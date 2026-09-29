@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ledgerRowFixture, signOut, unreachable } from "@/test/harness";
 import { ACCESS_COPY, BOOKINGS_TAB_COPY, DOORS_TAB_COPY, LEDGER_LIMIT, WALLET_TAB_COPY } from "@/lib/memberDetailCopy";
+import { DETAIL_LINKS } from "@/lib/playersCopy";
 import { BASE, MEMBER_ID, baseRoutes, bookingRow, detailFixture, doorRow, doorsPage, renderMember, serve } from "./memberKit";
 
 const at = (path: string) => `/admin/members/${MEMBER_ID}/${path}`;
@@ -55,6 +56,16 @@ describe("member detail — bookings tab", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Cancel Court 1, / }));
     const sheet = await screen.findByRole("dialog");
     expect(sheet).toHaveAttribute("data-sheet", "cancel");
+  });
+
+  it("links every booking, past ones too, to its own page with its players", async () => {
+    serve(baseRoutes(detailFixture(), [
+      { path: `${BASE}/bookings`, body: { when: "upcoming", items: [bookingRow({ checked_in_at: "2099-09-23T16:01:00Z" })], next_cursor: null } },
+    ]));
+    renderMember(at("bookings"));
+    const link = await screen.findByRole("link", { name: /^Players on Court 1, / });
+    expect(link).toHaveAttribute("href", "/bookings/b1");
+    expect(link).toHaveTextContent(DETAIL_LINKS.open);
   });
 
   it("offers no cancel on a booking the lights have already been on for", async () => {

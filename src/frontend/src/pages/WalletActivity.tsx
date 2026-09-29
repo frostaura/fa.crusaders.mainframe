@@ -10,6 +10,7 @@ import { ChartBar, DownloadSimple } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { MyBalanceLineChart, MyBookingsBarChart, MyFlowBarChart } from "../components/Charts";
 import { WalletNav } from "../components/wallet/WalletNav";
+import { REPORT_SHARES_COPY } from "../lib/playersCopy";
 import {
   Cell, ChartsCard, NetCredits, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
   type Tile,
@@ -148,7 +149,8 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
         footnote={(
           <>
             Net movement over this period: <strong className="font-semibold tabular-nums text-text-primary">{formatSignedCredits(wallet.net_movement_credits)}</strong>.
-            That is top-ups − spend + refunds − penalties + adjustments, and it is exactly what your balance moved by.
+            That is top-ups − spend + refunds − penalties + adjustments{typeof wallet.share_transfers_credits === "number" ? " + shares" : ""}, and it is exactly what your balance moved by.
+            {typeof wallet.share_transfers_credits === "number" ? ` ${REPORT_SHARES_COPY.memberFootnote}` : null}
           </>
         )}
       >
@@ -157,6 +159,14 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
         <Stat label="Refunds (net)" value={formatSignedCredits(wallet.refunds_credits)} />
         <Stat label="Penalties" value={formatSignedCredits(-wallet.penalties_credits)} />
         <Stat label="Adjustments" value={formatSignedCredits(wallet.adjustments_credits)} />
+        {/* D11 — optional on the wire: an API that predates shares sends neither, and a row
+            reading 0.00 for a figure the server never sent would be a claim it did not make. */}
+        {typeof wallet.share_transfers_credits === "number" ? (
+          <Stat label={REPORT_SHARES_COPY.memberShares} value={formatSignedCredits(wallet.share_transfers_credits)} />
+        ) : null}
+        {typeof wallet.net_court_spend_credits === "number" ? (
+          <Stat label={REPORT_SHARES_COPY.memberNetCourt} value={formatCredits(wallet.net_court_spend_credits)} />
+        ) : null}
         <Stat label="Penalty count" value={String(wallet.penalty_count)} />
         <Stat label="Bookings played" value={`${wallet.attended_bookings} · ${formatMinutes(wallet.minutes_on_court)}`} />
         <Stat label="Movements" value={String(wallet.count)} />

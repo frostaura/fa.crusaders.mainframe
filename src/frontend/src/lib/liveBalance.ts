@@ -72,7 +72,45 @@ export type BalanceFrame = {
   balance_credits: number;
   delta_credits?: number;
   reason?: string;
+  /**
+   * D11 (§3a): shares an organiser received, HELD for their partners' possible returns until
+   * `held_until` (the earliest share deadline among them). Part of the balance, not spendable.
+   * Every spend decision reads `spendable_credits`. Absent from an API that predates P11.
+   */
+  held_credits?: number;
+  spendable_credits?: number;
+  held_until?: string | null;
+  /**
+   * P11 — credits the organiser OWES BACK to partners whose return is waiting because the
+   * organiser's balance could not cover it. No release date: incoming credit pays it first.
+   * `spendable_credits` is balance − held − owed back, so it can be negative. Absent before P11.
+   */
+  owed_back_credits?: number;
 };
+
+/**
+ * What of a balance is held (D11, §3a) or owed back to partners (P11), as the chip, the wallet
+ * and every "balance after" figure need it. `held`/`owedBack` are 0 and `until` null when
+ * nothing is held — including against an API that predates the fields, where the balance IS
+ * the spendable figure. `spendable` may be NEGATIVE when more is owed back than the balance.
+ */
+export type HeldFigures = { held: number; owedBack: number; spendable: number; until: string | null };
+
+type HeldWire = {
+  balance_credits: number; held_credits?: number; spendable_credits?: number; held_until?: string | null; owed_back_credits?: number;
+};
+
+function positive(value: number | undefined): number {
+  return typeof value === "number" && value > 0 ? value : 0;
+}
+
+/** The held figures a frame (or a wallet read) carries, or the no-hold default. */
+export function heldFrom(frame: HeldWire): HeldFigures {
+  const held = positive(frame.held_credits);
+  const owedBack = positive(frame.owed_back_credits);
+  const spendable = typeof frame.spendable_credits === "number" ? frame.spendable_credits : frame.balance_credits - held - owedBack;
+  return { held, owedBack, spendable, until: held > 0 ? frame.held_until ?? null : null };
+}
 
 export type BalanceTransport = {
   /**
@@ -85,6 +123,11 @@ export type BalanceTransport = {
     /** Nothing has arrived for the silence window. The stream is open and is not delivering. */
     onSilence: () => void;
     onError: () => void;
+    /**
+     * P11 — the member inbox's named `notification` frame (`{unread_count}`), published after
+     * every change to the member's inbox so the bell needs no polling while the stream is live.
+     */
+    onNotification?: (unreadCount: number) => void;
   }): Promise<{ close: () => void }>;
 };
 
@@ -144,7 +187,7 @@ export function nextBackoff(current: number, policy: LiveBalancePolicy): number 
  */
 export function sseTransport(): BalanceTransport {
   return {
-    async open({ onFrame, onSilence, onError }) {
+    async open({ onFrame, onSilence, onError, onNotification }) {
       let ticket: string;
       try {
         ({ ticket } = await endpoints.walletStreamTicket());
@@ -178,6 +221,14 @@ export function sseTransport(): BalanceTransport {
       es.addEventListener("balance", (e) => take((e as MessageEvent).data));
       // The keep-alive carries no balance; all it proves is that the stream is still ours.
       es.addEventListener("ping", heardFrom);
+      // P11: the inbox's unread count, on the same stream — never a balance.
+      es.addEventListener("notification", (e) => {
+        heardFrom();
+        try {
+          const msg = JSON.parse((e as MessageEvent).data) as { unread_count?: unknown };
+          if (typeof msg.unread_count === "number") onNotification?.(msg.unread_count);
+        } catch { /* malformed payloads are ignored */ }
+      });
       es.onerror = onError;
 
       return { close: () => { clearSilence(); es.close(); } };
@@ -193,6 +244,15 @@ export type LiveBalance = {
   loading: boolean;
   lastConfirmedAt: number | null;
   delta: BalanceDelta | null;
+  /** D11 §3a — what of the balance is held, and the spendable figure. Null until a figure arrives. */
+  heldFigures: HeldFigures | null;
+  /**
+   * P11 — the inbox's unread count as the stream last pushed it; null until a `notification`
+   * frame has arrived (the bell reads its own count until then, and whenever the stream is not
+   * live). `noteUnread` lets a screen that has just changed the inbox say so.
+   */
+  unreadCount: number | null;
+  noteUnread: (count: number) => void;
   /** The chip has shown this delta. Clears it so a re-render cannot raise a second toast. */
   clearDelta: () => void;
   /**
@@ -234,6 +294,8 @@ export function useLiveBalance({
   const [state, setState] = useState<LiveState>("loading");
   const [lastConfirmedAt, setLastConfirmedAt] = useState<number | null>(null);
   const [delta, setDelta] = useState<BalanceDelta | null>(null);
+  const [heldFigures, setHeldFigures] = useState<HeldFigures | null>(null);
+  const [unreadCount, setUnreadCount] = useState<number | null>(null);
 
   const inflight = useRef(false);
   /**
@@ -279,6 +341,7 @@ export function useLiveBalance({
     if (options?.expectSelf) expectSelf.current = true;
     try {
       const w = await endpoints.wallet();
+      setHeldFigures(heldFrom(w));
       record(w.balance_credits);
       setState((current) => (current === "degraded" ? "degraded" : "live"));
     } catch {
@@ -292,8 +355,14 @@ export function useLiveBalance({
 
   const apply = useCallback((credits: number) => {
     expectSelf.current = true;
+    // A figure a booking answer stated carries no held split; the held and owed-back parts
+    // cannot have moved (a booking neither receives nor returns a share), so spendable moves
+    // with the balance.
+    setHeldFigures((h) => (h ? { ...h, spendable: credits - h.held - h.owedBack } : h));
     record(credits);
   }, [record]);
+
+  const noteUnread = useCallback((count: number) => setUnreadCount(Math.max(0, count)), []);
 
   const clearDelta = useCallback(() => setDelta(null), []);
 
@@ -304,6 +373,10 @@ export function useLiveBalance({
     if (!enabled) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clears a stale balance on sign-out
       setBalance(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ditto
+      setHeldFigures(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ditto
+      setUnreadCount(null);
       previous.current = null;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- ditto
       setState("loading");
@@ -392,8 +465,10 @@ export function useLiveBalance({
             failures = 0;
             backoffMs = policy.backoffInitialMs;
             setState("live");
+            setHeldFigures(heldFrom(frame));
             record(frame.balance_credits, frame);
           },
+          onNotification: (count) => setUnreadCount(Math.max(0, count)),
           onSilence: () => {
             // A stream can stop delivering WITHOUT failing — no `onerror`, nothing for a
             // backoff to react to, and a member watching a stale figure until they reload.
@@ -460,6 +535,9 @@ export function useLiveBalance({
     loading: state === "loading",
     lastConfirmedAt,
     delta,
+    heldFigures,
+    unreadCount,
+    noteUnread,
     clearDelta,
     refresh,
     apply,

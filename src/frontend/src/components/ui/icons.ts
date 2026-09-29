@@ -131,3 +131,5 @@ export { LightningIcon, LightningIcon as Lightning } from "@phosphor-icons/react
 export { TagIcon, TagIcon as Tag } from "@phosphor-icons/react/dist/csr/Tag";
 export { ShieldWarningIcon, ShieldWarningIcon as ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 export { SlidersHorizontalIcon, SlidersHorizontalIcon as SlidersHorizontal } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
+export { StarIcon, StarIcon as Star } from "@phosphor-icons/react/dist/csr/Star";
+export { ShareNetworkIcon, ShareNetworkIcon as ShareNetwork } from "@phosphor-icons/react/dist/csr/ShareNetwork";

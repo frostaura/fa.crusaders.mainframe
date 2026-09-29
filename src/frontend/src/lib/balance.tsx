@@ -1,6 +1,8 @@
 import { createContext, useContext } from "react";
 import { useAuth } from "./auth";
-import { useLiveBalance, type BalanceDelta, type BalanceTransport, type LiveBalancePolicy, type LiveState } from "./liveBalance";
+import {
+  useLiveBalance, type BalanceDelta, type BalanceTransport, type HeldFigures, type LiveBalancePolicy, type LiveState,
+} from "./liveBalance";
 
 /** How low a balance has to be before the chip warns, in credits. Mirrors the amber threshold. */
 export const LOW_BALANCE_CREDITS = 50;
@@ -41,9 +43,15 @@ export const LOW_BALANCE_CREDITS = 50;
  * defaults to saying nothing.
  * </p>
  */
-export function walletLabel(balance: number | null, loading: boolean, state?: LiveState): string {
+export function walletLabel(
+  balance: number | null, loading: boolean, state?: LiveState, heldCredits?: number, owedBackCredits?: number,
+): string {
   if (balance === null) return loading ? "Wallet balance, loading" : "Wallet balance unavailable";
-  const amount = `${balance.toFixed(2)} credits`;
+  // D11 §3a — the held part rides after the figure, in words, and only when there is one: the
+  // chip shows the whole balance, and a member refused a booking with it should hear why.
+  // P11 — so does what is owed back to partners, which the next credit in pays first.
+  const held = `${partSuffix(heldCredits, "held for partners")}${partSuffix(owedBackCredits, "owed back to partners")}`;
+  const amount = `${balance.toFixed(2)} credits${held}`;
   // Never claim a figure is live when the stream has gone and a 30-second poll is standing in
   // for it. A confident stale number is the defect the degraded state exists to close.
   const stale = state === "degraded" ? " This figure is checked every 30 seconds." : "";
@@ -51,9 +59,14 @@ export function walletLabel(balance: number | null, loading: boolean, state?: Li
   // one sees can never disagree — which they did at 0.004, where this said "running low" over
   // a chip the wallet page was calling empty.
   const tone = walletTone(balance);
-  if (tone === "zero") return `Wallet balance ${emptyAmount(balance)}. You can't book until you top up. Tap to top up.${stale}`;
+  if (tone === "zero") return `Wallet balance ${emptyAmount(balance)}${held}. You can't book until you top up. Tap to top up.${stale}`;
   if (tone === "low") return `Wallet balance ${amount}, running low. Tap to top up.${stale}`;
   return `Wallet balance ${amount}. Tap to top up.${stale}`;
+}
+
+/** ", 20.00 held for partners" — or nothing, when there is none of it. */
+function partSuffix(credits: number | undefined, what: string): string {
+  return credits && credits > 0 ? `, ${credits.toFixed(2)} ${what}` : "";
 }
 
 /**
@@ -134,6 +147,15 @@ type BalanceState = {
   /** The most recent movement, for the chip's count-up and flyout. */
   delta: BalanceDelta | null;
   clearDelta: () => void;
+  /**
+   * D11 §3a — what of the balance is held for partners, the SPENDABLE figure every spend
+   * decision and every "balance after" reads, and when the hold lifts. Null until a figure has
+   * arrived; `held` 0 against an API that predates it.
+   */
+  held: HeldFigures | null;
+  /** P11 — the inbox's unread count as the stream last pushed it (null until one arrives). */
+  unreadCount: number | null;
+  noteUnread: (count: number) => void;
   /**
    * Re-read the wallet. `{ expectSelf: true }` on the paths where the PAGE has already told
    * the member what happened, so the chip does not announce the same movement a second time —
@@ -219,6 +241,9 @@ export function BalanceProvider({ children, transport, policy }: {
         lastConfirmedAt: live.lastConfirmedAt,
         delta: live.delta,
         clearDelta: live.clearDelta,
+        held: live.heldFigures,
+        unreadCount: live.unreadCount,
+        noteUnread: live.noteUnread,
         refresh: live.refresh,
         apply: live.apply,
       }}

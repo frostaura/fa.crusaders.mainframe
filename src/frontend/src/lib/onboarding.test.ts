@@ -32,10 +32,8 @@ afterEach(() => {
 });
 
 describe("the step list", () => {
-  it("walks the seven built steps in order, and not the reserved privacy slot", () => {
-    expect(memberSteps()).toEqual(["welcome", "code", "passkey", "fingerprint", "topup", "book", "install"]);
-    // TODO(P11) lives in the slot list; until then a switch that governs nothing is not shown.
-    expect(memberSteps()).not.toContain("privacy");
+  it("walks the eight steps in order, with the privacy choice last (P11, D13)", () => {
+    expect(memberSteps()).toEqual(["welcome", "code", "passkey", "fingerprint", "topup", "book", "install", "privacy"]);
   });
 
   it("has a title for every step it walks", () => {
@@ -58,7 +56,11 @@ describe("where the wizard opens", () => {
     expect(startingStep({ replay: true, last: "topup" })).toBe("welcome");
   });
 
-  it.each([["an unknown step", "nope"], ["the disabled slot", "privacy"], ["nothing", null]])(
+  it("resumes at the privacy step now that it is walked", () => {
+    expect(startingStep({ last: "privacy" })).toBe("privacy");
+  });
+
+  it.each([["an unknown step", "nope"], ["nothing", null]])(
     "starts from the beginning for %s",
     (_why, last) => {
       expect(startingStep({ last })).toBe("welcome");
@@ -74,15 +76,15 @@ describe("the wizard's state machine", () => {
     state = wizardReducer(state, { type: "next" });
     expect(currentStep(state)).toBe("code");
     for (let i = 0; i < 20; i++) state = wizardReducer(state, { type: "next" });
-    expect(currentStep(state)).toBe("install");
+    expect(currentStep(state)).toBe("privacy");
     expect(isLastStep(state)).toBe(true);
     state = wizardReducer(state, { type: "back" });
-    expect(currentStep(state)).toBe("book");
+    expect(currentStep(state)).toBe("install");
   });
 
   it("ignores a goto for a step it does not walk", () => {
     const state = initialWizard("code");
-    expect(wizardReducer(state, { type: "goto", step: "privacy" })).toBe(state);
+    expect(wizardReducer(state, { type: "goto", step: "nope" as never })).toBe(state);
   });
 
   it("adopts a late resume point only while the member has not moved", () => {

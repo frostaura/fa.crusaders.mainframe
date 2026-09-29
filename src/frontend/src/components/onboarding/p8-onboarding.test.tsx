@@ -6,6 +6,7 @@ import GetStartedPage from "../../pages/GetStarted";
 import { ProfileProvider } from "../../lib/profile";
 import { ONBOARDING_STORAGE_KEY, type OnboardingPrefs } from "../../lib/onboarding";
 import { ADMIN_TOUR, CHECKLIST, GET_STARTED } from "../../lib/onboardingCopy";
+import { PRIVACY_COPY } from "../../lib/playersCopy";
 import { refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "../../test/harness";
 import { AdminTour } from "./AdminTour";
 import { CoachMarks } from "./CoachMarks";
@@ -44,6 +45,9 @@ function api({ admin = false, status = "active", prefs = PREFS, extra = [] }: Se
     { path: "/api/v1/me/profile", body: profile },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/webauthn/credentials", body: [] },
+    // P11 — the privacy step reads the social half of the preferences.
+    { path: "/api/v1/me/preferences", body: { ...PREFS, findable: false, show_in_leaderboards: false } },
+    { method: "PUT", path: "/api/v1/me/preferences", respond: (r) => ({ ...PREFS, findable: false, show_in_leaderboards: false, ...(r.body as object) }) },
     { method: "PUT", path: "/api/v1/me/onboarding/member/step", respond: (r) => ({ ...PREFS, member_onboarding_last_step: (r.body as { step: string }).step }) },
     { method: "POST", path: "/api/v1/me/onboarding/member/complete", body: { ...PREFS, member_onboarding_completed_at: "2026-09-23T10:00:00Z" } },
     { method: "POST", path: "/api/v1/me/onboarding/member/dismiss", body: { ...PREFS, member_onboarding_dismissed_at: "2026-09-23T10:00:00Z" } },
@@ -82,14 +86,14 @@ describe("the welcome wizard", () => {
     api();
     wizardAt();
     expect(await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.welcome.title })).toBeInTheDocument();
-    expect(screen.getByText(GET_STARTED.stepOf(1, 7))).toBeInTheDocument();
+    expect(screen.getByText(GET_STARTED.stepOf(1, 8))).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: GET_STARTED.back })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: GET_STARTED.next }));
     const code = await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.code.title });
     // Focus follows the step, because the route did not change and nothing else would move it.
     await waitFor(() => expect(code).toHaveFocus());
-    expect(screen.getByText(GET_STARTED.stepOf(2, 7))).toBeInTheDocument();
+    expect(screen.getByText(GET_STARTED.stepOf(2, 8))).toBeInTheDocument();
     expect(screen.getByRole("link", { name: GET_STARTED.steps.code.link })).toHaveAttribute("href", "/my-code");
 
     fireEvent.click(screen.getByRole("button", { name: GET_STARTED.back }));
@@ -131,7 +135,7 @@ describe("the welcome wizard", () => {
 
   it("finishes on the last step: the club is told, and the member lands on My Code", async () => {
     const { stub } = api();
-    wizardAt("/get-started?step=install");
+    wizardAt("/get-started?step=privacy");
     fireEvent.click(await screen.findByRole("button", { name: GET_STARTED.finish }));
     expect(await screen.findByText("My code landing")).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST" && c.path === "/api/v1/me/onboarding/member/complete")).toBe(true);
@@ -148,13 +152,16 @@ describe("the welcome wizard", () => {
 
   it("still lets a member finish when the club cannot be reached, and says it is remembered here", async () => {
     const { userId } = api({ extra: [{ method: "POST", path: "/api/v1/me/onboarding/member/complete", body: refuse(503, { error: "down" }) }] });
-    wizardAt("/get-started?step=install");
+    wizardAt("/get-started?step=privacy");
     fireEvent.click(await screen.findByRole("button", { name: GET_STARTED.finish }));
     expect(await screen.findByText("My code landing")).toBeInTheDocument();
     expect(await screen.findByText(GET_STARTED.savedHereOnly)).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)!)[userId].memberDoneVersion).toBe(1);
   });
 
+});
+
+describe("the welcome wizard's steps", () => {
   it("explains the court-box fingerprint as the in-person enrolment it is, with nothing to press", async () => {
     api();
     wizardAt("/get-started?step=fingerprint");
@@ -371,5 +378,24 @@ describe("the admin tour", () => {
     api({ admin: true, prefs: { admin_onboarding_completed_at: "2026-09-01T10:00:00Z" } });
     tourAt("/admin?tour=replay");
     expect(await screen.findByRole("dialog", { name: ADMIN_TOUR.stops[0].title })).toBeInTheDocument();
+  });
+});
+
+describe("the welcome wizard's privacy step (P11, D13)", () => {
+  it("ends on the privacy choice (P11, D13): both switches off, and a flip is saved", async () => {
+    const { stub } = api();
+    wizardAt("/get-started?step=install");
+    await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.install.title });
+    fireEvent.click(screen.getByRole("button", { name: GET_STARTED.next }));
+    expect(await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.privacy.title })).toBeInTheDocument();
+    expect(screen.getByText(GET_STARTED.stepOf(8, 8))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: GET_STARTED.finish })).toBeInTheDocument();
+
+    const findable = await screen.findByRole("switch", { name: PRIVACY_COPY.findableLabel });
+    expect(findable).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel })).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(findable);
+    await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT" && c.path === "/api/v1/me/preferences")?.body)
+      .toEqual({ findable: true }));
   });
 });

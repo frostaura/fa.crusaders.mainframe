@@ -11,6 +11,7 @@ import { AccountMenu } from "./AccountMenu";
 import { CreditsChip } from "./CreditsChip";
 import { CrestLink } from "./Crest";
 import { LANDING_PATH } from "./nav";
+import { NotificationBell } from "./NotificationBell";
 import { PageErrorBoundary } from "./PageErrorBoundary";
 import { PrimaryNav } from "./PrimaryNav";
 import { SkipLink } from "./SkipLink";
@@ -20,8 +21,8 @@ import { SkipLink } from "./SkipLink";
  *
  * <ul>
  *   <li><b>Desktop (`md`+):</b> one 56px top bar — crest · My Code · Bookings · Wallet · Admin
- *   (admins, with its attention badge) · credits chip · avatar menu.</li>
- *   <li><b>Phone:</b> a slim top bar (crest, credits chip, avatar) and a fixed, safe-area-aware
+ *   (admins, with its attention badge) · notification bell · credits chip · avatar menu.</li>
+ *   <li><b>Phone:</b> a slim top bar (crest, bell, credits chip, avatar) and a fixed, safe-area-aware
  *   bottom tab bar. Both are the same `PrimaryNav`.</li>
  * </ul>
  *
@@ -123,12 +124,18 @@ export default function AppShell() {
           paddingRight: "env(safe-area-inset-right)",
         }}
       >
-        <div className="mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1 sm:px-6 md:gap-x-6 lg:px-8">
+        {/*
+          `justify-end` and the bell's own `ml-auto` (P11): the bell is a ROW item, not one of the
+          actions, so that when large text wraps the row it stays up beside the crest and the
+          chip and avatar drop to the next line together, right-aligned — two lines, not three.
+          On one line the bell's auto margin takes the free space and the actions follow it.
+        */}
+        <div className="mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 md:gap-x-6 lg:px-8">
           <CrestLink to={signedIn ? LANDING_PATH : "/"} />
           {signedIn ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
-          <div data-app-header-actions="" className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-            {signedIn ? <CreditsChip /> : null}
-            {signedIn ? <AccountMenu /> : null}
+          {signedIn ? <NotificationBell className="ml-auto md:-mr-4" /> : null}
+          <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !signedIn && "ml-auto")}>
+            {signedIn ? <><CreditsChip /><AccountMenu /></> : null}
             {auth.status === "anonymous" ? (
               <Button asChild variant="outline" size="sm"><Link to="/login">Sign in</Link></Button>
             ) : null}

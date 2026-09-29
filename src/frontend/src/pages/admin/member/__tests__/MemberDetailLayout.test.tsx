@@ -145,11 +145,5 @@ describe("member detail — the ⋯ menu", () => {
     await waitFor(() => expect(stub.calls.filter((c) => c.path === BASE).length).toBeGreaterThanOrEqual(2));
   });
 
-  it("offers the member-code reset only as a disabled placeholder until P7", async () => {
-    serve(baseRoutes());
-    renderMember();
-    await screen.findByTestId("member-balance");
-    fireEvent.pointerDown(screen.getByRole("button", { name: MEMBER_COPY.moreActions("Thandi Mokoena") }), { button: 0, ctrlKey: false });
-    expect(await screen.findByRole("menuitem", { name: ACTIONS_COPY.resetCode })).toHaveAttribute("data-disabled");
-  });
+  // The member-code reset, live since P7, is pinned in MemberResetCode.test.tsx.
 });

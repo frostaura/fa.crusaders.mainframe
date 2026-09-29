@@ -114,6 +114,17 @@ function useReturnPath(): string {
   return `${path}${state?.from?.search ?? ""}`;
 }
 
+/**
+ * The sentence "Sign out everywhere" hands over (member-code §10): that session ended on purpose,
+ * on every device, so this page says so rather than presenting a blank form — and says it as a
+ * fact, not as the "your session ended" commiseration an expiry gets.
+ */
+function useSignedOutNotice(): string | null {
+  const location = useLocation();
+  const notice = (location.state as { signedOutNotice?: unknown } | null)?.signedOutNotice;
+  return typeof notice === "string" ? notice : null;
+}
+
 type FieldErrors = { email?: string; password?: string };
 
 function validate(email: string, password: string): FieldErrors {
@@ -218,6 +229,7 @@ export default function LoginPage() {
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const signIn = useSignIn(setRefusal);
+  const signedOut = useSignedOutNotice();
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -254,6 +266,7 @@ export default function LoginPage() {
     >
       <div className="flex flex-col gap-5">
         {auth.sessionExpired && !refusal ? <Alert tone="warning" live="polite">{LOGIN.sessionEnded}</Alert> : null}
+        {signedOut && !refusal ? <Alert tone="success" live="polite">{signedOut}</Alert> : null}
         {isPasskeySupported() ? (
           <>
             {/* The fastest way in, so it is drawn as a real control at the top — it used to be

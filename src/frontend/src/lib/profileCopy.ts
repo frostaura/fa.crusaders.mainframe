@@ -68,3 +68,27 @@ function shortDate(iso: string, withYear: boolean): string {
     ? { day: "2-digit", month: "short", year: "numeric" }
     : { day: "2-digit", month: "short" });
 }
+
+/* Sign out everywhere (member-code §10) — every session ends, this one included. */
+export const SIGN_OUT_EVERYWHERE_COPY = {
+  title: "Signed-in devices",
+  description:
+    "Lost a phone, or left yourself signed in on somebody else's? Sign out everywhere ends every session you have — this one too.",
+  open: "Sign out everywhere",
+  confirmTitle: "Sign out on every device?",
+  confirmBody:
+    "Every phone, tablet and computer you're signed in on is signed out, this one included, and the member code on your phone stops working. Sign in again to carry on — you'll get a new code.",
+  revokePasskeys: "Also remove my passkeys",
+  revokePasskeysHint:
+    "Turn this on if a device with one of your passkeys is lost — otherwise it could sign straight back in. Leave it off to keep signing in with a touch.",
+  confirm: "Sign out everywhere",
+  action: "sign you out everywhere",
+  /** Shown on /login, where the member lands — this session is over the moment it answers. */
+  done: (passkeysRevoked: boolean, passkeysRemoved: number) =>
+    `You're signed out on every device. Sign in again to get a new member code.${passkeysNote(passkeysRevoked, passkeysRemoved)}`,
+} as const;
+
+function passkeysNote(revoked: boolean, removed: number): string {
+  if (!revoked || removed === 0) return "";
+  return removed === 1 ? " Your passkey was removed, so use your password." : ` Your ${removed} passkeys were removed, so use your password.`;
+}

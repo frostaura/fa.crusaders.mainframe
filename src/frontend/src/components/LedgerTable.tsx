@@ -1,12 +1,15 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { LedgerRow } from "../lib/api";
-import { cn, formatSignedCredits } from "../lib/utils";
-import { clubDayAndClock, clubInstant } from "../lib/clubClock";
-import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import { ArrowRight, CaretDown, CaretUp, CaretUpDown } from "./ui/icons";
+import { cn } from "../lib/utils";
+import { TableBody, TableHead, TableHeader, TableRow } from "./ui/table";
+import { CaretDown, CaretUp, CaretUpDown } from "./ui/icons";
 import { ScrollArea } from "./ScrollArea";
+import { CELL } from "./wallet/ledgerCells";
+import type { Column } from "./wallet/ledgerColumns";
+import { groupShareRows, shareBookingIds } from "./wallet/shareGroups";
+import { ShareGroupRows } from "./wallet/ShareGroupRows";
+import { useShareBookings } from "./wallet/useShareBookings";
 
-type Column = "time" | "from" | "to" | "amount" | "comment";
 type SortDir = "asc" | "desc";
 
 /**
@@ -27,6 +30,11 @@ type LedgerTableProps = {
    * a member's wallet and the club's whole book — and "Ledger" would be a lie on one of them.
    */
   label: string;
+  /**
+   * D11 — gather a booking's `ShareTransfer` rows under one line, on the member's OWN wallet.
+   * Off for the club's book and an admin's view of a member: the sentences say "your share".
+   */
+  groupShares?: boolean;
 };
 
 type Sort = { key: Column; dir: SortDir };
@@ -76,9 +84,11 @@ function nextSort(current: Sort, key: Column): Sort {
  */
 export function LedgerTable(props: LedgerTableProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { rows, columns = DEFAULT_COLUMNS, emptyText = "No movements yet.", fill = false, label } = props;
+  const { rows, columns = DEFAULT_COLUMNS, emptyText = "No movements yet.", fill = false, label, groupShares = false } = props;
   const [sort, setSort] = useState<Sort>({ key: "time", dir: "desc" });
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
+  const items = useMemo(() => (groupShares ? groupShareRows(sorted) : sorted.map((row) => ({ kind: "row" as const, row }))), [groupShares, sorted]);
+  const bookings = useShareBookings(groupShares ? shareBookingIds(rows) : []);
   const headerFor = (column: Column) => (
     <SortHeader {...HEADER[column]} k={column} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
   );
@@ -99,7 +109,9 @@ export function LedgerTable(props: LedgerTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sorted.map((r) => <LedgerLine key={r.id} row={r} columns={columns} />)}
+          {items.map((item) => (item.kind === "row"
+            ? <LedgerLine key={item.row.id} row={item.row} columns={columns} />
+            : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId]} />))}
         </TableBody>
       </table>
     </ScrollArea>
@@ -113,61 +125,6 @@ function LedgerLine({ row, columns }: { row: LedgerRow; columns: Column[] }) {
     </TableRow>
   );
 }
-
-/**
- * One renderer per column, so the order is the caller's `columns` and nothing else.
- *
- * <p>
- * <b>Time — the club's day, in the club's format.</b> This column used to go through the
- * reader-locale helper in `lib/utils` — the READER's locale and zone — and one member journey
- * read `23:15` on the grid, `Mon, Sep 21, 11:15 PM` in the toast and `9/21/26, 8:31 PM` here.
- * `lib/clubClock` is `en-GB`, 24-hour, in the club's zone; the `title` carries the long form.
- * On a phone the column folds away and the time rides under the comment instead.
- * </p>
- */
-const CELL: Record<Column, (r: LedgerRow) => ReactNode> = {
-  time: (r) => (
-    <TableCell className="hidden whitespace-nowrap align-top text-xs tabular-nums text-text-secondary sm:table-cell" title={clubInstant(r.at)}>
-      {clubDayAndClock(r.at)}
-    </TableCell>
-  ),
-  from: (r) => (
-    <TableCell className="hidden max-w-44 truncate align-top sm:table-cell" title={r.from}>{r.from}</TableCell>
-  ),
-  to: (r) => (
-    <TableCell className="hidden align-top sm:table-cell">
-      <span className="inline-flex max-w-44 items-center gap-1.5" title={r.to}>
-        <ArrowRight size={14} weight="bold" aria-hidden="true" className="shrink-0 text-text-muted" />
-        <span className="truncate">{r.to}</span>
-      </span>
-    </TableCell>
-  ),
-  // Wraps on a phone — it is the only column that says what a movement WAS, and for a top-up
-  // the only place the rand amount and the rate appear — and truncates with a tooltip from
-  // `sm`, where there is room for a column. Primary ink on a phone, where it leads the row.
-  comment: (r) => (
-    <TableCell className="break-words align-top text-sm text-text-primary sm:max-w-xs sm:truncate sm:text-text-secondary" title={r.comment}>
-      {r.comment}
-      <time dateTime={r.at} className="mt-0.5 block text-xs tabular-nums text-text-muted sm:hidden">{clubDayAndClock(r.at)}</time>
-    </TableCell>
-  ),
-  amount: (r) => {
-    const credit = r.signedAmountCredits >= 0;
-    return (
-      <TableCell
-        className={cn(
-          "whitespace-nowrap text-right align-top font-semibold tabular-nums",
-          credit ? "text-success-strong" : "text-text-primary",
-        )}
-      >
-        {formatSignedCredits(r.signedAmountCredits)}
-        {/* On a phone the From/To columns are hidden, so the counterparty rides under the
-            amount rather than being lost — picked by sign, because the member is the other end. */}
-        <span className="block text-xs font-normal text-text-muted sm:hidden">{credit ? r.from : r.to}</span>
-      </TableCell>
-    );
-  },
-};
 
 type HeaderLook = { label: string; align?: "left" | "right"; hideOnMobile?: boolean };
 

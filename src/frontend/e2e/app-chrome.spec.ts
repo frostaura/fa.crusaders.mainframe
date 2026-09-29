@@ -298,13 +298,15 @@ test.describe("B12 — the chrome at a large root font size", () => {
    * And the rule underneath the percentage, measured as the mechanism rather than the symptom:
    * doubling the root font grows each bar by the height of its TEXT and nothing else. A fixed
    * `h-9` on the credits chip measured 72 px here and grew the top bar by 97 px; in `rem` every
-   * 44 px target would become 88 px. Measured at 390 px, where the top bar stays one row at both
+   * 44 px target would become 88 px. Measured at 440 px, where the top bar stays one row at both
    * sizes, so the number is box growth rather than the row wrapping — at 320 px and a 32 px root
    * the words are genuinely wider than the phone and the row takes two lines, which the
-   * percentage above prices in.
+   * percentage above prices in. (It was 390 px until P11 put the 44 px notification bell in the
+   * row: at a 32 px root the row then needs about 440 px to stay on one line. The bell is a fixed
+   * 44 px box, so it adds no growth of its own; only the width at which one line holds moved.)
    */
   test("grows only by its text when the root font size doubles", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 700 });
+    await page.setViewportSize({ width: 440, height: 700 });
     await openAdmin(page, "/admin/settings");
 
     const at = async (rootPx: number) => {

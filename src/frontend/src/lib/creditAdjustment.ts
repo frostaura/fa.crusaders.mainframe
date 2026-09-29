@@ -122,6 +122,7 @@ export const LEDGER_TYPE_LABEL: Record<LedgerEntryType, string> = {
   AdminAdjustment: "Admin adjustment",
   PaymentReversal: "Payment reversal",
   LightsPurchase: "Lights purchase",
+  ShareTransfer: "Share of a split booking",
 };
 
 /**

@@ -331,7 +331,12 @@ export type LedgerEntryType =
   | "LateCancellationPenalty"
   | "AdminAdjustment"
   | "PaymentReversal"
-  | "LightsPurchase";
+  | "LightsPurchase"
+  /**
+   * D11 — a partner's share moving to the organiser: always a pair (one debit, one credit, both
+   * naming the booking) that nets to zero club-wide. The trace word is `wallet.share_moved`.
+   */
+  | "ShareTransfer";
 
 /** The filter list, derived from the union so the two cannot disagree. */
 export const LEDGER_ENTRY_TYPES: readonly LedgerEntryType[] = [
@@ -342,6 +347,7 @@ export const LEDGER_ENTRY_TYPES: readonly LedgerEntryType[] = [
   "LightsPurchase",
   "NoShowPenalty",
   "PaymentReversal",
+  "ShareTransfer",
   "TopUp",
 ];
 
@@ -363,6 +369,18 @@ export type LedgerRow = {
 
 export type WalletResponse = {
   balance_credits: number;
+  /** D11 §3a — shares received as an organiser, held until `held_until`. Absent before P11. */
+  held_credits?: number;
+  /** The balance less what is held: what a booking or a share may spend. */
+  spendable_credits?: number;
+  /** The earliest release, or null when nothing is held. */
+  held_until?: string | null;
+  /**
+   * P11 — owed back to partners whose return waits on this balance; paid first from incoming
+   * credit, no release date. `spendable_credits` subtracts it too, so it may be negative.
+   * Absent from an older API: read as 0.
+   */
+  owed_back_credits?: number;
   entries: LedgerRow[];
   /** Every movement the member has ever had; `entries` is one page of them. */
   total_entries: number;
@@ -506,6 +524,10 @@ export type AdminBookingQuote = {
   balance_credits: number;
   balance_after_credits: number;
   overdraws: boolean;
+  /** D11 §3a — the payer's held credits. Absent from an older API. */
+  held_credits?: number;
+  /** P11 — what the payer owes back to partners, paid from their next credit. Absent: 0. */
+  owed_back_credits?: number;
 };
 
 /** One line of a bulk quote. `reason` is a booking refusal code when `bookable` is false. */
@@ -527,6 +549,9 @@ export type AdminBulkQuote = {
   balance_credits: number;
   balance_after_credits: number;
   overdraws: boolean;
+  /** As on {@link AdminBookingQuote}: absent from an older API, and read as 0. */
+  held_credits?: number;
+  owed_back_credits?: number;
   items: AdminBulkQuoteItem[];
 };
 
@@ -1149,6 +1174,11 @@ export type MyProfile = {
   top_up_credits_per_zar?: number;
   /** D2: whether their groups give them the peak window at any time. */
   peak_priority?: boolean;
+  /** D11 §3a — credits held for partners, and until when (null when nothing is held). */
+  held_credits?: number;
+  held_until?: string | null;
+  /** P11 — credits owed back to partners, paid from the next credit in. Absent before P11. */
+  owed_back_credits?: number;
   /**
    * The club's glyph set for confirm/decline buttons — `"thumbs"` or `"marks"`.
    *
@@ -1389,6 +1419,10 @@ export type WalletReport = {
   penalties_credits: number;
   adjustments_credits: number;
   reversals_credits: number;
+  /** D11 — shares paid to (−) or received from (+) other players. Absent before P11. */
+  share_transfers_credits?: number;
+  /** D11 — what court time cost once the players settled up: spend − refunds + penalties − shares. */
+  net_court_spend_credits?: number;
   net_movement_credits: number;
   penalty_count: number;
   /** Attendance — `CheckedInAt`, the source of truth the settlement model hangs off. */
@@ -1407,7 +1441,7 @@ export type WalletReport = {
  * so the club screen and the member screen cannot mean different things by "net", and a
  * ledger type nobody bucketed still reaches the total.
  */
-export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; adjustments_credits: number; reversals_credits: number; net_movement_credits: number; bookings: number; no_shows: number };
+export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; adjustments_credits: number; reversals_credits: number; share_transfers_credits?: number; net_movement_credits: number; bookings: number; no_shows: number };
 export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; attended: number; minutes_on_court: number; balance_credits: number };
 /**
  * Club revenue over a window, in BOTH units, because they are not interchangeable.
@@ -1830,7 +1864,15 @@ export const endpoints = {
   resendVerification: (email: string) => api.post<{ ok: boolean }>("/api/v1/auth/resend-verification", { email }),
   /** The signed-in member replacing their own password — and, in doing so, retiring a temporary one. */
   changePassword: (currentPassword: string, newPassword: string) =>
-    api.post<{ changed: boolean }>("/api/v1/me/password", { currentPassword, newPassword }),
+    api.post<{ changed: boolean; access_token?: string }>("/api/v1/me/password", { currentPassword, newPassword }),
+  /**
+   * Sign out everywhere (member-code §10): every session the caller has ends — THIS ONE INCLUDED —
+   * and their code rotates, so the token that sent this is dead once it answers. With
+   * `revokePasskeys` their passkeys are deleted too; the server's default is to keep them.
+   */
+  revokeAllSessions: (revokePasskeys: boolean) =>
+    api.post<{ signed_out: boolean; passkeys_revoked: boolean; passkeys_removed: number }>(
+      "/api/v1/me/sessions/revoke-all", { revoke_passkeys: revokePasskeys }),
 
   wallet: (limit?: number, offset?: number) => api.get<WalletResponse>(`/api/v1/wallet${qs({ limit, offset })}`),
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),
@@ -1972,6 +2014,15 @@ export const endpoints = {
     }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string | null; member_notified: boolean; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
+  /**
+   * Reset a member's code — the desk's answer to "I lost my phone" (member-code §10, §13). Takes
+   * the MEMBERSHIP id. The code rotates and every session they have ends; with `revokePasskeys`
+   * (the server's default is true here) their passkeys go too, because the lost phone's passkey
+   * would otherwise sign straight back in and enrol for the new code.
+   */
+  adminResetMemberCode: (memberId: string, revokePasskeys: boolean) =>
+    api.post<{ rotated: boolean; generation: number; passkeys_revoked: boolean; passkeys_removed: number }>(
+      `/api/v1/admin/members/${memberId}/code/reset`, { revoke_passkeys: revokePasskeys }),
 
   // D2 deleted `POST /admin/members/{id}/class` with the member class. A member's groups — which
   // now carry the top-up rate and the peak say — are set with `adminEndpoints.memberGroupsSet`.

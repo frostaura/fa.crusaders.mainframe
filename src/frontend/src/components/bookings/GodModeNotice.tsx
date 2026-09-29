@@ -1,5 +1,6 @@
 import { Warning } from "@/components/ui/icons";
 import { GOD_MODE } from "@/lib/bookingsCopy";
+import { owedBackQuoteLine } from "@/lib/playersCopy";
 
 /**
  * R19 — god mode, said before it happens.
@@ -18,8 +19,13 @@ import { GOD_MODE } from "@/lib/bookingsCopy";
  * consequence they should read. `role="status"` because it arrives after the quote is read,
  * and a screen-reader user needs to hear it before reaching the button it qualifies.
  * </p>
+ *
+ * <p>
+ * P11: when the payer already owes partners (`owed_back_credits` on the quote), the notice says
+ * so too — the next credit they get goes to those partners before it goes to this debt.
+ * </p>
  */
-export function GodModeNotice({ name, balanceAfter }: { name: string | null; balanceAfter: number }) {
+export function GodModeNotice({ name, balanceAfter, owedBack = 0 }: { name: string | null; balanceAfter: number; owedBack?: number }) {
   return (
     <div
       role="status"
@@ -30,6 +36,8 @@ export function GodModeNotice({ name, balanceAfter }: { name: string | null; bal
       <p className="grid min-w-0 gap-0.5 text-sm">
         <span className="font-semibold">{GOD_MODE.title}</span>
         <span>{GOD_MODE.body(name, balanceAfter)}</span>
+        {/* P11 — a payer who already owes partners pays them from their next credit first. */}
+        {owedBack > 0 ? <span data-owed-back="">{owedBackQuoteLine(owedBack, name)}</span> : null}
       </p>
     </div>
   );

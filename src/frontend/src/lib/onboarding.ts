@@ -44,18 +44,16 @@ export const MAX_STEP_LENGTH = 64;
 // --- the steps -------------------------------------------------------------------------
 
 /**
- * Every step slot in order, including one that is not built yet.
+ * Every step slot in order. A slot can be switched off here without renaming anything a
+ * member's stored resume point names.
  *
  * <p>
- * <b>`privacy` is a reserved slot, not a step.</b> D13 makes every social surface opt-in and
- * off by default (findable in partner search, leaderboards, rating, recap email), prompted in
- * this wizard — but partner search, leaderboards and the recap do not exist until P11, and a
- * switch that governs nothing is a control that lies. The slot is named here so P11 enables it
- * in one place.
+ * <b>`privacy` is last (P11, D13).</b> Every social surface is opt-in and off by default —
+ * findable in partner search, leaderboards — and the wizard is where a new member is first
+ * asked. It comes after install because it is the one step that is a choice rather than a
+ * setup task, and the last thing said before Finish is "these are off unless you say so".
  * </p>
  */
-// TODO(P11): enable the `privacy` slot once partner search / leaderboards exist (D13), and give
-// it a component in `components/onboarding/steps/`. The flags are already on the preferences row.
 export const MEMBER_STEP_SLOTS = [
   { id: "welcome", enabled: true },
   { id: "code", enabled: true },
@@ -64,7 +62,7 @@ export const MEMBER_STEP_SLOTS = [
   { id: "topup", enabled: true },
   { id: "book", enabled: true },
   { id: "install", enabled: true },
-  { id: "privacy", enabled: false },
+  { id: "privacy", enabled: true },
 ] as const;
 
 export type MemberStepId = (typeof MEMBER_STEP_SLOTS)[number]["id"];

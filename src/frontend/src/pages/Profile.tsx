@@ -25,6 +25,12 @@ import { useDoorsFlag } from "../components/member-door/useMemberDoor";
 // for "my emails" first.
 import { EmailAlertSwitches } from "../components/notifications/EmailAlertSwitches";
 import { EMAIL_ALERTS_COPY } from "../lib/notificationsCopy";
+// member-code §10 — end every session, this one included, from the page that holds the passkeys.
+import { SignOutEverywhere } from "../components/member-code/SignOutEverywhere";
+import { SIGN_OUT_EVERYWHERE_COPY } from "../lib/profileCopy";
+// P11 / D13 — the same two switches the welcome wizard's privacy step shows.
+import { PrivacySwitches } from "../components/players/privacy/PrivacySwitches";
+import { PRIVACY_COPY } from "../lib/playersCopy";
 // item 16 — the guide's third recall point. See the note beside the link.
 import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
 import {
@@ -135,6 +141,12 @@ function ProfileSections({ profile }: { profile: MyProfile }) {
       <PasswordCard />
       <MemberDoorHistory />
       <PasskeysCard />
+      <ProfileCard title={SIGN_OUT_EVERYWHERE_COPY.title} description={SIGN_OUT_EVERYWHERE_COPY.description}>
+        <div><SignOutEverywhere /></div>
+      </ProfileCard>
+      <ProfileCard title={PRIVACY_COPY.title} description={PRIVACY_COPY.description}>
+        <PrivacySwitches />
+      </ProfileCard>
       {profile.is_admin ? (
         <ProfileCard title={EMAIL_ALERTS_COPY.profileTitle} description={EMAIL_ALERTS_COPY.description}>
           <EmailAlertSwitches />

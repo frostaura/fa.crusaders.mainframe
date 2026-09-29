@@ -11,6 +11,7 @@ import { CodeStep } from "@/components/onboarding/steps/CodeStep";
 import { FingerprintStep } from "@/components/onboarding/steps/FingerprintStep";
 import { InstallStep } from "@/components/onboarding/steps/InstallStep";
 import { PasskeyStep } from "@/components/onboarding/steps/PasskeyStep";
+import { PrivacyStep } from "@/components/onboarding/steps/PrivacyStep";
 import { TopUpStep } from "@/components/onboarding/steps/TopUpStep";
 import { WelcomeStep } from "@/components/onboarding/steps/WelcomeStep";
 import {
@@ -47,6 +48,7 @@ const STEP_VIEWS: Partial<Record<MemberStepId, ComponentType<{ focusOnMount?: bo
   topup: TopUpStep,
   book: BookStep,
   install: InstallStep,
+  privacy: PrivacyStep,
 };
 
 function useStartingStep() {

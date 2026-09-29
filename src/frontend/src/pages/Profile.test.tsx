@@ -8,6 +8,7 @@ import { ToastProvider } from "../components/Toast";
 import { refuse, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
 import { KINDS_ROUTE } from "../components/notifications/fixtures";
 import { EMAIL_ALERTS_COPY } from "../lib/notificationsCopy";
+import { PRIVACY_COPY } from "../lib/playersCopy";
 import {
   PASSKEY_ADD, PASSKEY_NAME_LABEL, PASSKEY_NAME_MISSING, PHOTO_BAD_TYPE, PHOTO_BUTTON, PHOTO_CHANGE_LABEL,
   passkeyRemoveConsequence,
@@ -34,6 +35,8 @@ function renderProfile(routes: StubRoute[]) {
     { path: "/api/v1/whoami", body: whoami },
     { path: "/api/v1/me/door", body: { doors: false } },
     ...routes,
+    // P11 / D13 — the Privacy card's switches read the social preferences.
+    { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
   ]);
   render(
     <MemoryRouter>
@@ -256,5 +259,28 @@ describe("Profile — an admin's email alerts (R23)", () => {
     await screen.findByText(PROFILE.full_name);
     expect(screen.queryByRole("region", { name: EMAIL_ALERTS_COPY.profileTitle })).toBeNull();
     expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/notifications"))).toBe(false);
+  });
+});
+
+describe("Profile — privacy (P11, D13)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  it("gives every member the same two switches the welcome wizard shows, off by default", async () => {
+    const stub = renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+      { method: "PUT", path: "/api/v1/me/preferences", body: { show_in_leaderboards: true } },
+    ]);
+    const card = await screen.findByRole("region", { name: PRIVACY_COPY.title });
+    expect(within(card).getByText(PRIVACY_COPY.description)).toBeInTheDocument();
+    const findable = await within(card).findByRole("switch", { name: PRIVACY_COPY.findableLabel });
+    const boards = within(card).getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel });
+    expect(findable).not.toBeChecked();
+    expect(boards).not.toBeChecked();
+
+    fireEvent.click(boards);
+    await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT" && c.path === "/api/v1/me/preferences")?.body)
+      .toEqual({ show_in_leaderboards: true }));
+    expect(boards).toBeChecked();
   });
 });

@@ -11,6 +11,7 @@ import ChangePasswordPage from "./ChangePassword";
 import ProfilePage from "./Profile";
 import { ToastProvider } from "../components/Toast";
 import { AuthProvider } from "../lib/auth";
+import { tokenStore } from "../lib/api";
 import { BalanceProvider, useBalance } from "../lib/balance";
 import { ProfileProvider, useProfile } from "../lib/profile";
 import { signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
@@ -671,6 +672,24 @@ describe("Change password", () => {
     // The field hint says the same thing, so match the error paragraph specifically.
     expect(await screen.findByText(/^Your new password has to be different/i)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.path === "/api/v1/me/password")).toBe(false);
+  });
+
+  it("keeps the member signed in by adopting the token the change hands back", async () => {
+    // The change ends every session minted before it, this one included; the answer carries its
+    // replacement. Ignoring it signs the member out on their very next request.
+    const whoami = signIn({ isAdmin: false });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { method: "POST", path: "/api/v1/me/password", body: { changed: true, access_token: "fresh.session.token" } },
+    ]);
+    renderAt(<ChangePasswordPage />);
+
+    fireEvent.change(await screen.findByLabelText("Current password"), { target: { value: "Password123!" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "Different456!" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "Different456!" } });
+    fireEvent.click(screen.getByRole("button", { name: /Change password/i }));
+
+    await waitFor(() => expect(tokenStore.get()).toBe("fresh.session.token"));
   });
 });
 

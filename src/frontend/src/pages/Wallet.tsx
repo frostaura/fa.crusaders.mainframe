@@ -13,8 +13,10 @@ import { Receipt } from "../components/ui/icons";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
 import { useBalance, walletTone } from "../lib/balance";
+import { heldFrom, type HeldFigures } from "../lib/liveBalance";
 import { useBalanceMovement, useCountUp, useWalletLive } from "../components/wallet/useWalletLive";
 import { WalletNav } from "../components/wallet/WalletNav";
+import { HeldLine } from "../components/wallet/HeldLine";
 import {
   BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL,
   creditArrivedSentence, creditLeftSentence,
@@ -48,6 +50,8 @@ const MONEY_TOAST_MS = 6_000;
 function useWalletLedger() {
   const [rows, setRows] = useState<LedgerRow[] | null>(null);
   const [cardBalance, setCardBalance] = useState<number | null>(null);
+  /** D11 §3a — what this page's own read said is held; the live stream's figure wins. */
+  const [readHeld, setReadHeld] = useState<HeldFigures | null>(null);
   const [total, setTotal] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -83,7 +87,7 @@ function useWalletLedger() {
     issued BEFORE that confirmation may be the older of the two and is left alone — the frame
     that overtook it has already asked for a fresh read below.
   */
-  const { apply, lastConfirmedAt } = useBalance();
+  const { apply, lastConfirmedAt, held: liveHeld } = useBalance();
   const confirmedAt = useRef(lastConfirmedAt);
   useEffect(() => { confirmedAt.current = lastConfirmedAt; }, [lastConfirmedAt]);
   /** The figure this page last read, so the provider taking it does not trigger a re-read of it. */
@@ -96,6 +100,7 @@ function useWalletLedger() {
       const data = await endpoints.wallet(limit, 0);
       setRows(data.entries);
       setCardBalance(data.balance_credits);
+      setReadHeld(heldFrom(data));
       setTotal(data.total_entries);
       setError(null);
       setReadAt(Date.now());
@@ -131,7 +136,8 @@ function useWalletLedger() {
   const countUp = useCountUp(balance);
   useMoneyAnnouncement(delta, rows, toast);
 
-  return { rows, cardBalance, total, busy, error, readAt, balance, painted: countUp ?? balance, load };
+  const held = liveHeld ?? readHeld;
+  return { rows, cardBalance, total, busy, error, readAt, balance, painted: countUp ?? balance, load, held };
 }
 
 /**
@@ -191,7 +197,7 @@ function useMoneyAnnouncement(
  * nothing to play with: at zero it is the only thing on the page that does anything for them.
  * </p>
  */
-function BalanceCard({ balance, painted }: { balance: number | null; painted: number | null }) {
+function BalanceCard({ balance, painted, held }: { balance: number | null; painted: number | null; held: HeldFigures | null }) {
   const level = walletTone(balance);
   const tone = BALANCE_TONE[level];
   const edge = level === "zero" ? "border-danger-strong" : "border-warning-strong";
@@ -212,6 +218,7 @@ function BalanceCard({ balance, painted }: { balance: number | null; painted: nu
           <p className={cn("mt-2 max-w-prose text-sm", level === "fine" ? "text-text-secondary" : tone.ink)}>
             {BALANCE_SENTENCE[level]}
           </p>
+          <HeldLine held={held} />
         </div>
         <Button asChild variant={level === "zero" ? "primary" : "secondary"} className="shrink-0">
           <Link to="/wallet/topup">{TOP_UP_LABEL[level]}</Link>
@@ -271,7 +278,7 @@ function LedgerSection(props: LedgerProps) {
         />
       ) : (
         <Card className="gap-0 overflow-hidden py-0 sm:gap-0 sm:py-0">
-          <LedgerTable rows={rows} label="Wallet ledger" />
+          <LedgerTable rows={rows} label="Wallet ledger" groupShares />
           {/* Said once under the list rather than on every row: every face on a member surface
               is the CLUB's day, which is right and otherwise invisible. */}
           <p className="border-t border-border px-4 py-3 text-xs text-text-muted sm:px-6">{LEDGER_CLOCK_NOTE}</p>
@@ -287,7 +294,7 @@ function LedgerSection(props: LedgerProps) {
 }
 
 export default function WalletPage() {
-  const { rows, cardBalance, total, busy, error, readAt, balance, painted, load } = useWalletLedger();
+  const { rows, cardBalance, total, busy, error, readAt, balance, painted, load, held } = useWalletLedger();
   const loaded = rows !== null && cardBalance !== null;
   const shown = rows?.length ?? 0;
   const refresh = () => { void load(Math.max(shown, PAGE_SIZE)); };
@@ -312,7 +319,7 @@ export default function WalletPage() {
       >
         {loaded ? (
           <>
-            <BalanceCard balance={balance} painted={painted} />
+            <BalanceCard balance={balance} painted={painted} held={held} />
             <LedgerSection rows={rows} total={total} busy={busy} error={error} onOlder={() => void load(shown + PAGE_SIZE)} />
           </>
         ) : null}

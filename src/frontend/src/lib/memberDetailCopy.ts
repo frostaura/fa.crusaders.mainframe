@@ -119,9 +119,26 @@ export const ACTIONS_COPY = {
   resent: (email: string) => `Verification email sent to ${email}.`,
   resendFailed: "Couldn't send the verification email. Check the mail settings and try again.",
 
-  /** P7 lands the one rotating code; until then the item is there, disabled, and says why. */
-  resetCode: "Reset member code (coming soon)",
+  /** The desk's answer to "I lost my phone" (member-code §10, §13). */
+  resetCode: "Reset member code",
+  resetCodeTitle: (name: string) => `Reset ${name}'s member code?`,
+  resetCodeBody:
+    "For a lost phone or a code somebody else has seen. The code on their phone stops working straight away and they're signed out on every device. They sign in again to get a new code.",
+  revokePasskeys: "Also remove their passkeys",
+  revokePasskeysHint:
+    "Leave this on for a lost phone — a passkey on it could otherwise sign straight back in and pick up the new code.",
+  resetCodeConfirm: "Reset code",
+  resetCodeAction: "reset the member code",
+  codeReset: (name: string, passkeysRevoked: boolean, passkeysRemoved: number) =>
+    `${name}'s code is reset and they're signed out everywhere. ${passkeySentence(passkeysRevoked, passkeysRemoved)}`,
 } as const;
+
+/** What happened to a member's passkeys, for the reset's toast. */
+function passkeySentence(revoked: boolean, removed: number): string {
+  if (!revoked) return "Their passkeys were kept.";
+  if (removed === 0) return "They had no passkeys to remove.";
+  return `${countOf(removed, "passkey", "passkeys")} removed — they'll need to add one again.`;
+}
 
 /* ═══════════════════════════════ OVERVIEW ═══════════════════════════════ */
 

@@ -64,9 +64,9 @@ function day() {
 }
 
 /**
- * A MEMBER, not an admin: a member's booking sheet is one step (no "Book as", no quote), so the
- * walk reaches the confirm directly. The admin's stepper and god mode have their own spec,
- * `admin-self-booking.spec.ts`.
+ * A MEMBER, not an admin: no "Book as", no quote. Since P11 a member's sheet opens on Players with
+ * "Just me" chosen, and one Continue reaches the confirm (`players-book.spec.ts` walks the rest).
+ * The admin's stepper and god mode have their own spec, `admin-self-booking.spec.ts`.
  */
 const SESSION_MEMBER = {
   ...SESSION_ADMIN,
@@ -99,6 +99,10 @@ async function openBookingSheet(page: Page) {
   await page.goto("/bookings");
   await page.getByRole("button", { name: /^Book Court 1 .* for 50\.00 cr/ }).first().click();
   await expect(page.getByRole("dialog", { name: BOOK_SHEET.title(1) })).toBeVisible();
+  await page.getByRole("button", { name: BOOK_SHEET.next }).click();
+  await expect(page.getByRole("button", { name: PRIMARY })).toBeVisible();
+  // The sheet ignores a Book pressed within 300 ms of the step changing (a double-tap guard).
+  await page.waitForTimeout(350);
 }
 
 /** Holds the booking POST until `release` is called, so the working state can be looked at. */

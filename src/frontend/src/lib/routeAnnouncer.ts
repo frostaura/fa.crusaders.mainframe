@@ -49,6 +49,12 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   // R15 — the member's three destinations, in the order the tab bar shows them.
   ["/my-code", "My Code"],
   ["/bookings", "Bookings"],
+  // P11 — players and splits. Named per route: the court and the time are on the page's <h1>.
+  ["/bookings/invites", "Invites"],
+  ["/bookings/:bookingId", "Booking"],
+  ["/j/:token", "Invite"],
+  ["/invites/:participantId", "Invite"],
+  ["/inbox", "Notifications"],
   ["/wallet", "Wallet"],
   ["/wallet/topup", "Top up"],
   ["/wallet/topup/:topupId", "Top-up status"],
@@ -98,6 +104,9 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
    * renders. Each is named for where it now leads.
    */
   ["/schedule", "Bookings"],
+  ["/schedule/:bookingId", "Booking"],
+  ["/booking/:bookingId", "Booking"],
+  ["/invites", "Invites"],
   ["/court-code", "My Code"],
   ["/reports", "Reports"],
   ["/admin/ledger", "Transactions"],

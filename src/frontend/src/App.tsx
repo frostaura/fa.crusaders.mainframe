@@ -50,6 +50,13 @@ import MemberDetailLayout, {
 // P6 — the courts left Settings for a page of their own.
 import AdminCourtsPage from "./pages/admin/AdminCourts";
 import NotFoundPage from "./pages/NotFound";
+// P11 — players and splits (D11–D13): a booking's own page, invites (the tab, a shared link, and
+// the invite email's deep link) and the member's inbox.
+import BookingDetailPage from "./pages/BookingDetail";
+import InvitesPage from "./pages/Invites";
+import InviteLinkPage from "./pages/InviteLink";
+import InviteDeepLinkPage from "./pages/InviteDeepLink";
+import InboxPage from "./pages/Inbox";
 // `/reports` split in two (Target IA → Routes): club reports under Admin, a member's own under Wallet.
 import { ReportsRedirect } from "./pages/Reports";
 import AdminLayout from "./components/admin/AdminLayout";
@@ -155,6 +162,14 @@ export function AppRoutes() {
         {/* R15 — My Code is the landing, then Bookings, then Wallet. */}
         <Route path="/my-code" element={<RequireAuth><MyCodePage /></RequireAuth>} />
         <Route path="/bookings" element={<RequireAuth><SchedulePage /></RequireAuth>} />
+        {/* P11. `/bookings/invites` is literal, so it outranks `/bookings/:bookingId`. */}
+        <Route path="/bookings/invites" element={<RequireAuth><InvitesPage /></RequireAuth>} />
+        <Route path="/bookings/:bookingId" element={<RequireAuth><BookingDetailPage /></RequireAuth>} />
+        {/* A shared invite link (`/j/{token}`, WhatsApp) and the invite email's deep link. Both
+            signed-in: RequireAuth carries the link through /login and back. */}
+        <Route path="/j/:token" element={<RequireAuth><InviteLinkPage /></RequireAuth>} />
+        <Route path="/invites/:participantId" element={<RequireAuth><InviteDeepLinkPage /></RequireAuth>} />
+        <Route path="/inbox" element={<RequireAuth><InboxPage /></RequireAuth>} />
         <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />
         <Route path="/wallet/topup" element={<RequireAuth><TopUpPage /></RequireAuth>} />
         <Route path="/wallet/topup/:topupId" element={<RequireAuth><TopUpStatusPage /></RequireAuth>} />
@@ -203,6 +218,10 @@ export function AppRoutes() {
 
         {/* PERMANENT redirects — query and hash carried across (see `RedirectKeepingQuery`). */}
         <Route path="/schedule" element={<RedirectKeepingQuery to="/bookings" />} />
+        {/* P11 — a booking's page under the names it could have been linked by. */}
+        <Route path="/schedule/:bookingId" element={<RedirectBooking />} />
+        <Route path="/booking/:bookingId" element={<RedirectBooking />} />
+        <Route path="/invites" element={<RedirectKeepingQuery to="/bookings/invites" />} />
         <Route path="/court-code" element={<RedirectKeepingQuery to="/my-code" />} />
         <Route path="/reports" element={<RequireAuth><ReportsRedirect /></RequireAuth>} />
         <Route path="/admin/ledger" element={<RedirectKeepingQuery to="/admin/transactions" />} />
@@ -256,6 +275,12 @@ function RedirectDoor({ card = false }: { card?: boolean }) {
   const { id } = useParams();
   const base = `/admin/monitoring/doors/${id ?? ""}`;
   return <RedirectKeepingQuery to={card ? `${base}/card` : base} />;
+}
+
+/** A booking's page from a path it was never meant to have (P11) — the id carried across. */
+function RedirectBooking() {
+  const { bookingId } = useParams();
+  return <RedirectKeepingQuery to={`/bookings/${bookingId ?? ""}`} />;
 }
 
 /**

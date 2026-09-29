@@ -3,8 +3,11 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { ToastProvider } from "@/components/Toast";
+import { AuthProvider } from "@/lib/auth";
+import { BalanceProvider } from "@/lib/balance";
 import { refuse, stubFetch, type StubCall } from "@/test/harness";
 import { BOOK_SHEET, GOD_MODE, REFUSAL_REASON, RESULTS_LABEL } from "@/lib/bookingsCopy";
+import { BOOK_PLAYERS, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BookSheet, type BookSheetProps } from "../BookSheet";
 import { slotCount } from "../bookFlow";
 import type { SelectedSlot } from "../types";
@@ -34,8 +37,27 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Anonymous, so neither provider reads anything: the sheet's figures are the props'. */
 function Providers({ children }: { children: ReactNode }) {
-  return <MemoryRouter><ToastProvider>{children}</ToastProvider></MemoryRouter>;
+  return (
+    <MemoryRouter>
+      <AuthProvider>
+        <BalanceProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </BalanceProvider>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+}
+
+/**
+ * A member's sheet opens on Players with "Just me" chosen (P11): one tap on Continue reaches the
+ * Confirm the sheet always had. The pause is the sheet's own double-tap guard, which ignores a
+ * Book tapped within 300 ms of the step changing.
+ */
+async function toConfirm() {
+  fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+  await new Promise((r) => setTimeout(r, 350));
 }
 
 function open(props: Partial<BookSheetProps> = {}) {
@@ -65,13 +87,16 @@ const posts = (calls: StubCall[], path: string) => calls.filter((c) => c.method 
 const gets = (calls: StubCall[], path: string) => calls.filter((c) => c.method === "GET" && c.path.startsWith(path));
 
 describe("BookSheet — a member, one slot", () => {
-  it("states the slot, its length and the money, with a close × and an outcome-named book", () => {
+  it("states the slot, its length and the money, with a close × and an outcome-named book", async () => {
     stubFetch([]);
     const { dialog } = open();
     const d = dialog();
     expect(within(d).getByRole("heading", { name: BOOK_SHEET.title(S1) })).toBeTruthy();
-    // No stepper for a one-step sheet — a progress bar at 100% is decoration.
-    expect(within(d).queryByRole("list", { name: "Progress" })).toBeNull();
+    // P11: Players first ("Just me" chosen), then Confirm — Cancel on the first step, Back after.
+    expect(within(d).getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(1, 2, BOOK_SHEET.steps.players));
+    expect(within(d).getByRole("radio", { name: BOOK_PLAYERS.justMe })).toHaveAttribute("aria-checked", "true");
+    await toConfirm();
+    expect(within(d).getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(2, 2, BOOK_SHEET.steps.confirm));
     const slots = within(d).getByRole("list", { name: BOOK_SHEET.slotsLabel });
     expect(slots).toHaveTextContent("Court 1");
     expect(slots).toHaveTextContent("Mon 9 Sep · 18:00–18:45");
@@ -81,8 +106,10 @@ describe("BookSheet — a member, one slot", () => {
     expect(money).toHaveTextContent(`${BOOK_SHEET.balanceNow}500.00 cr`);
     expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}450.00 cr`);
     expect(within(d).getByRole("button", { name: "Close" })).toBeTruthy();
-    expect(within(d).getByRole("button", { name: BOOK_SHEET.cancel })).toBeTruthy();
+    expect(within(d).getByRole("button", { name: BOOK_SHEET.back })).toBeTruthy();
     expect(within(d).getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) })).toBeTruthy();
+    // Nobody else on it: no players section, nothing new in the money.
+    expect(d.querySelector("[data-confirm-players]")).toBeNull();
     // Banned dialog copy (design-system.md, Patterns → Dialog copy).
     expect(within(d).queryByText(/Keep looking|^OK$/)).toBeNull();
   });
@@ -92,6 +119,7 @@ describe("BookSheet — a member, one slot", () => {
       { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_credits: 450 } },
     ]);
     const { onBooked } = open();
+    await toConfirm();
     const book = screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) });
     fireEvent.click(book);
     fireEvent.click(book);
@@ -109,6 +137,7 @@ describe("BookSheet — a member, one slot", () => {
     let release: (v: unknown) => void = () => undefined;
     vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => { release = resolve; })));
     open();
+    await toConfirm();
     const book = screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) });
     fireEvent.click(book);
     await waitFor(() => expect(book).toHaveAttribute("aria-busy", "true"));
@@ -122,6 +151,7 @@ describe("BookSheet — a member, one slot", () => {
   it("keeps a refusal in the sheet, in words, and tells the page its grid is stale", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/bookings/", status: 409, body: { error: "slot_taken" } }]);
     const { onStale, onBooked } = open();
+    await toConfirm();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/Someone just took that slot/);
     expect(onStale).toHaveBeenCalledTimes(1);
@@ -130,9 +160,10 @@ describe("BookSheet — a member, one slot", () => {
     expect(screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) })).toBeTruthy();
   });
 
-  it("tells a short member what they need, never a red negative balance — members never overdraw", () => {
+  it("tells a short member what they need, never a red negative balance — members never overdraw", async () => {
     const stub = stubFetch([]);
     const { dialog } = open({ balanceCredits: 20 });
+    await toConfirm();
     const d = dialog();
     // P4 walk: "Balance after −30.00 cr" in red, a figure a member's wallet can never reach.
     const money = d.querySelector("dl")!;
@@ -154,9 +185,10 @@ describe("BookSheet — a member, one slot", () => {
     expect(stub.calls).toHaveLength(0);
   });
 
-  it("keeps the ordinary Balance after for a member who can afford it", () => {
+  it("keeps the ordinary Balance after for a member who can afford it", async () => {
     stubFetch([]);
     const { dialog } = open({ balanceCredits: 50 });
+    await toConfirm();
     const money = dialog().querySelector("dl")!;
     expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}0.00 cr`);
     expect(screen.queryByText(BOOK_SHEET.needMore(0))).toBeNull();
@@ -179,6 +211,7 @@ describe("BookSheet — a member, several slots (D8)", () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/bulk", body: bulkAnswer() }]);
     const { onBooked } = open({ slots: [C1, C2] });
     expect(screen.getByRole("heading", { name: BOOK_SHEET.title(S12) })).toBeTruthy();
+    await toConfirm();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(S12, 70, null) }));
     expect(await screen.findByText(BOOK_SHEET.bookedTitle(S1, S12))).toBeTruthy();
     const [call] = posts(stub.calls, "/api/v1/bookings/bulk");
@@ -205,6 +238,7 @@ describe("BookSheet — a member, several slots (D8)", () => {
     const answers = [halted, bulkAnswer({ booked: 2, refused: 0 })];
     const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/bulk", respond: () => answers[Math.min(served++, 1)] }]);
     open({ slots: [C1, C2] });
+    await toConfirm();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(S12, 70, null) }));
     expect(await screen.findByText(BOOK_SHEET.haltedShort)).toBeTruthy();
     expect(screen.getByRole("link", { name: BOOK_SHEET.topUp })).toHaveAttribute("href", "/wallet/topup");
@@ -266,6 +300,38 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     expect(screen.getByText(BOOK_SHEET.balanceLine(-16, "Naledi Khumalo"))).toBeTruthy();
     // The member's wallet is not the admin's: nothing for the admin's own chip.
     expect(onBooked).toHaveBeenCalledWith(expect.objectContaining({ ownBalanceAfter: null, forMemberId: NALEDI }));
+  });
+
+  it("P11: the god-mode notice names what the payer already owes back to partners", async () => {
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ held_credits: 0, owed_back_credits: 16 }) }]);
+    open({ isAdmin: true, members, bookAsUserId: NALEDI });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    const notice = await waitFor(() => {
+      const el = document.querySelector("[data-god-mode]");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    expect(notice).toHaveTextContent(GOD_MODE.body("Naledi Khumalo", -16));
+    expect(notice).toHaveTextContent(owedBackQuoteLine(16, "Naledi Khumalo"));
+    // Said once: the quiet line under the money stays away while the notice carries it.
+    expect(screen.getAllByText(owedBackQuoteLine(16, "Naledi Khumalo"))).toHaveLength(1);
+  });
+
+  it("P11: a quote that does not overdraw still names owed back, quietly; an older quote says nothing", async () => {
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_credits: 200, balance_after_credits: 140, overdraws: false, owed_back_credits: 16 }) }]);
+    open({ isAdmin: true, members });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    expect(await screen.findByText(owedBackQuoteLine(16, null))).toBeTruthy();
+    expect(screen.queryByText(GOD_MODE.title)).toBeNull();
+  });
+
+  it("P11: a quote with nothing owed back shows no owed-back line", async () => {
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_credits: 200, balance_after_credits: 140, overdraws: false }) }]);
+    open({ isAdmin: true, members });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    await screen.findByRole("button", { name: BOOK_SHEET.primary(S1, 60, null) });
+    expect(document.querySelector("[data-owed-back-line]")).toBeNull();
+    expect(document.querySelector("[data-owed-back]")).toBeNull();
   });
 
   it("books the admin's own court on their own wallet without the flag when it does not overdraw", async () => {

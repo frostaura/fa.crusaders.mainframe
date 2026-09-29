@@ -399,6 +399,15 @@ export const GET_STARTED = {
       email: "Bookings, cancellations, top-ups and anything else that affects you arrive by email, so keep an eye on "
         + "the inbox you signed up with.",
     },
+    /** D13 — the switches themselves carry their own labels (`PRIVACY_COPY` in `playersCopy`). */
+    privacy: {
+      title: "You choose who finds you",
+      body: [
+        "Partners can always add you with an invite link, or because you've played together before.",
+        "Being findable by name and appearing on leaderboards are up to you. Both start off, and you can change them "
+          + "any time on your profile.",
+      ],
+    },
   },
 } as const;
 

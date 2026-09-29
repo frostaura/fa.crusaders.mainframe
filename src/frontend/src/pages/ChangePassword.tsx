@@ -95,8 +95,8 @@ export function ChangePasswordForm({ onDone, onCancel, forced }: FormProps) {
   const [failure, setFailure] = useState<string | null>(null);
 
   const change = useAsyncAction((current: string, next: string) => endpoints.changePassword(current, next), {
-    success: () => {
-      auth.passwordChanged();
+    success: (answer) => {
+      auth.passwordChanged(answer.access_token);
       form.clear();
       onDone?.();
     },

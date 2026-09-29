@@ -49,6 +49,7 @@ describe("My door history", () => {
       { path: "/api/v1/whoami", body: whoami },
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/me/webauthn/credentials", body: [] },
+      { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
       ...routes,
     ]);
     return render(
@@ -268,6 +269,7 @@ describe("My door history", () => {
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/me/webauthn/credentials", body: [] },
       { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+      { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
       {
         path: "/api/v1/me/door/history",
         body: {},

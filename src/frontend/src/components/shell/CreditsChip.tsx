@@ -5,6 +5,7 @@ import { useBalance, walletHref, walletLabel, walletTone } from "@/lib/balance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn, formatCredits } from "@/lib/utils";
+import { chipHeldTitle } from "@/lib/walletCopy";
 import { useToast } from "../Toast";
 
 /**
@@ -62,8 +63,19 @@ function useClubMovementToast() {
   }, [delta, toast, clearDelta]);
 }
 
+/** The chip's hover title: the stream's health first, then what is held, then the plain one. */
+function chipTitle(state: string, loading: boolean, heldCredits: number, owedBack: number): string {
+  if (state === "degraded") return "The club's live updates aren't coming through — this figure is checked every 30 seconds.";
+  if (loading) return "Refreshing balance…";
+  return heldCredits > 0 || owedBack > 0 ? chipHeldTitle(heldCredits, owedBack) : "Wallet balance — tap to top up";
+}
+
 export function CreditsChip() {
-  const { balance, loading, state, delta } = useBalance();
+  const { balance, loading, state, delta, held } = useBalance();
+  // D11 §3a — the figure stays the whole balance; the name and title say what of it is held.
+  const heldCredits = held && held.held > 0 ? held.held : 0;
+  // P11 — and what of it is owed back to partners, paid from the next credit in.
+  const owedBack = held?.owedBack ?? 0;
   const location = useLocation();
   const reduceMotion = usePrefersReducedMotion();
   const tone = walletTone(balance);
@@ -86,10 +98,8 @@ export function CreditsChip() {
         data-credits-chip=""
         data-zero-entice={entice.breathing || undefined}
         data-live-state={state}
-        aria-label={walletLabel(balance, loading, state)}
-        title={state === "degraded"
-          ? "The club's live updates aren't coming through — this figure is checked every 30 seconds."
-          : loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
+        aria-label={walletLabel(balance, loading, state, heldCredits, owedBack)}
+        title={chipTitle(state, loading, heldCredits, owedBack)}
         className={cn(
           // A 44px floor in PIXELS at every pointer (it sits beside the 44px account button, and
           // on a phone it is a fingertip target), and no fixed height: at a 32px root the figure

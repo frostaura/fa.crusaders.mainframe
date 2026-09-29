@@ -223,6 +223,8 @@ function p8Routes(opts: { admin?: boolean; prefs?: Partial<typeof PREFS>; record
     },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/webauthn/credentials", body: [] },
+    // P11 / D13 — the wizard's last step and Profile's Privacy card read the social switches.
+    { path: "/api/v1/me/preferences", body: { ...prefs, findable: false, show_in_leaderboards: false } },
     { path: "/api/v1/me/door", body: door({ next_booking: null }) },
     { path: "/api/v1/me/door/history", body: { items: [], has_more: false } },
     ...memberCodeRoutes(),
@@ -250,18 +252,19 @@ test.describe("P8: the welcome wizard", () => {
     const titles = [
       GET_STARTED.steps.code.title, GET_STARTED.steps.passkey.title, GET_STARTED.steps.fingerprint.title,
       GET_STARTED.steps.topup.title, GET_STARTED.steps.book.title, GET_STARTED.steps.install.title,
+      GET_STARTED.steps.privacy.title,
     ];
     for (const [i, title] of titles.entries()) {
       await page.getByRole("button", { name: GET_STARTED.next, exact: true }).click();
       await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
-      await expect(page.getByText(GET_STARTED.stepOf(i + 2, 7))).toBeVisible();
+      await expect(page.getByText(GET_STARTED.stepOf(i + 2, 8))).toBeVisible();
     }
     // The court-box fingerprint step was an explanation, never a control: nothing it said was pressable.
     await page.getByRole("button", { name: GET_STARTED.finish }).click();
     await expect(page).toHaveURL(/\/my-code$/);
     expect(recorder.calls.some((c) => c.path.endsWith("/member/complete"))).toBe(true);
     expect(recorder.calls.filter((c) => c.path.endsWith("/member/step")).map((c) => (c.body as { step: string }).step))
-      .toEqual(["code", "passkey", "fingerprint", "topup", "book", "install"]);
+      .toEqual(["code", "passkey", "fingerprint", "topup", "book", "install", "privacy"]);
 
     // Once per sign-in: arriving at the landing again does not send the member round again.
     await page.goto("/my-code");

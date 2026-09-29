@@ -1,5 +1,7 @@
 import type { LedgerEntryType } from "./api";
 import type { WalletTone } from "./balance";
+import { firstName, playersWhen } from "./playersCopy";
+import { formatCredits, formatSignedCredits } from "./utils";
 
 /**
  * The wallet's own words, and the one distinction the product kept getting wrong.
@@ -96,6 +98,10 @@ export function creditArrivedSentence(amount: number, entryType: LedgerEntryType
       return `A cancelled booking put ${credits} back in your wallet.`;
     case "PaymentReversal":
       return `A payment was reversed: ${credits} are back in your wallet.`;
+    case "ShareTransfer":
+      // Either a partner paid their share or a share of the member's own came back; both are
+      // shares, and "held" is said on the card, not squeezed into a toast.
+      return `A share of a split booking moved ${credits} into your wallet.`;
     default:
       return `Your wallet went up by ${credits}.`;
   }
@@ -109,9 +115,108 @@ export function creditLeftSentence(amount: number, entryType: LedgerEntryType | 
     case "LightsPurchase": return `${credits} went on court time at the box.`;
     case "NoShowPenalty": return `${credits} went on a no-show charge.`;
     case "LateCancellationPenalty": return `${credits} went on a late-cancellation charge.`;
+    case "ShareTransfer": return `${credits} went on a share of a split booking.`;
     default: return `${credits} left your wallet.`;
   }
 }
 
 /** Said once under the ledger, not on every row — the same rule the door history follows. */
 export const LEDGER_CLOCK_NOTE = "Times are the club's own.";
+
+/* ─────────────────────────────── held credits (D11 §3a) ─────────────────────────────── */
+
+/** Under the held line on the wallet card: the figure every spend decision reads. */
+export function spendableLine(spendable: number): string {
+  // P11: owing partners more than the balance makes spendable negative. "You can spend −4.00 cr"
+  // reads as a debt the member can spend; the honest sentence is nothing, and what clears it.
+  if (spendable < 0) return `You can spend 0.00 cr until ${formatCredits(-spendable)} more comes in`;
+  return `You can spend ${formatCredits(spendable)}`;
+}
+
+/** The chip's hover title when part of the balance is held or owed back to partners. */
+export function chipHeldTitle(held: number, owedBack = 0): string {
+  const parts = [
+    held > 0 ? `${formatCredits(held)} of it held for partners` : null,
+    owedBack > 0 ? `${formatCredits(owedBack)} owed back to partners` : null,
+  ].filter(Boolean);
+  return `Wallet balance — ${parts.join(", ")}. Tap to top up.`;
+}
+
+/* ─────────────────────────────── shares in the ledger (D11) ─────────────────────────────── */
+
+/** What a share line knows about its booking, when the booking could be read. */
+export type SharePlace = { courtName: string | null; startsAt: string } | null | undefined;
+
+/** "Tue 30 Sep" — the game's day, in the club's zone. */
+function gameDay(startsAt: string, timezone?: string): string {
+  return playersWhen(startsAt, timezone).split(",")[0];
+}
+
+/** "Court 1 · Tue 30 Sep", or null when the booking could not be read. */
+export function sharePlace(place: SharePlace, timezone?: string): string | null {
+  if (!place) return null;
+  const court = place.courtName?.trim() || "Court";
+  return `${court} · ${gameDay(place.startsAt, timezone)}`;
+}
+
+function courtOf(place: SharePlace): string {
+  return place?.courtName?.trim() || "a split booking";
+}
+
+export type ShareGroupInput = {
+  side: "organiser" | "partner";
+  net: number;
+  place: SharePlace;
+  /** How many partners have paid, when the booking could be read. */
+  partners: number | null;
+  timezone?: string;
+};
+
+/**
+ * The one line a booking's shares collapse under.
+ * Organiser: "Shares for Court 1 · Tue 30 Sep: +50.00 cr from 2 partners".
+ * Partner: "Your share · Court 1 · Tue 30 Sep: −25.00 cr".
+ */
+export function shareGroupSentence(input: ShareGroupInput): string {
+  const where = sharePlace(input.place, input.timezone);
+  const amount = formatSignedCredits(input.net);
+  if (input.side === "partner") {
+    return where ? `Your share · ${where}: ${amount}` : `Your share of a split booking: ${amount}`;
+  }
+  const head = where ? `Shares for ${where}` : "Shares for a split booking";
+  if (input.net === 0) return `${head}: ${amount} — paid and returned`;
+  if (input.partners === null || input.partners === 0) return `${head}: ${amount}`;
+  return `${head}: ${amount} from ${input.partners} partner${input.partners === 1 ? "" : "s"}`;
+}
+
+export type ShareRowInput = {
+  side: "organiser" | "partner";
+  signed: number;
+  place: SharePlace;
+  /** The other person on this movement — the organiser for a partner, a partner for the organiser. */
+  other: string | null;
+};
+
+/**
+ * One share movement, as a sentence. "25.00 cr moved to Nomsa for your share of Court 1".
+ * Nobody owes anybody: a partner's share MOVES, and a returned one COMES BACK.
+ */
+export function shareRowSentence(input: ShareRowInput): string {
+  const amount = formatCredits(Math.abs(input.signed));
+  const court = courtOf(input.place);
+  const who = input.other ? firstName(input.other) : null;
+  if (input.side === "partner") {
+    if (input.signed < 0) return `${amount} moved to ${who ?? "the organiser"} for your share of ${court}`;
+    return `${amount} of your share of ${court} came back${who ? ` from ${who}` : ""}`;
+  }
+  if (input.signed >= 0) return `${who ?? "A partner"} paid you ${amount} for their share of ${court}`;
+  return `${amount} went back to ${who ?? "a partner"} from their share of ${court}`;
+}
+
+export const SHARE_LEDGER_COPY = {
+  viewBooking: "View booking",
+  partners: "Partners",
+  organiser: "Organiser",
+  /** The disclosure's state, spoken after the line itself. */
+  movements: (n: number) => `${n} movement${n === 1 ? "" : "s"}`,
+} as const;

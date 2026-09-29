@@ -16,6 +16,7 @@ import {
   type Tile,
 } from "../../components/reports/ReportParts";
 import { prettyDay, useReport, useReportRange } from "../../components/reports/range";
+import { REPORT_SHARES_COPY } from "../../lib/playersCopy";
 
 /**
  * `/admin/reports` — the club's money, courts and attendance for a period.
@@ -129,6 +130,7 @@ function sumDays(days: DailyAdminPoint[]) {
     penalties: sum((d) => d.penalties_credits),
     adjustments: sum((d) => d.adjustments_credits),
     reversals: sum((d) => d.reversals_credits),
+    shares: sum((d) => d.share_transfers_credits ?? 0),
     bookings: sum((d) => d.bookings),
     noShows: sum((d) => d.no_shows),
     net: sum((d) => d.net_movement_credits),
@@ -139,8 +141,14 @@ function sumDays(days: DailyAdminPoint[]) {
  * The club's own money, including the figure that was once on no screen at all: what the desk
  * added or took back by hand (Adjustments), and a payment clawed back after the fact (Reversals).
  */
+/** D11 — whether the server sent the share bucket at all. An older API does not, and then no row. */
+function carriesShares(days: DailyAdminPoint[]): boolean {
+  return days.some((d) => typeof d.share_transfers_credits === "number");
+}
+
 function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
   const t = sumDays(days);
+  const shares = carriesShares(days);
   return (
     <Section title="Club money — totals" description="Every movement of member credit across the club in this period.">
       <TotalsCard
@@ -150,6 +158,7 @@ function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
             this period — top-ups − charges + refunds − penalties + adjustments + reversals, which is every ledger movement
             in the club summed. <strong className="font-semibold text-text-primary">Adjustments</strong> is what the desk added or took back by hand;{" "}
             <strong className="font-semibold text-text-primary">Reversals</strong> is a payment clawed back after the fact.
+            {shares ? <> <strong className="font-semibold text-text-primary">{REPORT_SHARES_COPY.clubShares}</strong>: {REPORT_SHARES_COPY.clubCaption}</> : null}
           </>
         )}
       >
@@ -159,6 +168,7 @@ function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
         <Stat label="Penalties (net)" value={formatSignedCredits(-t.penalties)} />
         <Stat label="Adjustments" value={formatSignedCredits(t.adjustments)} />
         <Stat label="Reversals" value={formatSignedCredits(t.reversals)} />
+        {shares ? <Stat label={REPORT_SHARES_COPY.clubShares} value={formatSignedCredits(t.shares)} /> : null}
         <Stat label="Courts played" value={String(t.bookings)} />
         <Stat label="No-shows" value={String(t.noShows)} />
         <Stat label="Days" value={String(days.length)} />
@@ -215,7 +225,23 @@ const DAY_COLUMNS: DataColumn<DailyAdminPoint>[] = [
   { key: "no_shows", header: "No-shows", align: "right", cell: (r) => <Cell>{r.no_shows}</Cell>, sortValue: (r) => r.no_shows },
 ];
 
+/** The share column, after Reversals — only when the server sends the bucket. */
+const SHARES_COLUMN: DataColumn<DailyAdminPoint> = {
+  key: "share_transfers_credits",
+  header: REPORT_SHARES_COPY.clubShares,
+  align: "right",
+  cell: (r) => <NetCredits value={r.share_transfers_credits ?? 0} />,
+  sortValue: (r) => r.share_transfers_credits ?? 0,
+};
+
+function dayColumns(shares: boolean): DataColumn<DailyAdminPoint>[] {
+  if (!shares) return DAY_COLUMNS;
+  const at = DAY_COLUMNS.findIndex((c) => c.key === "reversals_credits") + 1;
+  return [...DAY_COLUMNS.slice(0, at), SHARES_COLUMN, ...DAY_COLUMNS.slice(at)];
+}
+
 function DailyBreakdown({ days }: { days: DailyAdminPoint[] }) {
+  const shares = carriesShares(days);
   return (
     <Section title="Daily breakdown" description={`${days.length} day${days.length === 1 ? "" : "s"}`}>
       <DataTable
@@ -224,7 +250,7 @@ function DailyBreakdown({ days }: { days: DailyAdminPoint[] }) {
         defaultSort={{ key: "date", dir: "desc" }}
         emptyTitle="No activity in this window."
         maxHeight="60vh"
-        columns={DAY_COLUMNS}
+        columns={dayColumns(shares)}
       />
       <TableNotes>
         <p className="text-sm text-text-secondary">
@@ -234,6 +260,7 @@ function DailyBreakdown({ days }: { days: DailyAdminPoint[] }) {
           halves of a row are not about the same bookings. Days are the club&#39;s own, in its configured timezone.
         </p>
         <NetNote what="Refunds, penalties, adjustments and reversals" />
+        {shares ? <p className="text-sm text-text-secondary">{REPORT_SHARES_COPY.clubCaption}</p> : null}
       </TableNotes>
     </Section>
   );

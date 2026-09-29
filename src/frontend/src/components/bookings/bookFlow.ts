@@ -10,8 +10,10 @@ import {
 import { formatMinutes } from "@/lib/utils";
 import { clubClock } from "@/lib/clubClock";
 import { refusalReason, RESULT_WORD } from "@/lib/bookingsCopy";
+import { playersEndpoints, type PlayersPayload } from "@/lib/playersApi";
 import type { SelectedSlot } from "./types";
 import type { BulkResultRow } from "./BulkResults";
+import { fromBulkWithPlayers, fromSingleWithPlayers, type PlayersOutcome } from "./playersOutcome";
 
 /**
  * Everything BookSheet decides that is not drawing: the steps, the admin quote, the call that
@@ -37,22 +39,30 @@ export function whoProblem(who: BookAs): "member" | "hold" | null {
 /* ─────────────────────────────── steps ─────────────────────────────── */
 
 /**
- * The stepper. Order is fixed; each step says whether it applies to THIS sheet. P11 turns on
- * `players` and `split` (partners and shares, D11) by making their `applies` true — nothing else
- * about the sheet has to move for a step to be inserted.
+ * The stepper. Order is fixed; each step says whether it applies to THIS sheet.
+ *
+ * <p>
+ * <b>P11 (D11).</b> A MEMBER picks their players, then — only when somebody is being asked for a
+ * share (a member or an open link seat; a guest pays nothing and is not a head) — how to split
+ * the cost. An ADMIN keeps Slots → Confirm: "Book as" is their decision, and players are added
+ * afterwards from the booking's own page, where the desk's god-mode add lives.
+ * </p>
  */
 export type StepId = "slots" | "players" | "split" | "confirm";
 
-type StepContext = { isAdmin: boolean };
+type StepContext = {
+  isAdmin: boolean;
+  /** Somebody on the booking is asked for a share. */
+  paying?: boolean;
+};
 
 const STEP_ORDER: readonly StepId[] = ["slots", "players", "split", "confirm"];
 
 const APPLIES: Record<StepId, (ctx: StepContext) => boolean> = {
   // The only decision on it is the admin's "Book as"; a member's slots are listed on Confirm.
   slots: (ctx) => ctx.isAdmin,
-  // RESERVED for P11 (D11–D13): partners, then the split. Render nothing until then.
-  players: () => false,
-  split: () => false,
+  players: (ctx) => !ctx.isAdmin,
+  split: (ctx) => !ctx.isAdmin && Boolean(ctx.paying),
   confirm: () => true,
 };
 
@@ -123,14 +133,20 @@ export type SheetQuote = {
   balance: number;
   after: number;
   overdraws: boolean;
+  /** P11 — what the payer owes back to partners (0 against an older API). */
+  owedBack: number;
   prices: Map<number, number>;
   refused: Map<number, string | null>;
 };
 
+function owedBackOf(q: { owed_back_credits?: number }): number {
+  return typeof q.owed_back_credits === "number" && q.owed_back_credits > 0 ? q.owed_back_credits : 0;
+}
+
 function fromSingle(q: AdminBookingQuote): SheetQuote {
   return {
     total: q.price_credits, balance: q.balance_credits, after: q.balance_after_credits,
-    overdraws: q.overdraws, prices: new Map([[0, q.price_credits]]), refused: new Map(),
+    overdraws: q.overdraws, owedBack: owedBackOf(q), prices: new Map([[0, q.price_credits]]), refused: new Map(),
   };
 }
 
@@ -143,7 +159,7 @@ function fromBulk(q: AdminBulkQuote): SheetQuote {
   }
   return {
     total: q.total_credits, balance: q.balance_credits, after: q.balance_after_credits,
-    overdraws: q.overdraws, prices, refused,
+    overdraws: q.overdraws, owedBack: owedBackOf(q), prices, refused,
   };
 }
 
@@ -217,6 +233,8 @@ export type BookRun = {
   /** `insufficient_balance` when the batch stopped part-way. */
   halted: string | null;
   hold: boolean;
+  /** Set when the booking went out with players: the links to share, per booking. */
+  players?: PlayersOutcome | null;
 };
 
 type Face = (slot: SelectedSlot) => string;
@@ -281,10 +299,29 @@ export type BookRequest = {
   /** God mode (R19): sent when the quote said `overdraws`, or on "Book the rest anyway". */
   allowNegativeBalance: boolean;
   face: Face;
+  /** A member's players (D11). Null or absent: the routes a booking always took, unchanged. */
+  players?: PlayersPayload | null;
 };
+
+/**
+ * With players, the same two routes carry the players payload. The bulk one is all-or-nothing on
+ * the players: a split that cannot work on any item is refused before anything is booked, so the
+ * refusal reaches the sheet as a failure (it stays on Confirm) rather than as rows.
+ */
+async function bookWithPlayers(req: BookRequest, players: PlayersPayload): Promise<BookRun> {
+  const { slots, face } = req;
+  if (slots.length === 1) {
+    const [s] = slots;
+    const r = await playersEndpoints.bookWithPlayers({ courtId: s.courtId, startsAt: s.startsAt, sliceCount: s.sliceCount, ...players });
+    return { ...singleRun(s, face, r.balance_after_credits, false), players: fromSingleWithPlayers(r, s) };
+  }
+  const res = await playersEndpoints.bulkWithPlayers({ idempotencyKey: req.idempotencyKey, items: itemsOf(slots), ...players });
+  return { ...fromMemberBulk(res, slots, face), players: fromBulkWithPlayers(res, slots) };
+}
 
 async function bookAsMember(req: BookRequest): Promise<BookRun> {
   const { slots, face } = req;
+  if (req.players) return bookWithPlayers(req, req.players);
   if (slots.length === 1) {
     const [s] = slots;
     const r = await endpoints.book(s.courtId, s.startsAt, s.sliceCount);

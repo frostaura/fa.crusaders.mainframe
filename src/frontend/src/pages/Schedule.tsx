@@ -16,6 +16,7 @@ import type { BoardContext } from "../components/ScheduleCells";
 import { BookingBoard, BookingGridHeading, BookingGridSkeleton, SELECTION_ROOM_PX } from "../components/bookings/BookingGrid";
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
 import { CancelSheet, type CancelledOutcome } from "../components/bookings/CancelSheet";
+import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -114,6 +115,7 @@ export default function BookingsPage() {
       {/* Room under the grid while the floating bar is up, so it never covers the last row —
           padding, not a spacer element, because a spacer would also take the shell's section gap. */}
       <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
+        <InvitesBadgeLink />
         <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} rateLine={explainer.rateLine} />
         <ScheduleNotices
           notices={explainer.notices(balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}

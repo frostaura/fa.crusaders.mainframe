@@ -1728,8 +1728,11 @@ describe("MyCode at a club with a door", () => {
     }));
 
     await screen.findByText(/The lock released/);
+    // The QR is drawn from the code once the phone has made it — its own async step, not the
+    // door read the line above waits for.
+    const qrImage = await screen.findByRole("img", { name: /QR code/ });
     const order = (node: Element | null) => [...document.querySelectorAll("*")].indexOf(node!);
-    const qr = order(screen.getByRole("img", { name: /QR code/ }));
+    const qr = order(qrImage);
     expect(qr).toBeLessThan(order(screen.getByText(/The lock released/)));
     expect(qr).toBeLessThan(order(screen.getByText(/Show this at the club door/)));
     expect(qr).toBeLessThan(order(screen.getByRole("heading", { name: /What opens the door/ })));

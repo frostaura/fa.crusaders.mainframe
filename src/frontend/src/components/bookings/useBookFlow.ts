@@ -4,6 +4,7 @@ import { describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { BOOK_SHEET, refusalReason } from "@/lib/bookingsCopy";
+import { PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
 import type { ComboboxMember } from "@/components/ui/member-combobox";
 import type { SelectedSlot } from "./types";
 import type { MoneyRow, SlotLine } from "./SheetParts";
@@ -11,6 +12,7 @@ import {
   newIdempotencyKey, placeBooking, slotCount, slotFace, slotKey, stepsFor, useAdminQuote, whoProblem,
   type BookAs, type BookRun, type QuoteState, type StepId,
 } from "./bookFlow";
+import { usePlayersStep } from "./usePlayersStep";
 
 /**
  * BookSheet's state machine, as one hook: which step, who pays, what the admin quote said, what
@@ -43,6 +45,8 @@ export type BookFlowInput = {
   members?: ComboboxMember[];
   onBooked?: (outcome: BookedOutcome) => void;
   onStale?: () => void;
+  /** What of a member's balance is held for partners (D11 §3a), for the line under the money. */
+  held?: { held: number; owedBack?: number; until: string | null } | null;
 };
 
 export type Primary =
@@ -132,19 +136,31 @@ function adminPrimary(quote: QuoteState, count: number, sendable: number, forNam
   };
 }
 
-/** The sentence for a run that failed outright — a refusal with figures, or no answer at all. */
-export function refusalSentence(error: unknown): string {
+/**
+ * The sentence for a run that failed outright — a refusal with figures, or no answer at all. A
+ * booking sent with players can be refused for the players (a split that cannot work, a member
+ * who left); those codes are the players feature's sentences, everything else the booking's.
+ */
+export function refusalSentence(error: unknown, withPlayers = false): string {
+  if (withPlayers && error instanceof ApiError && error.code !== null && error.code in PLAYERS_REFUSAL) {
+    return playersRefusal(error);
+  }
   return error instanceof ApiError
     ? describeBookingError(error, BOOK_SHEET.fallback)
     : describeFailure(error, { action: BOOK_SHEET.failedAction });
+}
+
+/** Where the steps go next — a step id, not an index, so inserting Split never shifts Confirm. */
+function neighbour(steps: readonly StepId[], at: StepId, by: 1 | -1): StepId {
+  const index = Math.max(0, steps.indexOf(at));
+  return steps[Math.min(Math.max(index + by, 0), steps.length - 1)];
 }
 
 /* ─────────────────────────────── the hook ─────────────────────────────── */
 
 export function useBookFlow(input: BookFlowInput) {
   const { slots, timezone, sliceMinutes, isAdmin, actorUserId, balanceCredits } = input;
-  const steps = useMemo(() => stepsFor({ isAdmin }), [isAdmin]);
-  const [stepIndex, setStepIndex] = useState(0);
+  const [stepId, setStepId] = useState<StepId>(() => stepsFor({ isAdmin })[0]);
   const [who, setWhoState] = useState<BookAs>(() => initialWho(isAdmin, input.bookAsUserId));
   const [key, setKey] = useState(() => newIdempotencyKey(isAdmin ? "ab" : "mb"));
   const [showProblem, setShowProblem] = useState(false);
@@ -152,7 +168,17 @@ export function useBookFlow(input: BookFlowInput) {
   const settledAt = useRef(0);
   const members = useSheetMembers(isAdmin, input.members, actorUserId);
 
-  const step: StepId = steps[Math.min(stepIndex, steps.length - 1)];
+  const onEdit = () => {
+    // A different game is a different request: never let a retry of the last one reuse its key.
+    setKey(newIdempotencyKey("mb"));
+    action.reset();
+  };
+  const players = usePlayersStep({
+    enabled: !isAdmin, prices: slots.map((s) => s.priceCredits), step: stepId, onEdit: () => onEdit(),
+  });
+  const steps = useMemo(() => stepsFor({ isAdmin, paying: players.paying }), [isAdmin, players.paying]);
+  const step: StepId = steps.includes(stepId) ? stepId : steps[steps.length - 1];
+  const stepIndex = steps.indexOf(step);
   const confirming = step === "confirm";
   const hold = isAdmin && who.kind === "hold";
   const quote = useAdminQuote(slots, who, isAdmin && confirming && !hold);
@@ -172,6 +198,7 @@ export function useBookFlow(input: BookFlowInput) {
   const action = useAsyncAction(
     (allowNegativeBalance: boolean) => placeBooking({
       slots: sendable, who, isAdmin, actorUserId, idempotencyKey: key, allowNegativeBalance, face,
+      players: isAdmin ? null : players.payload,
     }),
     {
       success: (result) => {
@@ -196,10 +223,10 @@ export function useBookFlow(input: BookFlowInput) {
     action.reset();
   };
 
-  const moveTo = (index: number) => {
+  const moveTo = (id: StepId) => {
     settledAt.current = Date.now();
     action.reset();
-    setStepIndex(index);
+    setStepId(id);
   };
 
   const next = () => {
@@ -207,7 +234,14 @@ export function useBookFlow(input: BookFlowInput) {
       setShowProblem(true);
       return;
     }
-    moveTo(Math.min(stepIndex + 1, steps.length - 1));
+    // A split the phone already knows cannot work is said on the step, not discovered on Book.
+    if (step === "split" && players.problem) return;
+    moveTo(neighbour(steps, step, 1));
+  };
+
+  const back = () => {
+    if (players.picking !== null) players.closePicker();
+    else moveTo(neighbour(steps, step, -1));
   };
 
   const submit = (allowNegativeBalance: boolean) => {
@@ -248,13 +282,14 @@ export function useBookFlow(input: BookFlowInput) {
   }
 
   return {
-    steps, stepIndex: steps.indexOf(step), step, confirming, hold, count, refusedSlots,
+    steps, stepIndex, step, confirming, hold, count, refusedSlots, players,
     who, setWho, problem: showProblem ? whoProblem(who) : null,
     members, memberName,
     quote, ready, sendable, lines, money, primary, short,
-    godMode: ready?.overdraws ? { name: memberName, balanceAfter: ready.after } : null,
+    godMode: ready?.overdraws ? { name: memberName, balanceAfter: ready.after, owedBack: ready.owedBack } : null,
     action, run,
-    next, back: () => moveTo(Math.max(stepIndex - 1, 0)), submit,
+    next, back, submit, face, timezone,
+    held: isAdmin ? null : input.held ?? null,
   };
 }
 

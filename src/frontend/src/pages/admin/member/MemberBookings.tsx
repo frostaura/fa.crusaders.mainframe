@@ -13,6 +13,7 @@ import { useBalance } from "@/lib/balance";
 import { clubClock } from "@/lib/clubClock";
 import { memberDetailEndpoints, type BookingsWhen, type MemberBookingRow, type MemberBookingsPage } from "@/lib/memberDetailApi";
 import { BOOKINGS_TAB_COPY as COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
+import { DETAIL_LINKS } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useRead } from "@/lib/useRead";
 import { BookingLine, BookingListSkeleton } from "./parts";
@@ -107,16 +108,28 @@ function BookingPagesView(props: {
             key={row.booking_id}
             row={row}
             zone={zone}
-            action={cancellable(row) ? (
-              <Button
-                variant="danger-soft"
-                size="sm"
-                aria-label={COPY.cancelFor(row.court_name ?? COPY.unknownCourt, bookingWhen(row, zone))}
-                onClick={() => onCancel(row)}
-              >
-                {COPY.cancel}
-              </Button>
-            ) : null}
+            action={(
+              <div className="flex items-center gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link
+                    to={`/bookings/${row.booking_id}`}
+                    aria-label={DETAIL_LINKS.openFor(row.court_name ?? COPY.unknownCourt, bookingWhen(row, zone))}
+                  >
+                    {DETAIL_LINKS.open}
+                  </Link>
+                </Button>
+                {cancellable(row) ? (
+                  <Button
+                    variant="danger-soft"
+                    size="sm"
+                    aria-label={COPY.cancelFor(row.court_name ?? COPY.unknownCourt, bookingWhen(row, zone))}
+                    onClick={() => onCancel(row)}
+                  >
+                    {COPY.cancel}
+                  </Button>
+                ) : null}
+              </div>
+            )}
           />
         ))}
       </ul>

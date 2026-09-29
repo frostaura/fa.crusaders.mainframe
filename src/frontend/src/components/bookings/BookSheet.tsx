@@ -14,10 +14,15 @@ import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
 import { BOOK_SHEET, RESULTS_LABEL } from "@/lib/bookingsCopy";
+import { useBalance } from "@/lib/balance";
+import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
 import { MoneyRows, SlotList, Stepper } from "./SheetParts";
 import { slotCount, type BookAs } from "./bookFlow";
+import { PlayersStep } from "./PlayersStep";
+import { ConfirmPlayers, ResultPlayers } from "./PlayersOutcomeView";
+import { SplitStep } from "./SplitStep";
 import { refusalSentence, useBookFlow, type BookFlow, type BookFlowInput } from "./useBookFlow";
 
 export type { BookedOutcome } from "./useBookFlow";
@@ -27,10 +32,16 @@ export type { BookedOutcome } from "./useBookFlow";
  * close × every dialog carries.
  *
  * <p>
- * <b>A stepper, so the P11 steps slot in.</b> Slots → [Players → Split, reserved for P11] →
- * Confirm. Each step declares whether it applies (`bookFlow.stepsFor`): an admin gets Slots,
- * where "Book as" is decided; a member, who has nothing to decide there yet, goes straight to
- * Confirm, which always lists the slots with their day, time and length.
+ * <b>A stepper.</b> Slots → Players → Split → Confirm, each step declaring whether it applies
+ * (`bookFlow.stepsFor`). An admin gets Slots, where "Book as" is decided, then Confirm. A member
+ * gets Players ("Just me" by default — one tap on Continue books exactly as before), Split only
+ * when somebody is asked for a share (P11, D11), then Confirm, which always lists the slots.
+ * </p>
+ *
+ * <p>
+ * <b>Members spend their SPENDABLE credits</b> (D11 §3a): shares partners have paid them
+ * are held until 48 hours after each game, so "Balance now" and "Balance after" read
+ * `useBalance().held.spendable`, with the held line under them when anything is held.
  * </p>
  *
  * <p>
@@ -47,6 +58,11 @@ export type { BookedOutcome } from "./useBookFlow";
  * item, so a partial batch is read rather than guessed.
  * </p>
  */
+type HeldNow = { held: number; owedBack: number; until: string | null };
+type Spendable = { spendable: number | null; held: HeldNow | null };
+
+type StepViewProps = { flow: BookFlow; isAdmin: boolean; reasonId: string; actorUserId: string | null };
+
 export type BookSheetProps = BookFlowInput & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -63,8 +79,20 @@ export function BookSheet(props: BookSheetProps) {
   );
 }
 
+/** The member's SPENDABLE figure when the wallet has one, else the balance the page passed. */
+function useSpendable(given: number | null): Spendable {
+  const { held } = useBalance();
+  // Hoisted out of the literal: lizard's .tsx lexer reads a bare comparison inside one as a tag.
+  const holding = Boolean(held && (held.held > 0 || held.owedBack > 0));
+  const shown = held && holding ? { held: held.held, owedBack: held.owedBack, until: held.until } : null;
+  return { spendable: held ? held.spendable : given, held: shown };
+}
+
 function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
-  const flow = useBookFlow(props);
+  const wallet = useSpendable(props.balanceCredits);
+  const flow = useBookFlow({
+    ...props, balanceCredits: props.isAdmin ? props.balanceCredits : wallet.spendable, held: wallet.held,
+  });
   const body = useRef<HTMLDivElement>(null);
   /** The sentence an unavailable Book button is described by. */
   const reasonId = useId();
@@ -91,7 +119,9 @@ function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
         {/* An inner stack, not a grid on the scroller itself: a grid item that clips (the slot
             card) has no minimum height, so a height-capped grid squashed it instead of scrolling. */}
         <div className="flex flex-col gap-4">
-          {flow.run ? <ResultView flow={flow} /> : <StepView flow={flow} isAdmin={props.isAdmin} reasonId={reasonId} />}
+          {flow.run
+            ? <ResultView flow={flow} />
+            : <StepView flow={flow} isAdmin={props.isAdmin} reasonId={reasonId} actorUserId={props.actorUserId} />}
         </div>
       </DialogBody>
       <BookFooter flow={flow} onClose={props.onClose} reasonId={reasonId} />
@@ -101,7 +131,10 @@ function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
 
 /* ─────────────────────────────── steps ─────────────────────────────── */
 
-function StepView({ flow, isAdmin, reasonId }: { flow: BookFlow; isAdmin: boolean; reasonId: string }) {
+function StepView(props: StepViewProps) {
+  const { flow, isAdmin, reasonId, actorUserId } = props;
+  if (flow.step === "players") return <PlayersStep players={flow.players} actorUserId={actorUserId} />;
+  if (flow.step === "split") return <SplitStep players={flow.players} />;
   if (flow.step === "slots") {
     return (
       <>
@@ -112,6 +145,33 @@ function StepView({ flow, isAdmin, reasonId }: { flow: BookFlow; isAdmin: boolea
     );
   }
   return <ConfirmStep flow={flow} reasonId={reasonId} />;
+}
+
+/**
+ * "12.00 cr held until Wed 30 Sep, 20:00", under the money, when any of it is held (§3a) — and
+ * "16.00 cr owed back to partners — paid from your next credit" when any is owed back (P11),
+ * which is why "Balance now" can read below zero for a member.
+ */
+function HeldNote({ flow }: { flow: BookFlow }) {
+  const held = flow.held;
+  if (!held) return null;
+  return (
+    <>
+      {held.held > 0 ? <p data-held-line="" className="-mt-2 px-1 text-xs text-text-secondary">{heldLine(held.held, held.until, flow.timezone)}</p> : null}
+      {held.owedBack ? <p data-owed-back-line="" className="-mt-2 px-1 text-xs text-text-secondary">{owedBackLine(held.owedBack)}</p> : null}
+    </>
+  );
+}
+
+/**
+ * P11 — an admin's quote names what the payer owes back to partners even when the booking does
+ * not overdraw: that debt is paid from their next credit first. When it DOES overdraw, the
+ * god-mode notice carries the same sentence, so this stays quiet.
+ */
+function QuoteOwedBack({ flow }: { flow: BookFlow }) {
+  const owed = flow.ready?.owedBack ?? 0;
+  if (owed <= 0 || flow.godMode) return null;
+  return <p data-owed-back-line="" className="-mt-2 px-1 text-xs text-text-secondary">{owedBackQuoteLine(owed, flow.memberName)}</p>;
 }
 
 function ConfirmStep({ flow, reasonId }: { flow: BookFlow; reasonId: string }) {
@@ -126,11 +186,14 @@ function ConfirmStep({ flow, reasonId }: { flow: BookFlow; reasonId: string }) {
         </Alert>
       ) : null}
       <QuoteProblem flow={flow} />
+      <ConfirmPlayers players={flow.players} />
       {flow.money ? <MoneyRows rows={flow.money} label={BOOK_SHEET.total} /> : null}
+      <HeldNote flow={flow} />
       {flow.quote.state.status === "loading" ? <span role="status" className="sr-only">{BOOK_SHEET.quoteReading}</span> : null}
-      {flow.godMode ? <GodModeNotice name={flow.godMode.name} balanceAfter={flow.godMode.balanceAfter} /> : null}
+      {flow.godMode ? <GodModeNotice name={flow.godMode.name} balanceAfter={flow.godMode.balanceAfter} owedBack={flow.godMode.owedBack} /> : null}
+      <QuoteOwedBack flow={flow} />
       {flow.short !== null ? <ShortNotice shortBy={flow.short} reasonId={reasonId} /> : null}
-      {failed ? <Alert tone="danger">{refusalSentence(failed)}</Alert> : null}
+      {failed ? <Alert tone="danger">{refusalSentence(failed, Boolean(flow.players.payload))}</Alert> : null}
     </>
   );
 }
@@ -257,6 +320,7 @@ function ResultView({ flow }: { flow: BookFlow }) {
         </Alert>
       ) : null}
       <BulkResults rows={run.rows} label={RESULTS_LABEL.book} />
+      {run.players ? <ResultPlayers outcome={run.players} face={flow.face} /> : null}
     </>
   );
 }
@@ -269,6 +333,14 @@ function isAdminRun(flow: BookFlow): boolean {
 
 function BookFooter({ flow, onClose, reasonId }: { flow: BookFlow; onClose: () => void; reasonId: string }) {
   if (flow.run) return <ResultFooter flow={flow} onClose={onClose} />;
+  if (flow.players.picking !== null) {
+    // The picker is a panel inside the Players step: its way out is Back, to the seats.
+    return (
+      <DialogFooter>
+        <Button variant="outline" onClick={flow.back}>{BOOK_PLAYERS.pickerBack}</Button>
+      </DialogFooter>
+    );
+  }
   const first = flow.stepIndex === 0;
   return (
     <DialogFooter>
