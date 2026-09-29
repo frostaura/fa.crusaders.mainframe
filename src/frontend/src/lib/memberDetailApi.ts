@@ -68,6 +68,8 @@ export type MemberDetail = {
   membership_number: string | null;
   status: MembershipStatus | null;
   account_status: string;
+  /** Why the application was turned down, when it was (F3.10). Absent from an API that predates it. */
+  rejection_reason?: string | null;
   email_verified: boolean;
   created_at: string;
   last_login_at: string | null;

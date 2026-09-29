@@ -104,7 +104,13 @@ function AccountFacts({ detail }: { detail: MemberDetail }) {
       {detail.membership_number ? <Fact term={COPY.membershipNumber}>{detail.membership_number}</Fact> : null}
       <Fact term={COPY.memberSince}>{clubDate(detail.created_at, zone)}</Fact>
       <Fact term={COPY.lastSignIn}>{detail.last_login_at ? clubInstant(detail.last_login_at, zone) : COPY.neverSignedIn}</Fact>
-      <Fact term={COPY.accountStatus}>{detail.account_status}</Fact>
+      {detail.status === "Rejected" ? (
+        <Fact term={COPY.application}>
+          {detail.rejection_reason ? COPY.turnedDownBecause(detail.rejection_reason) : COPY.turnedDown}
+        </Fact>
+      ) : (
+        <Fact term={COPY.accountStatus}>{detail.account_status}</Fact>
+      )}
       <Fact term={COPY.passkeys}>{countOf(detail.passkey_count, "passkey", "passkeys")}</Fact>
       <Fact term={COPY.fingerprints}>{countOf(detail.fingerprints.count, "finger enrolled", "fingers enrolled")}</Fact>
     </dl>

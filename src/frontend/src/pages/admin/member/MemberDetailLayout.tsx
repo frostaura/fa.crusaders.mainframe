@@ -285,9 +285,15 @@ function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: s
         <BalanceParts detail={detail} name={name} />
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={onTopUp} icon={<Plus weight="bold" aria-hidden="true" />} className="flex-1 sm:flex-none">
-          {MEMBER_COPY.topUp}
-        </Button>
+        {/* Only an active member is topped up (F3.10) — the members list offers no Top up
+            to anybody else, and a turned-down applicant was offered one here. */}
+        {canBook ? (
+          <Button onClick={onTopUp} icon={<Plus weight="bold" aria-hidden="true" />} className="flex-1 sm:flex-none">
+            {MEMBER_COPY.topUp}
+          </Button>
+        ) : (
+          <p className="max-w-xs text-sm text-text-muted">{MEMBER_COPY.noTopUp[detail.status ?? "none"] ?? MEMBER_COPY.noTopUp.none}</p>
+        )}
         {canBook ? (
           <Button asChild variant="outline" className="flex-1 sm:flex-none">
             <Link to={`/bookings?as=${encodeURIComponent(detail.user_id)}`} title={MEMBER_COPY.bookForHint(name)}>

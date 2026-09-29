@@ -4,7 +4,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ArrowCounterClockwise, CalendarBlank, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, Key, Prohibit, QrCode,
+  ArrowCounterClockwise, CalendarBlank, CheckCircle, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, Key, Prohibit, QrCode,
   UserCircle, UsersThree,
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
@@ -141,6 +141,18 @@ function StandingItems({ row, handlers }: { row: MemberRow; handlers: RowActionH
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="danger" onSelect={() => handlers.suspend(row)}>
           <Prohibit size={16} aria-hidden="true" />{COPY.suspend}
+        </DropdownMenuItem>
+      </>
+    );
+  }
+  if (row.status === "Rejected") {
+    // F3.23: a turned-down applicant can be approved after all — the member page offers it, and
+    // the list's ⋯ said nothing about it.
+    return (
+      <>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void handlers.approve(row)}>
+          <CheckCircle size={16} aria-hidden="true" />{ACTIONS_COPY.approve}
         </DropdownMenuItem>
       </>
     );

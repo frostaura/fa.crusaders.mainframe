@@ -52,7 +52,7 @@ export function MemberWallet() {
         emptyIcon={Receipt}
         emptyTitle={COPY.empty}
         emptyHint={COPY.emptyHint}
-        emptyAction={<Button onClick={openTopUp} icon={<Plus weight="bold" aria-hidden="true" />}>{MEMBER_COPY.topUp}</Button>}
+        emptyAction={detail.status !== "Active" ? undefined : <Button onClick={openTopUp} icon={<Plus weight="bold" aria-hidden="true" />}>{MEMBER_COPY.topUp}</Button>}
         skeleton={<TableSkeleton rows={5} />}
       >
         <div className="overflow-hidden rounded-xl border border-border bg-bg-surface">

@@ -33,6 +33,13 @@ export const MEMBER_COPY = {
   balance: "Balance",
   balanceOverdrawn: "Overdrawn — the next top-up pays this back first.",
   topUp: "Top up",
+  /** Why there is no Top up beside the balance (F3.10) — the members list already says the same. */
+  noTopUp: {
+    Suspended: "No top-ups until reactivated.",
+    Rejected: "Turned down — approve the application from ⋯ before topping up.",
+    PendingApproval: "Approve the application before topping up.",
+    none: "No membership, so no wallet to top up.",
+  } as Record<string, string>,
   bookFor: "Book for member",
   bookForHint: (name: string) => `Opens Bookings with ${name} already chosen as the player.`,
   moreActions: (name: string) => `More actions for ${name}`,
@@ -175,6 +182,10 @@ export const OVERVIEW_COPY = {
   neverSignedIn: "Never",
   membershipNumber: "Membership number",
   accountStatus: "Account",
+  /** F3.10: a turned-down application reads as one thing, not "Rejected" beside "Account: active". */
+  application: "Application",
+  turnedDown: "Turned down",
+  turnedDownBecause: (reason: string) => `Turned down — “${reason}”`,
   passkeys: "Passkeys",
   fingerprints: "Fingerprints",
   manageAccess: "Manage sign-in",

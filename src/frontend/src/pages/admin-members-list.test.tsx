@@ -89,6 +89,17 @@ describe("the row is the way into a member", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: ACTIONS_COPY.resetCodeTitle("Ada Lovelace") })).toBeNull());
   });
 
+  it("offers a turned-down applicant's approval from the row ⋯ (F3.23)", async () => {
+    const REJECTED = memberFixture({
+      membership_id: "m9", user_id: "u9", full_name: "Rita Rejected", email: "rita@example.com",
+      membership_number: "CR-0009", status: "Rejected",
+    });
+    const stub = render({ members: [REJECTED], extra: [{ method: "POST", path: "/api/v1/admin/members/m9/approve", body: {} }] });
+    fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more("Rita Rejected") }), POINTER);
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: ACTIONS_COPY.approve }));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path.includes("/approve"))).toBe(true));
+  });
+
   it("does not offer to book for an applicant, who cannot hold a court yet", async () => {
     render();
     fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more("Grace Hopper") }), POINTER);
