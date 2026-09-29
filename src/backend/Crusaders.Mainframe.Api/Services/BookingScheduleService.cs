@@ -201,15 +201,15 @@ public sealed class BookingScheduleService
         // Block body for the lizard reason in memory/gotchas.md — see StatusWord below.
         return new BookingSchedule
         {
-        Name = spec.Name,
-        Label = spec.Label,
-        DaysOfWeek = spec.DaysOfWeek,
-        StartMinute = spec.StartMinute,
-        EndMinute = spec.EndMinute,
-        StartDate = spec.StartDate,
-        EndDate = spec.EndDate,
-        IntervalWeeks = spec.IntervalWeeks,
-        CreatedByUserId = actorId,
+            Name = spec.Name,
+            Label = spec.Label,
+            DaysOfWeek = spec.DaysOfWeek,
+            StartMinute = spec.StartMinute,
+            EndMinute = spec.EndMinute,
+            StartDate = spec.StartDate,
+            EndDate = spec.EndDate,
+            IntervalWeeks = spec.IntervalWeeks,
+            CreatedByUserId = actorId,
         };
     }
 

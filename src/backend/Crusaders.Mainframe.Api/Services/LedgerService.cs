@@ -235,14 +235,14 @@ public sealed class LedgerService
     {
         return type switch
         {
-        LedgerEntryType.TopUp => "top_up",
-        LedgerEntryType.AdminAdjustment => "admin_adjustment",
-        LedgerEntryType.AdminTopUp => "admin_top_up",
-        LedgerEntryType.BookingCharge => "booking_charge",
-        LedgerEntryType.CancellationRefund => "cancellation_refund",
-        LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => "penalty",
-        LedgerEntryType.LightsPurchase => "lights_purchase",
-        LedgerEntryType.ShareTransfer => "share_transfer",
+            LedgerEntryType.TopUp => "top_up",
+            LedgerEntryType.AdminAdjustment => "admin_adjustment",
+            LedgerEntryType.AdminTopUp => "admin_top_up",
+            LedgerEntryType.BookingCharge => "booking_charge",
+            LedgerEntryType.CancellationRefund => "cancellation_refund",
+            LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => "penalty",
+            LedgerEntryType.LightsPurchase => "lights_purchase",
+            LedgerEntryType.ShareTransfer => "share_transfer",
             LedgerEntryType.PaymentReversal => "correction",
             _ => "unknown",
         };
@@ -357,14 +357,14 @@ public sealed class LedgerService
     {
         return new LedgerEntry
         {
-        TenantId = _tenant.TenantId,
-        UserId = posting.UserId,
-        Type = posting.Type,
-        AmountCredits = posting.AmountCredits,
-        ZarPaid = posting.ZarPaid,
-        ConversionRate = posting.ConversionRate,
-        RelatedBookingId = posting.RelatedBookingId,
-        ActorUserId = posting.ActorUserId,
+            TenantId = _tenant.TenantId,
+            UserId = posting.UserId,
+            Type = posting.Type,
+            AmountCredits = posting.AmountCredits,
+            ZarPaid = posting.ZarPaid,
+            ConversionRate = posting.ConversionRate,
+            RelatedBookingId = posting.RelatedBookingId,
+            ActorUserId = posting.ActorUserId,
             Reason = posting.Reason,
             ExternalReference = posting.ExternalReference,
         };

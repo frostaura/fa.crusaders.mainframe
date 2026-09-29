@@ -310,87 +310,90 @@ public static class BookingEndpoints
         var error = BookingRefusals.CodeOf(result);
         return result switch
         {
-        BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
-        BookingResult.NotFound => Results.NotFound(new { error }),
-        BookingResult.PastTime => Results.BadRequest(new { error }),
-        BookingResult.TooFarAhead => Results.BadRequest(new { error }),
-        BookingResult.SlotTaken => Results.Conflict(new { error }),
-        BookingResult.InsufficientBalance ib => Results.Json(
-            new { error, current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
-        // withheld_by_groups (D2): the member's own groups that do not grant peak priority, so
-        // the sentence can name the rule that stopped them. Empty when they are in no group.
-        BookingResult.PeakHoursPriorityOnly p => Results.Conflict(
-            new
-            {
-                error, peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours,
-                withheld_by_groups = p.WithheldByGroups,
-            }),
-        // The minutes cap — blueprint A.4's. The three original figures are unchanged so no
-        // existing client breaks; the three new ones are what the member's sentence needs, and
-        // resets_at is here so a browser never has to compute a club midnight (which is D2-B33
-        // waiting to happen on the other side of the wire).
-        BookingResult.PerDayCapExceeded c => Results.Conflict(
-            new
-            {
-                error,
-                cap_minutes = c.CapMinutes,
-                already_booked_minutes = c.AlreadyBookedMinutes,
-                attempted_minutes = c.AttemptedMinutes,
-                bound_by = c.BoundByGroupName is null ? "tenant" : "group",
-                group_name = c.BoundByGroupName,
-                club_day = c.ClubDay,
-                resets_at = c.ResetsAt,
-            }),
-        // GOAL item 19's cap, in SLOTS. Every figure the sentence needs, so the client composes
-        // "You have used all 4 of your slots for Tuesday. They reset at midnight." from one
-        // response. relaxation_available is the difference between "come back tomorrow" and
-        // "there is a court free at 19:00 if you want it".
-        BookingResult.PerDaySlotCapExceeded c => Results.Conflict(
-            new
-            {
-                error,
-                cap_slots = c.CapSlots,
-                booked_slots = c.BookedSlots,
-                attempted_slots = c.AttemptedSlots,
-                remaining_slots = c.RemainingSlots,
-                bound_by = c.BoundByGroupName is null ? "tenant" : "group",
-                group_name = c.BoundByGroupName,
-                club_day = c.ClubDay,
-                resets_at = c.ResetsAt,
-                relaxation_available = c.RelaxationAvailable,
-            }),
-        // GOAL item 3. The windows the member MAY book in travel with the refusal, because "not
-        // now" without "then" is a refusal a technology-averse member cannot act on.
-        BookingResult.GroupWindow w => Results.Conflict(
-            new
-            {
-                error,
-                groups = w.GroupNames,
-                day = w.Day,
-                allowed_windows = w.AllowedWindows.Select(x => new { start = x.Start, end = x.End }).ToList(),
-            }),
-        // The booking runs past the end of the club's day. Its own code, because every other
-        // refusal available here describes it wrongly — see BookingResult.CrossesMidnight.
-        BookingResult.CrossesMidnight m => Results.Conflict(
-            new
-            {
-                error,
-                starts_at = m.StartsAt,
-                ends_at = m.EndsAt,
-                minutes_past_midnight = m.MinutesPastMidnight,
-            }),
-        // The member is in two or more groups whose windows do not overlap at all on this day,
-        // so there is nothing they can book. Its own code, because the honest sentence is
-        // completely different and because an empty grid reads as "the club is shut".
-        BookingResult.NoBookableWindow n => Results.Conflict(
-            new { error, groups = n.GroupNames, day = n.Day }),
-        BookingResult.OutOfHours h => Results.Conflict(
-            new { error, opens_at = h.OpensAt, closes_at = h.ClosesAt }),
-        BookingResult.NoTimeAvailable n => Results.Conflict(
-            new { error, requested_minutes = n.RequestedMinutes, available_minutes = n.AvailableMinutes }),
-        BookingResult.InvalidDuration id => Results.BadRequest(
-            new { error, requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
-        BookingResult.DuplicateRequest => Results.Conflict(new { error }),
+            BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
+            BookingResult.NotFound => Results.NotFound(new { error }),
+            BookingResult.PastTime => Results.BadRequest(new { error }),
+            BookingResult.TooFarAhead => Results.BadRequest(new { error }),
+            BookingResult.SlotTaken => Results.Conflict(new { error }),
+            BookingResult.InsufficientBalance ib => Results.Json(
+                new { error, current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
+            // withheld_by_groups (D2): the member's own groups that do not grant peak priority, so
+            // the sentence can name the rule that stopped them. Empty when they are in no group.
+            BookingResult.PeakHoursPriorityOnly p => Results.Conflict(
+                new
+                {
+                    error,
+                    peak_start = p.PeakStart,
+                    peak_end = p.PeakEnd,
+                    regular_advance_hours = p.RegularAdvanceHours,
+                    withheld_by_groups = p.WithheldByGroups,
+                }),
+            // The minutes cap — blueprint A.4's. The three original figures are unchanged so no
+            // existing client breaks; the three new ones are what the member's sentence needs, and
+            // resets_at is here so a browser never has to compute a club midnight (which is D2-B33
+            // waiting to happen on the other side of the wire).
+            BookingResult.PerDayCapExceeded c => Results.Conflict(
+                new
+                {
+                    error,
+                    cap_minutes = c.CapMinutes,
+                    already_booked_minutes = c.AlreadyBookedMinutes,
+                    attempted_minutes = c.AttemptedMinutes,
+                    bound_by = c.BoundByGroupName is null ? "tenant" : "group",
+                    group_name = c.BoundByGroupName,
+                    club_day = c.ClubDay,
+                    resets_at = c.ResetsAt,
+                }),
+            // GOAL item 19's cap, in SLOTS. Every figure the sentence needs, so the client composes
+            // "You have used all 4 of your slots for Tuesday. They reset at midnight." from one
+            // response. relaxation_available is the difference between "come back tomorrow" and
+            // "there is a court free at 19:00 if you want it".
+            BookingResult.PerDaySlotCapExceeded c => Results.Conflict(
+                new
+                {
+                    error,
+                    cap_slots = c.CapSlots,
+                    booked_slots = c.BookedSlots,
+                    attempted_slots = c.AttemptedSlots,
+                    remaining_slots = c.RemainingSlots,
+                    bound_by = c.BoundByGroupName is null ? "tenant" : "group",
+                    group_name = c.BoundByGroupName,
+                    club_day = c.ClubDay,
+                    resets_at = c.ResetsAt,
+                    relaxation_available = c.RelaxationAvailable,
+                }),
+            // GOAL item 3. The windows the member MAY book in travel with the refusal, because "not
+            // now" without "then" is a refusal a technology-averse member cannot act on.
+            BookingResult.GroupWindow w => Results.Conflict(
+                new
+                {
+                    error,
+                    groups = w.GroupNames,
+                    day = w.Day,
+                    allowed_windows = w.AllowedWindows.Select(x => new { start = x.Start, end = x.End }).ToList(),
+                }),
+            // The booking runs past the end of the club's day. Its own code, because every other
+            // refusal available here describes it wrongly — see BookingResult.CrossesMidnight.
+            BookingResult.CrossesMidnight m => Results.Conflict(
+                new
+                {
+                    error,
+                    starts_at = m.StartsAt,
+                    ends_at = m.EndsAt,
+                    minutes_past_midnight = m.MinutesPastMidnight,
+                }),
+            // The member is in two or more groups whose windows do not overlap at all on this day,
+            // so there is nothing they can book. Its own code, because the honest sentence is
+            // completely different and because an empty grid reads as "the club is shut".
+            BookingResult.NoBookableWindow n => Results.Conflict(
+                new { error, groups = n.GroupNames, day = n.Day }),
+            BookingResult.OutOfHours h => Results.Conflict(
+                new { error, opens_at = h.OpensAt, closes_at = h.ClosesAt }),
+            BookingResult.NoTimeAvailable n => Results.Conflict(
+                new { error, requested_minutes = n.RequestedMinutes, available_minutes = n.AvailableMinutes }),
+            BookingResult.InvalidDuration id => Results.BadRequest(
+                new { error, requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
+            BookingResult.DuplicateRequest => Results.Conflict(new { error }),
             _ => Unmapped(result, ctx),
         };
     }
@@ -403,9 +406,9 @@ public static class BookingEndpoints
     {
         return result switch
         {
-        CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
-        CancellationResult.NotFound => Results.NotFound(new { error = "booking_not_found" }),
-        CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
+            CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
+            CancellationResult.NotFound => Results.NotFound(new { error = "booking_not_found" }),
+            CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
             _ => Unmapped(result, ctx),
         };
     }

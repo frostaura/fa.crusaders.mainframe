@@ -161,7 +161,7 @@ public static class DeviceErrorCodes
             // Info — worth counting, not worth waking anybody.
             MegaLinkBack or Boot => DeviceErrorSeverity.Info,
 
-                _ => DeviceErrorSeverity.Error,
+            _ => DeviceErrorSeverity.Error,
         };
     }
 
@@ -224,7 +224,7 @@ public static class DeviceErrorCodes
             QueueEventsLost => "The board lost some records before it could send them",
             ErrorLogOverflow => "This board is reporting more distinct problems than the club records",
             Unknown => "An error the club's software does not have a name for",
-                _ => "An error the club's software does not have a name for",
+            _ => "An error the club's software does not have a name for",
         };
     }
 
