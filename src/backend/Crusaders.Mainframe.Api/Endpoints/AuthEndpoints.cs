@@ -257,4 +257,5 @@ public sealed record ResetPasswordRequest(string Token, string NewPassword);
 public static class CurrentUser
 {
     public static Guid? Id(this ClaimsPrincipal? user)
-        => Guid.TryParse(user?.FindFirstValue(ClaimTypes.NameIdentifier) ?? user?.FindFirstValue("sub"), out var id) ? id : null;}
+        => Guid.TryParse(user?.FindFirstValue(ClaimTypes.NameIdentifier) ?? user?.FindFirstValue("sub"), out var id) ? id : null;
+}
