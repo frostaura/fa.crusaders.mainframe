@@ -164,7 +164,7 @@ public static class Seeder
             .Select(m => m.MembershipNumber)
             .ToListAsync();
         // Members are seeded once. Bookings are reseeded each boot (each day's slots are
-        // gated by an exact-match exists check below) so today's grid always has data.
+        // skipped where any live booking already holds them, below) so today's grid always has data.
 
         var courts = await db.Courts.OrderBy(c => c.CourtNumber).ToListAsync();
         if (courts.Count == 0) return;
@@ -255,7 +255,26 @@ public static class Seeder
             .Where(m => basePlan.Select(p => p.MembershipNumber).Contains(m.MembershipNumber))
             .ToDictionaryAsync(m => m.MembershipNumber, m => m.UserId);
 
+        // Every slot already held on the seeded window, whoever holds it. The seeder runs on
+        // every Development boot against a database that has lived: NoShowWorker has swept
+        // earlier seeded rows to NoShow and truncated them, and the developer has booked over
+        // and beside them. ck_bookings_no_overlapping_slot exempts Cancelled and nothing else,
+        // so a planned slot is skipped when ANY non-cancelled booking on its court overlaps it
+        // — an exact-start match on Booked rows (what this was) missed both cases, and one
+        // refused row failed the whole week's save. Skipped rather than moved: demo data has
+        // no claim to a slot someone actually holds. Read once, in memory, and extended with
+        // what this pass plants.
+        var windowStart = new DateTimeOffset(dates[0], TimeSpan.Zero) - sast;
+        var windowEnd = new DateTimeOffset(dates[^1].AddDays(1), TimeSpan.Zero);
+        var held = await db.Bookings.IgnoreQueryFilters()
+            .Where(b => b.TenantId == tenantId && b.Status != Domain.BookingStatus.Cancelled
+                        && b.StartsAt < windowEnd && b.EndsAt > windowStart)
+            .Select(b => new { b.CourtId, b.StartsAt, b.EndsAt })
+            .ToListAsync();
+        var occupied = held.Select(b => (b.CourtId, b.StartsAt, b.EndsAt)).ToList();
+
         var bookingsCreated = 0;
+        var skipped = 0;
         for (var di = 0; di < dates.Length; di++)
         {
             var date = dates[di];
@@ -269,11 +288,14 @@ public static class Seeder
                 var startsAtUtc = new DateTimeOffset(date.AddHours(p.Hour).AddMinutes(p.Minute), TimeSpan.Zero) - sast;
                 var endsAtUtc = startsAtUtc.AddMinutes(30);
 
-                var alreadyBooked = await db.Bookings.AnyAsync(b =>
-                    b.CourtId == court.Id && b.StartsAt == startsAtUtc && b.Status == Domain.BookingStatus.Booked);
-                if (alreadyBooked) continue;
+                if (occupied.Any(o => o.CourtId == court.Id && o.StartsAt < endsAtUtc && startsAtUtc < o.EndsAt))
+                {
+                    skipped++;
+                    continue;
+                }
 
                 if (!memberIdByNumber.TryGetValue(p.MembershipNumber, out var userId)) continue;
+                occupied.Add((court.Id, startsAtUtc, endsAtUtc));
 
                 var booking = new Domain.Booking
                 {
@@ -310,7 +332,9 @@ public static class Seeder
             }
         }
         await db.SaveChangesAsync();
-        logger.LogInformation("Seeded {N} sample bookings across {Days} day(s)", bookingsCreated, dates.Length);
+        logger.LogInformation(
+            "Seeded {N} sample bookings across {Days} day(s); {Skipped} planned slot(s) already held",
+            bookingsCreated, dates.Length, skipped);
     }
 
     /// <summary>
