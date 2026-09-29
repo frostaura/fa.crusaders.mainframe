@@ -98,6 +98,7 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     private static readonly Dictionary<string, int> DefaultRateLimits = new()
     {
         ["AuthPerMinute"] = 100_000,
+        ["AuthPerIpPerMinute"] = 100_000,
         ["DevicePerMinute"] = 100_000,
         ["GlobalPerMinute"] = 100_000,
         ["FirmwarePerMinute"] = 100_000,
@@ -110,7 +111,7 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     [
         "Database__AutoMigrateOnStartup", "Jwt__Secret", "MemberCodes__MasterKey",
         "ConnectionStrings__DefaultConnection", "Gateway__TrustedProxies", "Gateway__ForwardLimit",
-        "RateLimits__AuthPerMinute", "RateLimits__DevicePerMinute", "RateLimits__GlobalPerMinute",
+        "RateLimits__AuthPerMinute", "RateLimits__AuthPerIpPerMinute", "RateLimits__DevicePerMinute", "RateLimits__GlobalPerMinute",
         "RateLimits__FirmwarePerMinute",
     ];
 

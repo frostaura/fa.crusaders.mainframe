@@ -261,6 +261,31 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0,
         }));
 
+    // B14: sign-in, refresh, sign-out and reset. The tight per-account limit is SignInAttempts,
+    // in the handler (the limiter cannot read a body); this bucket is the per-address CEILING,
+    // higher because a club's members share one address. A cookie-only refresh is bucketed by
+    // its cookie, not the club's address.
+    static string SignInKey(HttpContext ctx)
+    {
+        if (ctx.User.Identity?.IsAuthenticated == true && ctx.User.Id() is { } id) return $"user:{id:N}";
+        if (RefreshSessions.CookieOf(ctx.Request) is { } cookie) return "rt:" + TokenHashing.Hash(cookie)[..24];
+        return $"ip:{ClientKey(ctx)}";
+    }
+
+    options.AddPolicy(RateLimitPolicies.SignIn, ctx =>
+    {
+        var key = SignInKey(ctx);
+        var limit = key.StartsWith("ip:", StringComparison.Ordinal)
+            ? builder.Configuration.GetValue("RateLimits:AuthPerIpPerMinute", 60)
+            : builder.Configuration.GetValue("RateLimits:AuthPerMinute", 10);
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = limit,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        });
+    });
+
     static string DeviceKey(HttpContext ctx)
     {
         // By club when the device scheme recognised the key, else by client address —
@@ -359,6 +384,7 @@ builder.Services.AddSingleton(InherentAdmins.From(builder.Configuration));
 builder.Services.AddScoped<InherentAdminService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<RefreshSessions>();
+builder.Services.AddSingleton<SignInAttempts>();
 builder.Services.AddScoped<MemberApprovalService>();
 // The club's undeletable admin change record. Every admin mutation in every lane writes
 // through this one service; see AdminChangeRecorder for why staging and recording differ.

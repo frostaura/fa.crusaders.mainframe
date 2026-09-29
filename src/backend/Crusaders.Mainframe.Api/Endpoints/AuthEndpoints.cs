@@ -51,6 +51,7 @@ public static class AuthEndpoints
         g.MapPost("/login", async (
             LoginRequest req, HttpContext ctx, AuthService auth, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
+            if (AccountLimited(ctx, "login", req.Email) is { } limited) return limited;
             var result = await auth.LoginAsync(req.Email, req.Password, ct);
             return result switch
             {
@@ -85,21 +86,22 @@ public static class AuthEndpoints
                     statusCode: 403),
                 _ => Results.Problem("Unexpected"),
             };
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
-        g.MapPost("/forgot-password", async (ForgotPasswordRequest req, AuthService auth, CancellationToken ct) =>
+        g.MapPost("/forgot-password", async (ForgotPasswordRequest req, HttpContext ctx, AuthService auth, CancellationToken ct) =>
         {
+            if (AccountLimited(ctx, "reset", req.Email) is { } limited) return limited;
             await auth.RequestPasswordResetAsync(req.Email, ct);
             // Always return ok — don't leak whether the email exists.
             return Results.Ok(new { ok = true });
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
         g.MapPost("/reset-password", async (ResetPasswordRequest req, AuthService auth, CancellationToken ct) =>
         {
             if (req.NewPassword.Length < 8) return Results.BadRequest(new { error = "password_too_short" });
             var ok = await auth.ResetPasswordAsync(req.Token, req.NewPassword, ct);
             return ok ? Results.Ok(new { reset = true }) : Results.BadRequest(new { error = "invalid_or_expired" });
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
         g.MapPost("/magic-link/{token}", async (string token, HttpContext ctx, AuthService auth, CancellationToken ct) =>
         {
@@ -109,7 +111,7 @@ public static class AuthEndpoints
                 LoginResult.Ok ok => await SessionCookies.SignedInAsync(ctx, ok, ct),
                 _ => Results.BadRequest(new { error = "invalid_or_expired" }),
             };
-        }).AllowAnonymous();
+        }).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
         // Refresh the access token (B1). Either a still-valid bearer (as before) or — with no
         // usable bearer — the httpOnly refresh cookie alone, which is what keeps a phone left idle
@@ -120,7 +122,7 @@ public static class AuthEndpoints
         // ends a session on 401 and merely reports a 403, so a suspended member's open tab would
         // keep running on the token it already holds until that token expired on its own. The
         // sentence they get is the sign-in screen's, where the reason is named properly.
-        g.MapPost("/refresh", SessionCookies.RefreshAsync).AllowAnonymous();
+        g.MapPost("/refresh", SessionCookies.RefreshAsync).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
         // Sign out, on the server as well as in the browser.
         //
@@ -136,7 +138,7 @@ public static class AuthEndpoints
         // Anonymous since B1: a member whose access token has already expired still has a refresh
         // cookie, and "sign out" on a shared phone must end THAT. The presented cookie's family is
         // revoked and the cookie cleared; a bearer, when there is one, is revoked as before.
-        g.MapPost("/logout", SignOutAsync).AllowAnonymous();
+        g.MapPost("/logout", SignOutAsync).AllowAnonymous().RequireRateLimiting(RateLimitPolicies.SignIn);
 
         // Dev-only shortcut: force-resets the seeded admin's password and returns a session token.
         // Keeps the "Sign in as seeded admin" UI button reliable even after password drift during tests.
@@ -178,6 +180,17 @@ public static class AuthEndpoints
 
         await auth.RevokeAccessTokenAsync(userId.Value, jti, expiresAt, ct);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// The per-account sign-in limit (B14): null to go ahead, else the 429. The per-address
+    /// ceiling is the <see cref="RateLimitPolicies.SignIn"/> policy on the route.
+    /// </summary>
+    private static IResult? AccountLimited(HttpContext ctx, string purpose, string? email)
+    {
+        var tenant = ctx.RequestServices.GetRequiredService<Multitenancy.ITenantContext>();
+        var attempts = ctx.RequestServices.GetRequiredService<SignInAttempts>();
+        return attempts.TryAcquire(purpose, tenant.IsResolved ? tenant.TenantId : Guid.Empty, email) ? null : SignInAttempts.Refused(ctx);
     }
 
     /// <summary>
