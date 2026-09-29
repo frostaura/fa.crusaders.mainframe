@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-gotchas-perf
-description: "Backend performance at volume: how the P10 pass measured it, the partial index that could not answer an any-status seat probe, and Postgres JIT adding ~240 ms to a mis-estimated OLTP plan."
+description: "Backend performance at volume: how P10 measured it, the partial index that could not answer an any-status seat probe, and JIT on a mis-estimated plan — fixed in code in P12; admin members list is next."
 type: gotcha
 last_verified: 2026-09-29
 ---
@@ -28,12 +28,22 @@ sequential requests after 5 warm-ups, as the seeded admin (the heaviest member, 
   per booking: 1.6M buffer hits, O(sessions²). `IX_booking_participants_TenantId_BookingId_UserId_any`
   (migration `AddParticipantBookingUserIndex`) took it to 17.6k. **Check EXPLAIN (ANALYZE,
   BUFFERS) on a heavy member, not a fixture member** — at test volume both plans are instant.
-- **Postgres JIT is on in `postgres:16-alpine`, and it is the rest of `/me/play`.** The sessions
-  query's `OR EXISTS` shape is estimated at ~11k rows for an actual 1.9k, costed at 693k —
-  above `jit_above_cost` and `jit_optimize_above_cost` — so every call compiles: 245 ms with JIT,
-  17 ms without. Owed, not done: `-c jit=off` on the compose Postgres (a deployment change) or a
-  rewrite of `AttendanceQuery.SessionsAsync` as a UNION of own and seated bookings. JIT output
-  does not appear under `EXPLAIN (… COSTS OFF)`; compare with `SET jit = off`.
+- **Postgres JIT is on in `postgres:16-alpine`; a mis-estimated OLTP plan pays it per call.**
+  `AttendanceQuery.SessionsAsync` was one statement (`booker OR EXISTS seat`, plus correlated
+  subqueries): a seq scan estimated at ~11k rows for 1.8k, costed ~615k — past `jit_above_cost`
+  (100k) and `jit_optimize_above_cost` (500k) — so every `/me/play` and admin `/members/{id}/play`
+  compiled 61 functions: ~240 ms idle, ~1 s at load 20, for a ~30 ms plan. **Fixed in code in P12,
+  not in compose** (the stack's Postgres settings are Dean's): the member's seats by
+  `(TenantId, UserId, Status)`, then a UNION ALL of own bookings and a semi-join onto seated
+  ones, joined in memory. Estimates within ~5%, total cost ~3k, no JIT. A/B on the same seed at
+  load ~8: p50 380 → 42 ms, p95 481 → 48 ms (both endpoints); `AttendanceEquivalenceTests` pins
+  it to the old statement. **Diagnose with `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` and read its
+  `JIT` key** — JIT output does not appear under `COSTS OFF`. **The cure is a plan the planner can
+  estimate** (no OR across a join, no per-row subplan on a big scan), never a per-query `SET jit`.
+- **Next over the line: `GET /admin/members/`** — a per-member correlated ledger `sum`, costed
+  ~89k at 506 members and 50k ledger rows; estimates are right, it is simply linear in members
+  × ledger, and the ledger only grows. A grouped `sum … GROUP BY "UserId"` join would take it to
+  a few thousand. Not JIT-ing yet (P12 scan of the P11/P12 reads found nothing else above ~2k).
 - **EF logs "Executed DbCommand (n ms)" when the reader opens, not when it drains.** A plan whose
   correlated subplans run per streamed row shows a short command and a long silent gap before the
   next one. Attribute by timestamp (`Logging__Console__FormatterOptions__TimestampFormat`) with
