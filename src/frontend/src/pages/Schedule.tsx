@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ActionBar, ActionBarItem } from "@/components/ui/action-bar";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +32,7 @@ import { describePlaces, type Place } from "../lib/bookingSpan";
 import { clubClock } from "../lib/clubClock";
 import { useGridExplainer, type ForMember } from "../lib/gridExplain";
 import {
-  freeCount, gridBookingOf, parseSelectionKey, pendingBookingId, toGridBookings, toSelectedSlots, useGridSelection, type Selection,
+  freeCount, gridBookingOf, parseSelectionKey, pendingBookingId, selectionKey, toGridBookings, toSelectedSlots, useGridSelection, type Selection,
 } from "../lib/gridSelection";
 import { useScheduleDay } from "../lib/scheduleDay";
 import { useHoldLift } from "../lib/scheduleEnd";
@@ -92,6 +92,8 @@ export default function BookingsPage() {
   useClearOnDayChange(date, selection, explainer);
 
   const sheets = useSheets();
+  const { sending, setSending } = sheets;
+  const holding = useMemo(() => holdingKeys(sending, day?.sliceMinutes ?? 15), [sending, day?.sliceMinutes]);
   const liftHold = useHoldLift({ day, setDay, reconcile, toast });
   // Keyed on the day, so moving to another day folds the past wall away again by itself.
   const [earlierShownFor, setEarlierShownFor] = useState<string | null>(null);
@@ -101,18 +103,23 @@ export default function BookingsPage() {
   const [changes, setChanges] = useState(0);
 
   const onBooked = useCallback((outcome: BookedOutcome) => {
-    setChanges((n) => n + 1);
+    // Perf: the sheet's confirmation is drawn from the booking's own answer, and it goes up
+    // FIRST. Re-drawing ~250 cells and the games lists rode in the same commit and held the
+    // "Court booked" back ~70–130 ms on a phone; as a transition they follow a frame later.
+    startTransition(() => setChanges((n) => n + 1));
     if (selection.api.active) selection.api.leave();
     // Read off a fresh schedule after a lost reply (F1.1): the grid already has it, and nobody
     // stated the balance — ask for it.
     if (outcome.proven) {
+      startTransition(() => setSending(null));
       if (!outcome.forMemberId && !outcome.hold) void refreshBalance({ expectSelf: true });
       return;
     }
-    setDay((d) => withBooked(d, outcome));
+    // "Holding…" becomes "Confirming…" in ONE commit, so the cell never flashes free between.
+    startTransition(() => { setSending(null); setDay((d) => withBooked(d, outcome)); });
     if (outcome.ownBalanceAfter !== null) applyBalance(outcome.ownBalanceAfter);
     void reconcile();
-  }, [setDay, applyBalance, refreshBalance, selection.api, reconcile]);
+  }, [setDay, applyBalance, refreshBalance, selection.api, reconcile, setSending]);
 
   const onCancelled = useCallback((outcome: CancelledOutcome) => {
     setChanges((n) => n + 1);
@@ -178,7 +185,7 @@ export default function BookingsPage() {
               ctx={ctx} slotsByCourt={schedule.slotsByCourt} timeSlices={schedule.timeSlices}
               pastThresholdMs={schedule.pastThresholdMs} peakNowMs={schedule.peakNowMs}
               collapsedRows={collapsed.rows} earlierLabel={collapsed.label} onExpandEarlier={() => setEarlierShownFor(date)}
-              showNow={date === today} underSheet={sheets.underSheet}
+              showNow={date === today} underSheet={sheets.underSheet} holding={holding}
             />
           ) : null}
         </StateBlock>
@@ -190,6 +197,7 @@ export default function BookingsPage() {
         isAdmin={isAdmin} actorUserId={actorUserId} balanceCredits={balance}
         bookAsUserId={bookAsUserId}
         onBooked={onBooked} onStale={() => void reconcile()} reread={reconcile} onCloseAutoFocus={sheets.returnFocus}
+        onSending={setSending}
         cancelTerms={day ? { penaltyPct: day.penaltyPct, windowMinutes: day.penaltyWindowMinutes } : null}
       />
       <CancelSheet
@@ -347,14 +355,21 @@ function useSheets() {
   const [cancelOpen, setCancelOpen] = useState(false);
   // From a sheet's opening until its close has finished (its focus return) — see `BoardProps.underSheet`.
   const [underSheet, setUnderSheet] = useState(false);
+  // The slots a booking is being sent for — "Holding…" on the grid until the club answers.
+  const [sending, setSending] = useState<SelectedSlot[] | null>(null);
   const opener = useRef<Element | null>(null);
   const openBook = useCallback((slots: SelectedSlot[]) => { opener.current = document.activeElement; setUnderSheet(true); setBookSlots(slots); setBookOpen(true); }, []);
   const openCancel = useCallback((bookings: GridBooking[]) => { opener.current = document.activeElement; setUnderSheet(true); setCancelBookings(bookings); setCancelOpen(true); }, []);
   // F1.19 — the system Back closes an open sheet instead of leaving Bookings.
   useSheetHistory(bookOpen, () => setBookOpen(false), "book");
   useSheetHistory(cancelOpen, () => setCancelOpen(false), "cancel");
-  const returnFocus = useCallback((event: Event) => { setUnderSheet(false); backToGrid(event, opener.current); }, []);
-  return { bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel, returnFocus, underSheet };
+  // A sheet closed while its booking was on its way leaves no answer to clear the mark with: the
+  // cell goes back to what the day says, as it did before the mark existed.
+  const returnFocus = useCallback((event: Event) => { setUnderSheet(false); setSending(null); backToGrid(event, opener.current); }, []);
+  return {
+    bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel, returnFocus,
+    underSheet, sending, setSending,
+  };
 }
 
 /**
@@ -421,6 +436,18 @@ function oneSlot(court: ScheduleCourt, startsAtUtc: string): SelectedSlot {
  * replaces every one of them within a round trip — and a hold is drawn as a hold. Until then the
  * grid draws them as pending and will not act on them (`isPendingBooking`).
  */
+/** The grid cells a sending booking covers — every slice of every slot — as selection keys. */
+function holdingKeys(sending: SelectedSlot[] | null, sliceMinutes: number): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const slot of sending ?? []) {
+    const start = Date.parse(slot.startsAt);
+    for (let i = 0; i < Math.max(1, slot.sliceCount); i++) {
+      keys.add(selectionKey(slot.courtId, new Date(start + i * sliceMinutes * 60_000).toISOString()));
+    }
+  }
+  return keys;
+}
+
 function withBooked(day: ScheduleDay | null, outcome: BookedOutcome): ScheduleDay | null {
   if (!day) return day;
   const sliceMs = day.sliceMinutes * 60_000;

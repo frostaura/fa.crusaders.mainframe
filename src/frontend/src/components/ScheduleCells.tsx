@@ -10,7 +10,7 @@ import { cn, formatCredits } from "../lib/utils";
 import { cellVerdict, type CellFacts, type GridReason, type ViewerRules } from "../lib/gridRules";
 import { closedCellLabel, holdCellLabel, holdLiftLabel, pastCellLabel, quotaCellLabel, restrictionLabel, unavailableWhy } from "../lib/gridCopy";
 import {
-  CELL_TEXT, PARTNER_CELL_WORD, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
+  CELL_TEXT, HOLDING_CELL, PARTNER_CELL_WORD, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
   mineCellLabel, minePastCellLabel, minePastOpenLabel, otherCellAdminLabel, partnerCellLabel,
 } from "../lib/bookingsCopy";
 import { isPartnerSlot } from "../lib/bookingsApi";
@@ -86,6 +86,8 @@ export type SlotCellProps = {
   isHead: boolean;
   /** Rows from this one to the end of the grid, this one included — a block never draws past it. */
   rowsLeft: number;
+  /** A booking is being sent for this free cell and the club has not answered (`HOLDING_CELL`). */
+  holding?: boolean;
 };
 
 /** The surface every cell draws, whatever its state. `border-transparent` survives forced colours. */
@@ -225,7 +227,7 @@ function CellCheck({ checked, hoverOnly }: { checked: boolean; hoverOnly: boolea
  */
 export const SlotCell = memo(SlotCellView, sameCellProps);
 
-const CELL_IDENTITY_KEYS = ["ctx", "court", "slot", "where", "startsAtUtc", "line", "roving", "isHead", "rowsLeft"] as const;
+const CELL_IDENTITY_KEYS = ["ctx", "court", "slot", "where", "startsAtUtc", "line", "roving", "isHead", "rowsLeft", "holding"] as const;
 
 function sameCellProps(a: SlotCellProps, b: SlotCellProps): boolean {
   return CELL_IDENTITY_KEYS.every((key) => a[key] === b[key])
@@ -328,6 +330,7 @@ function EmptyCell(props: SlotCellProps) {
 
 function AvailableCell(props: SlotCellProps) {
   const { ctx, court, where, startsAtUtc, at } = props;
+  if (props.holding) return <HoldingCell {...props} />;
   const key = selectionKey(court.id, startsAtUtc);
   const pick = choosable(ctx, key, at, () => ctx.onBook(court, startsAtUtc));
   return (
@@ -345,6 +348,32 @@ function AvailableCell(props: SlotCellProps) {
           <span className="hidden font-medium md:inline">{formatCredits(court.slicePriceCredits)}</span>
         </button>
       </Interactable>
+    </Cell>
+  );
+}
+
+/**
+ * A free cell whose booking is on its way (perf lane, 2026-09-30): Book was pressed and the club
+ * has not answered. Tentative, and says so — it claims no booking and no money, answers nothing
+ * (`aria-disabled`, `aria-busy`, so no watermark), and a refusal puts the free cell straight back;
+ * a booking that lands turns it into the confirming cell in the same commit.
+ */
+function HoldingCell(props: SlotCellProps) {
+  const { ctx, where } = props;
+  return (
+    <Cell label={where} selfFocus={false} at={props.at} line={props.line} roving={props.roving} selecting={ctx.selection.active}>
+      <button
+        type="button"
+        tabIndex={props.roving ? 0 : -1}
+        aria-disabled="true"
+        aria-busy="true"
+        aria-label={HOLDING_CELL.label(where)}
+        data-holding=""
+        className={cn(SURFACE, TONE.available, "cursor-progress hover:border-transparent")}
+      >
+        <Spinner />
+        <span className="min-w-0 truncate">{HOLDING_CELL.word}</span>
+      </button>
     </Cell>
   );
 }

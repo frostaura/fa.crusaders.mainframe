@@ -61,6 +61,12 @@ export type BookFlowInput = {
   reread?: Reread;
   /** The club's late-cancellation terms, from the day — said on Confirm before anything is charged (F1.10). */
   cancelTerms?: { penaltyPct: number; windowMinutes: number } | null;
+  /**
+   * Perf lane (2026-09-30): the slots a run is sending, the moment Book is pressed, so the grid
+   * can mark them "Holding…" while the club answers. Called with null when a run FAILS; a run that
+   * lands reports through `onBooked`, and the page clears the mark there (with the cells it paints).
+   */
+  onSending?: (slots: SelectedSlot[] | null) => void;
 };
 
 export type Primary =
@@ -75,6 +81,27 @@ export type Primary =
 
 /** A double tap on Continue must not land its second half on the Book button that replaces it. */
 const STEP_SETTLE_MS = 300;
+
+/**
+ * The step-change guard, and whether it is up (perf report Frontend 1). A press inside the window
+ * is ignored — that is the double tap's second half — but it used to be ignored SILENTLY on a Book
+ * button that looked ready: a quick first tap simply did nothing. While the guard is up the button
+ * now says so (`settling`: shown unavailable, then ready), so a dropped press is never invisible.
+ */
+function useStepSettle() {
+  const settledAt = useRef(0);
+  const [settling, setSettling] = useState(false);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current); }, []);
+  const arm = () => {
+    settledAt.current = Date.now();
+    setSettling(true);
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { timer.current = null; setSettling(false); }, STEP_SETTLE_MS);
+  };
+  const tooSoon = () => Date.now() - settledAt.current < STEP_SETTLE_MS;
+  return { settling, arm, tooSoon };
+}
 
 /* ─────────────────────────────── members (admin) ─────────────────────────────── */
 
@@ -193,7 +220,7 @@ export function useBookFlow(input: BookFlowInput) {
   const [key, setKey] = useState(() => newIdempotencyKey(isAdmin ? "ab" : "mb"));
   const [showProblem, setShowProblem] = useState(false);
   const [run, setRun] = useState<BookRun | null>(null);
-  const settledAt = useRef(0);
+  const settle = useStepSettle();
   const members = useSheetMembers(isAdmin, input.members, actorUserId);
 
   const onEdit = () => {
@@ -227,6 +254,7 @@ export function useBookFlow(input: BookFlowInput) {
     // R3 I-4: offline, nothing is sent — and the sheet says so, rather than "can't tell".
     async (allowNegativeBalance: boolean) => {
       refuseWhenOffline();
+      input.onSending?.(sendable);
       return placeBooking({
         slots: sendable, who, isAdmin, actorUserId, idempotencyKey: key, allowNegativeBalance, face,
         players: isAdmin ? null : players.payload,
@@ -246,6 +274,7 @@ export function useBookFlow(input: BookFlowInput) {
       },
       // A re-read already happened on the way here when there was one to make.
       failure: (error) => {
+        input.onSending?.(null);
         const reread = Boolean(input.reread) && worthRereading(error);
         if (!reread && provesStaleGrid(error)) input.onStale?.();
       },
@@ -261,7 +290,7 @@ export function useBookFlow(input: BookFlowInput) {
   };
 
   const moveTo = (id: StepId) => {
-    settledAt.current = Date.now();
+    settle.arm();
     action.reset();
     setStepId(id);
   };
@@ -282,7 +311,7 @@ export function useBookFlow(input: BookFlowInput) {
   };
 
   const submit = (allowNegativeBalance: boolean) => {
-    if (Date.now() - settledAt.current < STEP_SETTLE_MS) return;
+    if (settle.tooSoon()) return;
     void action.run(allowNegativeBalance);
   };
 
@@ -328,6 +357,8 @@ export function useBookFlow(input: BookFlowInput) {
     godMode: ready?.overdraws ? { name: memberName, balanceAfter: ready.after, owedBack: ready.owedBack } : null,
     action, run,
     next, back, submit, face, timezone,
+    /** The step-change guard is up: Book is shown unavailable for its few hundred ms. */
+    settling: settle.settling,
     held: memberHeld,
     /**
      * What of the payer's balance cannot be spent — the member's held + owed back, or the

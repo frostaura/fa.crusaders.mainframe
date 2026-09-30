@@ -411,6 +411,15 @@ function PrimaryButton({ flow, reasonId }: { flow: BookFlow; reasonId: string })
   if (primary.kind === "reading") {
     return <Button pending data-reading="">{primary.label}</Button>;
   }
+  if (flow.settling) {
+    // Just arrived on Confirm: a press now is a double tap's second half and is ignored — so the
+    // button says it is not ready rather than looking ready and doing nothing (perf report 1).
+    return (
+      <Button aria-disabled="true" data-settling="" className="cursor-default opacity-60 hover:bg-primary">
+        {primary.label}
+      </Button>
+    );
+  }
   return (
     <Button pending={flow.action.pending} onClick={() => flow.submit(primary.allowNegativeBalance)}>
       {primary.label}

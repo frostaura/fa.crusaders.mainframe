@@ -5,6 +5,7 @@ import { CaretDown } from "@/components/ui/icons";
 import type { ScheduleCourt, ScheduleSlot } from "../../lib/api";
 import { cn } from "../../lib/utils";
 import { isSlotHead, peakRestricted, slotAt, type TimeSlice } from "../../lib/scheduleGrid";
+import { selectionKey } from "../../lib/gridSelection";
 import { BOOKINGS_COPY, CELL_TEXT, courtChipLabel, slicePriceLine } from "../../lib/bookingsCopy";
 import { useGridInteractions } from "../../lib/useGridInteractions";
 import { useTicker } from "../../lib/useTicker";
@@ -48,6 +49,8 @@ export type BoardProps = {
    * the whole viewport until the sheet has gone.
    */
   underSheet?: boolean;
+  /** Free cells a booking is being sent for (`selectionKey`s) — drawn "Holding…" until the club answers. */
+  holding?: ReadonlySet<string>;
 };
 
 export const GRID_HEADING_ID = "bookings-grid-heading";
@@ -111,6 +114,7 @@ export function BookingBoard(props: BoardProps) {
               ctx={ctx} slotsByCourt={props.slotsByCourt} timeSlices={timeSlices}
               pastThresholdMs={pastThresholdMs} peakNowMs={props.peakNowMs} collapsedRows={collapsedRows}
               stopRow={interactions.stop.row} stopCol={interactions.stop.col} lineOf={lineOf}
+              holding={props.holding ?? NOTHING_HOLDING}
             />
             {props.showNow ? <NowLine timeSlices={timeSlices} fromRow={collapsedRows} lineOf={lineOf} sliceMinutes={day.sliceMinutes} /> : null}
           </div>
@@ -216,8 +220,10 @@ function EarlierRow({ label, onExpand }: { label: string; onExpand: () => void }
 }
 
 type RowsProps = Pick<BoardProps, "ctx" | "slotsByCourt" | "timeSlices" | "pastThresholdMs" | "peakNowMs" | "collapsedRows"> & {
-  stopRow: number; stopCol: number; lineOf: (row: number) => number;
+  stopRow: number; stopCol: number; lineOf: (row: number) => number; holding: ReadonlySet<string>;
 };
+
+const NOTHING_HOLDING: ReadonlySet<string> = new Set();
 
 /**
  * The day's rows. Memoised against the board's own churn — the roving stop moves one cell, a
@@ -225,7 +231,7 @@ type RowsProps = Pick<BoardProps, "ctx" | "slotsByCourt" | "timeSlices" | "pastT
  * repaints two hundred cells.
  */
 const GridRows = memo(function GridRows(props: RowsProps) {
-  const { ctx, slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, collapsedRows, stopRow, stopCol, lineOf } = props;
+  const { ctx, slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, collapsedRows, stopRow, stopCol, lineOf, holding } = props;
   const { day } = ctx;
   return (
     <>
@@ -255,6 +261,7 @@ const GridRows = memo(function GridRows(props: RowsProps) {
                   roving={stopRow === rowIndex && stopCol === colIndex}
                   isHead={slot ? isSlotHead(slot, cellStartMs, day.sliceMinutes, rowIndex === collapsedRows) : false}
                   rowsLeft={timeSlices.length - rowIndex}
+                  holding={!slot && holding.has(selectionKey(c.id, t.utc))}
                   facts={{
                     minuteOfDay: t.minuteOfDay, sliceMinutes: day.sliceMinutes, isPast, outOfHours: t.outOfHours,
                     peakRestricted: peakRestricted(day, t.minuteOfDay, cellStartMs, peakNowMs),

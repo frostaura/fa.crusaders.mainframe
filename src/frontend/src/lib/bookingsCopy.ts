@@ -155,6 +155,16 @@ export function adminWalletNote(balanceCredits: number): string {
  * cannot be opened, cancelled or chosen until then — a cancel for a temporary id is a cancel the
  * server has never heard of.
  */
+/**
+ * Perf lane (2026-09-30) — the cell a booking is being SENT for, while the club has not answered.
+ * Tentative on purpose: it claims nothing about money or the court; the sheet over it says what
+ * the club answered, and a refusal puts the cell straight back.
+ */
+export const HOLDING_CELL = {
+  word: "Holding…",
+  label: (where: string) => `${where} — booking it now; the club has not answered yet.`,
+} as const;
+
 export const PENDING_CELL = {
   word: "Confirming…",
   label: (where: string) => `${where} — just booked, still confirming with the club. It can be changed in a moment.`,

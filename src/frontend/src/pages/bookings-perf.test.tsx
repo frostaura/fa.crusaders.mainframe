@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
-import { openBookings, resetSheets, sheets } from "../test/bookingsKit";
+import { COURT_B, openBookings, resetSheets, sast, sheets } from "../test/bookingsKit";
+import { HOLDING_CELL, PENDING_CELL } from "../lib/bookingsCopy";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -57,5 +58,42 @@ describe("the grid under an open sheet", () => {
     // The close has finished — its focus return — and the grid inherits again.
     await act(async () => { sheets.book?.onCloseAutoFocus?.(new Event("focusout", { cancelable: true })); });
     await waitFor(() => expect(grid.style.pointerEvents).toBe(""));
+  });
+});
+
+describe("a booking on its way", () => {
+  const SLOT = { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceCredits: 50 };
+  const holdingCell = () => screen.queryByRole("button", { name: HOLDING_CELL.label("Court 2 at 16:15") });
+
+  it("holds the cell while the club answers, then draws it confirming in one step", async () => {
+    openBookings();
+    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15/ }));
+    await screen.findByRole("dialog", { name: "Book sheet" });
+    await act(async () => { sheets.book?.onSending?.([SLOT]); });
+    const held = holdingCell()!;
+    expect(held).toHaveAttribute("aria-busy", "true");
+    expect(held).toHaveAttribute("aria-disabled", "true");
+    expect(held).toHaveTextContent(HOLDING_CELL.word);
+    // Tentative: no watermark, no price, nothing that says booked or charged.
+    expect(held.querySelector(".wm-glyph")).toBeNull();
+
+    // The confirming re-read of the day never answers here, so what is drawn is the page's own.
+    const answered = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      (String(input).startsWith("/api/v1/schedule") ? new Promise(() => {}) : answered(input, init)));
+    await act(async () => { sheets.book?.onBooked?.({ booked: [SLOT], ownBalanceAfter: 850, forMemberId: null, hold: false }); });
+    await waitFor(() => expect(holdingCell()).toBeNull());
+    expect(screen.getByRole("button", { name: PENDING_CELL.label("Court 2 at 16:15") })).toBeInTheDocument();
+  });
+
+  it("puts the free cell straight back when the booking fails", async () => {
+    openBookings();
+    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15/ }));
+    await screen.findByRole("dialog", { name: "Book sheet" });
+    await act(async () => { sheets.book?.onSending?.([SLOT]); });
+    expect(holdingCell()).not.toBeNull();
+    await act(async () => { sheets.book?.onSending?.(null); });
+    expect(holdingCell()).toBeNull();
+    expect(screen.getByRole("button", { name: /^Book Court 2 at 16:15/ })).toBeInTheDocument();
   });
 });
