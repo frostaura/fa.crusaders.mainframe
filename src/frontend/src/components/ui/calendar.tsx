@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * </p>
  *
  * <p>
- * Day buttons are 44px (`size-11`, seven across fits 360px), carry `data-slot="calendar-day"` so
+ * Day buttons are squares that fill their column up to 56px (R4 X4-3), carry `data-slot="calendar-day"` so
  * the lift rule in `index.css` exempts them (a day is chosen, not pressed), and mark today with an
  * accent edge and the selection with the primary fill — never colour alone: today is also bold.
  * </p>
@@ -31,27 +31,35 @@ const NAV_BUTTON = cn(
   "aria-disabled:pointer-events-none aria-disabled:opacity-40 motion-reduce:transition-none",
 );
 
+/*
+ * R4 X4-3 — the month is a fluid seven-column grid, not seven fixed 44px cells: at 320px the
+ * sheet had 288px for 308px of days, so Sunday and "next month" sat off-screen and the dialog
+ * scrolled sideways; at 390px with 200% text a rem-sized cell was 88px and the month 616px wide.
+ * Each day is a square that takes its column's width, up to 56px (a 44px target wherever there
+ * is room for one). The popover gives the calendar its width (`date-picker`), the sheet its own.
+ */
 const CLASS_NAMES: CalendarProps["classNames"] = {
-  root: "w-fit",
+  root: "w-full",
   months: "relative flex flex-col gap-4",
   month: "flex flex-col gap-2",
   nav: "absolute inset-x-0 top-0 flex items-center justify-between",
   button_previous: NAV_BUTTON,
   button_next: NAV_BUTTON,
-  month_caption: "flex h-touch items-center justify-center px-12",
-  caption_label: "text-sm font-semibold text-text-primary",
-  month_grid: "border-collapse",
-  weekdays: "flex",
-  weekday: "w-11 pb-1 text-center text-xs font-medium text-text-muted",
-  week: "flex",
-  day: "p-0 text-center",
+  month_caption: "flex min-h-touch items-center justify-center px-12 text-center",
+  caption_label: "text-sm font-semibold leading-tight text-text-primary",
+  month_grid: "grid w-full",
+  weekdays: "grid grid-cols-7",
+  weekday: "pb-1 text-center text-xs font-medium text-text-muted",
+  weeks: "grid",
+  week: "grid grid-cols-7",
+  day: "flex justify-center p-0 text-center",
   day_button: "",
   outside: "text-text-muted",
   hidden: "invisible",
 };
 
 const DAY_BUTTON = cn(
-  "no-lift inline-flex size-11 items-center justify-center rounded-lg border border-transparent text-sm tabular-nums",
+  "no-lift inline-flex aspect-square w-full max-w-14 items-center justify-center rounded-lg border border-transparent text-sm tabular-nums",
   "text-text-primary transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none",
   "data-[today=true]:border-accent-strong data-[today=true]:font-bold",
   "data-[outside=true]:text-text-muted",

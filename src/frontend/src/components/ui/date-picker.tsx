@@ -96,7 +96,7 @@ function DatePicker(props: DatePickerProps) {
   // Lazy (see date-picker-calendar.tsx); the fallback holds the calendar's footprint so the
   // popover or sheet does not jump when it arrives.
   const calendar = (
-    <React.Suspense fallback={<Skeleton aria-hidden="true" className="mx-auto h-72 w-64" />}>
+    <React.Suspense fallback={<Skeleton aria-hidden="true" className="mx-auto h-72 w-full max-w-xs" />}>
       <DateCalendar value={value} min={min} max={max} zone={zone} onPick={pick} />
     </React.Suspense>
   );
@@ -104,7 +104,7 @@ function DatePicker(props: DatePickerProps) {
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-        <PopoverContent align="start" aria-label={label} className="w-auto p-2">
+        <PopoverContent align="start" aria-label={label} className="w-80 p-2">
           {calendar}
         </PopoverContent>
       </Popover>
