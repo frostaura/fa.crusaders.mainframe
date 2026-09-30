@@ -3,6 +3,7 @@ import {
   ArrowSquareOut, CalendarDots, FacebookLogo, InstagramLogo, MapPin, Trophy, Users, Wallet,
 } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { tokenStore } from "@/lib/api";
 import { useAuth } from "../lib/auth";
@@ -76,12 +77,19 @@ function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div className="rounded-lg border border-border bg-bg-surface p-4">
       <p className="text-2xl font-bold tracking-tight text-accent-strong">{value}</p>
-      <p className="mt-0.5 text-sm text-text-secondary">{label}</p>
+      <p className="mt-0.5 break-words text-sm text-text-secondary">{label}</p>
     </div>
   );
 }
 
 /** A landing card: the design-system card with its content gutter. */
+/**
+ * R4 (V4-2 / X4-7): a contact link is a 44px target, and its words wrap. At 200 % text the address
+ * and the handle are each one unbreakable "word" wider than a phone, and the page scrolled sideways
+ * (85px at 390, 155 at 320). The icon is rem-sized so it grows with the words beside it.
+ */
+const CONTACT_LINK = "inline-flex min-h-touch max-w-full items-center gap-2 py-2 text-accent-strong underline underline-offset-2 hover:no-underline";
+
 function Panel({ children }: { children: React.ReactNode }) {
   return <Card><CardContent>{children}</CardContent></Card>;
 }
@@ -100,13 +108,16 @@ function SignedOutLanding() {
     // full-bleed <main> rather than the app's boxed content column.
     <div className="mx-auto w-full max-w-content space-y-10 px-4 py-10 sm:space-y-14 sm:py-14">
       {/* ---- Hero ---------------------------------------------------------------- */}
-      <header className="grid items-center gap-6 sm:grid-cols-[1fr_auto]">
+      <header className="grid grid-cols-1 items-center gap-6 sm:grid-cols-[1fr_auto]">
         <div>
           <CrestMark className="mb-4 h-14 w-12" />
           <p className="text-sm font-medium uppercase tracking-wider text-accent-strong">
             Durban North · KwaZulu-Natal
           </p>
-          <h1 className="mt-1 font-display text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+          {/* R4: never wider than a phone — at 200 % text "Crusaders" alone was wider than a 320px
+              screen. 13vw is above 1.875rem at every phone width at normal text, so only large
+              text is capped. */}
+          <h1 className="mt-1 font-display text-[length:min(1.875rem,13vw)] font-bold leading-tight tracking-tight sm:text-4xl">
             Crusaders Squash
           </h1>
           {/*
@@ -136,7 +147,9 @@ function SignedOutLanding() {
       {/* ---- The four claims that are strongest and best-sourced ------------------ */}
       <section aria-labelledby="at-a-glance">
         <h2 id="at-a-glance" className="sr-only">The club at a glance</h2>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* R4: as many 8rem columns as fit — two on a phone, four on a desktop, and ONE at 200 %
+            text on a 320px phone, where "racketball" ran off a half-width cell. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-3">
           <Stat value="4" label="Glass-back courts" />
           <Stat value="13" label="League teams, across 10 divisions" />
           <Stat value="2025" label="KZN 1st Division champions" />
@@ -270,17 +283,17 @@ function SignedOutLanding() {
             For membership, fees and coaching, the club is the place to ask — those are not
             published online.
           </p>
-          <ul className="mt-4 space-y-2 text-sm">
+          <ul className="mt-4 flex flex-col gap-1 text-sm">
             <li>
-              <a className="inline-flex items-center gap-2 font-medium text-accent-strong underline underline-offset-2 hover:no-underline"
-                 href="mailto:info@northwoodcrusaders.co.za">
-                info@northwoodcrusaders.co.za
+              <a className={cn(CONTACT_LINK, "font-medium")} href="mailto:info@northwoodcrusaders.co.za">
+                <span className="min-w-0 [overflow-wrap:anywhere]">info@northwoodcrusaders.co.za</span>
               </a>
             </li>
             <li>
-              <a className="inline-flex items-center gap-2 text-accent-strong underline underline-offset-2 hover:no-underline"
+              <a className={CONTACT_LINK}
                  href="https://www.facebook.com/northwoodcrusaders/" target="_blank" rel="noreferrer noopener">
-                <FacebookLogo size={16} aria-hidden="true" /> Northwood Crusaders on Facebook
+                <FacebookLogo aria-hidden="true" className="size-5 shrink-0" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">Northwood Crusaders on Facebook</span>
               </a>
             </li>
             <li>
@@ -288,9 +301,10 @@ function SignedOutLanding() {
                 SINGULAR. The club's own website footer links @northwoodcrusaderssports — plural —
                 which is a dead account with no posts. This is the live one.
               */}
-              <a className="inline-flex items-center gap-2 text-accent-strong underline underline-offset-2 hover:no-underline"
+              <a className={CONTACT_LINK}
                  href="https://www.instagram.com/northwoodcrusaderssport/" target="_blank" rel="noreferrer noopener">
-                <InstagramLogo size={16} aria-hidden="true" /> @northwoodcrusaderssport
+                <InstagramLogo aria-hidden="true" className="size-5 shrink-0" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">@northwoodcrusaderssport</span>
               </a>
             </li>
             <li>
@@ -308,9 +322,10 @@ function SignedOutLanding() {
                 the id is plausible — but somebody at the club should open it once and either
                 delete this comment or delete the link.
               */}
-              <a className="inline-flex items-center gap-2 text-accent-strong underline underline-offset-2 hover:no-underline"
+              <a className={CONTACT_LINK}
                  href="https://www.facebook.com/groups/235624123200990/" target="_blank" rel="noreferrer noopener">
-                <FacebookLogo size={16} aria-hidden="true" /> Crusaders Squash &amp; Racketball group
+                <FacebookLogo aria-hidden="true" className="size-5 shrink-0" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">Crusaders Squash &amp; Racketball group</span>
               </a>
             </li>
           </ul>

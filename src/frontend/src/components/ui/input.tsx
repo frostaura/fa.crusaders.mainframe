@@ -21,7 +21,9 @@ export function Input({ className, type = "text", ...props }: ComponentProps<"in
         fieldSurface,
         // The `readonly` ATTRIBUTE, not `:read-only`: the pseudo-class matches every non-editable
         // element — a Select trigger (a <button>), a file input — and would paint it muted forever.
-        "flex h-touch px-3 [&[readonly]]:bg-bg-muted",
+        // `min-h`, not `h` (V4-1, R4): at 200 % text the line is 48px, and a fixed 44px box cut the
+        // typed text and pushed its neighbours onto it. 44px stays the floor at every size.
+        "flex min-h-touch px-3 py-2 [&[readonly]]:bg-bg-muted",
         "file:mr-3 file:border-0 file:bg-transparent file:text-sm file:font-semibold file:text-text-primary",
         className,
       )}

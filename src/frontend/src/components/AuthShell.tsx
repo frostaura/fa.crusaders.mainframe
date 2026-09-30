@@ -98,11 +98,13 @@ function Band({ subline }: { subline: string }) {
         motif out of its column. Hidden on phones, where the club's name wants the width.
       */}
       <CourtPlan className="pointer-events-none absolute right-6 top-1/2 hidden h-16 w-auto -translate-y-1/2 opacity-60 sm:block" />
-      <div className="relative flex items-center gap-3 sm:pr-32">
+      {/* R4 (V4-1): the name wraps under the crest when there is no room beside it (200 % text on
+          a phone), rather than being cut by the band's edge. */}
+      <div className="relative flex flex-wrap items-center gap-3 sm:pr-32">
         {/* The crest's own navy vanishes into the band, leaving its white keyline and red
             cross — the mark as it would be embroidered on a navy shirt. */}
         <CrestMark />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 basis-40 break-words">
           <p className="font-display text-xl font-bold tracking-tight text-brand-ink">Crusaders Squash Club</p>
           <p data-auth-subline="" className="mt-0.5 text-sm text-brand-ink/85">{subline}</p>
         </div>
@@ -110,6 +112,12 @@ function Band({ subline }: { subline: string }) {
     </div>
   );
 }
+
+/**
+ * The card's side padding: 1.25rem (2rem from `sm`), never more than its normal-text pixels. A
+ * style over two custom properties, because utilities outside `ui/` may not use arbitrary spacing.
+ */
+const CARD_GUTTER = { paddingInline: "min(var(--auth-gutter), var(--auth-gutter-px))" } as const;
 
 // Props destructured in the body: lizard counts each destructured name as a parameter (limit 6).
 export function AuthShell(props: AuthShellProps) {
@@ -124,7 +132,12 @@ export function AuthShell(props: AuthShellProps) {
           no text. `AuthShell.test` pins it, because it is exactly the mark a refactor loses.
         */}
         <div aria-hidden="true" className="h-1 bg-brand-tin" />
-        <div className="px-5 py-6 sm:px-8 sm:py-8">
+        {/* R4: the side padding is capped at its normal-text pixels, so 200 % text on a 320px
+            phone gives the words the width rather than 80px of gutter. */}
+        <div
+          className="py-6 [--auth-gutter-px:20px] [--auth-gutter:1.25rem] sm:py-8 sm:[--auth-gutter-px:32px] sm:[--auth-gutter:2rem]"
+          style={CARD_GUTTER}
+        >
           {mark}
           {title ? <h1 className={cn(typography({ variant: "h1" }), "text-2xl sm:text-2xl")}>{title}</h1> : null}
           {lead ? <div className="mt-2 text-sm text-text-secondary">{lead}</div> : null}

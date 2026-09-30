@@ -26,7 +26,7 @@ import { Eye, EyeSlash } from "./ui/icons";
 export function PasswordInput({ className, ...props }: Omit<ComponentProps<"input">, "type">) {
   const [visible, setVisible] = useState(false);
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <Input
         {...props}
         type={visible ? "text" : "password"}

@@ -83,9 +83,9 @@ type ChosenProps = { name: string; preview: string | null; disabled?: boolean; o
 function Chosen(props: ChosenProps) {
   const { name, preview, disabled, onReplace, onClear } = props;
   return (
-    <div className="flex items-center gap-4 rounded-xl border border-border bg-bg-surface p-3 shadow-xs peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent-strong">
+    <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-bg-surface p-3 shadow-xs peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent-strong">
       <Preview src={preview} />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-32">
         {/* The visible confirmation IS the status — a second sr-only copy announced it twice. */}
         <p role="status" className="flex items-center gap-1.5 text-sm font-semibold text-success-strong">
           <CheckCircle size={16} weight="fill" aria-hidden="true" className="shrink-0" /> {PHOTO_PICKER.ready}
@@ -115,7 +115,8 @@ function DropZone(props: DropZoneProps) {
       onDragLeave={() => setDragging(false)}
       onDrop={drop}
       className={cn(
-        "flex min-h-28 w-full cursor-pointer items-center gap-4 rounded-xl border-2 border-dashed p-4",
+        // R4 (V4-1): wraps — at 200 % text the words go under the circle instead of past the card.
+        "flex min-h-28 w-full cursor-pointer flex-wrap items-center gap-4 rounded-xl border-2 border-dashed p-4",
         "transition-colors duration-fast ease-standard motion-reduce:transition-none",
         "peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent-strong",
         dragging ? "border-accent-strong bg-accent-soft" : "border-control bg-bg-muted hover:border-accent-strong hover:bg-accent-soft",
@@ -127,7 +128,7 @@ function DropZone(props: DropZoneProps) {
       <span className="flex size-16 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-strong ring-1 ring-accent-strong/30">
         {busy ? <Spinner className="size-6" /> : <UserFocus size={32} weight="duotone" aria-hidden="true" />}
       </span>
-      <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="flex min-w-0 flex-1 basis-32 flex-col gap-0.5 break-words">
         {busy ? (
           <span role="status" className="text-sm font-semibold text-text-primary">{PHOTO_PICKER.preparing}</span>
         ) : (
@@ -226,7 +227,7 @@ export const PhotoPicker = forwardRef<PhotoPickerHandle, PhotoPickerProps>(funct
   const errorId = `${inputId}-error`;
 
   return (
-    <div className="grid gap-1.5">
+    <div className="grid grid-cols-1 gap-1.5">
       {/* No asterisk: every field on the form is required, and marking one implies the rest are not. */}
       <span id={`${inputId}-label`} className="text-sm font-medium text-text-primary">{label}</span>
       {/*

@@ -21,6 +21,9 @@ import { pendingInvitePath } from "../lib/playersPending";
 const DEV_ADMIN_EMAIL = "any@frostaura.net";
 const DEV_ADMIN_PASSWORD = "ChangeMeOnFirstLogin!";
 
+/** Half of what a line is short of a 44px target, as a negative margin: -12px at 14px text, ~0 at 200 %. */
+const FORGOT_OVERHANG = { marginBlock: "min(0px, calc((1lh - 44px) / 2))" } as const;
+
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
@@ -341,11 +344,13 @@ export default function LoginPage() {
             <FieldError>{errors.email}</FieldError>
           </Field>
           <Field>
-            <div className="flex items-baseline justify-between gap-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
               <FieldLabel>{LOGIN.password}</FieldLabel>
               {/* A link at rest, not only on hover: it was caption-slate once, and the control
-                  that helps a member who cannot get in was the one that did not look like one. */}
-              <TextLink to="/forgot-password" className="-my-3 inline-flex min-h-touch items-center text-sm">{LOGIN.forgot}</TextLink>
+                  that helps a member who cannot get in was the one that did not look like one.
+                  R4 (V4-1): the 44px target overhangs its line by what the line lacks (`lh`), not
+                  by a fixed rem — at 200 % text `-my-3` pulled the field 24px up under the link. */}
+              <TextLink to="/forgot-password" className="inline-flex min-h-touch items-center text-sm" style={FORGOT_OVERHANG}>{LOGIN.forgot}</TextLink>
             </div>
             <PasswordInput
               ref={passwordRef} required autoComplete="current-password"

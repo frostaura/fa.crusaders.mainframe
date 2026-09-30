@@ -54,9 +54,12 @@ export function Field({ invalid = false, controlId, className, ...props }: Field
     setHasDescription,
     setHasError,
   }), [controlId, generated, invalid, hasError, hasDescription]);
+  // `grid-cols-1` (minmax(0, 1fr)), not an implicit column (R4, V4-1): an implicit column is
+  // floored at its widest child's min-content, and at 200 % text a password field's wrapper
+  // pushed the whole field 36px out of the sign-in card.
   return (
     <FieldContext.Provider value={value}>
-      <div data-slot="field" data-invalid={value.invalid || undefined} className={cn("grid gap-1.5", className)} {...props} />
+      <div data-slot="field" data-invalid={value.invalid || undefined} className={cn("grid grid-cols-1 gap-1.5", className)} {...props} />
     </FieldContext.Provider>
   );
 }

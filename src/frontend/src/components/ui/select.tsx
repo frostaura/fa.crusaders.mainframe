@@ -39,7 +39,7 @@ export function SelectTrigger({ className, children, ...props }: ComponentProps<
       data-slot="select-trigger"
       className={cn(
         fieldSurface,
-        "flex h-touch items-center justify-between gap-2 whitespace-nowrap px-3 text-left",
+        "flex min-h-touch items-center justify-between gap-2 whitespace-nowrap px-3 py-2 text-left",
         "data-[placeholder]:text-text-muted",
         className,
       )}
