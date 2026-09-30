@@ -414,10 +414,77 @@ public abstract partial class DeviceGateHttpTests
                 rows <= DeviceRegistryService.MaxUnacknowledgedDevices,
                 $"{attempts} boards arriving together left {rows} rows against a cap of {DeviceRegistryService.MaxUnacknowledgedDevices} — the count-then-insert window is open");
 
-            // …and the answers agree with the rows: a board told OK has one.
-            Assert.Equal(rows, admitted);
+            // …and the answers agree with the rows: a board told OK has one. Every other answer
+            // is named in the message: a load-only failure here (16 rows, 15 OK — review round 4)
+            // was a request that registered and then failed AFTER the commit, not a cap race; the
+            // forced interleaving below proves the cap itself.
+            Assert.True(rows == admitted, $"{rows} rows, {admitted} OK; the rest: {await OtherAnswersAsync(answers)}");
 
             foreach (var answer in answers) answer.Dispose();
+        }
+
+        /// <summary>
+        /// The same flood, with the worst interleaving FORCED rather than hoped for (review
+        /// round 4): the test holds the club's registration lock from its own connection, fires
+        /// every board, waits until all of them are parked on that lock, and only then lets go —
+        /// so every one of them reaches the count-then-insert at the same moment. Exactly the cap
+        /// is admitted, every other board is the 409, and each admitted board has its row.
+        /// </summary>
+        [SkippableFact]
+        public async Task Boards_all_queued_on_the_lock_at_once_still_stop_at_the_cap()
+        {
+            Skip.IfNot(_pg.Available, Skipped);
+
+            var factory = CreateFactory();
+            var club = await ClubAsync(factory, "gatequeue", DefaultSettings);
+            var client = factory.CreateClient();
+            var attempts = DeviceRegistryService.MaxUnacknowledgedDevices * 2;
+
+            await using var holder = new Npgsql.NpgsqlConnection(_pg.ConnectionString);
+            await holder.OpenAsync();
+            await using var hold = await holder.BeginTransactionAsync();
+            await using (var take = new Npgsql.NpgsqlCommand("SELECT pg_advisory_xact_lock(@k)", holder, hold))
+            {
+                take.Parameters.AddWithValue("k", PayerLock.KeyFor(club.TenantId, Guid.Empty));
+                await take.ExecuteNonQueryAsync();
+            }
+
+            var inFlight = Enumerable.Range(0, attempts)
+                .Select(_ => client.SendAsync(Heartbeat(club.Key, NewMac(), DeviceKinds.Gate)))
+                .ToList();
+            for (var i = 0; i < 600; i++)
+            {
+                await using var waiting = new Npgsql.NpgsqlCommand(
+                    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted", holder);
+                if ((long)(await waiting.ExecuteScalarAsync())! >= attempts) break;
+                await Task.Delay(100);
+            }
+            await hold.CommitAsync();
+
+            var answers = await Task.WhenAll(inFlight);
+            var admitted = answers.Count(r => r.StatusCode == HttpStatusCode.OK);
+
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var rows = await db.Devices.IgnoreQueryFilters().CountAsync(d => d.TenantId == club.TenantId);
+
+            Assert.Equal(DeviceRegistryService.MaxUnacknowledgedDevices, rows);
+            Assert.True(rows == admitted, $"{rows} rows, {admitted} OK; the rest: {await OtherAnswersAsync(answers)}");
+            Assert.All(answers.Where(r => r.StatusCode != HttpStatusCode.OK),
+                r => Assert.Equal(HttpStatusCode.Conflict, r.StatusCode));
+
+            foreach (var answer in answers) answer.Dispose();
+        }
+
+        /// <summary>Every answer that was neither OK nor the cap's 409, with its body — for a failure message.</summary>
+        private static async Task<string> OtherAnswersAsync(IEnumerable<HttpResponseMessage> answers)
+        {
+            var odd = new List<string>();
+            foreach (var r in answers.Where(r => r.StatusCode is not HttpStatusCode.OK and not HttpStatusCode.Conflict))
+            {
+                odd.Add($"{(int)r.StatusCode} {await r.Content.ReadAsStringAsync()}");
+            }
+            return odd.Count == 0 ? "only 409s" : string.Join(" | ", odd);
         }
 
         [SkippableFact]
