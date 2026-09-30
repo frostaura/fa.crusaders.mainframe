@@ -187,7 +187,7 @@ describe("the section switcher (below xl)", () => {
     const bar = await screen.findByRole("button", { name: /Groups.*change section/ });
     fireEvent.click(bar);
     const sheet = await screen.findByRole("dialog", { name: "Admin sections" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: /^Close / }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(bar).toHaveFocus());

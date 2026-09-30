@@ -247,7 +247,7 @@ describe("PlayerPickerDialog", () => {
     const onPick = vi.fn();
     renderPage(<PlayerPickerDialog open onOpenChange={() => undefined} title="Invite a player" onPick={onPick} excludeUserIds={[]} />);
     const dialog = screen.getByRole("dialog", { name: "Invite a player" });
-    expect(within(dialog).getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: /^Close / })).toBeTruthy();
     fireEvent.click(await within(dialog).findByRole("button", { name: PICKER.add(SAM.name) }));
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ kind: "member", userId: "sam" }));
   });

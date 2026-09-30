@@ -76,7 +76,7 @@ describe("one at a time", () => {
     const stub = served([celebration()]);
     renderAt("/bookings");
     const dialog = await screen.findByRole("dialog", { name: /First win/ });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Close / }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(seenCalls(stub)[0].body).toEqual({ ids: ["c1"] });
   });
@@ -135,7 +135,7 @@ describe("never over the pass", () => {
     const other = await screen.findByRole("dialog", { name: "Book a court" });
     await waitFor(() => expect(stub.calls.some((c) => c.path === LIST)).toBe(true));
     expect(screen.queryByRole("dialog", { name: /First win/ })).toBeNull();
-    fireEvent.click(within(other).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(other).getByRole("button", { name: /^Close / }));
     expect(await screen.findByRole("dialog", { name: /First win/ })).toBeInTheDocument();
   });
 

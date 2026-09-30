@@ -39,7 +39,7 @@ describe("ConfirmDialog", () => {
     const dialog = await screen.findByRole("dialog", { name: "Delete this webhook?" });
     expect(dialog).toHaveAccessibleDescription("It stops receiving the club's events at once.");
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /^Close / })).toBeInTheDocument();
     // Copy rules: never "OK", never "Yes".
     expect(within(dialog).queryByRole("button", { name: /^(OK|Yes)$/ })).toBeNull();
   });

@@ -182,7 +182,7 @@ describe("the mail's deep link", () => {
     renderCard("?result=confirm");
     const dialog = await screen.findByRole("dialog", { name: CONFIRM_SHEET.title });
     expect(within(dialog).getByRole("table")).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: CONFIRM_SHEET.cancel }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Close / }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByTestId("where")).toHaveTextContent(`/bookings/${BOOKING}`);
     expect(screen.getByTestId("where").textContent).not.toContain("result=");
