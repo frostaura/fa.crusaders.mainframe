@@ -326,7 +326,8 @@ export default function AdminWebhooksPage() {
       await load();
       toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(REMOVED) : REMOVED });
     } catch (err) {
-      if (err instanceof UnsureOutcome) void load();
+      // The list is re-read so the page shows the record; its own failure is its own banner.
+      if (err instanceof UnsureOutcome) load().catch(() => {});
       throw err;
     }
   };
