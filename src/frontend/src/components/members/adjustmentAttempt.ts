@@ -1,4 +1,5 @@
 import { ApiError, endpoints } from "@/lib/api";
+import { rateLimitedSentence } from "@/lib/errors";
 import { adminEndpoints, type AdjustReasonCode } from "@/lib/adminApi";
 import { newIdempotencyKey, relatedBookingRefusal } from "@/lib/creditAdjustment";
 import { memberDetailEndpoints } from "@/lib/memberDetailApi";
@@ -79,6 +80,12 @@ function refusedOutright(err: unknown): boolean {
   return err instanceof ApiError && err.status >= 400 && err.status < 500;
 }
 
+/** The rate limit's sentence, with the wait the club named, or null for anything else. */
+function rateLimited(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 429) return null;
+  return `${rateLimitedSentence(Number(err.detail("retry_after_seconds")) || null)} Nothing was changed.`;
+}
+
 type Found = "landed" | "absent" | "unknown";
 
 /** Ask the ledger whether this press's movement is on it. */
@@ -139,6 +146,11 @@ export async function attemptAdjustment(
     const booking = relatedBookingRefusal(err);
     if (booking) return { kind: "booking", message: booking };
     if (!refusedOutright(err)) return afterLostReply(input, pressedAt, keyRef);
+    // R4 I4-4: the club's rate limit turns a press away before it is read — it is not a refusal
+    // of THIS adjustment ("The club refused that adjustment"), and pressing again after the wait
+    // is the right thing to do. The key stays: a later press is still this movement.
+    const busy = rateLimited(err);
+    if (busy) return { kind: "failed", message: busy, unchanged: true, said: busy };
     // A refusal settles the question. `idempotency_key_reused` settles it the other way: the
     // earlier movement DID land, the sentence says what it was, and the next press is a new one.
     const message = adjustRefusal(err) ?? LOST_REPLY.refused;
