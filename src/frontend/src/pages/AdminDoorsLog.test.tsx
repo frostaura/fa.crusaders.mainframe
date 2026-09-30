@@ -230,8 +230,11 @@ describe("the club door log", () => {
     await screen.findByRole("button", { name: /next month/i });
     const target = "2026-09-20";
     for (let step = 0; step < 60 && !document.querySelector(`button[data-day="${target}"]`); step++) {
-      // The calendar opens on today's month; walk to the fixture's day in whichever direction it lies.
-      const back = new Date().toISOString().slice(0, 7) > target.slice(0, 7);
+      // The calendar opens on the CLUB's month; walk to the fixture's day in whichever direction it
+      // lies, read off the month on show — UTC's month differs from the club's for two hours at
+      // every month's end (it did, 2026-09-30 22:30 UTC; gotchas-clock's UTC-midnight family).
+      const shown = document.querySelector("button[data-day]:not([data-outside])")?.getAttribute("data-day") ?? "";
+      const back = shown.slice(0, 7) > target.slice(0, 7);
       fireEvent.click(screen.getByRole("button", { name: back ? /previous month/i : /next month/i }));
     }
     fireEvent.click(document.querySelector<HTMLElement>(`button[data-day="${target}"]`)!);

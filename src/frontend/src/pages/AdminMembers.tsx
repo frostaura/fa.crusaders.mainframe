@@ -245,8 +245,10 @@ function ListFailed({ error, retrying, onRetry }: { error: unknown; retrying: bo
 function GroupsFailed({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">
-      <span className="min-w-0 flex-1">{GROUPS_COPY.failed}</span>
-      <Button size="sm" variant="ghost" onClick={onRetry}>{GROUPS_COPY.retry}</Button>
+      {/* A real basis, and a button that may wrap its words (R4, 200% text): at 320 "Read groups
+          again" was a 310px box in a 250px band and the page scrolled sideways. */}
+      <span className="min-w-0 flex-1 basis-48">{GROUPS_COPY.failed}</span>
+      <Button size="sm" variant="ghost" className="!h-auto min-h-9 max-w-full shrink whitespace-normal py-1.5" onClick={onRetry}>{GROUPS_COPY.retry}</Button>
     </div>
   );
 }

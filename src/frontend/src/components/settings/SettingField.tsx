@@ -77,7 +77,9 @@ const SettingRow = memo(function SettingRow(props: RowProps) {
       id={settingAnchorId(def.key)}
       data-setting={def.key}
       hidden={hidden}
-      className={cn("scroll-mt-28 rounded-lg [&[hidden]]:hidden", highlighted && HIGHLIGHT_CLASS)}
+      // content-start (R4 V4-7): beside a taller neighbour the field's grid stretched its rows,
+      // and side-by-side captions and inputs sat 7–10px apart at 1280.
+      className={cn("scroll-mt-28 content-start rounded-lg [&[hidden]]:hidden", highlighted && HIGHLIGHT_CLASS)}
       onFocus={() => setLeft(false)}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setLeft(true); }}
     >

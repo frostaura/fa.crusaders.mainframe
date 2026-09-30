@@ -45,8 +45,9 @@ export const MEMBER_COPY = {
   moreActions: (name: string) => `More actions for ${name}`,
   groupsLabel: "Groups",
   noGroups: "No groups",
-  adminBadge: "Administrator",
-  adminFromConfig: "Administrator · server config",
+  // "Admin" (R4 V4-9): "Administrator" is one long word, and at 320 with 200% text it broke mid-word.
+  adminBadge: "Admin",
+  adminFromConfig: "Admin · server config",
   tabsLabel: "Member sections",
   noMembership: "No membership",
 } as const;

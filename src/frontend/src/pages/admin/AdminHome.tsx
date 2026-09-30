@@ -322,7 +322,7 @@ function NeedsAttention({ attention }: { attention: AdminAttention }) {
 function QuickLink({ item, attention }: { item: AdminNavItem; attention: AdminAttention }) {
   const ItemIcon = item.icon;
   return (
-    <li className="flex min-w-0">
+    <li className="flex min-w-0 [container-type:inline-size]">
       <Interactable asChild surface="card" watermark>
         <Link
           to={item.path}
@@ -332,12 +332,16 @@ function QuickLink({ item, attention }: { item: AdminNavItem; attention: AdminAt
           aria-describedby={`${item.id}-quick-description`}
           className="flex w-full items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs hover:border-control hover:shadow-md"
         >
-          <span aria-hidden="true" className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-strong">
+          {/* The tile is the 20px icon plus padding, not a rem box (R4 X4-6): `size-10` became 80px
+              at 200% text and squeezed the label and description into a word-wide column. */}
+          {/* And at large text it goes: a rem container query is a large-text query — 16rem is 256px
+              at normal text (every card keeps its tile) and 512px at 200% ("Transactions" broke). */}
+          <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-accent-soft p-2.5 text-accent-strong [@container(max-width:16rem)]:hidden">
             <ItemIcon size={20} />
           </span>
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex items-center gap-2">
-              <span className="min-w-0 truncate font-semibold text-text-primary">{item.label}</span>
+              <span className="min-w-0 break-words font-semibold text-text-primary">{item.label}</span>
               <AttentionCount item={item} counts={attention} />
             </span>
             <span id={`${item.id}-quick-description`} className="text-sm text-text-secondary">{item.description}</span>

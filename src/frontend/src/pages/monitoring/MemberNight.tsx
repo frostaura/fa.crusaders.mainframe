@@ -441,7 +441,9 @@ function TraceCard({ event, subjectName, timezone }: {
           {event.headline ?? burstOutcomes([event])[0]}
         </p>
         {clause && (
-          <span className={onBehalf ? "shrink-0 text-sm text-info-strong" : "shrink-0 text-sm text-text-muted"}>
+          // Wraps, never shrink-0 (R4 V4-6): "by Priya Naidoo on Thandi's behalf" is wider than a
+          // 320 phone and a shrink-0 clause made the Night tab scroll sideways.
+          <span className={onBehalf ? "min-w-0 break-words text-sm text-info-strong" : "min-w-0 break-words text-sm text-text-muted"}>
             {clause}
           </span>
         )}

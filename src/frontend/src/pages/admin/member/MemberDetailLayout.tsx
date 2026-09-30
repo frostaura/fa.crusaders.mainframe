@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { GroupAssign } from "@/components/members/GroupAssign";
@@ -138,7 +138,14 @@ type HeaderProps = { state: MemberDetailState; detail: MemberDetail; name: strin
 
 function MemberHeader(props: HeaderProps) {
   const { state, detail, name, onTopUp } = props;
-  const subline = [detail.email, detail.membership_number].filter(Boolean).join(" · ");
+  // An address may break after its "@" and before each "." (R4 V4-9: at 320 with 200% text the
+  // one-word address ran 58px off the screen).
+  const subline = (
+    <span className="break-words">
+      {breakableEmail(detail.email)}
+      {detail.membership_number ? ` · ${detail.membership_number}` : null}
+    </span>
+  );
   return (
     <>
       <PageHeader
@@ -163,7 +170,9 @@ function MemberHeader(props: HeaderProps) {
       ) : null}
       <section
         aria-label={`${name} — summary`}
-        className="flex flex-col gap-4 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:gap-5 sm:p-6 md:flex-row md:items-center md:justify-between"
+        // Wraps rather than forcing two columns (R4 V4-9): at 768 with 200% text the identity and
+        // the balance side by side scrolled the header 114px sideways.
+        className="flex flex-col gap-4 rounded-xl border border-border bg-bg-surface p-4 shadow-xs [container-type:inline-size] sm:gap-5 sm:p-6 md:flex-row md:flex-wrap md:items-center md:justify-between"
       >
         <Identity detail={detail} name={name} state={state} />
         <BalancePanel detail={detail} name={name} onTopUp={onTopUp} />
@@ -172,12 +181,22 @@ function MemberHeader(props: HeaderProps) {
   );
 }
 
+function breakableEmail(email: string | null | undefined): ReactNode {
+  if (!email) return null;
+  return email.split(/(?<=@)|(?=\.)/).map((part, i) => <Fragment key={i}>{i > 0 ? <wbr /> : null}{part}</Fragment>);
+}
+
 function Identity({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
   return (
     // Compressed below `sm` (P10 walk): a 40px avatar and a tighter gap, so the tabs are not
     // pushed below the fold of a phone by the header alone.
-    <div className="flex min-w-0 items-start gap-3 sm:items-center sm:gap-4">
-      <Avatar size={56} className="size-10 text-sm sm:size-14 sm:text-lg">
+    // Stacked at large text (R4 V4-9): a rem container query is a large-text query — 15rem is 240px
+    // at normal text (a 360 phone keeps the avatar beside the name) and 480px at 200%, where the
+    // avatar beside "Admin" left it a word-wide column.
+    <div className="flex min-w-0 items-start gap-3 sm:items-center sm:gap-4 [@container(max-width:15rem)]:flex-col">
+      {/* Pixel sizes, not rem (R4 V4-9): at 200% text a size-10 avatar was 80px and squeezed the
+          status badge beside it into "Act / ive" at 320. */}
+      <Avatar size={56} className="size-[40px] text-sm sm:size-[56px] sm:text-lg">
         {detail.photo_url ? <AvatarImage src={detail.photo_url} alt="" /> : null}
         <AvatarFallback name={name} />
       </Avatar>
@@ -275,35 +294,43 @@ function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) 
   );
 }
 
+/**
+ * The two everyday actions: they share a row while it holds them, take a line each when it does
+ * not, and their words wrap in a box that grows (R4 V4-9: "Book for member" ran out of a fixed
+ * 44px box at 390 with 200% text).
+ */
+const GROWS = "!h-auto min-h-touch min-w-0 flex-[1_1_auto] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
+
 function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: string; onTopUp: () => void }) {
   const overdrawn = detail.balance_credits < 0;
   const canBook = detail.status === "Active";
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between md:justify-end md:gap-6">
+    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end sm:justify-between md:justify-end md:gap-6">
       {/* On a phone the label sits on the figure's baseline rather than a line above it (P10). */}
       <dl className="flex flex-row flex-wrap items-baseline gap-x-2 sm:flex-col sm:items-start">
         <dt className={typography({ variant: "overline" })}>{MEMBER_COPY.balance}</dt>
         <dd
           data-testid="member-balance"
-          className={cn(typography({ variant: "display" }), "whitespace-nowrap text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
+          // May wrap before "cr" (R4 V4-9): nowrap ran the figure off a 320 phone at 200% text.
+          className={cn(typography({ variant: "display" }), "min-w-0 break-words text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
         >
           {formatCredits(detail.balance_credits)}
         </dd>
         {overdrawn ? <dd className="basis-full text-xs text-danger-strong">{MEMBER_COPY.balanceOverdrawn}</dd> : null}
         <BalanceParts detail={detail} name={name} />
       </dl>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex min-w-0 flex-wrap gap-2">
         {/* Only an active member is topped up (F3.10) — the members list offers no Top up
             to anybody else, and a turned-down applicant was offered one here. */}
         {canBook ? (
-          <Button onClick={onTopUp} icon={<Plus weight="bold" aria-hidden="true" />} className="flex-1 sm:flex-none">
+          <Button onClick={onTopUp} icon={<Plus weight="bold" aria-hidden="true" />} className={GROWS}>
             {MEMBER_COPY.topUp}
           </Button>
         ) : (
           <p className="max-w-xs text-sm text-text-muted">{MEMBER_COPY.noTopUp[detail.status ?? "none"] ?? MEMBER_COPY.noTopUp.none}</p>
         )}
         {canBook ? (
-          <Button asChild variant="outline" className="flex-1 sm:flex-none">
+          <Button asChild variant="outline" className={GROWS}>
             <Link to={`/bookings?as=${encodeURIComponent(detail.user_id)}`} title={MEMBER_COPY.bookForHint(name)}>
               <CalendarBlank size={16} aria-hidden="true" />
               {MEMBER_COPY.bookFor}

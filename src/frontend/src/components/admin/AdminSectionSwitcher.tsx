@@ -54,7 +54,10 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
     <>
       {/* The tile is the 20px icon plus padding, not a rem box: `size-9` doubled to 72px at 200%
           text and squeezed the words into breaking mid-letter (review round 2, F4 → F3). */}
-      <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-accent-soft p-2 text-accent-strong">
+      {/* R4 V-16: at 320 with 200% text even the px tile left "Members" too little room and it
+          broke "Membe / rs". A rem-sized container query is a large-text query: 18rem is 288px at
+          normal text (the tile stays on a 320 phone) and 576px at 200% (it goes). */}
+      <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-accent-soft p-2 text-accent-strong [@container(max-width:18rem)]:hidden">
         <ItemIcon size={20} weight="fill" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col items-start text-left">
@@ -62,23 +65,24 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
             is wider than the bar, and a clipped section name is a silent loss (e2e/admin-doors).
             `break-words` breaks a word only when it cannot fit its line at all. */}
         <span className={cn(typography({ variant: "overline" }), "w-full break-words")}>{eyebrow}</span>
-        {/* V-16 / X-10 (round 3): the count rides WITH the name and wraps under it, rather than
-            standing beside the words as a third column — at 390 with 200% text that column left
-            the words 110px and "Overview" broke as "Overvie / w". */}
-        <span className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="min-w-0 break-words text-base font-semibold text-text-primary">{item.label}</span>
-          {attention.total > 0 ? (
-            <span
-              aria-hidden="true"
-              data-admin-badge="total"
-              className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-warning-soft px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-warning-strong"
-            >
-              {attention.total > 99 ? "99+" : attention.total}
-            </span>
-          ) : null}
-        </span>
+        <span className="w-full min-w-0 break-words text-base font-semibold text-text-primary">{item.label}</span>
       </span>
-      <CaretUpDown size={20} aria-hidden="true" className="shrink-0 text-text-secondary" />
+      {/* R4 A4-8 / V4-8: the count is the WHOLE console's (applications, doors, faults), and set
+          beside the name it read as this section's ("Boards 77"). It sits with the caret — the
+          control that opens every other section — at the far end of the bar, never in the name's
+          row, so it takes no width from the name at 200 % text either (V-16). */}
+      <span className="inline-flex shrink-0 items-center gap-1">
+        {attention.total > 0 ? (
+          <span
+            aria-hidden="true"
+            data-admin-badge="total"
+            className="inline-flex min-w-5 items-center justify-center rounded-full bg-warning-soft px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-warning-strong"
+          >
+            {attention.total > 99 ? "99+" : attention.total}
+          </span>
+        ) : null}
+        <CaretUpDown size={20} aria-hidden="true" className="text-text-secondary" />
+      </span>
     </>
   );
 }
@@ -95,7 +99,7 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
   };
 
   return (
-    <div data-admin-section-bar="" className={cn("border-b border-border bg-bg-surface px-2 py-1 sm:px-4 lg:px-6 xl:hidden print:hidden", className)}>
+    <div data-admin-section-bar="" className={cn("border-b border-border bg-bg-surface px-2 py-1 [container-type:inline-size] sm:px-4 lg:px-6 xl:hidden print:hidden", className)}>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <button

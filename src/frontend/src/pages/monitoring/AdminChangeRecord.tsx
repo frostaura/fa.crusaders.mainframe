@@ -228,7 +228,8 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
               dictionary has not got. Never a sentence assembled here out of `action`. */}
           {changeHeadline(row)}
         </p>
-        {row.actor?.name && <span className="shrink-0 text-sm text-text-muted">{row.actor.name}</span>}
+        {/* Wraps, never shrink-0 (R4 V4-6): a long name made the record scroll sideways at 320. */}
+        {row.actor?.name && <span className="min-w-0 break-words text-sm text-text-muted">{row.actor.name}</span>}
       </div>
       {row.subject?.label && <p className="text-sm text-text-secondary">{row.subject.label}</p>}
       {row.reason && <p className="text-sm text-text-secondary">{`Reason: “${row.reason}”`}</p>}

@@ -116,9 +116,17 @@ function useKeepFieldsClearOfBar(shown: boolean, bar: React.RefObject<HTMLDivEle
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(apply);
     observer?.observe(el);
     window.addEventListener("resize", apply);
+    // R4 V-13: a Tab onto a field at the bottom edge scrolled the FIELD clear of the bar (the
+    // padding above) and left its complaint under it. After the browser's own scroll, lift the
+    // complaint too.
+    let frame = 0;
+    const onFocus = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(apply); };
+    document.addEventListener("focusin", onFocus);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", apply);
+      document.removeEventListener("focusin", onFocus);
+      cancelAnimationFrame(frame);
       for (const scroller of scrollers) scroller.style.scrollPaddingBottom = "";
     };
   }, [shown, bar]);
