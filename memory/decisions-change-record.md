@@ -32,3 +32,8 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
 - **Ledger rows carry `actor_name`** (B9): whoever moved money on the owner's behalf; null for
   the owner's own, the system's (`Guid.Empty`) and a member-to-member share unless an admin moved
   it. The older record fields stay camelCase; the round-1 additions use the contract's snake names.
+- **The night trace has words for the account's own story** (applied, approved, turned down,
+  suspended, reactivated, admin rights, code reset, passkeys, passwords) and **declares
+  `credit.adjusted` not a person's night** — its ledger row is already on the wallet strand, and
+  the twin made one top-up read twice (F3). Each admin notice kind carries `others_receiving` so the
+  opt-out switch can warn that nobody else will be told (the dispatcher's own recipient test).

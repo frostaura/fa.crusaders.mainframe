@@ -47,3 +47,7 @@ deleted or archived (409 `group_is_system_default`). Resolution lives in `Servic
   move (PUT and the per-group add/remove) also writes a `member.groups_changed` audit row with the
   member as subject and the tariff before/after. *Why:* the class endpoint's `member.class_changed`
   was the member-side answer to "who moved me to the regular rate"; group rows are keyed by group.
+- **A group's price is shown on the club's REAL courts** (review round 1, F3, 2026-09-30): the
+  cheapest active court as the example, plus a min/max range and a per-court list (`CourtPrices`);
+  the retired club default is read only when no court is active. *Why:* "a slot costs 40 cr instead
+  of 8" — every court carries its own price since the default was retired for new courts only.
