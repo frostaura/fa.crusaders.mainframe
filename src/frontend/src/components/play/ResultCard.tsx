@@ -66,8 +66,10 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
     if (read.error.code !== "result_not_found") return null;
     return <NoResultYet />;
   }
+  // The data attribute leads: after braced props, lizard reads data-result-card="" as the start of
+  // something that never closes and scores every function below as part of this one.
   return (
-    <Section title={RESULT_CARD.title} description={RESULT_CARD.description} data-result-card="">
+    <Section data-result-card="" title={RESULT_CARD.title} description={RESULT_CARD.description}>
       <StateBlock
         loading={!read.data && read.loading}
         error={read.data ? null : read.error}
