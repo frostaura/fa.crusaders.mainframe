@@ -1,6 +1,6 @@
 import { INBOX_TITLE } from "./bellCopy";
 import { ApiError } from "./api";
-import { clubClock, clubShortDate } from "./clubClock";
+import { clubCalendarDate, clubClock, clubShortDate } from "./clubClock";
 import { describeFailure } from "./errors";
 import { formatCredits } from "./utils";
 import { unsureSentence, type UnsureWords } from "./lostReply";
@@ -165,7 +165,8 @@ function creditsDetail(e: ApiError, key: string): number | null {
 
 function capSentence(e: ApiError): string {
   const day = e.detail("club_day");
-  const when = typeof day === "string" ? ` on ${day}` : " that day";
+  // R4 X4-9 — the club day arrives as `YYYY-MM-DD`: said as "Wed 30 Sep", never printed raw.
+  const when = typeof day === "string" ? ` on ${clubCalendarDate(day)}` : " that day";
   if (e.detail("cap") === "slots") {
     const cap = creditsDetail(e, "cap_slots");
     return cap === null

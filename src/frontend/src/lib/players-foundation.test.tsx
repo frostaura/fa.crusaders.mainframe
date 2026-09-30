@@ -53,7 +53,7 @@ describe("playersRefusal — every code is a sentence, never the generic fallbac
 
   it("partner_cap_exceeded names the cap it would break", () => {
     expect(playersRefusal(refusal(409, { error: "partner_cap_exceeded", cap: "minutes", cap_minutes: 90, club_day: "2026-09-30" })))
-      .toBe("Saying yes would take you past your limit of 90 minutes on court a day on 2026-09-30.");
+      .toBe("Saying yes would take you past your limit of 90 minutes on court a day on Wed 30 Sep.");
     expect(playersRefusal(refusal(409, { error: "partner_cap_exceeded", cap: "slots", cap_slots: 2 })))
       .toBe("Saying yes would take you past your limit of 2 slots a day that day.");
   });
