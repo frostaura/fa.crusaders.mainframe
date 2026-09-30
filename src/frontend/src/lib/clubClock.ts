@@ -67,6 +67,30 @@ function zoneFor(timezone?: string): string | undefined {
   return clubZone();
 }
 
+/**
+ * F4.10 — THE short club date: "Thu 1 Oct", optionally "1 Oct 2026" or "Thu 1 Oct 2026".
+ *
+ * <p>
+ * Four spellings were on screen at once — "Thu 01 Oct" (inbox), "Thu 1 Oct" (most screens),
+ * "Tue 29 Sept" (a ledger) and raw ISO in ledger comments. The "Sept" is not a typo anybody
+ * wrote: current CLDR data spells en-GB's short September with four letters, so every
+ * `month: "short"` in the product prints it one month a year. Built from parts, with the month
+ * cut to three letters, so the spelling is the product's and not the ICU release's.
+ * </p>
+ */
+export function clubShortDate(
+  iso: string | number | Date, timezone?: string, options: { weekday?: boolean; year?: boolean } = {},
+): string {
+  const { weekday = true, year = false } = options;
+  const parts = new Intl.DateTimeFormat(CLUB_LOCALE, {
+    weekday: weekday ? "short" : undefined, day: "numeric", month: "short", year: year ? "numeric" : undefined,
+    timeZone: zoneFor(timezone),
+  }).formatToParts(new Date(iso));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return [weekday ? part("weekday") : "", part("day"), part("month").slice(0, 3), year ? part("year") : ""]
+    .filter(Boolean).join(" ");
+}
+
 /** "21:25" — a clock face in the club's day. */
 export function clubClock(iso: string | number | Date, timezone?: string): string {
   return new Date(iso).toLocaleTimeString(CLUB_LOCALE, { ...CLOCK, timeZone: zoneFor(timezone) });
@@ -80,6 +104,8 @@ export function clubClock(iso: string | number | Date, timezone?: string): strin
  */
 export function clubDayAndClock(iso: string | number | Date, timezone?: string): string {
   const date = new Date(iso);
+  // Still ICU's own short month ("Sept") — the doors and monitoring suites assert it. Moving this
+  // onto `clubShortDate` is one line here plus those assertions (F4.10, handed to their lane).
   const day = date.toLocaleDateString(CLUB_LOCALE, {
     weekday: "short", day: "numeric", month: "short", timeZone: zoneFor(timezone),
   });

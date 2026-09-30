@@ -220,6 +220,62 @@ describe("Profile — reading, failing and the page's shape", () => {
   });
 });
 
+describe("Profile — focus after a save, and passkeys in words (F4.7, F4.11)", () => {
+  beforeEach(() => withPasskeys());
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  /**
+   * F4.7 — Save disabled itself the moment the saved name matched the field, and the form was
+   * keyed on the saved name so it remounted: either way the button the member had just pressed
+   * left focus on <body>. It stays focusable (aria-disabled) and in the document.
+   */
+  it("keeps focus on Save after the name is saved", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { method: "PUT", path: "/api/v1/me/profile", body: { ...PROFILE, full_name: "Ada King" } },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+    ]);
+    const field = await screen.findByLabelText("Full name");
+    fireEvent.change(field, { target: { value: "Ada King" } });
+    const save = screen.getByRole("button", { name: "Save" });
+    save.focus();
+    fireEvent.click(save);
+    await waitFor(() => expect(save).toHaveAttribute("aria-disabled", "true"));
+    await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
+    expect(save.isConnected, "the form was remounted under the member").toBe(true);
+    expect(save).toHaveFocus();
+    expect(save).not.toBeDisabled();
+    expect(screen.getByLabelText("Full name")).toHaveValue("Ada King");
+  });
+
+  it("does not send an unchanged name, although Save stays focusable", async () => {
+    const stub = renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+    ]);
+    await screen.findByLabelText("Full name");
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(save);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(stub.calls.some((c) => c.method === "PUT" && c.path === "/api/v1/me/profile")).toBe(false);
+  });
+
+  it("says what kind of passkey it is, not the protocol's word for it", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      {
+        path: "/api/v1/me/webauthn/credentials",
+        body: [{ id: "k1", label: "iPhone", created_at: "2026-09-01T08:00:00Z", last_used_at: null, transports: "internal" }],
+      },
+    ]);
+    const passkeys = await screen.findByRole("region", { name: "Passkeys" });
+    const meta = await within(passkeys).findByText(/Never used/);
+    expect(meta).toHaveTextContent("Added 1 Sep 2026 · Never used · Built into the device");
+    expect(passkeys.textContent).not.toMatch(/internal/);
+  });
+});
+
 describe("Profile — an admin's email alerts (R23)", () => {
   beforeEach(() => withPasskeys());
   afterEach(() => {

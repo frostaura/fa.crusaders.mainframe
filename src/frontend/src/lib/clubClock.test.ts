@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { clubClock, clubDate, clubDayAndClock, clubInstant, clubRangeInWords, clubRowTime } from "./clubClock";
+import { clubClock, clubDate, clubDayAndClock, clubInstant, clubRangeInWords, clubRowTime, clubShortDate } from "./clubClock";
 import { clubZone, clubZoneIsKnown, forgetClubZone, isUsableZone, noteClubZoneFrom, rememberClubZone } from "./clubZone";
 import { api } from "./api";
 import { stubFetch } from "../test/harness";
@@ -261,4 +261,25 @@ describe("the club's zone, as a fact about the club", () => {
   });
 
   afterAll(() => { vi.unstubAllGlobals(); });
+});
+
+/**
+ * F4.10 — one short club date, whatever the ICU release thinks September is called.
+ */
+describe("clubShortDate", () => {
+  const ZONE = "Africa/Johannesburg";
+  it("writes 'Thu 1 Oct' — no leading zero, three-letter month", () => {
+    expect(clubShortDate("2026-10-01T08:00:00Z", ZONE)).toBe("Thu 1 Oct");
+  });
+  it("never writes 'Sept'", () => {
+    expect(clubShortDate("2026-09-29T08:00:00Z", ZONE)).toBe("Tue 29 Sep");
+  });
+  it("drops the weekday and adds the year on request", () => {
+    expect(clubShortDate("2026-09-01T08:00:00Z", ZONE, { weekday: false, year: true })).toBe("1 Sep 2026");
+    expect(clubShortDate("2026-09-01T08:00:00Z", ZONE, { year: true })).toBe("Tue 1 Sep 2026");
+  });
+  it("uses the club's day, not the reader's", () => {
+    // 23:30 UTC on 30 Sep is 01:30 on 1 Oct in Johannesburg.
+    expect(clubShortDate("2026-09-30T23:30:00Z", ZONE)).toBe("Thu 1 Oct");
+  });
 });

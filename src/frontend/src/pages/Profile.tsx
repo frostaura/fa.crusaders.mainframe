@@ -140,8 +140,9 @@ function ProfileSections({ profile }: { profile: MyProfile }) {
       <ProfileCard title={DETAILS_TITLE}>
         <PhotoPicker profile={profile} />
         <div className="border-t border-border pt-4">
-          {/* Keyed on the saved name, so a name the server settles on resets the buffer. */}
-          <NameForm key={profile.full_name ?? ""} profile={profile} />
+          {/* NOT keyed on the saved name (F4.7): a key change remounted the form on every save,
+              and the Save button the member had just pressed left the document with focus on it. */}
+          <NameForm profile={profile} />
         </div>
       </ProfileCard>
       <PasswordCard />
@@ -351,17 +352,33 @@ function CameraBadge() {
   );
 }
 
+/**
+ * The name buffer, following the SAVED name while the member has not typed anything of their own —
+ * what the `key` used to do by remounting the whole form (and taking focus with it, F4.7).
+ */
+function useNameBuffer(saved: string) {
+  const [fullName, setFullName] = useState(saved);
+  const [basis, setBasis] = useState(saved);
+  if (basis !== saved) {
+    // Adjusting state while rendering (React's documented pattern): the server settled on a name.
+    setBasis(saved);
+    if (fullName.trim() === basis.trim()) setFullName(saved);
+  }
+  return [fullName, setFullName] as const;
+}
+
 function NameForm({ profile }: { profile: MyProfile }) {
   const { setLocal } = useProfile();
   // Local-only edits for the name; commits via Save.
-  const [fullName, setFullName] = useState(profile.full_name ?? "");
+  const [fullName, setFullName] = useNameBuffer(profile.full_name ?? "");
   const trimmedName = fullName.trim();
   // `>` rather than `<`: lizard reads a bare `<` in a .tsx file as a JSX tag and swallows the file.
   const nameTooShort = NAME_MIN > trimmedName.length;
   const nameUnchanged = trimmedName === (profile.full_name ?? "").trim();
+  const blocked = nameUnchanged || nameTooShort;
 
   const save = useAsyncAction(() => endpoints.meUpdateProfile({ fullName: trimmedName }), {
-    success: (r) => setLocal({ ...profile, full_name: r.full_name }),
+    success: (r) => { setFullName(r.full_name ?? ""); setLocal({ ...profile, full_name: r.full_name }); },
     toast: { success: NAME_SAVED, action: "save your name", codes: { full_name_invalid: NAME_INVALID } },
   });
 
@@ -381,10 +398,12 @@ function NameForm({ profile }: { profile: MyProfile }) {
         />
         <FieldDescription>{NAME_HINT}</FieldDescription>
       </Field>
-      {/* Disabled only while the name is not one the server would take — the rule is stated
-          right above it. While it saves it is pending, never disabled, so focus stays put. */}
+      {/* Unavailable only while the name is not one the server would take — the rule is stated
+          right above it. `aria-disabled`, never `disabled` (F4.7): a save makes the name
+          "unchanged", and a button that disables itself under the member's finger drops focus on
+          <body>. The submit handler above is what refuses it. */}
       <div className="flex justify-end">
-        <Button type="submit" pending={save.pending} disabled={nameUnchanged || nameTooShort}>
+        <Button type="submit" pending={save.pending} aria-disabled={blocked || undefined} className={blocked && !save.pending ? "opacity-50" : undefined}>
           {NAME_SAVE}
         </Button>
       </div>

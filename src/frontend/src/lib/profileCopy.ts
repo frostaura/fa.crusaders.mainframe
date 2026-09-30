@@ -1,3 +1,5 @@
+import { clubShortDate } from "./clubClock";
+
 /**
  * The words on `/profile` (P3). Tests query by these constants, so a copy change is one edit
  * here rather than a hunt through assertions.
@@ -57,16 +59,28 @@ export function passkeyRemoveConsequence(label: string): string {
   return `Remove “${label}”? You won't be able to sign in with it any more. Your password and other passkeys still work.`;
 }
 
-/** "Added 01 Sep 2026 · Last used 14 Sep · internal". */
-export function passkeyMeta(created: string, lastUsed: string | null, transports: string | null): string {
-  const used = lastUsed ? ` · Last used ${shortDate(lastUsed, false)}` : " · Never used";
-  return `Added ${shortDate(created, true)}${used}${transports ? ` · ${transports}` : ""}`;
+/**
+ * What kind of passkey this is, in words (F4.11) — the WebAuthn transport list ("internal",
+ * "hybrid", "usb,nfc") is protocol vocabulary and was printed as-is. Unknown values say nothing.
+ */
+export function passkeyKind(transports: string | null): string | null {
+  const list = (transports ?? "").split(/[\s,]+/).filter(Boolean);
+  if (list.includes("internal")) return "Built into the device";
+  if (list.includes("hybrid")) return "On a phone nearby";
+  if (list.some((t) => t === "usb" || t === "nfc" || t === "ble")) return "Security key";
+  return null;
 }
 
+/** "Added 1 Sep 2026 · Last used 14 Sep · Built into the device". */
+export function passkeyMeta(created: string, lastUsed: string | null, transports: string | null): string {
+  const used = lastUsed ? ` · Last used ${shortDate(lastUsed, false)}` : " · Never used";
+  const kind = passkeyKind(transports);
+  return `Added ${shortDate(created, true)}${used}${kind ? ` · ${kind}` : ""}`;
+}
+
+/** "1 Sep 2026" / "14 Sep" — the club's short date (F4.10), no weekday. */
 function shortDate(iso: string, withYear: boolean): string {
-  return new Date(iso).toLocaleDateString("en-GB", withYear
-    ? { day: "2-digit", month: "short", year: "numeric" }
-    : { day: "2-digit", month: "short" });
+  return clubShortDate(iso, undefined, { weekday: false, year: withYear });
 }
 
 /* Sign out everywhere (member-code §10) — every session ends, this one included. */
