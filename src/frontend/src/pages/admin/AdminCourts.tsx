@@ -133,22 +133,26 @@ function CourtList({ courts, onEdit }: { courts: AdminCourt[]; onEdit: (court: A
 
 function CourtRow({ court, onEdit }: { court: AdminCourt; onEdit: () => void }) {
   return (
-    <li className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
+    // Wraps (R3 X-4): at 200% text the badge and Edit went past a phone's edge; now they drop
+    // under the name instead.
+    <li className="flex flex-wrap items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
       <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-bg-muted font-display text-lg font-bold tabular-nums text-text-primary">
         <span aria-hidden="true">{court.court_number}</span>
         <span className="sr-only">{COURTS_COPY.number(court.court_number)}</span>
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-20">
         <p className="truncate text-sm font-semibold text-text-primary">{court.name}</p>
         <p className="text-sm tabular-nums text-text-secondary">
           {COURTS_COPY.price(court.slice_price_credits)}
           <span className="hidden sm:inline"> · {court.court_type}</span>
         </p>
       </div>
-      <Badge tone={court.is_active ? "success" : "neutral"}>{court.is_active ? COURTS_COPY.inUse : COURTS_COPY.notInUse}</Badge>
-      <Button variant="outline" size="sm" aria-label={COURTS_COPY.editLabel(court.name)} onClick={onEdit}>
-        {COURTS_COPY.edit}
-      </Button>
+      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-3">
+        <Badge tone={court.is_active ? "success" : "neutral"} className="whitespace-nowrap">{court.is_active ? COURTS_COPY.inUse : COURTS_COPY.notInUse}</Badge>
+        <Button variant="outline" size="sm" aria-label={COURTS_COPY.editLabel(court.name)} onClick={onEdit}>
+          {COURTS_COPY.edit}
+        </Button>
+      </div>
     </li>
   );
 }

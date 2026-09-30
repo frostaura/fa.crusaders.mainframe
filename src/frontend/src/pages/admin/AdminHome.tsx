@@ -322,7 +322,7 @@ function NeedsAttention({ attention }: { attention: AdminAttention }) {
 function QuickLink({ item, attention }: { item: AdminNavItem; attention: AdminAttention }) {
   const ItemIcon = item.icon;
   return (
-    <li className="flex">
+    <li className="flex min-w-0">
       <Interactable asChild surface="card" watermark>
         <Link
           to={item.path}
@@ -366,7 +366,9 @@ function QuickLinkGroup({ label, children }: { label: string; children: ReactNod
   return (
     <div className="flex flex-col gap-3">
       <h3 id={id} className={typography({ variant: "overline" })}>{label}</h3>
-      <ul aria-labelledby={id} className="grid gap-3 sm:grid-cols-2">{children}</ul>
+      {/* `grid-cols-1` is minmax(0, 1fr): an implicit column is floored at its longest word, and
+          at 200% text on a phone that pushed every card past the screen (R3 X-4). */}
+      <ul aria-labelledby={id} className="grid grid-cols-1 gap-3 sm:grid-cols-2">{children}</ul>
     </div>
   );
 }

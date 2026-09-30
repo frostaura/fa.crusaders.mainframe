@@ -120,7 +120,8 @@ export function AdminSchedulesPage() {
     <PageHeader
       title="Repeating bookings"
       actions={creating ? null : (
-        <Button onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
+        // Wraps rather than widening the page at 200% text (R3 X-4).
+        <Button className="!h-auto min-h-touch whitespace-normal py-2" onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
           Create a repeating booking
         </Button>
       )}

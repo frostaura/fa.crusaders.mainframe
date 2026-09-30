@@ -109,7 +109,7 @@ function BookingPagesView(props: {
             row={row}
             zone={zone}
             action={(
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button asChild variant="outline" size="sm">
                   <Link
                     to={`/bookings/${row.booking_id}`}

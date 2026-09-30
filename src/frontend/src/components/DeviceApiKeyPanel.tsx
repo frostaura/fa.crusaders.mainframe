@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { endpoints, type DeviceApiKey } from "../lib/api";
+import { ApiError, endpoints, type DeviceApiKey } from "../lib/api";
+import { rateLimitedSentence } from "../lib/errors";
 import { clubDayAndClock } from "../lib/clubClock";
 import { describeDeviceError } from "../lib/deviceErrors";
 import { ConfirmDialog } from "./admin/ConfirmDialog";
@@ -151,14 +152,15 @@ function PairingNote() {
 export function DeviceApiKeyPanel() {
   const toast = useToast();
   const [key, setKey] = useState<DeviceApiKey | null>(null);
-  const [failed, setFailed] = useState(false);
+  // The error itself, not a flag (R3 V-10): a 429 is the club being busy, not a missing API.
+  const [failed, setFailed] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
       setKey(await endpoints.adminDeviceApiKey());
-      setFailed(false);
-    } catch {
-      setFailed(true);
+      setFailed(null);
+    } catch (err) {
+      setFailed(err ?? new Error("unread"));
     }
   }, []);
 
@@ -196,10 +198,8 @@ export function DeviceApiKeyPanel() {
       </CardHeader>
 
       <CardContent className="flex flex-col gap-4">
-        {failed && (
-          <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">
-            Could not read the club&apos;s device key. Reload the page; if it keeps failing, the API is not serving it yet.
-          </p>
+        {failed !== null && (
+          <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">{keyReadFailure(failed)}</p>
         )}
 
         {key && (
@@ -212,8 +212,10 @@ export function DeviceApiKeyPanel() {
             {/* overflow-wrap:anywhere — at a 32px root on a 320px phone "Regenerate" alone is
                 wider than the card, and a word that cannot break pushes the page sideways. */}
             <div className="flex flex-col gap-2 rounded-lg border border-danger-soft p-3 [overflow-wrap:anywhere] sm:flex-row sm:items-center sm:gap-4">
+              {/* `sm:shrink-0` (R3 V-5): beside the sentence, the anywhere-wrap let the sentence
+                  squeeze the button until "Regenerate" broke mid-word at 768 and 1280. */}
               <ConfirmDialog
-                trigger={<Button variant="danger-soft" className="h-auto max-w-full self-start whitespace-normal py-2">Regenerate key</Button>}
+                trigger={<Button variant="danger-soft" className="!h-auto max-w-full self-start whitespace-normal py-2 max-sm:w-full sm:shrink-0">Regenerate key</Button>}
                 title="Regenerate the club's device key?"
                 description={REGENERATE_CONSEQUENCE}
                 confirmLabel="Reflash every board after this"
@@ -232,6 +234,14 @@ export function DeviceApiKeyPanel() {
       </CardContent>
     </Card>
   );
+}
+
+/** Why the key could not be read — a rate limit is busy, not an API that lacks the route (R3 V-10). */
+function keyReadFailure(err: unknown): string {
+  if (err instanceof ApiError && err.status === 429) {
+    return `Could not read the club's device key: ${rateLimitedSentence(Number(err.detail("retry_after_seconds")) || null)}`;
+  }
+  return "Could not read the club's device key. Reload the page; if it keeps failing, the API is not serving it yet.";
 }
 
 const REGENERATE_CONSEQUENCE

@@ -168,7 +168,8 @@ export default function AdminLedgerPage() {
             options={TYPE_OPTIONS}
             onChange={(next) => setFilter("type", next)}
           />
-          <Field controlId="ledger-search" className="min-w-48 flex-[2_1_14rem]">
+          {/* No rem floor (R3 X-4): min-w-48 was 384px at 200% text, wider than a phone. */}
+          <Field controlId="ledger-search" className="min-w-0 flex-[2_1_14rem]">
             <FieldLabel>Search (name)</FieldLabel>
             <div className="relative">
               <MagnifyingGlass size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
@@ -204,7 +205,9 @@ export default function AdminLedgerPage() {
         skeleton={<TableSkeleton rows={6} />}
       >
         <Card className="gap-0 pb-0 sm:gap-0 sm:pb-0" aria-busy={loading || undefined}>
-          <CardContent className="grid shrink-0 grid-cols-2 gap-3 pb-4 text-sm sm:grid-cols-4">
+          {/* As many columns as fit a 9rem figure (R3 X-4): two fixed columns at 200% text on a
+              phone were narrower than "+68473.00", and the page scrolled sideways. */}
+          <CardContent className="grid shrink-0 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-3 pb-4 text-sm">
             {/*
               Every signed figure through `formatSignedCredits`, never a sign composed around
               `formatCredits`.

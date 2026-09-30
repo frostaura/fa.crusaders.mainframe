@@ -340,13 +340,17 @@ export default function AdminWebhooksPage() {
       {createdSecret && <SecretBlock secret={createdSecret} onDismiss={() => setCreatedSecret(null)} />}
 
       <Card>
-        <CardHeader>
+        {/* On a phone the action goes UNDER the heading (R3 X-4): beside it, the heading's longest
+            word plus "New endpoint" at 200% text were wider than the card and the page scrolled. */}
+        <CardHeader className="max-sm:!grid-cols-1">
           <CardTitle asChild><h2>Endpoints</h2></CardTitle>
           <CardDescription>Where the club&apos;s events are sent, and whether each one is answering.</CardDescription>
-          <CardAction>
+          <CardAction className="max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-3 max-sm:justify-self-start">
             <Button
               onClick={() => { setCreating(true); setCreatedSecret(null); }}
               icon={<Plus aria-hidden="true" />}
+              // Wraps rather than widening the page at 200% text (R3 X-4).
+              className="!h-auto min-h-touch whitespace-normal py-2"
               /*
                * Not offered while the list is unknown. Leaving it live directly above a panel
                * that says "do not create one until this list loads" is an instruction and its
@@ -912,8 +916,8 @@ function VariableCatalogCard() {
         <ul aria-label="Events and the variables each carries" className="flex flex-col divide-y divide-border rounded-lg border border-border sm:hidden">
           {EVENTS.map((e) => (
             <li key={e.name} className="flex flex-col gap-1.5 p-3">
-              <span className="font-mono text-xs font-semibold text-text-primary">{e.name}</span>
-              <span className="text-sm text-text-secondary">{e.description}</span>
+              <span className="font-mono text-xs font-semibold text-text-primary [overflow-wrap:anywhere]">{e.name}</span>
+              <span className="text-sm text-text-secondary [overflow-wrap:anywhere]">{e.description}</span>
               <div className="flex flex-wrap gap-1.5">{e.vars.map((v) => <VarChip key={v} name={v} />)}</div>
             </li>
           ))}
@@ -949,7 +953,8 @@ function VariableCatalogCard() {
 
 function VarChip({ name }: { name: string }) {
   return (
-    <span className="rounded-md border border-border bg-bg-muted px-2 py-0.5 font-mono text-xs text-text-secondary">
+    // May break anywhere (R3 X-4): "{amount_charged_credits}" at 200% text was wider than a phone.
+    <span className="max-w-full rounded-md border border-border bg-bg-muted px-2 py-0.5 font-mono text-xs text-text-secondary [overflow-wrap:anywhere]">
       {`{${name}}`}
     </span>
   );

@@ -285,7 +285,7 @@ function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: s
         <dt className={typography({ variant: "overline" })}>{MEMBER_COPY.balance}</dt>
         <dd
           data-testid="member-balance"
-          className={cn(typography({ variant: "display" }), "text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
+          className={cn(typography({ variant: "display" }), "whitespace-nowrap text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
         >
           {formatCredits(detail.balance_credits)}
         </dd>

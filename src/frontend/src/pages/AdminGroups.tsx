@@ -256,7 +256,8 @@ export function AdminGroupsPage() {
 
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => openSheet("", "settings")} icon={<Plus aria-hidden="true" />}>Create a group</Button>
-        <Button variant="outline" onClick={() => { setMemberPreview(true); setPreviewBasis(clubKey); }}>
+        {/* Wraps rather than widening the page at 200% text (R3 X-4). */}
+        <Button variant="outline" className="!h-auto min-h-touch whitespace-normal py-2" onClick={() => { setMemberPreview(true); setPreviewBasis(clubKey); }}>
           Preview for one member
         </Button>
       </div>

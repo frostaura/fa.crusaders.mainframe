@@ -341,7 +341,9 @@ function NightResult(props: {
         <NightTimeline rows={rows} subjectName={subjectName} timezone={timezone} />
         <div className="flex flex-wrap items-center gap-3">
           <NightCsvButton userId={userId} day={day} />
-          <p className="min-w-0 flex-1 text-xs text-text-muted">{NIGHT_EXPORT_NOTE}</p>
+          {/* A real basis (R3 V-7): with flex-1's zero basis it never wrapped, and at 320 the
+              note was squeezed into a word-wide column beside the button. */}
+          <p className="min-w-0 flex-1 basis-60 text-xs text-text-muted">{NIGHT_EXPORT_NOTE}</p>
         </div>
       </div>
     </StateBlock>
