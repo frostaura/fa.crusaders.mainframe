@@ -436,6 +436,11 @@ public sealed partial class PlayersService
         {
             var removal = await PlayerNotices.ChangedAsync(
                 _db, game.Booking, seat, game.Settings, $"{PlayerNotices.RemovedKeyPrefix}{seat.Id:N}", ct);
+            // Review round 2, B-8: the club took them off, not the organiser — the mail says so.
+            if (options?.ClubRemoval is not null && removal.Payload is GameChangedPayload told)
+            {
+                removal = removal with { Payload = told with { ByClub = true }, Headline = $"The club took you off {told.CourtName}, {told.StartsAtLocal}" };
+            }
             MemberNotices.Stage(_db, _tenant.TenantId,
                 await PlayerNotices.CollapsedAsync(_db, removal, PlayerNotices.RemovedKeyPrefix, game.Settings, ct), game.Settings);
         }

@@ -105,7 +105,8 @@ public sealed class PlayersAdminService
 
         await RecordAsync(AdminChangeActions.BookingPlayerRemoved, act, seat,
             new { status = "removed", overdraft_authorised = act.AllowNegativeBalance }, ct);
-        return await WithReturnStateAsync(await _players.RemoveSeatAsync(game, seat.Id, DateTimeOffset.UtcNow, ct, OptionsFor(act, seat)), seat.Id, ct);
+        var options = OptionsFor(act, seat) with { ClubRemoval = new ClubRemoval(seat.Id, act.Reason) };
+        return await WithReturnStateAsync(await _players.RemoveSeatAsync(game, seat.Id, DateTimeOffset.UtcNow, ct, options), seat.Id, ct);
     }
 
     /// <summary>
@@ -196,7 +197,8 @@ public sealed class PlayersAdminService
         {
             collected = await _shares.CollectAsync(game!.Booking.Id, seat.Id, act.ActorId, (tracked, delta, before) =>
                 RecordAsync(AdminChangeActions.BookingShareCollected, act, tracked,
-                    new { collected_credits = delta, balance_before_credits = before, balance_after_credits = before - delta }, ct), ct);
+                    new { collected_credits = delta, balance_before_credits = before, balance_after_credits = before - delta }, ct), ct,
+                act.Reason);
         }
         catch (DbUpdateException)
         {

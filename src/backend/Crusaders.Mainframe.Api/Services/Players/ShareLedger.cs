@@ -11,7 +11,17 @@ namespace Crusaders.Mainframe.Api.Services;
 public sealed record ShareMove(Guid ParticipantId, Guid PartnerUserId, Guid OrganiserUserId, decimal Delta, int Seq);
 
 /// <summary>Who is reconciling, and whether one seat may be collected below zero (an admin's explicit collect).</summary>
-public sealed record ReconcileOptions(Guid ActorUserId, Guid? OverdraftSeatId = null);
+/// <param name="ClubRemoval">The club took this seat off the game (an admin's remove): its return's receipts say so, with the reason (review round 2, B-8).</param>
+public sealed record ReconcileOptions(Guid ActorUserId, Guid? OverdraftSeatId = null, ClubRemoval? ClubRemoval = null);
+
+/// <summary>The club removed <paramref name="SeatId"/>'s member, for <paramref name="Reason"/>.</summary>
+public sealed record ClubRemoval(Guid SeatId, string? Reason);
+
+/// <summary>
+/// The club's hand in a share movement (B8, review round 2 B-8): a collect (with the partner's
+/// balance after it) or a removal, and the reason the admin recorded — both receipts say it.
+/// </summary>
+public sealed record ClubReceipt(bool Collected, decimal? BalanceAfter, string? Reason);
 
 /// <summary>
 /// Moves each partner's share of a split booking to or from the organiser until what they have
@@ -271,7 +281,7 @@ public sealed class ShareLedger
 
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
-        await StageReceiptsAsync(now.Booking, move, ct);
+        await StageReceiptsAsync(now.Booking, move, ct, RemovalReceipt(options, move));
         await _ledger.PostManyAsync(Pair(now.Booking, move, options.ActorUserId), ct);
         await payerLock.CommitAsync(ct);
         return move;
@@ -313,6 +323,13 @@ public sealed class ShareLedger
 
     private static string Cr(decimal amount) => MoneyFormat.Credits(amount);
 
+    /// <summary>A return caused by the club's removal of THIS seat is told as the club's (review round 2, B-8); anything else is not.</summary>
+    private static ClubReceipt? RemovalReceipt(ReconcileOptions options, ShareMove move)
+    {
+        if (options.ClubRemoval is not { } removal || removal.SeatId != move.ParticipantId || move.Delta >= 0m) return null;
+        return new ClubReceipt(false, null, removal.Reason);
+    }
+
     /// <summary>The seat's return has posted, or is no longer due: it is not waiting any more.</summary>
     /// <remarks>The organiser's owed-back falls with it, so their live wallet is told.</remarks>
     private async Task ClearWaitingAsync(Guid seatId, Guid organiserId, CancellationToken ct)
@@ -349,7 +366,8 @@ public sealed class ShareLedger
     /// written either).
     /// </summary>
     public async Task<Collected?> CollectAsync(
-        Guid bookingId, Guid seatId, Guid actorUserId, Func<BookingParticipant, decimal, decimal, Task> record, CancellationToken ct)
+        Guid bookingId, Guid seatId, Guid actorUserId, Func<BookingParticipant, decimal, decimal, Task> record, CancellationToken ct,
+        string? reason = null)
     {
         var partner = await _db.BookingParticipants.AsNoTracking().Where(p => p.Id == seatId).Select(p => p.UserId).FirstOrDefaultAsync(ct);
         if (partner is not { } partnerId) return null;
@@ -372,7 +390,7 @@ public sealed class ShareLedger
         var before = await _ledger.GetBalanceAsync(partnerId, ct);
         var move = new ShareMove(seatId, partnerId, PayerOf(booking), delta, await NextSeqAsync(seatId, partnerId, ct));
         await record(seat, delta, before);
-        await StageReceiptsAsync(booking, move, ct, clubCollect: before - delta);
+        await StageReceiptsAsync(booking, move, ct, new ClubReceipt(true, before - delta, reason));
         try
         {
             await _ledger.PostManyAsync(Pair(booking, move, actorUserId), ct);
@@ -422,11 +440,12 @@ public sealed class ShareLedger
     /// Both receipts, staged in the pair's own save — one per member, keyed on the pair, so a pair
     /// that rolls back leaves no receipt and a committed one cannot lose it.
     /// </summary>
-    /// <param name="clubCollect">
-    /// Set when the CLUB collected (an admin's collect): the partner's balance after it. Both
-    /// receipts then say the club did it, and the partner's says where their balance stands (B8).
+    /// <param name="club">
+    /// Set when the CLUB moved it: a collect (the partner's balance after it — both receipts say the
+    /// club did it, and the partner's where their balance stands, B8) or a removal's return; either
+    /// way with the admin's reason (review round 2, B-8).
     /// </param>
-    private async Task StageReceiptsAsync(Booking booking, ShareMove move, CancellationToken ct, decimal? clubCollect = null)
+    private async Task StageReceiptsAsync(Booking booking, ShareMove move, CancellationToken ct, ClubReceipt? club = null)
     {
         var settings = await _settings.GetAsync(ct);
         var game = await GameText.ForAsync(_db, booking, settings, ct);
@@ -444,13 +463,15 @@ public sealed class ShareLedger
         var heldUntil = organiserSide == ShareDirection.Received
             ? GameText.Local(PlayerSettings.ShareDeadline(booking, settings), settings)
             : null;
-        var byClub = clubCollect is not null;
+        var byClub = club?.Collected == true;
+        var removed = club is { Collected: false };
+        var reason = club?.Reason?.Trim() is { Length: > 0 } r ? r : null;
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
-                ByClub: byClub, BalanceAfterCredits: clubCollect),
+                ByClub: byClub, BalanceAfterCredits: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason),
             move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub), settings);
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
-                HeldUntilLocal: heldUntil, ByClub: byClub),
+                HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason),
             move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub), settings);
     }
 

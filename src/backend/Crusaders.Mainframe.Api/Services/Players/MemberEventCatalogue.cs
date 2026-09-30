@@ -13,9 +13,12 @@ public sealed record InvitePayload(
 /// <param name="HeldUntilLocal">On a share an organiser receives: when it stops being held (B12). Null on older rows.</param>
 /// <param name="ByClub">The club collected it (B8). False on older rows.</param>
 /// <param name="BalanceAfterCredits">The partner's balance after a club collect (B8).</param>
+/// <param name="ClubRemoved">The club took the partner off the game; this is that removal's return (review round 2, B-8).</param>
+/// <param name="ClubReason">The reason the admin recorded for a club collect or removal (B-8). Null on older rows.</param>
 public sealed record SharePayload(
     Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits,
-    string? HeldUntilLocal = null, bool ByClub = false, decimal? BalanceAfterCredits = null);
+    string? HeldUntilLocal = null, bool ByClub = false, decimal? BalanceAfterCredits = null,
+    bool ClubRemoved = false, string? ClubReason = null);
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
 public sealed record ClubSeatPayload(
@@ -41,7 +44,7 @@ public sealed record ResultToConfirmPayload(
 
 public sealed record GameChangedPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent,
-    Guid? SeatId = null);
+    Guid? SeatId = null, bool ByClub = false);
 
 /// <summary>Everything one member mail needs.</summary>
 public sealed record MemberMailContext(ClubIdentity Club, string To, AdminNotification Row, string BaseUrl, TenantSettingsView Settings)
@@ -158,7 +161,11 @@ public static class MemberEventCatalogue
         var p = c.Payload<SharePayload>();
         return EmailTemplates.ShareMoved(c.Club, c.To, new ShareMovement(
             p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, c.BookingUrl(p.BookingId),
-            p.HeldUntilLocal, p.ByClub, p.BalanceAfterCredits));
+            p.HeldUntilLocal, p.ByClub, p.BalanceAfterCredits)
+        {
+            ClubRemoved = p.ClubRemoved,
+            ClubReason = p.ClubReason,
+        });
     }
 
     private static EmailMessage ComposeClubSeat(MemberMailContext c)
@@ -206,6 +213,9 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<GameChangedPayload>();
         return EmailTemplates.PlayersChanged(c.Club, c.To, new PlayersChange(
-            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.Removed, p.NewShareCredits, p.NeedsConsent, c.BookingUrl(p.BookingId)));
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.Removed, p.NewShareCredits, p.NeedsConsent, c.BookingUrl(p.BookingId))
+        {
+            ByClub = p.ByClub,
+        });
     }
 }

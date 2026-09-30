@@ -29,7 +29,14 @@ public enum ShareDirection
 /// <param name="BalanceAfterCredits">The partner's balance after a club collect — said when it is below zero (B8).</param>
 public sealed record ShareMovement(
     ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, string BookingUrl,
-    string? HeldUntilLocal = null, bool ByClub = false, decimal? BalanceAfterCredits = null);
+    string? HeldUntilLocal = null, bool ByClub = false, decimal? BalanceAfterCredits = null)
+{
+    /// <summary>The club took the partner off the game and this is the share going back (review round 2, B-8).</summary>
+    public bool ClubRemoved { get; init; }
+
+    /// <summary>The reason the admin recorded for a club collect or removal — the adjust mail always carried one (B-8).</summary>
+    public string? ClubReason { get; init; }
+}
 
 /// <summary>
 /// The club put the reader on a game (an admin's add) or accepted one for them — review round 1,
@@ -55,7 +62,11 @@ public sealed record ShareReturnWaitingNotice(
 /// <summary>A change to a game the reader is in — they were taken off it, or their share moved.</summary>
 public sealed record PlayersChange(
     string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent,
-    string BookingUrl);
+    string BookingUrl)
+{
+    /// <summary>The club, not the organiser, took the reader off (review round 2, B-8).</summary>
+    public bool ByClub { get; init; }
+}
 
 /// <summary>
 /// The messages a game with more than one player sends (D11): the invite, the receipt for every
@@ -118,7 +129,9 @@ public static partial class EmailTemplates
             new(m.Direction is ShareDirection.Paid or ShareDirection.Returned ? "Taken from your balance" : "Added to your balance", Cr(m.AmountCredits)),
         };
         if (m.HeldUntilLocal is { } held) facts.Add(new("Held until", held));
-        var blocks = new List<EmailBlock> { new Paragraph(ShareSentence(m)), new Facts(facts) };
+        var blocks = new List<EmailBlock> { new Paragraph(ShareSentence(m)) };
+        if (m.ClubReason is { Length: > 0 } reason) blocks.Add(new Callout(CalloutTone.Info, $"Reason given by the club: {reason}"));
+        blocks.Add(new Facts(facts));
 
         // B12: received shares are held to the deadline in case one has to go back (D11) — say so,
         // or "added to your balance" reads as money to spend tonight.
@@ -254,9 +267,7 @@ public static partial class EmailTemplates
     {
         var blocks = new List<EmailBlock>
         {
-            new Paragraph(c.Removed
-                ? $"{c.OrganiserName} has taken you off the booking for {c.CourtName} at {c.StartsAtLocal}. Any share you paid comes back to you."
-                : $"{c.OrganiserName} has changed how {c.CourtName} at {c.StartsAtLocal} is split."),
+            new Paragraph(ChangeSentence(c)),
         };
         if (!c.Removed && c.NewShareCredits is { } share) blocks.Add(new Facts([new FactRow("Your share now", Cr(share))]));
         if (c.NeedsConsent) blocks.Add(new Callout(CalloutTone.Warning, "Your share went up. Nothing more is taken until you accept the new figure."));
@@ -264,9 +275,22 @@ public static partial class EmailTemplates
         return blocks;
     }
 
+    private static string ChangeSentence(PlayersChange c)
+    {
+        if (c.Removed && c.ByClub)
+        {
+            return $"The club has taken you off the booking {c.OrganiserName} made for {c.CourtName} at {c.StartsAtLocal}. Any share you paid comes back to you.";
+        }
+        return c.Removed
+            ? $"{c.OrganiserName} has taken you off the booking for {c.CourtName} at {c.StartsAtLocal}. Any share you paid comes back to you."
+            : $"{c.OrganiserName} has changed how {c.CourtName} at {c.StartsAtLocal} is split.";
+    }
+
     private static string ShareSubject(ShareMovement m)
     {
         if (m.ByClub && m.Direction == ShareDirection.Paid) return $"The club collected your share — {m.CourtName}";
+        if (m.ClubRemoved && m.Direction == ShareDirection.Refunded) return $"The club took you off the game — {m.CourtName}";
+        if (m.ClubRemoved) return $"The club took {m.OtherName} off your game — {m.CourtName}";
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"Share paid — {m.CourtName}";
@@ -279,6 +303,7 @@ public static partial class EmailTemplates
     private static string ShareHeading(ShareMovement m)
     {
         if (m.ByClub && m.Direction == ShareDirection.Paid) return "The club collected your share";
+        if (m.ClubRemoved) return "Taken off by the club";
         switch (m.Direction)
         {
             case ShareDirection.Paid: return "You paid your share";
@@ -291,6 +316,7 @@ public static partial class EmailTemplates
     private static string ShareSentence(ShareMovement m)
     {
         if (m.ByClub) return ClubShareSentence(m);
+        if (m.ClubRemoved) return ClubRemovedSentence(m);
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"You paid {Cr(m.AmountCredits)} to {m.OtherName} for your share of the court.";
@@ -298,6 +324,17 @@ public static partial class EmailTemplates
             case ShareDirection.Refunded: return $"{Cr(m.AmountCredits)} of your share came back from {m.OtherName}.";
             default: return $"{Cr(m.AmountCredits)} of {m.OtherName}'s share went back to them from your balance.";
         }
+    }
+
+    /// <summary>
+    /// Review round 2, B-8: the club REMOVED the partner, and their share went back. "X of your share
+    /// came back from Sam" told the partner the organiser had done it; the club did.
+    /// </summary>
+    private static string ClubRemovedSentence(ShareMovement m)
+    {
+        return m.Direction == ShareDirection.Refunded
+            ? $"The club took you off the game {m.OtherName} booked, and {Cr(m.AmountCredits)} of your share came back to your balance."
+            : $"The club took {m.OtherName} off your game, and {Cr(m.AmountCredits)} of their share went back to them from your balance.";
     }
 
     /// <summary>B8: a share the CLUB collected — "You paid your share…" told the partner they had done something they had not.</summary>
