@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, endpoints, refreshSession, setPasswordChangeRequiredHandler, setUnauthorizedHandler, TOKEN_KEY, tokenStore, type WhoAmI } from "./api";
+import { ApiError, endpoints, endSessionGeneration, refreshIsOwed, refreshSession, sessionGeneration, setPasswordChangeRequiredHandler, setUnauthorizedHandler, TOKEN_KEY, tokenStore, type WhoAmI } from "./api";
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
 import { forgetLastKnown } from "./lastKnown";
@@ -155,16 +155,27 @@ function isAuthRefusal(err: unknown): boolean {
  * (an anonymous probe is allowed its 401), so a phone opened after the access token lapsed would
  * otherwise go straight to /login with a perfectly good refresh cookie in the jar. One exchange,
  * one more probe; a second refusal is the answer.
+ *
+ * <p>
+ * C2 — an exchange the club did not answer (5xx, 429, timeout, no network) throws ITS error, which
+ * is not an auth refusal, so the provider goes to the outage state and keeps the token. Before
+ * this, a redeploy's 503 on the refresh call signed a member out as surely as a revoked session.
+ * </p>
  */
 async function whoamiRefreshingOnce(token: string): Promise<WhoAmI> {
-  let first: WhoAmI;
+  let first: WhoAmI | null = null;
   try {
     first = await endpoints.whoami();
+    if (first.is_authenticated) return first;
   } catch (err) {
-    if (!isAuthRefusal(err) || !(await refreshSession(token))) throw err;
-    return endpoints.whoami();
+    if (!isAuthRefusal(err)) throw err;
   }
-  if (first.is_authenticated || !(await refreshSession(token))) return first;
+  const outcome = await refreshSession(token);
+  if (outcome.kind === "transient") throw outcome.error;
+  if (outcome.kind === "ended") {
+    if (first) return first;
+    throw new ApiError(401, { error: "session_ended" });
+  }
   return endpoints.whoami();
 }
 
@@ -198,6 +209,9 @@ function useCrossTabSessionEnd(statusRef: { current: AuthState["status"] }, endS
       // `key === null` is `localStorage.clear()` — the whole store went, token included.
       if (e.key !== null && e.key !== TOKEN_KEY) return;
       if (e.newValue !== null) return;
+      // C1 — before anything else, and whatever this tab's status: an exchange in flight here
+      // must not store its reply over another tab's sign-out.
+      endSessionGeneration(false);
       // A tab still bootstrapping finds out for itself: its whoami goes out token-less and the
       // api client's session-ended handler catches the refusal.
       if (statusRef.current === "anonymous" || statusRef.current === "loading") return;
@@ -320,6 +334,8 @@ function forgetIdentity(): void {
  * the offline caches, and (through `forgetIdentity`) the member code's key.
  */
 function endLocally(): void {
+  // C1 — first, so an exchange whose reply lands after this line is discarded, in every tab.
+  endSessionGeneration(true);
   tokenStore.clear();
   void clearOfflineCache();
   forgetIdentity();
@@ -340,9 +356,64 @@ function endLocally(): void {
  * </p>
  */
 function endTakenAway(): void {
+  endSessionGeneration(false);
   tokenStore.clear();
   void clearOfflineCache();
 }
+
+/**
+ * While authenticated, refresh the access token a minute before it expires, so an active session
+ * never breaks under the member — and, after a transient failure (C2), try again when the tab
+ * comes back into view rather than waiting for a request to be refused.
+ *
+ * <p>
+ * C1 — a reply that lands after a sign-out (here or in another tab) is discarded, never stored:
+ * the generation is read before the call and compared when it answers. Only a 401 from the
+ * refresh ends the session (the api client's handler does that); anything else is retried later.
+ * Its own hook for the provider's length gate.
+ * </p>
+ */
+function useProactiveRefresh(status: AuthState["status"]) {
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let cancelled = false;
+    let timer: number | null = null;
+    const schedule = (delay: number) => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { void run(); }, delay);
+    };
+    const run = async () => {
+      if (cancelled) return;
+      const generation = sessionGeneration();
+      try {
+        const r = await endpoints.refresh();
+        if (cancelled || generation !== sessionGeneration() || !tokenStore.get()) return;
+        tokenStore.set(r.access_token);
+        schedule(nextRefreshDelayMs(r.access_token));
+      } catch {
+        // A 401 has already ended the session through the api client's handler. Anything else is
+        // the club not answering: keep the token and try again in a while.
+        if (!cancelled) schedule(RETRY_REFRESH_MS);
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !refreshIsOwed()) return;
+      const token = tokenStore.get();
+      if (token) void refreshSession(token, { now: true });
+    };
+    const t = tokenStore.get();
+    if (t) schedule(nextRefreshDelayMs(t));
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [status]);
+}
+
+/** After a proactive refresh the club did not answer: try again in 30 s. */
+const RETRY_REFRESH_MS = 30_000;
 
 type LoginAnswer = { access_token: string; user_id: string; is_admin: boolean; must_change_password?: boolean };
 
@@ -380,7 +451,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
   const [sessionExpired, setSessionExpired] = useState(false);
   const [sessionEnding, setSessionEnding] = useState<SessionEnding | null>(null);
-  const refreshTimer = useRef<number | null>(null);
   const probeTimer = useRef<number | null>(null);
   // The current status, readable from callbacks that were registered once — the api client's
   // session-expired handler and the cross-tab `storage` listener. Both are called by the
@@ -483,31 +553,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useCrossTabSessionEnd(statusRef, endSession);
 
-  // While authenticated, proactively refresh the access token before it expires so an active
-  // session never breaks under the user.
-  useEffect(() => {
-    if (state.status !== "authenticated") return;
-    let cancelled = false;
-    const schedule = (token: string) => {
-      if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
-      refreshTimer.current = window.setTimeout(async () => {
-        if (cancelled) return;
-        try {
-          const r = await endpoints.refresh();
-          tokenStore.set(r.access_token);
-          if (!cancelled) schedule(r.access_token);
-        } catch {
-          // 401 will already have been handled by setUnauthorizedHandler; nothing more to do here.
-        }
-      }, nextRefreshDelayMs(token));
-    };
-    const t = tokenStore.get();
-    if (t) schedule(t);
-    return () => {
-      cancelled = true;
-      if (refreshTimer.current) { window.clearTimeout(refreshTimer.current); refreshTimer.current = null; }
-    };
-  }, [state.status]);
+  useProactiveRefresh(state.status);
 
   /** Ask the club again right now — what the "Try again" button on the outage screen does. */
   const retryConnection = useCallback(() => {

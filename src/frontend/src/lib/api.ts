@@ -152,7 +152,7 @@ const NO_REFRESH = [REFRESH_PATH, "/api/v1/auth/logout"];
  * request that got there first) adopts it without spending anything.
  * </p>
  */
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
 
 /**
  * An exchange stands between a member and every screen (it runs at boot, behind `whoami`), so it
@@ -162,22 +162,108 @@ let refreshInFlight: Promise<boolean> | null = null;
 export const REFRESH_TIMEOUT_MS = 8_000;
 
 /**
- * Trade the refresh cookie for a new access token. Resolves `true` when a usable token is now
- * stored; `false` when the session is over. Never throws.
+ * C1 — the session generation: moved by every sign-out, in this tab and (through shared storage)
+ * in every other. An exchange records it before it spends the cookie and stores the answer only
+ * if it is unchanged when the reply lands.
+ *
+ * <p>
+ * <b>Why.</b> A refresh reply that completed after a sign-out stored its brand-new token and
+ * resurrected the session: another tab signed out while this tab's exchange was on the wire, and
+ * the member was signed back in on a phone they had just handed on (round 2, IX-H). The server
+ * revokes the family on sign-out, but a reply already on its way carries a token minted a moment
+ * before. Two halves, because either alone has a gap: an in-memory counter (this tab's sign-outs,
+ * and the `storage` event another tab's raises here) and a counter in `localStorage`, read
+ * synchronously at reply time, so it holds even when the reply beats that event. A token that
+ * DISAPPEARED while the exchange was in flight is read the same way — somebody ended the session.
+ * </p>
+ */
+const SESSION_GEN_KEY = "crusaders.mainframe.session-gen";
+let localGeneration = 0;
+
+function storedGeneration(): number {
+  try { return Number(localStorage.getItem(SESSION_GEN_KEY) ?? "0") || 0; } catch { return 0; }
+}
+
+/** The current generation — opaque; compare for equality only. */
+export function sessionGeneration(): string {
+  return `${localGeneration}:${storedGeneration()}`;
+}
+
+/**
+ * A sign-out here (`shared: true` also moves the stored half every other tab reads) or one learned
+ * from another tab's `storage` event (`shared: false`). Any exchange in flight now discards its reply.
+ */
+export function endSessionGeneration(shared: boolean): void {
+  localGeneration += 1;
+  if (!shared) return;
+  try { localStorage.setItem(SESSION_GEN_KEY, String(storedGeneration() + 1)); } catch { /* private mode */ }
+}
+
+/**
+ * How an exchange ended (C2). Only `ended` — the server refused the cookie (a 401, or another
+ * definite 4xx) — ends a session. `transient` is a 5xx, a 429, a timeout or no answer at all: the
+ * token and cookie are kept, the request that needed the exchange fails with `error` (the club
+ * could not be reached), and the next request — or the tab coming back into view — tries again
+ * after a backoff.
+ */
+export type RefreshOutcome = { kind: "ok" } | { kind: "ended" } | { kind: "transient"; error: Error };
+
+/** C2 backoff after transient exchange failures: 1 s, 2 s, 4 s … 30 s; any answer resets it. */
+let transientFailures = 0;
+let retryNotBefore = 0;
+
+/** Whether the last exchange failed transiently and nothing has answered since. */
+export function refreshIsOwed(): boolean {
+  return transientFailures > 0;
+}
+
+/** Test seam — forget the backoff between cases. */
+export function resetRefreshBackoff(): void {
+  transientFailures = 0;
+  retryNotBefore = 0;
+}
+
+function noteOutcome(outcome: RefreshOutcome): RefreshOutcome {
+  if (outcome.kind === "transient") {
+    transientFailures += 1;
+    retryNotBefore = Date.now() + Math.min(1000 * 2 ** (transientFailures - 1), 30_000);
+  } else {
+    resetRefreshBackoff();
+  }
+  return outcome;
+}
+
+/**
+ * Trade the refresh cookie for a new access token. Never throws.
  *
  * @param staleToken the access token the caller sent and was refused on — how an exchange tells
  * "somebody already refreshed" from "nobody has".
+ * @param options.now skip the backoff: the tab came back into view.
  */
-export function refreshSession(staleToken: string | null): Promise<boolean> {
-  refreshInFlight ??= withRefreshLock(() => exchangeCookie(staleToken)).finally(() => { refreshInFlight = null; });
+export function refreshSession(staleToken: string | null, options?: { now?: boolean }): Promise<RefreshOutcome> {
+  if (refreshInFlight) return refreshInFlight;
+  if (!options?.now && transientFailures > 0 && Date.now() < retryNotBefore) {
+    // Inside the backoff: a club that is restarting is not hammered by every screen at once.
+    return Promise.resolve({ kind: "transient", error: new NetworkError("unreachable") });
+  }
+  refreshInFlight = withRefreshLock(() => exchangeCookie(staleToken))
+    .then(noteOutcome)
+    .finally(() => { refreshInFlight = null; });
   return refreshInFlight;
 }
 
-function withRefreshLock(run: () => Promise<boolean>): Promise<boolean> {
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new NetworkError("unreachable");
+}
+
+function withRefreshLock(run: () => Promise<RefreshOutcome>): Promise<RefreshOutcome> {
   const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
   if (!locks?.request) return run();
   // `request` resolves with the callback's own resolved value; the DOM typing nests the promise.
-  return Promise.resolve(locks.request("crusaders.mainframe.refresh", run)).then((ok) => ok === true, () => false);
+  return Promise.resolve(locks.request("crusaders.mainframe.refresh", run)).then(
+    (outcome) => outcome as RefreshOutcome,
+    (error: unknown): RefreshOutcome => ({ kind: "transient", error: asError(error) }),
+  );
 }
 
 function replacedSince(staleToken: string | null): boolean {
@@ -185,18 +271,23 @@ function replacedSince(staleToken: string | null): boolean {
   return !!current && current !== staleToken;
 }
 
-async function exchangeCookie(staleToken: string | null): Promise<boolean> {
+const OK: RefreshOutcome = { kind: "ok" };
+const ENDED: RefreshOutcome = { kind: "ended" };
+
+async function exchangeCookie(staleToken: string | null): Promise<RefreshOutcome> {
   // Another tab (or an earlier exchange here) already did it: its token is in shared storage.
-  if (replacedSince(staleToken)) return true;
-  const first = await postRefreshCookie();
-  if (first === "superseded") {
-    // A concurrent spend from another tab won the race; the browser now holds its successor.
-    return replacedSince(staleToken) || (await postRefreshCookie()) === "ok";
-  }
-  return first === "ok";
+  if (replacedSince(staleToken)) return OK;
+  // C1 — the session was ended while this waited for the lock: nothing to refresh.
+  if (staleToken && !tokenStore.get()) return ENDED;
+  const first = await postRefreshCookie(sessionGeneration());
+  if (first !== "superseded") return first;
+  // A concurrent spend from another tab won the race; the browser now holds its successor.
+  if (replacedSince(staleToken)) return OK;
+  const second = await postRefreshCookie(sessionGeneration());
+  return second === "superseded" ? ENDED : second;
 }
 
-async function postRefreshCookie(): Promise<"ok" | "superseded" | "ended"> {
+async function postRefreshCookie(generation: string): Promise<RefreshOutcome | "superseded"> {
   let res: Response;
   try {
     // No bearer on purpose (contract §1): the cookie is the credential, and an expired bearer
@@ -204,15 +295,28 @@ async function postRefreshCookie(): Promise<"ok" | "superseded" | "ended"> {
     res = await fetchWithTimeout(
       REFRESH_PATH, { method: "POST", credentials: "include", headers: { "content-type": "application/json" } }, REFRESH_TIMEOUT_MS,
     );
-  } catch {
-    return "ended";
+  } catch (error) {
+    return { kind: "transient", error: asError(error) };
   }
   const payload = parseFailureBody(await res.text());
-  if (!res.ok) return bodyErrorCode(payload) === "refresh_superseded" ? "superseded" : "ended";
+  if (!res.ok) return refusalOutcome(res.status, payload);
   const token = (payload as { access_token?: unknown } | null)?.access_token;
-  if (typeof token !== "string" || !token) return "ended";
+  if (typeof token !== "string" || !token) return ENDED;
+  // C1 — signed out (here or in another tab) while the reply was on the wire: discard it.
+  if (generation !== sessionGeneration() || !tokenStore.get()) return ENDED;
   tokenStore.set(token);
-  return "ok";
+  return OK;
+}
+
+/**
+ * C2 — which refusals end a session. A 401 does (`refresh_superseded` is another tab's win, not a
+ * refusal). A 5xx, 429 or 408 is the club struggling, not the club saying no. Any other 4xx is a
+ * definite answer and ends it, as before.
+ */
+function refusalOutcome(status: number, payload: unknown): RefreshOutcome | "superseded" {
+  if (status === 401 && bodyErrorCode(payload) === "refresh_superseded") return "superseded";
+  if (status >= 500 || status === 429 || status === 408) return { kind: "transient", error: new ApiError(status, payload) };
+  return ENDED;
 }
 
 /**
@@ -341,13 +445,20 @@ async function send<T>(method: string, path: string, body?: unknown, retried = f
     // F4.1 — an expired access token is not an ended session while the refresh cookie lives:
     // one exchange, then this request once more. A 401 was refused before the endpoint ran, so
     // repeating a mutation cannot do it twice.
-    if (mayRefresh(res.status, sentToken, path, retried) && await refreshSession(sentToken)) {
-      return send<T>(method, path, body, true);
+    if (mayRefresh(res.status, sentToken, path, retried)) {
+      const outcome = await refreshSession(sentToken);
+      if (outcome.kind === "ok") return send<T>(method, path, body, true);
+      // C2 — the club did not answer the exchange. The session stands (token and cookie kept);
+      // this request fails as the club being unreachable, and the next one tries again.
+      if (outcome.kind === "transient") throw outcome.error;
     }
     // Session expired, revoked, or signed out in another tab — drop the token and let the
-    // AuthProvider say so and redirect to /login.
-    tokenStore.clear();
-    unauthorizedHandler?.();
+    // AuthProvider say so and redirect to /login. Unless a NEW session has begun since this
+    // request went out (C1): an old session's refusal must not end the next member's.
+    if (!replacedSince(sentToken)) {
+      tokenStore.clear();
+      unauthorizedHandler?.();
+    }
   }
   // The forced-password-change gate, which no screen should have to recognise for itself.
   if (res.status === 403 && bodyErrorCode(payload) === "password_change_required") {

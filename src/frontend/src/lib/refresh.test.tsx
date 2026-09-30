@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { api, endpoints, REFRESH_PATH, REFRESH_TIMEOUT_MS, setUnauthorizedHandler, tokenStore } from "./api";
+import { api, ApiError, endpoints, NetworkError, REFRESH_PATH, REFRESH_TIMEOUT_MS, resetRefreshBackoff, setUnauthorizedHandler, tokenStore } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 
 /**
@@ -54,6 +54,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   setUnauthorizedHandler(null);
+  resetRefreshBackoff();
   vi.unstubAllGlobals();
   tokenStore.clear();
   localStorage.clear();
@@ -199,15 +200,15 @@ describe("the bootstrap probe and the refresh cookie", () => {
 });
 
 describe("a refresh endpoint that is absent or hangs", () => {
-  it("ends quickly and cleanly when the endpoint is not there (501/404), so boot falls through", async () => {
+  it("ends quickly and cleanly when the endpoint is not there (404), so boot falls through", async () => {
     tokenStore.set("stale");
-    const s = server({ refresh: () => json(501, { error: "no route for POST /api/v1/auth/refresh" }), whoami: () => json(401, { error: "invalid_token" }) });
+    const s = server({ refresh: () => json(404, { error: "no route for POST /api/v1/auth/refresh" }), whoami: () => json(401, { error: "invalid_token" }) });
     render(<MemoryRouter><AuthProvider><Status /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"), { timeout: 1_000 });
     expect(s.refreshCalls()).toHaveLength(1);
   });
 
-  it("never lets a hanging exchange hold the request past its own budget", async () => {
+  it("never lets a hanging exchange hold the request past its own budget — and a timeout is not a sign-out (C2)", async () => {
     vi.useFakeTimers();
     try {
       tokenStore.set("stale");
@@ -221,10 +222,175 @@ describe("a refresh endpoint that is absent or hangs", () => {
       }));
       const pending = api.get("/api/v1/wallet").catch((e: unknown) => e);
       await vi.advanceTimersByTimeAsync(REFRESH_TIMEOUT_MS + 10);
-      await expect(pending).resolves.toMatchObject({ status: 401 });
-      expect(ended).toBe(1);
+      await expect(pending).resolves.toBeInstanceOf(NetworkError);
+      expect(ended).toBe(0);
+      expect(tokenStore.get(), "the session outlives a refresh the club never answered").toBe("stale");
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * C1 — a refresh reply that lands after a sign-out is discarded (round 2, IX-H). The repro: a tab's
+ * exchange is on the wire, the member signs out in another tab, the reply arrives and stored its
+ * new token, and the session came back from the dead in both tabs.
+ */
+describe("a sign-out while an exchange is in flight (C1)", () => {
+  function heldRefresh() {
+    let release: (r: Response) => void = () => {};
+    const s = server({ refresh: () => new Promise<Response>((resolve) => { release = resolve; }) });
+    return { s, release: (r: Response) => release(r) };
+  }
+
+  it("discards the reply when another tab signed out — even before its storage event arrives here", async () => {
+    tokenStore.set("stale");
+    const { s, release } = heldRefresh();
+    const pending = api.get("/api/v1/wallet").catch((e: unknown) => e);
+    await waitFor(() => expect(s.refreshCalls()).toHaveLength(1));
+
+    // The other tab's sign-out, as shared storage sees it: the token gone, the generation moved.
+    // No `storage` event is dispatched — the reply below beats it.
+    localStorage.removeItem("crusaders.mainframe.token");
+    localStorage.setItem("crusaders.mainframe.session-gen", "7");
+    release(json(200, LOGIN_BODY));
+
+    await expect(pending).resolves.toMatchObject({ status: 401 });
+    expect(tokenStore.get(), "the late reply must never be stored").toBeNull();
+    expect(s.calls.filter((c) => c.auth === "Bearer fresh"), "and nothing retried on it").toHaveLength(0);
+  });
+
+  it("discards the reply when this tab signed out while it was on the wire", async () => {
+    tokenStore.set("stale");
+    let heldResolve: (r: Response) => void = () => {};
+    const paths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      paths.push(path);
+      if (path === "/api/v1/whoami") return json(200, { tenant_slug: "c", tenant_id: "t", user_id: "u-1", is_authenticated: true, is_admin: false });
+      if (path === REFRESH_PATH) return new Promise<Response>((resolve) => { heldResolve = resolve; });
+      if (path === "/api/v1/auth/logout") return json(204, undefined);
+      return headers.authorization === "Bearer fresh" ? json(200, { ok: path }) : json(401, { error: "invalid_token" });
+    }));
+    function SignOut() {
+      const auth = useAuth();
+      return <><span data-testid="status">{auth.status}</span><button onClick={() => void auth.logout()}>Sign out</button></>;
+    }
+    render(<MemoryRouter><AuthProvider><SignOut /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    const pending = api.get("/api/v1/wallet").catch((e: unknown) => e);
+    await waitFor(() => expect(paths).toContain(REFRESH_PATH));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+    // Somebody signs straight back in on this phone? No — the point is the OLD reply: even with a
+    // token present again, a reply from before the sign-out must not be stored.
+    tokenStore.set("next-member");
+    heldResolve(json(200, LOGIN_BODY));
+    await pending;
+
+    expect(tokenStore.get(), "the late reply replaced the next session's token").toBe("next-member");
+    expect(screen.getByTestId("status")).toHaveTextContent("anonymous");
+  });
+
+  it("an open tab learns of another tab's sign-out and discards its own late reply", async () => {
+    tokenStore.set("stale");
+    let heldResolve: (r: Response) => void = () => {};
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      calls.push(`${path} ${headers.authorization ?? null}`);
+      if (path === "/api/v1/whoami") return json(200, { tenant_slug: "c", tenant_id: "t", user_id: "u-1", is_authenticated: true, is_admin: false });
+      if (path === REFRESH_PATH) return new Promise<Response>((resolve) => { heldResolve = resolve; });
+      return headers.authorization === "Bearer fresh" ? json(200, { ok: path }) : json(401, { error: "invalid_token" });
+    }));
+    render(<MemoryRouter><AuthProvider><Status /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    const pending = api.get("/api/v1/wallet").catch((e: unknown) => e);
+    await waitFor(() => expect(calls.some((c) => c.startsWith(REFRESH_PATH))).toBe(true));
+    // The other tab signs out: its token removal reaches this tab as a `storage` event. The
+    // stored generation is NOT moved here, so only the event can carry the news.
+    act(() => {
+      localStorage.removeItem("crusaders.mainframe.token");
+      window.dispatchEvent(new StorageEvent("storage", { key: "crusaders.mainframe.token", oldValue: "stale", newValue: null }));
+    });
+    // A late reply, and a token that reappeared in between — the resurrection route.
+    tokenStore.set("stale");
+    heldResolve(json(200, LOGIN_BODY));
+    await pending;
+
+    expect(tokenStore.get(), "the late reply was stored over the sign-out").not.toBe("fresh");
+    expect(screen.getByTestId("status")).toHaveTextContent("anonymous");
+  });
+});
+
+/**
+ * C2 — only a 401 from /auth/refresh ends the session (round 2, IX-H). The repro: a redeploy's
+ * 503 (or a 429, a dropped network, the 8 s timeout) on the refresh call signed every member out.
+ */
+describe("a refresh the club did not answer (C2)", () => {
+  it.each([
+    ["503", () => json(503, { error: "unavailable" }), (e: unknown) => e instanceof ApiError && e.status === 503],
+    ["429", () => json(429, { error: "rate_limited" }), (e: unknown) => e instanceof ApiError && e.status === 429],
+    ["no network", () => Promise.reject(new TypeError("Failed to fetch")), (e: unknown) => e instanceof NetworkError],
+  ])("keeps the session on a %s and fails the request as the club being unreachable", async (_name, answer, isTransient) => {
+    tokenStore.set("stale");
+    const s = server({ refresh: answer as () => Response });
+
+    const err = await api.get("/api/v1/wallet").catch((e: unknown) => e);
+
+    expect(isTransient(err), String(err)).toBe(true);
+    expect(tokenStore.get(), "the token is kept").toBe("stale");
+    expect(ended, "the session is not ended").toBe(0);
+    expect(s.refreshCalls()).toHaveLength(1);
+  });
+
+  it("backs off: requests refused inside the backoff do not spend the cookie again; the next one after it does", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      tokenStore.set("stale");
+      let n = 0;
+      const s = server({ refresh: () => (n++ === 0 ? json(503, null) : json(200, LOGIN_BODY)) });
+
+      await expect(api.get("/api/v1/wallet")).rejects.toBeInstanceOf(ApiError);
+      await expect(api.get("/api/v1/me/door")).rejects.toBeInstanceOf(NetworkError);
+      expect(s.refreshCalls(), "single-flight with backoff").toHaveLength(1);
+
+      vi.setSystemTime(Date.now() + 1_500);
+      await expect(api.get("/api/v1/me/door")).resolves.toEqual({ ok: "/api/v1/me/door" });
+      expect(s.refreshCalls()).toHaveLength(2);
+      expect(ended).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the bootstrap waits out a 503 on the refresh in the outage state, token kept — never /login", async () => {
+    tokenStore.set("stale");
+    server({ refresh: () => json(503, null), whoami: () => json(401, { error: "invalid_token" }) });
+    render(<MemoryRouter><AuthProvider><Status /></AuthProvider></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("offline"));
+    expect(tokenStore.get()).toBe("stale");
+  });
+
+  it("tries again when the tab comes back into view after a transient failure", async () => {
+    tokenStore.set("stale");
+    let n = 0;
+    const s = server({
+      refresh: () => (n++ === 0 ? json(503, null) : json(200, LOGIN_BODY)),
+      whoami: (auth) => json(200, { tenant_slug: "c", tenant_id: "t", user_id: "u-1", is_authenticated: true, is_admin: false, auth }),
+    });
+    render(<MemoryRouter><AuthProvider><Status /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+    await expect(api.get("/api/v1/wallet")).rejects.toBeInstanceOf(ApiError);
+
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+
+    await waitFor(() => expect(tokenStore.get()).toBe("fresh"));
+    expect(s.refreshCalls()).toHaveLength(2);
   });
 });
