@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { revealOnFocus } from "../lib/revealInScroller";
 import { cn } from "../lib/utils";
 import { Input } from "./ui/input";
 import { Skeleton } from "./ui/skeleton";
@@ -168,6 +169,8 @@ function HeaderCell<T>({ column: c, sort, onSort }: { column: DataColumn<T>; sor
         <button
           type="button"
           onClick={() => onSort(c.key)}
+          // X-8: the cell is sticky, and Chromium does not scroll a sticky box into view on focus.
+          onFocus={revealOnFocus}
           className={cn(
             "no-lift -mx-1 inline-flex min-h-touch items-center gap-1 rounded-md px-1 uppercase tracking-overline",
             "transition-colors duration-fast ease-standard hover:text-text-primary motion-reduce:transition-none",
