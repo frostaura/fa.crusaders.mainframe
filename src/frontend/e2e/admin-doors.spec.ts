@@ -1077,7 +1077,10 @@ test.describe("The log a committee reads", () => {
     // The calendar is its own lazily loaded chunk (P10): let it arrive before counting days.
     await expect(page.getByRole("button", { name: /next month/i })).toBeVisible();
     for (let step = 0; step < 36 && (await page.locator('button[data-day="2026-09-19"]').count()) === 0; step++) {
-      const back = new Date().toISOString().slice(0, 7) > "2026-09";
+      // The month on show, never UTC's: they differ for hours at every month's end (it failed at
+      // 2026-09-30 23:00 UTC, already October in the club; gotchas-clock's UTC-midnight family).
+      const shown = (await page.locator("button[data-day]:not([data-outside])").first().getAttribute("data-day")) ?? "";
+      const back = shown.slice(0, 7) > "2026-09";
       await page.getByRole("button", { name: back ? /previous month/i : /next month/i }).click();
     }
     await page.locator('button[data-day="2026-09-19"]').click();

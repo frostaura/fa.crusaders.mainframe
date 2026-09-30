@@ -182,3 +182,38 @@ test.describe("R4 V-14 — the members table at 1280", () => {
     expect(Math.abs(a!.y - r!.y), "Approve and Reject side by side").toBeLessThan(2);
   });
 });
+
+test.describe("R4 V-13 — the save bar and a field reached by Tab", () => {
+  test("lifts the field's complaint clear of the bar when Tab lands on it at the bottom edge", async ({ page }) => {
+    const settings = {
+      slice_minutes: 15, slice_price_credits: 8, advance_booking_days: 14, day_start_minute: 360, day_end_minute: 1320,
+      penalty_pct: 30, grace_window_minutes: 5, penalty_window_minutes: 15, timezone: "Africa/Johannesburg",
+      button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
+      operating_hours: { mon: "06:00-22:00" }, credits_per_zar_regular: 1.6, topup_block_zar: 100,
+      topup_max_zar_per_member: 1000, member_per_day_max_minutes: 60, peak_hours: "16:00-19:00",
+      peak_advance_hours_for_regular: 1, retention_years: 2, no_show_lookback_days: 7, currency_symbol: "R",
+    };
+    await open(page, "/admin/settings", 1280, false, [{ path: "/api/v1/admin/settings/", body: settings }]);
+    await page.getByRole("searchbox", { name: "Search settings" }).fill("Top-up");
+    const field = page.getByRole("spinbutton", { name: /Top-up block/ });
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    await field.fill("0");
+    await page.keyboard.press("Tab");
+    const bar = page.getByRole("region", { name: "Unsaved settings" });
+    await expect(bar).toBeVisible();
+    const error = field.locator("xpath=ancestor::*[@data-setting][1]").locator("[data-slot=field-error]");
+    await expect(error).toBeVisible();
+    // Put the field at the bottom edge, under the bar, then come back to it with Shift+Tab: the
+    // browser scrolls the FIELD clear (scroll-padding); its complaint must come with it.
+    const barTop = (await bar.boundingBox())!.y;
+    const fieldBottom = await field.evaluate((el) => el.getBoundingClientRect().bottom);
+    await page.setViewportSize({ width: 1280, height: Math.max(420, Math.round(900 - (barTop - fieldBottom) - 20)) });
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Shift+Tab");
+    await expect(field).toBeFocused();
+    await page.waitForTimeout(400);
+    const top = (await bar.boundingBox())!.y;
+    const box = (await error.boundingBox())!;
+    expect(box.y + box.height, "the complaint sits under the save bar").toBeLessThanOrEqual(top + 1);
+  });
+});
