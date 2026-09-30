@@ -34,12 +34,14 @@ public sealed class ViewAuditOnce
     public ViewAuditOnce(TimeProvider clock) => _clock = clock;
 
     /// <summary>True when this view should be recorded — the first of its kind inside the window.</summary>
-    public bool ShouldRecord(HttpContext ctx, string action, Guid subjectUserId)
+    public bool ShouldRecord(HttpContext ctx, string action, Guid subjectUserId, string? view = null)
     {
         var now = _clock.GetUtcNow();
         var tenant = ctx.User.FindFirst("tenant_id")?.Value ?? "";
+        // `view` names what was looked at when the query string says more than that — the trace's
+        // pages (review round 4): the pages of one night are one look, not one look per page.
         var key = string.Join('|', tenant, ctx.User.Id()?.ToString("N") ?? "", action, subjectUserId.ToString("N"),
-            ctx.Request.Path.Value ?? "", ctx.Request.QueryString.Value ?? "");
+            ctx.Request.Path.Value ?? "", view ?? ctx.Request.QueryString.Value ?? "");
 
         lock (_gate)
         {

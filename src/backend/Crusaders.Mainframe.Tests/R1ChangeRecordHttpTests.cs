@@ -163,8 +163,12 @@ public sealed class R1ChangeRecordHttpTests(PostgresFixture pg) : IClassFixture<
             Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(path)).StatusCode);
             Assert.Equal(1, await CountAsync(action));
 
-            // A different question is a different view.
-            Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(path + "?limit=10")).StatusCode);
+            // A different question is a different view. For the trace a page size is not a
+            // question (review round 4 — its pages are one view), so it asks about another day.
+            var other = action == AdminChangeActions.MemberTraceViewed
+                ? $"?day={DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1):yyyy-MM-dd}"
+                : "?limit=10";
+            Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(path + other)).StatusCode);
             Assert.Equal(2, await CountAsync(action));
 
             // The same question after the window is looked at again.

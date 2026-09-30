@@ -222,8 +222,15 @@ public static class AdminMemberTraceEndpoints
     {
         var query = asked.Query;
         // B19: one row per view — an identical re-fetch inside the window is the same look.
+        // Review round 4: keyed on the query WITHOUT its page (limit, cursor), so paging through
+        // one night is one view rather than a row per page. A cursor cannot dodge the record: a
+        // range not seen inside the window is a new key and writes, whatever page it asks for.
+        var view = string.Join('&', ctx.Request.Query
+            .Where(q => q.Key is not ("cursor" or "limit"))
+            .OrderBy(q => q.Key, StringComparer.Ordinal)
+            .Select(q => $"{q.Key}={q.Value}"));
         if (!export && !ctx.RequestServices.GetRequiredService<ViewAuditOnce>()
-                .ShouldRecord(ctx, AdminChangeActions.MemberTraceViewed, asked.Member.UserId))
+                .ShouldRecord(ctx, AdminChangeActions.MemberTraceViewed, asked.Member.UserId, view))
         {
             return Task.CompletedTask;
         }
