@@ -18,10 +18,12 @@ function RadioDot({ className }: { className?: string }) {
       className={cn(
         "flex size-5 shrink-0 items-center justify-center rounded-full border-2 border-control bg-bg-surface",
         "group-data-[state=checked]:border-primary",
+        // F4-5: in forced colours the ring of a chosen dot is Highlight, and its fill (below) CanvasText.
+        "forced-colors:group-data-[state=checked]:border-[Highlight]",
         className,
       )}
     >
-      <span className="size-2.5 scale-0 rounded-full bg-primary transition-transform duration-fast ease-standard motion-reduce:transition-none group-data-[state=checked]:scale-100" />
+      <span className="size-2.5 scale-0 rounded-full bg-primary transition-transform duration-fast ease-standard motion-reduce:transition-none group-data-[state=checked]:scale-100 forced-colors:bg-[CanvasText]" />
     </span>
   );
 }
@@ -66,6 +68,8 @@ export function RadioCard({ className, title, description, children, ...props }:
         "no-lift group flex min-h-touch w-full items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left",
         "transition-colors duration-fast ease-standard motion-reduce:transition-none hover:bg-bg-muted",
         "data-[state=checked]:border-accent-strong data-[state=checked]:bg-accent-soft",
+        // F4-5: a heavier Highlight edge — the fill is not a system colour and would be discarded.
+        "forced-colors:data-[state=checked]:border-[3px] forced-colors:data-[state=checked]:border-[Highlight]",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}

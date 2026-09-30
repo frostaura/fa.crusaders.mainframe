@@ -52,15 +52,27 @@ const TRIGGER_BASE = [
   "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
 ].join(" ");
 
+/**
+ * Forced colours (F4-5): the mode throws away every author colour that is not a system colour, and
+ * the state classes here (`bg-accent-soft`, `bg-bg-surface`, `bg-primary`) outrank index.css's
+ * `Highlight` rule by source order — so a checked card, an active tab and an "on" toggle rendered
+ * exactly like their neighbours. These `forced-colors:` utilities restate each state in system
+ * colours, in the same layer, so they win.
+ */
+const FORCED_ACTIVE = "forced-colors:data-[state=active]:border-[Highlight] forced-colors:data-[state=active]:bg-[Highlight] forced-colors:data-[state=active]:text-[HighlightText]";
+
 const TRIGGER: Record<TabsVariant, string> = {
   segmented: cn(
     "rounded-md px-3",
     "data-[state=active]:border-border data-[state=active]:bg-bg-surface data-[state=active]:text-accent-strong",
+    FORCED_ACTIVE,
   ),
   underline: cn(
     "px-1",
     "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-transparent",
     "data-[state=active]:text-text-primary data-[state=active]:after:bg-accent-strong",
+    FORCED_ACTIVE,
+    "forced-colors:data-[state=active]:after:bg-[HighlightText]",
   ),
 };
 

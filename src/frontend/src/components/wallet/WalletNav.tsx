@@ -17,7 +17,11 @@ const SEGMENT = cn(
   "text-sm font-semibold text-text-secondary transition-colors duration-fast ease-standard motion-reduce:transition-none",
   "hover:text-text-primary focus-visible:-outline-offset-2",
 );
-const ACTIVE = "border-border bg-bg-surface text-accent-strong shadow-xs hover:text-accent-strong";
+const ACTIVE = cn(
+  "border-border bg-bg-surface text-accent-strong shadow-xs hover:text-accent-strong",
+  // F4-5: forced colours discard the lifted surface, which left both views identical.
+  "forced-colors:border-[Highlight] forced-colors:bg-[Highlight] forced-colors:text-[HighlightText]",
+);
 
 const VIEWS = [
   { to: "/wallet", label: "Overview", end: true },

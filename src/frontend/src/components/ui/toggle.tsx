@@ -15,6 +15,8 @@ export const toggleVariants = cva(
     "transition-colors duration-fast ease-standard motion-reduce:transition-none",
     "hover:bg-bg-muted hover:text-text-primary",
     "data-[state=on]:bg-accent-soft data-[state=on]:text-accent-strong",
+    // F4-5: forced colours discard the soft fill; "on" is restated in system colours.
+    "forced-colors:data-[state=on]:border-[Highlight] forced-colors:data-[state=on]:bg-[Highlight] forced-colors:data-[state=on]:text-[HighlightText]",
     "disabled:pointer-events-none disabled:opacity-50",
     "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   ],
