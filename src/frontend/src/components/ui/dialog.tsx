@@ -111,28 +111,58 @@ function CloseButton({ label }: { label: string }) {
 }
 
 /**
- * What had focus when the surface opened — read in a layout effect, which runs before Radix's
- * focus scope moves focus inside (a passive effect), so it is the opener and not the dialog.
+ * The control a pointer last pressed, whatever it was. iOS Safari (and a mouse in desktop Safari)
+ * does not focus a button it taps, so a dialog opened by a tap finds `<body>` in
+ * `document.activeElement` — the pressed element is the only record of what opened it. One
+ * capture-phase listener for the page, installed on first use; the target is resolved to the
+ * nearest control so a tap on an icon inside a button returns to the button.
+ */
+let lastPressed: { element: HTMLElement; at: number } | null = null;
+let pressListening = false;
+
+function listenForPresses() {
+  if (pressListening || typeof document === "undefined") return;
+  pressListening = true;
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const control = target?.closest<HTMLElement>("button, a[href], [role=button], [tabindex], input, select, textarea, summary");
+    if (control) lastPressed = { element: control, at: Date.now() };
+  }, true);
+}
+
+/** A press this recent opened the dialog; an older one is somebody else's history. */
+const PRESS_WINDOW_MS = 2_000;
+
+/**
+ * What opened the surface — read in a layout effect, which runs before Radix's focus scope moves
+ * focus inside (a passive effect). Two records: what had FOCUS, and what was PRESSED just before.
  */
 function useOpener() {
-  const opener = React.useRef<Element | null>(null);
+  const opener = React.useRef<{ focused: Element | null; pressed: HTMLElement | null }>({ focused: null, pressed: null });
   React.useLayoutEffect(() => {
-    opener.current = document.activeElement;
+    const pressed = lastPressed && Date.now() - lastPressed.at <= PRESS_WINDOW_MS ? lastPressed.element : null;
+    opener.current = { focused: document.activeElement, pressed };
   }, []);
   return opener;
 }
 
-/** The opener, while it is still in the page and is not `<body>`; otherwise null. */
-function usableOpener(opener: Element | null): HTMLElement | null {
-  return opener instanceof HTMLElement && opener !== document.body && opener.isConnected ? opener : null;
+listenForPresses();
+
+/** An element focus can go back to: in the page, and not `<body>`. */
+function usable(element: Element | null): HTMLElement | null {
+  return element instanceof HTMLElement && element !== document.body && element.isConnected ? element : null;
 }
 
 /**
- * No opener to go back to — it left the page, or nothing had focus when the dialog opened (Safari
- * does not focus a button on click, so a mouse-opened dialog there records `<body>`). Radix's own
- * default runs first (it knows a `DialogTrigger` when there is one); if that leaves focus on
- * `<body>`, the page's `<main>` takes it.
+ * Where focus goes on close, in order: what had focus when the dialog opened, still in the page;
+ * else what was pressed to open it (a tap in iOS Safari focuses nothing); else null, and Radix's
+ * own default runs (it knows a `DialogTrigger`) with `<main>` as the last resort.
  */
+function usableOpener(opener: { focused: Element | null; pressed: HTMLElement | null }): HTMLElement | null {
+  return usable(opener.focused) ?? usable(opener.pressed);
+}
+
+/** Radix's default left focus on `<body>`: the page's `<main>` takes it. */
 function rescueFromBody(): void {
   window.setTimeout(() => {
     const active = document.activeElement;

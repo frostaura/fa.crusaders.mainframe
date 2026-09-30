@@ -319,3 +319,37 @@ describe("F4.5 — the opener is gone", () => {
     await waitFor(() => expect(document.activeElement).toBe(document.getElementById("main-content")));
   });
 });
+
+/**
+ * R1 (F3 follow-up) — a tap in iOS Safari focuses nothing, so `document.activeElement` is `<body>`
+ * when the dialog opens. The pressed control is the opener then, ahead of `<main>`.
+ */
+describe("a dialog opened by a press that focused nothing", () => {
+  function Tapped() {
+    const [open, setOpen] = useState(false);
+    return (
+      <main id="main-content" tabIndex={-1}>
+        <button type="button" onClick={() => setOpen(true)}><span>Tap to open</span></button>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent>
+            <DialogTitle>Tapped</DialogTitle>
+            <DialogDescription>Opened by a tap</DialogDescription>
+          </DialogContent>
+        </Dialog>
+      </main>
+    );
+  }
+
+  it("returns focus to the pressed control, not to <main>", async () => {
+    renderPage(<Tapped />);
+    const button = screen.getByRole("button", { name: "Tap to open" });
+    (document.activeElement as HTMLElement | null)?.blur();
+    // A press on the icon INSIDE the button, and no focus — as Safari does it.
+    fireEvent.pointerDown(button.querySelector("span")!);
+    fireEvent.click(button);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(button).toHaveFocus());
+  });
+});
