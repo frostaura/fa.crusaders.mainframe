@@ -10,7 +10,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "../components/ui/dialog";
-import { Field, FieldDescription, FieldLabel } from "../components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "../components/ui/field";
 import { IconButton } from "../components/ui/icon-button";
 import { Input } from "../components/ui/input";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
@@ -255,7 +255,7 @@ export default function AdminWebhooksPage() {
   const [description, setDescription] = useState("");
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   // F3.16: why the last create failed, IN the dialog — a toast faded and always said "Check the URL".
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<CreateFailure | null>(null);
   const [openDeliveriesId, setOpenDeliveriesId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDeliveryDto[]>([]);
   /**
@@ -289,7 +289,7 @@ export default function AdminWebhooksPage() {
   useEffect(() => { load().catch(() => {}); }, []);
 
   const create = async () => {
-    if (!url.trim()) { setCreateError(CREATE_REFUSAL.url_required); return; }
+    if (!url.trim()) { setCreateError({ text: CREATE_REFUSAL.url_required, field: "url" }); return; }
     setCreateError(null);
     try {
       const created = await endpoints.adminWebhooksCreate({
@@ -307,7 +307,8 @@ export default function AdminWebhooksPage() {
       toast.push({ tone: "success", text: "Endpoint created." });
     } catch (err) {
       const known = new Set(list.map((row) => row.id));
-      setCreateError(createRefusal(err) ?? await lostCreate({ url: url.trim(), filter: formatFilter(filterTokens), known }, setList));
+      setCreateError(createRefusal(err)
+        ?? { text: await lostCreate({ url: url.trim(), filter: formatFilter(filterTokens), known }, setList), field: null });
     }
   };
 
@@ -514,10 +515,20 @@ function NewEndpointDialog(props: {
   onOpenChange: (open: boolean) => void;
   form: EndpointForm;
   pending: boolean;
-  error: string | null;
+  error: CreateFailure | null;
   onCreate: () => void;
 }) {
   const { open, onOpenChange, form, pending, onCreate } = props;
+  const urlError = props.error?.field === "url" ? props.error.text : null;
+  const urlField = useRef<HTMLDivElement>(null);
+  // R4 A4-9: a refusal ABOUT the URL is said at the URL — aria-invalid, described by the error,
+  // focused — not at the foot of the form, where it named no field and took no focus.
+  useEffect(() => {
+    if (!urlError) return;
+    const input = urlField.current?.querySelector("input");
+    input?.scrollIntoView?.({ block: "nearest" });
+    input?.focus({ preventScroll: true });
+  }, [urlError, props.error]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -534,15 +545,18 @@ function NewEndpointDialog(props: {
             </p>
           </div>
 
-          <Field>
-            <FieldLabel>URL template</FieldLabel>
-            <TemplateInput
-              value={form.url}
-              onChange={form.setUrl}
-              variables={variablesForEvents(form.filterTokens)}
-              placeholder="https://example.com/webhook?court={court_number}"
-            />
-          </Field>
+          <div ref={urlField}>
+            <Field invalid={urlError !== null}>
+              <FieldLabel>URL template</FieldLabel>
+              <TemplateInput
+                value={form.url}
+                onChange={form.setUrl}
+                variables={variablesForEvents(form.filterTokens)}
+                placeholder="https://example.com/webhook?court={court_number}"
+              />
+              {urlError ? <FieldError>{urlError}</FieldError> : null}
+            </Field>
+          </div>
 
           <Field>
             <FieldLabel>Description</FieldLabel>
@@ -553,7 +567,7 @@ function NewEndpointDialog(props: {
             <Input value={form.description} onChange={(e) => form.setDescription(e.target.value)} placeholder="Scoreboard — court lit" />
             <FieldDescription>What the endpoint is for, so the list says it in words.</FieldDescription>
           </Field>
-          {props.error ? <CreateError text={props.error} /> : null}
+          {props.error && !urlError ? <CreateError text={props.error.text} /> : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -839,14 +853,18 @@ const CREATE_REFUSAL: Record<string, string> = {
  * to look at the list before trying again (the endpoint may exist), and an unreachable server says
  * so. Anything else goes through the house `describeFailure`.
  */
-function createRefusal(err: unknown): string | null {
+function createRefusal(err: unknown): CreateFailure | null {
   // No answer, or a server failure: the outcome is not known, and `lostCreate` finds it out.
   if (!(err instanceof ApiError) || err.status >= 500) return null;
   const code = err.code ?? "";
-  if (code in CREATE_REFUSAL) return CREATE_REFUSAL[code];
-  if (err.status === 429) return "Too many attempts in a short time. Wait a minute, then try again — nothing was created.";
-  return describeFailure(err, { action: "create the endpoint" });
+  // Every coded refusal on this form is about the URL (R4 A4-9): said at the field.
+  if (code in CREATE_REFUSAL) return { text: CREATE_REFUSAL[code], field: "url" };
+  if (err.status === 429) return { text: "Too many attempts in a short time. Wait a minute, then try again — nothing was created.", field: null };
+  return { text: describeFailure(err, { action: "create the endpoint" }), field: null };
 }
+
+/** Why a create failed, and the field it is about (null: the form as a whole). */
+type CreateFailure = { text: string; field: "url" | null };
 
 /**
  * A dropped connection or a server failure said "so nothing was created" — about a request that

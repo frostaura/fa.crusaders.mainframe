@@ -354,6 +354,11 @@ describe("AdminWebhooks", () => {
 
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText("Couldn't create endpoint.")).not.toBeInTheDocument();
+    // R4 A4-9: said AT the URL — the field is invalid, described by the refusal, and focused.
+    const field = screen.getByPlaceholderText(URL_PLACEHOLDER);
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription(expected);
+    await waitFor(() => expect(field).toHaveFocus());
   });
 
   /**
