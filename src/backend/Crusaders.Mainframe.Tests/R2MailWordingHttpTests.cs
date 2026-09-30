@@ -64,7 +64,7 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
 
         var (theirs, _) = await club.BookWithPlayersAsync(f, [], at: at.AddHours(2), slices: 1);
         var slot2 = $"Court 1 · {at.AddHours(2).ToString(Api.Services.ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture)}";
-        var cancel = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{theirs}/cancel", new { });
+        var cancel = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{theirs}/cancel", new { reason = "Court maintenance" });
         Assert.True(cancel.IsSuccessStatusCode, await cancel.Content.ReadAsStringAsync());
         var byClub = await AwaitAsync(mail, club, "olive.organiser", "The club cancelled");
         Assert.Equal($"The club cancelled your booking — {slot2}", byClub.Subject);

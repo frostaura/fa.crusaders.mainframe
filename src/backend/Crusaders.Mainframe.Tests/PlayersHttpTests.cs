@@ -287,7 +287,7 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         Assert.Equal(HttpStatusCode.OK, (await AcceptAsync(club, f, club.Sam, bookingId, seat)).StatusCode);
         Assert.Equal(34m, await PlayersClub.BalanceAsync(f, club.Sam));
 
-        var cancel = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{bookingId}/cancel", new { });
+        var cancel = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{bookingId}/cancel", new { reason = "Court maintenance" });
 
         Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
         Assert.Equal(50m, await PlayersClub.BalanceAsync(f, club.Sam));

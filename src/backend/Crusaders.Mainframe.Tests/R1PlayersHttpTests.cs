@@ -140,7 +140,7 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         }
 
         var single = await SplitGameAsync(8);
-        var one = await JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/bookings/{single}/cancel", new { }));
+        var one = await JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/bookings/{single}/cancel", new { reason = "Court maintenance" }));
         Assert.Equal(32m, one.GetProperty("refunded_credits").GetDecimal());
         Assert.Equal(16m, one.GetProperty("net_credits").GetDecimal());
         var partner = Assert.Single(one.GetProperty("partner_refunds").EnumerateArray());

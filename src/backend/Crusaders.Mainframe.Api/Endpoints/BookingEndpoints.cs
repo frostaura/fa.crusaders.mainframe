@@ -185,15 +185,27 @@ public static class BookingEndpoints
     {
         var actorId = ctx.User.Id() ?? Guid.Empty;
         var waive = req?.WaivePenalty ?? false;
-        var reason = req?.WaiveReason?.Trim();
-        if (waive && string.IsNullOrEmpty(reason))
-            return Results.BadRequest(new { error = "waive_reason_required" });
+        // Review round 4 (A4-4): every desk cancellation says why, waiver or not — the reason is
+        // the only record of why the club took somebody's court, and it is mailed to them. The
+        // waiver's own field still counts as the reason, so a console that sends only it works.
+        var reason = (string.IsNullOrWhiteSpace(req?.Reason) ? req?.WaiveReason : req.Reason)?.Trim();
+        if (string.IsNullOrEmpty(reason))
+            return Results.BadRequest(new { error = waive ? "waive_reason_required" : "reason_required" });
+
+        // Staged BEFORE the cancellation so it flushes in the cancellation's own save (A4-4):
+        // the ledger saves through this context, and a record of a cancellation that rolled
+        // back is worse than none. Withdrawn if nothing was cancelled.
+        var record = await AdminCancelRecord.StageAsync(ctx, bookingId, actorId, reason, ct);
 
         // Review round 1 (lane F1): the desk sees the same truthful split refund the member does.
         var split = ctx.RequestServices.GetRequiredService<SplitCancelView>();
         var paidBefore = await split.PaidByPartnerAsync(bookingId, ct);
         var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: waive, ct, reason);
-        if (result is not CancellationResult.Ok ok) return ToHttpResult(result, ctx);
+        if (result is not CancellationResult.Ok ok)
+        {
+            AdminCancelRecord.Withdraw(ctx, record);
+            return ToHttpResult(result, ctx);
+        }
         await ctx.AfterSettlementAsync([bookingId], ct);
         return CancelledAnswer(ok, await split.AfterAsync(bookingId, paidBefore, ct));
     }
@@ -491,7 +503,11 @@ public sealed record AdminBookingRequest(
 /// true — §7's "logged with reason". Defaulted so a cancellation that waives nothing needs
 /// no reason, and so an older client that never waives is unaffected.
 /// </summary>
-public sealed record AdminCancelRequest(bool WaivePenalty, string? WaiveReason = null);
+/// <summary>
+/// The desk's cancellation. <c>reason</c> is required (review round 4, A4-4 —
+/// <c>400 reason_required</c>); <c>waiveReason</c> is accepted in its place.
+/// </summary>
+public sealed record AdminCancelRequest(bool WaivePenalty = false, string? WaiveReason = null, string? Reason = null);
 
 /// <summary>
 /// The query of <c>GET /api/v1/admin/bookings/quote</c>, as sent. <c>userId</c> is the payer and

@@ -184,7 +184,7 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
             "resplit_on_add" => await organiser.PostAsJsonAsync($"{path}/players", new { players = new object[] { new { userId = club.Alex } } }),
             "settle_outside" => await club.Client(f, club.Admin, admin: true)
                 .PostAsJsonAsync($"/api/v1/admin/bookings/{bookingId}/players/{seat}/settle-outside", new { reason = "Paid cash" }),
-            _ => await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{bookingId}/cancel", new { }),
+            _ => await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/bookings/{bookingId}/cancel", new { reason = "Court maintenance" }),
         };
         Assert.True(giveBack.IsSuccessStatusCode, await giveBack.Content.ReadAsStringAsync());
 

@@ -224,12 +224,13 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// A cancellation that waives nothing needs no reason — the field is required by the
-    /// waiver, not by the route — and the penalty is still taken. This is what stops the
-    /// new requirement from quietly becoming "an admin cannot cancel without paperwork".
+    /// A desk cancellation without a reason is refused and cancels nothing (review round 4,
+    /// A4-4). It was allowed while the reason belonged to the waiver alone; the club's record
+    /// then had no answer to "why did the desk take this court", and the member's mail none
+    /// either. Every desk cancellation says why now, waiver or not.
     /// </summary>
     [SkippableFact]
-    public async Task An_ordinary_admin_cancellation_needs_no_reason_and_still_takes_the_penalty()
+    public async Task An_admin_cancellation_without_a_reason_is_refused_and_cancels_nothing()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -238,15 +239,13 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
 
         var (status, body) = await PostAsync(AdminClient(factory, s), CancelPath(s.BookingId), new { waivePenalty = false });
 
-        Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(SlicePriceCredits * 0.30m, body.GetProperty("penalty_credits").GetDecimal());
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Equal("reason_required", body.GetProperty("error").GetString());
 
-        var details = await CancellationAuditAsync(factory, s);
-        Assert.False(details.GetProperty("waived").GetBoolean());
-        // Present and null rather than absent, so a reader never has to guess whether an
-        // older row simply predates the field. Null because the desk typed nothing — not
-        // because nothing was waived; see the test below for that distinction.
-        Assert.Equal(JsonValueKind.Null, details.GetProperty("waive_reason").ValueKind);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var booking = await db.Bookings.IgnoreQueryFilters().AsNoTracking().FirstAsync(b => b.Id == s.BookingId);
+        Assert.Equal(BookingStatus.Booked, booking.Status);
     }
 
     /// <summary>
@@ -289,25 +288,21 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// Blank is not a reason. A whitespace-only string on a cancellation that waives nothing
-    /// is not refused — the route's requirement belongs to the waiver — but neither is it
-    /// written into the audit row as an empty string a month-end reader would have to squint
-    /// at. Null means "nobody said why", and it has to keep meaning only that.
+    /// Blank is not a reason: whitespace is refused like nothing at all (A4-4), so no audit row
+    /// or mail can carry an empty string a month-end reader would have to squint at.
     /// </summary>
     [SkippableFact]
-    public async Task A_blank_reason_is_recorded_as_nothing_rather_than_as_an_empty_string()
+    public async Task A_blank_reason_is_refused_like_no_reason()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
         await using var factory = CreateFactory();
         var s = await SeedAsync(factory);
 
-        var (status, _) = await PostAsync(AdminClient(factory, s), CancelPath(s.BookingId),
-            new { waivePenalty = false, waiveReason = "   " });
+        var (status, body) = await PostAsync(AdminClient(factory, s), CancelPath(s.BookingId),
+            new { waivePenalty = false, waiveReason = "   ", reason = " " });
 
-        Assert.Equal(HttpStatusCode.OK, status);
-
-        var details = await CancellationAuditAsync(factory, s);
-        Assert.Equal(JsonValueKind.Null, details.GetProperty("waive_reason").ValueKind);
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Equal("reason_required", body.GetProperty("error").GetString());
     }
 }
