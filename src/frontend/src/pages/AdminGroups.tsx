@@ -21,9 +21,11 @@ import {
   type MemberGroupBody, type Weekday,
 } from "../lib/adminApi";
 import {
-  ARCHIVE_COPY, ARCHIVED_HEADING, GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, GROUP_SHEET, MOST_RESTRICTIVE_STANDING,
+  ARCHIVE_COPY, ARCHIVED_HEADING, GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, GROUP_LOST, GROUP_SHEET, MOST_RESTRICTIVE_STANDING,
   deleteRefusalSentence, explainGroupRefusal, groupChangeConsequence,
 } from "../lib/groupsCopy";
+import { UnsureOutcome, unsureSentence, writeOrReadBack } from "../lib/lostReply";
+import { LOST_REPLY } from "../lib/lostReplyCopy";
 import { typography } from "../lib/typography";
 
 /**
@@ -153,6 +155,17 @@ function usePageReads() {
  * two 409s carry the way out (archiving) and belong on the page, where they stay until read.
  * </p>
  */
+/** The group as the list now has it, tested; `{}` when the test holds, null when it does not. */
+async function groupNow(id: string, holds: (group: MemberGroup | undefined) => boolean): Promise<object | null> {
+  const { groups } = await adminEndpoints.memberGroups();
+  return holds(groups.find((g) => g.id === id)) ? {} : null;
+}
+
+/** A success sentence, with the reply-lost note when the list had to be asked. */
+function saidOnce(done: string, proven: boolean): string {
+  return proven ? LOST_REPLY.proven(done) : done;
+}
+
 function useGroupWrites(load: () => Promise<void>, setSheet: (next: SheetState) => void) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
@@ -175,28 +188,47 @@ function useGroupWrites(load: () => Promise<void>, setSheet: (next: SheetState) 
     }
   };
 
+  // Archive, restore and delete read a lost reply back from the groups list (review round 3):
+  // found as asked → done, with the reply-lost note; not → "nothing changed"; unreadable → not known.
   const archive = async (group: MemberGroup, reason: string) => {
-    await adminEndpoints.memberGroupUpdate(group.id, { status: "archived", reason });
-    toast.push({ tone: "success", text: ARCHIVE_COPY.archived(group.name) });
-    await load();
+    try {
+      const { proven } = await writeOrReadBack(
+        async () => { await adminEndpoints.memberGroupUpdate(group.id, { status: "archived", reason }); return {}; },
+        () => groupNow(group.id, (g) => g?.status === "archived"),
+      );
+      toast.push({ tone: "success", text: saidOnce(ARCHIVE_COPY.archived(group.name), proven) });
+      await load();
+    } catch (err) {
+      if (err instanceof UnsureOutcome) void load();
+      throw err;
+    }
   };
 
   const restore = async (group: MemberGroup) => {
     try {
-      await adminEndpoints.memberGroupUpdate(group.id, { status: "active" });
-      toast.push({ tone: "success", text: ARCHIVE_COPY.restored(group.name) });
+      const { proven } = await writeOrReadBack(
+        async () => { await adminEndpoints.memberGroupUpdate(group.id, { status: "active" }); return {}; },
+        () => groupNow(group.id, (g) => g !== undefined && g.status !== "archived"),
+      );
+      toast.push({ tone: "success", text: saidOnce(ARCHIVE_COPY.restored(group.name), proven) });
       await load();
     } catch (err) {
-      setRefusal(explainGroupRefusal(err, `bring ${group.name} back`));
+      if (err instanceof UnsureOutcome) void load();
+      setRefusal(unsureSentence(err, GROUP_LOST.restore(group.name)) ?? explainGroupRefusal(err, `bring ${group.name} back`));
     }
   };
 
   const remove = async (group: MemberGroup) => {
     try {
-      await adminEndpoints.memberGroupDelete(group.id);
+      const { proven } = await writeOrReadBack(
+        async () => { await adminEndpoints.memberGroupDelete(group.id); return {}; },
+        () => groupNow(group.id, (g) => g === undefined),
+      );
       await load();
-      return `${group.name} is deleted.`;
+      return saidOnce(`${group.name} is deleted.`, proven);
     } catch (err) {
+      const unsure = unsureSentence(err, GROUP_LOST.remove(group.name));
+      if (unsure) { void load(); setRefusal(unsure); return "It isn't known yet whether that happened."; }
       const code = err instanceof ApiError ? err.code : null;
       setRefusal(code
         ? deleteRefusalSentence(code, {

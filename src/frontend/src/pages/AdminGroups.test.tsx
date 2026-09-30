@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { AdminGroupsPage } from "./AdminGroups";
-import { SETTINGS_FIXTURE, memberFixture, renderPage, signIn, stubFetch, type StubRoute } from "../test/harness";
+import { SETTINGS_FIXTURE, memberFixture, refuse, renderPage, signIn, stubFetch, type StubRoute } from "../test/harness";
 import {
   bookingRulesFixture, groupFixture, groupMemberFixture, restrictedGroupFixture, weekdayWindows,
 } from "../test/groupFixtures";
@@ -611,5 +611,49 @@ describe("moving somebody between groups from the group's own members tab", () =
     expect(stub.calls.some((c) => c.path === "/api/v1/admin/members/u9")).toBe(true);
     // Nothing changed yet, so there is nothing to save — and the button says so.
     expect(within(dialog).getByRole("button", { name: ASSIGN_COPY.unchanged })).toBeDisabled();
+  });
+});
+
+/**
+ * Review round 3 (admin lost-reply audit): archive and delete whose reply is lost are looked up
+ * on the groups list. The stubs perform the write, then fail the reply.
+ */
+describe("a group write whose reply was lost", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+
+  function lost(kind: "PATCH" | "DELETE", landed: boolean, readable = true): StubRoute[] {
+    let groups: MemberGroup[] = [OFF_PEAK];
+    let reads = 0;
+    return [
+      {
+        path: "/api/v1/admin/member-groups",
+        respond: () => (++reads > 1 && !readable ? refuse(503, { error: "down" }) : { groups }),
+      },
+      {
+        method: kind, path: "/api/v1/admin/member-groups/g-offpeak",
+        respond: () => {
+          if (landed) groups = kind === "DELETE" ? [] : [{ ...OFF_PEAK, status: "archived" }];
+          return refuse(504, { error: "gateway_timeout" });
+        },
+      },
+    ];
+  }
+
+  it("says an archive landed when the list has it archived", async () => {
+    open(null, lost("PATCH", true));
+    await archiveFromMenu("Off-peak", "Season over");
+    expect(await screen.findByText(`${ARCHIVE_COPY.archived("Off-peak")} The club's reply didn't arrive, so we checked its record.`)).toBeInTheDocument();
+  });
+
+  it("says nothing changed, in the dialog, when the list still has it active", async () => {
+    open(null, lost("PATCH", false));
+    await archiveFromMenu("Off-peak", "Season over");
+    expect(await within(screen.getByRole("dialog")).findByText(/we checked: Off-peak is still active — nothing changed/)).toBeInTheDocument();
+  });
+
+  it("says it cannot tell whether a delete happened when the list cannot be read either", async () => {
+    open(null, lost("DELETE", true, false));
+    await fromMenu("Off-peak", GROUP_ACTIONS.remove);
+    expect(await screen.findByText(/can't tell whether Off-peak was deleted/)).toBeInTheDocument();
   });
 });

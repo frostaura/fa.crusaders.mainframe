@@ -12,9 +12,10 @@ import {
 import { Textarea } from "../ui/textarea";
 import { priceForGroup } from "../../lib/groupRules";
 import {
-  ARCHIVE_COPY, GROUP_ACTIONS, GROUP_REFUSAL_CODES, SYSTEM_GROUP, capsSummary, creditsRange, memberCountLine,
+  ARCHIVE_COPY, GROUP_ACTIONS, GROUP_LOST, GROUP_REFUSAL_CODES, SYSTEM_GROUP, capsSummary, creditsRange, memberCountLine,
   paintedWeekSentence, peakChip, rateChip, ratePreviewLine, slicePriceLine, type PaintedWeek,
 } from "../../lib/groupsCopy";
+import { unsureSentence } from "../../lib/lostReply";
 import { windowsToPainted } from "./weekGrid";
 import type { MemberGroup } from "../../lib/adminApi";
 
@@ -211,6 +212,8 @@ function ArchiveDialog(props: {
       // R3 A-16: enabled, and a press names the missing reason and focuses it (never a dead button).
       notReady={reason.trim() === ""}
       action={`archive ${group.name}`}
+      // A lost reply read back is not a failure (R3): "still active", or "can't tell".
+      describe={(error) => unsureSentence(error, GROUP_LOST.archive(group.name))}
       codes={GROUP_REFUSAL_CODES}
       onConfirm={() => onArchive(reason.trim())}
       returnFocus={() => document.querySelector<HTMLElement>(`[data-group-card="${CSS.escape(group.id)}"] [data-slot="card-action"] button`)}

@@ -1,4 +1,5 @@
 import { ApiError } from "./api";
+import { unsureWords } from "./lostReplyCopy";
 import { describeFailure } from "./errors";
 import type { AdminItemResult, GroupPricingMode, Weekday } from "./adminApi";
 import {
@@ -862,6 +863,16 @@ export const ARCHIVE_COPY = {
   restore: "Bring back",
   restored: (name: string) => `${name} is back.`,
   archived: (name: string) => `${name} is archived.`,
+} as const;
+
+/**
+ * A group write whose reply was lost, read back (review round 3, the admin lost-reply audit):
+ * what the groups list still shows, and what cannot be told. See `lib/lostReplyCopy`.
+ */
+export const GROUP_LOST = {
+  archive: (name: string) => unsureWords(`${name} is still active`, `${name} was archived`, "Groups"),
+  restore: (name: string) => unsureWords(`${name} is still archived`, `${name} was brought back`, "Groups"),
+  remove: (name: string) => unsureWords(`${name} is still there`, `${name} was deleted`, "Groups"),
 } as const;
 
 export const ARCHIVED_HEADING = "Archived";
