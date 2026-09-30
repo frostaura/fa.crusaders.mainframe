@@ -216,19 +216,26 @@ function SettingsEditor({ doc }: { doc: Doc }) {
           className="rounded-xl border border-border bg-bg-surface px-4 shadow-xs sm:px-6 [&[hidden]]:hidden"
           hidden={search !== null && search.sections.length === 0}
         >
-          {SETTINGS_SECTIONS.map((section) => (
-            <SettingsSection
-              key={section.id}
-              section={section}
-              open={openValue.includes(section.id)}
-              hidden={search !== null && !search.sections.includes(section.id)}
-              summary={sectionSummary(section.id, draft, currency)}
-              dirty={dirty.has(section.id)}
-              advancedOpen={sections.advanced.has(section.id)}
-              onAdvancedChange={(next) => sections.setAdvancedOpen(section.id, next)}
-              {...sectionExtras(section.id, draft)}
-            />
-          ))}
+          {SETTINGS_SECTIONS.map((section) => {
+            // Named, not spread: lizard loses the end of the function at a JSX spread prop and
+            // scores everything below it as part of this editor.
+            const extras = sectionExtras(section.id, draft);
+            return (
+              <SettingsSection
+                key={section.id}
+                section={section}
+                open={openValue.includes(section.id)}
+                hidden={search !== null && !search.sections.includes(section.id)}
+                summary={sectionSummary(section.id, draft, currency)}
+                dirty={dirty.has(section.id)}
+                advancedOpen={sections.advanced.has(section.id)}
+                onAdvancedChange={(next) => sections.setAdvancedOpen(section.id, next)}
+                before={extras.before}
+                after={extras.after}
+                footer={extras.footer}
+              />
+            );
+          })}
         </Accordion>
       </PageShell>
       <SaveBar
