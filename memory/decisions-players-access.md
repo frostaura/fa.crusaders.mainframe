@@ -7,9 +7,8 @@ last_verified: 2026-09-30
 
 # Live decisions — players: access, consent, invites and mail (D11–D13)
 
-The spec is `docs/specs/players-and-splits.md` §4–§6; the money rules are in
-`decisions-players.md`. Items dated 2026-09-28 came from the adversarial review, each pinned by a
-test in `PlayersReviewHttpTests`.
+Spec: `docs/specs/players-and-splits.md` §4–§6; money rules: `decisions-players.md`. Items dated
+2026-09-28 came from the adversarial review, each pinned by a test in `PlayersReviewHttpTests`.
 
 - **Only a LIVE seat makes a member a player** (2026-09-28). A declined, withdrawn, removed or
   lapsed member reads the detail as a stranger (404). *Why:* a dead seat kept showing the game and
@@ -57,3 +56,4 @@ test in `PlayersReviewHttpTests`.
   share's mail says it is held and until when (B12); a club collect, a club add and an
   accept-on-behalf are told as the CLUB's doing (`players.club_seat`, B8). *Why:* each screen or
   mail said something the money did not.
+- **A lost reply is read back, never called a refusal (R2 F2-1/F2-2, 2026-09-30):** an unanswered accept reads `GET /me/invites/{pid}`, an unanswered cancel on the booking page re-reads the booking. The UI also reads optional `resolved_at` (inbox) and `before_joining` (streak week) — owed by the backend. *Why:* "Couldn't accept" after the share was taken.
