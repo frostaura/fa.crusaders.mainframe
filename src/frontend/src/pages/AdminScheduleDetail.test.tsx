@@ -22,6 +22,10 @@ import { DATES_EMPTY } from "../lib/scheduleCopy";
  */
 vi.setConfig({ testTimeout: 20_000 });
 
+// Typing is `fireEvent.change`, never `userEvent.type` (R3, integrator: this file failed only under
+// heavy load). user-event types a character per macrotask, so a 20-letter reason is twenty trips
+// through a saturated event loop; the change event is what the field listens to either way.
+
 /**
  * One repeating booking: what it holds, what has been changed about it, and the two ways to
  * change it.
@@ -194,7 +198,7 @@ describe("changing the hours", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Just Tue 13 Oct" }));
     pickTime("New start time", "19:00");
     pickTime("New end time", "21:30");
-    await userEvent.type(screen.getByLabelText("Reason (kept in the change record)"), "League starts later");
+    fireEvent.change(screen.getByLabelText("Reason (kept in the change record)"), { target: { value: "League starts later" } });
     // The primary button restates the option chosen — the last thing read before the press.
     await userEvent.click(screen.getByRole("button", { name: "Change just Tue 13 Oct to 19:00–21:30" }));
 
@@ -213,7 +217,7 @@ describe("changing the hours", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Tue 13 Oct and every Tuesday after it" }));
     pickTime("New start time", "19:00");
     pickTime("New end time", "21:30");
-    await userEvent.type(screen.getByLabelText("Reason (kept in the change record)"), "League starts later");
+    fireEvent.change(screen.getByLabelText("Reason (kept in the change record)"), { target: { value: "League starts later" } });
     await userEvent.click(screen.getByRole("button", {
       name: "Change Tue 13 Oct and every Tuesday after it to 19:00–21:30",
     }));
@@ -248,7 +252,7 @@ describe("changing the hours", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Tue 13 Oct and every Tuesday after it" }));
     pickTime("New start time", "19:00");
     pickTime("New end time", "21:30");
-    await userEvent.type(screen.getByLabelText("Reason (kept in the change record)"), "League starts later");
+    fireEvent.change(screen.getByLabelText("Reason (kept in the change record)"), { target: { value: "League starts later" } });
     await userEvent.click(screen.getByRole("button", {
       name: "Change Tue 13 Oct and every Tuesday after it to 19:00–21:30",
     }));
@@ -318,7 +322,7 @@ describe("there is no delete", () => {
     renderDetail();
     await screen.findByRole("heading", { name: "Tuesday league", level: 1 });
 
-    await userEvent.type(screen.getByLabelText(/Reason for ending/), "League season finished");
+    fireEvent.change(screen.getByLabelText(/Reason for ending/), { target: { value: "League season finished" } });
     await userEvent.click(screen.getByRole("button", { name: "End Tuesday league" }));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "End Tuesday league" }));
 

@@ -23,6 +23,14 @@ async function choose(label: string, option: string | RegExp) {
 /** The picker, found by its label once the page has it. */
 const picker = (label: string) => screen.findByRole("combobox", { name: label });
 
+/**
+ * A longer per-test timeout than the 5-second default, for this file only (R3, integrator: it
+ * failed only under heavy load). Each case renders the whole log page, and one walks a calendar
+ * month by month to a fixed day — well under a second on a quiet machine, past five with five fix
+ * lanes and a backend suite sharing it. The assertions are untouched; only the time allowed is.
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
 
 /**
  * The club door log — W1.3.
