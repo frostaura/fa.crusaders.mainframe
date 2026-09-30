@@ -616,7 +616,8 @@ export const DETAIL_ADMIN = {
   addGuestHint: "Named, no share, no app.",
   addLink: "An open seat",
   addLinkHint: "A link anyone can claim.",
-  memberLabel: "Member",
+  /** The member combobox's own name (R1, from F3) — "Member" alone named nothing it was for. */
+  memberLabel: "Member to add",
   memberPlaceholder: "Choose a member",
   memberMissing: "Choose a member.",
   membersFailed: "Couldn't read the members list.",

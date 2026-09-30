@@ -185,6 +185,15 @@ describe("accept on their behalf", () => {
 });
 
 describe("add a player as the club", () => {
+  it("names its member combobox for what it is for (R1, from F3)", async () => {
+    serve({ admin: true, detail: adminView(), extra: [{ path: "/api/v1/admin/members", body: [] }] });
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: DETAIL_ADMIN.add }));
+    const dialog = await screen.findByRole("dialog", { name: DETAIL_ADMIN.addTitle });
+    const box = within(dialog).getByRole("combobox", { name: new RegExp(`^${DETAIL_ADMIN.memberLabel}`) });
+    expect(box).toHaveAccessibleName(`${DETAIL_ADMIN.memberLabel} ${DETAIL_ADMIN.memberPlaceholder}`);
+  });
+
   it("adds an open link seat with a reason, then offers its link", async () => {
     const stub = serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `/api/v1/admin/bookings/${BOOKING}/players`,
