@@ -56,5 +56,5 @@ unit tests; each was wrong in the running app.
 - **The first-run wizard is offered only on a landing a sign-in delivered (F4.8)** — router state
   `{ signedIn: true }` from Login. `/my-code` is the app's start URL and the door.
 - **The credits chip shows SPENDABLE (F1.11)**, naming the whole and the held/owed parts —
-  supersedes D11 §3a's "the figure stays the whole balance" (550 shown, a 520 booking refused).
+  supersedes D11 §3a's "the figure stays the whole balance" (550 shown, a 520 booking refused). Its flyout (R3 M-1) is the NET change of that figure over a burst of frames under 1 s apart — a split cancel's last frame read −33 while the chip rose 100.
 
