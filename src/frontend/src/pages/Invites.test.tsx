@@ -199,7 +199,7 @@ describe("the accept sheet", () => {
       ],
     });
     const sheet = await openSheet();
-    const walletReads = () => stub.calls.filter((c) => c.path === "/api/v1/wallet").length;
+    const walletReads = () => stub.calls.filter((c) => c.path.split("?")[0] === "/api/v1/wallet").length;
     await waitFor(() => expect(walletReads()).toBeGreaterThan(0));
     const before = walletReads();
     fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
@@ -379,7 +379,7 @@ describe("an accept whose reply was lost (R2 F2-1)", () => {
       { path: MY_SEAT, body: seatRecord("accepted") },
     ] });
     const sheet = await openSheet();
-    const walletReads = () => stub.calls.filter((c) => c.path === "/api/v1/wallet").length;
+    const walletReads = () => stub.calls.filter((c) => c.path.split("?")[0] === "/api/v1/wallet").length;
     await waitFor(() => expect(walletReads()).toBeGreaterThan(0));
     const before = walletReads();
     fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
