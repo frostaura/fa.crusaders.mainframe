@@ -48,6 +48,9 @@ function worthFetching(): boolean {
   return navigator.onLine !== false && connection?.saveData !== true;
 }
 
+/** The admin console's frame (`adminFrame`): not a member page, so it is not in `routeChunks`. */
+export const loadAdminFrame = () => import("./adminFrame");
+
 /** Looked up at call time, so a test can watch the loader. */
 function hint(name: ChunkName) {
   routeChunks[name]().catch(() => undefined);
@@ -56,18 +59,26 @@ function hint(name: ChunkName) {
 /** Start fetching the code of the page at `pathname`, if it is one of these. Returns whether it did. */
 export function preloadRouteChunk(pathname: string): boolean {
   if (!worthFetching()) return false;
+  if (/^\/admin(\/|$)/.test(pathname)) {
+    loadAdminFrame().catch(() => undefined);
+    return true;
+  }
   const hit = BY_PATH.find(([pattern]) => pattern.test(pathname));
   if (!hit) return false;
   hint(hit[1]);
   return true;
 }
 
-/** Once the phone is idle, fetch the tab bar's pages. Returns a cancel for an unmount. */
-export function prefetchNavChunks(delayMs = 1_500): () => void {
+/** Once the phone is idle, fetch the tab bar's pages (and an admin's console). Returns a cancel. */
+export function prefetchNavChunks(delayMs = 1_500, admin = false): () => void {
   if (!worthFetching()) return () => undefined;
   let idle: number | null = null;
   const timer = window.setTimeout(() => {
-    const run = () => { if (worthFetching()) NAV_CHUNKS.forEach(hint); };
+    const run = () => {
+      if (!worthFetching()) return;
+      NAV_CHUNKS.forEach(hint);
+      if (admin) loadAdminFrame().catch(() => undefined);
+    };
     if (typeof window.requestIdleCallback === "function") idle = window.requestIdleCallback(run, { timeout: 4_000 });
     else run();
   }, delayMs);

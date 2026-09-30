@@ -10,18 +10,14 @@ import HomePage from "./pages/Home";
 import LoginPage from "./pages/Login";
 import MyCodePage from "./pages/MyCode";
 import { FirstRunGate } from "./components/onboarding/FirstRunGate";
-import { AdminDoorsPage } from "./pages/AdminDoors";
-import { AdminDoorsDetailPage } from "./pages/AdminDoorsDetail";
 import NotFoundPage from "./pages/NotFound";
 // `/reports` split in two (Target IA → Routes): club reports under Admin, a member's own under Wallet.
 import { ReportsRedirect } from "./pages/Reports";
-import AdminLayout from "./components/admin/AdminLayout";
-import AdminHomePage from "./pages/admin/AdminHome";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
 import { RouteSkeleton } from "./components/shell/SessionScreens";
 import { RequireAuth } from "./components/shell/RequireAuth";
 import { loadChunk } from "./lib/chunkLoad";
-import { routeChunks } from "./routeChunks";
+import { loadAdminFrame, routeChunks } from "./routeChunks";
 import { NavPrefetch } from "./components/shell/NavPrefetch";
 
 /**
@@ -54,16 +50,36 @@ const DevPrimitivesPage = import.meta.env.DEV ? lazy(() => import("./pages/DevPr
  * page-shaped {@link RouteSkeleton}.
  *
  * <p>
- * <b>The admin console's frame, its Overview and the two doors pages are NOT lazy,
- * deliberately.</b> They read the club's doors through the shared doors store, which dedupes
- * only while a read is in flight — a reader that mounts after a Suspense boundary resolves
- * joins late and fires a second identical GET (E-L6: "one read on arrival, not one per
- * reader"; `e2e/admin-doors.spec.ts` counts it). Every other admin page reads nothing from
- * that store.
+ * <b>The admin console's frame, its Overview and the two doors pages are ONE lazy chunk</b>
+ * (`adminFrame`, perf lane 2026-09-30 — they were eager, ~97 kB of every member's first load).
+ * They read the club's doors through the shared doors store, and a reader mounting after a
+ * Suspense boundary resolved used to fire a second identical GET (E-L6: "one read on arrival,
+ * not one per reader"; `e2e/admin-doors.spec.ts` counts it). `named` therefore does not
+ * suspend once the chunk is in, the chunk is fetched at boot on an admin path, and the store takes
+ * a read that landed moments before rather than reading again.
  * </p>
  */
+/**
+ * A named export of a lazy module. Once that module has arrived, the next page from it does NOT
+ * suspend (perf lane, 2026-09-30): React.lazy reads a thenable that answers synchronously, so a
+ * page mounts in the same commit as the frame around it. That is what keeps the admin frame and
+ * its doors pages (`adminFrame`, one chunk) reading the doors store once (E-L6).
+ */
+const arrived = new WeakMap<() => Promise<unknown>, Record<string, ComponentType>>();
 const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) =>
-  lazy(() => load().then((m) => ({ default: m[name] })));
+  reactLazy(() => {
+    const ready = arrived.get(load);
+    if (ready) return { then: (resolve: (m: { default: ComponentType }) => void) => resolve({ default: ready[name] }) } as Promise<{ default: ComponentType }>;
+    return loadChunk(load).then((m) => {
+      arrived.set(load, m as Record<string, ComponentType>);
+      return { default: m[name] };
+    });
+  });
+
+const AdminLayout = named(loadAdminFrame, "AdminLayout");
+const AdminHomePage = named(loadAdminFrame, "AdminHomePage");
+const AdminDoorsPage = named(loadAdminFrame, "AdminDoorsPage");
+const AdminDoorsDetailPage = named(loadAdminFrame, "AdminDoorsDetailPage");
 
 const RegisterPage = lazy(() => import("./pages/Register"));
 const VerifyEmailPage = lazy(() => import("./pages/VerifyEmail"));
@@ -115,10 +131,7 @@ const AdminWebhooksPage = lazy(() => import("./pages/AdminWebhooks"));
  * opens the club's reports.
  *
  * <p>
- * <b>The admin console's frame and Overview are NOT lazy, deliberately.</b> Both read the
- * club's doors through the shared doors store, which dedupes only while a read is in flight — a
- * reader that mounts after a Suspense boundary resolves joins late and fires a second identical
- * GET (E-L6: "one read on arrival, not one per reader"; `e2e/admin-doors.spec.ts` counts it).
+ * The admin console's frame and Overview are lazy too, as one chunk — see `named` above.
  * </p>
  */
 const AdminReportsPage = lazy(() => import("./pages/admin/AdminReports"));
@@ -217,7 +230,7 @@ export function AppRoutes() {
         <Route path="/get-started" element={<RequireAuth><Lazy><GetStartedPage /></Lazy></RequireAuth>} />
 
         {/* R16 — one Admin tab. Everything the gear menu held is in here now. */}
-        <Route path="/admin" element={<RequireAuth admin><AdminLayout /></RequireAuth>}>
+        <Route path="/admin" element={<RequireAuth admin><Lazy><AdminLayout /></Lazy></RequireAuth>}>
           <Route index element={<AdminHomePage />} />
           <Route path="/admin/members" element={<Lazy><AdminMembersPage /></Lazy>} />
           {/* Absolute child paths, so every `path=` here is a whole URL the title table can name. */}

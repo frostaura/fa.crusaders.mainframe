@@ -319,6 +319,13 @@ function stopPolling() {
   ownActionPending = false;
 }
 
+/** How recent a landed read must be for a joining reader to take it rather than read again. */
+export const DOORS_JOIN_FRESH_MS = 2_000;
+
+function justRead(): boolean {
+  return state.checkedAt !== null && Date.now() - state.checkedAt < DOORS_JOIN_FRESH_MS;
+}
+
 /**
  * Subscribe to the one doors read.
  *
@@ -338,9 +345,12 @@ export function useDoorsStore(enabled: boolean, intervalMs = DOORS_CHROME_INTERV
     subscribers.add(setSnapshot);
     cadences.set(setSnapshot, intervalMs);
     startPolling();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- hands the joining reader what the store already knows
+    // Hands the joining reader what the store already knows.
     setSnapshot(state);
-    void refreshDoorsView();
+    // A reader joining moments after a read landed takes that read (perf lane, 2026-09-30): the
+    // admin frame is a lazy chunk now, and its readers can mount just after the chrome's read
+    // finished — the second identical GET E-L6 exists to prevent. Older than that, it reads.
+    if (!justRead()) void refreshDoorsView();
     return () => {
       subscribers.delete(setSnapshot);
       cadences.delete(setSnapshot);

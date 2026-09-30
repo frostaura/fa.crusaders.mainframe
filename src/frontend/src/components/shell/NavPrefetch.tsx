@@ -9,6 +9,7 @@ import { prefetchNavChunks } from "@/routeChunks";
 export function NavPrefetch() {
   const auth = useAuth();
   const signedIn = auth.status === "authenticated";
-  useEffect(() => (signedIn ? prefetchNavChunks() : undefined), [signedIn]);
+  const admin = signedIn && auth.isAdmin;
+  useEffect(() => (signedIn ? prefetchNavChunks(undefined, admin) : undefined), [signedIn, admin]);
   return null;
 }

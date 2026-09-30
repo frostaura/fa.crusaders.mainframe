@@ -24,10 +24,10 @@ describe("preloadRouteChunk — at boot, beside the session check", () => {
     expect(spies.wallet).toHaveBeenCalledTimes(1);
   });
 
-  it("asks for nothing on a page in the entry, an admin page, or offline", () => {
+  it("asks for nothing on a page in the entry, or offline", () => {
     const spies = watch();
     expect(preloadRouteChunk("/my-code")).toBe(false);
-    expect(preloadRouteChunk("/admin/members")).toBe(false);
+    expect(preloadRouteChunk("/")).toBe(false);
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     expect(preloadRouteChunk("/bookings")).toBe(false);
     for (const spy of Object.values(spies)) expect(spy).not.toHaveBeenCalled();
