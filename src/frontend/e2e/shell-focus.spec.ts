@@ -51,7 +51,8 @@ test("F4.5: a dialog opened with the keyboard gives focus back to what opened it
   await expect(sheet).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
-  expect(await focused(page)).toBe(RING_COPY.editGoal);
+  // Radix returns focus as its exit settles, a frame or two after the node leaves.
+  await expect.poll(() => focused(page)).toBe(RING_COPY.editGoal);
 
   // Again, closed from inside with the keyboard: Tab to the close × and press it.
   await page.keyboard.press("Enter");
@@ -61,7 +62,8 @@ test("F4.5: a dialog opened with the keyboard gives focus back to what opened it
   await expect(close).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(sheet).toHaveCount(0);
-  expect(await focused(page)).toBe(RING_COPY.editGoal);
+  // Radix returns focus as its exit settles, a frame or two after the node leaves.
+  await expect.poll(() => focused(page)).toBe(RING_COPY.editGoal);
 });
 
 test("F4.7: saving a name with the keyboard leaves focus on Save", async ({ page }) => {
