@@ -1,0 +1,34 @@
+---
+name: crusaders-mainframe-decisions-frontend-offline-shell
+description: "The service worker per build (id stamped by vite, caches named for it, last build pruned), the document revalidated (no-cache), My Code painted while whoami is out, and the chip's one-row wallet read."
+type: decision
+last_verified: 2026-09-30
+---
+
+# Live decisions — the offline shell across deploys (review round 4, lane F4)
+
+The worker still caches NO member data (`public/sw.js` header, `offline-shell` and
+`sw-update` specs). These are about a deploy reaching a phone that already has the app.
+
+- **Each build ships its own worker.** `vite.config.ts` stamps a build id (SHA-256 of every
+  emitted file name and every public file's bytes, 16 hex) into the shipped `sw.js`
+  (`src/swBuild.ts`, placeholder exactly once) and into `precache.json`. **Why:** `VERSION = "v3"`
+  never changed, and a browser installs a worker only when its bytes change — no deploy ever
+  installed one, the new chunks were never precached, `crusaders-assets-v3` grew for ever.
+  Same sources → same id, so a rebuild does not make every phone reinstall.
+- **Caches are named per build; activate drops the last build's shell and the leaking
+  `crusaders-api-v1` at once, and its assets after `precacheRest`.** Install takes a hashed file
+  the last build already cached from that cache (a deploy downloads what changed). An old tab's
+  lazy chunk then 404s and `lib/chunkLoad` reloads it once — accepted.
+- **The document and `precache.json` are `Cache-Control: no-cache`** (`src/frontend/nginx.conf`,
+  each block repeating the four framing headers), and the worker fetches the shell and every
+  navigation with `{ cache: "no-cache" }`. **Why:** with no header an `index.html` was cached
+  heuristically (~17 h for a week-old build) and named deleted chunks. `nginx-posture.test`.
+- **My Code renders while `whoami` is out** when the device holds a token AND a confirmed identity
+  (`RequireAuth` loading branch; `useMemberCode` paints the key, asks the club only once the check
+  answers). **Why:** at one bar of signal the splash stood for up to 20 s at the door.
+- **The credits chip reads `/wallet?limit=1`** — balance and held parts are top-level on any page
+  (735 bytes vs 55 kB, checked on the stack). A page read in flight for more rows still answers it.
+- **Proof method for a worker change:** `e2e/sw-update.spec.ts` — two real builds (a copy with one
+  file changed), switch the origin, `registration.update()`; assert caches, reuse, no member data.
+  A precache lane once fetched `undefined` (queue emptied under its await) — keep the guard.

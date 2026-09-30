@@ -36,14 +36,20 @@ entry → 304 kB. Perf lane 2026-09-30: 328 → **255 kB** (entry 166 + React 74
 - **Only React + the router are grouped by hand** (`manualChunks` → `react`). **Why:** a hand-made
   group pulls its non-leaf dependencies — and what the entry shares with them — into the first
   load. Measured again 2026-09-30: a `ui/` group dragged react-day-picker and ~48 kB gzip in.
+  R4 tried member-route groups naming the entry's static closure `app` to stop the pull: the
+  icon and `radix-ui` BARRELS put every re-exported module in that closure (+40 kB gzip first
+  load). Only a barrel-aware closure could make it safe; not built.
 - **`experimentalMinChunkSize: 2_500`.** Merges micro-chunks where Rollup can do so without
   changing what runs when: 110 → 92 files for +1.2 kB gzip. **Why not higher:** 8 kB merged real
   lazy code into the entry (+12 kB gzip).
-- **Member pages' loaders live in `src/routeChunks.ts`** (shared with `App.tsx`'s `lazy()`), so
-  the opened page's code starts once `whoami` is SENT (`auth.whenSessionCheckSent` — queued
-  before it, ~30 files held `whoami` for a second on HTTP/1.1) and the tab bar's pages are
-  fetched at idle once signed in (`NavPrefetch`). Hints only: failures swallowed, not offline,
-  not under Save-Data.
+- **Member pages' loaders live in `src/routeChunks.ts`**: the opened page's code starts once
+  `whoami` is SENT; **Bookings' once the page's reads have settled** (`lib/api` `whenApiQuiet`,
+  300 ms with nothing in flight), and Wallet/Profile/desk frame each wait for it too (R4).
+  **Why not beside `whoami`:** measured A/B (slow 4G, 4x CPU) it made a cold My Code — the door
+  page — 0.9 s slower; settled-gated, My Code is unchanged and Bookings tapped 1 s after My Code
+  shows fell 1.05 → 0.64 s. Hints only: failures swallowed, not offline, not under Save-Data.
+- **A member's install set (`precache.json` `first`) leaves out chart chunks and the desk's
+  frame** (R4, P4-6: 666 → 514 kB gzip); precached after control, still every chunk on the phone.
 - **The date picker's calendar is its own chunk**, prefetched on pointer/focus intent.
 - **Retired in P10 and not to return:** the P1 compat shims (`components/Button|Card|Modal|
   StateBlock`, `components/Layout`); `lucide-react`; the `action_glyphs` setting and ClubUi

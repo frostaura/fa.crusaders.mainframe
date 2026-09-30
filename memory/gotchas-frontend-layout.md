@@ -1,16 +1,15 @@
 ---
 name: crusaders-mainframe-gotchas-frontend-layout
-description: "Layout traps measured in Chromium (R3, R4): cn keeps h-touch beside h-auto, text overflow is invisible to rects, a zero flex basis never wraps, 200 % text needs rem container queries."
+description: "Layout traps measured in Chromium (R3-R4): text overflow is invisible to element rects, a zero flex basis never wraps, implicit grid columns and min-widths beat max-widths at 200 %, ui heights are floors."
 type: gotcha
 last_verified: 2026-09-30
 ---
 
 # Gotchas — layout, measured in a real browser (review round 3, lane F3)
 
-- **`cn` (tailwind-merge, unconfigured) does not know `h-touch`**, so `className="h-auto …"` on a
-  `md` Button leaves BOTH classes and `h-touch` wins by stylesheet order: wrapped text spilled out
-  of a fixed 44px box ("Create a / repeating / booking" over a one-line fill). Use `!h-auto` at the
-  call site; the durable fix is teaching `cn` the custom height/size keys (ui lane).
+- **`cn` (tailwind-merge, unconfigured) does not know `h-touch`**, so `h-auto` beside it left both
+  and `h-touch` won ("Create a / repeating / booking" spilled out of 44px). Since R4 Button, Input
+  and SelectTrigger carry `min-h-touch`, not `h-touch`; any other `h-touch` still needs `!h-auto`.
 - **Text overflowing its own box is invisible to `getBoundingClientRect` on elements.** A mono
   event name ("booking.late_cancellation") ran 150px past a phone's edge from inside a span that
   measured in bounds, and `<main>` scrolled sideways with no element to blame. Probe TEXT nodes with
@@ -33,3 +32,14 @@ last_verified: 2026-09-30
 - **A rem-sized badge dot on a px glyph hides it at 200 %** (a 24px dot over a 20px icon).
 - **A figure beside a name wraps UNDER it, not squeezes it**: `flex flex-wrap justify-between`
   with `ml-auto` on the figure; a `shrink-0` figure broke names mid-word ("Bon/gani").
+- **A `min-width` beats a `max-width`** (R4, X4-2): `min-w-48` is 384 px at 200 % text and ran
+  the account menu off a 375 phone despite `max-w-[calc(100vw-1rem)]`. Floors on popovers are
+  `min(12rem, 100vw-1rem)`; height caps are Radix's `--radix-*-content-available-height` + scroll.
+- **Heights are floors in `ui/`** (R4, V4-1): Input, SelectTrigger and Button are `min-h-*` +
+  padding (a fixed 44 px box around a 48 px line cut the text); Button labels may wrap with
+  `shrink-0` so flex rows behave as under `nowrap`; side padding is capped `px-[min(1rem,16px)]`.
+  A `Field` is `grid-cols-1` — its implicit column let a password wrapper push the field 36 px out.
+- **A negative margin that grows a target must use `lh`, not rem**: `-my-3` pulled the field
+  24 px under "Forgot password?" at 200 %; `min(0px, calc((1lh - 44px) / 2))` is ~0 there.
+- **Measure "clipped label" on the `button-label` layer**, not scrollWidth: the hidden pending
+  spinner overflows every icon button by a few px and is never seen.
