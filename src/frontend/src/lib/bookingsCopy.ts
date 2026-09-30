@@ -382,6 +382,12 @@ export const CANCEL_SHEET = {
   unsureRow: "The club didn't answer — check the schedule.",
 } as const;
 
+/** F1.13 — a split booking's row: the organiser's net, and what went on to the partners. */
+export function splitRowOutcome(net: number, toPartners: number, penalty: number): string {
+  const line = `${formatCredits(Math.max(net, 0))} back, ${formatCredits(toPartners)} to partners`;
+  return penalty > 0 ? `${line}, ${formatCredits(penalty)} penalty kept` : line;
+}
+
 /** What a successful cancellation moved, per row. `refund` is GROSS, as the cancel routes answer it. */
 export function cancelRowOutcome(refund: number, penalty: number): string {
   const back = refund - penalty;

@@ -6,7 +6,7 @@ import { SPLIT_MODES, type SplitMode } from "@/lib/playersApi";
 import { BOOK_SPLIT, PLAYERS_COPY } from "@/lib/playersCopy";
 import { seatName, type DraftSeat } from "./playersDraft";
 import { SplitTotals } from "./SplitTotals";
-import type { PlayersStepState } from "./usePlayersStep";
+import type { SplitEditor } from "./usePlayersStep";
 
 /**
  * The BookSheet's Split step (D11): Equal · Ratio · Amount, the figure each mode asks for per
@@ -14,7 +14,7 @@ import type { PlayersStepState } from "./usePlayersStep";
  * court with guests alone goes straight to Confirm, because a guest pays nothing to split.
  */
 
-export function SplitStep({ players }: { players: PlayersStepState }) {
+export function SplitStep({ players }: { players: SplitEditor }) {
   const { draft } = players;
   const labelId = useId();
   const pick = (value: string) => {
@@ -47,7 +47,7 @@ export function SplitStep({ players }: { players: PlayersStepState }) {
 }
 
 /** The per-seat figure a Ratio or Amount split asks for. Guests are listed as playing free. */
-function SeatFigures({ players }: { players: PlayersStepState }) {
+function SeatFigures({ players }: { players: SplitEditor }) {
   const { draft } = players;
   const ratio = draft.mode === "ratio";
   return (
@@ -69,7 +69,7 @@ function SeatFigures({ players }: { players: PlayersStepState }) {
   );
 }
 
-function SeatFigure({ seat, players }: { seat: DraftSeat; players: PlayersStepState }) {
+function SeatFigure({ seat, players }: { seat: DraftSeat; players: SplitEditor }) {
   const name = seatName(seat.player);
   if (seat.player.kind === "guest") return <FixedFigure name={name} text={BOOK_SPLIT.playsFree} />;
   if (players.draft.mode === "ratio") {

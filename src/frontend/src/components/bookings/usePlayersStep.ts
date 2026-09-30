@@ -90,3 +90,10 @@ export function usePlayersStep(input: PlayersInput) {
 }
 
 export type PlayersStepState = ReturnType<typeof usePlayersStep>;
+
+/**
+ * What the Split step and its totals actually read — the draft, the batch flag, the preview and
+ * the four setters. Narrow on purpose: the booking page's "Change split" dialog supplies exactly
+ * this, and a field the BookSheet adds for itself must not become a field every editor owes.
+ */
+export type SplitEditor = Pick<PlayersStepState, "draft" | "bulk" | "preview" | "setMode" | "setWeight" | "setAmount" | "setOrganiserWeight">;

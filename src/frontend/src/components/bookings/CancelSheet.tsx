@@ -101,7 +101,10 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
   const reasonNeeded = forOthers && (!single || waive);
 
   const action = useAsyncAction(
-    () => cancelBookings({ bookings, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key, reread: props.reread }),
+    () => cancelBookings({
+      bookings, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key, reread: props.reread,
+      quotes: quotes.state.status === "ready" ? quotes.state.quotes : null,
+    }),
     {
       success: (result) => {
         const own = bookings.every((b) => b.mine);

@@ -319,3 +319,26 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
     expect(document.querySelector("dl")).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}50.00 cr`);
   });
 });
+
+describe("F1.13 — the desk cancelling a split booking says the truth even when its route does not", () => {
+  const ADM: GridBooking = { ...MINE, mine: false, memberFirstName: "Adm", amountChargedCredits: 250 };
+  const splitQuote = {
+    ...QUOTE, amountChargedCredits: 250, refundCredits: 250, net_credits: 125, partner_refunds: [{ name: "Sam", credits: 125 }],
+  };
+
+  it("never '250.00 cr back to Adm' when 125 of it went to the partner", async () => {
+    stubFetch([
+      { path: "/api/v1/bookings/bk-1/cancellation-quote", body: splitQuote },
+      // The desk's route answers the gross figures only.
+      { method: "POST", path: "/api/v1/admin/bookings/bk-1/cancel", body: { refunded_credits: 250, penalty_credits: 0 } },
+    ]);
+    openCancel({ bookings: [ADM], isAdmin: true });
+    await screen.findByText(CANCEL_SHEET.free("Adm"));
+    const money = document.querySelector("dl")!;
+    expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}125.00 cr`);
+    expect(money).toHaveTextContent(`${CANCEL_SHEET.goesBack("Adm")}125.00 cr`);
+    fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
+    expect(await screen.findByText("Booking cancelled. 125.00 cr back to Adm's credit; 125.00 cr to Sam.")).toBeTruthy();
+    expect(screen.queryByText(/250\.00 cr back to Adm/)).toBeNull();
+  });
+});

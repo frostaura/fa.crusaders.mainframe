@@ -7,7 +7,7 @@ import { BOOK_SPLIT, PLAYERS_COPY, PLAYERS_REFUSAL, playersRefusal } from "@/lib
 import { formatCredits } from "@/lib/utils";
 import { seatName, type PlayersDraft } from "./playersDraft";
 import { partnersTotal } from "./splitMath";
-import type { PlayersStepState } from "./usePlayersStep";
+import type { SplitEditor } from "./usePlayersStep";
 
 /**
  * The live totals bar: each seat's share as the SERVER splits it, and what that means for the
@@ -67,7 +67,7 @@ function TotalsSkeleton({ rows }: { rows: number }) {
   );
 }
 
-export function SplitTotals({ players }: { players: PlayersStepState }) {
+export function SplitTotals({ players }: { players: SplitEditor }) {
   const state = players.preview.state;
   if (state.status === "invalid") {
     return <Alert tone="danger" live="polite">{PLAYERS_REFUSAL[state.error] ?? PLAYERS_REFUSAL.split_preview_invalid}</Alert>;
