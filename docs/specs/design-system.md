@@ -146,7 +146,8 @@ reserved for genuine biometrics (passkey, capture).
 
 `<Interactable asChild surface="cell|card|tile|cta" watermark>` wraps a `<button>`/`<Link>`, adds
 `relative isolate overflow-hidden`, `data-interactive`, `data-watermark`, and appends an aria-hidden,
-non-focusable, pointer-events-none `FingerprintSimple` (light weight), cropped by the edge, rotated −15°,
+pointer-events-none empty box masked to `FingerprintSimple` (light weight — a CSS mask of Phosphor's own
+path, not an inline SVG, so a 200-cell grid decodes the shape once), cropped by the edge, rotated −15°,
 painted in `currentColor` at per-theme opacities (`--wm-rest/hover/press`).
 
 | Surface | Glyph | Position | Rest L/D | Hover/focus-visible | Press |

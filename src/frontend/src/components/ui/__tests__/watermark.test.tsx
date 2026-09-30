@@ -12,8 +12,8 @@ const SRC = join(UI, "..", "..");
 const CSS = readFileSync(join(UI, "watermark.css"), "utf8");
 
 /** The glyph an Interactable appended, if any. */
-function glyphIn(host: HTMLElement): SVGElement | null {
-  return host.querySelector<SVGElement>("svg.wm-glyph");
+function glyphIn(host: HTMLElement): HTMLElement | null {
+  return host.querySelector<HTMLElement>(".wm-glyph");
 }
 
 describe("Interactable", () => {
@@ -82,11 +82,27 @@ describe("Watermark glyph", () => {
     const glyph = glyphIn(screen.getByRole("button", { name: "Go" }))!;
     const geometry = components.watermarkGeometry[surface];
     expect(glyph).toHaveAttribute("aria-hidden", "true");
-    expect(glyph).toHaveAttribute("focusable", "false");
     expect(glyph).toHaveAttribute("data-wm-glyph", surface);
-    expect(glyph).toHaveAttribute("width", String(geometry.size));
+    // An empty box: nothing to read, focus or tab to (an inline SVG needed focusable="false").
+    expect(glyph.tagName).toBe("SPAN");
+    expect(glyph.childNodes).toHaveLength(0);
+    expect(glyph.style.width).toBe(`${geometry.size}px`);
+    expect(glyph.style.height).toBe(`${geometry.size}px`);
     expect(glyph.style.right).toBe(`${geometry.right}px`);
     expect(glyph.style.bottom).toBe(`${geometry.bottom}px`);
+  });
+
+  it("is cut to Phosphor's FingerprintSimple, light weight — the glyph it replaced, byte for byte", () => {
+    // Perf lane (2026-09-30): the per-cell inline SVG became a CSS mask. Same path, same viewBox,
+    // painted in currentColor — so the look cannot drift from the icon it was.
+    const defs = readFileSync(join(SRC, "..", "node_modules", "@phosphor-icons", "react", "dist", "defs", "FingerprintSimple.es.js"), "utf8");
+    const light = /\n {2}\[\n {4}"light",([\s\S]*?)\n {2}\]/.exec(defs)?.[1] ?? "";
+    const phosphorPath = /d: "([^"]+)"/.exec(light)?.[1];
+    expect(phosphorPath, "Phosphor's light fingerprint").toBeTruthy();
+    const mask = /--wm-shape: url\("data:image\/svg\+xml,([^"]+)"\);/.exec(CSS)?.[1] ?? "";
+    const svg = decodeURIComponent(mask);
+    expect(svg).toBe(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'><path d='${phosphorPath}'/></svg>`);
+    expect(CSS).toMatch(/\.wm-glyph \{[^}]*background-color: currentColor;[^}]*mask-image: var\(--wm-shape\);/);
   });
 
   it("reads only opacity variables the token plugin actually emits, in both themes", () => {
