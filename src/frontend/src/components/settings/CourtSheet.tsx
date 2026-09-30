@@ -9,7 +9,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useIsSmUp } from "@/components/ui/use-media-query";
 import { endpoints, type AdminCourt } from "@/lib/api";
-import { COURTS_COPY } from "@/lib/courtsCopy";
+import { COURTS_COPY, COURTS_LOST } from "@/lib/courtsCopy";
+import { unsureSentence, writeOrReadBack } from "@/lib/lostReply";
+import { LOST_REPLY } from "@/lib/lostReplyCopy";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { shown, toNumber } from "./draft";
@@ -58,19 +60,32 @@ function initialDraft(court: AdminCourt | "new", suggestedPrice: number | null):
   return { name: court.name, price: court.slice_price_credits, active: court.is_active };
 }
 
-/** The write: a POST for a new court, a PATCH carrying only what changed for an existing one. */
+/** The court on the list now that matches the draft, as the proof a lost write landed. */
+async function courtAsDrafted(court: AdminCourt | "new", draft: Draft): Promise<object | null> {
+  const name = draft.name.trim();
+  const courts = await endpoints.adminCourtsList();
+  const found = court === "new" ? courts.find((c) => c.name.trim() === name) : courts.find((c) => c.id === court.id);
+  const matches = found && found.name.trim() === name && found.slice_price_credits === draft.price
+    && (court === "new" || found.is_active === draft.active);
+  return matches ? {} : null;
+}
+
+/**
+ * The write: a POST for a new court, a PATCH carrying only what changed for an existing one. A
+ * lost reply is read back from the courts list (review round 3) — see `COURTS_LOST`.
+ */
 async function write(court: AdminCourt | "new", draft: Draft) {
   const name = draft.name.trim();
-  if (court === "new") {
-    await endpoints.adminCourtsCreate({ name, slicePriceCredits: draft.price });
-    return COURTS_COPY.added(name);
-  }
-  await endpoints.adminCourtsUpdate(court.id, {
-    ...(name !== court.name ? { name } : {}),
-    ...(draft.price !== court.slice_price_credits ? { slicePriceCredits: draft.price } : {}),
-    ...(draft.active !== court.is_active ? { isActive: draft.active } : {}),
-  });
-  return COURTS_COPY.saved(name);
+  const send = court === "new"
+    ? () => endpoints.adminCourtsCreate({ name, slicePriceCredits: draft.price })
+    : () => endpoints.adminCourtsUpdate(court.id, {
+      ...(name !== court.name ? { name } : {}),
+      ...(draft.price !== court.slice_price_credits ? { slicePriceCredits: draft.price } : {}),
+      ...(draft.active !== court.is_active ? { isActive: draft.active } : {}),
+    });
+  const { proven } = await writeOrReadBack(async () => { await send(); return {}; }, () => courtAsDrafted(court, draft));
+  const done = court === "new" ? COURTS_COPY.added(name) : COURTS_COPY.saved(name);
+  return proven ? LOST_REPLY.proven(done) : done;
 }
 
 function CourtForm({ court, suggestedPrice, onDone }: { court: AdminCourt | "new"; suggestedPrice: number | null; onDone: () => void }) {
@@ -137,7 +152,8 @@ function CourtForm({ court, suggestedPrice, onDone }: { court: AdminCourt | "new
         )}
         {save.error ? (
           <Alert tone="danger" live="assertive">
-            {describeFailure(save.error, { action: isNew ? COURTS_COPY.addAction : COURTS_COPY.saveAction, codes: COURTS_COPY.errorCodes })}
+            {unsureSentence(save.error, isNew ? COURTS_LOST.add(draft.name.trim()) : COURTS_LOST.save(draft.name.trim()))
+              ?? describeFailure(save.error, { action: isNew ? COURTS_COPY.addAction : COURTS_COPY.saveAction, codes: COURTS_COPY.errorCodes })}
           </Alert>
         ) : null}
       </SheetBody>

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminCourtsPage from "../AdminCourts";
-import { courtFixture, renderPage, stubFetch, type StubRoute } from "@/test/harness";
+import { courtFixture, refuse, renderPage, stubFetch, type StubRoute } from "@/test/harness";
 import { COURTS_COPY } from "@/lib/courtsCopy";
 
 /**
@@ -177,5 +177,56 @@ describe("adding a court", () => {
 
     expect(within(dialog).getByText(COURTS_COPY.priceInvalid)).toBeInTheDocument();
     expect(priceField()).toHaveFocus();
+  });
+});
+
+/**
+ * Review round 3 (admin lost-reply audit): a court save whose reply is lost is read back from
+ * the courts list. The stubs perform the PATCH, then fail the reply.
+ */
+describe("a court save whose reply was lost", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function lost(landed: boolean, readable = true): StubRoute[] {
+    let courts = COURTS;
+    let reads = 0;
+    return [
+      { path: "/api/v1/admin/courts/", respond: () => (++reads > 1 && !readable ? refuse(503, { error: "down" }) : courts) },
+      {
+        method: "PATCH", path: "/api/v1/admin/courts/",
+        respond: () => {
+          if (landed) courts = COURTS.map((c) => (c.id === COURTS[2].id ? { ...c, slice_price_credits: 14 } : c));
+          return refuse(504, { error: "gateway_timeout" });
+        },
+      },
+    ];
+  }
+  async function save() {
+    fireEvent.click(await screen.findByRole("button", { name: COURTS_COPY.editLabel("Glass court") }));
+    const dialog = await screen.findByRole("dialog", { name: COURTS_COPY.editTitle("Glass court") });
+    fireEvent.change(priceField(), { target: { value: "14" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: COURTS_COPY.saveEdit }));
+    return dialog;
+  }
+
+  it("says it saved when the list has the new price", async () => {
+    stubFetch(lost(true));
+    renderPage(<AdminCourtsPage />);
+    await save();
+    expect(await screen.findByText(`${COURTS_COPY.saved("Glass court")} The club's reply didn't arrive, so we checked its record.`)).toBeInTheDocument();
+  });
+
+  it("says nothing changed when the list still has the old price", async () => {
+    stubFetch(lost(false));
+    renderPage(<AdminCourtsPage />);
+    const dialog = await save();
+    expect(await within(dialog).findByText(/we checked: Glass court still has its old details — nothing changed/)).toBeInTheDocument();
+  });
+
+  it("says it cannot tell when the list cannot be read either", async () => {
+    stubFetch(lost(true, false));
+    renderPage(<AdminCourtsPage />);
+    const dialog = await save();
+    expect(await within(dialog).findByText(/can't tell whether Glass court was saved/)).toBeInTheDocument();
   });
 });

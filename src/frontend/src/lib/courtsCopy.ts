@@ -1,3 +1,5 @@
+import { unsureWords } from "./lostReplyCopy";
+
 /**
  * The Courts page's words (`/admin/courts`). Tests query by these.
  *
@@ -56,3 +58,12 @@ export const COURTS_COPY = {
 export function formatCredits(credits: number): string {
   return Number.isInteger(credits) ? String(credits) : credits.toFixed(2);
 }
+
+/**
+ * A court write whose reply was lost, read back from the courts list (review round 3, the admin
+ * lost-reply audit): what the list still shows, and what cannot be told.
+ */
+export const COURTS_LOST = {
+  add: (name: string) => unsureWords(`there is no ${name} yet`, `${name} was added`, "Courts"),
+  save: (name: string) => unsureWords(`${name} still has its old details`, `${name} was saved`, "Courts"),
+} as const;
