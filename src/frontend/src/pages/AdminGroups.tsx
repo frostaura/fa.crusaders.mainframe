@@ -18,7 +18,7 @@ import { GroupAssign } from "../components/members/GroupAssign";
 import { ApiError, endpoints, type AdminCourt } from "../lib/api";
 import {
   adminEndpoints, type GroupAddResult, type MemberBookingRules, type MemberGroup,
-  type MemberGroupBody, type Weekday,
+  type GroupWindow, type MemberGroupBody, type Weekday,
 } from "../lib/adminApi";
 import {
   ADD_LOST, ARCHIVE_COPY, ARCHIVED_HEADING, GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, GROUP_LOST, GROUP_SHEET, MOST_RESTRICTIVE_STANDING,
@@ -177,12 +177,39 @@ async function addedAccordingToGroup(groupId: string, asked: string[], before: S
   };
 }
 
+/**
+ * A group save whose reply was lost, answered from the list (R4 carry-over): an edit is saved when
+ * the group now reads as sent; a create when a group of this name is listed that was not before.
+ */
+async function savedAccordingToList(id: string, body: MemberGroupBody, known: ReadonlySet<string>): Promise<object | null> {
+  const { groups } = await adminEndpoints.memberGroups();
+  const same = (g: MemberGroup) => g.name.trim().toLowerCase() === body.name.trim().toLowerCase();
+  if (id === "") return groups.some((g) => !known.has(g.id) && same(g)) ? {} : null;
+  const now = groups.find((g) => g.id === id);
+  return now && groupReadsAs(now, body) ? {} : null;
+}
+
+/** Whether a listed group carries what a save sent: name, description, pricing mode, caps and times. */
+function groupReadsAs(g: MemberGroup, body: MemberGroupBody): boolean {
+  const times = (w: GroupWindow[] | undefined) => (w ?? []).map((x) => `${x.day} ${x.start}-${x.end}`).sort().join("|");
+  const cap = (v: number | null | undefined) => v ?? null;
+  return g.name === body.name
+    && (g.description ?? null) === (body.description ?? null)
+    && g.pricing?.mode === body.pricing.mode
+    && cap(g.caps?.max_slots_per_day) === cap(body.caps.maxSlotsPerDay)
+    && cap(g.caps?.max_minutes_per_day) === cap(body.caps.maxMinutesPerDay)
+    && cap(g.caps?.advance_booking_days) === cap(body.caps.advanceBookingDays)
+    && times(g.windows) === times(body.windows);
+}
+
 /** A success sentence, with the reply-lost note when the list had to be asked. */
 function saidOnce(done: string, proven: boolean): string {
   return proven ? LOST_REPLY.proven(done) : done;
 }
 
-function useGroupWrites(load: () => Promise<void>, setSheet: (next: SheetState) => void) {
+function useGroupWrites(
+  load: () => Promise<void>, setSheet: (next: SheetState) => void, listed: () => MemberGroup[] | null,
+) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
@@ -191,13 +218,24 @@ function useGroupWrites(load: () => Promise<void>, setSheet: (next: SheetState) 
   const save = async (id: string, body: MemberGroupBody) => {
     setSaving(true);
     setSaveError(null);
+    // The groups on screen at the press: a group with this name that was already listed is not
+    // this create's (R4 carry-over: a second press after a lost reply said the name was taken).
+    const known = new Set((listed() ?? []).map((g) => g.id));
     try {
-      if (id === "") await adminEndpoints.memberGroupCreate(body);
-      else await adminEndpoints.memberGroupUpdate(id, body);
-      toast.push({ tone: "success", text: id === "" ? GROUP_SHEET.created(body.name) : GROUP_SHEET.saved(body.name) });
+      const { proven } = await writeOrReadBack(
+        async () => {
+          if (id === "") await adminEndpoints.memberGroupCreate(body);
+          else await adminEndpoints.memberGroupUpdate(id, body);
+          return {};
+        },
+        () => savedAccordingToList(id, body, known),
+      );
+      const done = id === "" ? GROUP_SHEET.created(body.name) : GROUP_SHEET.saved(body.name);
+      toast.push({ tone: "success", text: saidOnce(done, proven) });
       setSheet(null);
       await load();
     } catch (err) {
+      if (err instanceof UnsureOutcome) void load();
       setSaveError(err);
     } finally {
       setSaving(false);
@@ -268,7 +306,7 @@ export function AdminGroupsPage() {
   const [draftKey, setDraftKey] = useState(0);
   const [weekPreviewId, setWeekPreviewId] = useState<string | null>(null);
   const [memberPreview, setMemberPreview] = useState(false);
-  const writes = useGroupWrites(load, setSheet);
+  const writes = useGroupWrites(load, setSheet, () => groups);
 
   const club = useMemo(() => clubWeek(settings ?? {}), [settings]);
   const context = clubContextFrom(settings, club, courts);

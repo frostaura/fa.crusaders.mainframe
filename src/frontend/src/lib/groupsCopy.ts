@@ -1,5 +1,6 @@
 import { ApiError } from "./api";
 import { unsureWords } from "./lostReplyCopy";
+import { unsureSentence } from "./lostReply";
 import { describeFailure } from "./errors";
 import type { GroupAddResult, GroupAddRow, GroupPricingMode, Weekday } from "./adminApi";
 import {
@@ -510,6 +511,9 @@ function figure(err: ApiError, key: string): string | null {
  * Tuesday window starts after it ends" sends them to the Tuesday.
  */
 export function explainGroupRefusal(err: unknown, action = "save this group"): string {
+  // A lost reply, read back (R4 carry-over): the list shows whether the save landed.
+  const unsure = unsureSentence(err, GROUP_LOST.save);
+  if (unsure) return unsure;
   if (err instanceof ApiError) {
     const code = err.code;
     if (code === "group_name_taken") {
@@ -899,6 +903,8 @@ export const GROUP_LOST = {
   archive: (name: string) => unsureWords(`${name} is still active`, `${name} was archived`, "Groups"),
   restore: (name: string) => unsureWords(`${name} is still archived`, `${name} was brought back`, "Groups"),
   remove: (name: string) => unsureWords(`${name} is still there`, `${name} was deleted`, "Groups"),
+  /** The sheet's save: nothing the list shows says it landed, so the sheet stays open with the edits. */
+  save: unsureWords("the group is as it was", "the group was saved", "Groups"),
 } as const;
 
 export const ARCHIVED_HEADING = "Archived";

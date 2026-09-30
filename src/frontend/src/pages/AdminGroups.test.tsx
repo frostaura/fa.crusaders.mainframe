@@ -714,6 +714,43 @@ describe("a group write whose reply was lost", () => {
     expect(await screen.findByText(ADD_LOST.unchecked("Off-peak"))).toBeInTheDocument();
   });
 
+  /** R4 carry-over: the sheet's save performs, then the reply dies; the list is read back. */
+  function lostSave(landed: boolean): StubRoute[] {
+    let groups: MemberGroup[] = [OFF_PEAK];
+    return [
+      { path: "/api/v1/admin/member-groups", respond: () => ({ groups }) },
+      {
+        method: "PATCH", path: "/api/v1/admin/member-groups/g-offpeak",
+        respond: (req) => {
+          if (landed) groups = [{ ...OFF_PEAK, name: (req.body as { name: string }).name }];
+          return refuse(504, { error: "gateway_timeout" });
+        },
+      },
+    ];
+  }
+
+  async function renameOffPeak() {
+    fireEvent.click(await screen.findByRole("button", { name: /Edit Off-peak/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "Daytime" } });
+    fireEvent.click(within(dialog).getByRole("button", SAVE("Off-peak")));
+    return dialog;
+  }
+
+  it("says a lost save landed when the list reads as sent, and closes the sheet", async () => {
+    open(null, lostSave(true));
+    await renameOffPeak();
+    expect(await screen.findByText(`${GROUP_SHEET.saved("Daytime")} The club's reply didn't arrive, so we checked its record.`))
+      .toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("says nothing changed, in the sheet, when the list does not read as sent", async () => {
+    open(null, lostSave(false));
+    const dialog = await renameOffPeak();
+    expect(await within(dialog).findByText(/we checked: the group is as it was — nothing changed/)).toBeInTheDocument();
+  });
+
   it("says it cannot tell whether a delete happened when the list cannot be read either", async () => {
     open(null, lost("DELETE", true, false));
     await fromMenu("Off-peak", GROUP_ACTIONS.remove);
