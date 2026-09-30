@@ -149,6 +149,13 @@ async function bookTogether(
  * court, heartbeats again for a roster, and activates the booking's code — exactly the path a
  * scan takes. This is what sets `bookings.CheckedInAt`; nothing else in the walk does.
  */
+// A result can be recorded only once the court time has started (`not_started` before), and the
+// box checks a booking in up to the cue window early — so wait out the rest before recording.
+async function untilStarted(startsAt: string) {
+  const wait = Date.parse(startsAt) - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait + 2_000));
+}
+
 async function checkInThroughTheBox(
   request: APIRequestContext, court: Court, bookingId: string, startsAt: string, endsAt: string,
 ): Promise<void> {
@@ -223,6 +230,7 @@ test("organiser records 3–1, partner confirms from the mail, both earn their b
 
   const { bookingId, court, startsAt, endsAt } = await bookTogether(request, organiser, partner);
   await checkInThroughTheBox(request, court, bookingId, startsAt, endsAt);
+  await untilStarted(startsAt);
   // The wait for the box's cue window can outlast a session; sign both back in.
   organiser.session = await passwordSession(request, organiser.email, organiser.password);
   partner.session = await passwordSession(request, partner.email, partner.password);
@@ -284,6 +292,7 @@ test("a disputed result reaches the admin, who removes it", async ({ browser, re
   await setup.close();
   const { bookingId, court, startsAt, endsAt } = await bookTogether(request, organiser, partner);
   await checkInThroughTheBox(request, court, bookingId, startsAt, endsAt);
+  await untilStarted(startsAt);
   // The wait for the box's cue window can outlast a session; sign both back in.
   organiser.session = await passwordSession(request, organiser.email, organiser.password);
   partner.session = await passwordSession(request, partner.email, partner.password);
