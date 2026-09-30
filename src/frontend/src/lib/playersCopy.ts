@@ -1,3 +1,4 @@
+import { INBOX_TITLE } from "./bellCopy";
 import { ApiError } from "./api";
 import { clubClock, clubShortDate } from "./clubClock";
 import { describeFailure } from "./errors";
@@ -909,7 +910,7 @@ export const INVITE_REFUSAL: Record<string, string> = {
 
 /** The bell in the top bar and the member's inbox at `/inbox`. */
 export const INBOX_COPY = {
-  title: "Notifications",
+  title: INBOX_TITLE,
   description: "Invites, shares and changes to your games.",
   listLabel: "Your notifications",
   /** StateBlock's "Couldn't read your notifications — …". */
@@ -933,21 +934,14 @@ export const INBOX_COPY = {
   markUnknown: "The club didn't answer and we couldn't check either, so we can't tell whether that was marked read. Refresh to see.",
 } as const;
 
-/** The bell's accessible name: "Notifications, 3 unread" — or just "Notifications". */
-export function bellLabel(unread: number | null): string {
-  return unread && unread > 0 ? `${INBOX_COPY.title}, ${unread} unread` : INBOX_COPY.title;
-}
+/** The bell's words live with the shell (`bellCopy`, so this file stays out of the entry chunk). */
+export { bellBadge, bellLabel } from "./bellCopy";
 
 /** Above the inbox list: "1 unread" / "3 unread". */
 export function inboxUnreadLine(unread: number): string {
   return `${unread} unread`;
 }
 
-/** The digits on the bell: 1–9, then "9+". Null at zero or unknown — no badge at all. */
-export function bellBadge(unread: number | null): string | null {
-  if (!unread || unread <= 0) return null;
-  return unread > 9 ? "9+" : String(unread);
-}
 
 /** What each kind is, in words — the icon's companion for a screen reader. */
 export const INBOX_KIND_WORD: Record<string, string> = {

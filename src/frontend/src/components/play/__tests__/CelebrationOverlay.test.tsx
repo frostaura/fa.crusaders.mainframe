@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { renderPage, signOut } from "@/test/harness";
 import { CelebrationOverlay } from "@/components/play/CelebrationOverlay";
+// The moment is a lazy chunk; importing it here makes its load instant (gotchas-frontend: lazy chunks race tests).
+import "@/components/play/CelebrationMoment";
 import { COLLAPSE_OVER, isQuietPath, momentOf } from "@/components/play/celebrationRules";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { CELEBRATION_COPY } from "@/lib/playCopy";

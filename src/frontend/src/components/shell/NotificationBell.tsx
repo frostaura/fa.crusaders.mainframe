@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useUnreadCount, useUnreadCountDriver } from "@/components/inbox/useUnreadCount";
 import { Bell } from "@/components/ui/icons";
-import { bellBadge, bellLabel } from "@/lib/playersCopy";
+import { bellBadge, bellLabel } from "@/lib/bellCopy";
 import { cn } from "@/lib/utils";
 
 /**
