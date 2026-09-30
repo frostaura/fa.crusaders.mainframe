@@ -164,9 +164,48 @@ function NightDayChooser({ day, today, onDay, rangeHint }: {
  * </p>
  */
 function useMemberNight(userId: string, day: string) {
-  const load = useCallback(() => adminEndpoints.memberTrace(userId, { day }), [userId, day]);
-  const [read, retry] = useRead(`${userId}:${day}`, load);
-  return { view: read.data, loading: read.loading, error: read.error, retry };
+  const key = `${userId}:${day}`;
+  // A page at a time (R4 carry-over): one busy night's trace was 307 KB in one read. The summary
+  // and the total are the whole night's on every page; "Show more" appends with the cursor, and
+  // the server counts every page of one night as ONE privacy view.
+  const load = useCallback(() => adminEndpoints.memberTrace(userId, { day, limit: TRACE_PAGE }), [userId, day]);
+  const [read, retry] = useRead(key, load);
+  const [more, setMore] = useState<NightMore>({ key: "", events: [], cursor: undefined, pending: false, error: null });
+  const mine = more.key === key ? more : null;
+  const cursor = mine?.cursor !== undefined ? mine.cursor : read.data?.cursor ?? null;
+  const view = read.data ? { ...read.data, events: [...read.data.events, ...(mine?.events ?? [])], cursor } : read.data;
+
+  const loadMore = async () => {
+    if (!cursor || mine?.pending) return;
+    setMore({ key, events: mine?.events ?? [], cursor, pending: true, error: null });
+    try {
+      const page = await adminEndpoints.memberTrace(userId, { day, limit: TRACE_PAGE, cursor });
+      setMore((now) => (now.key === key ? { key, events: [...now.events, ...page.events], cursor: page.cursor ?? null, pending: false, error: null } : now));
+    } catch (error) {
+      setMore((now) => (now.key === key ? { ...now, pending: false, error } : now));
+    }
+  };
+  return { view, loading: read.loading, error: read.error, retry, loadMore, more: { pending: mine?.pending ?? false, error: mine?.error ?? null } };
+}
+
+/** Events a page holds beyond the first read, for one night (`key`). `cursor` undefined: not paged yet. */
+type NightMore = { key: string; events: TraceView["events"]; cursor: string | null | undefined; pending: boolean; error: unknown };
+
+/** A night's events per page (B2 suggests 100): enough for most nights in one read. */
+const TRACE_PAGE = 100;
+
+/** "Show more", while the night has events not yet on the page. */
+function NightMoreButton({ view, onMore, pending, error }: {
+  view: TraceView | null; onMore: () => void; pending: boolean; error: unknown;
+}) {
+  if (!view?.cursor) return null;
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <p className="text-sm text-text-secondary">{NIGHT_TAB_COPY.showing(view.events.length, view.total ?? null)}</p>
+      {error ? <p role="alert" className="text-sm text-danger-strong">{describeFailure(error, { action: "read more of that night" })}</p> : null}
+      <Button variant="outline" pending={pending} onClick={onMore}>{NIGHT_TAB_COPY.showMore}</Button>
+    </div>
+  );
 }
 
 /**
@@ -218,7 +257,8 @@ export function MemberNight({ userId, name }: { userId: string; name: string | n
       return out;
     }, { replace: true });
   };
-  const { view, loading, error, retry } = useMemberNight(userId, day);
+  const night = useMemberNight(userId, day);
+  const { view, loading, error, retry } = night;
   const { timezone, events, rows, subjectName, caveat, retentionKey, rangeHint } = nightView(view, name);
 
   return (
@@ -240,6 +280,7 @@ export function MemberNight({ userId, name }: { userId: string; name: string | n
         timezone={timezone}
         onRetry={retry}
       />
+      <NightMoreButton view={view} onMore={() => void night.loadMore()} pending={night.more.pending} error={night.more.error} />
     </div>
   );
 }

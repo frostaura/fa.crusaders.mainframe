@@ -117,14 +117,14 @@ describe("a person's night", () => {
 
       await waitFor(() => expect(stub.calls.some((c) => c.path.includes("/trace?day="))).toBe(true));
       const asked = stub.calls.filter((c) => c.path.includes("/trace?day=")).map((c) => c.path);
-      expect(asked.every((p) => p.endsWith("day=2026-09-23"))).toBe(true);
+      expect(asked.every((p) => new URLSearchParams(p.split("?")[1]).get("day") === "2026-09-23")).toBe(true);
       expect(screen.getByRole("radio", { name: "Tonight" })).toHaveAttribute("aria-checked", "true");
     });
 
     it("lets a ?day= in the link win over the default", async () => {
       const stub = stubFetch(nightRoutes(traceView([traceEvent()], { timezone: "Pacific/Auckland" })));
       renderNight("/admin/members/u1/night?day=2026-09-20");
-      await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/trace?day=2026-09-20"))).toBe(true));
+      await waitFor(() => expect(stub.calls.some((c) => c.path.includes("/trace?day=2026-09-20&"))).toBe(true));
     });
   });
 
@@ -462,5 +462,31 @@ describe("the admin change record", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/That does not mean nothing happened/);
     expect(screen.queryByText("No changes recorded in this range.")).not.toBeInTheDocument();
+  });
+});
+
+/** R4 carry-over: a busy night's trace was 307 KB in one read; it comes a page at a time now. */
+describe("a night read a page at a time", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+
+  it("asks for a page, says how many of the night are shown, and appends the next page", async () => {
+    const first = traceView([traceEvent({ headline: "Booked Court 2 for 18:00" })], { total: 2, cursor: "p2" });
+    const second = traceView([traceEvent({ at: "2026-09-22T16:10:00.000Z", headline: "Cancelled Court 2 for 18:00", kind: "booking.cancelled" })], { total: 2, cursor: null });
+    const stub = stubFetch([
+      ...nightRoutes(first).filter((r) => r.path !== "/api/v1/admin/members/u1/trace"),
+      { path: "/api/v1/admin/members/u1/trace", respond: (req) => (req.path.includes("cursor=p2") ? second : first) },
+    ]);
+    renderNight("/admin/members/u1/night?day=2026-09-22");
+
+    expect(await screen.findByText(NIGHT_TAB_COPY.showing(1, 2))).toBeInTheDocument();
+    const firstCall = stub.calls.find((c) => c.path.startsWith("/api/v1/admin/members/u1/trace"))!;
+    expect(firstCall.path).toContain("limit=100");
+    fireEvent.click(screen.getByRole("button", { name: NIGHT_TAB_COPY.showMore }));
+    expect(await screen.findByText(/Cancelled Court 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Booked Court 2/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: NIGHT_TAB_COPY.showMore })).not.toBeInTheDocument();
+    const paged = stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/members/u1/trace")).at(-1)!;
+    expect(paged.path).toContain("cursor=p2");
+    expect(paged.path).toContain("day=2026-09-22");
   });
 });

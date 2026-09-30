@@ -435,6 +435,10 @@ export const ADMIN_ROLE_CODES: Record<string, string> = {
 /* ═══════════════════════════════ NIGHT ═══════════════════════════════ */
 
 export const NIGHT_TAB_COPY = {
+  /** R4 carry-over: a night read a page at a time. */
+  showing: (shown: number, total: number | null) =>
+    total === null ? `Showing the first ${shown} events.` : `Showing ${shown} of ${total} events.`,
+  showMore: "Show more of this night",
   title: "Night",
   pickerTitle: "A person’s night",
   pickerDescription: "Choose a member to open their night. It now lives on the member's own page.",
