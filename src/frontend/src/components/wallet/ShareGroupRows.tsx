@@ -118,6 +118,12 @@ const GROUP_CELL: Record<Column, (h: Head) => ReactNode> = {
   ),
 };
 
+/**
+ * R4 V4-10 — the line reads like every other row: its sentence on the cells' own baseline (the
+ * disclosure needs no padding of its own — it is stretched over the whole row, so the row is its
+ * target), the date directly under it on a phone, and "View booking" as a quiet line after both
+ * instead of a 44px block floating between the title and its date.
+ */
 function GroupComment({ head }: { head: Head }) {
   const Caret = head.open ? CaretDown : CaretRight;
   return (
@@ -128,8 +134,9 @@ function GroupComment({ head }: { head: Head }) {
         aria-expanded={head.open}
         aria-controls={head.controls}
         onClick={head.onToggle}
+        data-share-toggle=""
         className={cn(
-          "no-lift -mx-1 inline-flex min-h-touch items-start gap-1.5 rounded-md px-1 py-2 text-left font-semibold text-text-primary",
+          "no-lift -mx-1 inline-flex items-start gap-2 rounded-md px-1 text-left font-semibold text-text-primary",
           // Stretched over the line (its row is `relative`); the booking link sits above it.
           "after:absolute after:inset-0 after:content-['']",
           "transition-colors duration-fast ease-standard hover:text-accent-strong motion-reduce:transition-none",
@@ -139,13 +146,15 @@ function GroupComment({ head }: { head: Head }) {
         <span className="min-w-0 break-words">{head.sentence}</span>
         <span className="sr-only">{`, ${COPY.movements(head.group.rows.length)}`}</span>
       </button>
-      <span className="block">
-        <TextLink to={`/bookings/${head.group.bookingId}`} className="relative z-10 inline-flex min-h-touch items-center text-sm">
+      {/* Under the sentence, not under the caret: the caret (16px) and its gap (8px) are pl-6. */}
+      <div className="pl-6">
+        <PhoneTime at={newest(head.group.rows).at} />
+        {/* A 44px target on a phone, where it is tapped; a line of text on a desk, where it is clicked. */}
+        <TextLink to={`/bookings/${head.group.bookingId}`} className="relative z-10 inline-flex min-h-touch items-center text-sm sm:min-h-0 sm:pt-1">
           {COPY.viewBooking}
           <span className="sr-only">{`: ${head.sentence}`}</span>
         </TextLink>
-      </span>
-      <PhoneTime at={newest(head.group.rows).at} />
+      </div>
     </TableCell>
   );
 }

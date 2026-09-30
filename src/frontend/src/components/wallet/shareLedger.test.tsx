@@ -143,3 +143,20 @@ describe("the share sentences", () => {
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+describe("the share line's layout (R4 V4-10)", () => {
+  it("keeps the sentence on the cells' baseline, and puts the date under it before the link", async () => {
+    stubFetch([]);
+    renderPage(<LedgerTable rows={[row("s1")]} label="Wallet ledger" groupShares shareBookings={known(summary())} />);
+    const toggle = await screen.findByRole("button", { name: /^Shares for Court 1/ });
+    // No padding or touch floor of its own: the row is its target, so its words sit where every
+    // other cell's words sit (it was 8px low beside the amount).
+    expect(toggle.className).not.toMatch(/\bpy-2\b/);
+    expect(toggle.className).not.toMatch(/\bmin-h-touch\b/);
+    // On a phone the date belongs to its title: it comes before "View booking", not after it.
+    const cell = toggle.closest("td")!;
+    const time = cell.querySelector("time")!;
+    const link = within(cell).getByRole("link", { name: new RegExp(`^${SHARE_LEDGER_COPY.viewBooking}`) });
+    expect(time.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
