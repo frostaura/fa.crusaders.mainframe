@@ -298,7 +298,7 @@ test.describe("P8: the welcome wizard", () => {
     await page.goto("/my-code");
     // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
     // asserted present, and the pass itself visible.
-    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("heading", { level: 1, name: "My Code" })).toBeAttached();
     await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(page).toHaveURL(/\/my-code$/);
   });
@@ -321,7 +321,7 @@ test.describe("P8: the welcome wizard", () => {
     await page.goto("/my-code");
     // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
     // asserted present, and the pass itself visible.
-    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("heading", { level: 1, name: "My Code" })).toBeAttached();
     await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(page).toHaveURL(/\/my-code$/);
 
@@ -372,7 +372,7 @@ test.describe("P8: the setup checklist on My Code", () => {
     await page.reload();
     // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
     // asserted present, and the pass itself visible.
-    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("heading", { level: 1, name: "My Code" })).toBeAttached();
     await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(page.getByRole("region", { name: CHECKLIST.title })).toHaveCount(0);
   });

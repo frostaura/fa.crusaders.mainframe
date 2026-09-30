@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { CalendarCheck } from "../ui/icons";
 import type { MemberDoorBooking } from "../../lib/api";
-import { clubClock } from "../../lib/clubClock";
+import { clubClock, clubShortDate } from "../../lib/clubClock";
 import { useCountdownSeconds } from "../member-door/useCountdownSeconds";
 import { Button } from "../ui/button";
 import { Panel } from "../ui/card";
@@ -98,6 +98,7 @@ export function WhatsNextCard({ booking, timezone, doors, unlockSeconds }: Whats
   const lines = whatsNextSteps(
     {
       courtNumber: booking.court_number ?? null,
+      day: clubShortDate(booking.starts_at, timezone),
       startsClock: clubClock(booking.starts_at, timezone),
       endsClock: clubClock(booking.ends_at, timezone),
     },

@@ -161,7 +161,7 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
       id: "code",
       title: "Come to the club",
       body: [
-        "Bring your phone. Open Your code from the menu at the top.",
+        "Bring your phone. Open My Code from the menu at the top.",
         "The code changes every minute. That is normal, and you never have to do anything about it.",
       ],
     },
@@ -253,12 +253,17 @@ export const WHATS_NEXT_MORE = "Read the whole guide";
  * that push help be easy to get rid of.
  * </p>
  */
-export function whatsNextSteps(booking: { courtNumber: number | null; startsClock: string; endsClock: string },
+/**
+ * F4-13 — the day is part of the booking: "from 11:15 to 11:30" for a court TOMORROW read as
+ * today. And the code is found under the name the menu actually shows ("My Code"); the card
+ * said "under Your code in the menu" beside a nav reading My Code.
+ */
+export function whatsNextSteps(booking: { courtNumber: number | null; day: string; startsClock: string; endsClock: string },
   input: GuideInput = {}): string[] {
   const where = booking.courtNumber != null ? `court ${booking.courtNumber}` : "your court";
   const lines = [
-    `Your court is ${where}, from ${booking.startsClock} to ${booking.endsClock}.`,
-    "Bring your phone. Your code is under Your code in the menu — it changes every minute, which is normal.",
+    `Your court is ${where} on ${booking.day}, from ${booking.startsClock} to ${booking.endsClock}.`,
+    "Bring your phone. Your code is on My Code in the menu — it changes every minute, which is normal.",
   ];
   if (input.doors !== "no") {
     lines.push("At the club door, hold your phone in front of the small scanner beside it. "

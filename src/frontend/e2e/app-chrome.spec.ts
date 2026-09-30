@@ -175,7 +175,7 @@ test.describe("R15 — where the old addresses go", () => {
     await expect(page).toHaveURL(/\/my-code$/);
     // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
     // asserted present, and the pass itself visible.
-    await expect(page.getByRole("heading", { name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("heading", { name: "My Code" })).toBeAttached();
     await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(mainNav(page).getByRole("link", { name: "My Code" })).toHaveAttribute("aria-current", "page");
   });
@@ -331,7 +331,7 @@ test.describe("B12 — the chrome at a large root font size", () => {
     await openMember(page);
     // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
     // asserted present, and the pass itself visible.
-    await expect(page.getByRole("heading", { name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("heading", { name: "My Code" })).toBeAttached();
     await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
 

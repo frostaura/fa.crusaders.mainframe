@@ -1738,7 +1738,7 @@ describe("MyCode at a club with a door", () => {
     expect(qr).toBeLessThan(order(screen.getByRole("heading", { name: /What opens the door/ })));
     // D1: there is no choice of code to put above it — the heading is the only thing that is.
     expect(screen.queryByRole("tablist")).toBeNull();
-    expect(order(screen.getByRole("heading", { level: 1, name: "Your code" }))).toBeLessThan(qr);
+    expect(order(screen.getByRole("heading", { level: 1, name: "My Code" }))).toBeLessThan(qr);
   });
 
   // --- D12: the full-screen overlay --------------------------------------------------
@@ -1965,7 +1965,7 @@ describe("MyCode — round 3", () => {
     }));
 
     await screen.findByText(/That is what the door's board reported doing/);
-    const heading = screen.getByRole("heading", { name: "Your code" });
+    const heading = screen.getByRole("heading", { name: "My Code" });
     expect(heading.closest("[data-page-shell]")!.className).toMatch(/pb-24/);
   });
 

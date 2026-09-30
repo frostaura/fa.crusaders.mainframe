@@ -173,7 +173,7 @@ describe("the what-happens-next card", () => {
   it("names the real court and the real times, in the club's day", () => {
     renderCard();
     // 17:00Z is 19:00 in Johannesburg. The club's zone, not the reader's, and 24-hour.
-    expect(screen.getByText(/court 3, from 19:00 to 19:45/i)).toBeInTheDocument();
+    expect(screen.getByText(/court 3 on Thu 1 Jan, from 19:00 to 19:45/i)).toBeInTheDocument();
     expect(screen.queryByText(/PM/)).toBeNull();
   });
 
@@ -195,17 +195,17 @@ describe("the what-happens-next card", () => {
   it("stays dismissed for this booking and comes back for the next", () => {
     renderCard();
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
-    expect(screen.queryByText(/court 3, from 19:00/i)).toBeNull();
+    expect(screen.queryByText(/court 3 on /i)).toBeNull();
     expect(window.localStorage.getItem(WHATS_NEXT_DISMISS_KEY)).toBe(BOOKING.ends_at);
 
     cleanup();
     renderCard();
-    expect(screen.queryByText(/court 3, from 19:00/i)).toBeNull();
+    expect(screen.queryByText(/court 3 on /i)).toBeNull();
 
     cleanup();
     const later = { ...BOOKING, starts_at: "2099-01-02T17:00:00Z", ends_at: "2099-01-02T17:45:00Z", court_number: 1 };
     renderCard({ booking: later });
-    expect(screen.getByText(/court 1, from 19:00 to 19:45/i)).toBeInTheDocument();
+    expect(screen.getByText(/court 1 on Fri 2 Jan, from 19:00 to 19:45/i)).toBeInTheDocument();
   });
 
   /** Storage the browser has taken away is not a reason for the card to throw. */
@@ -217,7 +217,7 @@ describe("the what-happens-next card", () => {
     renderCard();
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
     // Dismissed for this visit even though nothing could be written down.
-    expect(screen.queryByText(/court 3, from 19:00/i)).toBeNull();
+    expect(screen.queryByText(/court 3 on /i)).toBeNull();
   });
 
   /** It is a standing card on a screen somebody arrived at, never a second announcement. */
@@ -233,7 +233,7 @@ describe("the what-happens-next card", () => {
 
   it("builds one line per thing that happens, and no more", () => {
     const lines = whatsNextSteps(
-      { courtNumber: 2, startsClock: "19:00", endsClock: "19:45" },
+      { courtNumber: 2, day: "Thu 1 Oct", startsClock: "19:00", endsClock: "19:45" },
       { doors: "yes" },
     );
     expect(lines).toHaveLength(5);

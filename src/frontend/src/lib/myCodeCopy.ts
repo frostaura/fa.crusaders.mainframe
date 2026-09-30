@@ -12,7 +12,8 @@
  */
 
 export const MY_CODE = {
-  title: "Your code",
+  /** F4-13 — the page is called what the nav calls it; "Your code" beside a "My Code" tab was two names. */
+  title: "My Code",
   /** The pass card's accessible name. */
   passLabel: "Your member pass",
   overline: "MEMBER",

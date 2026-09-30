@@ -132,7 +132,7 @@ test("the old court-code link still lands on the page, under its new name", asyn
   await expect(page).toHaveURL(/\/my-code$/);
   // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
   // asserted present, and the pass itself visible.
-  await expect(page.getByRole("heading", { name: "Your code" })).toBeAttached();
+  await expect(page.getByRole("heading", { name: "My Code" })).toBeAttached();
   await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
   // D1: the member's one code, as the club computes it (an independent Node implementation).
   const shown = await page.getByLabel("Your code", { exact: true }).textContent();
