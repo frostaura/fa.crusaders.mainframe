@@ -1,6 +1,11 @@
 import type { PickedPlayer } from "@/components/players/PlayerPicker";
 import { parseAmount, parseWeight, type DraftSeat, type PlayersDraft } from "@/components/bookings/playersDraft";
+// `parseAmount` above reads the Split step's own draft fields (the BookSheet's rule); a figure
+// typed into the share ask goes through the shared money parser instead.
+import { parseAmount as parseTypedAmount } from "@/lib/amount";
+import { amountProblemSentence } from "@/lib/amountCopy";
 import type { BookingDetail, DetailPlayer, PlayerSpec, SplitChange } from "@/lib/playersApi";
+import { PLAYERS_REFUSAL } from "@/lib/playersCopy";
 import { isLive } from "./detailModel";
 
 /**
@@ -86,14 +91,19 @@ export function defaultAsk(d: BookingDetail): string {
   return Math.max(0, Math.min(equal, Math.floor(organiserShare(d)))).toFixed(2);
 }
 
-/** The figure typed, as a spec's `weight` / `amount`, or a refusal code the sentence map knows. */
+/**
+ * The figure typed, as a spec's `weight` / `amount`, or the sentence saying why not. An amount
+ * goes through the club's ONE money parser (`lib/amount`, F3.18): a decimal comma is fine,
+ * "1e3" and "1,000" are refused with their own reasons, and 0 is allowed — it means the
+ * organiser covers them.
+ */
 export function askedFigure(d: BookingDetail, text: string): { ok: true; spec: Pick<PlayerSpec, "weight" | "amount"> } | { ok: false; error: string } {
   if (d.split_mode === "ratio") {
     const weight = parseWeight(text);
-    return weight === null ? { ok: false, error: "split_weight_invalid" } : { ok: true, spec: { weight } };
+    return weight === null ? { ok: false, error: PLAYERS_REFUSAL.split_weight_invalid } : { ok: true, spec: { weight } };
   }
-  const amount = parseAmount(text);
-  if (amount === null) return { ok: false, error: "split_amount_invalid" };
-  if (amount > organiserShare(d)) return { ok: false, error: "split_exceeds_price" };
-  return { ok: true, spec: { amount } };
+  const parsed = parseTypedAmount(text, { allowZero: true, decimals: 2 });
+  if (!parsed.ok) return { ok: false, error: amountProblemSentence(parsed.problem, "credits") };
+  if (parsed.value > organiserShare(d)) return { ok: false, error: PLAYERS_REFUSAL.split_exceeds_price };
+  return { ok: true, spec: { amount: parsed.value } };
 }

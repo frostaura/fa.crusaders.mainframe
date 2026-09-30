@@ -7,7 +7,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { playEndpoints, type PlaySettings } from "@/lib/playApi";
-import { GOAL_SHEET, goalMinutesFrom, playRefusal } from "@/lib/playCopy";
+import { GOAL_SHEET, playRefusal, readGoal } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 
 /**
@@ -43,7 +43,7 @@ function GoalBody(props: GoalSheetProps) {
   const { goalMinutes, onSaved } = props;
   const [text, setText] = useState(hoursText(goalMinutes));
   const [tried, setTried] = useState(false);
-  const minutes = goalMinutesFrom(text);
+  const goal = readGoal(text);
   const save = useAsyncAction((goal: number) => playEndpoints.saveSettings({ monthlyGoalMinutes: goal }), {
     success: (settings) => onSaved(settings, false),
   });
@@ -51,10 +51,10 @@ function GoalBody(props: GoalSheetProps) {
     success: (settings) => onSaved(settings, true),
   });
   const error = save.error ?? remove.error;
-  const invalid = tried && minutes === null;
+  const invalid = tried && !goal.ok;
   const submit = () => {
     setTried(true);
-    if (minutes !== null) void save.run(minutes);
+    if (goal.ok) void save.run(goal.minutes);
   };
   return (
     <DialogContent data-dialog="goal-sheet" closeLabel={GOAL_SHEET.cancel}>
@@ -73,7 +73,7 @@ function GoalBody(props: GoalSheetProps) {
               onChange={(e) => setText(e.target.value)}
               className="w-32 tabular-nums"
             />
-            {invalid ? <FieldError>{GOAL_SHEET.outOfRange}</FieldError> : <FieldDescription>{GOAL_SHEET.hint}</FieldDescription>}
+            {!goal.ok && invalid ? <FieldError>{goal.sentence}</FieldError> : <FieldDescription>{GOAL_SHEET.hint}</FieldDescription>}
           </Field>
         </form>
         {error ? <Alert tone="danger" live="assertive">{playRefusal(error, GOAL_SHEET.action)}</Alert> : null}

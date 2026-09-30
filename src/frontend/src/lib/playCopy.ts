@@ -1,3 +1,5 @@
+import { parseAmount, type AmountProblem } from "./amount";
+import { amountProblemSentence } from "./amountCopy";
 import { ApiError } from "./api";
 import { describeFailure } from "./errors";
 import type { GameReason, MatchProgress } from "./playScore";
@@ -220,6 +222,9 @@ export const GOAL_SHEET = {
   label: "Hours a month",
   hint: "From half an hour to 100 hours, in quarter hours.",
   outOfRange: "Choose from 0.5 to 100 hours, in quarter hours (0.25, 0.5, 0.75…).",
+  /** The shared parser's refusals, said in hours (`amountCopy` speaks of credits and rand). */
+  empty: "Enter a number of hours.",
+  notANumber: "That isn't a number — enter hours, like 8 or 7,5.",
   save: "Save goal",
   remove: "Remove goal",
   cancel: "Cancel",
@@ -228,15 +233,33 @@ export const GOAL_SHEET = {
   action: "save your goal",
 } as const;
 
+export type GoalRead = { ok: true; minutes: number } | { ok: false; sentence: string };
+
+/** A refusal of the shared parser, in the goal's own words: shape problems said, the rest a range. */
+function goalProblemSentence(problem: AmountProblem): string {
+  if (problem.kind === "empty") return GOAL_SHEET.empty;
+  if (problem.kind === "not_a_number") return GOAL_SHEET.notANumber;
+  if (problem.kind === "negative" || problem.kind === "ambiguous") return amountProblemSentence(problem, "credits");
+  return GOAL_SHEET.outOfRange;
+}
+
+/**
+ * The goal in hours, as typed, through the club's ONE amount parser (`lib/amount`, F3.18 — a
+ * decimal comma is fine, "1e3" is not a number): to minutes when it is a quarter hour from 0.5
+ * to 100, else the sentence saying why. Zero parses (it is a number) and is then out of range.
+ */
+export function readGoal(hoursText: string): GoalRead {
+  const parsed = parseAmount(hoursText, { allowZero: true, decimals: 2 });
+  if (!parsed.ok) return { ok: false, sentence: goalProblemSentence(parsed.problem) };
+  const minutes = Math.round(parsed.value * 60);
+  const inRange = minutes >= 30 && minutes <= 6000 && minutes % 15 === 0 && Math.abs(parsed.value * 60 - minutes) < 1e-6;
+  return inRange ? { ok: true, minutes } : { ok: false, sentence: GOAL_SHEET.outOfRange };
+}
+
 /** The goal in hours, as typed, to minutes — or null when it is not a quarter-hour in range. */
 export function goalMinutesFrom(hoursText: string): number | null {
-  const trimmed = hoursText.trim().replace(",", ".");
-  if (trimmed === "" || !/^\d+(\.\d+)?$/.test(trimmed)) return null;
-  const minutes = Number(trimmed) * 60;
-  if (!Number.isFinite(minutes) || minutes < 30 || minutes > 6000) return null;
-  const rounded = Math.round(minutes);
-  if (Math.abs(minutes - rounded) > 1e-6 || rounded % 15 !== 0) return null;
-  return rounded;
+  const read = readGoal(hoursText);
+  return read.ok ? read.minutes : null;
 }
 
 export const STREAK_COPY = {

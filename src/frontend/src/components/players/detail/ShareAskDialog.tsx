@@ -7,7 +7,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import type { BookingDetail, PlayerSpec } from "@/lib/playersApi";
-import { DETAIL_ACTIONS, PLAYERS_REFUSAL, SHARE_ASK, firstName } from "@/lib/playersCopy";
+import { DETAIL_ACTIONS, SHARE_ASK, firstName } from "@/lib/playersCopy";
 import { formatCredits } from "@/lib/utils";
 import { askedFigure, defaultAsk, organiserShare } from "./splitEditor";
 
@@ -33,7 +33,7 @@ export function ShareAskDialog({ detail, pick, onCancel, onAsk }: Props) {
   const ratio = detail.split_mode === "ratio";
   const who = whoOf(pick);
   const figure = askedFigure(detail, text);
-  const error = tried && !figure.ok ? PLAYERS_REFUSAL[figure.error] : null;
+  const error = tried && !figure.ok ? figure.error : null;
   const submit = () => {
     setTried(true);
     if (figure.ok) onAsk(pick, figure.spec);

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { refuse, signOut, type StubCall } from "@/test/harness";
 import type { PlayerPickerDialogProps } from "@/components/players/PlayerPicker";
+import { AMOUNT_COPY } from "@/lib/amountCopy";
 import { BOOK_SPLIT, CHANGE_SPLIT, DETAIL_ACTIONS, PLAYERS_REFUSAL, SHARE_ASK } from "@/lib/playersCopy";
 import { ALEX_SEAT, DETAIL_PATH, PID, SAM_SEAT, detail, playerView, renderDetail, seat, serve } from "./detailKit";
 
@@ -132,6 +133,25 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));
     expect(within(ask).getByText(PLAYERS_REFUSAL.split_exceeds_price)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST" && c.path === `${DETAIL_PATH}/players`)).toBe(false);
+  });
+
+  it("reads the amount with the club's one money parser: a decimal comma is fine, '1e3' is refused in words (R1, from F3)", async () => {
+    const stub = serve({ detail: amountSplit(), extra: [{
+      method: "POST", path: `${DETAIL_PATH}/players`,
+      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 3, user_id: "u-jo", guest_name: null, status: "invited", share_credits: 12.5, invite_token: null, invite_path: null }] },
+    }] });
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
+    fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
+    const ask = await screen.findByRole("dialog", { name: SHARE_ASK.title("Jo") });
+    const field = within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") });
+    fireEvent.change(field, { target: { value: "1e3" } });
+    fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));
+    expect(within(ask).getByText(AMOUNT_COPY.notANumber("credits"))).toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "12,5" } });
+    fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));
+    await waitFor(() => expect(stub.calls.find((c) => c.method === "POST" && c.path === `${DETAIL_PATH}/players`)?.body)
+      .toEqual({ players: [{ userId: "u-jo", amount: 12.5 }] }));
   });
 
   it("a guest plays free, so nothing is asked", async () => {

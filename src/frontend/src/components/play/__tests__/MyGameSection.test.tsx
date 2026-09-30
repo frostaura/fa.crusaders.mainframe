@@ -5,7 +5,9 @@ import { MyGameSection } from "@/components/play/MyGameSection";
 import {
   BADGES_COPY, CELEBRATIONS_SWITCH, GOAL_SHEET, MY_GAME, PAUSE_COPY, PEOPLE_COPY, RING_COPY, STATS_COPY, STREAK_COPY,
   goalMinutesFrom,
+  readGoal,
 } from "@/lib/playCopy";
+import { AMOUNT_COPY } from "@/lib/amountCopy";
 import { myPlay, serve } from "./playKit";
 
 /**
@@ -100,6 +102,16 @@ describe("the ring", () => {
     expect(goalMinutesFrom("100.25")).toBeNull();
     expect(goalMinutesFrom("1,75")).toBe(105);
     expect(goalMinutesFrom("abc")).toBeNull();
+  });
+
+  it("reads the goal with the club's one amount parser, and says a bad one in words (R1, from F3)", () => {
+    expect(goalMinutesFrom("1e3")).toBeNull();
+    expect(readGoal("1e3")).toEqual({ ok: false, sentence: GOAL_SHEET.notANumber });
+    expect(readGoal("")).toEqual({ ok: false, sentence: GOAL_SHEET.empty });
+    expect(readGoal("-2")).toEqual({ ok: false, sentence: AMOUNT_COPY.negative });
+    // Zero is a number (allowZero) — and then outside the goal's range, said as such.
+    expect(readGoal("0")).toEqual({ ok: false, sentence: GOAL_SHEET.outOfRange });
+    expect(readGoal(" 7,5 ")).toEqual({ ok: true, minutes: 450 });
   });
 });
 
