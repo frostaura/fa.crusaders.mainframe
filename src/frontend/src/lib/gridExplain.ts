@@ -112,9 +112,10 @@ export function useGridExplainer(
     return { text: quotaPill(booked, max, dayLabel), atLimit: booked >= max };
   }, [rules, dayLabel]);
 
+  const courtPrice = standardSlice(day);
   const rateLine = useMemo(
-    () => (rules.known && !rules.adminExempt && rules.groups.length > 0 ? groupRateLine(rules.groups) : null),
-    [rules],
+    () => (rules.known && !rules.adminExempt ? groupRateLine(rules.groups, rules.slicePriceCredits, courtPrice) : null),
+    [rules, courtPrice],
   );
 
   const collapsedRows = useCallback(
@@ -245,6 +246,15 @@ function hoursFromDay(day: ScheduleDay | null): { start: string; end: string } |
 
 function asClock(minutes: number): string {
   return `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The court's own price the server prices a member's group from: the first open court by number
+ * (`ScheduleService` — `rules.slicePriceCredits` is `GroupRules.PriceFor(groups, that)`).
+ */
+function standardSlice(day: ScheduleDay | null): number | null {
+  const open = (day?.courts ?? []).filter((c) => c.isActive !== false).sort((a, b) => a.courtNumber - b.courtNumber);
+  return open[0]?.slicePriceCredits ?? null;
 }
 
 function cheapestSlice(day: ScheduleDay | null): number | null {

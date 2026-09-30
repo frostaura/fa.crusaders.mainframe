@@ -219,10 +219,26 @@ export function emptyWindowSentence(groups: readonly string[], day: string): str
   return `${who}, so there is nothing you can book on ${weekdayName(day)}. Please ask the club.`;
 }
 
-/** The day picker's quiet line when the viewer's price is their group's rather than the court's. */
-export function groupRateLine(groups: readonly { name: string }[]): string | null {
-  const first = groups[0]?.name;
-  return first ? `You're booking as a ${withoutTrailingPlural(first).toLowerCase()}.` : null;
+/**
+ * The day picker's quiet line when the viewer's price is their group's rather than the court's.
+ *
+ * <p>
+ * R4 I4-7: it read "You're booking as a ix review group." — the club's own name lowercased and
+ * singularised, an "a" hard-coded in front of it, and shown for a group that charges the club's
+ * standard price, where it said nothing true. Now: only when the group price differs from the
+ * court's (`rules.slicePriceCredits` against the first open court's own price, which is what the
+ * server prices from), the name as the club wrote it, and never a figure — a member is never
+ * shown another group's rate. With several groups the server takes the highest of their prices
+ * and does not say whose, so the line does not guess.
+ * </p>
+ */
+export function groupRateLine(
+  groups: readonly { name: string }[], groupPrice: number | null, courtPrice: number | null,
+): string | null {
+  if (groups.length === 0 || groupPrice === null || courtPrice === null || groupPrice === courtPrice) return null;
+  const name = groups[0].name.trim();
+  if (groups.length > 1 || name === "") return "You book at your groups' rate.";
+  return `You book at the ${name} rate.`;
 }
 
 /* ─────────────────────────── The wallet, before the member picks ─────────────────────────── */
@@ -293,7 +309,3 @@ function listNames(names: readonly string[]): string {
   return `${kept.slice(0, -1).join(", ")} and ${kept[kept.length - 1]}`;
 }
 
-/** "League members" → "League member", so a sentence can say "you're a league member". */
-function withoutTrailingPlural(name: string): string {
-  return name.endsWith("s") ? name.slice(0, -1) : name;
-}

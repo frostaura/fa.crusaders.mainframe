@@ -191,12 +191,24 @@ describe("item 3 — the group's window, on the member's grid", () => {
     expect(visible[0].closest("[aria-hidden='true']")).not.toBeNull();
   });
 
-  it("names the rate as a membership rather than as a difference done to the member", async () => {
-    open(dayWith(GROUPED));
+  it("names the rate by the group, as the club wrote it, when the group changes the price (R4 I4-7)", async () => {
+    open(dayWith({ ...GROUPED, groups: [{ id: "g1", name: "ix review group" }], slicePriceCredits: 60 }));
     // Naming the group is what makes it a membership the member chose. A price COMPARISON is
     // deliberately absent: a member is never shown another group's rate.
-    expect(await screen.findByText("You're booking as a non-league member.")).toBeInTheDocument();
+    expect(await screen.findByText("You book at the ix review group rate.")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/was \d/);
+    expect(document.body.textContent).not.toMatch(/booking as a/);
+  });
+
+  it("says nothing about a rate when the group charges the club's standard price (R4 I4-7)", async () => {
+    open(dayWith(GROUPED)); // group price 50, the court's own 50
+    await screen.findByRole("button", { name: /Court 1 at 16:00/ });
+    expect(document.body.textContent).not.toMatch(/rate\./);
+  });
+
+  it("does not guess whose rate it is when several groups set the price (R4 I4-7)", async () => {
+    open(dayWith({ ...GROUPED, groups: [{ id: "g1", name: "Juniors" }, { id: "g2", name: "Seniors" }], slicePriceCredits: 40 }));
+    expect(await screen.findByText("You book at your groups' rate.")).toBeInTheDocument();
   });
 
   it("says the empty intersection out loud instead of drawing a grid that reads as 'shut'", async () => {
