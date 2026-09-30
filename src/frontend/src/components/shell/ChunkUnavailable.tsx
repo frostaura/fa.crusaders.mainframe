@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { WarningCircle, WifiSlash } from "@/components/ui/icons";
 import { PageShell } from "@/components/ui/page-shell";
+import { retryByReload } from "@/lib/routeAnnouncer";
 import { CHUNK_COPY } from "@/lib/shellCopy";
 import { typography } from "@/lib/typography";
 
@@ -14,7 +15,7 @@ import { typography } from "@/lib/typography";
 export function ChunkUnavailable({ offline: offlineAtFailure }: { offline: boolean }) {
   const [offline, setOffline] = useState(offlineAtFailure);
   useEffect(() => {
-    const back = () => window.location.reload();
+    const back = () => retryByReload();
     const gone = () => setOffline(true);
     window.addEventListener("online", back);
     window.addEventListener("offline", gone);
@@ -33,7 +34,7 @@ export function ChunkUnavailable({ offline: offlineAtFailure }: { offline: boole
         </h1>
         <p className="max-w-prose text-sm text-text-secondary">{offline ? CHUNK_COPY.offlineBody : CHUNK_COPY.failedBody}</p>
         <div className="flex flex-wrap justify-center gap-2">
-          <Button onClick={() => window.location.reload()}>{CHUNK_COPY.retry}</Button>
+          <Button onClick={() => retryByReload()}>{CHUNK_COPY.retry}</Button>
           <Button asChild variant="outline"><Link to="/my-code">{CHUNK_COPY.myCode}</Link></Button>
         </div>
       </div>

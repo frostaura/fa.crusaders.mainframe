@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
-  APP_NAME, entityPageName, focusFragmentTarget, focusHeading, isEntityRoute, isPlaceholderHeading, routePageName, routeTitle,
+  APP_NAME, clearRetryLanding, entityPageName, focusFragmentTarget, focusHeading, isEntityRoute, isPlaceholderHeading, isRetryLanding,
+  routePageName, routeTitle,
 } from "../lib/routeAnnouncer";
 import { resetStandingAnnouncements } from "../lib/announce";
 
@@ -95,12 +96,16 @@ export function RouteAnnouncer() {
     // put focus at the top of it, and moving focus there again is a second announcement of
     // something that just happened. A HASH on a first paint is different — a pasted or
     // emailed deep link has a target, and landing at the top of the page is the D9 failure.
-    if (initial && !location.hash) return;
+    // F4-6 — except the landing of the member's own Retry, which is treated as the navigation it is.
+    const retried = initial && !location.hash && isRetryLanding(location.pathname);
+    if (initial && !location.hash && !retried) return;
 
     // The NAME, only where the name has changed. A fragment jump inside one page would
     // otherwise announce the page the person is already on.
-    if (pathChanged) setAnnouncement(name);
-    return takeFocus(location.hash, nameTheRecord(location.pathname, pathChanged ? setAnnouncement : null));
+    const announce = pathChanged || retried;
+    if (announce) setAnnouncement(name);
+    const named = nameTheRecord(location.pathname, announce ? setAnnouncement : null);
+    return takeFocus(location.hash, retried ? (heading) => { clearRetryLanding(); named(heading); } : named);
   }, [location.pathname, location.search, location.hash, location.key]);
 
   /**

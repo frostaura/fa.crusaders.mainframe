@@ -8,7 +8,8 @@ export const CHUNK_COPY = {
   offlineBody: "This phone hasn't opened this page before, so it needs signal once. Your code still works on My Code.",
   /** Online, and the page's code still would not arrive (after the one reload a new build earns). */
   failedTitle: "This page didn't load",
-  failedBody: "Its code couldn't be fetched. Check your connection and try again.",
+  /** IX-L (F4-6): said while ONLINE, so never "check your connection" — the phone's is fine. */
+  failedBody: "Its code couldn't be fetched from the club — the app may have just been updated. Try again in a moment.",
   retry: "Retry",
   myCode: "Go to My Code",
 } as const;

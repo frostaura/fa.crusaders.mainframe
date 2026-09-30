@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { RouteAnnouncer } from "./RouteAnnouncer";
-import { NOT_FOUND_PAGE_NAME, focusFragmentTarget, knownRoutePatterns, routePageName, routeTitle } from "../lib/routeAnnouncer";
+import { NOT_FOUND_PAGE_NAME, focusFragmentTarget, isRetryLanding, knownRoutePatterns, retryByReload, routePageName, routeTitle } from "../lib/routeAnnouncer";
 import { ADMIN_NAV_ITEMS } from "./admin/adminNav";
 
 const SRC = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -450,6 +450,56 @@ describe("a heading renamed in place after focus landed (F4-10)", () => {
 
     await waitFor(() => expect(document.title).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking — Crusaders Mainframe"));
     expect(screen.getByTestId("route-announcer").textContent).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking");
+  });
+});
+
+/**
+ * F4-6 — Retry on an error/offline boundary reloads the page, and the page that opened after it
+ * used to leave focus on `<body>` and say nothing: a cold first paint's rule, applied to a
+ * navigation the member had just asked for.
+ */
+describe("the page a boundary's Retry reloads into (F4-6)", () => {
+  it("is announced and focused, once — and a later plain first paint is silent again", async () => {
+    const reload = vi.fn();
+    window.history.replaceState(null, "", "/wallet");
+    retryByReload(reload);
+    expect(reload).toHaveBeenCalledOnce();
+    expect(isRetryLanding("/wallet")).toBe(true);
+
+    const first = render(
+      <MemoryRouter initialEntries={["/wallet"]}>
+        <RouteAnnouncer />
+        <Page title="Your wallet" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your wallet" })).toHaveFocus());
+    expect(screen.getByTestId("route-announcer").textContent).toBe("Wallet");
+    expect(isRetryLanding("/wallet"), "the mark is spent").toBe(false);
+    first.unmount();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    render(
+      <MemoryRouter initialEntries={["/wallet"]}>
+        <RouteAnnouncer />
+        <Page title="Your wallet" />
+      </MemoryRouter>,
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    expect(screen.getByTestId("route-announcer").textContent).toBe("");
+    expect(document.body).toHaveFocus();
+  });
+
+  it("ignores a mark left for a different page", () => {
+    window.history.replaceState(null, "", "/bookings");
+    retryByReload(() => {});
+    render(
+      <MemoryRouter initialEntries={["/wallet"]}>
+        <RouteAnnouncer />
+        <Page title="Your wallet" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("route-announcer").textContent).toBe("");
+    sessionStorage.clear();
   });
 });
 

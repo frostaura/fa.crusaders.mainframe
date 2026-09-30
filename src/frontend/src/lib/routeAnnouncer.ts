@@ -275,3 +275,36 @@ export function focusHeading(target: HTMLElement, scroll: boolean): void {
   if (scroll) target.scrollIntoView?.({ block: "start" });
   target.focus({ preventScroll: true });
 }
+
+/**
+ * F4-6 — a page reloaded by the member's own Retry (a boundary's "Retry" / "Reload the page", or
+ * signal coming back) is a navigation they asked for, not a cold open. A plain first paint stays
+ * silent and leaves focus where the browser puts it; after a Retry that left the member on
+ * `<body>` with nothing said, on a page that had just replaced an error screen they were reading.
+ * The boundary marks the path before it reloads; the announcer, finding the mark for the path it
+ * opens on, names the page and moves focus to its heading, then clears it.
+ */
+const RETRY_LANDING_KEY = "crusaders.mainframe.retry-landing";
+const RETRY_LANDING_TTL_MS = 60_000;
+
+export function markRetryLanding(pathname: string): void {
+  try { window.sessionStorage.setItem(RETRY_LANDING_KEY, JSON.stringify({ pathname, at: Date.now() })); } catch { /* nothing to carry */ }
+}
+
+/** Whether this first paint is the landing of a Retry for this path. Does not consume the mark. */
+export function isRetryLanding(pathname: string): boolean {
+  try {
+    const mark = JSON.parse(window.sessionStorage.getItem(RETRY_LANDING_KEY) ?? "null") as { pathname?: string; at?: number } | null;
+    return !!mark && mark.pathname === pathname && typeof mark.at === "number" && Date.now() - mark.at < RETRY_LANDING_TTL_MS;
+  } catch { return false; }
+}
+
+export function clearRetryLanding(): void {
+  try { window.sessionStorage.removeItem(RETRY_LANDING_KEY); } catch { /* nothing to clear */ }
+}
+
+/** A boundary's Retry: reload, marked so the page that opens is announced and focused (F4-6). */
+export function retryByReload(reload: () => void = () => window.location.reload()): void {
+  markRetryLanding(window.location.pathname);
+  reload();
+}

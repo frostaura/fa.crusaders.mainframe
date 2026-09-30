@@ -4,6 +4,7 @@ import { WarningCircle } from "@/components/ui/icons";
 import { PageShell } from "@/components/ui/page-shell";
 import { ChunkLoadError, isChunkLoadFailure } from "@/lib/chunkLoad";
 import { typography } from "@/lib/typography";
+import { retryByReload } from "@/lib/routeAnnouncer";
 import { ChunkUnavailable } from "./ChunkUnavailable";
 
 /**
@@ -57,7 +58,7 @@ export class PageErrorBoundary extends Component<Props, State> {
             Something on this page went wrong while it was being shown. Reload to try again, or use
             the tabs to go somewhere else.
           </p>
-          <Button onClick={() => window.location.reload()}>Reload the page</Button>
+          <Button onClick={() => retryByReload()}>Reload the page</Button>
         </div>
       </PageShell>
     );
