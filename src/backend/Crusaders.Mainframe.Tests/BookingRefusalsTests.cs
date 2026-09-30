@@ -86,6 +86,23 @@ public sealed class BookingRefusalsTests
         var error = JsonSerializer.SerializeToElement(value).GetProperty("error").GetString();
         Assert.Equal(BookingRefusals.CodeOf(refusal), error);
     }
+
+    /// <summary>Review round 1 contract §9: a window refusal names the group(s) and the day in words.</summary>
+    [Fact]
+    public void A_window_refusal_names_the_group_and_the_day()
+    {
+        foreach (var refusal in new BookingResult[]
+                 {
+                     new BookingResult.NoBookableWindow(["Juniors", "League"], "Tuesday"),
+                     new BookingResult.GroupWindow(["Juniors"], "Tuesday", [("17:00", "19:00")]),
+                 })
+        {
+            var value = Assert.IsAssignableFrom<IValueHttpResult>(BookingEndpoints.ToHttpResult(refusal, new DefaultHttpContext())).Value;
+            var body = JsonSerializer.SerializeToElement(value);
+            Assert.StartsWith("Juniors", body.GetProperty("group_name").GetString());
+            Assert.Equal("Tuesday", body.GetProperty("day").GetString());
+        }
+    }
 }
 
 /// <summary>

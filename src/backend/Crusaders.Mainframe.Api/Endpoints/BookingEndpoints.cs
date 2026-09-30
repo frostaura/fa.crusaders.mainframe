@@ -356,6 +356,8 @@ public static class BookingEndpoints
                 {
                     error,
                     groups = w.GroupNames,
+                    // The round-1 contract's name for the same fact, joined for a sentence.
+                    group_name = string.Join(", ", w.GroupNames),
                     day = w.Day,
                     allowed_windows = w.AllowedWindows.Select(x => new { start = x.Start, end = x.End }).ToList(),
                 }),
@@ -373,7 +375,7 @@ public static class BookingEndpoints
             // so there is nothing they can book. Its own code, because the honest sentence is
             // completely different and because an empty grid reads as "the club is shut".
             BookingResult.NoBookableWindow n => Results.Conflict(
-                new { error, groups = n.GroupNames, day = n.Day }),
+                new { error, groups = n.GroupNames, group_name = string.Join(", ", n.GroupNames), day = n.Day }),
             BookingResult.OutOfHours h => Results.Conflict(
                 new { error, opens_at = h.OpensAt, closes_at = h.ClosesAt }),
             BookingResult.NoTimeAvailable n => Results.Conflict(
