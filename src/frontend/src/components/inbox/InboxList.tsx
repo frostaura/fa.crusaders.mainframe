@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { Alert } from "@/components/Alert";
 import { Button } from "@/components/ui/button";
 import { Bell } from "@/components/ui/icons";
@@ -19,7 +20,7 @@ import type { InboxFeed } from "./useInbox";
  * the rows above it standing and says so beside the button.
  * </p>
  */
-export function InboxList({ feed }: { feed: InboxFeed }) {
+export function InboxList({ feed, listRef }: { feed: InboxFeed; listRef?: Ref<HTMLOListElement> }) {
   // The "Today, 18:05" face turns into a date at midnight; a minute is fine enough.
   const now = useTicker(true, 60_000);
   return (
@@ -35,9 +36,12 @@ export function InboxList({ feed }: { feed: InboxFeed }) {
       skeleton={<InboxSkeleton />}
     >
       <ol
+        ref={listRef}
+        // R4 X4-5 — where focus goes when "Mark all read" takes its own bar away.
+        tabIndex={-1}
         aria-label={COPY.listLabel}
         data-inbox-list=""
-        className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs"
+        className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none"
       >
         {feed.items.map((n) => <InboxRow key={n.id} notice={n} now={now} feed={feed} />)}
       </ol>

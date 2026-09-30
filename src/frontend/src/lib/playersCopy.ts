@@ -926,6 +926,8 @@ export const INBOX_COPY = {
   readCaveat: "This doesn't mean you have none.",
   empty: "Nothing yet — invites, shares and game changes land here.",
   markAll: "Mark all read",
+  /** R4 X4-5 — said once every notice is marked read; the bar that held the button has gone. */
+  allRead: "All read",
   markAllAction: "mark your notifications read",
   markOne: "Mark read",
   markOneAction: "mark that notification read",

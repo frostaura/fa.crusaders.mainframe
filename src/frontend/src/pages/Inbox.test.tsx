@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { resetUnread } from "@/components/inbox/useUnreadCount";
 import { NotificationBell } from "@/components/shell/NotificationBell";
@@ -173,6 +173,20 @@ describe("the inbox", () => {
     await waitFor(() => expect(document.querySelectorAll("[data-unread]")).toHaveLength(0));
     expect(await screen.findByRole("link", { name: "Notifications" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: INBOX_COPY.markAll })).toBeNull();
+  });
+
+  it("R4 X4-5: Mark all read puts focus on the list, never <body>, and says \"All read\"", async () => {
+    setup({ extra: [{ method: "POST", path: "/api/v1/me/notifications/read-all", body: { marked: 2 } }] });
+    renderInbox();
+    await screen.findByRole("link", { name: "Notifications, 2 unread" }, SLOW);
+    const ol = await list();
+    const button = await screen.findByRole("button", { name: INBOX_COPY.markAll });
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByRole("button", { name: INBOX_COPY.markAll })).toBeNull());
+    expect(document.activeElement).toBe(ol);
+    await waitFor(() => expect(document.querySelector("[data-inbox-said]")).toHaveTextContent(INBOX_COPY.allRead));
+    expect(document.querySelector("[data-inbox-said]")).toHaveAttribute("role", "status");
   });
 
   it("rolls mark-all back when the server refuses, and says so", async () => {
