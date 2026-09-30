@@ -3,6 +3,7 @@ import { clubCurrencySymbol } from "./currency";
 import { ADJUST_REASON_CODES, type AdjustReasonCode } from "./adminApi";
 import { reasonLabel } from "./topUpCopy";
 import { formatCredits, formatMoney } from "./utils";
+import { clubCalendarDate, clubDayAndClock } from "./clubClock";
 
 /**
  * The change record's own words — review round 1, F3.2.
@@ -81,7 +82,7 @@ const FIELD_LABEL: Record<string, string> = {
   end_minute: "Ends",
   start_date: "First date",
   end_date: "Last date",
-  interval_weeks: "Every",
+  interval_weeks: "Repeats",
   occurrence_date: "Date",
   occurrences_cancelled: "Dates cancelled",
   courts: "Courts",
@@ -132,12 +133,33 @@ function money(field: string, value: string): string | null {
   return null;
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * Times, dates and counts in words (review round 3, A-7): the record read "Starts
+ * 2026-09-30T16:00:00+00:00", "First date 2026-09-30", "Length 15" and "Every 1". An instant is
+ * said in the CLUB's day and clock, a calendar date as the club's short date, a length in minutes
+ * and a repeat as "Every week".
+ */
+function whenOrCount(field: string, token: string, timezone?: string): string | null {
+  if (ISO_INSTANT.test(token) && Number.isFinite(Date.parse(token))) return clubDayAndClock(token, timezone);
+  if (ISO_DATE.test(token)) return clubCalendarDate(token, { weekday: true });
+  const n = /^\d+$/.test(token) ? Number(token) : null;
+  if (n === null) return null;
+  if (field === "minutes") return n === 1 ? "1 minute" : `${n} minutes`;
+  if (field === "interval_weeks") return n === 1 ? "Every week" : `Every ${n} weeks`;
+  return null;
+}
+
 /** One stored value in the words a volunteer uses. */
-export function changeValueInWords(field: string, value: string | null | undefined): string | null {
+export function changeValueInWords(field: string, value: string | null | undefined, timezone?: string): string | null {
   if (value === null || value === undefined) return null;
   const formatted = money(field, value);
   if (formatted) return formatted;
   const token = value.trim();
+  const when = whenOrCount(field, token, timezone);
+  if (when) return when;
   if (field === "reason_code" && (ADJUST_REASON_CODES as readonly string[]).includes(token)) {
     return reasonLabel(token as AdjustReasonCode);
   }
@@ -151,6 +173,7 @@ export function changeValueInWords(field: string, value: string | null | undefin
 /** The server's diff, as the page shows it: what changed, then the facts around it. */
 export function presentChanges(
   row: { area?: string | null; action?: string | null; changes?: RawChange[] | null },
+  timezone?: string,
 ): PresentedChanges {
   const raw = (row.changes ?? []).filter((c) => !isIdField(c.field, c));
   const byField = new Map(raw.map((c) => [c.field, c]));
@@ -172,8 +195,8 @@ export function presentChanges(
   for (const c of raw) {
     if (c.field === "balance_before_credits" || c.field === "balance_after_credits") continue;
     const label = labelFor(row, c);
-    const was = changeValueInWords(c.field, c.before);
-    const is = changeValueInWords(c.field, c.after);
+    const was = changeValueInWords(c.field, c.before, timezone);
+    const is = changeValueInWords(c.field, c.after, timezone);
     const oneSided = (was === null) !== (is === null);
     if (oneSided && !STATE_FIELDS.has(c.field) && !(row.area === "setting")) {
       facts.push({ field: c.field, label, value: (is ?? was)! });

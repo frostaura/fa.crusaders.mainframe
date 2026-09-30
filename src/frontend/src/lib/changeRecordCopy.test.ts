@@ -62,3 +62,32 @@ describe("the change record in words", () => {
     expect(changed.map((c) => c.label)).toEqual(["Ends", "Days"]);
   });
 });
+
+/** Review round 3, A-7: raw UTC instants, ISO dates and bare counts reached the page. */
+describe("times, dates and counts in the club's words (R3 A-7)", () => {
+  const row = (changes: Array<{ field: string; before?: string | null; after?: string | null }>) =>
+    presentChanges({ area: "booking", action: "booking.admin_created", changes }, "Africa/Johannesburg");
+
+  it("says an instant in the club's day and clock, and a date as the club's short date", () => {
+    const { facts } = row([
+      { field: "starts_at", after: "2026-09-30T16:00:00+00:00" },
+      { field: "occurrence_date", after: "2026-10-04" },
+    ]);
+    expect(facts).toEqual([
+      { field: "starts_at", label: "Starts", value: "Wed 30 Sep, 18:00" },
+      { field: "occurrence_date", label: "Date", value: "Sun 4 Oct" },
+    ]);
+  });
+
+  it("says a length in minutes and a repeat in weeks", () => {
+    const { facts, changed } = row([
+      { field: "minutes", after: "15" },
+      { field: "interval_weeks", before: "1", after: "2" },
+      { field: "start_date", after: "2026-09-30" },
+    ]);
+    expect(facts).toContainEqual({ field: "minutes", label: "Length", value: "15 minutes" });
+    expect(facts).toContainEqual({ field: "start_date", label: "First date", value: "Wed 30 Sep" });
+    expect(changed).toContainEqual({ field: "interval_weeks", label: "Repeats", before: "Every week", after: "Every 2 weeks" });
+    expect(JSON.stringify({ facts, changed })).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+});
