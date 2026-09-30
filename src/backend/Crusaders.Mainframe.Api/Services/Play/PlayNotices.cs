@@ -11,7 +11,7 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <see cref="MemberEventCatalogue.ResultToConfirm"/> is mailed, once per (booking, member); the
 /// rest are inbox lines. Nothing here saves.
 /// </summary>
-public static class PlayNotices
+public static partial class PlayNotices
 {
     public static string Local(DateTimeOffset instant, TenantSettingsView settings) =>
         TimeZoneInfo.ConvertTime(instant, ClubClock.ZoneOf(settings)).ToString(ClubDate.Format, CultureInfo.InvariantCulture);
@@ -48,10 +48,10 @@ public static class PlayNotices
         var mailed = await db.AdminNotifications.AsNoTracking()
             .Where(n => keys.Contains(n.DedupeKey)).Select(n => n.RecipientUserId).ToListAsync(ct);
 
-        var headline = $"{ToConfirmHeadline(r, c)} ({c.When}). Is it right?";
         var payload = ToConfirmPayload(r, c);
         foreach (var user in confirming)
         {
+            var headline = $"{ToConfirmHeadline(r, c, user)} ({c.When})";
             MemberNotices.Stage(db, r.TenantId, new MemberNotice(
                 user, MemberEventCatalogue.ResultToConfirm, $"{MailKey(r.BookingId, user)}:{r.Id}:{version ?? r.Version}", payload,
                 headline, $"{BookingPath(r.BookingId)}?result=confirm", r.BookingId)
@@ -63,54 +63,22 @@ public static class PlayNotices
     }
 
     /// <summary>
-    /// The facts a <see cref="MemberEventCatalogue.ResultToConfirm"/> mail states, from the result as
-    /// it is NOW — at staging, and again when a held mail is released (C8), so a mail never shows a
-    /// score that was edited, withdrawn or re-recorded while it waited.
-    /// </summary>
-    public static ResultToConfirmPayload ToConfirmPayload(MatchResult r, ResultContext c)
-    {
-        var line = $"{SideNames(r, MatchSide.A, c)} {r.GamesWonA}–{r.GamesWonB} {SideNames(r, MatchSide.B, c)}";
-        var due = Local(r.ConfirmDueAt ?? r.SubmittedAt, c.Settings);
-        return new ResultToConfirmPayload(r.BookingId, c.NameOf(r.SubmittedByUserId), c.CourtName, c.When, $"{line} ({GamesText(r)})", due);
-    }
-
-    /// <summary>
-    /// "Cara recorded a 2–1 win over Bongani" — from the recorder's side, first names, nobody named
-    /// twice (review round 1, F2: the line read "Cara Naidoo recorded Cara Naidoo 2–1 Bongani").
-    /// A doubles partner rides along: "Cara recorded a 3–1 win with Jo over Sam &amp; Lee".
-    /// </summary>
-    public static string ToConfirmHeadline(MatchResult r, ResultContext c)
-    {
-        var mine = SubmittingSide(r);
-        var (won, lost) = mine == MatchSide.A ? (r.GamesWonA, r.GamesWonB) : (r.GamesWonB, r.GamesWonA);
-        var partners = FirstNames(r.Players.Where(p => p.Side == mine && p.UserId != r.SubmittedByUserId), c);
-        var opponents = FirstNames(r.Players.Where(p => p.Side != mine), c);
-        var with = partners.Length > 0 ? $" with {partners}" : "";
-        var outcome = won > lost ? $"a {won}–{lost} win{with} over" : $"a {won}–{lost} loss{with} to";
-        return $"{FirstName(c.NameOf(r.SubmittedByUserId))} recorded {outcome} {opponents}";
-    }
-
-    private static string FirstNames(IEnumerable<MatchResultPlayer> players, ResultContext c) =>
-        string.Join(" & ", players.OrderBy(p => p.Position).Select(p => p.UserId is { } u ? FirstName(c.NameOf(u)) : p.GuestName ?? "Guest"));
-
-    private static string FirstName(string fullName)
-    {
-        var trimmed = fullName.Trim();
-        var space = trimmed.IndexOf(' ');
-        return space < 0 ? trimmed : trimmed[..space];
-    }
-
-    /// <summary>
-    /// Marks every unread "Is it right?" line on this booking read, in the caller's save: the result
-    /// it asked about was confirmed, disputed, edited (the new version asks again), withdrawn,
-    /// voided or kept — it asks nothing any more (review round 1, F2).
+    /// Retires every open "confirm or dispute" line on this booking, in the caller's save: the
+    /// result it asked about was confirmed, disputed, edited (the new version asks again),
+    /// withdrawn, voided or kept — it asks nothing any more (review round 1, F2). It is marked
+    /// read AND stamped <c>ResolvedAt</c> (review round 2, F2-5), so the inbox draws it as settled
+    /// even when the member had already read it without answering.
     /// </summary>
     public static async Task RetireToConfirmAsync(MainframeDbContext db, Guid bookingId, DateTimeOffset now, CancellationToken ct)
     {
         var open = await db.MemberNotifications
-            .Where(n => n.BookingId == bookingId && n.Kind == MemberEventCatalogue.ResultToConfirm && n.ReadAt == null)
+            .Where(n => n.BookingId == bookingId && n.Kind == MemberEventCatalogue.ResultToConfirm && n.ResolvedAt == null)
             .ToListAsync(ct);
-        foreach (var n in open) n.ReadAt = now.Storable();
+        foreach (var n in open)
+        {
+            n.ReadAt ??= now.Storable();
+            n.ResolvedAt = now.Storable();
+        }
     }
 
     /// <summary>The one-mail-per-(booking, member) key of <see cref="MemberEventCatalogue.ResultToConfirm"/>.</summary>

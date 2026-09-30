@@ -179,4 +179,12 @@ public sealed class MemberNotification : ITenantScoped
 
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ReadAt { get; set; }
+
+    /// <summary>
+    /// When the question this line asked was answered or replaced (review round 2, F2-5) — a
+    /// result-to-confirm retired by a confirm, dispute, edit, withdraw, void or keep. Distinct from
+    /// <see cref="ReadAt"/>: a line can be read and still open, and the inbox draws a resolved ask
+    /// as settled rather than as something to act on. Null for every other kind.
+    /// </summary>
+    public DateTimeOffset? ResolvedAt { get; set; }
 }

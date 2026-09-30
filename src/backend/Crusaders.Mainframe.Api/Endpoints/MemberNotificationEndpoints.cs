@@ -81,6 +81,8 @@ public static class MemberNotificationEndpoints
                 booking_id = n.BookingId,
                 created_at = n.CreatedAt,
                 read_at = n.ReadAt,
+                // F2-5: set when the question the line asked was answered or replaced; null otherwise.
+                resolved_at = n.ResolvedAt,
             }).ToList(),
             unread_count = await db.MemberNotifications.CountAsync(n => n.UserId == me && n.ReadAt == null, ct),
             next_cursor = more && rows.Count > 0 ? new AdminChangeCursor(rows[^1].CreatedAt, rows[^1].Id).Encode() : null,

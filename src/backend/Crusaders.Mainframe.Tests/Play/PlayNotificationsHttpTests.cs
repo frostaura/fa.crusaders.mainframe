@@ -31,9 +31,10 @@ public sealed class PlayNotificationsHttpTests(PostgresFixture pg) : IClassFixtu
         foreach (var member in new[] { club.Alex, club.Jo })
         {
             var line = Assert.Single(await InboxAsync(f, member, MemberEventCatalogue.ResultToConfirm));
-            // First names, nobody named twice, from the recorder's side (review round 1, F2).
-            Assert.StartsWith("Olive recorded a 3–1 win with Sam over Alex & Jo (", line.Headline);
-            Assert.EndsWith("). Is it right?", line.Headline);
+            // Spoken TO the reader (review round 2, F2-5): the recorder's side by first name, the
+            // reader as "you" — never their own name in the third person.
+            Assert.StartsWith("Olive and Sam say they won 3–1 — confirm or dispute (", line.Headline);
+            Assert.DoesNotContain(member == club.Alex ? "Alex" : "Jo", line.Headline);
             Assert.Equal($"/bookings/{booking}?result=confirm", line.Link);
             Assert.Single(await OutboxAsync(f, member, MemberEventCatalogue.ResultToConfirm));
         }
@@ -83,6 +84,60 @@ public sealed class PlayNotificationsHttpTests(PostgresFixture pg) : IClassFixtu
         var version = current.GetProperty("result").GetProperty("version").GetInt32();
         Assert.True((await ActAsync(club.Client(f, club.Sam), booking, "confirm", version)).IsSuccessStatusCode);
         Assert.All(await InboxAsync(f, club.Sam, MemberEventCatalogue.ResultToConfirm), l => Assert.NotNull(l.ReadAt));
+    }
+
+    /// <summary>
+    /// F2-5: when the recorder's side LOST, the ask says the reader won — "you", with the reader's
+    /// doubles partner beside them, never the reader's own name.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_recorded_loss_tells_the_reader_that_they_won()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await SeedAsync(f, "nt-you");
+        var booking = await club.GameAsync(f, DateTimeOffset.UtcNow.AddHours(-2).Storable(), club.Organiser, [club.Sam, club.Alex, club.Jo]);
+        Assert.True((await RecordAsync(club.Client(f, club.Organiser), booking, [U(club.Organiser), U(club.Sam)], [U(club.Alex), U(club.Jo)],
+            G((7, 11), (11, 9), (5, 11), (8, 11)))).IsSuccessStatusCode);
+
+        var alex = Assert.Single(await InboxAsync(f, club.Alex, MemberEventCatalogue.ResultToConfirm)).Headline;
+        Assert.StartsWith("Olive and Sam say you and Jo won 3–1 — confirm or dispute (", alex);
+        Assert.DoesNotContain("Alex", alex);
+        var jo = Assert.Single(await InboxAsync(f, club.Jo, MemberEventCatalogue.ResultToConfirm)).Headline;
+        Assert.StartsWith("Olive and Sam say you and Alex won 3–1", jo);
+
+        var singles = await club.GameAsync(f, DateTimeOffset.UtcNow.AddHours(-5).Storable(), club.Organiser, [club.Bystander]);
+        Assert.True((await RecordAsync(club.Client(f, club.Organiser), singles, [U(club.Organiser)], [U(club.Bystander)], G((11, 1), (11, 2), (11, 3)))).IsSuccessStatusCode);
+        Assert.StartsWith("Olive says they won 3–0 — confirm or dispute (",
+            Assert.Single(await InboxAsync(f, club.Bystander, MemberEventCatalogue.ResultToConfirm)).Headline);
+    }
+
+    /// <summary>
+    /// F2-5: an ask that was answered carries <c>resolved_at</c> on <c>/me/notifications</c> — even
+    /// one the member had already READ without answering — and an open ask carries null.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_answered_ask_is_resolved_on_the_inbox_and_an_open_one_is_not()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await SeedAsync(f, "nt-resolved");
+        var booking = await club.GameAsync(f, DateTimeOffset.UtcNow.AddHours(-2).Storable(), club.Organiser, [club.Sam]);
+        var v = (await (await RecordAsync(club.Client(f, club.Organiser), booking, [U(club.Organiser)], [U(club.Sam)])).JsonAsync())
+            .GetProperty("version").GetInt32();
+        var sam = club.Client(f, club.Sam);
+
+        JsonElement Ask(JsonElement inbox) => inbox.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("kind").GetString() == MemberEventCatalogue.ResultToConfirm);
+        var open = Ask(await sam.GetFromJsonAsync<JsonElement>("/api/v1/me/notifications"));
+        Assert.Equal(JsonValueKind.Null, open.GetProperty("resolved_at").ValueKind);
+        Assert.True((await sam.PostAsync($"/api/v1/me/notifications/{open.GetProperty("id").GetGuid()}/read", null)).IsSuccessStatusCode);
+        Assert.Equal(JsonValueKind.Null, Ask(await sam.GetFromJsonAsync<JsonElement>("/api/v1/me/notifications")).GetProperty("resolved_at").ValueKind);
+
+        Assert.True((await ActAsync(sam, booking, "confirm", v)).IsSuccessStatusCode);
+
+        var answered = Ask(await sam.GetFromJsonAsync<JsonElement>("/api/v1/me/notifications"));
+        Assert.Equal(JsonValueKind.String, answered.GetProperty("resolved_at").ValueKind);
     }
 
     [SkippableFact]
