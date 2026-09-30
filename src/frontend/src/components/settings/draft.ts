@@ -157,7 +157,10 @@ export function carryEdits(
  * Returns the part of the message after the caption, or null when it does not open with it.
  */
 export function afterCaption(label: string, message: string): string | null {
-  const bare = label.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  // A trailing "(unit)" is dropped. String methods, not a regex: lizard's lexer reads the
+  // bracket class in one as code and scored this function 271 lines long (R4).
+  const opened = label.lastIndexOf("(");
+  const bare = (label.trimEnd().endsWith(")") && opened >= 0 ? label.slice(0, opened) : label).trim();
   for (const head of [label, bare]) {
     if (head && message.toLowerCase().startsWith(head.toLowerCase())) return message.slice(head.length);
   }

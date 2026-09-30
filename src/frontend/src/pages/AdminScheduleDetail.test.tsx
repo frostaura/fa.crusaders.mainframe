@@ -404,8 +404,49 @@ describe("an ended schedule, and the next date after a skip (R3 A-6)", () => {
     }));
     renderDetail();
 
-    expect(await screen.findByText("Next on Tue 20 Oct, 18:00.")).toBeInTheDocument();
+    expect(await screen.findByText("Next on Tue 20 Oct, 18:00–21:00.")).toBeInTheDocument();
     expect(screen.queryByText(/Next on Tue 13 Oct/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Review round 4, A4-3: after a "from 20 Oct on" change to 18:30–20:00, the header said the new
+ * hours and "Next on Tue 6 Oct, 18:30" while 6 and 13 Oct were still held at 18:00, and the date
+ * list gave no hours at all. Each date now says its own hours, the next line is the next held
+ * date's own, and the header says from when the rule's hours apply.
+ */
+describe("a schedule whose hours changed from a date on (R4 A4-3)", () => {
+  const OLD = { starts_at: "", ends_at: "" };
+  const at = (date: string, start: string, end: string) => ({
+    ...OLD, starts_at: `${date}T${start}:00.000Z`, ends_at: `${date}T${end}:00.000Z`,
+  });
+
+  it("says each date's own hours, the next one's, and from when the new hours apply", async () => {
+    stubFetch(detailRoutes({
+      schedule: scheduleRowFixture({ start: "18:30", end: "20:00", next_occurrence: "2026-10-06T16:30:00.000Z" }),
+      occurrences: scheduleOccurrencesResponse([
+        occurrenceFixture("2026-10-06", at("2026-10-06", "16:00", "19:00")),
+        occurrenceFixture("2026-10-13", at("2026-10-13", "16:00", "19:00")),
+        occurrenceFixture("2026-10-20", at("2026-10-20", "16:30", "18:00")),
+      ]),
+    }));
+    renderDetail();
+
+    expect(await screen.findByText("Next on Tue 6 Oct, 18:00–21:00.")).toBeInTheDocument();
+    expect(screen.getByText(/These hours apply from Tue 20 Oct\. The 2 dates before it keep the hours they were booked at/))
+      .toBeInTheDocument();
+    expect(screen.getAllByText("Held · 18:00–21:00 · 3 courts")).toHaveLength(2);
+    expect(screen.getByText("Held · 18:30–20:00 · 3 courts")).toBeInTheDocument();
+  });
+
+  it("says nothing about 'from' when every held date is at the rule's hours", async () => {
+    stubFetch(detailRoutes({
+      schedule: scheduleRowFixture(),
+      occurrences: scheduleOccurrencesResponse([occurrenceFixture("2026-10-06"), occurrenceFixture("2026-10-13")]),
+    }));
+    renderDetail();
+    expect(await screen.findByText("Next on Tue 6 Oct, 18:00–21:00.")).toBeInTheDocument();
+    expect(screen.queryByText(/These hours apply from/)).not.toBeInTheDocument();
   });
 });
 

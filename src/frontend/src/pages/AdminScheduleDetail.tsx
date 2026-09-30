@@ -23,7 +23,8 @@ import { UnsureOutcome, unsureSentence, writeOrReadBack, type UnsureWords } from
 import { LOST_REPLY } from "../lib/lostReplyCopy";
 import { endCheck, hoursCheck, skipCheck, type ScheduleCheck } from "../lib/scheduleReadBack";
 import {
-  DATES_EMPTY, clampedNotice, clubDateShort, endConsequence, nextHeldOccurrence, nextOccurrenceLine, occurrenceStatusWord,
+  DATES_EMPTY, clampedNotice, clubDateShort, endConsequence, hoursFromLine, nextHeldDate, nextHeldOccurrence, nextOccurrenceLine,
+  occurrenceHours, occurrenceStatusWord,
   partialMaterialisation, ruleSentence, scheduleCodes, skipChipLabel, skipConsequence,
 } from "../lib/scheduleCopy";
 import { slotsPerOccurrence } from "../lib/scheduleRules";
@@ -69,9 +70,11 @@ function courtsHeldBy(occurrence: ScheduleOccurrence, fallback: number): number 
  */
 function OccurrenceRow({
   occurrence, courtCount, row, busy, changing,
-  onToggleChange, onCancelChange, onSubmitChange, onSkip, focusAfter, notice,
+  onToggleChange, onCancelChange, onSubmitChange, onSkip, focusAfter, notice, timezone,
 }: {
   occurrence: ScheduleOccurrence;
+  /** The club's zone, for each date's own hours. */
+  timezone?: string;
   courtCount: number;
   row: ScheduleRow;
   busy: boolean;
@@ -89,7 +92,13 @@ function OccurrenceRow({
               <div>
                 <p className="text-sm font-semibold text-text-primary">{clubDateShort(occurrence.date)}</p>
                 <p className="text-sm text-text-secondary">
-                  {`${occurrenceStatusWord(occurrence.status)} · ${courtsHeldBy(occurrence, courtCount)} court${courtsHeldBy(occurrence, courtCount) === 1 ? "" : "s"}`}
+                  {[
+                    occurrenceStatusWord(occurrence.status),
+                    // Each date's own hours (A4-3): after a "from this date on" change the dates
+                    // before it are still held at the old ones.
+                    occurrence.status === "skipped" ? null : occurrenceHours(occurrence, timezone),
+                    `${courtsHeldBy(occurrence, courtCount)} court${courtsHeldBy(occurrence, courtCount) === 1 ? "" : "s"}`,
+                  ].filter(Boolean).join(" · ")}
                 </p>
               </div>
               {occurrence.status === "scheduled" && (
@@ -198,14 +207,18 @@ function EndScheduleCard({ row, busy, endReason, onEndReason, consequence, focus
  * "we could not read the dates" must not be rendered as "it holds none".
  * </p>
  */
-function ScheduleHeadline({ row, days, partial, next, timezone }: {
+function ScheduleHeadline({ row, days, partial, occurrences, timezone }: {
   row: ScheduleRow;
   days: NonNullable<ScheduleRow["days"]>;
   partial: string | null;
-  /** The next date really held — past any skipped one (R3 A-6). */
-  next: string | null | undefined;
+  /** The dates read, or null until they are: the next line and the "from" line come from them. */
+  occurrences: ScheduleOccurrence[] | null;
   timezone?: string;
 }) {
+  // The next date really held — past any skipped one (R3 A-6) — at its OWN hours (R4 A-4-3).
+  const heldNext = nextHeldDate(occurrences);
+  const next = nextHeldOccurrence(row.next_occurrence, occurrences);
+  const from = hoursFromLine(row, occurrences, timezone);
   return (
     <>
       <PageHeader
@@ -227,7 +240,8 @@ function ScheduleHeadline({ row, days, partial, next, timezone }: {
                 intervalWeeks: row.interval_weeks,
               })}
             </span>
-            <span className="mt-1 block text-text-muted">{nextOccurrenceLine(next, row.status, timezone)}</span>
+            <span className="mt-1 block text-text-muted">{nextOccurrenceLine(next, row.status, timezone, heldNext?.ends_at)}</span>
+            {from ? <span className="mt-1 block text-text-secondary" data-hours-from="">{from}</span> : null}
           </>
         )}
       />
@@ -410,7 +424,7 @@ export function AdminScheduleDetailPage() {
       <ScheduleHeadline
         row={row}
         days={days}
-        next={nextHeldOccurrence(row.next_occurrence, occurrences)}
+        occurrences={occurrences}
         timezone={scheduleRead.data?.timezone}
         partial={occurrences === null ? null : partialMaterialisation(
           occurrences.filter((o) => (o.courts?.length ?? 0) > 0).length,
@@ -456,6 +470,7 @@ export function AdminScheduleDetailPage() {
               <OccurrenceRow
                 key={o.date}
                 occurrence={o}
+                timezone={occurrencesRead.data?.timezone ?? scheduleRead.data?.timezone}
                 courtCount={courtCount}
                 row={row}
                 busy={busy}

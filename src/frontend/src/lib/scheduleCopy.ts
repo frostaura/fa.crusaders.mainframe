@@ -1,5 +1,5 @@
 import { WEEKDAYS, type ScheduleConflict, type Weekday } from "./adminApi";
-import { clubCalendarDate, clubDayAndClock } from "./clubClock";
+import { clubCalendarDate, clubClock, clubDayAndClock } from "./clubClock";
 import { epochDay, weekdayOf } from "./scheduleRules";
 import { formatCredits } from "./utils";
 
@@ -440,6 +440,44 @@ export function nextHeldOccurrence(
   return held?.starts_at ?? next;
 }
 
+/** The date that is really held next, with its own start and end (A4-3), or null while unknown. */
+export function nextHeldDate<T extends { status?: string; starts_at?: string; ends_at?: string }>(
+  occurrences: readonly T[] | null,
+): T | null {
+  return occurrences?.find((o) => (o.status === "scheduled" || o.status === "overridden") && o.starts_at) ?? null;
+}
+
+/**
+ * One held date's own hours, "18:00–19:30" (review round 4, A4-3). A "from this date on" change
+ * leaves the dates before it at the hours they were booked at, and the list showed only the date
+ * — so an admin saw the new rule over dates the courts were really held at 18:00.
+ */
+export function occurrenceHours(occurrence: { starts_at?: string; ends_at?: string }, timezone?: string): string | null {
+  if (!occurrence.starts_at || !occurrence.ends_at) return null;
+  return `${clubClock(occurrence.starts_at, timezone)}–${clubClock(occurrence.ends_at, timezone)}`;
+}
+
+/**
+ * When the rule's hours differ from some dates still held (A4-3): the first held date at the
+ * rule's hours, said as "from", and that the dates before it keep theirs. Null when every held
+ * date is at the rule's hours, or when none is (nothing to say "from").
+ */
+export function hoursFromLine(
+  rule: { start?: string; end?: string },
+  occurrences: ReadonlyArray<{ date: string; status?: string; starts_at?: string; ends_at?: string }> | null,
+  timezone?: string,
+): string | null {
+  if (!occurrences || !rule.start || !rule.end) return null;
+  const ruleHours = `${rule.start}–${rule.end}`;
+  const held = occurrences.filter((o) => (o.status === "scheduled" || o.status === "overridden") && o.starts_at);
+  const first = held.findIndex((o) => occurrenceHours(o, timezone) === ruleHours);
+  if (first <= 0) return null;
+  const earlier = held.slice(0, first).filter((o) => occurrenceHours(o, timezone) !== ruleHours);
+  if (earlier.length === 0) return null;
+  return `These hours apply from ${clubDateShort(held[first].date)}. `
+    + `${earlier.length === 1 ? "The date before it keeps the hours it was" : `The ${earlier.length} dates before it keep the hours they were`} booked at — see each date below.`;
+}
+
 /** The empty state teaches the feature rather than restating the heading. */
 export const LIST_EMPTY_HINT =
   "A repeating booking is how you hold Tuesday nights for the league "
@@ -456,8 +494,9 @@ export const LIST_FAILED_CAVEAT = "That does not mean the club has none.";
  * asserting an ending out of its own gap.
  */
 export function nextOccurrenceLine(
-  next: string | null | undefined, status: string | undefined, timezone?: string,
+  next: string | null | undefined, status: string | undefined, timezone?: string, endsAt?: string | null,
 ): string {
+  if (next && endsAt) return `Next on ${clubDayAndClock(next, timezone)}–${clubClock(endsAt, timezone)}.`;
   if (next) return `Next on ${clubDayAndClock(next, timezone)}.`;
   if (status === "ended") return "This has ended — there are no more dates.";
   return "The next date hasn't been worked out yet.";
