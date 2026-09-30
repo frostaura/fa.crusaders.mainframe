@@ -256,6 +256,15 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   });
   const members = [{ id: NALEDI, name: "Naledi Khumalo", balance: 44 }, { id: ME, name: "Desk Admin", balance: 0 }];
 
+  it("names the book-as combobox for who the booking is for", () => {
+    stubFetch([]);
+    open({ isAdmin: true, members });
+    fireEvent.click(screen.getByRole("radio", { name: BOOK_SHEET.asMember }));
+    const combo = screen.getByRole("combobox", { name: new RegExp(`^${BOOK_SHEET.memberLabel}`) });
+    expect(combo).toBeTruthy();
+    expect(BOOK_SHEET.memberLabel).toBe("Member to book for");
+  });
+
   it("is a stepper: Slots with Book as, then Confirm — Cancel first, Back after", () => {
     stubFetch([]);
     open({ isAdmin: true, members });

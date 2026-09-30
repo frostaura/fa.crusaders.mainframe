@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { confirmPlayersSentence } from "@/lib/playersCopy";
 import { partnersTotal, splitShares, type MathSeat } from "../splitMath";
 import {
-  EMPTY_DRAFT, addPlayer, hasPaying, localSplit, parseAmount, parseWeight, playersPayload, previewBody,
+  EMPTY_DRAFT, addPlayer, hasPaying, localSplit, amountProblem, parseAmount, parseWeight, playersPayload, previewBody,
   removeSeat, sentenceSeats, updateSeat, withMode, type PlayersDraft,
 } from "../playersDraft";
 import type { SplitMode } from "@/lib/playersApi";
@@ -170,6 +170,16 @@ describe("the draft → request bodies", () => {
     expect(parseAmount("12,5")).toBe(12.5);
     expect(parseAmount("12.345")).toBeNull();
     expect(parseAmount("-1")).toBeNull();
+  });
+
+  it("reads a share through the product's one amount parser (lib/amount)", () => {
+    expect(parseAmount("12,50")).toBe(12.5);
+    expect(parseAmount("1e2")).toBeNull();
+    expect(parseAmount("1,000")).toBeNull();
+    expect(amountProblem("1,000")).toEqual({ kind: "ambiguous" });
+    expect(amountProblem("1e2")).toEqual({ kind: "not_a_number" });
+    expect(amountProblem("")).toBeNull();
+    expect(amountProblem("0")).toBeNull();
   });
 
   it("the local split says split_exceeds_price the moment the amounts pass the court", () => {

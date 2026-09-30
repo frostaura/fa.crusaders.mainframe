@@ -9,6 +9,7 @@ import { BalanceProvider } from "@/lib/balance";
 import type { BalanceTransport } from "@/lib/liveBalance";
 import { refuse, signIn, signOut, stubFetch, type StubCall, type StubRoute } from "@/test/harness";
 import { BOOK_SEATS, BOOK_SHEET } from "@/lib/bookingsCopy";
+import { amountProblemSentence } from "@/lib/amountCopy";
 import { formatCredits } from "@/lib/utils";
 import {
   BOOK_CONFIRM, BOOK_PLAYERS, BOOK_SPLIT, PICKER, PLAYERS_REFUSAL, heldLine, owedBackLine,
@@ -250,6 +251,20 @@ describe("BookSheet — Split", () => {
     expect(ratio).toHaveAttribute("aria-checked", "true");
     expect(screen.getByLabelText(BOOK_SPLIT.weightLabel("Sam"))).toBeTruthy();
     expect(within(group).getByRole("radio", { name: BOOK_SPLIT.modes.equal })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("says what is wrong with a typed share, in the shared amount sentence, under its field", async () => {
+    stubFetch([FAVOURITES, PREVIEW]);
+    open();
+    await addSamAndALink();
+    await next();
+    await userEvent.setup().click(screen.getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
+    const sam = screen.getByLabelText(BOOK_SPLIT.amountLabel("Sam"));
+    fireEvent.change(sam, { target: { value: "1,000" } });
+    expect(screen.getByText(amountProblemSentence({ kind: "ambiguous" }, "credits"))).toBeTruthy();
+    expect(sam).toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(sam, { target: { value: "12,50" } });
+    expect(screen.queryByText(amountProblemSentence({ kind: "ambiguous" }, "credits"))).toBeNull();
   });
 
   it("says amounts past the price at once, asks the server nothing, and will not continue", async () => {

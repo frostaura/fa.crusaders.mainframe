@@ -1,10 +1,11 @@
 import { useId } from "react";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { amountProblemSentence } from "@/lib/amountCopy";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SPLIT_MODES, type SplitMode } from "@/lib/playersApi";
 import { BOOK_SPLIT, PLAYERS_COPY } from "@/lib/playersCopy";
-import { seatName, type DraftSeat } from "./playersDraft";
+import { amountProblem, seatName, type DraftSeat } from "./playersDraft";
 import { SplitTotals } from "./SplitTotals";
 import type { SplitEditor } from "./usePlayersStep";
 
@@ -80,9 +81,11 @@ function SeatFigure({ seat, players }: { seat: DraftSeat; players: SplitEditor }
       />
     );
   }
+  const problem = amountProblem(seat.amount);
   return (
     <FigureField
       label={BOOK_SPLIT.amountLabel(name)} name={name} value={seat.amount}
+      error={problem ? amountProblemSentence(problem, "credits") : undefined}
       onChange={(v) => players.setAmount(seat.seat, v)}
     />
   );
@@ -97,23 +100,28 @@ function FixedFigure({ name, text }: { name: string; text: string }) {
   );
 }
 
-type FigureFieldProps = { label: string; name: string; value: string; numeric?: boolean; onChange: (value: string) => void };
+type FigureFieldProps = {
+  label: string; name: string; value: string; numeric?: boolean; onChange: (value: string) => void;
+  /** The shared amount parser's sentence for what was typed (lib/amount), under the field. */
+  error?: string;
+};
 
 /** A name on the left, its figure on the right; the field's name is the full "Weight for Sam". */
 function FigureField(props: FigureFieldProps) {
-  const { label, name, value, numeric = false, onChange } = props;
+  const { label, name, value, numeric = false, onChange, error } = props;
   return (
-    <Field className="flex items-center justify-between gap-3">
+    <Field invalid={Boolean(error)} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
       <FieldLabel className="truncate font-semibold">{name}</FieldLabel>
       <Input
         aria-label={label}
         value={value}
         inputMode={numeric ? "numeric" : "decimal"}
         autoComplete="off"
-        maxLength={numeric ? 3 : 9}
+        maxLength={numeric ? 3 : 12}
         className="w-24 text-right tabular-nums"
         onChange={(e) => onChange(e.target.value)}
       />
+      {error ? <FieldError className="col-span-2">{error}</FieldError> : null}
     </Field>
   );
 }

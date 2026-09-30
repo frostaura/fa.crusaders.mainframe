@@ -194,7 +194,8 @@ export const BOOK_SHEET = {
   asMemberHint: "Charged to the member you choose.",
   asHold: "A club hold",
   asHoldHint: "Nobody is charged. The name you write shows on the grid.",
-  memberLabel: "Member",
+  /** The book-as combobox's name — who the booking is FOR, not the bare word "Member" (R1, F3). */
+  memberLabel: "Member to book for",
   memberPlaceholder: "Choose a member",
   memberMissing: "Choose who this is for.",
   holdLabel: "Name on the grid",
