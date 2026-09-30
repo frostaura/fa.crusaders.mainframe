@@ -56,5 +56,5 @@ Each came from a finding reproduced on the running app; the pinning tests are
   no claim of a booking or charge); a refusal takes it back at once, a landed booking becomes the
   confirming cell in the SAME commit (`startTransition`), a sheet closed mid-flight drops it. The
   confirmation is drawn from the POST answer and commits before the grid's re-draw.
-- **The 300 ms guard after Continue is visible** (`useStepSettle`); it silently ate quick taps.
+- **After Continue only a double tap's tail is ignored** (R4: `decisions-frontend-bookings-r4`).
   Under an open sheet the grid states `pointer-events: auto` (see gotchas-frontend-rendering).

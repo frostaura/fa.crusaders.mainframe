@@ -48,5 +48,6 @@ entry → 304 kB. Perf lane 2026-09-30: 328 → **255 kB** (entry 166 + React 74
 - **Retired in P10 and not to return:** the P1 compat shims (`components/Button|Card|Modal|
   StateBlock`, `components/Layout`); `lucide-react`; the `action_glyphs` setting and ClubUi
   context; D1's booking-code copy branches. **Why:** each was a second path to one thing.
-- **Still big and known:** Schedule 28 kB gzip with CancelSheet (9) and the split preview (8)
-  eager inside it; ReportParts (charts) 124 kB, lazy and admin/activity-only.
+- **Bookings' rare parts are lazy (R4 F1):** CancelSheet (4.4 kB gz) and SplitStep (2.0) are
+  their own chunks (Schedule 29.5 kB gz); `/wallet/activity` imports its charts (121 kB gz)
+  lazily, so no member route statically depends on the chart library.
