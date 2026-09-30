@@ -48,6 +48,13 @@ describe("reading", () => {
     expect(screen.queryByRole("button", { name: RESULT_CARD.record })).toBeNull();
   });
 
+  it("says a checked-in court whose time has not begun as not started (B15), with no button", async () => {
+    serve([{ path: RESULT_PATH, body: view({ permissions: { ...view().permissions, can_record: false }, not_recordable_reason: "not_started" }) }]);
+    renderCard();
+    expect(await screen.findByText(RESULT_CARD.notStarted)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: RESULT_CARD.record })).toBeNull();
+  });
+
   it("says a failed read as a failure with a retry — never as 'no result'", async () => {
     // The first read never reaches the club (a phone in a lift); the retry does.
     let calls = 0;
@@ -241,5 +248,20 @@ describe("a refusal from the server reads like the live check", () => {
     expect(boxes.length).toBeGreaterThan(0);
     fireEvent.click(within(dialog).getByRole("button", { name: RESULT_SHEET.submit }));
     expect(await within(dialog).findByText(`Game 1: ${GAME_REASON.overrun}`)).toBeInTheDocument();
+  });
+
+  it("result_not_recordable with not_started (B15) says the court time has not begun", async () => {
+    serve([
+      { path: RESULT_PATH, body: view() },
+      { method: "POST", path: RESULT_PATH, respond: () => refuse(409, { error: "result_not_recordable", reason: "not_started" }) },
+    ]);
+    renderCard("?result=record");
+    const dialog = await screen.findByRole("dialog", { name: RESULT_SHEET.title });
+    for (let g = 0; g < 3; g += 1) {
+      fireEvent.change(within(dialog).getAllByRole("textbox")[g * 2], { target: { value: "11" } });
+      fireEvent.change(within(dialog).getAllByRole("textbox")[g * 2 + 1], { target: { value: "0" } });
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: RESULT_SHEET.submit }));
+    expect(await within(dialog).findByText(RESULT_CARD.notStarted)).toBeInTheDocument();
   });
 });

@@ -77,6 +77,7 @@ export const RESULT_CARD = {
   noneYet: "No result recorded yet.",
   noneYetHint: "Once you've played, record the score — the other side confirms it.",
   notCheckedIn: "A result can be recorded once the court has been checked in at the box.",
+  notStarted: "A result can be recorded once your court time has started.",
   windowClosed: "It's too late to record a result for this game.",
   notEnoughPlayers: "A result needs two players or more on the booking.",
   recordUntil: (when: string) => `You can record it until ${when}.`,
@@ -123,6 +124,7 @@ export const RESULT_CARD = {
 
 export function notRecordableLine(reason: NotRecordableReason | null): string | null {
   if (reason === "not_checked_in") return RESULT_CARD.notCheckedIn;
+  if (reason === "not_started") return RESULT_CARD.notStarted;
   if (reason === "window_closed") return RESULT_CARD.windowClosed;
   if (reason === "not_enough_players") return RESULT_CARD.notEnoughPlayers;
   return null;

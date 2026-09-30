@@ -74,7 +74,8 @@ export type MatchResult = {
   viewer_outcome: Outcome | null;
 };
 
-export type NotRecordableReason = "not_checked_in" | "window_closed" | "not_enough_players";
+/** `not_started` (review round 1, B15): results open at the court time's start or the check-in, whichever is later. */
+export type NotRecordableReason = "not_checked_in" | "not_started" | "window_closed" | "not_enough_players";
 
 export type ResultPermissions = {
   can_record: boolean;
