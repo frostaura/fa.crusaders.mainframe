@@ -19,6 +19,8 @@ import { Skeleton } from "../components/ui/skeleton";
 import { StateBlock } from "../components/ui/state-block";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
+import { UnsureOutcome, unsureSentence, writeOrReadBack } from "../lib/lostReply";
+import { LOST_REPLY, unsureWords } from "../lib/lostReplyCopy";
 import { Check, Copy, Plus, Trash, WebhooksLogo, X } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { clubDayAndClock } from "../lib/clubClock";
@@ -231,6 +233,8 @@ function formatFilter(tokens: string[]): string {
   return tokens.length === 0 ? "*" : tokens.join(",");
 }
 
+const REMOVED = "Endpoint removed.";
+
 export default function AdminWebhooksPage() {
   const toast = useToast();
   const [list, setList] = useState<WebhookEndpointDto[]>([]);
@@ -311,10 +315,20 @@ export default function AdminWebhooksPage() {
   const createAction = useAsyncAction(create);
 
   // Thrown, not swallowed: the confirm dialog keeps itself open and says what went wrong.
+  // A lost reply is looked up (review round 3): the list read again without this id → it was
+  // deleted; with it → nothing changed; unreadable → not known (said in the dialog, see below).
   const remove = async (id: string) => {
-    await endpoints.adminWebhooksDelete(id);
-    await load();
-    toast.push({ tone: "success", text: "Endpoint removed." });
+    try {
+      const { proven } = await writeOrReadBack(
+        async () => { await endpoints.adminWebhooksDelete(id); return {}; },
+        async () => ((await endpoints.adminWebhooksList()).some((w) => w.id === id) ? null : {}),
+      );
+      await load();
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(REMOVED) : REMOVED });
+    } catch (err) {
+      if (err instanceof UnsureOutcome) void load();
+      throw err;
+    }
   };
 
   const openDeliveries = async (id: string) => {
@@ -472,6 +486,7 @@ function EndpointRow(props: {
                 confirmLabel: "Delete endpoint",
                 action: "delete the endpoint",
                 onConfirm: props.onRemove,
+                describe: (error) => unsureSentence(error, unsureWords(`${name} is still there`, `${name} was deleted`, "Webhooks")),
                 focusAfter: () => document.querySelector<HTMLElement>("#main-content h1"),
               },
             }]}

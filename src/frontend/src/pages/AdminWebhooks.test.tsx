@@ -490,6 +490,52 @@ describe("AdminWebhooks", () => {
     });
   });
 
+  /**
+   * Review round 3 (admin lost-reply audit): a delete whose reply is lost is looked up on the
+   * list. The stubs delete the endpoint, then lose the reply.
+   */
+  describe("a delete whose reply was lost", () => {
+    function deletedThenLost(landed: boolean, listAfter: "ok" | "fails" = "ok") {
+      let rows: unknown[] = [endpointFixture()];
+      let reads = 0;
+      return [
+        { path: LIST, respond: () => (++reads > 1 && listAfter === "fails" ? refuse(503, { error: "down" }) : rows) },
+        {
+          method: "DELETE", path: `${LIST}/${ENDPOINT_ID}`,
+          respond: () => { if (landed) rows = []; return refuse(504, { error: "gateway_timeout" }); },
+        },
+      ] as StubRoute[];
+    }
+    async function remove() {
+      fireEvent.pointerDown(await screen.findByRole("button", { name: "More actions for Scoreboard" }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Delete endpoint" }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete endpoint" }));
+      return dialog;
+    }
+
+    it("says it was removed when the list no longer has it", async () => {
+      stubFetch(deletedThenLost(true));
+      renderPage(<AdminWebhooksPage />);
+      await remove();
+      expect(await screen.findByText(/^Endpoint removed\. The club's reply didn't arrive, so we checked its record\.$/)).toBeInTheDocument();
+    });
+
+    it("says nothing changed when the list still has it", async () => {
+      stubFetch(deletedThenLost(false));
+      renderPage(<AdminWebhooksPage />);
+      const dialog = await remove();
+      expect(await within(dialog).findByText(/we checked: Scoreboard is still there — nothing changed/)).toBeInTheDocument();
+    });
+
+    it("says it cannot tell when the list cannot be read either", async () => {
+      stubFetch(deletedThenLost(true, "fails"));
+      renderPage(<AdminWebhooksPage />);
+      const dialog = await remove();
+      expect(await within(dialog).findByText(/can't tell whether Scoreboard was deleted/)).toBeInTheDocument();
+    });
+  });
+
   it("creates an endpoint and shows the signing secret once", async () => {
     const stub = stubFetch(routes([
       { method: "POST", path: LIST, body: { ...endpointFixture(), secret: "whsec_abc123" } },
