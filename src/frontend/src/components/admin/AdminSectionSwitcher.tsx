@@ -60,9 +60,10 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
       <span className="flex min-w-0 flex-1 flex-col items-start text-left">
         {/* Wrapping, never truncating: at a 32px root font on a 320px phone "Courts & hardware"
             is wider than the bar, and a clipped section name is a silent loss (e2e/admin-doors).
-            It wraps at SPACES: `break-words` broke "HARDWARE" mid-letter at 200% text. */}
-        <span className={cn(typography({ variant: "overline" }), "w-full")}>{eyebrow}</span>
-        <span className="w-full text-base font-semibold text-text-primary">{item.label}</span>
+            `break-words` breaks a word only when it cannot fit its line at all — at 390 with 200%
+            text "HARDWARE" now fits whole (the tile no longer doubles); at 320 nothing can. */}
+        <span className={cn(typography({ variant: "overline" }), "w-full break-words")}>{eyebrow}</span>
+        <span className="w-full break-words text-base font-semibold text-text-primary">{item.label}</span>
       </span>
       {attention.total > 0 ? (
         <span
