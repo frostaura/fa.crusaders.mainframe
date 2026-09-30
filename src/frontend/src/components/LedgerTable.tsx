@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import type { LedgerRow } from "../lib/api";
-import { cn, formatSignedCredits } from "../lib/utils";
+import { cn } from "../lib/utils";
+import { clubDayAndClock } from "../lib/clubClock";
 import { ledgerCategory, ledgerDoneBy, LEDGER_COPY } from "../lib/ledgerCopy";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Button } from "./ui/button";
@@ -141,7 +142,9 @@ function LedgerLine({ row, columns, onOpen }: { row: LedgerRow; columns: Column[
           <Button
             variant="ghost"
             size="sm"
-            aria-label={LEDGER_COPY.openRow(`${ledgerCategory(row)}, ${formatSignedCredits(row.signedAmountCredits)}`)}
+            // Named by kind and time, not by amount: the amount is its own cell's name, and
+            // repeating it here made "+160.00 cr" match two cells in the row.
+            aria-label={LEDGER_COPY.openRow(`${ledgerCategory(row)}, ${clubDayAndClock(row.at)}`)}
             onClick={(e) => { e.stopPropagation(); onOpen(row); }}
             icon={<CaretRight aria-hidden="true" />}
           >

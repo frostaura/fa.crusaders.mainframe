@@ -342,7 +342,7 @@ describe("Admin ledger — done by, category, and a detail per row", () => {
   it("opens a row's whole story, with its booking", async () => {
     open();
     await screen.findByText("R200 cash, receipt 0412");
-    fireEvent.click(screen.getByRole("button", { name: /Details — Admin adjustment, \+40\.00 cr/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Details — Admin adjustment, / }));
     const sheet = await screen.findByRole("dialog");
     expect(sheet).toHaveTextContent("Review Admin");
     expect(sheet).toHaveTextContent("R200 cash, receipt 0412");

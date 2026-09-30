@@ -100,3 +100,16 @@ describe("the save bar never covers the field being typed in (F3.23)", () => {
     expect(document.documentElement.style.scrollPaddingBottom).toBe("");
   });
 });
+
+describe("a successful save keeps the keyboard somewhere (F4.7, settings half)", () => {
+  it("lands focus on a status saying it saved, never on <body>", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+    await changeAhead("30");
+    const save = saveButton();
+    save.focus();
+    fireEvent.click(save);
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("data-save-landing"));
+    expect(document.activeElement).toHaveTextContent(SETTINGS_COPY.saved);
+  });
+});

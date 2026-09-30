@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { settingAnchorId } from "@/lib/tenantSettings";
@@ -94,6 +94,34 @@ function useKeepFieldsClearOfBar(shown: boolean, bar: React.RefObject<HTMLDivEle
   }, [shown, bar]);
 }
 
+/**
+ * Where focus lands when the bar goes away under it (F4.7's settings half). A save — or a
+ * discard — empties the change count, the bar unmounts, and the Save the admin pressed took
+ * focus to <body> with it. A persistent, focusable status takes it instead and says what
+ * happened.
+ */
+function useFocusLanding(shown: boolean) {
+  const inside = useRef(false);
+  const status = useRef<HTMLParagraphElement>(null);
+  const [said, setSaid] = useState("");
+  useLayoutEffect(() => {
+    if (shown || !inside.current) return;
+    inside.current = false;
+    status.current?.focus();
+  }, [shown]);
+  const element = (
+    <p ref={status} tabIndex={-1} data-save-landing="" className="sr-only">{said}</p>
+  );
+  return {
+    element,
+    onFocus: () => { inside.current = true; setSaid(SETTINGS_COPY.saved); },
+    onBlur: (e: React.FocusEvent) => {
+      // Leaving to somewhere else on the page is a real move; only a removal lands here.
+      if (e.relatedTarget) inside.current = false;
+    },
+  };
+}
+
 export function SaveBar(props: SaveBarProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { changes, blockers, pending, onSave, onDiscard, onFocusSetting } = props;
@@ -103,7 +131,8 @@ export function SaveBar(props: SaveBarProps) {
   const shown = changes > 0 || blocked;
   const bar = useRef<HTMLDivElement>(null);
   useKeepFieldsClearOfBar(shown, bar);
-  if (!shown) return null;
+  const landing = useFocusLanding(shown);
+  if (!shown) return landing.element;
 
   const press = () => {
     if (!blocked) {
@@ -117,7 +146,16 @@ export function SaveBar(props: SaveBarProps) {
   };
 
   return (
-    <div ref={bar} data-save-bar="" className="pointer-events-none fixed inset-x-0 z-actionbar px-4" style={OFFSET}>
+    <>
+    {landing.element}
+    <div
+      ref={bar}
+      data-save-bar=""
+      className="pointer-events-none fixed inset-x-0 z-actionbar px-4"
+      style={OFFSET}
+      onFocus={landing.onFocus}
+      onBlur={landing.onBlur}
+    >
       <section
         aria-label={SETTINGS_COPY.saveBarLabel}
         className="pointer-events-auto mx-auto flex w-full max-w-screen-sm flex-col gap-3 rounded-2xl border border-border bg-bg-raised p-3 text-text-primary shadow-lg animate-sheet-up motion-reduce:animate-none"
@@ -157,5 +195,6 @@ export function SaveBar(props: SaveBarProps) {
         <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
       </section>
     </div>
+    </>
   );
 }
