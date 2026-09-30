@@ -49,9 +49,9 @@ unit tests; each was wrong in the running app.
   facts; `/my-code` renders signed out from the key, asking the club nothing. Only the sign-out
   buttons (and a different member signing in) wipe them. **Why:** the D3 wipe-on-expiry turned
   "signed out after a while" into "locked out at the door"; with a 30-day cookie a lapse is rare.
-- **Every chunk is on the phone (F4.3)** — `precache.json` lists all JS/CSS; install caches them,
-  its `first` (member pages) 4 at a time, then the desk's 2 at a time (perf: ~110 at once starved
-  the page's reads). A failed chunk: own boundary + Retry; online, one reload per 5 min (looped).
+- **Every chunk is on the phone (F4.3)** — install caches `precache.json`'s `first` (member pages,
+  4 lanes); the desk's follow after claim (2 lanes; a sign-out stops them). A slow install is no
+  offline. A failed chunk: own boundary + Retry; online, one reload per 5 min (looped).
 - **The first-run wizard is offered only on a landing a sign-in delivered (F4.8)** — router state
   `{ signedIn: true }` from Login. `/my-code` is the app's start URL and the door.
 - **The credits chip shows SPENDABLE (F1.11)**, naming the whole and the held/owed parts —
