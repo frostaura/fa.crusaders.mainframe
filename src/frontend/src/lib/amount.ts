@@ -48,20 +48,27 @@ const SPACES = /[\s\u00a0\u202f\u2009]/g;
 const PLAIN = /^\d+(?:[.,]\d+)?$/;
 const MINUS = /^[-−–]/;
 
-export function parseAmount(text: string, rules: AmountRules = {}): AmountResult {
-  const decimals = rules.decimals ?? 2;
-  const trimmed = text.trim();
-  if (trimmed === "") return { ok: false, problem: { kind: "empty" } };
-  if (MINUS.test(trimmed)) return { ok: false, problem: { kind: "negative" } };
-  const compact = trimmed.replace(SPACES, "");
-  if (!PLAIN.test(compact)) return { ok: false, problem: { kind: "not_a_number" } };
+/** The shape checks, before any arithmetic: empty, a minus, not a plain number. */
+function shapeProblem(trimmed: string, compact: string): AmountProblem | null {
+  if (trimmed === "") return { kind: "empty" };
+  if (MINUS.test(trimmed)) return { kind: "negative" };
+  if (!PLAIN.test(compact)) return { kind: "not_a_number" };
+  return null;
+}
+
+/** The decimals: three after a separator is ambiguous, more than the unit has is too precise. */
+function fractionProblem(compact: string, decimals: number): AmountProblem | null {
   const fraction = compact.split(/[.,]/)[1];
-  if (fraction !== undefined && fraction.length === 3 && decimals < 3) {
-    return { ok: false, problem: { kind: "ambiguous" } };
-  }
-  if (fraction !== undefined && fraction.length > decimals) {
-    return { ok: false, problem: { kind: "too_precise", decimals } };
-  }
+  if (fraction === undefined) return null;
+  if (fraction.length === 3 && decimals < 3) return { kind: "ambiguous" };
+  return fraction.length > decimals ? { kind: "too_precise", decimals } : null;
+}
+
+export function parseAmount(text: string, rules: AmountRules = {}): AmountResult {
+  const trimmed = text.trim();
+  const compact = trimmed.replace(SPACES, "");
+  const problem = shapeProblem(trimmed, compact) ?? fractionProblem(compact, rules.decimals ?? 2);
+  if (problem) return { ok: false, problem };
   const value = Number(compact.replace(",", "."));
   if (!Number.isFinite(value)) return { ok: false, problem: { kind: "not_a_number" } };
   if (value === 0 && !rules.allowZero) return { ok: false, problem: { kind: "zero" } };

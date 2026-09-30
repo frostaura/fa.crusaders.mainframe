@@ -177,10 +177,7 @@ function SettingsEditor({ doc }: { doc: Doc }) {
   const form: SettingsForm = {
     settings: draft,
     update: doc.update,
-    errors: {
-      ...(doc.failure?.fieldKey ? { [doc.failure.fieldKey]: doc.failure.text } : {}),
-      ...Object.fromEntries(blockers.map((blocker) => [blocker.key, blocker.message])),
-    },
+    errors: fieldErrors(doc.failure, blockers),
     highlighted,
     query,
     visible: (key) => !search || search.keys.has(key),
@@ -198,12 +195,7 @@ function SettingsEditor({ doc }: { doc: Doc }) {
     <SettingsFormProvider value={form}>
       <PageShell className={barShown ? (blockers.length > 0 ? "pb-80" : "pb-40") : undefined}>
         <PageHeader title={SETTINGS_COPY.title} description={SETTINGS_COPY.description} />
-        {doc.restored && changed.length > 0 ? (
-          <Alert tone="info" live="polite" announceKey="settings-restored">{SETTINGS_COPY.draftRestored}</Alert>
-        ) : null}
-        {doc.failure && !doc.failure.sessionEnded ? (
-          <SaveFailureBanner failure={doc.failure} currency={currency} onGoTo={focusSetting} />
-        ) : null}
+        <SaveNotices doc={doc} changes={changed.length} currency={currency} onGoTo={focusSetting} />
         <SettingsIntro />
         <SettingsToolbar
           query={rawQuery}
@@ -249,6 +241,30 @@ function SettingsEditor({ doc }: { doc: Doc }) {
       />
       <LeaveGuard changes={changed.length} />
     </SettingsFormProvider>
+  );
+}
+
+/** Each field's complaint: a refused save's named field, then every blocker. */
+function fieldErrors(failure: Doc["failure"], blockers: ReturnType<typeof blockersOf>): Record<string, string> {
+  return {
+    ...(failure?.fieldKey ? { [failure.fieldKey]: failure.text } : {}),
+    ...Object.fromEntries(blockers.map((blocker) => [blocker.key, blocker.message])),
+  };
+}
+
+/** The two notices over the sections (F3.15): edits kept across a sign-in, and a refused save. */
+function SaveNotices({ doc, changes, currency, onGoTo }: {
+  doc: Doc; changes: number; currency: string; onGoTo: (key: string) => void;
+}) {
+  return (
+    <>
+      {doc.restored && changes > 0 ? (
+        <Alert tone="info" live="polite" announceKey="settings-restored">{SETTINGS_COPY.draftRestored}</Alert>
+      ) : null}
+      {doc.failure && !doc.failure.sessionEnded ? (
+        <SaveFailureBanner failure={doc.failure} currency={currency} onGoTo={onGoTo} />
+      ) : null}
+    </>
   );
 }
 
