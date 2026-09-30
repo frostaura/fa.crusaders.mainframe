@@ -21,8 +21,9 @@ const SEGMENT = cn(
 );
 const ACTIVE = cn(
   "border-border bg-bg-surface text-accent-strong shadow-xs hover:text-accent-strong",
-  // F4-5: forced colours discard the lifted surface, which left both views identical.
-  "forced-colors:border-[Highlight] forced-colors:bg-[Highlight] forced-colors:text-[HighlightText]",
+  // F4-5: forced colours discard the lifted surface, which left both views identical. X-1: and the
+  // label opts out of the Canvas backplate, or HighlightText is drawn on Canvas and vanishes.
+  "forced-colors:border-[Highlight] forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:[forced-color-adjust:none]",
 );
 
 const VIEWS = [

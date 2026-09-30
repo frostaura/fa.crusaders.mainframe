@@ -133,6 +133,27 @@
       color: HighlightText;
     }
 
+    /*
+     * X-1 (review round 3) — the same states, where they carry a LABEL. With the default
+     * `forced-color-adjust: auto` the mode draws a Canvas "readability backplate" behind every run
+     * of text, so HighlightText landed on Canvas — white on white, black on black — and a chosen
+     * tab or option was a blank block. Opting the chosen control out keeps the pairing whole; its
+     * text inherits HighlightText (an author colour on a child would otherwise show through).
+     * `html` lifts these over the state utilities (`data-[state=active]:bg-…`, 0,2,0), which the
+     * opt-out would otherwise let paint.
+     */
+    html [role="tab"][data-state="active"],
+    html [role="option"][aria-selected="true"] {
+      forced-color-adjust: none;
+      background-color: Highlight;
+      color: HighlightText;
+    }
+
+    html [role="tab"][data-state="active"] *,
+    html [role="option"][aria-selected="true"] * {
+      color: inherit;
+    }
+
     /* A focus ring in a mode that has thrown the accent away. */
     :focus-visible {
       outline: 2px solid Highlight;

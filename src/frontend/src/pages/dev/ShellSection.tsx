@@ -5,6 +5,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Plus } from "@/components/ui/icons";
 import { PageHeader, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Demo, ThemePair } from "./parts";
 
 /**
@@ -80,11 +81,34 @@ function ActionBarDemo() {
   );
 }
 
+/** Both looks of `ui/tabs`, once each (e2e/forced-colors-r3 reads the active tab's label ink). */
+function TabsDemo() {
+  return (
+    <div className="flex flex-col gap-6">
+      {(["segmented", "underline"] as const).map((variant) => (
+        <Tabs key={variant} variant={variant} defaultValue="recent" data-testid={`ui-tabs-${variant}`}>
+          <TabsList aria-label={`Players (${variant})`}>
+            <TabsTrigger value="favourites">Favourites</TabsTrigger>
+            <TabsTrigger value="recent">Recent</TabsTrigger>
+            <TabsTrigger value="members">Members</TabsTrigger>
+          </TabsList>
+          <TabsContent value="favourites" className="text-sm text-text-secondary">Your favourite partners.</TabsContent>
+          <TabsContent value="recent" className="text-sm text-text-secondary">People you played with lately.</TabsContent>
+          <TabsContent value="members" className="text-sm text-text-secondary">Everyone at the club.</TabsContent>
+        </Tabs>
+      ))}
+    </div>
+  );
+}
+
 export function ShellSection() {
   return (
     <div className="flex flex-col gap-10">
       <Demo title="Page header" note="The one h1 on a page, the actions slot on the right, freshness beside it.">
         <ThemePair>{() => <Headers />}</ThemePair>
+      </Demo>
+      <Demo title="Tabs" note="Segmented, for a view switched in place; underline, for page-level sections.">
+        <TabsDemo />
       </Demo>
       <Demo title="Action bar" note="Floats above the tab bar on a phone and centres at 640px on a desktop. Escape or the cross clears it.">
         <ActionBarDemo />

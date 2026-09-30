@@ -59,7 +59,12 @@ const TRIGGER_BASE = [
  * exactly like their neighbours. These `forced-colors:` utilities restate each state in system
  * colours, in the same layer, so they win.
  */
-const FORCED_ACTIVE = "forced-colors:data-[state=active]:border-[Highlight] forced-colors:data-[state=active]:bg-[Highlight] forced-colors:data-[state=active]:text-[HighlightText]";
+const FORCED_ACTIVE = cn(
+  "forced-colors:data-[state=active]:border-[Highlight] forced-colors:data-[state=active]:bg-[Highlight] forced-colors:data-[state=active]:text-[HighlightText]",
+  // X-1 (round 3): without this the mode draws a Canvas backplate behind the label, and
+  // HighlightText on Canvas is white on white (black on black in a dark palette).
+  "forced-colors:data-[state=active]:[forced-color-adjust:none]",
+);
 
 const TRIGGER: Record<TabsVariant, string> = {
   segmented: cn(
