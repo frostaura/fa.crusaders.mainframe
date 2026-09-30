@@ -130,6 +130,43 @@ describe("a session ending takes the caches with it", () => {
     expect(event.delivered).toEqual([{ type: "CACHES_CLEARED" }]);
   });
 
+  it("stores nothing more once a sign-out has emptied the caches, even mid-precache (perf round)", async () => {
+    let signedOut: Promise<unknown> | null = null;
+    const sw: ReturnType<typeof loadServiceWorker> = loadServiceWorker({
+      "/index.html": () => new Response('<script type="module" src="/assets/index-AAAA.js"></script>', { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({
+        assets: Array.from({ length: 12 }, (_, i) => `/assets/Admin${i}-FFFF.js`), first: [],
+      }), { status: 200 }),
+      // The member signs out while the desk's pages are being fetched after activation.
+      "/assets/Admin0-FFFF.js": () => {
+        signedOut ??= sw.dispatchMessage({ type: "CLEAR_CACHES" });
+        return new Response("chunk", { status: 200 });
+      },
+    });
+    await sw.install();
+    await sw.activate();
+    await signedOut;
+    expect(sw.caches.storedUrls().filter((u) => u.includes("/assets/Admin"))).toEqual([]);
+  });
+
+  it("stores nothing more once the page itself has deleted the caches mid-precache (perf round)", async () => {
+    let deleted = false;
+    const sw: ReturnType<typeof loadServiceWorker> = loadServiceWorker({
+      "/index.html": () => new Response('<script type="module" src="/assets/index-AAAA.js"></script>', { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({
+        assets: Array.from({ length: 12 }, (_, i) => `/assets/Admin${i}-FFFF.js`), first: [],
+      }), { status: 200 }),
+      // `lib/pwa`'s page half of a sign-out: the caches deleted from the page, no message.
+      "/assets/Admin0-FFFF.js": () => {
+        if (!deleted) { deleted = true; for (const name of [...sw.caches.stores.keys()]) sw.caches.stores.delete(name); }
+        return new Response("chunk", { status: 200 });
+      },
+    });
+    await sw.install();
+    await sw.activate();
+    expect(sw.caches.storedUrls().filter((u) => u.includes("/assets/Admin"))).toEqual([]);
+  });
+
   it("deletes the leaking cache of an earlier worker the moment the new one activates", async () => {
     // Devices that already ran the shipped version are carrying member data right now. Nobody
     // is going to sign out to clean it up, so activation has to.
@@ -219,7 +256,7 @@ describe("install precaches every chunk the build lists", () => {
     expect(stored.some((u) => u.includes("elsewhere") || u.endsWith("/sw.js"))).toBe(false);
   });
 
-  it("fetches what a member's pages need first, and the desk's pages after (perf round)", async () => {
+  it("installs with what a member's pages need, and fetches the desk's pages once in control (perf round)", async () => {
     const sw = loadServiceWorker({
       "/index.html": () => new Response(INDEX, { status: 200 }),
       "/precache.json": () => new Response(JSON.stringify({
@@ -228,12 +265,14 @@ describe("install precaches every chunk the build lists", () => {
       }), { status: 200 }),
     });
     await sw.install();
+    expect(sw.caches.storedUrls()).not.toContain(`${ORIGIN}/assets/AdminLedger-FFFF.js`);
+    await sw.activate();
     const order = sw.networkCalls.map((r) => new URL(r.url, ORIGIN).pathname).filter((p) => p.startsWith("/assets/"));
     const lastMember = Math.max(...["/assets/index-AAAA.js", "/assets/Schedule-DDDD.js", "/assets/Wallet-CCCC.js"].map((p) => order.indexOf(p)));
     const firstDesk = Math.min(...["/assets/AdminLedger-FFFF.js", "/assets/AdminMembers-GGGG.js"].map((p) => order.indexOf(p)));
     expect(lastMember).toBeGreaterThanOrEqual(0);
     expect(firstDesk).toBeGreaterThan(lastMember);
-    // Still every chunk on the phone by the end of install (F4.3).
+    // Still every chunk on the phone once it is in control (F4.3).
     expect(sw.caches.storedUrls()).toEqual(expect.arrayContaining(
       ["/assets/AdminLedger-FFFF.js", "/assets/AdminMembers-GGGG.js", "/assets/Schedule-DDDD.js"].map((p) => `${ORIGIN}${p}`)));
   });

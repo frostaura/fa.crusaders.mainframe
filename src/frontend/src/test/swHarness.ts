@@ -105,6 +105,10 @@ class FakeCacheStorage {
     return this.stores.delete(name);
   }
 
+  async has(name: string): Promise<boolean> {
+    return this.stores.has(name);
+  }
+
   async match(request: SwRequest | string, options?: { cacheName?: string }): Promise<Response | undefined> {
     const names = options?.cacheName ? [options.cacheName] : [...this.stores.keys()];
     for (const name of names) {

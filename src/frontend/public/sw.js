@@ -122,8 +122,12 @@ async function cachePut(cacheName, request, response) {
   return true;
 }
 
+/** Moves on every purge; a precache that started before one stores nothing after it. */
+let cacheGeneration = 0;
+
 /** Deletes every cache this worker owns. Sign-out, and the sweep on activate, both use it. */
 async function purgeOwnedCaches(keep = []) {
+  if (keep.length === 0) cacheGeneration += 1;
   const names = await caches.keys();
   await Promise.all(
     names.filter((n) => n.startsWith(CACHE_PREFIX) && !keep.includes(n)).map((n) => caches.delete(n)),
@@ -158,6 +162,7 @@ async function purgeOwnedCaches(keep = []) {
  * page. They land in the cache on first use like anything else once this worker is in control.
  */
 async function precacheBuild() {
+  const generation = cacheGeneration;
   try {
     const response = await fetch("/index.html", { cache: "no-cache" });
     if (!response.ok) return;
@@ -167,12 +172,12 @@ async function precacheBuild() {
     // without it.
     const listed = await buildChunks();
     const firstUrls = [...new Set([...(html.match(/\/assets\/[A-Za-z0-9._-]+/g) || []), ...listed.first])];
-    const restUrls = listed.all.filter((url) => !firstUrls.includes(url));
-    // PERF (2026-09-30): the document's own files and every chunk a MEMBER's page needs first, a
-    // few at a time; the desk's pages after, two at a time. All ~110 at once queued the page's
-    // own reads behind them on a phone's six connections, on the very visit that installs this.
-    await fetchInto(firstUrls, 4);
-    await fetchInto(restUrls, 2);
+    // PERF (2026-09-30): at INSTALL only the document's own files and every chunk a MEMBER's page
+    // needs, a few at a time; the desk's pages once this worker is in control (`precacheRest`).
+    // All ~110 at once queued the page's own reads behind them on a phone's six connections, on
+    // the very visit that installs this — and an install that fetched all of them two at a time
+    // left the member's first visits uncontrolled (no offline) for that much longer.
+    await fetchInto(firstUrls, 4, generation);
   } catch {
     // Installed with no network, or behind a captive portal. There is nothing to precache and
     // nothing to be done about it; first use will fill the cache instead.
@@ -207,14 +212,35 @@ async function buildChunks() {
   }
 }
 
+/**
+ * Every listed chunk not yet in the cache — the desk's pages, after install — two at a time, once
+ * this worker is in control. Still every chunk on the phone (F4.3), just not ahead of the page.
+ */
+async function precacheRest() {
+  const generation = cacheGeneration;
+  try {
+    const listed = await buildChunks();
+    const cache = await caches.open(ASSET_CACHE);
+    const missing = [];
+    for (const url of listed.all) if (!(await cache.match(url))) missing.push(url);
+    await fetchInto(missing, 2, generation, true);
+  } catch {
+    // Offline after install: first use fills the cache instead.
+  }
+}
+
 /** Fetches and stores `urls`, `lanes` at a time. One asset that will not fetch costs only itself. */
-async function fetchInto(urls, lanes) {
+async function fetchInto(urls, lanes, generation = cacheGeneration, cacheMustExist = false) {
   const queue = [...urls];
+  // A sign-out's purge after `generation` was read — by this worker, or by the page deleting the
+  // caches itself (`cacheMustExist`: the cache is gone) — must not be undone by fetches still going.
+  const wanted = async () => generation === cacheGeneration && (!cacheMustExist || (await caches.has(ASSET_CACHE)));
   const lane = async () => {
-    while (queue.length > 0) {
+    while (queue.length > 0 && (await wanted())) {
       const url = queue.shift();
       try {
         const asset = await fetch(url);
+        if (!(await wanted())) return;
         // Through `cachePut`, not `cache.add`: one chokepoint decides what may be stored, and
         // a second path into the cache is how the rule above gets quietly broken.
         await cachePut(ASSET_CACHE, new Request(url), asset);
@@ -243,6 +269,7 @@ self.addEventListener("activate", (event) => {
     // version filled with member data on every device it ever ran on.
     await purgeOwnedCaches(OWNED);
     await self.clients.claim();
+    await precacheRest();
   })());
 });
 
