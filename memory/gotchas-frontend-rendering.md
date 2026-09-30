@@ -26,5 +26,5 @@ last_verified: 2026-09-30
   Assert the thing is visible before measuring it.
 - **200 % text is a 32 px root, and every rem gap, pad and min-width doubles with it.** On a 390
   phone a row of rem gutters around a word leaves the word no room and `break-words` splits it
-  ("Overvie/w"). Phone chrome gutters and gaps are pixels; let a count WRAP under its label rather
-  than stand beside it as a column.
+  ("Overvie/w"). Let a count WRAP under its label rather than stand beside it as a column; a
+  pixel box goes in an inline `style` — `theme-vocabulary` bans `p-[8px]`-style classes outside ui/.

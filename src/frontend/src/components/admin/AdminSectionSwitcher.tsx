@@ -54,7 +54,7 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
     <>
       {/* The tile is the 20px icon plus padding, not a rem box: `size-9` doubled to 72px at 200%
           text and squeezed the words into breaking mid-letter (review round 2, F4 → F3). */}
-      <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-accent-soft p-[8px] text-accent-strong">
+      <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-accent-soft p-2 text-accent-strong">
         <ItemIcon size={20} weight="fill" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col items-start text-left">
@@ -95,7 +95,7 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
   };
 
   return (
-    <div data-admin-section-bar="" className={cn("border-b border-border bg-bg-surface px-[8px] py-1 sm:px-4 lg:px-6 xl:hidden print:hidden", className)}>
+    <div data-admin-section-bar="" className={cn("border-b border-border bg-bg-surface px-2 py-1 sm:px-4 lg:px-6 xl:hidden print:hidden", className)}>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <button
@@ -105,10 +105,8 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
             // in Chromium (see `attentionName` in AdminRail). Opens with the words on screen.
             aria-label={switcherName(item, attention)}
             className={cn(
-              // 8px inside the bar's own 8px (sm: px-4, lg: px-6) puts the icon on the page gutter (16 / 24 / 32px).
-              // PIXELS on the phone (V-16): rem gutters and gaps doubled at 200% text and took the room the
-              // section's name needed, so "HARDWARE" broke mid-word at 320.
-              "no-lift flex min-h-appbar w-full items-center gap-[12px] rounded-lg border border-transparent px-[8px]",
+              // px-2 inside the bar's own px-2 (sm: px-4, lg: px-6) puts the icon on the page gutter (16 / 24 / 32px).
+              "no-lift flex min-h-appbar w-full items-center gap-3 rounded-lg border border-transparent px-2",
               "transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none",
             )}
           >

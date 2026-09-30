@@ -74,7 +74,7 @@ const LINK = [
  * pill, and at 200 % text the clamp won — the "46" sat on half the shield. The badge now overhangs
  * the pill into its tab's own margin instead, which the smaller badge below leaves room for.
  */
-const BADGE_LEFT = { left: "calc(50% + 8px)" } as const;
+const BADGE_BOX = { left: "calc(50% + 8px)", minWidth: 20, minHeight: 20, padding: "2px 6px" } as const;
 
 const PILL_BOX = { height: 32, maxWidth: 56 } as const;
 
@@ -130,14 +130,14 @@ function CountBadge({ attention }: { attention: Pick<AdminAttention, "total" | "
         // the shield it counts for. Its left edge is just right of the icon's centre, but never so
         // far right that it leaves the tab (the 320 px phone at the largest text), and its foot
         // stops at 60 % of the pill's height, so at most the icon's upper corner is covered.
-        // X-10: the digits grow with the text to 20 px and no further, and the box is pixel-padded
-        // around them — a count whose number is also the link's accessible name, not body text. At
-        // 200 % a rem box (40 px) was wider than the room right of the icon in a quarter of 390 px.
-        "absolute bottom-1/2 inline-flex min-h-[20px] min-w-[20px] items-center justify-center rounded-full px-[6px] py-[2px]",
+        // X-10: the digits grow with the text to 20 px and no further, and the box (BADGE_BOX) is
+        // pixel-padded around them — a count whose number is also the link's accessible name, not
+        // body text. At 200 % a rem box (40 px) was wider than the room right of the icon.
+        "absolute bottom-1/2 inline-flex items-center justify-center rounded-full",
         "bg-danger-solid text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
         "md:static md:order-last md:ml-0 md:ring-0",
       )}
-      style={BADGE_LEFT}
+      style={BADGE_BOX}
     >
       {attention.total > 99 ? "99+" : attention.total}
     </span>
