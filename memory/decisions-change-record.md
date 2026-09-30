@@ -37,3 +37,8 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   `credit.adjusted` not a person's night** — its ledger row is already on the wallet strand, and
   the twin made one top-up read twice (F3). Each admin notice kind carries `others_receiving` so the
   opt-out switch can warn that nobody else will be told (the dispatcher's own recipient test).
+- **The console words the diff the server renders** (review round 2, F3-7, `presentChanges` in
+  `lib/changeRecordCopy.ts`): ids hidden, credits and rand formatted, states and reason codes in
+  words, `balance_before/after_credits` joined into one Balance row, one-sided values listed as
+  facts rather than as a "Before" with a dash. *Why:* the writers store keys and tokens, and the
+  record read `pending_approval`, `top_up_cash` and UUIDs; a new writer's key falls back to words.

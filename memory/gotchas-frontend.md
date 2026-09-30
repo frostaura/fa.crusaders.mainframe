@@ -31,9 +31,9 @@ last_verified: 2026-09-30
   `executablePath` and reproduced a **cross-member cache leak** — one member's wallet served to
   another. `PLAYWRIGHT_CHROMIUM_PATH` is read by `playwright.config.ts`; without it
   `npx playwright test` cannot launch on this Mac, because the cached revision and the one
-  Playwright wants differ.
-- **Playwright refuses a browser revision it did not pin**; the same `executablePath` key lets a CI
-  runner use the Chromium it ships (a no-op when unset).
+  Playwright wants differ (it refuses a revision it did not pin; unset, the key is a no-op).
+- **The app shell scrolls `<main>`, not the document**: `scroll-padding` on `<html>` did nothing
+  (R1 F3.23's save-bar fix never applied; R2 F3-14 pads `#main-content`). Probe the scroller first.
 - **vitest has no `localStorage` under Node ≥25 + jsdom 28** — jsdom defers to Node's flag-gated
   built-in, which is undefined without the flag. An in-memory `Storage` polyfill in the frontend
   test setup file covers it; **keep it if that file is ever rewritten**, or the app test fails on
