@@ -368,7 +368,11 @@ public sealed class BookingScheduleService
     /// </summary>
     public async Task<int> CancelFutureAsync(Guid scheduleId, DateTimeOffset from, CancellationToken ct)
     {
-        var floor = from < DateTimeOffset.UtcNow ? DateTimeOffset.UtcNow : from;
+        // `.ToUniversalTime()` at the query boundary (review round 3, A-1): every caller hands in
+        // `ScheduleClock.InstantAt`, which carries the club's own offset, and Npgsql refuses a
+        // non-zero offset on a timestamptz parameter — a future effective date 500'd. A past one
+        // was clamped to UtcNow first, which is why only the future date ever reached here.
+        var floor = from < DateTimeOffset.UtcNow ? DateTimeOffset.UtcNow : from.ToUniversalTime();
 
         var rows = await _db.Bookings
             .Where(b => b.ScheduleId == scheduleId

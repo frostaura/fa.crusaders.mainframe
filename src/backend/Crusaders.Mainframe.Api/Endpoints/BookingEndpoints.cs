@@ -521,9 +521,13 @@ public sealed record AdminQuoteQuery(
         }
 
         var ok = Guid.TryParse(CourtId ?? CourtIdSnake, out var courtId)
+                 // Normalised to UTC here, the query-string twin of UtcInstantConverter (review
+                 // round 3, A-1): a console in the club's zone sends `+02:00`, and that offset
+                 // reached the overlap query, where Npgsql refuses it.
                  & DateTimeOffset.TryParse(StartsAt ?? StartsAtSnake,
                      System.Globalization.CultureInfo.InvariantCulture,
-                     System.Globalization.DateTimeStyles.None, out var startsAt)
+                     System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                     out var startsAt)
                  & int.TryParse(Slices ?? SliceCount ?? SliceCountSnake,
                      System.Globalization.NumberStyles.Integer,
                      System.Globalization.CultureInfo.InvariantCulture, out var slices);
