@@ -200,9 +200,9 @@ describe("the bootstrap probe and the refresh cookie", () => {
 });
 
 describe("a refresh endpoint that is absent or hangs", () => {
-  it("ends quickly and cleanly when the endpoint is not there (404), so boot falls through", async () => {
+  it.each([404, 501])("ends quickly and cleanly when the endpoint is not there (%i), so boot falls through", async (status) => {
     tokenStore.set("stale");
-    const s = server({ refresh: () => json(404, { error: "no route for POST /api/v1/auth/refresh" }), whoami: () => json(401, { error: "invalid_token" }) });
+    const s = server({ refresh: () => json(status, { error: "no route for POST /api/v1/auth/refresh" }), whoami: () => json(401, { error: "invalid_token" }) });
     render(<MemoryRouter><AuthProvider><Status /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"), { timeout: 1_000 });
     expect(s.refreshCalls()).toHaveLength(1);

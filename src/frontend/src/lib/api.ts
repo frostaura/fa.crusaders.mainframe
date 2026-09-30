@@ -311,11 +311,12 @@ async function postRefreshCookie(generation: string): Promise<RefreshOutcome | "
 /**
  * C2 — which refusals end a session. A 401 does (`refresh_superseded` is another tab's win, not a
  * refusal). A 5xx, 429 or 408 is the club struggling, not the club saying no. Any other 4xx is a
- * definite answer and ends it, as before.
+ * definite answer and ends it, as before — and so is a 501: "there is no such endpoint" will
+ * not change on a retry, and a gateway with no refresh route must not hold the boot forever.
  */
 function refusalOutcome(status: number, payload: unknown): RefreshOutcome | "superseded" {
   if (status === 401 && bodyErrorCode(payload) === "refresh_superseded") return "superseded";
-  if (status >= 500 || status === 429 || status === 408) return { kind: "transient", error: new ApiError(status, payload) };
+  if ((status >= 500 && status !== 501) || status === 429 || status === 408) return { kind: "transient", error: new ApiError(status, payload) };
   return ENDED;
 }
 
