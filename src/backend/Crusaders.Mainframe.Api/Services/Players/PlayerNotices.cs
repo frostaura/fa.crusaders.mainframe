@@ -57,6 +57,25 @@ public static class PlayerNotices
         return told ? notice with { Email = false } : notice;
     }
 
+    /// <summary>
+    /// The member answered their invite in the app (review round 3, I-9): its invite and reminder
+    /// lines on this booking are marked read and resolved in the answer's own save — they ask
+    /// nothing any more, and an inbox that kept them unread showed a number with nothing to do.
+    /// Stages only; the caller saves.
+    /// </summary>
+    public static async Task AnsweredAsync(MainframeDbContext db, Guid bookingId, Guid userId, DateTimeOffset now, CancellationToken ct)
+    {
+        var open = await db.MemberNotifications
+            .Where(n => n.BookingId == bookingId && n.UserId == userId && n.ResolvedAt == null
+                        && (n.Kind == MemberEventCatalogue.Invited || n.Kind == MemberEventCatalogue.Reminder))
+            .ToListAsync(ct);
+        foreach (var n in open)
+        {
+            n.ReadAt ??= now.Storable();
+            n.ResolvedAt = now.Storable();
+        }
+    }
+
     public static async Task<MemberNotice> InviteAsync(
         MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, CancellationToken ct)
     {

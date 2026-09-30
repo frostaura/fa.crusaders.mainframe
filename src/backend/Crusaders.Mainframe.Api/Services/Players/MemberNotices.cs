@@ -22,6 +22,13 @@ public sealed record MemberNotice(
     /// member) however often the result is edited or re-recorded. Null = the inbox line's key.
     /// </summary>
     public string? MailDedupeKey { get; init; }
+
+    /// <summary>
+    /// The inbox line is born read (review round 3, I-9): a receipt of the member's OWN action —
+    /// "You paid Olive 10.00 credits" at their own accept — tells them nothing new, and counting it
+    /// unread put a number on the bell with nothing to do. The mail, when there is one, still goes.
+    /// </summary>
+    public bool BornRead { get; init; }
 }
 
 /// <summary>
@@ -63,6 +70,7 @@ public static class MemberNotices
             BookingId = notice.BookingId,
             DedupeKey = key,
             CreatedAt = now,
+            ReadAt = notice.BornRead ? now : null,
         });
 
         if (!notice.Email) return;

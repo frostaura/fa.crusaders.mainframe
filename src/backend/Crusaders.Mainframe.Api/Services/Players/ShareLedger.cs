@@ -296,7 +296,7 @@ public sealed class ShareLedger
 
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
-        await StageReceiptsAsync(now.Booking, move, ct, RemovalReceipt(options, move));
+        await StageReceiptsAsync(now.Booking, move, options.ActorUserId, ct, RemovalReceipt(options, move));
         await _ledger.PostManyAsync(Pair(now.Booking, move, options.ActorUserId), ct);
         await payerLock.CommitAsync(ct);
         return move;
@@ -364,7 +364,7 @@ public sealed class ShareLedger
     {
         var partner = seat.UserId ?? throw new InvalidOperationException("a seat with no member pays nothing");
         var move = new ShareMove(seat.Id, partner, PayerOf(booking), delta, await NextSeqAsync(seat.Id, partner, ct));
-        await StageReceiptsAsync(booking, move, ct);
+        await StageReceiptsAsync(booking, move, actorUserId, ct);
         return Pair(booking, move, actorUserId);
     }
 
@@ -405,7 +405,7 @@ public sealed class ShareLedger
         var before = await _ledger.GetBalanceAsync(partnerId, ct);
         var move = new ShareMove(seatId, partnerId, PayerOf(booking), delta, await NextSeqAsync(seatId, partnerId, ct));
         await record(seat, delta, before);
-        await StageReceiptsAsync(booking, move, ct, new ClubReceipt(true, before - delta, reason));
+        await StageReceiptsAsync(booking, move, actorUserId, ct, new ClubReceipt(true, before - delta, reason));
         try
         {
             await _ledger.PostManyAsync(Pair(booking, move, actorUserId), ct);
@@ -460,7 +460,7 @@ public sealed class ShareLedger
     /// club did it, and the partner's where their balance stands, B8) or a removal's return; either
     /// way with the admin's reason (review round 2, B-8).
     /// </param>
-    private async Task StageReceiptsAsync(Booking booking, ShareMove move, CancellationToken ct, ClubReceipt? club = null)
+    private async Task StageReceiptsAsync(Booking booking, ShareMove move, Guid actorUserId, CancellationToken ct, ClubReceipt? club = null)
     {
         var settings = await _settings.GetAsync(ct);
         var game = await GameText.ForAsync(_db, booking, settings, ct);
@@ -484,16 +484,26 @@ public sealed class ShareLedger
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterCredits: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason),
-            move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub), settings);
+            move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub), settings,
+            actorUserId == move.PartnerUserId);
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason),
-            move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub), settings);
+            move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub), settings,
+            actorUserId == move.OrganiserUserId);
     }
 
-    private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings)
+    /// <param name="ownAction">
+    /// The receipt's reader moved the money themselves — born read (review round 3, I-9). A move
+    /// somebody else made on their money (the partner's payment to the organiser, the club's
+    /// collect) is news and arrives unread.
+    /// </param>
+    private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings, bool ownAction)
     {
         MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
-            userId, MemberEventCatalogue.ShareMoved, key, payload, headline, $"/bookings/{payload.BookingId}", payload.BookingId), settings);
+            userId, MemberEventCatalogue.ShareMoved, key, payload, headline, $"/bookings/{payload.BookingId}", payload.BookingId)
+        {
+            BornRead = ownAction,
+        }, settings);
     }
 
     private static string ShareHeadline(ShareDirection d, string other, decimal amount, bool byClub = false)

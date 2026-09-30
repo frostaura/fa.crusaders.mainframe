@@ -138,6 +138,7 @@ public sealed partial class PlayersService
             postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct);
         }
         if (fresh) MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "accepted", ct), game.Settings);
+        await PlayerNotices.AnsweredAsync(_db, game.Booking.Id, me, now, ct);
 
         // One save: the seat, the pair, the receipts. An empty posting list still saves the seat.
         await _p.Ledger.PostManyAsync(postings, ct);
@@ -265,6 +266,7 @@ public sealed partial class PlayersService
         seat.RespondedAt = now.Storable();
         seat.UpdatedAt = now.Storable();
         MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "declined", ct), game.Settings);
+        await PlayerNotices.AnsweredAsync(_db, game.Booking.Id, me, now, ct);
         if (await SaveAsync(ct) is { } conflict) return conflict;
         await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
