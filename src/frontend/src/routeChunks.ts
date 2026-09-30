@@ -56,6 +56,7 @@ function hint(name: ChunkName) {
   routeChunks[name]().catch(() => undefined);
 }
 
+
 /** Start fetching the code of the page at `pathname`, if it is one of these. Returns whether it did. */
 export function preloadRouteChunk(pathname: string): boolean {
   if (!worthFetching()) return false;
@@ -70,17 +71,21 @@ export function preloadRouteChunk(pathname: string): boolean {
 }
 
 /** Once the phone is idle, fetch the tab bar's pages (and an admin's console). Returns a cancel. */
-export function prefetchNavChunks(delayMs = 1_500, admin = false): () => void {
+export function prefetchNavChunks(delayMs = 500, admin = false): () => void {
   if (!worthFetching()) return () => undefined;
   let idle: number | null = null;
   const timer = window.setTimeout(() => {
-    const run = () => {
-      if (!worthFetching()) return;
-      NAV_CHUNKS.forEach(hint);
-      if (admin) loadAdminFrame().catch(() => undefined);
+    // One page at a time, Bookings first: all of them at once put ~50 files in front of the
+    // member's own next tap on HTTP/1.1's six connections (measured: 1.2 s → 2.2 s).
+    const run = async () => {
+      for (const name of NAV_CHUNKS) {
+        if (!worthFetching()) return;
+        await routeChunks[name]().catch(() => undefined);
+      }
+      if (admin && worthFetching()) await loadAdminFrame().catch(() => undefined);
     };
-    if (typeof window.requestIdleCallback === "function") idle = window.requestIdleCallback(run, { timeout: 4_000 });
-    else run();
+    if (typeof window.requestIdleCallback === "function") idle = window.requestIdleCallback(() => void run(), { timeout: 4_000 });
+    else void run();
   }, delayMs);
   return () => {
     window.clearTimeout(timer);

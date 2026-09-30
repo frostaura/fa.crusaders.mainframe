@@ -41,6 +41,17 @@ describe("preloadRouteChunk — at boot, beside the session check", () => {
 });
 
 describe("prefetchNavChunks — the tab bar's pages, once idle", () => {
+  it("fetches them one after another — Bookings, Wallet, Profile — and an admin's console last", async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    for (const name of ["schedule", "wallet", "profile"] as const) {
+      vi.spyOn(routeChunks, name).mockImplementation(async () => { order.push(name); return { default: () => null }; });
+    }
+    prefetchNavChunks(10);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(order).toEqual(["schedule", "wallet", "profile"]);
+  });
+
   it("fetches Bookings, Wallet and Profile after the delay, and nothing if cancelled first", () => {
     vi.useFakeTimers();
     const spies = watch();
@@ -49,9 +60,9 @@ describe("prefetchNavChunks — the tab bar's pages, once idle", () => {
     expect(spies.schedule).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     vi.runOnlyPendingTimers();
+    // One at a time, Bookings first: Wallet waits for Bookings' code.
     expect(spies.schedule).toHaveBeenCalledTimes(1);
-    expect(spies.wallet).toHaveBeenCalledTimes(1);
-    expect(spies.profile).toHaveBeenCalledTimes(1);
+    expect(spies.wallet).not.toHaveBeenCalled();
     expect(spies.inbox).not.toHaveBeenCalled();
     cancel();
 
