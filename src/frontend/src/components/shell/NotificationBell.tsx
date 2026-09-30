@@ -32,7 +32,10 @@ export function NotificationBell({ className }: { className?: string }) {
       aria-label={bellLabel(count)}
       aria-current={here ? "page" : undefined}
       className={cn(
-        "no-lift relative inline-flex size-touch shrink-0 items-center justify-center rounded-full border border-transparent",
+        // R4 (V4-11): a floor, not a size, padded by the badge's overhang (half its 1.25rem height
+        // above a 1.25rem glyph): at 200 % text the badge rose 20px above the glyph and was cut by
+        // the top of the screen. At normal text this is the same 44px circle.
+        "no-lift relative inline-flex min-h-touch min-w-touch shrink-0 items-center justify-center rounded-full border border-transparent p-2.5",
         "text-text-secondary transition-colors duration-fast ease-standard hover:bg-bg-muted hover:text-text-primary motion-reduce:transition-none",
         here && "bg-accent-soft text-accent-strong",
         className,

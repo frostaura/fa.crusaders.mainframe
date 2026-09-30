@@ -21,8 +21,15 @@ const DropdownMenuPortal = MenuPrimitive.Portal;
 const DropdownMenuSub = MenuPrimitive.Sub;
 const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
 
+/**
+ * R4 (X4-2): never wider or taller than the screen. `min-w-48` is 384px at 200 % text, and a
+ * min-width beats a max-width — the account menu ran 17px off a 375px phone. The height is capped
+ * at what Radix measures is left beside the trigger, and the panel scrolls (roving focus scrolls
+ * the highlighted row into view), so the last row — Sign out — is always reachable.
+ */
 const PANEL = [
-  "z-popover min-w-48 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-bg-raised p-1",
+  "z-popover min-w-[min(12rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-bg-raised p-1",
+  "max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden overscroll-contain",
   "text-text-primary shadow-md animate-pop-in data-[state=closed]:animate-pop-out motion-reduce:animate-none",
 ].join(" ");
 

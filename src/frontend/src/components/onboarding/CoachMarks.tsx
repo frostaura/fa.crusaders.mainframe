@@ -133,6 +133,17 @@ type MarkContentProps = {
   onFinish: (how: "done" | "skipped") => void;
 };
 
+/**
+ * R4 (V4-5): the room the tab bar takes at the bottom of a phone, which the shell publishes as
+ * `--app-bottom-bar-height`. Radix keeps the mark inside the viewport less this padding, so a mark
+ * never sits under the bar, and its `max-h` (the popover's available height) leaves Next on screen.
+ */
+function bottomChrome(): number {
+  if (typeof window === "undefined") return 8;
+  const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height"));
+  return (Number.isFinite(value) ? value : 0) + 8;
+}
+
 function MarkContent(props: MarkContentProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { mark, position, labels, onMove, onFinish } = props;
@@ -149,6 +160,7 @@ function MarkContent(props: MarkContentProps) {
       aria-labelledby={titleId}
       aria-describedby={bodyId}
       tabIndex={-1}
+      collisionPadding={{ top: 8, right: 8, left: 8, bottom: bottomChrome() }}
       className="flex w-80 flex-col gap-3"
       onOpenAutoFocus={(event) => { event.preventDefault(); box.current?.focus(); }}
       onEscapeKeyDown={() => onFinish("skipped")}

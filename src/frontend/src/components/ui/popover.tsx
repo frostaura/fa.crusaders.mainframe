@@ -32,7 +32,10 @@ function PopoverContent({
         sideOffset={sideOffset}
         collisionPadding={8}
         className={cn(
+          // R4 (X4-1): never taller than the room Radix measures beside the anchor — the admin
+          // tour ran off a phone at 200 % text with its Next button below the screen. It scrolls.
           "z-popover w-72 max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-bg-raised p-4",
+          "max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain",
           "text-sm text-text-primary shadow-md origin-[--radix-popover-content-transform-origin]",
           "animate-pop-in data-[state=closed]:animate-pop-out motion-reduce:animate-none",
           className,

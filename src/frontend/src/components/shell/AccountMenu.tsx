@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -10,6 +11,7 @@ import {
   ADMIN_TOUR_PATH, GET_STARTED_PATH, GUIDE_LINK_LABEL, GUIDE_PATH, REPLAY_ADMIN_TOUR, REPLAY_WELCOME,
 } from "@/lib/onboardingCopy";
 import { useProfile } from "@/lib/profile";
+import { focusHeading } from "@/lib/routeAnnouncer";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
 
 /**
@@ -48,8 +50,49 @@ function isThemeChoice(value: string): value is ThemeChoice {
   return value === "system" || value === "light" || value === "dark";
 }
 
+/**
+ * R4 (X4-4) — after a destination is chosen, focus goes to the destination.
+ *
+ * <p>
+ * Radix returns focus to the avatar when the menu closes, which is right for Escape and wrong for
+ * a navigation: "Replay admin tour" opened the tour with focus still on the avatar, so the tour was
+ * never announced and Tab could not reach it; Profile and Replay welcome left it there too. The
+ * route announcer's own move to the new heading lost the race — a modal menu holds focus until it
+ * unmounts, then hands it back. So the menu's close is told not to, and focus goes to the tour
+ * when one opens, otherwise to the new page's heading, once either has rendered (a lazy page's
+ * heading arrives with its chunk). Never off something the person has moved to since.
+ * </p>
+ */
+function focusWhereItWent(timeoutMs = 3_000) {
+  const started = Date.now();
+  let landed: HTMLElement | null = null;
+  const attempt = () => {
+    const active = document.activeElement;
+    const free = !active || active === document.body || active === landed;
+    const tour = document.querySelector<HTMLElement>("[data-coachmark]");
+    if (tour && free) {
+      tour.focus();
+      return;
+    }
+    const heading = landed ? null : document.querySelector<HTMLElement>("#main-content h1");
+    if (heading && free) {
+      focusHeading(heading, false);
+      landed = heading;
+    }
+    // Keep looking for a tour that opens after the page does, for as long as focus sits where
+    // this put it; anything the person has moved to since is theirs.
+    if (Date.now() - started < timeoutMs && (landed === null || document.activeElement === landed)) {
+      window.setTimeout(attempt, 50);
+    }
+  };
+  window.setTimeout(attempt, 0);
+}
+
 export function AccountMenu() {
   const auth = useAuth();
+  /** Set when an item navigates, so the close hands focus to the destination (X4-4). */
+  const went = useRef(false);
+  const going = () => { went.current = true; };
   const navigate = useNavigate();
   const { profile } = useProfile();
   const { theme, setTheme } = useTheme();
@@ -69,23 +112,31 @@ export function AccountMenu() {
           <AvatarFallback aria-hidden="true">{initials(name)}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" loop className="w-64">
+      <DropdownMenuContent
+        align="end" loop className="w-64"
+        onCloseAutoFocus={(event) => {
+          if (!went.current) return;
+          went.current = false;
+          event.preventDefault();
+          focusWhereItWent();
+        }}
+      >
         <Identity name={name} email={profile?.email ?? null} photo={profile?.photo_url ?? null} />
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
+        <DropdownMenuItem asChild onSelect={going}>
           <Link to="/profile">
             <UserCircle size={16} aria-hidden="true" className="text-text-muted" />
             Profile
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
+        <DropdownMenuItem asChild onSelect={going}>
           <Link to={GUIDE_PATH}>
             <Question size={16} aria-hidden="true" className="text-text-muted" />
             {GUIDE_LINK_LABEL}
           </Link>
         </DropdownMenuItem>
         {member ? (
-          <DropdownMenuItem asChild>
+          <DropdownMenuItem asChild onSelect={going}>
             <Link to={`${GET_STARTED_PATH}?replay=1`}>
               <HandWaving size={16} aria-hidden="true" className="text-text-muted" />
               {REPLAY_WELCOME}
@@ -93,7 +144,7 @@ export function AccountMenu() {
           </DropdownMenuItem>
         ) : null}
         {admin ? (
-          <DropdownMenuItem asChild>
+          <DropdownMenuItem asChild onSelect={going}>
             <Link to={ADMIN_TOUR_PATH}>
               <MapTrifold size={16} aria-hidden="true" className="text-text-muted" />
               {REPLAY_ADMIN_TOUR}
@@ -114,6 +165,7 @@ export function AccountMenu() {
         <DropdownMenuItem
           variant="danger"
           onSelect={() => {
+            going();
             void auth.logout();
             navigate("/login");
           }}
