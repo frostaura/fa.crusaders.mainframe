@@ -6,6 +6,8 @@ import { isOnline, offlineAfterSecondsFor, relative } from "../lib/deviceLivenes
 import { useTicker } from "../lib/useTicker";
 import { OFFLINE_WHO_NOTE, doorDisplayName, doorStateChip } from "../lib/doorsCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
+import { unsureSentence, writeOrReadBack } from "../lib/lostReply";
+import { LOST_REPLY, unsureWords } from "../lib/lostReplyCopy";
 import {
   ACTIVITY_READ_FAILED, activityEmptyNotice, activityPanelTitle, describeActivityAction,
   describeActivityReason, describeActivityWho, unacknowledgedBoardsNotice,
@@ -897,65 +899,86 @@ function UnacknowledgedBoardsNotice({ devices }: { devices: AdminDevice[] }) {
 function useDeviceActions(reload: () => Promise<void>) {
   const toast = useToast();
 
-  return (device: AdminDevice, coverage: CourtCoverage): DeviceActions => ({
-    /** Returns whether the save went through, so the row knows whether to leave edit mode. */
-    details: async (name, courtNumbers) => {
-      try {
-        await endpoints.adminDeviceUpdate(device.id, { name, court_numbers: courtNumbers });
-        toast.push({ tone: "success", text: `${name} now drives ${describeCourts(courtNumbers)}.` });
-        await reload();
-        return true;
-      } catch (e) {
-        toast.push({ tone: "danger", text: describeDeviceError(e, "Could not save that box."), durationMs: 8000 });
-        return false;
-      }
-    },
-    buttonMap: async (map) => {
-      try {
-        await endpoints.adminDeviceUpdate(device.id, { button_map: map });
-        toast.push({
-          tone: "success",
-          text: map === null
-            ? `${device.name} uses the club's button map again. It picks that up on its next heartbeat.`
-            : `${device.name} has its own button map. It picks that up on its next heartbeat.`,
-        });
-        await reload();
-        return true;
-      } catch (e) {
-        toast.push({ tone: "danger", text: describeDeviceError(e, "Could not save that box's buttons."), durationMs: 8000 });
-        return false;
-      }
-    },
-    /**
-     * Out of service, or back in. `enabled` has been on the API and on the typed client
-     * since the row existed and nothing ever sent it — the three mutations above send
-     * `{name, court_numbers}`, `{name, gate_key}` and `{button_map}` and nothing else.
-     * What the success toast says is {@link enabledToast}'s, which is the same generator
-     * the row notice reads.
-     */
-    setEnabled: async (enabled) => {
-      try {
-        await endpoints.adminDeviceUpdate(device.id, { enabled });
-        toast.push({ tone: "success", text: enabledToast(device, coverage, enabled), durationMs: 8000 });
-        await reload();
-      } catch (e) {
-        toast.push({
-          tone: "danger",
-          text: describeDeviceError(e, enabled ? "Could not put that board back in service." : "Could not take that board out of service."),
-          durationMs: 8000,
-        });
-      }
-    },
-    remove: async () => {
-      try {
-        await endpoints.adminDeviceDelete(device.id);
-        toast.push({ tone: "success", text: deletedToast(device), durationMs: 8000 });
-        await reload();
-      } catch (e) {
-        toast.push({ tone: "danger", text: describeDeviceError(e, "Could not delete that board.") });
-      }
-    },
-  });
+  /**
+   * One write, read back from the board list when its reply is lost (R4 carry-over): the row as
+   * asked → the success sentence with the reply-lost note; read and not → nothing changed;
+   * unreadable → not known. A refusal is the club's answer and is said as before.
+   */
+  const write = async (
+    id: string, send: () => Promise<unknown>, holds: (row: AdminDevice | undefined) => boolean,
+    words: { done: string; failed: string; still: string; whether: string },
+  ): Promise<boolean> => {
+    try {
+      const { proven } = await writeOrReadBack(
+        async () => { await send(); return {}; },
+        async () => (holds((await endpoints.adminDevicesList()).find((d) => d.id === id)) ? {} : null),
+      );
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(words.done) : words.done, durationMs: 8000 });
+      await reload();
+      return true;
+    } catch (e) {
+      const unsure = unsureSentence(e, unsureWords(words.still, words.whether, "Boards"));
+      if (unsure) void reload().catch(() => undefined);
+      toast.push({ tone: "danger", text: unsure ?? describeDeviceError(e, words.failed), durationMs: 8000 });
+      return false;
+    }
+  };
+
+  return (device: AdminDevice, coverage: CourtCoverage): DeviceActions => {
+    const named = device.name;
+    return {
+      /** Returns whether the save went through, so the row knows whether to leave edit mode. */
+      details: (name, courtNumbers) => write(
+        device.id, () => endpoints.adminDeviceUpdate(device.id, { name, court_numbers: courtNumbers }),
+        (row) => row?.name === name && sameCourts(row.court_numbers, courtNumbers),
+        {
+          done: `${name} now drives ${describeCourts(courtNumbers)}.`, failed: "Could not save that box.",
+          still: `${named} is as it was`, whether: `${named} was saved`,
+        },
+      ),
+      buttonMap: (map) => write(
+        device.id, () => endpoints.adminDeviceUpdate(device.id, { button_map: map }),
+        (row) => row !== undefined && JSON.stringify(row.button_map ?? null) === JSON.stringify(map),
+        {
+          done: map === null
+            ? `${named} uses the club's button map again. It picks that up on its next heartbeat.`
+            : `${named} has its own button map. It picks that up on its next heartbeat.`,
+          failed: "Could not save that box's buttons.",
+          still: `${named}'s buttons are as they were`, whether: `${named}'s buttons were saved`,
+        },
+      ),
+      /**
+       * Out of service, or back in. `enabled` has been on the API and on the typed client
+       * since the row existed and nothing ever sent it — the three mutations above send
+       * `{name, court_numbers}`, `{name, gate_key}` and `{button_map}` and nothing else.
+       * What the success toast says is {@link enabledToast}'s, which is the same generator
+       * the row notice reads.
+       */
+      setEnabled: async (enabled) => {
+        await write(
+          device.id, () => endpoints.adminDeviceUpdate(device.id, { enabled }),
+          (row) => row?.enabled === enabled,
+          {
+            done: enabledToast(device, coverage, enabled),
+            failed: enabled ? "Could not put that board back in service." : "Could not take that board out of service.",
+            still: `${named} is ${enabled ? "still out of service" : "still in service"}`,
+            whether: `${named} was ${enabled ? "put back in service" : "taken out of service"}`,
+          },
+        );
+      },
+      remove: async () => {
+        await write(
+          device.id, () => endpoints.adminDeviceDelete(device.id),
+          (row) => row === undefined,
+          { done: deletedToast(device), failed: "Could not delete that board.", still: `${named} is still there`, whether: `${named} was deleted` },
+        );
+      },
+    };
+  };
+}
+
+function sameCourts(a: number[] | undefined, b: number[]): boolean {
+  return (a ?? []).length === b.length && (a ?? []).every((n, i) => n === b[i]);
 }
 
 export function AdminDevicesPage() {

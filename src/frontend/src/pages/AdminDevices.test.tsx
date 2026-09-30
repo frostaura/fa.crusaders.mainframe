@@ -527,6 +527,41 @@ describe("AdminDevices", () => {
     expect(screen.getByText("Court 1 box")).toBeInTheDocument();
   });
 
+  /** R4 carry-over: a delete whose reply is lost. The stub deletes, then fails the reply. */
+  function lostDelete(landed: boolean, readable = true): StubRoute[] {
+    let rows = [deviceFixture()];
+    let reads = 0;
+    return [
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", respond: () => (++reads > 1 && !readable ? refuse(503, { error: "down" }) : rows) },
+      {
+        method: "DELETE", path: "/api/v1/admin/devices/",
+        respond: () => { if (landed) rows = []; return refuse(504, { error: "gateway_timeout" }); },
+      },
+    ];
+  }
+
+  it("says a lost delete landed when the board is gone from the list", async () => {
+    stubFetch(lostDelete(true));
+    renderPage(<AdminDevicesPage />);
+    fireEvent.click(within(await deleteBoard()).getByRole("button", { name: "Delete board" }));
+    expect(await screen.findByText(/re-registers.*The club's reply didn't arrive, so we checked its record\./)).toBeInTheDocument();
+  });
+
+  it("says nothing changed when the board is still listed", async () => {
+    stubFetch(lostDelete(false));
+    renderPage(<AdminDevicesPage />);
+    fireEvent.click(within(await deleteBoard()).getByRole("button", { name: "Delete board" }));
+    expect(await screen.findByText(/we checked: Court 1 box is still there — nothing changed/)).toBeInTheDocument();
+  });
+
+  it("says it cannot tell when the list cannot be read either", async () => {
+    stubFetch(lostDelete(true, false));
+    renderPage(<AdminDevicesPage />);
+    fireEvent.click(within(await deleteBoard()).getByRole("button", { name: "Delete board" }));
+    expect(await screen.findByText(/can't tell whether Court 1 box was deleted/)).toBeInTheDocument();
+  });
+
   // --- button maps --------------------------------------------------------------------
 
   it("names the box when the button map reaches past its courts", async () => {
