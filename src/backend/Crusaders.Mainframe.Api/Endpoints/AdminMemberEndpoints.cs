@@ -186,8 +186,8 @@ public static class AdminMemberEndpoints
             var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.Id == memberId, ct);
             if (membership is null) return Results.NotFound();
 
-            var t = to ?? DateTimeOffset.UtcNow;
-            var f = from ?? t.AddMonths(-12);
+            var t = (to ?? DateTimeOffset.UtcNow).ToUniversalTime();   // B-9: Npgsql refuses a non-zero offset
+            var f = (from ?? t.AddMonths(-12)).ToUniversalTime();
             var spendGroups = await MemberTariffs.GroupsOfAsync(db, membership.UserId, ct);
 
             var entries = await db.LedgerEntries

@@ -20,8 +20,9 @@ public static class AdminLedgerEndpoints
             Guid? userId, string? type, int? limit,
             MainframeDbContext db, CancellationToken ct) =>
         {
-            var fromUtc = from ?? DateTimeOffset.UtcNow.AddDays(-90);
-            var toUtc = to ?? DateTimeOffset.UtcNow.AddDays(1);
+            // B-9: a query-string instant keeps the offset it was sent with; Npgsql refuses one.
+            var fromUtc = (from ?? DateTimeOffset.UtcNow.AddDays(-90)).ToUniversalTime();
+            var toUtc = (to ?? DateTimeOffset.UtcNow.AddDays(1)).ToUniversalTime();
             var take = Math.Clamp(limit ?? 500, 1, 5000);
 
             var q = db.LedgerEntries.AsNoTracking()

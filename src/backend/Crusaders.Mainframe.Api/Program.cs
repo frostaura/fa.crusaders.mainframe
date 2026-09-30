@@ -502,6 +502,8 @@ builder.Services.AddSingleton<IFido2>(sp =>
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
+// B-9: every instant in a request body is UTC by the time it reaches a query (UtcInstantConverter).
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new UtcInstantConverter()));
 builder.Services.AddRouting();
 
 builder.Services.AddHttpContextAccessor();
@@ -579,6 +581,9 @@ if (app.Environment.IsDevelopment())
 // unhandled 500 have to carry the framing refusal too. See SecurityHeaders for what was
 // reachable without it.
 app.UseSecurityHeaders();
+
+// B-9: an unhandled exception is 500 {"error":"internal_error"} everywhere — never a stack trace.
+app.UseStableInternalErrors();
 
 app.UseForwardedHeaders();
 
