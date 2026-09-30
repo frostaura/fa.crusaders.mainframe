@@ -1,6 +1,6 @@
 import type {
   AdminBulkResult, AdminChangePage, AdminChangeRow, AdminItemResult, AdminPerson, ControlBoardBooking,
-  ControlBoardCourt, ControlBoardDevice, ControlBoardLights, ControlBoardView, DeviceErrorCounts, DeviceErrorPage,
+  ControlBoardBox, ControlBoardCourt, ControlBoardDevice, ControlBoardLights, ControlBoardView, DeviceErrorCounts, DeviceErrorPage,
   DeviceErrorRow, MemberBookingRules, MemberCodeResetResult, MemberGroup, MemberGroupChip, MemberGroupPreview,
   MemberGroupSaved, MemberGroupsSetResult, MemberTariff, MonitoringSummary, StreamTicket, TraceActor, TraceEvent,
   TraceView, AdminAdjustResult, adminEndpoints,
@@ -49,7 +49,7 @@ const ID = "00000000-0000-0000-0000-000000000001";
 
 export function controlBoardView(): ControlBoardView {
   return {
-    generated_at: AT, timezone: "Africa/Johannesburg", slice_minutes: 20, club_day: "2026-09-30", courts: [],
+    generated_at: AT, timezone: "Africa/Johannesburg", slice_minutes: 20, club_day: "2026-09-30", courts: [], boxes: [],
     realtime: { poll_seconds: 15, resync_seconds: 60, fallback_after_failures: 3, fallback_window_seconds: 60 },
   };
 }
@@ -99,6 +99,7 @@ export function controlBoardDevice(): ControlBoardDevice {
   return {
     device_id: ID, device_code: "box-1", name: "Court box", relay: "A", link: "online", last_seen_at: AT,
     silent_seconds: 3, offline_after_seconds: 90, firmware: "1.0", mega_version: "1.0", open_errors: null,
+    mac_address: "5c:cf:7f:00:00:01",
   };
 }
 
@@ -107,7 +108,15 @@ export function openErrorCounts(): DeviceErrorCounts {
 }
 
 export function controlBoardOtherBox(): NonNullable<ControlBoardCourt["other_boxes"]>[number] {
-  return { device_id: ID, device_code: "box-2", name: null, last_seen_at: null };
+  return { device_id: ID, device_code: "box-2", name: null, mac_address: null, last_seen_at: null };
+}
+
+/** One entry of the board's `boxes` list (R4 A4-5). */
+export function controlBoardBox(): ControlBoardBox {
+  return {
+    device_id: ID, device_code: "box-1", name: "Court box", mac_address: null, enabled: true, link: "online",
+    last_seen_at: AT, court_numbers: [1, 2],
+  };
 }
 
 export function streamTicket(): StreamTicket {

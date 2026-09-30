@@ -222,6 +222,8 @@ export type ControlBoardDevice = {
   firmware?: string | null;
   mega_version?: string | null;
   open_errors?: { critical?: number; error?: number; warning?: number; info?: number } | null;
+  /** R4 A4-5: what tells two boxes of one name apart, with the code. */
+  mac_address?: string | null;
 };
 
 export type ControlBoardCourt = {
@@ -241,7 +243,9 @@ export type ControlBoardCourt = {
    */
   boxes_on_court?: number;
   /** The enabled boxes claiming this court that `device` is not. */
-  other_boxes?: Array<{ device_id: string; device_code?: string | null; name?: string | null; last_seen_at?: string | null }>;
+  other_boxes?: Array<{
+    device_id: string; device_code?: string | null; name?: string | null; mac_address?: string | null; last_seen_at?: string | null;
+  }>;
 };
 
 export type ControlBoardView = {
@@ -251,6 +255,11 @@ export type ControlBoardView = {
   slice_minutes?: number;
   club_day?: string;
   courts: ControlBoardCourt[];
+  /**
+   * Every court box once (R4 A4-5), beside the tiles: one box drives up to four courts, so a
+   * count of boxes is taken here, never over tiles. Absent from an API before round 4.
+   */
+  boxes?: ControlBoardBox[];
   /** The club's realtime tuning, so the wall's poll fallback uses the club's numbers. */
   realtime?: {
     poll_seconds?: number;
@@ -258,6 +267,18 @@ export type ControlBoardView = {
     fallback_after_failures?: number;
     fallback_window_seconds?: number;
   };
+};
+
+/** One court box on the board's `boxes` list (`ControlBoardReader.BoxBlock`). */
+export type ControlBoardBox = {
+  device_id: string;
+  device_code: string;
+  name: string | null;
+  mac_address: string | null;
+  enabled: boolean;
+  link: DeviceLink;
+  last_seen_at: string | null;
+  court_numbers: number[];
 };
 
 /**

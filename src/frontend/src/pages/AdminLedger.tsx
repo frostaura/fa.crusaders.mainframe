@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { endpoints, type LedgerRow } from "../lib/api";
-import { readWholeLedger } from "../lib/adminPaging";
+import { describeFailure } from "../lib/errors";
+import { ledgerPage, readLedgerStart, totalsOver, type LedgerFilters, type LedgerTotals as Totals } from "../lib/adminPaging";
 import { clubDayRange, clubToday } from "../lib/clubDay";
 import { clubZoneIsKnown } from "../lib/clubZone";
 import { formatSignedCredits } from "../lib/utils";
@@ -65,7 +66,8 @@ export default function AdminLedgerPage() {
 
   usePinnedRange(params, setParams, from, to);
 
-  const { rows, loading, loadError, readAt, complete, load } = useLedgerRead({ from, to, type, userId });
+  const read = useLedgerRead({ from, to, type, userId });
+  const { rows, loading, loadError, readAt, load } = read;
 
   const filtered = useMemo(() => byName(rows, userQuery), [rows, userQuery]);
 
@@ -106,7 +108,7 @@ export default function AdminLedgerPage() {
           {/* As many columns as fit a 9rem figure (R3 X-4): two fixed columns at 200% text on a
               phone were narrower than "+68473.00", and the page scrolled sideways. */}
           <CardContent className="grid shrink-0 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-3 pb-4 text-sm">
-            <LedgerTotals rows={filtered} complete={complete} loading={loading} readSoFar={rows?.length ?? 0} />
+            <LedgerTotals totals={shownTotals(read.totals, filtered, userQuery, read.next)} loading={loading} searching={userQuery.trim() !== ""} />
           </CardContent>
           <LedgerTable
             rows={filtered}
@@ -116,6 +118,7 @@ export default function AdminLedgerPage() {
             label="Club ledger"
             wideOnly={["comment"]}
           />
+          <ShowMore read={read} />
         </Card>
       </StateBlock>
       <LedgerDetailSheet row={opened} onClose={() => setOpened(null)} />
@@ -179,15 +182,18 @@ function byName(rows: LedgerRow[] | null, query: string): LedgerRow[] {
   return rows.filter((r) => [r.subjectName, r.actorName, r.from, r.to].some((v) => v.toLowerCase().includes(q)));
 }
 
-/** The four totals, only ever over a complete read of the range (R4 carry-over). */
-function LedgerTotals({ rows, complete, loading, readSoFar }: {
-  rows: LedgerRow[]; complete: boolean; loading: boolean; readSoFar: number;
-}) {
-  const totals = useMemo(() => {
-    const credits = rows.filter((r) => r.signedAmountCredits > 0).reduce((s, r) => s + r.amountCredits, 0);
-    const debits = rows.filter((r) => r.signedAmountCredits < 0).reduce((s, r) => s + r.amountCredits, 0);
-    return { credits, debits, net: credits - debits, count: rows.length };
-  }, [rows]);
+/**
+ * The totals the tiles show: the whole range's (the server's) when no name search narrows the
+ * rows; with a search, ours over the matching rows — but only once every row is read, because a
+ * sum over part of a range is a wrong sum. Null: not known yet.
+ */
+function shownTotals(range: Totals | null, filtered: LedgerRow[], query: string, next: string | null): Totals | null {
+  if (query.trim() === "") return range;
+  return next === null ? totalsOver(filtered) : null;
+}
+
+/** The four totals (R4 carry-over), or why there are none. */
+function LedgerTotals({ totals, loading, searching }: { totals: Totals | null; loading: boolean; searching: boolean }) {
   // Every signed figure through formatSignedCredits, never a sign composed around
   // formatCredits.
   //
@@ -206,20 +212,21 @@ function LedgerTotals({ rows, complete, loading, readSoFar }: {
   // is counting. The sign on screen is then the sign of a number, which is the property
   // that cannot drift.
   //
-  return (
-    <>
-      {complete || loading ? (
-        <>
-          <Stat label="Movements" value={complete ? String(totals.count) : null} />
-          <Stat label="Credits" value={complete ? formatSignedCredits(totals.credits) : null} tone={toneOf(totals.credits)} />
-          <Stat label="Debits" value={complete ? formatSignedCredits(-totals.debits) : null} tone={toneOf(-totals.debits)} />
-          <Stat label="Net" value={complete ? formatSignedCredits(totals.net) : null} tone={toneOf(totals.net)} />
-        </>
-      ) : (
-        <p className="col-span-full text-text-secondary">{LEDGER_TOO_MANY(readSoFar)}</p>
-      )}
-    </>
-  );
+  if (!totals && !loading) {
+    return <p className="col-span-full text-text-secondary">{searching ? LEDGER_SEARCH_PARTIAL : LEDGER_TOO_MANY}</p>;
+  }
+  return <>{tilesOf(totals).map((tile) => <Stat key={tile.label} {...tile} />)}</>;
+}
+
+/** The four tiles: a figure each, or null (a skeleton) while the totals are not known. */
+function tilesOf(totals: Totals | null): Array<{ label: string; value: string | null; tone?: "success" | "warning" }> {
+  if (!totals) return ["Movements", "Credits", "Debits", "Net"].map((label) => ({ label, value: null }));
+  return [
+    { label: "Movements", value: String(totals.count) },
+    { label: "Credits", value: formatSignedCredits(totals.credits), tone: toneOf(totals.credits) },
+    { label: "Debits", value: formatSignedCredits(-totals.debits), tone: toneOf(-totals.debits) },
+    { label: "Net", value: formatSignedCredits(totals.net), tone: toneOf(totals.net) },
+  ];
 }
 
 /** From, To, Type and the name search — each writing the URL. */
@@ -264,33 +271,37 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [readAt, setReadAt] = useState<number | null>(null);
-  /** Whether `rows` is the WHOLE range: totals are shown only over a complete read. */
-  const [complete, setComplete] = useState(false);
+  /** The whole range's totals (the server's, or ours over a complete read); null when not known. */
+  const [totals, setTotals] = useState<Totals | null>(null);
+  /** The next page's cursor; null once every row of the range is on the page. */
+  const [next, setNext] = useState<string | null>(null);
+  const [more, setMore] = useState<{ pending: boolean; error: unknown }>({ pending: false, error: null });
   const loadSeq = useRef(0);
+  const filters = useRef<LedgerFilters>({});
 
   const load = async () => {
     const seq = ++loadSeq.current;
     const current = () => seq === loadSeq.current;
     setLoading(true);
-    setComplete(false);
+    setTotals(null);
     try {
       // The club's day needs the club's zone; settings carry it (and the API layer notes it).
       if (!clubZoneIsKnown()) await endpoints.adminSettingsGet().catch(() => undefined);
       const range = clubDayRange(from, to);
-      const { rows: all, complete: whole } = await readWholeLedger({
+      filters.current = {
         // An empty "From" is UNBOUNDED: the server's own default is 90 days back, which is not
         // what an emptied box says. The club's first movement is later than this.
         from: range.from ?? UNBOUNDED_FROM,
         to: range.to,
         type: type || undefined,
         userId: userId || undefined,
-      }, {
-        // Rows appear as each page lands; the totals wait for the last one.
-        onPage: (sofar) => { if (current()) setRows(sofar); },
-      });
+      };
+      const start = await readLedgerStart(filters.current);
       if (!current()) return;
-      setRows(all);
-      setComplete(whole);
+      setRows(start.rows);
+      setNext(start.next);
+      setTotals(start.totals);
+      setMore({ pending: false, error: null });
       setLoadError(null);
       setReadAt(Date.now());
     } catch (e) {
@@ -305,6 +316,22 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
     finally { if (current()) setLoading(false); }
   };
 
+  /** The next page of rows, appended; the totals do not move (they were the whole range's). */
+  const loadMore = async () => {
+    if (!next || more.pending) return;
+    const seq = loadSeq.current;
+    setMore({ pending: true, error: null });
+    try {
+      const page = await ledgerPage(filters.current, next);
+      if (seq !== loadSeq.current) return;
+      setRows((now) => [...(now ?? []), ...page.items]);
+      setNext(page.next_cursor);
+      setMore({ pending: false, error: null });
+    } catch (e) {
+      if (seq === loadSeq.current) setMore({ pending: false, error: e });
+    }
+  };
+
   // Auto-apply filters: debounce server reload as the user edits date/type.
   const firstRun = useRef(true);
   useEffect(() => {
@@ -314,7 +341,7 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [from, to, type, userId]);
 
-  return { rows, loading, loadError, readAt, complete, load };
+  return { rows, loading, loadError, readAt, totals, next, more, load, loadMore };
 }
 
 /**
@@ -354,6 +381,21 @@ function Stat({ label, value, tone }: { label: string; value: string | null; ton
 /** The earliest instant an emptied "From" asks for: before any club's first movement. */
 const UNBOUNDED_FROM = "2000-01-01T00:00:00.000Z";
 
-/** The read stopped at its cap, so no total is shown: a sum over part of a range is a wrong sum. */
-const LEDGER_TOO_MANY = (n: number) =>
-  `These dates hold more than ${n.toLocaleString("en-ZA")} movements — too many to total here. Narrow the dates to see the totals.`;
+/** No totals: an API that sends none, and a range past what the page will read whole. */
+const LEDGER_TOO_MANY =
+  "These dates hold too many movements to total here. Narrow the dates to see the totals.";
+
+/** A name search over rows not all read yet: its totals would be over part of the range. */
+const LEDGER_SEARCH_PARTIAL =
+  "The name search covers the movements shown so far. Show them all to see its totals.";
+
+/** "Show more", under the table, while the range has rows not yet on the page. */
+function ShowMore({ read }: { read: ReturnType<typeof useLedgerRead> }) {
+  if (!read.next) return null;
+  return (
+    <div className="flex flex-col items-center gap-2 border-t border-border p-4">
+      {read.more.error ? <p role="alert" className="text-sm text-danger-strong">{describeFailure(read.more.error, { action: "read more movements" })}</p> : null}
+      <Button variant="outline" pending={read.more.pending} onClick={() => void read.loadMore()}>Show more movements</Button>
+    </div>
+  );
+}

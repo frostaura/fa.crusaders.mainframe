@@ -3,10 +3,15 @@ import { api, type LedgerRow } from "./api";
 /**
  * The admin reads that page (the perf round's additive paging, switched by the PRESENCE of
  * `cursor`): `/admin/ledger/` and `/admin/members/` answer `{ items, next_cursor }` (+ `total` on
- * members) when asked with `cursor=` — empty for the first page — and the bare array otherwise.
- * Pinned against the C# handlers in `adminResponses.contract.test.ts`.
+ * members, + `totals` on the ledger's first page since R4) when asked with `cursor=` — empty for
+ * the first page — and the bare array otherwise. Pinned in `adminResponses.contract.test.ts`.
  */
 export type Page<T> = { items: T[]; next_cursor: string | null; total?: number };
+
+/** The whole range's four figures (R4, B2): credits in, debits as a magnitude, net = credits − debits. */
+export type LedgerTotals = { count: number; credits: number; debits: number; net: number };
+
+export type LedgerPage = Page<LedgerRow> & { totals?: LedgerTotals | null };
 
 function query(params: Record<string, string | number | undefined>): string {
   const q = new URLSearchParams();
@@ -21,29 +26,36 @@ function query(params: Record<string, string | number | undefined>): string {
 export type LedgerFilters = { from?: string; to?: string; userId?: string; type?: string };
 
 /** One page. A bare array (an API from before paging) is taken as the whole answer. */
-export async function ledgerPage(filters: LedgerFilters, cursor = "", limit = 500): Promise<Page<LedgerRow>> {
-  const answer = await api.get<Page<LedgerRow> | LedgerRow[]>(`/api/v1/admin/ledger/${query({ ...filters, cursor, limit })}`);
+export async function ledgerPage(filters: LedgerFilters, cursor = "", limit = 200): Promise<LedgerPage> {
+  const answer = await api.get<LedgerPage | LedgerRow[]>(`/api/v1/admin/ledger/${query({ ...filters, cursor, limit })}`);
   return Array.isArray(answer) ? { items: answer, next_cursor: null } : answer;
 }
 
+/** The four figures over rows the page holds — only ever over a COMPLETE set. */
+export function totalsOver(rows: readonly LedgerRow[]): LedgerTotals {
+  const credits = rows.filter((r) => r.signedAmountCredits > 0).reduce((s, r) => s + r.amountCredits, 0);
+  const debits = rows.filter((r) => r.signedAmountCredits < 0).reduce((s, r) => s + r.amountCredits, 0);
+  return { count: rows.length, credits, debits, net: credits - debits };
+}
+
 /**
- * Every movement in the range, page by page (review round 4, carry-over): Transactions asked for
+ * The range's first page and its totals (review round 4, carry-over): Transactions asked for
  * `limit=1000` and summed what came back, so a range holding 1664 movements read "MOVEMENTS 1000"
- * with credits, debits and net over a truncated set. Totals are only ever taken over a complete
- * read; `cap` stops a runaway range, and the caller says so when it is reached.
+ * with credits, debits and net over a truncated set. The server now totals the whole range on the
+ * first page; the rows come a page at a time ("Show more"). An API that sends no totals is read
+ * to the end instead (up to `cap`), and totals are taken only over a complete read — null past it.
  */
-export async function readWholeLedger(
-  filters: LedgerFilters, options: { cap?: number; onPage?: (rows: LedgerRow[]) => void } = {},
-): Promise<{ rows: LedgerRow[]; complete: boolean }> {
-  const cap = options.cap ?? 20_000;
-  const rows: LedgerRow[] = [];
-  let cursor = "";
-  for (;;) {
-    const page = await ledgerPage(filters, cursor);
+export async function readLedgerStart(
+  filters: LedgerFilters, cap = 2_000,
+): Promise<{ rows: LedgerRow[]; next: string | null; totals: LedgerTotals | null }> {
+  const first = await ledgerPage(filters);
+  if (first.totals) return { rows: first.items, next: first.next_cursor, totals: first.totals };
+  const rows = [...first.items];
+  let next = first.next_cursor;
+  while (next && rows.length < cap) {
+    const page = await ledgerPage(filters, next, 500);
     rows.push(...page.items);
-    options.onPage?.(rows.slice());
-    if (!page.next_cursor) return { rows, complete: true };
-    if (rows.length >= cap) return { rows, complete: false };
-    cursor = page.next_cursor;
+    next = page.next_cursor;
   }
+  return { rows, next, totals: next ? null : totalsOver(rows) };
 }

@@ -298,12 +298,15 @@ export function duplicateBoxesWarning(court: ControlBoardCourt, now: number): st
 
 /** A box's name, with its reported code (and MAC, when sent) where another box shares the name. */
 function boxLabel(
-  box: { name?: string | null; device_code?: string | null; mac?: string | null },
+  box: { name?: string | null; device_code?: string | null; mac_address?: string | null },
   clashes: boolean,
 ): string {
   const name = box.name ?? box.device_code ?? "an unnamed box";
   if (!clashes) return name;
-  const ids = [box.device_code && box.device_code !== name ? box.device_code : null, box.mac ?? null].filter(Boolean);
+  const ids = [
+    box.device_code && box.device_code !== name ? box.device_code : null,
+    box.mac_address ? `MAC ${box.mac_address}` : null,
+  ].filter(Boolean);
   return ids.length > 0 ? `${name} (${ids.join(", ")})` : name;
 }
 

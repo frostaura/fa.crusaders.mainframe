@@ -4,7 +4,7 @@ import {
   serverTypeProperties, type ServerScope,
 } from "../test/serverContract";
 import { groupAddResponse } from "../test/groupFixtures";
-import type { Page } from "./adminPaging";
+import type { LedgerPage, LedgerTotals, Page } from "./adminPaging";
 import * as F from "../test/adminResponseFixtures";
 
 /**
@@ -89,6 +89,7 @@ describe("control board", () => {
     exact(only(ok(READER, "DeviceBlock")), F.controlBoardDevice());
     exact(only(ok(READER, "OpenErrorsOf")), F.openErrorCounts());
     exact(only(ok(READER, "OtherBox")), F.controlBoardOtherBox());
+    exact(only(ok(READER, "BoxBlock")), F.controlBoardBox());
   });
 
   it("both stream tickets", () => {
@@ -452,11 +453,14 @@ describe("notifications (lib/notificationsApi.ts)", () => {
 });
 
 describe("paged admin reads (R4 carry-over: Transactions totals over the whole range)", () => {
-  it("the ledger's page is { items, next_cursor }", () => {
-    const page: Required<Page<unknown>> = { items: [], next_cursor: null, total: 0 };
+  it("the ledger's page is { items, next_cursor, totals }, totals as the page reads them", () => {
+    const page: Required<LedgerPage> = { items: [], next_cursor: null, total: 0, totals: { count: 0, credits: 0, debits: 0, net: 0 } };
     const { total: _total, ...ledger } = page;
     void _total;
-    expect(server("Endpoints/AdminLedgerEndpoints.cs", "ListAsync").at(-1)).toEqual(sorted(ledger));
+    // serverShapes: this handler's comments carry commas, which the older reader counts as keys.
+    expect(serverShapes("Endpoints/AdminLedgerEndpoints.cs", "ListAsync").at(-1)?.sort()).toEqual(sorted(ledger));
+    const totals: Required<LedgerTotals> = { count: 0, credits: 0, debits: 0, net: 0 };
+    expect(server("Endpoints/AdminLedgerEndpoints.cs", "TotalsAsync")).toEqual([sorted(totals)]);
   });
 
   it("the members' page is { items, next_cursor, total }", () => {

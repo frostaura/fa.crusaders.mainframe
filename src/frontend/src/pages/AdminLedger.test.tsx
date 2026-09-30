@@ -368,38 +368,58 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
   const row = (n: number) => ledgerRowFixture({
     id: `r${n}`, comment: `Charge ${n}`, signedAmountCredits: -10, amountCredits: 10,
   });
+  const totalsShown = () => Array.from(document.querySelectorAll("[data-ledger-total]")).map((el) => el.textContent);
 
-  it("reads every page and totals all of them", async () => {
+  it("shows the server's totals for the whole range, and the rows a page at a time", async () => {
+    rememberClubZone("Africa/Johannesburg");
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      {
+        path: "/api/v1/admin/ledger",
+        respond: (req) => (req.path.includes("cursor=c1")
+          ? { items: [row(3)], next_cursor: null, totals: null }
+          : { items: [row(1), row(2)], next_cursor: "c1", totals: { count: 1664, credits: 500, debits: 16640, net: -16140 } }),
+      },
+    ]);
+    renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
+
+    await screen.findByText("Charge 2");
+    // The range holds 1664 even though two rows are on the page: never a sum over what was read.
+    await vi.waitFor(() => expect(totalsShown()[0]).toBe("1664"));
+    expect(screen.queryByText("Charge 3")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show more movements" }));
+    expect(await screen.findByText("Charge 3")).toBeInTheDocument();
+    expect(totalsShown()[0]).toBe("1664");
+    expect(screen.queryByRole("button", { name: "Show more movements" })).not.toBeInTheDocument();
+    expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger"))[1].path).toContain("cursor=c1");
+  });
+
+  it("reads an API that sends no totals to the end, and totals all of it", async () => {
     rememberClubZone("Africa/Johannesburg");
     const pages = [
       { items: [row(1), row(2)], next_cursor: "c1" },
       { items: [row(3)], next_cursor: null },
     ];
-    const stub = stubFetch([
+    stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
       // `body` too: the stub refuses a route with neither body nor respond before it reads `sequence`.
       { path: "/api/v1/admin/ledger", body: pages[1], sequence: pages },
     ]);
     renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
-
     await screen.findByText("Charge 3");
-    const totals = await screen.findAllByText((_, el) => el?.hasAttribute("data-ledger-total") ?? false);
-    expect(totals[0]).toHaveTextContent("3");
-    expect(totals[2]).toHaveTextContent(/30\.00/);
-    const calls = stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger"));
-    expect(calls[1].path).toContain("cursor=c1");
+    await vi.waitFor(() => expect(totalsShown()[0]).toBe("3"));
+    expect(totalsShown()[2]).toMatch(/30\.00/);
   });
 
-  it("shows no total at all when the range is too big to read whole", async () => {
+  it("shows no total at all when an API with no totals holds too many to read whole", async () => {
     rememberClubZone("Africa/Johannesburg");
-    const many = Array.from({ length: 500 }, (_, i) => row(i));
     let n = 0;
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
-      { path: "/api/v1/admin/ledger", respond: () => ({ items: many.map((r) => ({ ...r, id: `${r.id}-${n}` })), next_cursor: `c${++n}` }) },
+      { path: "/api/v1/admin/ledger", respond: () => ({ items: Array.from({ length: 500 }, (_, i) => row(n * 500 + i)), next_cursor: `c${++n}` }) },
     ]);
     renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2020-01-01&to=2026-09-30"] });
-    expect(await screen.findByText(/too many to total here/, {}, { timeout: 15_000 })).toBeInTheDocument();
+    expect(await screen.findByText(/too many movements to total here/, {}, { timeout: 15_000 })).toBeInTheDocument();
     expect(document.querySelector("[data-ledger-total]")).toBeNull();
   }, 30_000);
 });
