@@ -18,14 +18,29 @@ import type { AdminSettings } from "./api";
  */
 const PREFIX = "crusaders.settings.draft.";
 
-type Kept = { basis: AdminSettings; draft: AdminSettings };
+/**
+ * `afterSessionEnd`: the draft was kept because a save met an ended session, so the admin signed
+ * in again before seeing it. Without it the restore only says the edits were kept — a plain reload
+ * restores them too, and "while you signed in again" was said over no sign-in at all (R3 A-9).
+ */
+type Kept = { basis: AdminSettings; draft: AdminSettings; afterSessionEnd?: boolean };
 
 function storage(): Storage | null {
   try { return window.sessionStorage ?? null; } catch { return null; }
 }
 
 export function keepSettingsDraft(userId: string, basis: AdminSettings, draft: AdminSettings): void {
-  try { storage()?.setItem(PREFIX + userId, JSON.stringify({ basis, draft } satisfies Kept)); } catch { /* full or blocked */ }
+  const afterSessionEnd = keptSettingsDraft(userId)?.afterSessionEnd;
+  try {
+    storage()?.setItem(PREFIX + userId, JSON.stringify({ basis, draft, ...(afterSessionEnd ? { afterSessionEnd } : {}) } satisfies Kept));
+  } catch { /* full or blocked */ }
+}
+
+/** A save met an ended session: the kept draft will be seen after a sign-in. */
+export function noteSettingsDraftSessionEnded(userId: string): void {
+  const kept = keptSettingsDraft(userId);
+  if (!kept) return;
+  try { storage()?.setItem(PREFIX + userId, JSON.stringify({ ...kept, afterSessionEnd: true } satisfies Kept)); } catch { /* blocked */ }
 }
 
 export function forgetSettingsDraft(userId: string): void {

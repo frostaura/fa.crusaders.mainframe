@@ -105,10 +105,12 @@ function useKeepFieldsClearOfBar(shown: boolean, bar: React.RefObject<HTMLDivEle
       // or grows (a blocker list) over the field already being typed in moved nothing, and at 390
       // it covered the very field it named (F3-14). Lift that field above the bar's new top.
       const focused = document.activeElement as HTMLElement | null;
-      if (focused && !el.contains(focused) && focused.matches("input, textarea, select, [role=combobox]")
-        && focused.getBoundingClientRect().bottom > top) {
-        focused.scrollIntoView?.({ block: "nearest" });
-      }
+      if (!focused || el.contains(focused) || !focused.matches("input, textarea, select, [role=combobox]")) return;
+      // The field's own complaint counts, not only its box (R3 V-13): at 1280 the input cleared
+      // the bar and the error under it — the sentence saying what to fix — was covered.
+      const error = focused.closest("[data-setting], [data-slot=field]")?.querySelector<HTMLElement>("[data-slot=field-error]");
+      const target = error ?? focused;
+      if (target.getBoundingClientRect().bottom > top) target.scrollIntoView?.({ block: "nearest" });
     };
     apply();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(apply);

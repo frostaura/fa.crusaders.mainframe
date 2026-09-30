@@ -51,6 +51,10 @@ export const SETTINGS_COPY = {
   /** The banner when the refusal names a field: the reason itself is said AT the field. */
   saveRefusedField: (label: string) => `The club’s system refused ${label}. The reason is on the field.`,
   draftRestored: "Your unsaved changes were kept while you signed in again. They are not saved yet.",
+  /** R3 A-9: kept across a reload or a visit elsewhere — no sign-in happened, so none is claimed. */
+  draftRestoredEarlier: "Your unsaved changes from earlier were kept. They are not saved yet.",
+  /** R3 A-12: the club's rate limit — busy, nothing saved, nothing to fix. */
+  saveRateLimited: (busy: string) => `${busy} Nothing was saved; your changes are still here.`,
   /** F3-4: kept edits to a setting somebody else has saved since are not restored over theirs. */
   draftDropped: (labels: string[]) =>
     `${labels.join(", ")} ${labels.length === 1 ? "was" : "were"} saved by someone else while you were away, so your change${labels.length === 1 ? "" : "s"} there ${labels.length === 1 ? "was" : "were"} not brought back.`,

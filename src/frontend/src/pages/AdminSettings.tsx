@@ -12,7 +12,7 @@ import { doorRetentionNotice } from "../lib/doorsCopy";
 import { describeDoorBookingHorizon } from "../lib/gateCopy";
 import { doorBookingHorizonMinutes } from "../lib/tenantSettings";
 import {
-  SETTINGS_SECTIONS, isServed, normaliseQuery, sectionDef, sectionMatches,
+  SETTINGS_SECTIONS, isServed, normaliseQuery, sectionMatches,
   sectionOfKey, settingDef, settingLabel, settingMatches, settingsFor, type SettingContext, type SettingsSectionId,
 } from "../lib/settingsSchema";
 import { sectionSummary } from "../lib/settingsSummaries";
@@ -144,14 +144,20 @@ function useSearch(query: string, context: SettingContext) {
   return useMemo(() => {
     if (!query) return null;
     const all = settingsFor(context.settings);
+    // A section also answers by its one-line summary (R3 A-10): "chased", "results show" and
+    // "walk-ups" are words the collapsed page shows and search could not find.
+    const whole = new Set(SETTINGS_SECTIONS
+      .filter((section) => sectionMatches(section, query)
+        || sectionSummary(section.id, context.settings, context.currency).toLowerCase().includes(query))
+      .map((section) => section.id));
     const keys = new Set(
       all
         .filter((def) => isServed(def, context.settings))
-        .filter((def) => sectionMatches(sectionDef(def.section), query) || settingMatches(def, query, context))
+        .filter((def) => whole.has(def.section) || settingMatches(def, query, context))
         .map((def) => def.key),
     );
     const sections = SETTINGS_SECTIONS
-      .filter((section) => sectionMatches(section, query) || all.some((def) => def.section === section.id && keys.has(def.key)))
+      .filter((section) => whole.has(section.id) || all.some((def) => def.section === section.id && keys.has(def.key)))
       .map((section) => section.id);
     return { keys, sections };
   }, [query, context]);
@@ -268,7 +274,9 @@ function SaveNotices({ doc, changes, currency, onGoTo }: {
   return (
     <>
       {doc.restored && changes > 0 ? (
-        <Alert tone="info" live="polite" announceKey="settings-restored">{SETTINGS_COPY.draftRestored}</Alert>
+        <Alert tone="info" live="polite" announceKey="settings-restored">
+          {doc.restoredAfterSignIn ? SETTINGS_COPY.draftRestored : SETTINGS_COPY.draftRestoredEarlier}
+        </Alert>
       ) : null}
       {doc.restored && doc.droppedLabels.length > 0 ? (
         <Alert tone="warning" live="polite" announceKey="settings-dropped">{SETTINGS_COPY.draftDropped(doc.droppedLabels)}</Alert>

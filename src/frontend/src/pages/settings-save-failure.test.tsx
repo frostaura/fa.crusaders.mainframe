@@ -5,7 +5,8 @@ import { SETTINGS_FIXTURE, refuse, renderPage, signIn, signOut, stubFetch, type 
 import { findControl, saveButton } from "../components/settings/testKit";
 import { SETTINGS_COPY } from "../lib/settingsCopy";
 import { settingDef } from "../lib/settingsSchema";
-import { keepSettingsDraft } from "../lib/settingsDraftStore";
+import { keepSettingsDraft, noteSettingsDraftSessionEnded } from "../lib/settingsDraftStore";
+import { rateLimitedSentence } from "../lib/errors";
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -73,6 +74,7 @@ describe("a session that ends during a save keeps the edits", () => {
 
   it("brings the kept edits back after signing in again, and says they are not saved", async () => {
     keepSettingsDraft(USER, SETTINGS_FIXTURE as never, { ...SETTINGS_FIXTURE, advance_booking_days: 30 } as never);
+    noteSettingsDraftSessionEnded(USER);
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
@@ -86,6 +88,38 @@ describe("a session that ends during a save keeps the edits", () => {
     renderPage(<AdminSettingsPage />);
     expect(await findControl(/Reserve window/)).toHaveValue(SETTINGS_FIXTURE.advance_booking_days);
     expect(screen.queryByText(SETTINGS_COPY.draftRestored)).toBeNull();
+    expect(screen.queryByText(SETTINGS_COPY.draftRestoredEarlier)).toBeNull();
+  });
+
+  /** Review round 3, A-9: a plain reload restored the draft and claimed a sign-in that never happened. */
+  it("claims no sign-in when the edits were kept across a plain reload", async () => {
+    keepSettingsDraft(USER, SETTINGS_FIXTURE as never, { ...SETTINGS_FIXTURE, advance_booking_days: 30 } as never);
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByText(SETTINGS_COPY.draftRestoredEarlier)).toBeInTheDocument();
+    expect(screen.queryByText(SETTINGS_COPY.draftRestored)).toBeNull();
+  });
+
+  it("marks the kept edits as waiting for a sign-in when a save meets an ended session", async () => {
+    stubFetch([...routes({ status: 401, body: { error: "unauthorized" } }), { method: "POST", path: "/api/v1/auth/refresh", status: 401, body: {} }]);
+    renderPage(<AdminSettingsPage />);
+    await changeAhead("30");
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(window.sessionStorage.getItem(`crusaders.settings.draft.${USER}`)).toContain(`"afterSessionEnd":true`));
+  });
+});
+
+/** Review round 3, A-12: a 429 said "fix what is named" with nothing named. */
+describe("the club's rate limit on a save", () => {
+  it("says it is busy and nothing was saved, and asks for no fix", async () => {
+    stubFetch(routes({ status: 429, body: { error: "rate_limited", retry_after_seconds: 12 } }));
+    renderPage(<AdminSettingsPage />);
+    await changeAhead("30");
+    fireEvent.click(saveButton());
+
+    expect(await screen.findByText(SETTINGS_COPY.saveRateLimited(rateLimitedSentence(12)))).toBeInTheDocument();
+    expect(screen.queryByText(SETTINGS_COPY.saveNotSaved)).toBeNull();
   });
 });
 
@@ -112,7 +146,7 @@ describe("kept edits survive the page's own second read (F3-4)", () => {
     delaySecondRead(150);
     renderPage(<AdminSettingsPage />, { reactStrictMode: true });
 
-    expect(await screen.findByText(SETTINGS_COPY.draftRestored)).toBeInTheDocument();
+    expect(await screen.findByText(SETTINGS_COPY.draftRestoredEarlier)).toBeInTheDocument();
     await new Promise((r) => { setTimeout(r, 400); });
     expect(await findControl(/Reserve window/)).toHaveValue(30);
     expect(window.sessionStorage.getItem(`crusaders.settings.draft.${USER}`)).toContain(`"advance_booking_days":30`);
@@ -123,7 +157,7 @@ describe("kept edits survive the page's own second read (F3-4)", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    expect(await screen.findByText(SETTINGS_COPY.draftRestored)).toBeInTheDocument();
+    expect(await screen.findByText(SETTINGS_COPY.draftRestoredEarlier)).toBeInTheDocument();
     expect(await findControl(/Reserve window/)).toHaveValue(30);
   });
 

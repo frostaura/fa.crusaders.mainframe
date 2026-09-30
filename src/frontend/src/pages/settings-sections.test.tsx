@@ -257,6 +257,17 @@ describe("R13 — search", () => {
     expect(control(/Grace window/).closest("[data-setting]")).not.toHaveAttribute("hidden");
   });
 
+  /** Review round 3, A-10: words the collapsed summaries show ("walk-ups", "chased") found nothing. */
+  it("finds a section by the words of its one-line summary", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    await findControl(/Unlock time/);
+    fireEvent.change(screen.getByRole("searchbox", { name: SETTINGS_COPY.searchLabel }), { target: { value: "walk-ups" } });
+    expect(screen.queryByText(SETTINGS_COPY.noMatches("walk-ups"))).toBeNull();
+    expect(control(/walk-up/i).closest("[data-setting]")).not.toHaveAttribute("hidden");
+  });
+
   it("opens the advanced disclosure when the match is behind it", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);

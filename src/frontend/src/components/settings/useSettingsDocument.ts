@@ -4,7 +4,9 @@ import { readCurrencySymbol } from "@/lib/currency";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useAuth } from "@/lib/auth";
-import { forgetSettingsDraft, keepSettingsDraft, keptSettingsDraft } from "@/lib/settingsDraftStore";
+import {
+  forgetSettingsDraft, keepSettingsDraft, keptSettingsDraft, noteSettingsDraftSessionEnded,
+} from "@/lib/settingsDraftStore";
 import { settingLabel } from "@/lib/settingsSchema";
 import { DAY_KEYS, DAY_NAMES } from "@/lib/tenantSettings";
 import {
@@ -80,7 +82,7 @@ function useKeptDraft(doc: Doc | null, setDoc: (next: Doc) => void) {
   const auth = useAuth();
   const userId = auth.status === "authenticated" ? auth.userId : null;
   const [lookedFor, setLookedFor] = useState<string | null>(null);
-  const [restored, setRestored] = useState<{ dropped: string[] } | null>(null);
+  const [restored, setRestored] = useState<{ dropped: string[]; afterSignIn: boolean } | null>(null);
 
   // F3.15: edits kept across a sign-in come back — once per admin, before any edit, onto the
   // settings as they are now, key by key (`carryEdits`). Adjusted during render, React's pattern
@@ -91,7 +93,7 @@ function useKeptDraft(doc: Doc | null, setDoc: (next: Doc) => void) {
     if (kept) {
       const { merged, carried, dropped } = carryEdits(kept.basis, kept.draft, doc.saved);
       if (carried.length > 0) setDoc({ saved: doc.saved, draft: merged });
-      if (carried.length > 0 || dropped.length > 0) setRestored({ dropped });
+      if (carried.length > 0 || dropped.length > 0) setRestored({ dropped, afterSignIn: kept.afterSessionEnd === true });
     }
   }
 
@@ -103,7 +105,7 @@ function useKeptDraft(doc: Doc | null, setDoc: (next: Doc) => void) {
     else keepSettingsDraft(userId, doc.saved, doc.draft);
   }, [userId, doc]);
 
-  return { restored, setRestored };
+  return { restored, setRestored, userId };
 }
 
 export function useSettingsDocument() {
@@ -113,7 +115,7 @@ export function useSettingsDocument() {
   const [failure, setFailure] = useState<SaveFailure | null>(null);
   /** The sentence the save bar keeps on screen after a save, until the next edit (F3-4). */
   const [savedNote, setSavedNote] = useState<string | null>(null);
-  const { restored, setRestored } = useKeptDraft(doc, setDoc);
+  const { restored, setRestored, userId } = useKeptDraft(doc, setDoc);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,7 +143,12 @@ export function useSettingsDocument() {
     // F3.15: on the PAGE, not in a toast that fades — the sentence, the field it is about and
     // the next step. Through the shared device-error dictionary, so a code that HAS a sentence
     // gets it and a `<key>_out_of_range` names the field by its caption.
-    failure: (err, sent) => setFailure(saveFailureOf(err, readCurrencySymbol(sent.currency_symbol))),
+    failure: (err, sent) => {
+      const failed = saveFailureOf(err, readCurrencySymbol(sent.currency_symbol));
+      // The kept draft will next be seen after a sign-in, and may say so (R3 A-9).
+      if (failed.sessionEnded && userId) noteSettingsDraftSessionEnded(userId);
+      setFailure(failed);
+    },
   });
 
   const update = useCallback((patch: Partial<AdminSettings>) => {
@@ -166,6 +173,7 @@ export function useSettingsDocument() {
     draft: doc?.draft ?? null,
     error, loading, load, update, discard, save, failure,
     restored: restored !== null,
+    restoredAfterSignIn: restored?.afterSignIn === true,
     droppedLabels,
     savedNote,
     dismissSavedNote: () => setSavedNote(null),

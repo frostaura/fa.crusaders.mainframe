@@ -1,5 +1,6 @@
 import { ApiError, type AdminSettings } from "@/lib/api";
 import { describeDeviceError } from "@/lib/deviceErrors";
+import { rateLimitedSentence } from "@/lib/errors";
 import { ecoSettingComplaints } from "@/lib/ecoSettings";
 import {
   DAY_KEYS, DAY_NAMES, deviceNumbersComplaint, doorSettingComplaints, gateSettingComplaints, operatingHoursComplaint,
@@ -160,7 +161,15 @@ export function afterCaption(label: string, message: string): string | null {
   for (const head of [label, bare]) {
     if (head && message.toLowerCase().startsWith(head.toLowerCase())) return message.slice(head.length);
   }
-  return null;
+  // Review round 3, I-7: a message that names the setting in its OWN words ("Unlock time has to
+  // be…" under "Door unlock time (seconds)", "A refusal spike has to be…") still said it twice.
+  // A short subject before "has to be" that shares a word with the caption is that setting: keep
+  // the predicate. One that does not ("Closing time" under a day's hours) is another thing, kept.
+  const parts = /^([^.:]{1,60}?) (has to be .*)$/.exec(message);
+  if (!parts) return null;
+  const words = (text: string) => text.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3);
+  const caption = new Set(words(label));
+  return words(parts[1]).some((w) => caption.has(w) || caption.has(w.replace(/s$/, ""))) ? ` ${parts[2]}` : null;
 }
 
 /** The sections holding at least one unsaved change — for each header's dot. */
@@ -285,6 +294,12 @@ export function saveFailureOf(err: unknown, currency: string): SaveFailure {
   }
   if (err instanceof ApiError && err.status === 401) {
     return { text: SETTINGS_COPY.saveFailed, fieldKey: null, sessionEnded: true };
+  }
+  // Review round 3, A-12: the club's rate limit turns a save away before it is read, so nothing
+  // was saved and nothing is wrong with a field — "fix what is named" named nothing.
+  if (err instanceof ApiError && err.status === 429) {
+    const seconds = Number(err.detail("retry_after_seconds")) || null;
+    return { text: SETTINGS_COPY.saveRateLimited(rateLimitedSentence(seconds)), fieldKey: null, sessionEnded: false, transient: true };
   }
   const fieldKey = err instanceof ApiError ? fieldOf(err) : null;
   const said = describeSaveFailure(err, currency);
