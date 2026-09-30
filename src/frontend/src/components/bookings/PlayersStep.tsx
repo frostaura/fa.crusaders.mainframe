@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { PlayerPicker } from "@/components/players/PlayerPicker";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { IconButton } from "@/components/ui/icon-button";
@@ -34,11 +34,12 @@ export type PlayersStepProps = {
 export function PlayersStep(props: PlayersStepProps) {
   const { players, actorUserId } = props;
   const headingId = useId();
+  const root = useFocusAcrossPicker(players.picking);
   if (players.picking !== null) {
     const exclude = [...(actorUserId ? [actorUserId] : []), ...pickedUserIds(players.draft)];
     return (
-      <section aria-labelledby={headingId} className="grid gap-3" data-picker-panel="">
-        <h3 id={headingId} className="text-base font-semibold text-text-primary">
+      <section ref={root} aria-labelledby={headingId} className="grid gap-3" data-picker-panel="">
+        <h3 id={headingId} tabIndex={-1} data-picker-heading="" className="text-base font-semibold text-text-primary">
           {BOOK_SEATS.pickerTitle(players.picking)}
         </h3>
         <PlayerPicker onPick={players.pick} excludeUserIds={exclude} />
@@ -46,11 +47,35 @@ export function PlayersStep(props: PlayersStepProps) {
     );
   }
   return (
-    <>
+    <div ref={root} className="contents">
       <WhoChoice players={players} />
       {players.withOthers ? <Court players={players} /> : null}
-    </>
+    </div>
   );
+}
+
+/**
+ * R2 F1-9 — the picker swaps the whole step's body, so the focused node vanished twice: opening
+ * left focus on the sheet's container, and closing (a pick, or Back) left it there too — or on a
+ * footer button that had just been renamed "Cancel". Opening focuses the panel's heading; closing
+ * focuses the seat it was opened for: its Remove once filled, its "Add…" button when not.
+ */
+function useFocusAcrossPicker(picking: number | null) {
+  const root = useRef<HTMLDivElement & HTMLElement>(null);
+  const last = useRef(picking);
+  useEffect(() => {
+    const was = last.current;
+    last.current = picking;
+    if (was === picking) return;
+    const box = root.current;
+    if (!box) return;
+    if (picking !== null) { box.querySelector<HTMLElement>("[data-picker-heading]")?.focus(); return; }
+    if (was === null) return;
+    const seat = box.querySelector<HTMLElement>(`[data-seat="${was}"]`);
+    const target = seat?.tagName === "BUTTON" ? seat : seat?.querySelector<HTMLElement>("button");
+    target?.focus();
+  }, [picking]);
+  return root;
 }
 
 function WhoChoice({ players }: { players: PlayersStepState }) {

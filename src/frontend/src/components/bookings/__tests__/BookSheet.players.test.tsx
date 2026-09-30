@@ -159,6 +159,23 @@ describe("BookSheet — Players", () => {
     expect(screen.getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(1, 3, BOOK_SHEET.steps.players));
   });
 
+  it("R2 F1-9 — the picker takes focus on its heading, and hands it back to the seat it was opened for", async () => {
+    stubFetch([FAVOURITES]);
+    open();
+    fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
+    // Opened: focus on the panel's heading, never left on the sheet's container.
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(2) }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: BOOK_SEATS.pickerTitle(2) })));
+    // Picked: focus on the seat just filled — its Remove — not on the container.
+    fireEvent.click(await screen.findByRole("button", { name: PICKER.add(SAM.name) }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: BOOK_PLAYERS.remove("Sam") })));
+    // Back to the seats: focus on the seat it was opened for, never on a footer button renamed "Cancel".
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: BOOK_SEATS.pickerTitle(3) })));
+    fireEvent.click(screen.getByRole("button", { name: BOOK_PLAYERS.pickerBack }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(3) })));
+  });
+
   it("F1.9/F1.15 — 'With other players' shows the seats and opens nothing; Just me shows none", async () => {
     stubFetch([FAVOURITES]);
     open();
