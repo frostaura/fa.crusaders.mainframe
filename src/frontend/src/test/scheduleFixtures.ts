@@ -1,5 +1,7 @@
 import type {
-  AdminChangeRow, ScheduleConflict, ScheduleOccurrence, SchedulePreview, ScheduleRow,
+  AdminChangeRow, ScheduleConflict, ScheduleCreateResponse, ScheduleDetailResponse,
+  ScheduleEndResponse, ScheduleOccurrence, ScheduleOccurrenceResponse, ScheduleOccurrencesResponse,
+  SchedulePreview, ScheduleRow, ScheduleUpdateResponse,
 } from "../lib/adminApi";
 import type { StubRoute } from "./harness";
 import { SETTINGS_FIXTURE } from "./harness";
@@ -18,7 +20,7 @@ import { SETTINGS_FIXTURE } from "./harness";
  * <b>Every optional field is genuinely optional here.</b> Three backend lanes are building
  * these endpoints in parallel, so the shapes below are written as the minimum D2 §11.8
  * promises, and the fields a page must not require — `would_refund_credits`,
- * `next_occurrence`, `occurrences_ahead`, `materialised_through` — are set only where a test
+ * `next_occurrence`, `materialised_through` — are set only where a test
  * is about them. A fixture that always carries every field cannot fail the way production
  * will.
  * </p>
@@ -65,6 +67,66 @@ export function scheduleRowFixture(overrides: Partial<ScheduleRow> = {}): Schedu
     ],
     created_by_name: "Review Admin",
     ...overrides,
+  };
+}
+
+/**
+ * A row carrying EVERY key the server's `Project` writes — `AdminSchedules.contract.test.ts`
+ * compares its keys with the C# source, so the partial fixture above cannot quietly become the
+ * only shape anybody tests against.
+ */
+export function fullScheduleRowFixture(): Required<ScheduleRow> {
+  return {
+    ...scheduleRowFixture(),
+    days: ["tue"],
+    start: "18:00",
+    end: "21:00",
+    start_date: "2026-10-06",
+    end_date: "2026-12-15",
+    interval_weeks: 1,
+    status: "active",
+    courts: [{ id: COURT_IDS.one, name: "Court 1" }],
+    next_occurrence: "2026-10-06T16:00:00.000Z",
+    materialised_through: "2026-11-03",
+    created_by_name: "Review Admin",
+    created_at: "2026-09-21T18:31:00.000Z",
+  };
+}
+
+// ---------------------------------------------------------------------------------------
+// Response envelopes (C7) — what each route ANSWERS, pinned against the C# handlers
+// ---------------------------------------------------------------------------------------
+
+export function scheduleDetailResponse(row: ScheduleRow = scheduleRowFixture()): ScheduleDetailResponse {
+  return { schedule: row, timezone: "Africa/Johannesburg" };
+}
+
+export function scheduleOccurrencesResponse(occurrences: ScheduleOccurrence[]): Required<ScheduleOccurrencesResponse> {
+  return { occurrences, timezone: "Africa/Johannesburg" };
+}
+
+export function scheduleCreateResponse(row: ScheduleRow = scheduleRowFixture(), rowsCreated = 33): ScheduleCreateResponse {
+  return { schedule: row, rows_created: rowsCreated };
+}
+
+export function scheduleUpdateResponse(
+  row: ScheduleRow = scheduleRowFixture(), overrides: Partial<ScheduleUpdateResponse> = {},
+): ScheduleUpdateResponse {
+  return {
+    schedule: row, rows_created: 30, effective_from: "2026-10-13", effective_from_clamped_to: null, ...overrides,
+  };
+}
+
+export function scheduleOccurrenceResponse(
+  date: string, status: ScheduleOccurrenceResponse["status"] = "skipped",
+): ScheduleOccurrenceResponse {
+  return { occurrence_date: date, status, rows_created: 0 };
+}
+
+export function scheduleEndResponse(overrides: Partial<ScheduleEndResponse> = {}): ScheduleEndResponse {
+  return {
+    status: "ended", end_date: "2026-10-12", occurrences_cancelled: 27, effective_from: "2026-10-13",
+    effective_from_clamped_to: null, ...overrides,
   };
 }
 

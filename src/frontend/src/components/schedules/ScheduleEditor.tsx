@@ -207,8 +207,9 @@ export function ScheduleEditor({
     setCreating(true);
     setCreateError(null);
     try {
-      const row = await adminEndpoints.scheduleCreate(body);
-      onCreated(row);
+      // C7: the create answers `{ schedule, rows_created }` — the row is inside it.
+      const { schedule } = await adminEndpoints.scheduleCreate(body);
+      onCreated(schedule);
     } catch (err) {
       const fresh = conflictsFromRefusal(err);
       if (fresh) {

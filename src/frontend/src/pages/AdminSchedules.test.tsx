@@ -4,8 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { AdminSchedulesPage } from "./AdminSchedules";
 import { refuse, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 import {
-  COURT_IDS, conflictFixture, editorPrerequisiteRoutes, previewFixture, scheduleRowFixture,
-  sessionRoutes,
+  COURT_IDS, SCHEDULE_ID, conflictFixture, editorPrerequisiteRoutes, previewFixture,
+  scheduleCreateResponse, scheduleRowFixture, sessionRoutes,
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
 import { serverRecordFields } from "../test/serverContract";
@@ -236,6 +236,30 @@ describe("creating one", () => {
       "Nothing is in the way. All 396 slots are free on all 11 Tuesdays.",
     )).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create the hold" })).toBeInTheDocument();
+  });
+
+  it("names what it created from the server's `{ schedule, rows_created }` reply", async () => {
+    // Review round 2 (F3-1): the create answers an envelope, the page read the row's name off
+    // its top level, and the notice said "“undefined” was created. Open undefined".
+    stubFetch([
+      ...sessionRoutes(),
+      { path: SCHEDULES, body: { schedules: [] } },
+      ...editorPrerequisiteRoutes(),
+      { method: "POST", path: `${SCHEDULES}/preview`, body: previewFixture() },
+      { method: "POST", path: SCHEDULES, body: scheduleCreateResponse(scheduleRowFixture()) },
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText("No repeating bookings yet.");
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+    await fillTheSentence();
+    await userEvent.click(screen.getByRole("button", { name: "Check 11 Tuesdays" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Create the hold" }));
+
+    expect(await screen.findByText(/“Tuesday league” was created\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Tuesday league to see its dates" }))
+      .toHaveAttribute("href", `/admin/schedules/${SCHEDULE_ID}`);
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
   });
 
   it("sends the sentence under the field names the server's ScheduleRequest binds", async () => {

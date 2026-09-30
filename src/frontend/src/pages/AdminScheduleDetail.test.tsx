@@ -5,7 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { AdminScheduleDetailPage } from "./AdminScheduleDetail";
 import { renderPage, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
 import {
-  SCHEDULE_ID, changeRowFixture, occurrenceFixture, scheduleRowFixture, sessionRoutes,
+  SCHEDULE_ID, changeRowFixture, occurrenceFixture, scheduleDetailResponse, scheduleEndResponse,
+  scheduleOccurrenceResponse, scheduleOccurrencesResponse, scheduleRowFixture, scheduleUpdateResponse,
+  sessionRoutes,
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
 import { serverRecordFields } from "../test/serverContract";
@@ -34,18 +36,24 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const BASE = `/api/v1/admin/schedules/${SCHEDULE_ID}`;
 
+/**
+ * Every reply below is the server's ENVELOPE (C7), built by the fixtures that
+ * `AdminSchedules.contract.test.ts` pins key-for-key against the C# handlers. Round 2 (F3-1): the
+ * page read `{ schedule, timezone }` as the row itself, and this file stubbed a bare row, so the
+ * suite was green over a page that rendered "End undefined".
+ */
 function detailRoutes(over: Partial<{
-  schedule: unknown; occurrences: unknown; changes: unknown;
+  schedule: ReturnType<typeof scheduleRowFixture>; occurrences: unknown; changes: unknown;
 }> = {}): StubRoute[] {
   return [
     ...sessionRoutes(),
-    { path: `${BASE}/occurrences`, body: over.occurrences ?? { occurrences: [
+    { path: `${BASE}/occurrences`, body: over.occurrences ?? scheduleOccurrencesResponse([
       occurrenceFixture("2026-10-06", { status: "past" }),
       occurrenceFixture("2026-10-13"),
       occurrenceFixture("2026-10-20", { status: "skipped", courts: [] }),
-    ] } },
+    ]) },
     { path: `${BASE}/changes`, body: over.changes ?? { rows: [changeRowFixture()], retention: "kept indefinitely — these records cannot be deleted" } },
-    { path: BASE, body: over.schedule ?? scheduleRowFixture() },
+    { path: BASE, body: scheduleDetailResponse(over.schedule ?? scheduleRowFixture()) },
   ];
 }
 
@@ -82,7 +90,7 @@ describe("what it holds", () => {
 
   it("gives every date a word, including the state it was not told", async () => {
     stubFetch(detailRoutes({
-      occurrences: { occurrences: [occurrenceFixture("2026-10-13", { status: undefined })] },
+      occurrences: scheduleOccurrencesResponse([occurrenceFixture("2026-10-13", { status: undefined })]),
     }));
     renderDetail();
 
@@ -113,7 +121,7 @@ describe("skipping a date", () => {
   it("says what opens back up before anything is skipped", async () => {
     stubFetch([
       ...detailRoutes(),
-      { method: "PATCH", path: `${BASE}/occurrences/2026-10-13`, body: { date: "2026-10-13", status: "skipped" } },
+      { method: "PATCH", path: `${BASE}/occurrences/2026-10-13`, body: scheduleOccurrenceResponse("2026-10-13") },
     ]);
     renderDetail();
 
@@ -176,7 +184,7 @@ describe("changing the hours", () => {
       {
         method: "PATCH",
         path: `${BASE}/occurrences/2026-10-13`,
-        body: { date: "2026-10-13", status: "overridden" },
+        body: scheduleOccurrenceResponse("2026-10-13", "overridden"),
       },
     ]);
     renderDetail();
@@ -196,7 +204,7 @@ describe("changing the hours", () => {
   it("changes this and every one after it through the schedule route, with the date", async () => {
     const stub = stubFetch([
       ...detailRoutes(),
-      { method: "PATCH", path: BASE, body: scheduleRowFixture({ start: "19:00", end: "21:30" }) },
+      { method: "PATCH", path: BASE, body: scheduleUpdateResponse(scheduleRowFixture({ start: "19:00", end: "21:30" })) },
     ]);
     renderDetail();
     await openTheChange();
@@ -230,7 +238,7 @@ describe("changing the hours", () => {
       {
         method: "PATCH",
         path: BASE,
-        body: { ...scheduleRowFixture(), effective_from_clamped_to: "2026-09-22" },
+        body: scheduleUpdateResponse(scheduleRowFixture(), { effective_from_clamped_to: "2026-09-22" }),
       },
     ]);
     renderDetail();
@@ -304,7 +312,7 @@ describe("there is no delete", () => {
   it("ends the series through the end route, with the reason", async () => {
     const stub = stubFetch([
       ...detailRoutes(),
-      { method: "POST", path: `${BASE}/end`, body: scheduleRowFixture({ status: "ended" }) },
+      { method: "POST", path: `${BASE}/end`, body: scheduleEndResponse() },
     ]);
     renderDetail();
     await screen.findByRole("heading", { name: "Tuesday league", level: 1 });

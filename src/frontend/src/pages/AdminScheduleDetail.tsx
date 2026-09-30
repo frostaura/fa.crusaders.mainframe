@@ -15,7 +15,8 @@ import { ArrowCounterClockwise, CalendarDots, PencilSimple } from "../components
 import { OccurrenceChange, type EditScope } from "../components/schedules/OccurrenceChange";
 import { ScheduleChangeList } from "../components/schedules/ScheduleChangeList";
 import {
-  adminEndpoints, scheduleBodyOf, type AdminChangePage, type ScheduleOccurrence, type ScheduleRow,
+  adminEndpoints, scheduleBodyOf, type AdminChangePage, type ScheduleDetailResponse,
+  type ScheduleOccurrence, type ScheduleOccurrencesResponse, type ScheduleRow,
 } from "../lib/adminApi";
 import { describeFailure } from "../lib/errors";
 import {
@@ -307,9 +308,10 @@ export function AdminScheduleDetailPage() {
   const loadOccurrences = useCallback(() => adminEndpoints.scheduleOccurrences(id), [id]);
   const loadChanges = useCallback(() => adminEndpoints.scheduleChanges(id), [id]);
 
-  const [scheduleRead, reloadSchedule] = useRead<ScheduleRow>(id, loadSchedule);
+  // C7: the read answers `{ schedule, timezone }`, never the bare row (review round 2, F3-1).
+  const [scheduleRead, reloadSchedule] = useRead<ScheduleDetailResponse>(id, loadSchedule);
   const [occurrencesRead, reloadOccurrences] =
-    useRead<{ occurrences: ScheduleOccurrence[] }>(id, loadOccurrences);
+    useRead<ScheduleOccurrencesResponse>(id, loadOccurrences);
   const [changesRead, reloadChanges] = useRead<AdminChangePage>(id, loadChanges);
 
   const [changing, setChanging] = useState<string | null>(null);
@@ -320,7 +322,7 @@ export function AdminScheduleDetailPage() {
   const shellRef = useRef<HTMLDivElement>(null);
   const focusHeading = useCallback(() => headingIn(shellRef.current), []);
 
-  const row = scheduleRead.data;
+  const row = scheduleRead.data?.schedule ?? null;
   const occurrences = occurrencesRead.data?.occurrences ?? null;
   const codes = useMemo(() => scheduleCodes({}), []);
 

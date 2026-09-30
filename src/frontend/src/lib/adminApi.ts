@@ -524,6 +524,8 @@ export type SchedulePreview = {
   first?: string | null;
   last?: string | null;
   rows_to_create?: number;
+  /** The club's cap on rows one change may write (`schedule_max_rows_per_change`). */
+  max_rows?: number;
   conflicts: ScheduleConflict[];
 };
 
@@ -540,10 +542,37 @@ export type ScheduleRow = {
   status?: "active" | "ended";
   courts?: Array<{ id: string; name: string }>;
   next_occurrence?: string | null;
-  occurrences_ahead?: number;
   materialised_through?: string | null;
   created_by_name?: string | null;
   created_at?: string;
+};
+
+/*
+ * What each schedule route ANSWERS (C7). Every read and write wraps the row — the page once read
+ * a `{ schedule, timezone }` reply as if it were the row and rendered "End undefined" — so these
+ * are pinned key-for-key against the C# handlers by `AdminSchedules.contract.test.ts`.
+ */
+export type ScheduleListResponse = { schedules: ScheduleRow[]; timezone?: string };
+export type ScheduleDetailResponse = { schedule: ScheduleRow; timezone: string };
+export type ScheduleOccurrencesResponse = { occurrences: ScheduleOccurrence[]; timezone?: string };
+export type ScheduleCreateResponse = { schedule: ScheduleRow; rows_created: number };
+export type ScheduleUpdateResponse = {
+  schedule: ScheduleRow;
+  rows_created: number;
+  effective_from: string;
+  effective_from_clamped_to: string | null;
+};
+export type ScheduleOccurrenceResponse = {
+  occurrence_date: string;
+  status: "skipped" | "overridden";
+  rows_created: number;
+};
+export type ScheduleEndResponse = {
+  status: "ended";
+  end_date: string | null;
+  occurrences_cancelled: number;
+  effective_from: string;
+  effective_from_clamped_to: string | null;
 };
 
 export type ScheduleOccurrence = {
@@ -786,10 +815,10 @@ export const adminEndpoints = {
 
   // --- Schedules (item 14) ---------------------------------------------------------------
   schedules: (status: "active" | "ended" | "all" = "active") =>
-    api.get<{ schedules: ScheduleRow[] }>(`/api/v1/admin/schedules${qs({ status })}`),
-  schedule: (id: string) => api.get<ScheduleRow>(`/api/v1/admin/schedules/${id}`),
+    api.get<ScheduleListResponse>(`/api/v1/admin/schedules${qs({ status })}`),
+  schedule: (id: string) => api.get<ScheduleDetailResponse>(`/api/v1/admin/schedules/${id}`),
   scheduleOccurrences: (id: string, range: { from?: string; to?: string } = {}) =>
-    api.get<{ occurrences: ScheduleOccurrence[] }>(`/api/v1/admin/schedules/${id}/occurrences${qs({ ...range })}`),
+    api.get<ScheduleOccurrencesResponse>(`/api/v1/admin/schedules/${id}/occurrences${qs({ ...range })}`),
   scheduleChanges: (id: string) =>
     api.get<AdminChangePage>(`/api/v1/admin/schedules/${id}/changes`),
   /**
@@ -799,22 +828,22 @@ export const adminEndpoints = {
    */
   schedulePreview: (body: ScheduleBody) =>
     api.post<SchedulePreview>("/api/v1/admin/schedules/preview", body),
-  scheduleCreate: (body: ScheduleBody) => api.post<ScheduleRow>("/api/v1/admin/schedules", body),
+  scheduleCreate: (body: ScheduleBody) => api.post<ScheduleCreateResponse>("/api/v1/admin/schedules", body),
   /**
    * This and future. `effectiveFrom` is clamped to never be earlier than the club's today —
    * an admin typing last Tuesday means "from now on" — and the response says it was clamped.
    */
   scheduleUpdate: (id: string, body: ScheduleUpdateBody) =>
-    api.patch<ScheduleRow & { effective_from_clamped_to?: string }>(`/api/v1/admin/schedules/${id}`, body),
+    api.patch<ScheduleUpdateResponse>(`/api/v1/admin/schedules/${id}`, body),
   /** Only this occurrence: skip it, or move its hours. A past date is refused, never rewritten. */
   scheduleOccurrenceUpdate: (
     id: string,
     date: string,
     body: { skip?: boolean; start?: string; end?: string; reason?: string },
-  ) => api.patch<ScheduleOccurrence>(`/api/v1/admin/schedules/${id}/occurrences/${date}`, body),
+  ) => api.patch<ScheduleOccurrenceResponse>(`/api/v1/admin/schedules/${id}/occurrences/${date}`, body),
   /** There is no delete. A schedule that ran is history; ending it is the operation. */
   scheduleEnd: (id: string, body: { effectiveFrom?: string; reason?: string }) =>
-    api.post<ScheduleRow>(`/api/v1/admin/schedules/${id}/end`, body),
+    api.post<ScheduleEndResponse>(`/api/v1/admin/schedules/${id}/end`, body),
 
   // --- Member groups (items 3 + 19) ------------------------------------------------------
   memberGroups: () => api.get<{ groups: MemberGroup[] }>("/api/v1/admin/member-groups"),
