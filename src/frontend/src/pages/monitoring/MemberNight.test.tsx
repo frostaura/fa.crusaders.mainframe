@@ -5,7 +5,8 @@ import { MemberNight, MemberNightPage } from "./MemberNight";
 import { AdminChangeRecordPage } from "./AdminChangeRecord";
 import { CHANGES_PAGE } from "../../lib/changeRecordCopy";
 import { settingDef } from "../../lib/settingsSchema";
-import { memberFixture, renderPage, signIn, stubFetch, unreachable, type StubRoute } from "../../test/harness";
+import { memberFixture, refuse, renderPage, signIn, stubFetch, unreachable, type StubRoute } from "../../test/harness";
+import { nightWindowHint } from "../../lib/nightCopy";
 import type { TraceEvent, TraceView } from "../../lib/adminApi";
 import { rememberClubZone } from "../../lib/clubZone";
 import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
@@ -261,6 +262,34 @@ describe("the old night route — a picker onto the member's own page (R17)", ()
     // Said under the field, not inside a list that has to be opened to find it (MemberCombobox).
     expect(await screen.findByText(/not the same as the club having none/)).toBeInTheDocument();
     expect(screen.queryByText("No members yet.")).not.toBeInTheDocument();
+  });
+
+  it("offers a Try again that reads the members again (review round 2, F3-16)", async () => {
+    let reads = 0;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/members/", respond: () => (++reads === 1 ? refuse(503, { error: "down" }) : [MEMBER]) },
+    ]);
+    renderPage(<MemberNightPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: NIGHT_TAB_COPY.membersRetry }));
+    await waitFor(() => expect(screen.queryByText(/not the same as the club having none/)).toBeNull());
+    fireEvent.click(await screen.findByRole("combobox", { name: new RegExp(NIGHT_TAB_COPY.pickerLabel) }));
+    expect(await screen.findByRole("option", { name: /Thandi Mokoena/ })).toBeInTheDocument();
+    expect(reads).toBe(2);
+  });
+});
+
+describe("the night's window, in words (review round 2, F3-10)", () => {
+  it("says a whole club day as that day, never 'From 00:00 to 00:00'", () => {
+    const hint = nightWindowHint({ from: "2026-09-22T00:00:00+02:00", to: "2026-09-23T00:00:00+02:00" }, "Africa/Johannesburg");
+    expect(hint).not.toMatch(/00:00 to 00:00/);
+    expect(hint).toMatch(/^All of .*22.*club time\.$/);
+  });
+
+  it("names both days when the window crosses midnight", () => {
+    const hint = nightWindowHint({ from: "2026-09-22T18:00:00+02:00", to: "2026-09-23T02:00:00+02:00" }, "Africa/Johannesburg");
+    expect(hint).toMatch(/^From 18:00 on .*22.* to 02:00 on .*23.*, club time\.$/);
   });
 });
 

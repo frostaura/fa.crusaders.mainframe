@@ -40,7 +40,13 @@ export const NIGHT_EXPORT_NOTE
 /** A night's window, said plainly, because "a night" is not a self-evident unit. */
 export function nightWindowHint(range: TraceView["range"], timezone: string | undefined): string {
   if (!range) return "Pick a night. Everything the club recorded about that member on that day appears below.";
-  return `From ${clubClock(range.from, timezone)} to ${clubClock(range.to, timezone)} club time, on ${clubDate(range.from, timezone)}.`;
+  const [fromClock, toClock] = [clubClock(range.from, timezone), clubClock(range.to, timezone)];
+  const [fromDay, toDay] = [clubDate(range.from, timezone), clubDate(range.to, timezone)];
+  // Review round 2 (F3-10): a whole club day is midnight to midnight, and "From 00:00 to 00:00
+  // club time" read as an empty window. A window that crosses midnight names both days.
+  if (fromClock === "00:00" && toClock === "00:00" && fromDay !== toDay) return `All of ${fromDay}, club time.`;
+  if (fromDay !== toDay) return `From ${fromClock} on ${fromDay} to ${toClock} on ${toDay}, club time.`;
+  return `From ${fromClock} to ${toClock} club time, on ${fromDay}.`;
 }
 
 // ---------------------------------------------------------------------------------------

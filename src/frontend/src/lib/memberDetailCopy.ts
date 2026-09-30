@@ -432,6 +432,7 @@ export const NIGHT_TAB_COPY = {
   pickerLabel: "Which member?",
   pickerPlaceholder: "Search the club's members",
   membersFailed: "Couldn't read the club's members. That is not the same as the club having none — try again.",
+  membersRetry: "Try again",
   open: "Open their night",
   download: "Download CSV",
   downloadFailed: "Couldn't build that CSV.",

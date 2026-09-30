@@ -249,7 +249,7 @@ export function MemberNight({ userId, name }: { userId: string; name: string | n
  * It asks WHO, and opens that member's own Night tab; the night itself is read only there.
  */
 export function MemberNightPage() {
-  const { pickable, membersLoading, membersFailed } = useClubMembers();
+  const { pickable, membersLoading, membersFailed, retry } = useClubMembers();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const day = validClubDay(params.get("day"));
@@ -272,6 +272,9 @@ export function MemberNightPage() {
             loading={membersLoading}
             error={membersFailed ? NIGHT_TAB_COPY.membersFailed : null}
           />
+          {membersFailed ? (
+            <Button variant="outline" className="self-start" onClick={retry}>{NIGHT_TAB_COPY.membersRetry}</Button>
+          ) : null}
         </CardContent>
       </Card>
     </PageShell>
@@ -287,17 +290,20 @@ export function MemberNightPage() {
 function useClubMembers() {
   const [members, setMembers] = useState<AdminMember[] | null>(null);
   const [membersFailed, setMembersFailed] = useState(false);
+  // F3-16: a failed read said "try again" and offered nothing to press. A retry re-runs the read.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     endpoints.adminMembers()
-      .then((rows) => { if (!cancelled) setMembers(rows); })
+      .then((rows) => { if (!cancelled) { setMembers(rows); setMembersFailed(false); } })
       .catch(() => { if (!cancelled) { setMembers([]); setMembersFailed(true); } });
     return () => { cancelled = true; };
-  }, []);
+  }, [attempt]);
 
+  const retry = useCallback(() => { setMembers(null); setMembersFailed(false); setAttempt((n) => n + 1); }, []);
   const pickable = (members ?? []).map((m) => ({ id: m.user_id, name: m.full_name, subtitle: m.membership_number ?? null }));
-  return { pickable, membersLoading: members === null, membersFailed };
+  return { pickable, membersLoading: members === null, membersFailed, retry };
 }
 
 /**
