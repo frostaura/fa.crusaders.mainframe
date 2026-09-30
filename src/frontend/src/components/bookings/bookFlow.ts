@@ -8,7 +8,7 @@ import {
   type MemberBulkBookResponse,
 } from "@/lib/api";
 import { formatMinutes } from "@/lib/utils";
-import { clubClock } from "@/lib/clubClock";
+import { clubClock, clubShortDate } from "@/lib/clubClock";
 import { refusalReason, RESULT_WORD } from "@/lib/bookingsCopy";
 import { playersEndpoints, type PlayersPayload } from "@/lib/playersApi";
 import type { SelectedSlot } from "./types";
@@ -72,16 +72,9 @@ export function stepsFor(ctx: StepContext): StepId[] {
 
 /* ─────────────────────────────── slot faces ─────────────────────────────── */
 
-/**
- * "Tue 23 Sep" in the club's zone. Built from parts because ICU's en-GB spells September
- * "Sept" — the one four-letter month, which would make this the one label that does not match
- * the week strip and the grid.
- */
-export function clubDayLabel(at: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: timezone })
-    .formatToParts(at);
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${part("weekday")} ${part("day")} ${part("month").slice(0, 3)}`;
+/** "Tue 23 Sep" in the club's zone — the product's one short date (`lib/clubClock`). */
+export function clubDayLabel(at: Date, timezone?: string): string {
+  return clubShortDate(at, timezone);
 }
 
 /** "Tue 23 Sep", "18:00–18:45", "45 min" — the club's clock, whatever the reader's locale. */

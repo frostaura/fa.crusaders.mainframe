@@ -36,6 +36,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   signOut();
+  // The picker remembers the last tab chosen (R1 F1.21); every test here starts from none.
+  window.sessionStorage.clear();
 });
 
 /** A stream that never speaks, so the wallet read is the only figure. */
@@ -146,7 +148,9 @@ describe("BookSheet — Players", () => {
     // No dialog inside the sheet: one dialog, with the panel inside it.
     fireEvent.click(within(court).getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    // Sam is on it already, so the picker shows him as added.
+    // Sam is on it already, so the picker shows him as added. (It reopens on the tab last
+    // chosen — Link — so go back to Favourites first; R1 F1.21.)
+    await tab(PICKER.favourites);
     expect(await screen.findByRole("button", { name: `${SAM.name}, ${PICKER.added}` })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: BOOK_PLAYERS.pickerBack }));
     fireEvent.click(screen.getByRole("button", { name: BOOK_PLAYERS.remove("Sam") }));

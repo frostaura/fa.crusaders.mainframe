@@ -81,11 +81,27 @@ function zoneFor(timezone?: string): string | undefined {
 export function clubShortDate(
   iso: string | number | Date, timezone?: string, options: { weekday?: boolean; year?: boolean } = {},
 ): string {
+  return shortDateIn(new Date(iso), zoneFor(timezone), options);
+}
+
+/**
+ * The same "Thu 1 Oct" for a CLUB DAY that is already a calendar date — `YYYY-MM-DD`, as the
+ * schedules and the week strip hold them. Written at UTC midnight in UTC, so no zone can move it
+ * a day, and WITHOUT teaching "UTC" to `lib/clubZone` as the club's zone (which passing "UTC" to
+ * {@link clubShortDate} would). The input unchanged when it is not a date.
+ */
+export function clubCalendarDate(date: string, options: { weekday?: boolean; year?: boolean } = {}): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return date;
+  return shortDateIn(new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))), "UTC", options);
+}
+
+function shortDateIn(at: Date, timeZone: string | undefined, options: { weekday?: boolean; year?: boolean }): string {
   const { weekday = true, year = false } = options;
   const parts = new Intl.DateTimeFormat(CLUB_LOCALE, {
     weekday: weekday ? "short" : undefined, day: "numeric", month: "short", year: year ? "numeric" : undefined,
-    timeZone: zoneFor(timezone),
-  }).formatToParts(new Date(iso));
+    timeZone,
+  }).formatToParts(at);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
   return [weekday ? part("weekday") : "", part("day"), part("month").slice(0, 3), year ? part("year") : ""]
     .filter(Boolean).join(" ");
@@ -104,12 +120,8 @@ export function clubClock(iso: string | number | Date, timezone?: string): strin
  */
 export function clubDayAndClock(iso: string | number | Date, timezone?: string): string {
   const date = new Date(iso);
-  // Still ICU's own short month ("Sept") — the doors and monitoring suites assert it. Moving this
-  // onto `clubShortDate` is one line here plus those assertions (F4.10, handed to their lane).
-  const day = date.toLocaleDateString(CLUB_LOCALE, {
-    weekday: "short", day: "numeric", month: "short", timeZone: zoneFor(timezone),
-  });
-  return `${day}, ${clubClock(date, timezone)}`;
+  // The one short club date (F4.10/F3.23): "Tue 29 Sep", never ICU's "Sept".
+  return `${shortDateIn(date, zoneFor(timezone), {})}, ${clubClock(date, timezone)}`;
 }
 
 /**

@@ -84,7 +84,7 @@ export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknow
 
 function when(game: UpcomingGame, zone: string | undefined): string {
   const start = new Date(game.starts_at);
-  return `${clubDayLabel(start, zone ?? "UTC")} · ${clubClock(start, zone)}–${clubClock(game.ends_at, zone)}`;
+  return `${clubDayLabel(start, zone)} · ${clubClock(start, zone)}–${clubClock(game.ends_at, zone)}`;
 }
 
 function GameCard({ game, zone }: { game: UpcomingGame; zone: string | undefined }) {

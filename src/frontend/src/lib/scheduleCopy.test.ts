@@ -76,7 +76,8 @@ describe("dates, written without ever becoming an instant", () => {
   it("writes a club-local date in the club's own format", () => {
     expect(clubDateShort("2026-10-06")).toBe("Tue 6 Oct");
     expect(clubDateLong("2026-10-06")).toBe("6 October 2026");
-    expect(clubDateShort("2026-09-22")).toBe("Tue 22 Sept");
+    // One club date format: three-letter months, "Sep" never "Sept" (R1, F4.10).
+    expect(clubDateShort("2026-09-22")).toBe("Tue 22 Sep");
     expect(clubDateLong("2026-12-15")).toBe("15 December 2026");
   });
 
@@ -386,5 +387,18 @@ describe("the list and the detail page", () => {
 
   it("says the record cannot be deleted, in the words the ruling fixes", () => {
     expect(CHANGES_UNDELETABLE).toBe("Nobody can delete these from the app, including admins.");
+  });
+});
+
+describe("one club date (R1, F4.10)", () => {
+  it("writes a calendar date without teaching 'UTC' to the club's zone", async () => {
+    const { clubZone, forgetClubZone, rememberClubZone } = await import("./clubZone");
+    const { clubCalendarDate } = await import("./clubClock");
+    forgetClubZone();
+    rememberClubZone("Africa/Johannesburg");
+    expect(clubCalendarDate("2026-10-01")).toBe("Thu 1 Oct");
+    expect(clubCalendarDate("2026-09-29", { weekday: false, year: true })).toBe("29 Sep 2026");
+    expect(clubZone()).toBe("Africa/Johannesburg");
+    forgetClubZone();
   });
 });

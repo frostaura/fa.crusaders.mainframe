@@ -1,5 +1,5 @@
 import { WEEKDAYS, type ScheduleConflict, type Weekday } from "./adminApi";
-import { clubDayAndClock } from "./clubClock";
+import { clubCalendarDate, clubDayAndClock } from "./clubClock";
 import { epochDay, weekdayOf } from "./scheduleRules";
 import { formatCredits } from "./utils";
 
@@ -107,11 +107,8 @@ function utcDateFor(date: string): Date | null {
 
 /** "Tue 6 Oct" — a weekday AND its date, because a bare weekday is ambiguous over a season. */
 export function clubDateShort(date: string): string {
-  const utc = utcDateFor(date);
-  if (!utc) return date;
-  return utc.toLocaleDateString(CLUB_LOCALE, {
-    weekday: "short", day: "numeric", month: "short", timeZone: "UTC",
-  });
+  // The product's one short date (lib/clubClock) — never ICU's en-GB "Sept".
+  return utcDateFor(date) ? clubCalendarDate(date) : date;
 }
 
 /** "6 October 2026" — the long form, for a consequence line and an accessible name. */
