@@ -18,7 +18,7 @@ import { useAsyncAction } from "@/lib/useAsyncAction";
 import { ConfirmResultSheet, type ConfirmMode } from "./ConfirmResultSheet";
 import { ResultScore } from "./ResultScore";
 import { ResultSheet } from "./ResultSheet";
-import { confirmingNames, outcomeLine, STATUS_TONE } from "./resultFacts";
+import { confirmingNames, isViewer, outcomeLine, STATUS_TONE } from "./resultFacts";
 import { useResult, type ResultRead } from "./useResult";
 
 /**
@@ -193,15 +193,27 @@ function statusHeadline(result: MatchResult): string {
   }
 }
 
-function StatusLines({ result }: { result: MatchResult }) {
+/** R2 F2-5 — the card speaks to its viewer: "Waiting for you to confirm", "You said this isn't right". */
+function statusLines(result: MatchResult, me: string | null): string[] {
   const lines: string[] = [];
   if (result.status === "pending") {
     const due = result.confirm_due_at ? playWhen(result.confirm_due_at) : null;
-    lines.push(RESULT_CARD.waitingFor(confirmingNames(result), due));
+    lines.push(RESULT_CARD.waitingFor(confirmingNames(result, me), due));
   }
-  if (result.status === "disputed" && result.disputed_by) lines.push(RESULT_CARD.disputedBy(result.disputed_by.name));
-  if (result.status === "confirmed" && result.confirmed_by) lines.push(RESULT_CARD.confirmedBy(result.confirmed_by.name));
-  lines.push(RESULT_CARD.recordedBy(result.submitted_by.name, playWhen(result.edited_at ?? result.submitted_at)));
+  if (result.status === "disputed" && result.disputed_by) {
+    lines.push(isViewer(result.disputed_by, me) ? RESULT_CARD.disputedByYou : RESULT_CARD.disputedBy(result.disputed_by.name));
+  }
+  if (result.status === "confirmed" && result.confirmed_by) {
+    lines.push(isViewer(result.confirmed_by, me) ? RESULT_CARD.confirmedByYou : RESULT_CARD.confirmedBy(result.confirmed_by.name));
+  }
+  const when = playWhen(result.edited_at ?? result.submitted_at);
+  lines.push(isViewer(result.submitted_by, me) ? RESULT_CARD.recordedByYou(when) : RESULT_CARD.recordedBy(result.submitted_by.name, when));
+  return lines;
+}
+
+function StatusLines({ result }: { result: MatchResult }) {
+  const auth = useAuth();
+  const lines = statusLines(result, auth.status === "authenticated" ? auth.userId : null);
   return (
     <div className="flex flex-col gap-1 text-sm text-text-secondary">
       {lines.map((line) => <p key={line}>{line}</p>)}

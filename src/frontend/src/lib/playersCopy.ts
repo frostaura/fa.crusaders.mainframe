@@ -882,6 +882,9 @@ export const INBOX_COPY = {
   cursorExpired: "The list moved on while you were reading. Refresh to start from the newest.",
   refresh: "Refresh notifications",
   today: "Today",
+  /** R2 F2-5 — a question that has been answered or withdrawn: said so, never still "to confirm". */
+  resolved: "Nothing needed now",
+  resolvedHint: "This no longer needs you — the booking has the latest.",
 } as const;
 
 /** The bell's accessible name: "Notifications, 3 unread" — or just "Notifications". */

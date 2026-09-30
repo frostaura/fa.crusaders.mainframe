@@ -327,6 +327,12 @@ export type MemberNotification = {
   booking_id: string | null;
   created_at: string;
   read_at: string | null;
+  /**
+   * R2 F2-5 — set when the notice no longer asks anything (a "result to confirm" whose result was
+   * confirmed, disputed, edited, withdrawn or voided). Absent from an older API: the row then reads
+   * as before.
+   */
+  resolved_at?: string | null;
 };
 
 export type MemberNotificationPage = {

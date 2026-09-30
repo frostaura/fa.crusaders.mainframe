@@ -98,6 +98,11 @@ export const RESULT_CARD = {
   confirmed: "Confirmed",
   confirmedAuto: "Confirmed automatically",
   confirmedBy: (name: string) => `Confirmed by ${name}`,
+  /** R2 F2-5 — the viewer is addressed as "you", never by their own name. */
+  confirmedByYou: "You confirmed it",
+  disputedByYou: "You said this isn't right.",
+  recordedByYou: (when: string) => `Recorded by you · ${when}`,
+  you: "you",
   voided: "The club removed this result",
   withdrawnStatus: "This result was withdrawn",
   recordedBy: (name: string, when: string) => `Recorded by ${name} · ${when}`,

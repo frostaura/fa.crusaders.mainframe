@@ -6,7 +6,7 @@ import { ResultCard } from "@/components/play/ResultCard";
 import {
   CONFIRM_SHEET, GAME_REASON, PLAY_REFUSAL, RESULT_CARD, RESULT_SHEET, STATUS_WORD,
 } from "@/lib/playCopy";
-import { BOOKING, GUEST, RESULT_PATH, result, samView, serve, submitterView, view } from "./playKit";
+import { BOOKING, GUEST, ME, RESULT_PATH, SAM, result, samView, serve, submitterView, view } from "./playKit";
 
 /**
  * The result on a booking (§9.2) in every status and every hand the server gives the viewer,
@@ -263,5 +263,26 @@ describe("a refusal from the server reads like the live check", () => {
     }
     fireEvent.click(within(dialog).getByRole("button", { name: RESULT_SHEET.submit }));
     expect(await within(dialog).findByText(RESULT_CARD.notStarted)).toBeInTheDocument();
+  });
+});
+
+describe("the card speaks to its viewer (R2 F2-5)", () => {
+  it("pending on the viewer: 'Waiting for you to confirm', and Sam recorded it", async () => {
+    // Sam recorded it; the viewer (Nomsa) is the confirming side.
+    const pending = result({ submitted_by: { user_id: SAM, name: "Sam Petersen" }, viewer_side: "a", viewer_outcome: "won",
+      sides: { a: [result().sides.b[0]], b: [result().sides.a[0]] } });
+    serve([{ path: RESULT_PATH, body: view({ result: pending, permissions: { ...view().permissions, can_record: false, can_confirm: true, can_dispute: true } }) }]);
+    renderCard();
+    expect(await screen.findByText(/Waiting for you to confirm/)).toBeInTheDocument();
+    expect(card()).not.toHaveTextContent(/Waiting for Nomsa/);
+  });
+
+  it("disputed and recorded by the viewer: 'You said this isn't right', 'Recorded by you'", async () => {
+    const disputed = result({ status: "disputed", disputed_by: { user_id: ME, name: "Nomsa Khumalo" } });
+    serve([{ path: RESULT_PATH, body: view({ result: disputed, permissions: { ...view().permissions, can_record: false } }) }]);
+    renderCard();
+    expect(await screen.findByText(RESULT_CARD.disputedByYou)).toBeInTheDocument();
+    expect(card()).toHaveTextContent(/Recorded by you ·/);
+    expect(card()).not.toHaveTextContent(/Nomsa Khumalo said/);
   });
 });

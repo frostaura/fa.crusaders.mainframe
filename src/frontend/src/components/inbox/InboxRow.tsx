@@ -60,7 +60,8 @@ function RowBody(props: BodyProps) {
   const { notice, now, unread, ids, trailing, action } = props;
   // Unknown kinds get the bell.
   const KindIcon = KIND_ICON[notice.kind] ?? Bell;
-  const word = kindWord(notice.kind);
+  const resolved = Boolean(notice.resolved_at);
+  const word = resolved ? COPY.resolved : kindWord(notice.kind);
   return (
     <>
       <span aria-hidden="true" className="relative inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-bg-muted text-text-secondary">
@@ -68,9 +69,10 @@ function RowBody(props: BodyProps) {
         {unread ? <span data-unread-dot="" className="absolute -right-0.5 -top-0.5 size-3 rounded-full bg-accent-strong ring-2 ring-bg-surface" /> : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span id={ids.headlineId} className={cn("break-words text-text-primary", unread ? "font-bold" : "font-medium")}>
+        <span id={ids.headlineId} className={cn("break-words", resolved ? "text-text-secondary" : "text-text-primary", unread ? "font-bold" : "font-medium")}>
           {notice.headline}
         </span>
+        {resolved ? <span data-resolved="" className="text-sm text-text-secondary">{COPY.resolvedHint}</span> : null}
         <span id={ids.metaId} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
           {unread ? <span className="sr-only">{`${COPY.unread}. `}</span> : null}
           {word ? <Meta>{word}</Meta> : null}
