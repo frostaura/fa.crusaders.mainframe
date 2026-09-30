@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, endpoints, type PayFastFormField, type RateGroup, type TopUpOptions } from "../lib/api";
 import { yourRateLine } from "../lib/groupsCopy";
 import { cn, formatCredits, describeTopUpRate, formatMoney } from "../lib/utils";
@@ -17,6 +17,7 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { ArrowDown, Coins } from "../components/ui/icons";
 import { Alert } from "../components/Alert";
 import { parseAmount } from "../lib/amount";
+import { rememberTopUpReturn, safeReturnTo } from "../lib/topUpReturn";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -222,6 +223,9 @@ type FormProps = {
 };
 
 function TopUpForm(props: FormProps) {
+  // `?returnTo=` — where the member came from (an invite, usually); kept for the status page.
+  const [search] = useSearchParams();
+  const returnTo = safeReturnTo(search.get("returnTo"));
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { options, setOptions, amount, setAmount } = props;
   const [error, setError] = useState<string | null>(null);
@@ -254,6 +258,8 @@ function TopUpForm(props: FormProps) {
       // has moved away from rather than registering the member at the new one — before it
       // writes anything, which is the only version that cannot be raced.
       const res = await endpoints.topupStart(value, options.conversion_rate);
+      // The way back (an invite, usually) must survive PayFast, whose return URLs are the server's.
+      rememberTopUpReturn(res.topup_id, returnTo);
       postToGateway(res.redirect_url, res.form_fields);
     } catch (err) {
       const payload = err instanceof ApiError && isRecord(err.payload) ? err.payload : null;

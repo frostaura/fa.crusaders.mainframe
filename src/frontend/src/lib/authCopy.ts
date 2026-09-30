@@ -51,6 +51,8 @@ export const LOGIN = {
   resent: "Sent. If that address is registered and still unconfirmed, a fresh link is on its way — it replaces any earlier one.",
   resendNeedsEmail: "Enter your email address above so we know where to send the link.",
   sessionEnded: "Your session ended, so we've signed you out. Sign in again to pick up where you left off.",
+  /** R1 (lane F2) — arriving from an invite link: what signing in is FOR. */
+  inviteNotice: "Sign in to answer your invite",
   contactHeading: "Contact the club",
 } as const;
 

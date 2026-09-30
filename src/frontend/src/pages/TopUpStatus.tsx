@@ -14,6 +14,9 @@ import { Spinner } from "../components/ui/spinner";
 import { TextLink } from "../components/ui/text-link";
 import { ArrowsClockwise, CheckCircle, Clock, Prohibit, WarningCircle } from "../components/ui/icons";
 import { Alert } from "../components/Alert";
+import { useAuth } from "../lib/auth";
+import { pendingInvitePath } from "../lib/playersPending";
+import { returnLabel, safeReturnTo, topUpReturnFor } from "../lib/topUpReturn";
 
 /**
  * What each failure code means, to a member.
@@ -81,6 +84,7 @@ export default function TopUpStatusPage() {
   const { topupId } = useParams<{ topupId: string }>();
   const [search] = useSearchParams();
   const cancelledReturn = search.get("cancelled") === "1";
+  const wayBack = useWayBack(topupId, search.get("returnTo"));
   const [s, setS] = useState<TopUpStatus | null>(null);
   /* Whether the LAST attempt to read the status failed. Not the sentence — the two places
      that report it say different things, because "we could not reach the club" means something
@@ -205,8 +209,28 @@ export default function TopUpStatusPage() {
           <Alert tone="danger">{UNREACHABLE_LATER}</Alert>
         )}
         <StatusBody status={s} gaveUp={gaveUp} checking={checking} onCheck={checkAgain} />
+        {s.status === "Completed" || s.status === "Cancelled" ? <WayBack path={wayBack} /> : null}
       </Card>
     </StatusShell>
+  );
+}
+
+/**
+ * Where this top-up was started from: `?returnTo=`, else the path kept when the member left for
+ * PayFast, else an invite this device is still waiting to answer (R1, lane F2's journey).
+ */
+function useWayBack(topupId: string | undefined, fromQuery: string | null): string | null {
+  const auth = useAuth();
+  const userId = auth.status === "authenticated" ? auth.userId : null;
+  return safeReturnTo(fromQuery) ?? topUpReturnFor(topupId) ?? pendingInvitePath(userId);
+}
+
+function WayBack({ path }: { path: string | null }) {
+  if (!path) return null;
+  return (
+    <div>
+      <Button asChild variant="primary"><Link to={path}>{returnLabel(path)}</Link></Button>
+    </div>
   );
 }
 

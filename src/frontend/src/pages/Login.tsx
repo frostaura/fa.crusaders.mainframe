@@ -15,6 +15,7 @@ import { Envelope, Fingerprint, Phone } from "../components/ui/icons";
 import { AUTH_SUBLINE, FIELD_REQUIRED, LOGIN, LOGIN_REFUSAL } from "../lib/authCopy";
 import { LANDING_PATH } from "../components/shell/nav";
 import { SIGNED_IN_ARRIVAL } from "../lib/onboarding";
+import { pendingInvitePath } from "../lib/playersPending";
 
 // Seeded by Seeder.cs in Development. Hidden behind import.meta.env.DEV so it disappears in prod builds.
 const DEV_ADMIN_EMAIL = "any@frostaura.net";
@@ -117,8 +118,12 @@ function useCapturedEnding(): SessionEnding | null {
   return ending;
 }
 
-/** Where to land after signing in, and — when the page was someone's — whose it was. */
-type ReturnPath = { path: string; onlyFor: string | null };
+/**
+ * Where to land after signing in, and — when the page was someone's — whose it was. `asked` is
+ * false when nobody asked for a page (the default landing), which is when a waiting invite this
+ * device opened may be resurfaced instead (R1 F2 — the first sign-in after approval).
+ */
+type ReturnPath = { path: string; onlyFor: string | null; asked: boolean };
 
 /**
  * The page the member actually asked for, captured by `RequireAuth` when it turned them away.
@@ -134,10 +139,10 @@ type ReturnPath = { path: string; onlyFor: string | null };
 function useReturnPath(ending: SessionEnding | null): ReturnPath {
   const location = useLocation();
   // …unless the sign-out was asked for so that somebody else could open a page (D5).
-  if (ending?.kind === "signed-out") return { path: ending.returnTo ?? LANDING_PATH, onlyFor: null };
+  if (ending?.kind === "signed-out") return { path: ending.returnTo ?? LANDING_PATH, onlyFor: null, asked: !!ending.returnTo };
   const path = inAppPath(location.state as { from?: { pathname?: string; search?: string } } | null);
-  if (path === null) return { path: LANDING_PATH, onlyFor: null };
-  return { path, onlyFor: ending?.userId ?? null };
+  if (path === null) return { path: LANDING_PATH, onlyFor: null, asked: false };
+  return { path, onlyFor: ending?.userId ?? null, asked: true };
 }
 
 /** The guard's captured `from`, when it is an in-app path other than /login; otherwise null. */
@@ -242,9 +247,11 @@ function useSignIn(onRefused: (refusal: Refusal | null) => void, ending: Session
   const land = (userId?: string) => {
     auth.clearSessionExpired();
     const theirs = from.onlyFor === null || from.onlyFor === userId;
+    // R1 F2 — nobody asked for a page: an invite this device is waiting to answer comes first.
+    const invite = from.asked ? null : pendingInvitePath(userId ?? null);
     // F4.8 — the state is what lets the first-run gate offer the wizard HERE, after a sign-in,
     // and never to a member who opened My Code at a door.
-    nav(theirs ? from.path : LANDING_PATH, { replace: true, state: SIGNED_IN_ARRIVAL });
+    nav(invite ?? (theirs ? from.path : LANDING_PATH), { replace: true, state: SIGNED_IN_ARRIVAL });
   };
   const password = useAsyncAction((e: string, p: string) => auth.login(e, p), {
     success: land,
@@ -254,7 +261,11 @@ function useSignIn(onRefused: (refusal: Refusal | null) => void, ending: Session
     success: land,
     failure: (err) => onRefused(passkeyRefusal(err)),
   });
-  return { password, passkey, land, busy: password.pending || passkey.pending };
+  return { password, passkey, land, busy: password.pending || passkey.pending, forInvite: isInvitePath(from.path) && from.asked };
+}
+
+function isInvitePath(path: string): boolean {
+  return path.startsWith("/j/") || path.startsWith("/invites/");
 }
 
 export default function LoginPage() {
@@ -304,6 +315,7 @@ export default function LoginPage() {
       footer={<>{LOGIN.newHere}{" "}<TextLink to="/register" className="py-3">{LOGIN.register}</TextLink></>}
     >
       <div className="flex flex-col gap-5">
+        {signIn.forInvite ? <p className="text-base font-semibold text-text-primary">{LOGIN.inviteNotice}</p> : null}
         {auth.sessionExpired && !refusal ? <Alert tone="warning" live="polite">{LOGIN.sessionEnded}</Alert> : null}
         {signedOut && !refusal ? <Alert tone="success" live="polite">{signedOut}</Alert> : null}
         {isPasskeySupported() ? (

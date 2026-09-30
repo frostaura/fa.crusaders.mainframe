@@ -711,14 +711,16 @@ describe("Profile — the name rule the server has always had", () => {
     const field = await screen.findByLabelText("Full name");
     expect(screen.getByText(/At least 2 characters/i)).toBeInTheDocument();
 
+    // F4.7 — refused by `aria-disabled`, not `disabled`: a button that disables itself under the
+    // member's finger (a save makes the name "unchanged") drops focus on <body>.
     fireEvent.change(field, { target: { value: "   " } });
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toHaveAttribute("aria-disabled", "true");
 
     fireEvent.change(field, { target: { value: "x" } });
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toHaveAttribute("aria-disabled", "true");
 
     fireEvent.change(field, { target: { value: "Ada L" } });
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("offers somewhere to change the password at all", async () => {

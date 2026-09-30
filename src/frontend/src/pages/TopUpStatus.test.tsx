@@ -498,3 +498,49 @@ describe("Top-up status — back from PayFast after cancelling", () => {
     expect(await screen.findByText(/Waiting for confirmation from PayFast/)).toBeInTheDocument();
   });
 });
+
+/** R1 (lane F2's invite journey) — the way back to where the top-up was started from. */
+describe("Top-up status — the way back", () => {
+  const ID = "dddd1111-0000-0000-0000-000000000004";
+
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", class {
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+    } as unknown as typeof EventSource);
+  });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); sessionStorage.clear(); localStorage.clear(); });
+
+  function show(status: string, search = "") {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status, amount_zar: 200, conversion_rate: 1, failure_code: null } },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+    renderPage(
+      <BalanceProvider>
+        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+      </BalanceProvider>,
+      { initialEntries: [`/wallet/topup/${ID}${search}`] },
+    );
+  }
+
+  it("offers the invite back after a completed top-up, from ?returnTo=", async () => {
+    show("Completed", "?returnTo=%2Fj%2Fabc");
+    expect(await screen.findByRole("link", { name: "Back to your invite" })).toHaveAttribute("href", "/j/abc");
+  });
+
+  it("offers it after a cancel too, from what was kept when the member left for PayFast", async () => {
+    sessionStorage.setItem(`crusaders.topup-return:${ID}`, "/invites/p-1");
+    show("Pending", "?cancelled=1");
+    expect(await screen.findByRole("link", { name: "Back to your invite" })).toHaveAttribute("href", "/invites/p-1");
+  });
+
+  it("ignores a returnTo that leaves the app, and says nothing while the payment is pending", async () => {
+    show("Completed", "?returnTo=https%3A%2F%2Fevil.example");
+    await screen.findByText("Your wallet has been credited.");
+    expect(screen.queryByRole("link", { name: /Back to/ })).toBeNull();
+  });
+});
