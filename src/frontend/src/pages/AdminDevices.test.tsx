@@ -9,10 +9,13 @@ import {
   deviceFixture,
   deviceServer,
   gateFixture,
+  refuse,
   renderPage,
   stubFetch,
+  type StubRoute,
 } from "../test/harness";
 import { clubInstant } from "../lib/clubClock";
+import { rateLimitedSentence } from "../lib/errors";
 
 /**
  * A Radix Select, found by its name (P3 replaced the native selects — R7). Opened the way a
@@ -172,7 +175,8 @@ describe("AdminDevices", () => {
   it("explains a refused regeneration instead of silently keeping the old key on screen", async () => {
     stubFetch([
       ...baseRoutes(),
-      { method: "POST", path: "/api/v1/admin/devices/api-key/regenerate", status: 500, body: { message: "Key store is unavailable." } },
+      // A refusal (4xx) says itself; a 5xx is an unknown outcome and is looked up — see below.
+      { method: "POST", path: "/api/v1/admin/devices/api-key/regenerate", status: 409, body: { message: "Key store is unavailable." } },
     ]);
 
     renderPage(<AdminDevicesPage />);
@@ -184,6 +188,63 @@ describe("AdminDevices", () => {
     // rotated, and a fleet flashed with a key the API never issued.
     expect(await screen.findByText("Key store is unavailable.")).toBeInTheDocument();
     expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••a1c2");
+  });
+
+  /**
+   * Review round 3 (lost-reply audit): a regeneration whose reply is lost is looked up. The stub
+   * performs the write, then fails the reply — as the lost reply did.
+   */
+  describe("a regeneration whose reply was lost", () => {
+    const NEXT = { api_key: "crsdr_live_0000111122223333bbbb", regenerated_at: "2026-09-05T09:00:00Z" };
+    function lostAfter(landed: boolean, readable = true): StubRoute[] {
+      let current = DEVICE_API_KEY_FIXTURE;
+      return [
+        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/api-key"),
+        { path: "/api/v1/admin/devices/api-key", respond: () => (readable || current === DEVICE_API_KEY_FIXTURE ? current : refuse(503, {})) },
+        {
+          method: "POST", path: "/api/v1/admin/devices/api-key/regenerate",
+          respond: () => { if (landed) current = NEXT; return refuse(504, { error: "gateway_timeout" }); },
+        },
+      ];
+    }
+    async function press() {
+      fireEvent.click(await screen.findByRole("button", { name: /Regenerate key/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /Reflash every board after this/ }));
+    }
+
+    it("shows the new key and says it was issued when the club has it", async () => {
+      stubFetch(lostAfter(true));
+      renderPage(<AdminDevicesPage />);
+      await press();
+      await waitFor(() => expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••bbbb"));
+      expect(await screen.findByText(/^New key issued\. .*The club's reply didn't arrive, so we checked its record\.$/)).toBeInTheDocument();
+    });
+
+    it("says nothing changed when the club still has the old key", async () => {
+      stubFetch(lostAfter(false));
+      renderPage(<AdminDevicesPage />);
+      await press();
+      expect(await screen.findByText(/we checked: the club's device key is the one shown — nothing changed/)).toBeInTheDocument();
+      expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••a1c2");
+    });
+
+    it("says it cannot tell when the key cannot be read either", async () => {
+      stubFetch(lostAfter(true, false));
+      renderPage(<AdminDevicesPage />);
+      await press();
+      expect(await screen.findByText(/can't tell whether the key was replaced/)).toBeInTheDocument();
+    });
+  });
+
+  /** Review round 3, V-10: a 429 is the club being busy, not an API that lacks the route. */
+  it("words a rate-limited key read as busy, not as a missing API", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/api-key"),
+      { path: "/api/v1/admin/devices/api-key", status: 429, body: { error: "rate_limited", retry_after_seconds: 12 } },
+    ]);
+    renderPage(<AdminDevicesPage />);
+    expect(await screen.findByText(`Could not read the club's device key: ${rateLimitedSentence(12)}`)).toBeInTheDocument();
+    expect(screen.queryByText(/not serving it yet/)).not.toBeInTheDocument();
   });
 
   it("says so when the key cannot be read at all, rather than showing an empty panel", async () => {

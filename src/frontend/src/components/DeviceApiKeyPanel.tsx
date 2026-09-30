@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, endpoints, type DeviceApiKey } from "../lib/api";
 import { rateLimitedSentence } from "../lib/errors";
+import { unsureSentence, writeOrReadBack } from "../lib/lostReply";
+import { LOST_REPLY, unsureWords } from "../lib/lostReplyCopy";
 import { clubDayAndClock } from "../lib/clubClock";
 import { describeDeviceError } from "../lib/deviceErrors";
 import { ConfirmDialog } from "./admin/ConfirmDialog";
@@ -168,17 +170,23 @@ export function DeviceApiKeyPanel() {
   useEffect(() => { void load(); }, [load]);
 
   async function regenerate() {
+    const before = key?.api_key ?? null;
     try {
-      setKey(await endpoints.adminDeviceApiKeyRegenerate());
-      toast.push({
-        tone: "success",
-        text: "New key issued. The old one stopped working immediately — every board, court boxes and door gates alike, has to be reflashed with this one before it can call in again.",
-        durationMs: 10000,
-      });
+      // A lost reply is looked up (review round 3): the key read again differs from the one on
+      // screen → it was replaced; the same key → nothing changed; unreadable → not known.
+      const { value, proven } = await writeOrReadBack(
+        () => endpoints.adminDeviceApiKeyRegenerate(),
+        async () => { const now = await endpoints.adminDeviceApiKey(); return now.api_key !== before ? now : null; },
+      );
+      setKey(value);
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(KEY_ISSUED) : KEY_ISSUED, durationMs: 10000 });
     } catch (e) {
       // Loud, because the failure this stops is silent: an admin who believes the key
       // rotated goes and flashes a fleet with a key the API never issued.
-      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not regenerate the key."), durationMs: 8000 });
+      const unsure = unsureSentence(e, unsureWords(
+        "the club's device key is the one shown", "the key was replaced", "the Boards page",
+      ));
+      toast.push({ tone: "danger", text: unsure ?? describeDeviceError(e, "Could not regenerate the key."), durationMs: 8000 });
     }
   }
 
@@ -243,6 +251,9 @@ function keyReadFailure(err: unknown): string {
   }
   return "Could not read the club's device key. Reload the page; if it keeps failing, the API is not serving it yet.";
 }
+
+const KEY_ISSUED = "New key issued. The old one stopped working immediately — every board, court boxes and door gates alike, "
+  + "has to be reflashed with this one before it can call in again.";
 
 const REGENERATE_CONSEQUENCE
   = "The old key stops working immediately. Every board — court boxes and door gates — has to be reflashed with the new one "
