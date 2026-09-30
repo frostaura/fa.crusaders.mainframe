@@ -102,7 +102,7 @@ export default function AppShell() {
   if (headerless) {
     return (
       <div className="flex h-full flex-col">
-        <main className="flex min-h-0 flex-1 flex-col overflow-auto">
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-auto">
           <div className={cn(FRAME, "max-w-content", SELF_FRAMED)}>
             <PageErrorBoundary resetKey={location.pathname}><Outlet /></PageErrorBoundary>
           </div>
@@ -143,11 +143,23 @@ export default function AppShell() {
           </div>
         </div>
       </header>
+      {/*
+        `relative` (F4-3): <main> is the scroller, so it must also be the containing block of
+        everything absolutely placed inside it. Without it a visually hidden live region or a
+        positioned badge far down a long page sat at its static position in the DOCUMENT, made
+        the document taller than the screen, and a wheel or a focus scrolled the whole app —
+        header and nav included — off-screen (admin /admin at 1280: scrollY 1588, all blank).
+        `scroll-padding-bottom` (F4-4): the phone's tab bar is fixed over the foot of this
+        scroller, so a control focused by Tab is scrolled clear of it, not under it.
+      */}
       <main
         id="main-content"
         tabIndex={-1}
-        className="flex min-h-0 flex-1 flex-col overflow-auto"
-        style={{ paddingBottom: "var(--app-bottom-bar-height, 0px)" }}
+        className="relative flex min-h-0 flex-1 flex-col overflow-auto"
+        style={{
+          paddingBottom: "var(--app-bottom-bar-height, 0px)",
+          scrollPaddingBottom: "calc(var(--app-bottom-bar-height, 0px) + 0.5rem)",
+        }}
       >
         {/*
           The club-wide shut banner on every route an ADMIN is on (C8) — not only on /admin paths,
