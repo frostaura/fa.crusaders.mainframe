@@ -3,10 +3,11 @@ import { Link, useLocation } from "react-router-dom";
 import { Wallet } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBalance, walletHref, walletLabel, walletTone } from "@/lib/balance";
+import type { HeldFigures, LiveState } from "@/lib/liveBalance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn, formatCredits } from "@/lib/utils";
-import { chipHeldTitle, movementSentence } from "@/lib/walletCopy";
+import { movementSentence } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/auth";
 import { namedShareMovement } from "./shareMovement";
 import { useToast } from "../Toast";
@@ -71,11 +72,53 @@ function useClubMovementToast() {
   }, [delta, toast, clearDelta, me]);
 }
 
-/** The chip's hover title: the stream's health first, then what is held, then the plain one. */
-function chipTitle(state: string, loading: boolean, heldCredits: number, owedBack: number): string {
+/**
+ * F1.11 — what the chip SHOWS: what the member can spend. It showed the whole balance (550) while
+ * 50 was held for a partner, so a member saw 550 and was refused a 520 booking. With nothing held
+ * or owed back the two are the same number and nothing changes; with something set aside the
+ * figure is the spendable one and the name and title say what the rest is.
+ */
+type ChipFigures = { shown: number | null; parted: boolean; held: number; owedBack: number };
+
+function chipFigures(balance: number | null, held: HeldFigures | null): ChipFigures {
+  const heldCredits = held && held.held > 0 ? held.held : 0;
+  const owedBack = held && held.owedBack > 0 ? held.owedBack : 0;
+  const parted = balance !== null && held !== null && (heldCredits > 0 || owedBack > 0);
+  return { shown: parted ? held!.spendable : balance, parted, held: heldCredits, owedBack };
+}
+
+/** ", 20.00 held for partners, 16.00 owed back to partners" — the parts, in words. */
+function partsInWords(f: ChipFigures): string {
+  const held = f.held > 0 ? `, ${f.held.toFixed(2)} held for partners` : "";
+  const owed = f.owedBack > 0 ? `, ${f.owedBack.toFixed(2)} owed back to partners` : "";
+  return `${held}${owed}`;
+}
+
+/**
+ * The accessible name. Unparted, exactly `walletLabel`. Parted: the spendable figure first, then
+ * the whole balance with its parts — "Wallet balance 500.00 credits to spend — 550.00 credits,
+ * 50.00 held for partners. Tap to top up." The tone sentence follows the SPENDABLE figure, as the
+ * chip's colour does: a member with nothing to spend cannot book, whatever the whole says.
+ */
+function chipLabel(balance: number | null, loading: boolean, state: LiveState, f: ChipFigures): string {
+  if (!f.parted || balance === null || f.shown === null) return walletLabel(balance, loading, state, f.held, f.owedBack);
+  const spend = f.shown > 0 ? `${f.shown.toFixed(2)} credits to spend` : "nothing to spend";
+  const tone = walletTone(f.shown);
+  const next = tone === "zero" ? " You can't book until you top up. Tap to top up." : tone === "low" ? " Running low. Tap to top up." : " Tap to top up.";
+  const stale = state === "degraded" ? " This figure is checked every 30 seconds." : "";
+  return `Wallet balance ${spend} — ${balance.toFixed(2)} credits${partsInWords(f)}.${next}${stale}`;
+}
+
+/** The chip's hover title: the stream's health first, then what is set aside, then the plain one. */
+function chipTitle(state: string, loading: boolean, balance: number | null, f: ChipFigures): string {
   if (state === "degraded") return "The club's live updates aren't coming through — this figure is checked every 30 seconds.";
   if (loading) return "Refreshing balance…";
-  return heldCredits > 0 || owedBack > 0 ? chipHeldTitle(heldCredits, owedBack) : "Wallet balance — tap to top up";
+  if (!f.parted || balance === null || f.shown === null) return "Wallet balance — tap to top up";
+  const parts = [
+    f.held > 0 ? `${formatCredits(f.held)} held for partners` : null,
+    f.owedBack > 0 ? `${formatCredits(f.owedBack)} owed back to partners` : null,
+  ].filter(Boolean).join(", ");
+  return `${formatCredits(Math.max(0, f.shown))} to spend — ${formatCredits(balance)} in your wallet, ${parts}. Tap to top up.`;
 }
 
 /**
@@ -90,14 +133,13 @@ function ChipFigure({ balance, loading, displayed }: { balance: number | null; l
 
 export function CreditsChip() {
   const { balance, loading, state, delta, held } = useBalance();
-  // D11 §3a — the figure stays the whole balance; the name and title say what of it is held.
-  const heldCredits = held && held.held > 0 ? held.held : 0;
-  // P11 — and what of it is owed back to partners, paid from the next credit in.
-  const owedBack = held?.owedBack ?? 0;
+  // F1.11 (supersedes D11 §3a's "the figure stays the whole balance"): the figure is what can be
+  // spent; the name and title say what is held for partners and owed back to them.
+  const figures = chipFigures(balance, held);
   const location = useLocation();
   const reduceMotion = usePrefersReducedMotion();
-  const tone = walletTone(balance);
-  const displayed = useCountUp(balance, { instant: reduceMotion });
+  const tone = walletTone(figures.shown);
+  const displayed = useCountUp(figures.shown, { instant: reduceMotion });
   const entice = useZeroBalanceEntice({ atZero: tone === "zero", reduceMotion });
   useClubMovementToast();
 
@@ -111,13 +153,13 @@ export function CreditsChip() {
   return (
     <div className="relative shrink-0">
       <Link
-        to={walletHref(balance)}
+        to={walletHref(figures.shown)}
         onClick={() => entice.stop("tapped")}
         data-credits-chip=""
         data-zero-entice={entice.breathing || undefined}
         data-live-state={state}
-        aria-label={walletLabel(balance, loading, state, heldCredits, owedBack)}
-        title={chipTitle(state, loading, heldCredits, owedBack)}
+        aria-label={chipLabel(balance, loading, state, figures)}
+        title={chipTitle(state, loading, balance, figures)}
         className={cn(
           // A 44px floor in PIXELS at every pointer (it sits beside the 44px account button, and
           // on a phone it is a fingertip target), and no fixed height: at a 32px root the figure
@@ -129,7 +171,7 @@ export function CreditsChip() {
         )}
       >
         <Wallet size={16} weight="fill" aria-hidden="true" className={cn("shrink-0", ICON_TONE[tone])} />
-        <ChipFigure balance={balance} loading={loading} displayed={displayed} />
+        <ChipFigure balance={figures.shown} loading={loading} displayed={displayed} />
         {entice.showWord ? <span aria-hidden="true">· Top up</span> : null}
         {state === "degraded" ? (
           <span aria-hidden="true" className="ml-0.5 inline-block size-1 rounded-full border border-current opacity-70" />

@@ -97,17 +97,38 @@ describe("the chip's name mentions what is held", () => {
     stub(wallet({ held_credits: 0, owed_back_credits: 16, spendable_credits: 104, held_until: null }));
     renderPage(<CreditsChip />);
     const chip = await screen.findByRole("link", { name: /120\.00 credits, 16\.00 owed back to partners/ }, { timeout: 5_000 });
-    await waitFor(() => expect(chip).toHaveAttribute("title", chipHeldTitle(0, 16)));
+    await waitFor(() => expect(chip).toHaveAttribute("title", "104.00 cr to spend — 120.00 cr in your wallet, 16.00 cr owed back to partners. Tap to top up."));
     expect(chipHeldTitle(0, 16)).toBe("Wallet balance — 16.00 cr owed back to partners. Tap to top up.");
     expect(chipHeldTitle(20)).toBe("Wallet balance — 20.00 cr of it held for partners. Tap to top up.");
   });
 
-  it("wears it on the live chip, name and title", async () => {
+  /**
+   * F1.11 — REVERSES D11 §3a's "the figure stays the whole balance". A member saw 550 on the chip
+   * and was refused a 520 booking because 50 was held for a partner: the chip now shows what can
+   * be spent, and its name and title say what the rest is.
+   */
+  it("shows what can be spent, and names the whole balance and what is held", async () => {
     stub(wallet({ held_credits: 20, spendable_credits: 100, held_until: UNTIL }));
     renderPage(<CreditsChip />);
     const chip = await screen.findByRole("link", { name: /120\.00 credits, 20\.00 held for partners/ }, { timeout: 5_000 });
-    await waitFor(() => expect(chip).toHaveAttribute("title", chipHeldTitle(20)));
-    // The figure on the chip is still the whole balance.
+    await waitFor(() => expect(chip).toHaveTextContent("100.00 cr"));
+    expect(chip).not.toHaveTextContent("120.00 cr");
+    expect(chip).toHaveAccessibleName("Wallet balance 100.00 credits to spend — 120.00 credits, 20.00 held for partners. Tap to top up.");
+    expect(chip).toHaveAttribute("title", "100.00 cr to spend — 120.00 cr in your wallet, 20.00 cr held for partners. Tap to top up.");
+  });
+
+  it("says a member with nothing to spend cannot book, whatever the whole balance is", async () => {
+    stub(wallet({ held_credits: 0, owed_back_credits: 130, spendable_credits: -10, held_until: null }));
+    renderPage(<CreditsChip />);
+    const chip = await screen.findByRole("link", { name: /nothing to spend/ }, { timeout: 5_000 });
+    expect(chip).toHaveAccessibleName(/You can't book until you top up/);
+    expect(chip).toHaveAttribute("href", "/wallet/topup");
+  });
+
+  it("keeps the plain balance when nothing is set aside (the fixture, varied)", async () => {
+    stub(wallet({ held_credits: 0, owed_back_credits: 0, spendable_credits: 120, held_until: null }));
+    renderPage(<CreditsChip />);
+    const chip = await screen.findByRole("link", { name: walletLabel(120, false, "live") }, { timeout: 5_000 });
     await waitFor(() => expect(chip).toHaveTextContent("120.00 cr"));
   });
 });
