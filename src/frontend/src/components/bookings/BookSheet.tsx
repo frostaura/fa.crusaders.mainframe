@@ -71,14 +71,16 @@ type StepViewProps = {
 export type BookSheetProps = BookFlowInput & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close when the control that opened it has gone (R3 X-6). */
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 export function BookSheet(props: BookSheetProps) {
-  const { open, onOpenChange } = props;
+  const { open, onOpenChange, onCloseAutoFocus } = props;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* D12 — top-anchored on desktop: steps and picker tabs change its height. */}
-      <DialogContent data-sheet="book" className={TOP_ANCHORED_SHEET}>
+      <DialogContent data-sheet="book" className={TOP_ANCHORED_SHEET} onCloseAutoFocus={onCloseAutoFocus}>
         {props.slots.length > 0 ? <BookFlowView {...props} onClose={() => onOpenChange(false)} /> : null}
       </DialogContent>
     </Dialog>

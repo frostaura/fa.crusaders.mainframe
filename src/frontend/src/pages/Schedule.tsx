@@ -37,6 +37,8 @@ import {
 import { useScheduleDay } from "../lib/scheduleDay";
 import { useHoldLift } from "../lib/scheduleEnd";
 import { useSheetHistory } from "../lib/bookingSheetHistory";
+import { focusAfterAction } from "../lib/focusAfterAction";
+import { gridTabStop } from "../lib/useGridInteractions";
 
 /**
  * Bookings — the week strip, the grid and the two sheets it opens (R1–R6, D8).
@@ -187,12 +189,13 @@ export default function BookingsPage() {
         timezone={day?.timezone ?? "UTC"} sliceMinutes={day?.sliceMinutes ?? 15}
         isAdmin={isAdmin} actorUserId={actorUserId} balanceCredits={balance}
         bookAsUserId={bookAsUserId}
-        onBooked={onBooked} onStale={() => void reconcile()} reread={reconcile}
+        onBooked={onBooked} onStale={() => void reconcile()} reread={reconcile} onCloseAutoFocus={sheets.returnFocus}
         cancelTerms={day ? { penaltyPct: day.penaltyPct, windowMinutes: day.penaltyWindowMinutes } : null}
       />
       <CancelSheet
         open={sheets.cancelOpen} onOpenChange={sheets.setCancelOpen} bookings={sheets.cancelBookings}
         isAdmin={isAdmin} onCancelled={onCancelled} onStale={() => void reconcile()} reread={reconcile}
+        onCloseAutoFocus={sheets.returnFocus}
       />
     </PageShell>
   );
@@ -238,6 +241,8 @@ const DATE_TRIGGER = "ml-1 w-11 shrink-0 justify-center px-0 sm:w-auto sm:px-3 [
  * The week strip — today selected by default, the past greyed for a member (R5) — with a
  * date-picker trigger beside the week arrows to jump further ahead, and the quiet facts a member
  * needs before they pick: how much of today's quota is gone, and whose rate they book at.
+ * From `lg` the strip takes the width the facts leave (R3 V-12: capped at 36rem, it stopped at
+ * about x=608 over a 1215px grid).
  */
 function DayPicker(props: {
   schedule: ScheduleState; isAdmin: boolean;
@@ -249,14 +254,14 @@ function DayPicker(props: {
     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
       <WeekStrip
         value={date} onChange={setDate} min={bounds.min} max={bounds.max} today={today}
-        disablePast={!isAdmin} label={BOOKINGS_COPY.dayStripLabel} className="w-full lg:max-w-xl"
+        disablePast={!isAdmin} label={BOOKINGS_COPY.dayStripLabel} className="w-full lg:min-w-0 lg:flex-1"
         trailing={(
           <DatePicker label={BOOKINGS_COPY.jumpToDate} value={date} onChange={setDate}
             min={bounds.min} max={bounds.max} timeZone={schedule.day?.timezone} className={DATE_TRIGGER} />
         )}
       />
       {quota || rateLine ? (
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end lg:pb-2">
+        <div className="flex flex-wrap items-center gap-2 lg:max-w-xs lg:shrink-0 lg:justify-end lg:pb-2">
           {rateLine ? <p className="text-sm text-text-secondary">{rateLine}</p> : null}
           {/* Approaching a limit is not a warning; only arriving at it is. */}
           {quota ? <Badge tone={quota.atLimit ? "warning" : "neutral"}>{quota.text}</Badge> : null}
@@ -340,12 +345,30 @@ function useSheets() {
   const [bookOpen, setBookOpen] = useState(false);
   const [cancelBookings, setCancelBookings] = useState<GridBooking[]>([]);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const openBook = useCallback((slots: SelectedSlot[]) => { setBookSlots(slots); setBookOpen(true); }, []);
-  const openCancel = useCallback((bookings: GridBooking[]) => { setCancelBookings(bookings); setCancelOpen(true); }, []);
+  const opener = useRef<Element | null>(null);
+  const openBook = useCallback((slots: SelectedSlot[]) => { opener.current = document.activeElement; setBookSlots(slots); setBookOpen(true); }, []);
+  const openCancel = useCallback((bookings: GridBooking[]) => { opener.current = document.activeElement; setCancelBookings(bookings); setCancelOpen(true); }, []);
   // F1.19 — the system Back closes an open sheet instead of leaving Bookings.
   useSheetHistory(bookOpen, () => setBookOpen(false), "book");
   useSheetHistory(cancelOpen, () => setCancelOpen(false), "cancel");
-  return { bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel };
+  const returnFocus = useCallback((event: Event) => backToGrid(event, opener.current), []);
+  return { bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel, returnFocus };
+}
+
+/**
+ * R3 X-6 — a sheet closing after the grid has re-drawn the cell it was opened from (booked,
+ * cancelled) gives focus back to the grid's tab stop — that cell's successor — never `<main>`.
+ * The dialog's own return stands while the opener is still in the page (Escape before anything
+ * changed, a selection bar that is still up). The pending cell is re-drawn again when the day's
+ * confirming read lands, so `focusAfterAction` keeps watching and puts focus back on the stop.
+ */
+function backToGrid(event: Event, opener: Element | null) {
+  if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) return;
+  const stop = gridTabStop();
+  if (!stop) return;
+  event.preventDefault();
+  stop.focus({ preventScroll: true });
+  focusAfterAction(gridTabStop);
 }
 
 /**

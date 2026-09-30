@@ -10,7 +10,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, type CancellationQuote } from "@/lib/api";
 import { cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
-import { UnsureOutcome, type Reread } from "@/lib/bookingOutcome";
+import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL } from "@/lib/bookingsCopy";
@@ -57,13 +57,15 @@ export type CancelSheetProps = {
   onStale?: () => void;
   /** Re-reads the day and returns it — an unanswered cancel is checked against it (F1.1). */
   reread?: Reread;
+  /** Where focus goes on close when the control that opened it has gone (R3 X-6). */
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 export function CancelSheet(props: CancelSheetProps) {
-  const { open, onOpenChange } = props;
+  const { open, onOpenChange, onCloseAutoFocus } = props;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-sheet="cancel">
+      <DialogContent data-sheet="cancel" onCloseAutoFocus={onCloseAutoFocus}>
         {props.bookings.length > 0 ? <CancelFlowView {...props} onClose={() => onOpenChange(false)} /> : null}
       </DialogContent>
     </Dialog>
@@ -81,7 +83,7 @@ function useOptionalPush() {
 
 /** Its own words — never the booking's "Nothing was booked" under a failed cancel (F1.2). */
 function failureSentence(error: unknown): string {
-  return error instanceof ApiError || error instanceof UnsureOutcome
+  return error instanceof ApiError || error instanceof UnsureOutcome || error instanceof NotSent
     ? describeBookingError(error, CANCEL_SHEET.fallback, { action: "cancel" })
     : describeFailure(error, { action: CANCEL_SHEET.failedAction });
 }
@@ -101,10 +103,14 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
   const reasonNeeded = forOthers && (!single || waive);
 
   const action = useAsyncAction(
-    () => cancelBookings({
-      bookings, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key, reread: props.reread,
-      quotes: quotes.state.status === "ready" ? quotes.state.quotes : null,
-    }),
+    // R3 I-4: offline, nothing is sent — and the sheet says so.
+    async () => {
+      refuseWhenOffline();
+      return cancelBookings({
+        bookings, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key, reread: props.reread,
+        quotes: quotes.state.status === "ready" ? quotes.state.quotes : null,
+      });
+    },
     {
       success: (result) => {
         const own = bookings.every((b) => b.mine);

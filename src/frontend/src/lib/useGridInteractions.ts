@@ -70,6 +70,16 @@ function focusInView(el: HTMLElement | null) {
   if (typeof cell.scrollIntoView === "function") cell.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
+/**
+ * The grid's one tab stop (R3 X-6): the roving cell's control, or the cell itself. Where focus
+ * goes back to when a sheet closes and the control that opened it was re-rendered away — a Book
+ * button that became the booking, a booking that became a free slot. It is the cell for that very
+ * slot whenever the sheet was opened from a cell, because clicking a cell makes it the stop.
+ */
+export function gridTabStop(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[role="grid"] [tabindex="0"]');
+}
+
 type Move = (here: GridCoord, ctx: { rows: number; cols: number; first: number; ctrl: boolean }) => GridCoord;
 
 /**

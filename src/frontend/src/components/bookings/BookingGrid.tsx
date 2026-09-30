@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type FocusEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CaretDown } from "@/components/ui/icons";
@@ -355,14 +355,23 @@ function useBoardScroll(firstLive: number, key: string, courts: number) {
 /** Forced colours keep system colours only: the pressed chip in Highlight, opted out of the override. */
 const FORCED_PRESSED = "forced-colors:aria-pressed:bg-[Highlight] forced-colors:aria-pressed:text-[HighlightText] forced-colors:aria-pressed:[forced-color-adjust:none]";
 
+/**
+ * R3 X-8 — a chip reached by Tab is brought into the row's view: the row scrolls sideways, and
+ * "Court 4" took focus while it was still off the edge of a 390px phone.
+ */
+function chipInView(event: FocusEvent<HTMLElement>) {
+  const chip = event.currentTarget;
+  if (typeof chip.scrollIntoView === "function") chip.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
 function CourtChips({ courts, active, onPick }: { courts: ScheduleCourt[]; active: number; onPick: (i: number) => void }) {
   return (
-    <div role="group" aria-label={BOOKINGS_COPY.courtChips} className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+    <div role="group" aria-label={BOOKINGS_COPY.courtChips} className="-mx-4 flex scroll-px-4 gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:scroll-px-0 sm:px-0">
       {courts.map((c, i) => (
         // R2 F1-12: 44px targets (`md`), not 36. R2 F1-11: under forced colours the current chip
         // is drawn in the system highlight — the secondary fill was thrown away with the rest.
         <Button key={c.id} size="md" variant={i === active ? "secondary" : "outline"} aria-pressed={i === active}
-          aria-label={courtChipLabel(c.name)} onClick={() => onPick(i)} className={cn("shrink-0 rounded-full", FORCED_PRESSED)}>
+          aria-label={courtChipLabel(c.name)} onClick={() => onPick(i)} onFocus={chipInView} className={cn("shrink-0 rounded-full", FORCED_PRESSED)}>
           {c.name}
         </Button>
       ))}
