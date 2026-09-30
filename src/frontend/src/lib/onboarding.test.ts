@@ -5,7 +5,7 @@ import {
   wizardReducer, writeLocalOnboarding, type OnboardingPrefs,
 } from "./onboarding";
 import { installRoute, isIos } from "./installPrompt";
-import { GET_STARTED } from "./onboardingCopy";
+import { CODE_KEEPS_CHANGING, GET_STARTED, guideSteps, whatsNextSteps } from "./onboardingCopy";
 
 /**
  * P8 — the rules the wizard, the gate and the tour stand on, without a DOM.
@@ -222,5 +222,23 @@ describe("the install step's four answers", () => {
     expect(isIos("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", 5)).toBe(true);
     expect(isIos("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", 5)).toBe(true);
     expect(isIos("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", 0)).toBe(false);
+  });
+});
+
+/**
+ * R3 M-4 — the guide and the after-booking card say nothing a layout or a club setting can make
+ * false: the code's step is a club setting (30 s, not "every minute"), and My Code is in a bottom
+ * tab bar on a phone (not "the menu at the top").
+ */
+describe("the code's words are layout- and setting-neutral (R3 M-4)", () => {
+  const all = [
+    ...guideSteps({ doors: "yes" }).flatMap((s) => s.body),
+    ...whatsNextSteps({ courtNumber: 1, day: "Wed 30 Sep", startsClock: "18:00", endsClock: "18:15" }, { doors: "yes" }),
+  ].join(" ");
+
+  it("names no period for the code and no place for the menu", () => {
+    expect(all).not.toMatch(/every (minute|\d+ seconds?)/i);
+    expect(all).not.toMatch(/menu at the (top|bottom)|(top|bottom) menu/i);
+    expect(all).toContain(CODE_KEEPS_CHANGING);
   });
 });

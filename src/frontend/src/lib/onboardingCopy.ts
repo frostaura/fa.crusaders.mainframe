@@ -1,4 +1,8 @@
 import { formatCredits } from "./utils";
+
+/** R3 M-4 — how often the code changes is the club's setting; the sentence never names a period. */
+export const CODE_KEEPS_CHANGING = "The code changes by itself every so often. That is normal, and you never have to do anything about it.";
+
 /**
  * GOAL item 16 — what happens after you book, in words for somebody who is not good with
  * technology.
@@ -161,8 +165,10 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
       id: "code",
       title: "Come to the club",
       body: [
-        "Bring your phone. Open My Code from the menu at the top.",
-        "The code changes every minute. That is normal, and you never have to do anything about it.",
+        // R3 M-4 — the menu is a top bar on a wide screen and a bottom tab bar on a phone, and the
+        // code's step is a club setting (30 s here): neither is named, so neither can be wrong.
+        "Bring your phone. Open My Code — it is always in the app's menu.",
+        CODE_KEEPS_CHANGING,
       ],
     },
   ];
@@ -263,7 +269,7 @@ export function whatsNextSteps(booking: { courtNumber: number | null; day: strin
   const where = booking.courtNumber != null ? `court ${booking.courtNumber}` : "your court";
   const lines = [
     `Your court is ${where} on ${booking.day}, from ${booking.startsClock} to ${booking.endsClock}.`,
-    "Bring your phone. Your code is on My Code in the menu — it changes every minute, which is normal.",
+    `Bring your phone. Your code is on My Code in the app's menu. ${CODE_KEEPS_CHANGING}`,
   ];
   if (input.doors !== "no") {
     lines.push("At the club door, hold your phone in front of the small scanner beside it. "
