@@ -77,7 +77,7 @@ export function RequireAuth(props: { children: ReactNode; admin?: boolean; allow
    * </p>
    */
   if (auth.status === "offline") {
-    if (!copesWithoutClub(location.pathname)) return <ConnectionLost onRetry={auth.retryConnection} />;
+    if (!copesWithoutClub(location.pathname)) return <ConnectionLost onRetry={auth.retryConnection} cause={auth.cause} />;
     return <>{children}</>;
   }
   if (auth.status !== "authenticated") {

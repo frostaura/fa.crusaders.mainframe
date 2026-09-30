@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { WifiSlash } from "@/components/ui/icons";
+import { Clock, WifiSlash } from "@/components/ui/icons";
 import { PageShell } from "@/components/ui/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { ApiError } from "@/lib/api";
+import { rateLimitedSentence } from "@/lib/errors";
+import { CONNECTION_COPY } from "@/lib/shellCopy";
 import { typography } from "@/lib/typography";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CrestMark } from "./Crest";
@@ -56,20 +59,26 @@ export function BootSplash() {
  * when the probe resolves whether or not it succeeded (on failure this screen stays mounted).
  * </p>
  */
-export function ConnectionLost({ onRetry }: { onRetry: () => void | Promise<void> }) {
+export function ConnectionLost({ onRetry, cause }: { onRetry: () => void | Promise<void>; cause?: unknown }) {
   const retry = useAsyncAction(async () => { await onRetry(); });
+  // V-10 — a 429 is the club ANSWERING, busy; saying "can't reach" blamed a connection that was fine.
+  const busy = cause instanceof ApiError && cause.status === 429;
+  const wait = busy ? Number(cause.detail("retry_after_seconds")) || null : null;
   return (
     <PageShell width="narrow">
       <Card>
         <CardContent className="flex flex-col items-start gap-3">
-          <WifiSlash size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />
-          <h1 data-route-heading="" className={typography({ variant: "h2" })}>Can't reach the club right now</h1>
+          {busy
+            ? <Clock size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />
+            : <WifiSlash size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />}
+          <h1 data-route-heading="" className={typography({ variant: "h2" })}>
+            {busy ? CONNECTION_COPY.busyTitle : CONNECTION_COPY.unreachableTitle}
+          </h1>
           <p className="text-sm text-text-secondary">
-            You're still signed in. This is usually a brief interruption — we'll keep trying, and the
-            page will carry on by itself once the connection is back.
+            {busy ? `${rateLimitedSentence(wait)} ${CONNECTION_COPY.busyBody}` : CONNECTION_COPY.unreachableBody}
           </p>
           <Button className="mt-1" pending={retry.pending} onClick={() => { void retry.run(); }}>
-            Try again now
+            {CONNECTION_COPY.retry}
           </Button>
         </CardContent>
       </Card>

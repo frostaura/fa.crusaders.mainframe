@@ -25,7 +25,14 @@ type AuthState =
    * so the token is kept and the probe retried with backoff until the club answers.
    * </p>
    */
-  | { status: "offline" }
+  | {
+      status: "offline";
+      /**
+       * V-10 — what the last probe failed with, so the screen can tell "busy" (a 429: the club
+       * answered) from "unreachable". Absent when nothing was thrown worth naming.
+       */
+      cause?: unknown;
+    }
   | {
       status: "authenticated"; userId: string; isAdmin: boolean;
       /**
@@ -502,7 +509,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       // The club is down, not the session. Keep the token — a redeploy must not cost every
       // signed-in member their session — and keep asking until somebody answers.
-      setState({ status: "offline" });
+      setState({ status: "offline", cause: err });
       const delay = nextProbeDelayMs(probeAttempt.current);
       probeAttempt.current += 1;
       if (probeTimer.current) window.clearTimeout(probeTimer.current);

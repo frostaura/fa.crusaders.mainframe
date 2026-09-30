@@ -13,3 +13,17 @@ export const CHUNK_COPY = {
   retry: "Retry",
   myCode: "Go to My Code",
 } as const;
+
+/**
+ * The screen shown while a stored session exists and the club has not confirmed it
+ * (`SessionScreens.ConnectionLost`). V-10: a 429 is the club answering "busy", not an outage, so
+ * it gets its own heading and the rate-limit sentence from `lib/errors` — never "the connection".
+ */
+export const CONNECTION_COPY = {
+  unreachableTitle: "Can't reach the club right now",
+  unreachableBody: "You're still signed in. This is usually a brief interruption — we'll keep trying, and the page will carry on by itself once the connection is back.",
+  busyTitle: "The club is busy right now",
+  /** Follows `rateLimitedSentence(…)`. */
+  busyBody: "You're still signed in, and nothing is wrong with your connection — we'll ask again by ourselves.",
+  retry: "Try again now",
+} as const;
