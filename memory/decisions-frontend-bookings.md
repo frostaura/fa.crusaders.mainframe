@@ -1,14 +1,14 @@
 ---
 name: crusaders-mainframe-decisions-frontend-bookings
-description: "Bookings screen (R2 lane F1): only the latest schedule read lands, ?as= draws the member's windows, finished games live under Recent, 4xx refusals get no retry, held parts per deadline."
+description: "Bookings screen (R2/R3 lane F1): latest schedule read wins, ?as= draws member windows, game cards name accepted seats and paid/owed, offline sends nothing, focus returns to the grid."
 type: decision
 last_verified: 2026-09-30
 ---
 
-# Live decisions — the Bookings screen (review round 2, lane F1)
+# Live decisions — the Bookings screen (review rounds 2–3, lane F1)
 
-Each came from a round-2 finding reproduced on the running app; the pinning tests are
-`lib/scheduleDay.test.tsx`, `pages/bookings-review-r2.test.tsx` and `e2e/bookings-r2.spec.ts`.
+Each came from a finding reproduced on the running app; the pinning tests are
+`lib/scheduleDay.test.tsx`, `pages/bookings-review-r2|r3.test.tsx`, `e2e/bookings-r2|r3.spec.ts`.
 
 - **Only the latest schedule read may touch the day, the error or the spinner** (F1-2). A reply for
   a day the member has left is dropped; a background re-read (`reconcile`) lands on screen only
@@ -42,3 +42,12 @@ Each came from a round-2 finding reproduced on the running app; the pinning test
   the seat's Add after Back — the step's body is swapped, so the focused node vanishes otherwise.
 - **The phone's week-strip caption uses short months ("Sep – Oct 2026") and never `break-words`**
   (F1-10): at 200 % text "September" broke mid-word beside the arrows.
+- **A game card names only ACCEPTED seats and counts the rest; a seat's `name` may be null** (R3
+  V-1, M-3): an unclaimed invite link has no name, and `p.name.split` crashed all of /bookings.
+  The money line is what the game cost (`my_paid_credits`) or is owed (`my_owing_credits`), the
+  share only from a server without them — "your share 25" was said to an organiser who paid 50.
+- **Offline (`navigator.onLine === false`) a booking write is not sent** (`NotSent`, R3 I-4):
+  certain nothing happened, so it says so — never the lost-reply "can't tell". A hold lift whose
+  reply was lost reads the day back like book and cancel do (gone = lifted).
+- **A sheet closing over a re-drawn cell returns focus to the grid's tab stop** (R3 X-6,
+  `gridTabStop`), not `<main>`; the dialog's own return stands while the opener still exists.
