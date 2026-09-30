@@ -23,6 +23,8 @@ import {
   ASSIGN_COPY, explainAssignRefusal, peakChangeLine, peakChip, rateChangeLine, rateChip, rulesChangeLines, tariffLine,
 } from "@/lib/groupsCopy";
 import { memberDetailEndpoints } from "@/lib/memberDetailApi";
+import { writeOrReadBack } from "@/lib/lostReply";
+import { LOST_REPLY } from "@/lib/lostReplyCopy";
 import { cn } from "@/lib/utils";
 
 /**
@@ -157,9 +159,14 @@ function useAssignState({ userId, name, current, onSaved, onClose }: GroupAssign
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await adminEndpoints.memberGroupsSet(userId, { groupIds: selected, reason });
-      const rateGroup = result.groups.find((g) => g.id === result.tariff.rate_group_id)?.name ?? null;
-      toast.push({ tone: "success", text: `${ASSIGN_COPY.saved(name, result.groups.length)} ${tariffLine(result.tariff, rateGroup)}.` });
+      // A lost reply reads the member back (R4 carry-over): their groups are the set sent → saved.
+      const { value: result, proven } = await writeOrReadBack(
+        () => adminEndpoints.memberGroupsSet(userId, { groupIds: selected, reason }),
+        () => groupsAccordingToMember(userId, selected),
+      );
+      const rateGroup = result.groups.find((g) => g.id === result.tariff?.rate_group_id)?.name ?? null;
+      const said = `${ASSIGN_COPY.saved(name, result.groups.length)}${result.tariff ? ` ${tariffLine(result.tariff, rateGroup)}.` : ""}`;
+      toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said) : said });
       onSaved(result);
       onClose();
     } catch (err) {
@@ -173,6 +180,17 @@ function useAssignState({ userId, name, current, onSaved, onClose }: GroupAssign
     groups: reads.groups, readError: reads.readError, read: reads.read, known: reads.known,
     selected, toggle, changed, preview, reason, setReason, saving, saveError, save,
   };
+}
+
+/**
+ * The member's groups as their page reads them, shaped as the save's answer when they are the set
+ * sent; null when they are not (the save did not land). The tariff rides along where the API has it.
+ */
+async function groupsAccordingToMember(userId: string, sent: string[]): Promise<MemberGroupsSetResult | null> {
+  const detail = await memberDetailEndpoints.detail(userId);
+  const groups = detail.groups ?? [];
+  if (!sameSet(groups.map((g) => g.id), sent)) return null;
+  return { user_id: userId, groups, added: [], removed: [], tariff: detail.tariff as MemberGroupsSetResult["tariff"] };
 }
 
 function sameSet(a: string[], b: string[]): boolean {

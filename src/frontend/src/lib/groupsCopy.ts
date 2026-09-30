@@ -982,7 +982,12 @@ export const ASSIGN_REFUSAL_CODES: Record<string, string> = {
 };
 
 /** A refusal with the group it names, where the server named one. */
+/** A member's groups set whose reply was lost, read back from their page (R4 carry-over). */
+export const ASSIGN_LOST = unsureWords("their groups are as they were", "their groups were changed", "their page");
+
 export function explainAssignRefusal(err: unknown): string {
+  const unsure = unsureSentence(err, ASSIGN_LOST);
+  if (unsure) return unsure;
   if (err instanceof ApiError && err.code === "group_archived") {
     const name = err.detail("name");
     if (typeof name === "string" && name) {
