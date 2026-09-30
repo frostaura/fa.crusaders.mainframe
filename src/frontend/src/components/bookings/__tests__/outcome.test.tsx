@@ -271,6 +271,33 @@ describe("F1.5 — a group-window refusal names the rule, the day and who may ch
   });
 });
 
+describe("R2 F1-4 — a window refusal says the day in words and offers no retry that cannot work", () => {
+  it("reads the server's own day key ('wed') as a weekday", () => {
+    // BookingRules.DayName sends OperatingHours' keys — "mon"…"sun" — never a word.
+    const e = new ApiError(409, { error: "group_window", groups: ["Juniors"], day: "wed", allowed_windows: [{ start: "09:00", end: "16:00" }] });
+    const text = describeBookingError(e, "x", { forName: "Naledi" });
+    expect(text).toContain("on Wednesday");
+    expect(text).not.toMatch(/on wed\b/);
+    const none = new ApiError(409, { error: "no_bookable_window", groups: ["Juniors"], day: "sun" });
+    expect(describeBookingError(none, "x")).toContain("at all on Sunday");
+  });
+
+  it("offers no Try again on the desk's refused quote — asking again gets the same refusal", async () => {
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: refuse(409, { error: "group_window", groups: ["Juniors"], day: "wed", allowed_windows: [{ start: "09:00", end: "16:00" }] }) }]);
+    openBook({ isAdmin: true, members: [{ id: NALEDI, name: "Naledi Khumalo", balance: 85 }], bookAsUserId: NALEDI });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    expect(await screen.findByText(/can book 09:00–16:00 on Wednesday/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: BOOK_SHEET.retry })).toBeNull();
+  });
+
+  it("still offers Try again when the quote could not be read at all", async () => {
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", status: 503, body: { error: "unavailable" } }]);
+    openBook({ isAdmin: true, members: [{ id: NALEDI, name: "Naledi Khumalo", balance: 85 }], bookAsUserId: NALEDI });
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
+    expect(await screen.findByRole("button", { name: BOOK_SHEET.retry })).toBeTruthy();
+  });
+});
+
 describe("F1.10 — Confirm states the cancellation terms before anything is charged", () => {
   it("says the window, the penalty and the lights-on rule", async () => {
     stubFetch([]);

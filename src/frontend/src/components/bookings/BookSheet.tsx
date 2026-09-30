@@ -13,6 +13,7 @@ import { MemberCombobox } from "@/components/ui/member-combobox";
 import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
+import { worthRetrying } from "@/lib/bookingErrors";
 import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine } from "@/lib/bookingsCopy";
 import { useBalance } from "@/lib/balance";
 import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
@@ -233,7 +234,7 @@ function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string 
   );
 }
 
-/** A quote that could not be read: the refusal it carried, or the failure, and a retry. */
+/** A quote that could not be read: the refusal it carried, or the failure, and a retry where one could help. */
 function QuoteProblem({ flow }: { flow: BookFlow }) {
   const state = flow.quote.state;
   if (state.status !== "error") return null;
@@ -243,7 +244,8 @@ function QuoteProblem({ flow }: { flow: BookFlow }) {
   return (
     <div className="grid justify-items-start gap-3">
       <Alert tone="danger" className="w-full">{sentence}</Alert>
-      <Button variant="outline" onClick={flow.quote.retry}>{BOOK_SHEET.retry}</Button>
+      {/* R2 F1-4 — only where asking again could change the answer. */}
+      {worthRetrying(state.error) ? <Button variant="outline" onClick={flow.quote.retry}>{BOOK_SHEET.retry}</Button> : null}
     </div>
   );
 }

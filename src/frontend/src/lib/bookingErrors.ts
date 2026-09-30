@@ -172,8 +172,8 @@ function groupNames(err: ApiError): string | null {
  */
 function describeGroupWindow(err: ApiError, forName: string | null | undefined): string {
   const groups = groupNames(err);
-  const day = err.detail("day");
-  const onDay = typeof day === "string" ? ` on ${day}` : " that day";
+  const day = dayInWords(err.detail("day"));
+  const onDay = day ? ` on ${day}` : " that day";
   const noun = groups?.includes(" and ") ? "groups" : "group";
   const whose = (lead: boolean) => {
     const owner = forName ? `${forName}'s` : lead ? "Your" : "your";
@@ -188,6 +188,33 @@ function describeGroupWindow(err: ApiError, forName: string | null | undefined):
   const windows = allowedWindows(err);
   const when = windows ? ` ${forName ? "They" : "You"} can book ${windows}${onDay}.` : "";
   return `That time is outside ${whose(false)} booking times.${when}${override}`;
+}
+
+/** The server's day keys (`OperatingHours.DayKeys`) as the weekday a member reads. */
+const DAY_WORDS: Record<string, string> = {
+  mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
+};
+
+/**
+ * "wed" → "Wednesday" (R2 F1-4: the refusal said "on wed"). A word the server already spelled
+ * out passes through; anything unrecognisable is dropped, and the sentence says "that day".
+ */
+function dayInWords(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  const key = raw.trim().toLowerCase().slice(0, 3);
+  const word = DAY_WORDS[key];
+  if (!word) return null;
+  return raw.trim().length <= 3 ? word : raw.trim()[0].toUpperCase() + raw.trim().slice(1);
+}
+
+/**
+ * Would asking again change the answer? Not for a refusal about the member or the rules (a 4xx
+ * with a reason) — a Try again beside "outside your group's times" promises what it cannot do
+ * (R2 F1-4). A failure to hear back, a 5xx, a timeout (408) or a rate limit (429) may pass.
+ */
+export function worthRetrying(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return true;
+  return e.status >= 500 || e.status === 408 || e.status === 429 || e.status === 401;
 }
 
 function allowedWindows(err: ApiError): string | null {
