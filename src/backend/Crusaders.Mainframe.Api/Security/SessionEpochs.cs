@@ -101,12 +101,16 @@ public sealed class SessionEpochs
 
     /// <summary>
     /// Whether a connection that outlives its request — an SSE stream — may go on: the same
-    /// question as <see cref="IsStaleAsync"/>, answered in a scope of its own.
+    /// question as <see cref="IsStaleAsync"/>, plus whether the ticket's refresh family
+    /// (<see cref="RefreshFamilies"/>) is still live, answered in a scope of its own.
     /// </summary>
     public async Task<bool> StillCurrentAsync(ClaimsPrincipal principal, IServiceProvider services, CancellationToken ct)
     {
         using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        return !await IsStaleAsync(principal, scope.ServiceProvider, ct);
+        // C1 (review round 2): the stream also ends when its refresh family does — a sign-out
+        // closes every open stream of that session within one keep-alive, not only new requests.
+        return !await IsStaleAsync(principal, scope.ServiceProvider, ct)
+               && !await scope.ServiceProvider.GetRequiredService<RefreshFamilies>().IsEndedAsync(principal, scope.ServiceProvider, ct);
     }
 
     /// <summary>The account's epoch from the row, never the cache. Null for an unknown account.</summary>

@@ -226,6 +226,7 @@ public static class WalletEndpoints
         if (userId is null) return Results.Unauthorized();
         var ticket = jwt.IssueOneTime(userId.Value, tenant.TenantId, tenant.TenantSlug,
             new TicketScope(TokenPurposes.WalletStream, TokenPurposes.WalletStreamTicketTtl), SessionEpochs.EpochOf(ctx.User));
+        ticket = RefreshSessions.BindTicket(jwt, ctx.User, ticket);
         return Results.Ok(new
         {
             ticket,

@@ -192,6 +192,15 @@ public sealed class RefreshSessions
         return !await links.AnyAsync(t => t.RevokedAt != null, ct) && await links.AnyAsync(t => t.ExpiresAt > now, ct);
     }
 
+    /// <summary>
+    /// A stream ticket bound to the refresh family of the session that minted it (C1), so a
+    /// sign-out closes the stream it opened. A session from before C1 mints an unbound ticket.
+    /// </summary>
+    public static string BindTicket(IJwtIssuer jwt, System.Security.Claims.ClaimsPrincipal minter, string ticket)
+    {
+        return FamilyOf(minter) is { } family ? jwt.BindToFamily(ticket, family) : ticket;
+    }
+
     /// <summary>The family a presented link belongs to, in this club — for sign-out. Null when unknown.</summary>
     public async Task<Guid?> FamilyOfAsync(string? plaintext, Guid tenantId, CancellationToken ct)
     {

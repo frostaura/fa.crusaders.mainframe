@@ -313,6 +313,54 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
         }
     }
 
+    /// <summary>
+    /// Review round 2, C1: a sign-out ends the session's open streams too, not only its next
+    /// request. The ticket carries the session's refresh family; the stream re-checks it on every
+    /// keep-alive (the epoch's cache, evicted by the revoke) and ends within one interval.
+    /// Here in this class, not its own: <c>KeepAliveOverride</c> is a static.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_open_wallet_stream_closes_within_a_keep_alive_of_its_session_signing_out()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "streamout");
+        var bearer = await club.LoginAsync(app, "olga");
+        var session = club.Bearer(app, bearer);
+        var ticket = (await MemberCodeClub.JsonAsync(await session.PostAsync("/api/v1/wallet/stream-ticket", null))).GetProperty("ticket").GetString()!;
+        var family = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(bearer).Claims
+            .Single(c => c.Type == Crusaders.Mainframe.Api.Security.RefreshSessions.FamilyClaim).Value;
+        Assert.Equal(family, new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(ticket).Claims
+            .Single(c => c.Type == Crusaders.Mainframe.Api.Security.RefreshSessions.FamilyClaim).Value);
+
+        Crusaders.Mainframe.Api.Endpoints.WalletEndpoints.KeepAliveOverride = TimeSpan.FromMilliseconds(300);
+        try
+        {
+            var client = app.CreateClient();
+            client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/wallet/stream?ticket={Uri.EscapeDataString(ticket)}");
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(cts.Token));
+            Assert.StartsWith("data:", await reader.ReadLineAsync(cts.Token));
+            await reader.ReadLineAsync(cts.Token);   // at least one keep-alive re-check, so "live" is cached
+
+            Assert.Equal(HttpStatusCode.NoContent, (await session.PostAsync("/api/v1/auth/logout", null)).StatusCode);
+            var signedOut = System.Diagnostics.Stopwatch.StartNew();
+
+            string? line;
+            while ((line = await reader.ReadLineAsync(cts.Token)) is not null) { }
+            Assert.Null(line);
+            Assert.True(signedOut.Elapsed < TimeSpan.FromSeconds(3), $"stream outlived the sign-out by {signedOut.Elapsed}");
+        }
+        finally
+        {
+            Crusaders.Mainframe.Api.Endpoints.WalletEndpoints.KeepAliveOverride = null;
+        }
+    }
+
     // ---- Refute round 2, M1: a sign-in inside the rotation --------------------------------------
 
     /// <summary>
