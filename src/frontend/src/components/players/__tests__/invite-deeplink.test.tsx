@@ -32,6 +32,9 @@ function invite(overrides: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
+/** The caller's own seat (`GET /me/invites/{id}`, B4): 404 — not this account's. */
+const NOT_MY_SEAT: StubRoute = { path: `/api/v1/me/invites/${SEAT}`, status: 404, body: { error: "invite_not_found" } };
+
 function openDeepLink(routes: StubRoute[], participantId = SEAT): FetchStub {
   const stub = stubFetch([
     ...routes,
@@ -69,7 +72,7 @@ describe("the invite mail's deep link", () => {
   });
 
   it("an invite no longer waiting is a sentence with the way to Invites and Bookings", async () => {
-    openDeepLink([{ path: "/api/v1/me/invites", body: { items: [invite({ participant_id: "other" })], count: 1 } }]);
+    openDeepLink([{ path: "/api/v1/me/invites", body: { items: [invite({ participant_id: "other" })], count: 1 } }, NOT_MY_SEAT]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.deepLinkGone })).toBeInTheDocument();
     expect(screen.getByText(INVITES_COPY.deepLinkGoneHint)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: INVITES_COPY.toInvites })).toHaveAttribute("href", "/bookings/invites");
@@ -79,6 +82,7 @@ describe("the invite mail's deep link", () => {
   it("D5 — says which account is signed in, and signs out so the invited member can open it", async () => {
     const stub = stubFetch([
       { path: "/api/v1/me/invites", body: { items: [], count: 0 } },
+      NOT_MY_SEAT,
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: "/api/v1/me/profile", body: {
         user_id: "44444444-4444-4444-4444-444444444444", email: "olivia@club.review.test", is_admin: false, tenant_slug: "crusaders",
@@ -114,38 +118,44 @@ describe("the invite mail's deep link", () => {
 });
 
 
-describe("R1 F2.7 / F2.8 — the mail's link after the invite moved on", () => {
-  const NOTICES = { path: "/api/v1/me/notifications", body: { items: [
-    { id: "n1", kind: "players.invited", headline: "Sam invited you", link: `/invites/${SEAT}`, booking_id: BOOKING, created_at: "2026-09-28T08:00:00Z", read_at: null },
-  ], unread_count: 1, next_cursor: null } };
-  const DETAIL = `/api/v1/bookings/${BOOKING}`;
-  const detail = (status: string, seatStatus: string) => ({
-    booking_id: BOOKING, status, players: [{ participant_id: SEAT, status: seatStatus }],
+describe("R1 F2.7 / F2.8 — the mail's link after the invite moved on (asked of GET /me/invites/{id}, B4)", () => {
+  const LIST = { path: "/api/v1/me/invites", body: { items: [], count: 0 } };
+  const seat = (status: string, bookingStatus: string, extra: Record<string, unknown> = {}): StubRoute => ({
+    path: `/api/v1/me/invites/${SEAT}`,
+    body: {
+      participant_id: SEAT, booking_id: BOOKING, status, lapsed: false, settled_outside: false, booking_status: bookingStatus,
+      court_name: "Court 1", starts_at: "2026-10-01T08:00:00Z", ends_at: "2026-10-01T08:45:00Z",
+      organiser_name: "Sam Petersen", share_credits: 25, timezone: "Africa/Johannesburg", ...extra,
+    },
   });
 
   it("already said yes: \"You're in\" with the way to the booking — never 'sign out'", async () => {
-    openDeepLink([{ path: "/api/v1/me/invites", body: { items: [], count: 0 } }, NOTICES, { path: DETAIL, body: detail("booked", "accepted") }]);
+    const stub = openDeepLink([LIST, seat("accepted", "booked")]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateInTitle })).toBeInTheDocument();
     expect(screen.getByText(INVITES_COPY.fateInBody)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
     expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
+    // Asked of the seat itself — the inbox and the booking are no longer read to guess it.
+    expect(stub.calls.some((c) => c.path.startsWith("/api/v1/me/notifications"))).toBe(false);
   });
 
   it("the game was cancelled: it says so, with the way to the booking", async () => {
-    openDeepLink([{ path: "/api/v1/me/invites", body: { items: [], count: 0 } }, NOTICES, { path: DETAIL, body: detail("cancelled", "invited") }]);
+    openDeepLink([LIST, seat("invited", "cancelled")]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateCancelledTitle })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
     expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
   });
 
-  it("off the game (the booking is a 404 to them): says so, with no link to a page they cannot open", async () => {
-    openDeepLink([
-      { path: "/api/v1/me/invites", body: { items: [], count: 0 } }, NOTICES,
-      { path: DETAIL, status: 404, body: { error: "booking_not_found" } },
-    ]);
+  it.each(["declined", "withdrawn", "removed", "lapsed"])("off the game (%s): says so, with no link to a page they cannot open", async (status) => {
+    openDeepLink([LIST, seat(status, "booked")]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateGoneTitle })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: INVITES_COPY.seeBooking })).toBeNull();
     expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
+  });
+
+  it("an accepted seat that lapsed is off the game, not in it", async () => {
+    openDeepLink([LIST, seat("accepted", "booked", { lapsed: true })]);
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateGoneTitle })).toBeInTheDocument();
   });
 });
 

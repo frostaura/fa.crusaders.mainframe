@@ -180,6 +180,40 @@ export type PartnerCap =
   | { cap: string };
 
 /**
+ * `GET /api/v1/invites/{token}/preview` — ANONYMOUS (review round 1, B4). What a signed-out person
+ * holding a shared link may see: exactly the invite mail's facts, no ids, no other players.
+ * One `404 invite_not_found` for every way the seat is not open.
+ */
+export type InvitePreview = {
+  organiser_first_name: string | null;
+  court_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  share_credits: number;
+  timezone: string;
+};
+
+/**
+ * `GET /api/v1/me/invites/{participantId}` — the caller's OWN seat in any state, with the
+ * booking's status (review round 1, B4): what the mail's link says once the invite moved on.
+ * Anybody else's seat is `404 invite_not_found`.
+ */
+export type MySeat = {
+  participant_id: string;
+  booking_id: string;
+  status: ParticipantStatus;
+  lapsed: boolean;
+  settled_outside: boolean;
+  booking_status: "booked" | "cancelled" | "no_show" | "completed" | "blocked";
+  court_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  organiser_name: string | null;
+  share_credits: number;
+  timezone: string;
+};
+
+/**
  * One invite, as the accept sheet reads it — also the answer to opening a link.
  *
  * <p>
@@ -281,6 +315,7 @@ export type MemberNotificationKind =
   | "players.game_changed"
   | "players.response"
   | "players.return_waiting"
+  | "players.club_seat"
   | (string & {});
 
 export type MemberNotification = {
@@ -358,6 +393,8 @@ export const playersEndpoints = {
   /* invites */
   myInvites: () => api.get<{ items: Invite[]; count: number; timezone?: string }>("/api/v1/me/invites"),
   invite: (token: string) => api.get<Invite>(`/api/v1/invites/${encodeURIComponent(token)}`),
+  invitePreview: (token: string) => api.get<InvitePreview>(`/api/v1/invites/${encodeURIComponent(token)}/preview`),
+  mySeat: (participantId: string) => api.get<MySeat>(`/api/v1/me/invites/${encodeURIComponent(participantId)}`),
   acceptLink: (token: string, expectedShareCredits: number) =>
     api.post<AcceptAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/accept`, { expectedShareCredits }),
   declineLink: (token: string) => api.post<SeatAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/decline`),

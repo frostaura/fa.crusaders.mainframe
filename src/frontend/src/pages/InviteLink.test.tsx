@@ -122,8 +122,15 @@ describe("a link that cannot be opened", () => {
 const ME = "44444444-4444-4444-4444-444444444444"; // the harness's signed-in user
 
 describe("R1 F2.3 / F2.4 — opened signed out", () => {
-  function openSignedOut() {
-    stubFetch([]);
+  const PREVIEW = `/api/v1/invites/${TOKEN}/preview`;
+  const FACTS = {
+    organiser_first_name: "Nomsa", court_name: "Court 2",
+    starts_at: "2026-10-01T16:00:00Z", ends_at: "2026-10-01T16:45:00Z",
+    share_credits: 25, timezone: "Africa/Johannesburg",
+  };
+
+  function openSignedOut(routes: StubRoute[] = [{ path: PREVIEW, body: FACTS }]) {
+    stubFetch(routes);
     renderPage(
       <Routes>
         <Route path="/j/:token" element={<InviteLinkPage />} />
@@ -134,8 +141,26 @@ describe("R1 F2.3 / F2.4 — opened signed out", () => {
     );
   }
 
-  it("says an invite is waiting, and offers sign-in and joining — asking the club nothing", async () => {
+  it("shows the anonymous preview's facts (B4) — who, where, when, the share — and nothing else", async () => {
     openSignedOut();
+    const facts = await screen.findByText(INVITES_COPY.previewInvited("Nomsa"));
+    const box = facts.closest("[data-invite-preview]") as HTMLElement;
+    // 18:00 in the club's zone (UTC+2), whatever zone the test runner is in.
+    expect(box).toHaveTextContent("Court 2 · Thu 1 Oct, 18:00–18:45");
+    expect(box).toHaveTextContent(`${INVITES_COPY.yourShare} 25.00 cr`);
+    expect(screen.getByRole("link", { name: INVITES_COPY.signedOutJoin })).toHaveAttribute("href", "/register");
+  });
+
+  it("a link the club no longer answers (404) says it is closed, offers no joining and forgets the link", async () => {
+    savePendingInvite(TOKEN, null);
+    openSignedOut([{ path: PREVIEW, status: 404, body: { error: "invite_not_found" } }]);
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.signedOutGoneTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: INVITES_COPY.signedOutJoin })).toBeNull();
+    await waitFor(() => expect(pendingInvite("u-new-member")).toBeNull());
+  });
+
+  it("a preview that cannot be read (offline) still says an invite is waiting and offers both ways in", async () => {
+    openSignedOut([]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.signedOutTitle })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: INVITES_COPY.signedOutSignIn })).toHaveAttribute("href", "/login");
     expect(screen.getByRole("link", { name: INVITES_COPY.signedOutJoin })).toHaveAttribute("href", "/register");

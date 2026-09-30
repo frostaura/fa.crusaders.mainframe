@@ -738,6 +738,11 @@ export const INVITES_COPY = {
   signedOutSignIn: "Sign in to answer",
   signedOutJoin: "Join the club",
   signedOutJoinHint: "New here? Join the club — once you're approved and signed in, this invite will be waiting for you.",
+  /** Review round 1 (B4) — the anonymous preview: once a link's seat is not open, there is nothing to sign in for. */
+  signedOutGoneTitle: "This invite is no longer open",
+  signedOutGoneBody: "The game may have been cancelled, or its seat was answered or closed. Ask whoever sent it for a fresh link.",
+  /** "Sam invited you to play" — the anonymous preview names the organiser by first name only. */
+  previewInvited: (organiser: string) => `${organiser} invited you to play`,
   /** R1 F2.7 — a link this account opened before, now closed: never "sign out". */
   linkNoLongerOpen: "This invite is no longer open — the game may have been cancelled, or its seat was answered or closed.",
   /** R1 F2.7 / F2.8 — the mail's link, once the invite has moved on: what happened to it. */
@@ -869,6 +874,7 @@ export const INBOX_KIND_WORD: Record<string, string> = {
   "players.game_changed": "Game changed",
   "players.response": "Reply",
   "players.return_waiting": "Share on its way back",
+  "players.club_seat": "Added by the club",
 };
 
 /* ═══════════════════════════════════ WALLET · REPORTS · PRIVACY ═══════════════════════════════════ */
