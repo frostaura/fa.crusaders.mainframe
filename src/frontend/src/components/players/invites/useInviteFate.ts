@@ -53,3 +53,40 @@ export function useInviteFate(participantId: string, enabled: boolean): InviteFa
   }, [participantId, enabled]);
   return fate?.id === participantId ? fate.fate : { kind: "reading" };
 }
+
+/**
+ * R2 F2-6 — a shared link answered `409 invite_closed` with its booking: when the caller is on
+ * that game (they claimed the seat) and it was cancelled, the page says so and what came back,
+ * instead of "can't be opened". Read from the booking itself — a claimer is a player of it; for
+ * anybody else the read is a 404 and the page keeps its general sentence.
+ */
+export type ClosedGame =
+  | { kind: "reading" }
+  | { kind: "other" }
+  | { kind: "cancelled"; bookingId: string; back: number };
+
+async function readClosedGame(bookingId: string): Promise<ClosedGame> {
+  try {
+    const d = await playersEndpoints.detail(bookingId);
+    const mine = d.players.find((p) => p.participant_id !== null && p.participant_id === d.viewer.participant_id);
+    if (d.status !== "cancelled" || d.viewer.role !== "player" || !mine) return { kind: "other" };
+    // What they had paid came back with the cancellation — the share they said yes to, when
+    // nothing is still counted as paid (a check-in keeps it: then it is `paid_credits`).
+    const back = mine.status === "accepted" && mine.paid_credits <= 0 ? mine.consented_credits : 0;
+    return { kind: "cancelled", bookingId, back };
+  } catch {
+    return { kind: "other" };
+  }
+}
+
+export function useClosedGame(bookingId: string | null): ClosedGame {
+  const [held, setHeld] = useState<{ id: string; game: ClosedGame } | null>(null);
+  useEffect(() => {
+    if (!bookingId) return undefined;
+    let live = true;
+    void readClosedGame(bookingId).then((game) => { if (live) setHeld({ id: bookingId, game }); });
+    return () => { live = false; };
+  }, [bookingId]);
+  if (!bookingId) return { kind: "other" };
+  return held?.id === bookingId ? held.game : { kind: "reading" };
+}

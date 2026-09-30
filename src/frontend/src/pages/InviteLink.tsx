@@ -4,11 +4,13 @@ import { InviteGone, InvitePanel, InvitePanelSkeleton } from "@/components/playe
 import { InviteSignedOut } from "@/components/players/invites/InviteSignedOut";
 import { codeOf } from "@/components/players/invites/inviteFacts";
 import { useInviteSnapshot } from "@/components/players/invites/useInviteSnapshot";
+import { useClosedGame } from "@/components/players/invites/useInviteFate";
 import type { AcceptPort } from "@/components/players/invites/useAcceptFlow";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { playersEndpoints } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
+import { formatCredits } from "@/lib/utils";
 import { clearPendingInvite, pendingInvite, savePendingInvite } from "@/lib/playersPending";
 
 /**
@@ -64,14 +66,24 @@ function InviteLinkFor({ token, userId }: { token: string; userId: string }) {
 
   const code = codeOf(snapshot.error);
   const refused = code !== null && code in OPEN_REFUSAL;
+  const errorBooking = snapshot.error instanceof ApiError ? snapshot.error.detail("booking_id") : null;
+  const closedGame = useClosedGame(code === "invite_closed" && typeof errorBooking === "string" ? errorBooking : null);
   const opened = snapshot.invite !== null;
   useEffect(() => {
     if (refused) clearPendingInvite(token);
     else if (opened) savePendingInvite(token, userId);
   }, [refused, opened, token, userId]);
 
+  if (code === "invite_closed" && closedGame.kind === "reading") {
+    return <InvitePanelSkeleton loading error={null} onRetry={() => undefined} />;
+  }
+  if (closedGame.kind === "cancelled") {
+    const sentence = closedGame.back > 0
+      ? INVITES_COPY.linkCancelledBack(formatCredits(closedGame.back)) : INVITES_COPY.linkCancelledNothing;
+    return <InviteGone title={INVITES_COPY.fateCancelledTitle} sentence={sentence} bookingId={closedGame.bookingId} />;
+  }
   if (code && refused) {
-    const bookingId = snapshot.error instanceof ApiError ? snapshot.error.detail("booking_id") : null;
+    const bookingId = errorBooking;
     const mine = code === "invite_not_found" && openedBefore;
     return (
       <InviteGone

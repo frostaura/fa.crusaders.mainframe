@@ -119,6 +119,44 @@ describe("a link that cannot be opened", () => {
   });
 });
 
+describe("R2 F2-6 — the claimer's own link after the organiser cancelled", () => {
+  function claimedDetail(overrides: Record<string, unknown> = {}) {
+    return {
+      booking_id: BOOKING, court_id: "c1", court_name: "Court 2", starts_at: at(24), ends_at: at(24.75), sold_ends_at: at(24.75),
+      status: "cancelled", split_mode: "equal", viewer: { role: "player", participant_id: "p-eve" },
+      organiser: { user_id: "u-nomsa", name: "Nomsa Khumalo", photo_url: null },
+      players: [{
+        participant_id: "p-eve", seat: 4, team: "B", kind: "member", user_id: "44444444-4444-4444-4444-444444444444", name: "Eve",
+        photo_url: null, status: "accepted", share_credits: 10, weight: 1, consented_credits: 10, paid_credits: 0, target_credits: 0,
+        unpaid_credits: 0, needs_consent: false, settled_outside: false, lapsed: false, checked_in_at: null, invited_at: null, responded_at: null,
+      }],
+      money: { price_credits: 40, organiser_owed_credits: 0, shares_received_credits: 0, organiser_net_credits: 0, unpaid_credits: 0, share_deadline: at(26), is_split: true },
+      attendance: { checked_in_at: null, players_checked_in: 0 },
+      permissions: { can_invite: false, can_change_split: false, can_cancel: false, can_accept: false, can_decline: false, can_withdraw: false, withdraw_closes_at: at(20) },
+      ...overrides,
+    };
+  }
+
+  it("says the game was cancelled and that the share is back — not 'can't be opened'", async () => {
+    openLink([
+      { path: OPEN, status: 409, body: { error: "invite_closed", booking_id: BOOKING } },
+      { path: `/api/v1/bookings/${BOOKING}`, body: claimedDetail() },
+    ]);
+    expect(await screen.findByText(INVITES_COPY.linkCancelledBack("10.00 cr"))).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: INVITES_COPY.fateCancelledTitle })).toBeInTheDocument();
+    expect(screen.queryByText(INVITES_COPY.refusedTitle)).toBeNull();
+    expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
+  });
+
+  it("a closed link on a game still on keeps the general sentence", async () => {
+    openLink([
+      { path: OPEN, status: 409, body: { error: "invite_closed", booking_id: BOOKING } },
+      { path: `/api/v1/bookings/${BOOKING}`, body: claimedDetail({ status: "booked" }) },
+    ]);
+    expect(await screen.findByText(INVITES_COPY.linkClosed)).toBeInTheDocument();
+  });
+});
+
 const ME = "44444444-4444-4444-4444-444444444444"; // the harness's signed-in user
 
 describe("R1 F2.3 / F2.4 — opened signed out", () => {
@@ -148,6 +186,9 @@ describe("R1 F2.3 / F2.4 — opened signed out", () => {
     // 18:00 in the club's zone (UTC+2), whatever zone the test runner is in.
     expect(box).toHaveTextContent("Court 2 · Thu 1 Oct, 18:00–18:45");
     expect(box).toHaveTextContent(`${INVITES_COPY.yourShare} 25.00 cr`);
+    // R2 F2-7 — the facts are on screen: the subtitle never says "sign in to see" them.
+    expect(screen.getByText(INVITES_COPY.signedOutBodyShown)).toBeInTheDocument();
+    expect(screen.queryByText(INVITES_COPY.signedOutBody)).toBeNull();
     expect(screen.getByRole("link", { name: INVITES_COPY.signedOutJoin })).toHaveAttribute("href", "/register");
   });
 

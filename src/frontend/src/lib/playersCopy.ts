@@ -756,6 +756,8 @@ export const INVITES_COPY = {
   /** R1 F2.3 / F2.4 — an invite opened signed out. The club shows a game only to a member, so the page says what it can. */
   signedOutTitle: "You've been invited to a game",
   signedOutBody: "Sign in to see who asked you, when it is and your share — then say yes or no.",
+  /** R2 F2-7 — under the preview's own facts: they are already on screen, so only the answer needs a sign-in. */
+  signedOutBodyShown: "Sign in to answer.",
   signedOutSignIn: "Sign in to answer",
   signedOutJoin: "Join the club",
   signedOutJoinHint: "New here? Join the club — once you're approved and signed in, this invite will be waiting for you.",
@@ -771,6 +773,9 @@ export const INVITES_COPY = {
   fateInBody: "You've already said yes to this game.",
   fateCancelledTitle: "This game was cancelled",
   fateCancelledBody: "Nothing more is needed from you. The booking shows what happened to any share.",
+  /** R2 F2-6 — the claimer's own link, after the organiser cancelled. */
+  linkCancelledBack: (amount: string) => `This game was cancelled — your ${amount} is back in your credit.`,
+  linkCancelledNothing: "This game was cancelled — nothing was taken from you for it.",
   fateGoneTitle: "You're no longer on this game",
   fateGoneBody: "You declined it, pulled out or were taken off it — or its invite lapsed. Your bookings have the latest.",
   /** R1 F2.5 — an invite link opened and not yet answered (a short balance, a sign-in between), resurfaced. */

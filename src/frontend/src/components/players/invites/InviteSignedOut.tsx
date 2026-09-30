@@ -42,7 +42,7 @@ export function InviteSignedOut({ token }: {
     <PageShell width="narrow">
       <PageHeader
         title={gone ? INVITES_COPY.signedOutGoneTitle : INVITES_COPY.signedOutTitle}
-        description={gone ? INVITES_COPY.signedOutGoneBody : INVITES_COPY.signedOutBody}
+        description={gone ? INVITES_COPY.signedOutGoneBody : preview.kind === "open" ? INVITES_COPY.signedOutBodyShown : INVITES_COPY.signedOutBody}
       />
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6" data-invite-signed-out="">
         <span aria-hidden="true" className="inline-flex size-12 items-center justify-center rounded-full bg-accent-soft text-accent-strong">
