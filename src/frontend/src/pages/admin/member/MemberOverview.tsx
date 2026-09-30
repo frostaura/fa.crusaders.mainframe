@@ -95,6 +95,7 @@ function Fact({ term, children, tone }: { term: string; children: ReactNode; ton
 
 function AccountFacts({ detail }: { detail: MemberDetail }) {
   const zone = zoneNow();
+  const applicant = detail.status === "PendingApproval" || detail.status === "Rejected";
   return (
     <dl className="rounded-xl border border-border bg-bg-surface px-4 sm:px-6">
       <Fact term={COPY.email}>{detail.email}</Fact>
@@ -102,13 +103,17 @@ function AccountFacts({ detail }: { detail: MemberDetail }) {
         {detail.email_verified ? COPY.verifiedYes : COPY.unverified}
       </Fact>
       {detail.membership_number ? <Fact term={COPY.membershipNumber}>{detail.membership_number}</Fact> : null}
-      <Fact term={COPY.memberSince}>{clubDate(detail.created_at, zone)}</Fact>
+      {/* An applicant was never a member (F3-12): "Member since" on a pending or turned-down
+          page claimed a membership the club has not granted. */}
+      <Fact term={applicant ? COPY.appliedOn : COPY.memberSince}>{clubDate(detail.created_at, zone)}</Fact>
       <Fact term={COPY.lastSignIn}>{detail.last_login_at ? clubInstant(detail.last_login_at, zone) : COPY.neverSignedIn}</Fact>
       {detail.status === "Rejected" ? (
         <Fact term={COPY.application}>
           {detail.rejection_reason ? COPY.turnedDownBecause(detail.rejection_reason) : COPY.turnedDown}
         </Fact>
-      ) : (
+      ) : applicant ? null : (
+        // Not on a pending page (F3-12): "Account: active" beside "Awaiting approval" read as
+        // two answers to one question. The header's status is the one that counts.
         <Fact term={COPY.accountStatus}>{detail.account_status}</Fact>
       )}
       <Fact term={COPY.passkeys}>{countOf(detail.passkey_count, "passkey", "passkeys")}</Fact>

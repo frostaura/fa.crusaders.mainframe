@@ -35,3 +35,25 @@ describe("member detail — a turned-down application", () => {
     expect(await screen.findByRole("button", { name: MEMBER_COPY.topUp })).toBeInTheDocument();
   });
 });
+
+/** Review round 2, F3-12: an applicant's page claimed a membership and an active account. */
+describe("member detail — an applicant is not a member yet", () => {
+  beforeEach(() => { signOut(); });
+
+  it.each(["PendingApproval", "Rejected"] as const)("says when %s applied, never 'Member since'", async (status) => {
+    serve(baseRoutes(detailFixture({ status, account_status: "active" })));
+    renderMember();
+    await screen.findByTestId("member-balance");
+    expect(screen.getByText(OVERVIEW_COPY.appliedOn, { selector: "dt" })).toBeInTheDocument();
+    expect(screen.queryByText(OVERVIEW_COPY.memberSince, { selector: "dt" })).toBeNull();
+    expect(screen.queryByText(OVERVIEW_COPY.accountStatus, { selector: "dt" })).toBeNull();
+  });
+
+  it("still says 'Member since' and the account for a member", async () => {
+    serve(baseRoutes(detailFixture()));
+    renderMember();
+    await screen.findByTestId("member-balance");
+    expect(screen.getByText(OVERVIEW_COPY.memberSince, { selector: "dt" })).toBeInTheDocument();
+    expect(screen.getByText(OVERVIEW_COPY.accountStatus, { selector: "dt" })).toBeInTheDocument();
+  });
+});

@@ -182,6 +182,8 @@ export const OVERVIEW_COPY = {
   verifiedYes: "Yes",
   unverified: "Not verified — they can't sign in with a password yet",
   memberSince: "Member since",
+  /** F3-12: an applicant — waiting or turned down — has never been a member. */
+  appliedOn: "Applied on",
   lastSignIn: "Last sign-in",
   neverSignedIn: "Never",
   membershipNumber: "Membership number",
