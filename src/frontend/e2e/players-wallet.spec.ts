@@ -33,12 +33,28 @@ const JO_BOOKING = detailFixture({
   players: [],
 });
 
+type Detail = ReturnType<typeof detailFixture>;
+type Seat = { kind: string; user_id: string | null; name: string | null; paid_credits: number };
+
+/** What `GET /wallet?include=share_bookings` says about a booking (perf round, 2026-09-30). */
+function summaryOf(d: Detail) {
+  const organiser = d.organiser as { user_id: string; name: string; photo_url: string | null };
+  return {
+    booking_id: d.booking_id, court_name: d.court_name, starts_at: d.starts_at, organiser,
+    partners: (d.players as Seat[]).filter((p) => p.kind === "member" && p.user_id && p.user_id !== organiser.user_id)
+      .map((p) => ({ user_id: p.user_id, name: p.name, paid_credits: p.paid_credits })),
+  };
+}
+
 function walletRoutes(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     ...extra,
+    // The booking's own page, for the link below — never read to draw the wallet's share lines.
     { path: `/api/v1/bookings/${BOOKING}`, body: detailFixture() },
-    { path: `/api/v1/bookings/${B2}`, body: JO_BOOKING },
-    ...memberShellRoutes({ wallet: { entries: ENTRIES, total_entries: ENTRIES.length } }),
+    ...memberShellRoutes({ wallet: {
+      entries: ENTRIES, total_entries: ENTRIES.length,
+      share_bookings: { [BOOKING]: summaryOf(detailFixture()), [B2]: summaryOf(JO_BOOKING) },
+    } }),
   ];
 }
 
@@ -62,6 +78,8 @@ test.describe("P11: the wallet, with shares", () => {
   test("gathers a booking's shares under one line that opens, and links to the booking", async ({ page }) => {
     await signIn(page);
     await serveApi(page, walletRoutes());
+    const bookingReads: string[] = [];
+    page.on("request", (r) => { if (new URL(r.url()).pathname.startsWith("/api/v1/bookings/")) bookingReads.push(r.url()); });
     await page.goto("/wallet");
 
     const organiser = page.getByRole("button", { name: /^Shares for Court 1 · .* from 1 partner/ });
@@ -83,6 +101,8 @@ test.describe("P11: the wallet, with shares", () => {
 
     // Every other movement is its own row.
     await expect(page.getByText("Wallet top-up · R100.00")).toBeVisible();
+    // Perf round: the lines came with the ledger read — not one booking read per line.
+    expect(bookingReads).toEqual([]);
 
     const link = page.getByRole("link", { name: new RegExp(`^${SHARE_LEDGER_COPY.viewBooking}.*Shares for Court 1`) });
     await expect(link).toHaveAttribute("href", `/bookings/${BOOKING}`);
