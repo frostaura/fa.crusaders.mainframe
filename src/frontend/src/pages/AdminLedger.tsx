@@ -235,6 +235,7 @@ export default function AdminLedgerPage() {
             onOpen={setOpened}
             emptyText="No movements match these filters."
             label="Club ledger"
+            wideOnly={["comment"]}
           />
         </Card>
       </StateBlock>

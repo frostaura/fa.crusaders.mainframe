@@ -1,9 +1,9 @@
-import { Link } from "react-router-dom";
 import type { LedgerRow } from "@/lib/api";
 import { clubDayAndClock } from "@/lib/clubClock";
 import { LEDGER_COPY, ledgerCategory, ledgerDoneBy } from "@/lib/ledgerCopy";
 import { formatSignedCredits } from "@/lib/utils";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { TextLink } from "@/components/ui/text-link";
 import {
   Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
@@ -35,9 +35,10 @@ export function LedgerDetailSheet({ row, onClose }: { row: LedgerRow | null; onC
                 {row.comment ? <Fact term={LEDGER_COPY.comment}>{row.comment}</Fact> : null}
                 {row.relatedBookingId ? (
                   <Fact term={LEDGER_COPY.booking}>
-                    <Link className={buttonVariants({ variant: "outline", size: "sm" })} to={`/bookings/${row.relatedBookingId}`}>
+                    {/* A link that looks like one (VIS F3-15: it read as plain text in the sheet). */}
+                    <TextLink variant="standalone" to={`/bookings/${row.relatedBookingId}`}>
                       {LEDGER_COPY.openBooking}
-                    </Link>
+                    </TextLink>
                   </Fact>
                 ) : null}
               </dl>

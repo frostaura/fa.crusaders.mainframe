@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, cloneElement, isValidElement, useMemo, useState, type ReactNode } from "react";
 import type { LedgerRow } from "../lib/api";
 import { cn } from "../lib/utils";
 import { clubDayAndClock } from "../lib/clubClock";
@@ -40,7 +40,21 @@ type LedgerTableProps = {
   groupShares?: boolean;
   /** F3.8: when given, every row opens its detail — a "Details" button per row, and the row. */
   onOpen?: (row: LedgerRow) => void;
+  /**
+   * Columns shown only from `2xl` (review round 2, F3-9). The club's book has seven columns and a
+   * Details button; at 1280 beside the admin rail the Amount and Details were off the right edge.
+   * The comment is the column that can go — every row's Details sheet carries it whole.
+   */
+  wideOnly?: Column[];
 };
+
+/** Hide a cell below `2xl` — merged over its own classes, so `sm:table-cell` does not win. */
+const WIDE_ONLY = "sm:hidden 2xl:table-cell";
+
+function narrowed(cell: ReactNode, wide: boolean): ReactNode {
+  if (!wide || !isValidElement<{ className?: string }>(cell)) return cell;
+  return cloneElement(cell, { className: cn("hidden", cell.props.className, WIDE_ONLY) });
+}
 
 type Sort = { key: Column; dir: SortDir };
 
@@ -92,13 +106,13 @@ function nextSort(current: Sort, key: Column): Sort {
 export function LedgerTable(props: LedgerTableProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { rows, columns = DEFAULT_COLUMNS, emptyText = "No movements yet.", fill = false, label, groupShares = false } = props;
-  const { onOpen } = props;
+  const { onOpen, wideOnly = [] } = props;
   const [sort, setSort] = useState<Sort>({ key: "time", dir: "desc" });
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
   const items = useMemo(() => (groupShares ? groupShareRows(sorted) : sorted.map((row) => ({ kind: "row" as const, row }))), [groupShares, sorted]);
   const bookings = useShareBookings(groupShares ? shareBookingIds(rows) : []);
   const headerFor = (column: Column) => (
-    <SortHeader {...HEADER[column]} k={column} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+    <SortHeader {...HEADER[column]} wideOnly={wideOnly.includes(column)} k={column} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
   );
 
   if (rows.length === 0) {
@@ -110,7 +124,9 @@ export function LedgerTable(props: LedgerTableProps) {
     // container that silently cuts off the Amount column reads as a missing column rather
     // than as one swipe away. It also makes the region keyboard-reachable.
     <ScrollArea label={label} className={cn(fill && "min-h-0 flex-1")}>
-      <table data-slot="table" className="w-full border-collapse text-sm">
+      {/* Named as well as its scroller (A11Y F3.22): a table reached by a screen reader's table
+          navigation announces its own name, not the region's. */}
+      <table data-slot="table" aria-label={label} className="w-full border-collapse text-sm">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {columns.map((column) => <Fragment key={column}>{headerFor(column)}</Fragment>)}
@@ -119,7 +135,7 @@ export function LedgerTable(props: LedgerTableProps) {
         </TableHeader>
         <TableBody>
           {items.map((item) => (item.kind === "row"
-            ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} />
+            ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} />
             : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId]} />))}
         </TableBody>
       </table>
@@ -127,7 +143,9 @@ export function LedgerTable(props: LedgerTableProps) {
   );
 }
 
-function LedgerLine({ row, columns, onOpen }: { row: LedgerRow; columns: Column[]; onOpen?: (row: LedgerRow) => void }) {
+function LedgerLine({ row, columns, onOpen, wideOnly }: {
+  row: LedgerRow; columns: Column[]; onOpen?: (row: LedgerRow) => void; wideOnly: Column[];
+}) {
   return (
     <TableRow
       // The whole row is a pointer target; the button in the last cell is the keyboard's and
@@ -136,19 +154,23 @@ function LedgerLine({ row, columns, onOpen }: { row: LedgerRow; columns: Column[
       onClick={onOpen ? () => onOpen(row) : undefined}
       className={onOpen ? "cursor-pointer" : undefined}
     >
-      {columns.map((column) => <Fragment key={column}>{CELL[column](row)}</Fragment>)}
+      {columns.map((column) => <Fragment key={column}>{narrowed(CELL[column](row), wideOnly.includes(column))}</Fragment>)}
       {onOpen ? (
         <TableCell className="w-0 align-top">
           <Button
             variant="ghost"
             size="sm"
+            // 44 × 44 at the least (A11Y F3-19: it measured 42 × 36 at 390), and an icon only: the
+            // word cost 73px the row did not have beside the admin rail even at 1920 (F3-9,
+            // measured) — the button's name is its aria-label either way.
+            className="min-h-touch min-w-touch"
             // Named by kind and time, not by amount: the amount is its own cell's name, and
             // repeating it here made "+160.00 cr" match two cells in the row.
             aria-label={LEDGER_COPY.openRow(`${ledgerCategory(row)}, ${clubDayAndClock(row.at)}`)}
             onClick={(e) => { e.stopPropagation(); onOpen(row); }}
             icon={<CaretRight aria-hidden="true" />}
           >
-            <span className="sr-only sm:not-sr-only">{LEDGER_COPY.detailsHeader}</span>
+            <span className="sr-only">{LEDGER_COPY.detailsHeader}</span>
           </Button>
         </TableCell>
       ) : null}
@@ -170,6 +192,7 @@ const HEADER: Record<Column, HeaderLook> = {
 
 type HeaderProps = {
   label: string;
+  wideOnly?: boolean;
   k: Column;
   sort: Sort;
   onSort: (k: Column) => void;
@@ -183,7 +206,7 @@ type HeaderProps = {
  * against the ScrollArea.
  */
 function SortHeader(props: HeaderProps) {
-  const { label, k, sort, onSort, align = "left", hideOnMobile = false } = props;
+  const { label, k, sort, onSort, align = "left", hideOnMobile = false, wideOnly = false } = props;
   const active = sort.key === k;
   const Icon = !active ? CaretUpDown : sort.dir === "asc" ? CaretUp : CaretDown;
   return (
@@ -193,6 +216,7 @@ function SortHeader(props: HeaderProps) {
         "sticky top-0 z-sticky",
         align === "right" ? "text-right" : "text-left",
         hideOnMobile && "hidden sm:table-cell",
+        wideOnly && ["hidden", WIDE_ONLY],
       )}
     >
       <button

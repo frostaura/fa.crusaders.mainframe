@@ -33,7 +33,9 @@ export const LEDGER_COPY = {
   booking: "Booking",
   openBooking: "Open the booking",
   comment: "Comment",
-  close: "Close",
+  /** The footer's way out. Not "Close": the sheet's own × is named that, and two controls with
+   *  one name are two guesses for a screen-reader user (A11Y F3-20). */
+  close: "Done",
 } as const;
 
 /** Who did it: the admin's name, "The member", or "The club's system". */
