@@ -81,6 +81,12 @@ describe("the admin IA", () => {
     expect(isAdminItemActive(doors, "/admin/monitoring/doors/abc")).toBe(true);
   });
 
+  /** R3 V-8: "A person's night" is a member picker; it lit Control board in the rail and switcher. */
+  it("files A person's night under Members, not the control board", () => {
+    expect(activeAdminItem("/admin/monitoring/night")?.id).toBe("members");
+    expect(activeAdminItem("/admin/monitoring")?.id).toBe("control-board");
+  });
+
   it("matches on a segment boundary, so /admin/groupsx is not Groups", () => {
     expect(activeAdminItem("/admin/groupsx")?.id).toBe("overview");
     expect(activeAdminItem("/admin/monitoringx")?.id).toBe("overview");

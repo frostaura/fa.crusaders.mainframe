@@ -31,6 +31,12 @@ export type AdminNavItem = {
   /** One line: what an admin goes there to do. The Overview's quick links show it. */
   description: string;
   badge?: AdminBadgeKey;
+  /**
+   * Other pages that belong to this destination although their path lies elsewhere. R3 V-8:
+   * "A person's night" (`/admin/monitoring/night`) is a member picker that now lives on the
+   * member's page, and it lit Control board in the rail and the switcher.
+   */
+  also?: readonly string[];
 };
 
 export type AdminNavGroup = {
@@ -68,6 +74,7 @@ export const ADMIN_NAV: readonly AdminNavGroup[] = [
     items: [
       {
         id: "members", label: "Members", path: "/admin/members", icon: Users, badge: "pending",
+        also: ["/admin/monitoring/night"],
         description: "Approve applications, top up wallets and manage accounts.",
       },
       {
@@ -175,9 +182,11 @@ function normalise(pathname: string): string {
 export function activeAdminItem(pathname: string): AdminNavItem | null {
   const path = normalise(pathname);
   let best: AdminNavItem | null = null;
+  let bestLength = -1;
   for (const item of ADMIN_NAV_ITEMS) {
-    if (!isUnder(path, item.path)) continue;
-    if (!best || item.path.length > best.path.length) best = item;
+    for (const prefix of [item.path, ...(item.also ?? [])]) {
+      if (isUnder(path, prefix) && prefix.length > bestLength) { best = item; bestLength = prefix.length; }
+    }
   }
   return best;
 }
