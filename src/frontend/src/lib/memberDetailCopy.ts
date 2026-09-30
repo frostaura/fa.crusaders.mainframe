@@ -402,6 +402,11 @@ export const ADMIN_ROLE_COPY = {
   revokeConfirm: "Remove admin rights",
   revokeAction: "remove admin rights",
   revoked: (name: string) => `${name} is no longer an administrator.`,
+  /** R3 lost-reply audit: what the member read again still shows, and what is not known. */
+  stillNotAdmin: (name: string) => `${name} is still not an administrator`,
+  stillAdmin: (name: string) => `${name} is still an administrator`,
+  whetherGranted: (name: string) => `${name} was made an administrator`,
+  whetherRevoked: (name: string) => `${name}'s admin rights were removed`,
   reason: "Reason",
   reasonHint: "Recorded in the change record and sent in the email.",
   reasonPlaceholder: "e.g. Stepped down from the committee",

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { signOut, type StubRoute } from "@/test/harness";
+import { refuse, signOut, type StubRoute } from "@/test/harness";
 import { ADMIN_ROLE_CODES, ADMIN_ROLE_COPY as COPY } from "@/lib/memberDetailCopy";
 import type { MemberDetail } from "@/lib/memberDetailApi";
 import { ADMIN_ID, BASE, MEMBER_ID, baseRoutes, detailFixture, renderMember, serve } from "./memberKit";
@@ -158,5 +158,58 @@ describe("AdminRoleSwitch", () => {
     renderAccess(detailFixture({ status: "PendingApproval" }));
     expect(await roleSwitch()).toBeDisabled();
     expect(screen.getByText(COPY.notActive)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Review round 3 (lost-reply audit): a grant whose reply is lost is looked up on the member.
+ * The stub performs the grant, then fails the reply.
+ */
+describe("a grant whose reply was lost", () => {
+  beforeEach(() => { signOut(); });
+
+  function lost(landed: boolean, readable = true): StubRoute[] {
+    let admin = false;
+    let reads = 0;
+    return [
+      {
+        path: BASE,
+        respond: () => {
+          reads += 1;
+          if (!readable && reads > 1 && admin) return refuse(503, {});
+          return detailFixture({ is_admin: admin, admin_source: admin ? "granted" : null });
+        },
+      },
+      {
+        method: "POST", path: ROLE,
+        respond: () => { if (landed) admin = true; return refuse(504, { error: "gateway_timeout" }); },
+      },
+    ];
+  }
+  async function grant() {
+    fireEvent.click(await roleSwitch());
+    const dialog = await screen.findByRole("dialog", { name: COPY.grantTitle("Thandi Mokoena") });
+    giveReason(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: COPY.grantConfirm }));
+    return dialog;
+  }
+
+  it("says it was granted when the member now holds the rights", async () => {
+    renderAccess(detailFixture(), lost(true));
+    await grant();
+    expect(await screen.findByText(`${COPY.granted("Thandi Mokoena")} The club's reply didn't arrive, so we checked its record.`)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("switch", { name: COPY.label })).toHaveAttribute("aria-checked", "true"));
+  });
+
+  it("says nothing changed when the member still has no rights", async () => {
+    renderAccess(detailFixture(), lost(false));
+    const dialog = await grant();
+    expect(await within(dialog).findByText(/we checked: Thandi Mokoena is still not an administrator — nothing changed/)).toBeInTheDocument();
+  });
+
+  it("says it cannot tell when the member cannot be read either", async () => {
+    renderAccess(detailFixture(), lost(true, false));
+    const dialog = await grant();
+    expect(await within(dialog).findByText(/can't tell whether Thandi Mokoena was made an administrator/)).toBeInTheDocument();
   });
 });

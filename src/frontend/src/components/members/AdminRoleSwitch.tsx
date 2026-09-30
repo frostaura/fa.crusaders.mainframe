@@ -4,6 +4,8 @@ import { useToast } from "../Toast";
 import { Checkbox } from "../ui/checkbox";
 import { Field, FieldDescription, FieldLabel } from "../ui/field";
 import { REQUIRED_MARK } from "../../lib/confirmDialogCopy";
+import { unsureSentence, writeOrReadBack } from "../../lib/lostReply";
+import { LOST_REPLY, unsureWords } from "../../lib/lostReplyCopy";
 import { Lock } from "../ui/icons";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
@@ -121,6 +123,11 @@ export function AdminRoleSwitch(props: AdminRoleSwitchProps) {
           codes={ADMIN_ROLE_CODES}
           // R3 A-16: enabled, and a press names what is missing and focuses the reason.
           notReady={!act.ready(mode === "grant")}
+          describe={(error) => unsureSentence(error, unsureWords(
+            mode === "grant" ? COPY.stillNotAdmin(name) : COPY.stillAdmin(name),
+            mode === "grant" ? COPY.whetherGranted(name) : COPY.whetherRevoked(name),
+            `${name}'s page`,
+          ))}
           notReadyMessage={act.reason.trim() ? COPY.confirmSelfMissing : undefined}
           onConfirm={() => act.run(mode === "grant")}
         >
@@ -181,15 +188,17 @@ function useRoleChange(props: AdminRoleSwitchProps, self: boolean) {
   const [confirmSelf, setConfirmSelf] = useState(false);
 
   const run = async (grant: boolean) => {
-    const result = await memberDetailEndpoints.setAdmin(userId, {
-      grant,
-      reason: reason.trim(),
-      ...(!grant && self ? { confirmSelf } : {}),
-    });
-    toast.push({
-      tone: "success",
-      text: !result.changed ? COPY.unchanged(name, result.is_admin) : grant ? COPY.granted(name) : COPY.revoked(name),
-    });
+    // A lost reply is looked up (review round 3): the member read again holds the rights asked
+    // for → it landed; does not → nothing changed; unreadable → not known (said by the dialog).
+    const { value: result, proven } = await writeOrReadBack(
+      () => memberDetailEndpoints.setAdmin(userId, { grant, reason: reason.trim(), ...(!grant && self ? { confirmSelf } : {}) }),
+      async () => {
+        const now = await memberDetailEndpoints.detail(userId);
+        return now.is_admin === grant ? { user_id: userId, is_admin: now.is_admin, admin_source: now.admin_source, changed: true } : null;
+      },
+    );
+    const said = !result.changed ? COPY.unchanged(name, result.is_admin) : grant ? COPY.granted(name) : COPY.revoked(name);
+    toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said) : said });
     await onChanged(result);
     if (!grant && self) void auth.retryConnection();
   };
