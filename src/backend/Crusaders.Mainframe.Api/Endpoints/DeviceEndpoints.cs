@@ -649,7 +649,9 @@ public static class DeviceEndpoints
                 new DeviceErrorReport(
                     DeviceErrorCodes.RestoreNotConfirmed, DeviceErrorSource.Server,
                     DeviceId: device.Id, ClaimedDeviceCode: device.DeviceCode,
-                    Detail: $"served {served} relay(s), the box reported 0"));
+                    // In words (review round 1, B16): the fault page shows this line to a volunteer
+                    // admin, and "served 4 relay(s)" is the server's vocabulary, not theirs.
+                    Detail: RestoreDetail(served)));
             return;
         }
 
@@ -790,6 +792,13 @@ public static class DeviceEndpoints
                 code, DeviceErrorSource.Server, DeviceId: device.Id,
                 ClaimedDeviceCode: device.DeviceCode,
                 Detail: $"since_boot={current}", Count: rise, At: now));
+    }
+
+    /// <summary>The restore fault's detail, in the club's words (B16).</summary>
+    internal static string RestoreDetail(int served)
+    {
+        var courts = served == 1 ? "1 court's lights" : $"{served} courts' lights";
+        return $"The box was told to switch {courts} back on after the power cut and has not confirmed any of them.";
     }
 }
 

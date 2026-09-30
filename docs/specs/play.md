@@ -148,6 +148,7 @@ A player may record a result for booking `b` when **all** hold, else `409 result
 | --- | --- |
 | `b` is not an admin block and has at least two players or guests to line up | `not_enough_players` |
 | `b.CheckedInAt` is set — the box saw the session (a door scan is not enough) | `not_checked_in` |
+| the court time has started AND the check-in has happened — whichever is later (review round 1, B15: an early-entry scan does not open recording) | `not_started` |
 | now ≤ `b.EndsAt` + `result_record_days` | `window_closed` |
 | no live result exists on `b` | → `409 result_exists {result_id}` instead |
 
@@ -478,7 +479,7 @@ viewer_side: "a"|"b"|null, viewer_outcome: "won"|"lost"|null}`
 
 | Route | Body → answer |
 | --- | --- |
-| `GET /api/v1/bookings/{id}/result` | → `{booking_id, result: result\|null, permissions: {can_record, can_edit, can_confirm, can_dispute, can_withdraw}, not_recordable_reason: null\|"not_checked_in"\|"window_closed"\|"not_enough_players", record_closes_at, candidates: [player], default_sides: {a: [player_key], b: [player_key]}, default_format: "best_of_5"}`. `result` is the live one, else the most recent closed one (so players see "the club removed this result"), else null. Applies a due auto-confirmation first (§3.3). 404 for a non-player |
+| `GET /api/v1/bookings/{id}/result` | → `{booking_id, result: result\|null, permissions: {can_record, can_edit, can_confirm, can_dispute, can_withdraw}, not_recordable_reason: null\|"not_checked_in"\|"not_started"\|"window_closed"\|"not_enough_players", record_closes_at, candidates: [player], default_sides: {a: [player_key], b: [player_key]}, default_format: "best_of_5"}`. `result` is the live one, else the most recent closed one (so players see "the club removed this result"), else null. Applies a due auto-confirmation first (§3.3). 404 for a non-player |
 | `POST /api/v1/bookings/{id}/result` | `{idempotencyKey, format, sideA: [playerKey], sideB: [playerKey], games: [{a, b}]}` → `201 result`; a replay of the same `idempotencyKey` by the same member → `200` with that result as it now stands. Errors: `400 idempotency_key_invalid` (1–64 chars), `400 format_invalid`, `400 lineup_invalid {reason}`, `400 score_invalid {game_index, reason}`, `400 match_incomplete {games_needed}`, `400 games_after_decided {game_index}`, `409 result_not_recordable {reason}`, `409 result_exists {result_id}` |
 | `PUT /api/v1/bookings/{id}/result` | `{expectedVersion, format, sideA, sideB, games}` → `result` (still `pending`, `ConfirmDueAt` restarted). The caller must be a member of the submitting side and in the new lineup. `403 result_not_yours`, `409 result_not_pending {status}`, `409 result_changed {version, status}`, plus the create's validation errors |
 | `POST /api/v1/bookings/{id}/result/confirm` | `{expectedVersion}` → `result`. `403 result_not_yours_to_confirm` (the caller is on the submitting side, or not in the lineup), `409 result_not_pending {status}`, `409 result_changed` |

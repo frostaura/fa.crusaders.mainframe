@@ -75,7 +75,8 @@ public sealed class PlayersAdminService
         if (game.Booking.Status is not (BookingStatus.Booked or BookingStatus.Completed)) return PlayerOutcome.Refuse(409, PlayerErrors.BookingNotOpen);
 
         // The organiser's own path, acting as the organiser: the same seats, split and invites.
-        var added = await _players.AddAsync(act.BookingId, game.Booking.UserId!.Value, new PlayersRequest([spec]), ct, act.ActorId, asAdmin: true);
+        var added = await _players.AddAsync(
+            act.BookingId, game.Booking.UserId!.Value, new PlayersRequest([spec]), ct, new PlayersService.ClubAdd(act.ActorId, accepted));
         if (!added.IsOk) return added;
 
         var seat = await _db.BookingParticipants
@@ -139,6 +140,9 @@ public sealed class PlayersAdminService
         seat.RespondedAt = StorableTime.UtcNow;
         seat.UpdatedAt = StorableTime.UtcNow;
         await RecordAsync(AdminChangeActions.BookingPlayerAcceptedOnBehalf, act, seat, new { status = "accepted", consented_credits = seat.ConsentedCredits }, ct);
+        // B8: the member is told the club said yes for them, in the same save.
+        MemberNotices.Stage(_db, _tenant.TenantId,
+            await PlayerNotices.ClubSeatAsync(_db, game!.Booking, seat, game.Settings, "club-accepted", ct), game.Settings);
         return await SaveAndSettleAsync(game!, seat, ct);
     }
 

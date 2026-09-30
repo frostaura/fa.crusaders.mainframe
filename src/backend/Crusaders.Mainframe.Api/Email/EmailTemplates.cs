@@ -261,7 +261,7 @@ public static partial class EmailTemplates
             Heading: "Your membership is suspended",
             Blocks:
             [
-                new Paragraph($"Hello {fullName}. Your membership at {club.Name} has been suspended, so you can't sign in, book a court, or open a court with your fingerprint, PIN or code while it is."),
+                new Paragraph($"Hello {fullName}. Your membership at {club.Name} has been suspended, so you can't sign in, book a court, or open a court or the door with your member code while it is."),
                 new Callout(CalloutTone.Danger, reason),
                 new Paragraph("Your credit balance and any bookings you already have are untouched. Speak to the club office to have the suspension lifted."),
             ],
@@ -383,7 +383,7 @@ public static partial class EmailTemplates
         {
             new Paragraph(d.IsWalkUp
                 ? $"You bought court time at the box and the court is yours now."
-                : $"Your court is booked. Bring your phone — you open the court with your code, your PIN or your fingerprint when you get there."),
+                : $"Your court is booked. Bring your phone — you open the door and the court with the member code on it when you get there."),
             new Facts(
             [
                 new FactRow("Court", d.CourtName),

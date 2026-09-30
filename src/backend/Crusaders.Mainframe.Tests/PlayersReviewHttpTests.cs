@@ -359,10 +359,13 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
         // The desk can put Alex back — and Alex's inbox says so without a second mail inside the cadence.
         var admin = club.Client(f, club.Admin, admin: true);
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/bookings/{bookingId}/players", new { userId = club.Alex, reason = "Phoned" })).StatusCode);
+        // The desk's re-add is told as the club's (players.club_seat, review round 1 B8) under the same loop rule.
         var alexMail = await PlayersClub.ReadAsync(f, db => db.AdminNotifications.IgnoreQueryFilters()
-            .CountAsync(n => n.TenantId == club.TenantId && n.RecipientUserId == club.Alex && n.Kind == MemberEventCatalogue.Invited));
+            .CountAsync(n => n.TenantId == club.TenantId && n.RecipientUserId == club.Alex
+                             && (n.Kind == MemberEventCatalogue.Invited || n.Kind == MemberEventCatalogue.ClubSeat)));
         var alexInbox = await PlayersClub.ReadAsync(f, db => db.MemberNotifications.IgnoreQueryFilters()
-            .CountAsync(n => n.TenantId == club.TenantId && n.UserId == club.Alex && n.Kind == MemberEventCatalogue.Invited));
+            .CountAsync(n => n.TenantId == club.TenantId && n.UserId == club.Alex
+                             && (n.Kind == MemberEventCatalogue.Invited || n.Kind == MemberEventCatalogue.ClubSeat)));
         Assert.Equal(1, alexMail);
         Assert.Equal(2, alexInbox);
 

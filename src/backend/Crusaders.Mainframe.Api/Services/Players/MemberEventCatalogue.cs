@@ -8,8 +8,16 @@ namespace Crusaders.Mainframe.Api.Services;
 
 public sealed record InvitePayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string Path);
 
+/// <param name="HeldUntilLocal">On a share an organiser receives: when it stops being held (B12). Null on older rows.</param>
+/// <param name="ByClub">The club collected it (B8). False on older rows.</param>
+/// <param name="BalanceAfterCredits">The partner's balance after a club collect (B8).</param>
 public sealed record SharePayload(
-    Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits);
+    Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits,
+    string? HeldUntilLocal = null, bool ByClub = false, decimal? BalanceAfterCredits = null);
+
+/// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
+public sealed record ClubSeatPayload(
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, bool Accepted, string Path);
 
 public sealed record ReminderPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string DeadlineLocal,
@@ -59,6 +67,12 @@ public static class MemberEventCatalogue
     public const string GameChanged = "players.game_changed";
 
     /// <summary>
+    /// The club added the member to a game (an admin's add) or accepted one on their behalf —
+    /// review round 1, B8: the member heard nothing of either. Mailed, not urgent.
+    /// </summary>
+    public const string ClubSeat = "players.club_seat";
+
+    /// <summary>
     /// Money due back to a partner waits because the organiser's credits do not cover it — told
     /// ONCE to each side when it starts waiting (the seat's <c>ReturnPendingSince</c> stamp), never
     /// on every sweep that finds it still waiting. Not urgent. The wording owes nobody anything.
@@ -92,7 +106,7 @@ public static class MemberEventCatalogue
 
     /// <summary>The kinds that are mailed. <see cref="Response"/> and the inbox-only play kinds never reach the outbox.</summary>
     public static readonly IReadOnlyList<string> All =
-        [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting, ResultToConfirm];
+        [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting, ResultToConfirm, ClubSeat];
 
     private static readonly HashSet<string> Urgent = new(StringComparer.Ordinal) { ShareMoved, GameCancelled };
 
@@ -120,6 +134,8 @@ public static class MemberEventCatalogue
                 return ComposeReturnWaiting(c);
             case ResultToConfirm:
                 return ComposeResultToConfirm(c);
+            case ClubSeat:
+                return ComposeClubSeat(c);
             default:
                 throw new InvalidOperationException($"no message for member notice kind '{c.Row.Kind}'");
         }
@@ -136,7 +152,15 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<SharePayload>();
         return EmailTemplates.ShareMoved(c.Club, c.To, new ShareMovement(
-            p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, c.BookingUrl(p.BookingId)));
+            p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, c.BookingUrl(p.BookingId),
+            p.HeldUntilLocal, p.ByClub, p.BalanceAfterCredits));
+    }
+
+    private static EmailMessage ComposeClubSeat(MemberMailContext c)
+    {
+        var p = c.Payload<ClubSeatPayload>();
+        return EmailTemplates.ClubSeat(c.Club, c.To, new ClubSeatNotice(
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareCredits, p.Accepted, c.BaseUrl + p.Path));
     }
 
     private static EmailMessage ComposeReminder(MemberMailContext c)

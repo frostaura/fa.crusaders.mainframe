@@ -175,10 +175,12 @@ public sealed partial class PlayersService
     /// later (invite). The organiser's seat is written the first time; each new member seat and
     /// open link seat gets its own link token, returned here once and never again.
     /// </summary>
-    /// <param name="actorId">Who is adding — the organiser, or an admin acting in god mode. Recorded as the inviter.</param>
-    /// <param name="asAdmin">
-    /// The desk's add: may invite again a member who declined or was taken off, and is not held to
-    /// the club's per-booking invite cap. Both are on the admin change record.
+    /// <param name="club">
+    /// The desk's add (null for the organiser's own): the admin, recorded as the inviter; it may
+    /// invite again a member who declined or was taken off, and is not held to the club's
+    /// per-booking invite cap — both on the admin change record. The member is told the CLUB added
+    /// them (review round 1, B8), and with <see cref="ClubAdd.Accept"/> is placed as accepted (no
+    /// consent recorded, so nothing is collected until they accept their share themselves).
     /// </param>
     ///
     /// <remarks>
@@ -187,8 +189,9 @@ public sealed partial class PlayersService
     /// would both squeeze under it. The lock ends at the commit; the reconcile runs after it.
     /// </remarks>
     public async Task<PlayerOutcome> AddAsync(
-        Guid bookingId, Guid organiserId, PlayersRequest req, CancellationToken ct, Guid? actorId = null, bool asAdmin = false)
+        Guid bookingId, Guid organiserId, PlayersRequest req, CancellationToken ct, ClubAdd? club = null)
     {
+        var asAdmin = club is not null;
         await using var bookingLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, bookingId, _p.Outbox, ct);
         var now = DateTimeOffset.UtcNow;
         var game = await LoadAsync(bookingId, ct);
@@ -209,11 +212,48 @@ public sealed partial class PlayersService
             return bad;
         }
 
-        return await AddSeatsAsync(new AddWork(game, req with { SplitMode = mode }, actorId ?? organiserId, now, bookingLock), ct);
+        return await AddSeatsAsync(new AddWork(game, req with { SplitMode = mode }, club?.ActorId ?? organiserId, now, bookingLock) { Club = club }, ct);
+    }
+
+    /// <summary>The desk adding a player: who, and whether to place them as accepted (B8).</summary>
+    public sealed record ClubAdd(Guid ActorId, bool Accept);
+
+    /// <summary>
+    /// The member's notice for being added: the organiser's invite (collapsed per the reminder
+    /// cadence), or — when the club added them — the club's own notice, never collapsed, with the
+    /// seat placed as accepted first when the desk asked for that (B8).
+    /// </summary>
+    private async Task StageAddedNoticeAsync(Game game, BookingParticipant seat, ClubAdd? club, CancellationToken ct)
+    {
+        if (club is null)
+        {
+            var invite = await PlayerNotices.InviteAsync(_db, game.Booking, seat, game.Settings, ct);
+            MemberNotices.Stage(_db, _tenant.TenantId,
+                await PlayerNotices.CollapsedAsync(_db, invite, PlayerNotices.InvitedKeyPrefix, game.Settings, ct, game.Booking), game.Settings);
+            return;
+        }
+        if (club.Accept)
+        {
+            seat.Status = ParticipantStatus.Accepted;
+            seat.RespondedAt = StorableTime.UtcNow;
+            MemberNotices.Stage(_db, _tenant.TenantId,
+                await PlayerNotices.ClubSeatAsync(_db, game.Booking, seat, game.Settings, "club-added", ct), game.Settings);
+            return;
+        }
+
+        // Still an invite, so the invite loop's rule holds: repeated inside the reminder cadence
+        // it is inbox-only when a reminder will follow (the key keeps the invite prefix for that).
+        var notice = await PlayerNotices.ClubSeatAsync(_db, game.Booking, seat, game.Settings, PlayerNotices.InvitedKeyPrefix + "club", ct);
+        MemberNotices.Stage(_db, _tenant.TenantId,
+            await PlayerNotices.CollapsedAsync(_db, notice, PlayerNotices.InvitedKeyPrefix, game.Settings, ct, game.Booking), game.Settings);
     }
 
     /// <summary>One add, decided: the game, the players (mode resolved), who, when, and the lock to commit.</summary>
-    private sealed record AddWork(Game Game, PlayersRequest Req, Guid ActorId, DateTimeOffset Now, PayerLock Lock);
+    private sealed record AddWork(Game Game, PlayersRequest Req, Guid ActorId, DateTimeOffset Now, PayerLock Lock)
+    {
+        /// <summary>Set when the club is adding (B8).</summary>
+        public ClubAdd? Club { get; init; }
+    }
 
     /// <summary>
     /// The organiser's invite loop, closed (review finding 7): a member who said no to this game,
@@ -255,9 +295,7 @@ public sealed partial class PlayersService
 
         foreach (var (seat, _) in added.Where(a => a.Seat.UserId is not null))
         {
-            var invite = await PlayerNotices.InviteAsync(_db, game.Booking, seat, game.Settings, ct);
-            MemberNotices.Stage(_db, _tenant.TenantId,
-                await PlayerNotices.CollapsedAsync(_db, invite, PlayerNotices.InvitedKeyPrefix, game.Settings, ct, game.Booking), game.Settings);
+            await StageAddedNoticeAsync(game, seat, work.Club, ct);
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;

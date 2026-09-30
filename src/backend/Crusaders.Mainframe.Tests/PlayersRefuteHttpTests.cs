@@ -247,7 +247,8 @@ public sealed class PlayersRefuteHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/bookings/{bookingId}/players", new { userId = club.Alex, reason = "Phoned" })).StatusCode);
 
         var mailed = await PlayersClub.ReadAsync(f, db => db.AdminNotifications.IgnoreQueryFilters()
-            .CountAsync(n => n.TenantId == club.TenantId && n.RecipientUserId == club.Alex && n.Kind == MemberEventCatalogue.Invited));
+            .CountAsync(n => n.TenantId == club.TenantId && n.RecipientUserId == club.Alex
+                             && (n.Kind == MemberEventCatalogue.Invited || n.Kind == MemberEventCatalogue.ClubSeat)));
         Assert.Equal(2, mailed);
     }
 

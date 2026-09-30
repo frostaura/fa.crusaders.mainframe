@@ -1676,12 +1676,14 @@ public static class DeviceEventEndpoints
         }
 
         // Two retries in flight together: the replay check above found nothing because the
-        // other attempt had not committed yet, and the database refused this one — on the
-        // reference's unique index, or on the slot the other attempt has just taken. Either
-        // way the purchase exists now, so re-read it and answer with it. The claim is KEPT: the
-        // purchase it stands for was made, under this very nonce.
-        if (created is BookingResult.DuplicateRequest or BookingResult.SlotTaken
-            && await ReplayAsync(reference, req, services, ct) is { } original)
+        // other attempt had not committed yet, and this one was refused — on the reference's
+        // unique index, on the slot the other attempt has just taken, or (review round 1, B18)
+        // with NO TIME LEFT: each attempt reads its own clock, and when this one read it a moment
+        // BEFORE the winner, the winner's booking starts after "now" and leaves zero whole minutes
+        // to sell. Whatever the refusal, if the purchase under this nonce exists now it is the
+        // answer: re-read it and replay. The claim is KEPT: the purchase it stands for was made,
+        // under this very nonce.
+        if (created is not BookingResult.Ok && await ReplayAsync(reference, req, services, ct) is { } original)
         {
             return original;
         }

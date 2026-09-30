@@ -49,6 +49,9 @@ public static class ResultErrors
 
     public const string NotEnoughPlayers = "not_enough_players";
     public const string NotCheckedIn = "not_checked_in";
+
+    /// <summary>The court time has not begun (review round 1, B15): a box check-in during early entry is not a game played.</summary>
+    public const string NotStarted = "not_started";
     public const string WindowClosed = "window_closed";
 }
 
@@ -212,7 +215,10 @@ public sealed class ResultService
     public static string? NotRecordableReason(Booking booking, int candidates, TenantSettingsView settings, DateTimeOffset now)
     {
         if (booking.UserId is null || candidates < 2) return ResultErrors.NotEnoughPlayers;
-        if (booking.CheckedInAt is null) return ResultErrors.NotCheckedIn;
+        if (booking.CheckedInAt is not { } checkedIn) return ResultErrors.NotCheckedIn;
+        // B15: from the court time's start or the check-in, whichever is later — a scan at the box
+        // during early entry used to open recording before a ball was hit.
+        if (now < (checkedIn > booking.StartsAt ? checkedIn : booking.StartsAt)) return ResultErrors.NotStarted;
         if (now > RecordClosesAt(booking, settings)) return ResultErrors.WindowClosed;
         return null;
     }

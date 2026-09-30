@@ -21,8 +21,23 @@ public enum ShareDirection
 }
 
 /// <summary>One share movement, as the person on one side of it reads it.</summary>
+/// <param name="HeldUntilLocal">
+/// A share an organiser RECEIVES is held until the booking's share deadline (D11) — "added to your
+/// balance" alone read as money they could spend now (review round 1, B12).
+/// </param>
+/// <param name="ByClub">The club collected it (an admin's collect), not the partner (B8).</param>
+/// <param name="BalanceAfterCredits">The partner's balance after a club collect — said when it is below zero (B8).</param>
 public sealed record ShareMovement(
-    ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, string BookingUrl);
+    ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, string BookingUrl,
+    string? HeldUntilLocal = null, bool ByClub = false, decimal? BalanceAfterCredits = null);
+
+/// <summary>
+/// The club put the reader on a game (an admin's add) or accepted one for them — review round 1,
+/// B8: neither was told to the member at all. <paramref name="Accepted"/>: they are in, and nothing
+/// is taken for their share until they accept it themselves (an admin's acceptance records no consent).
+/// </summary>
+public sealed record ClubSeatNotice(
+    string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, bool Accepted, string Url);
 
 /// <summary>A share still waiting — a reminder from the club, or a nudge from the organiser.</summary>
 public sealed record ShareReminderNotice(
@@ -90,20 +105,72 @@ public static partial class EmailTemplates
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: ShareSubject(m),
             Preheader: $"{m.CourtName}, {m.StartsAtLocal}.",
-            Heading: ShareHeading(m.Direction),
-            Blocks:
-            [
-                new Paragraph(ShareSentence(m)),
-                new Facts(
-                [
-                    new FactRow("Court", m.CourtName),
-                    new FactRow("When", m.StartsAtLocal),
-                    new FactRow(m.Direction is ShareDirection.Paid or ShareDirection.Returned ? "Taken from your balance" : "Added to your balance", Cr(m.AmountCredits)),
-                ]),
-                new CallToAction("Open the booking", m.BookingUrl),
-                new Footnote("Shares move between players only. The club's price for the court is unchanged."),
-            ],
+            Heading: ShareHeading(m),
+            Blocks: ShareBlocks(m),
             WhyThis: WhyMoney));
+
+    private static List<EmailBlock> ShareBlocks(ShareMovement m)
+    {
+        var facts = new List<FactRow>
+        {
+            new("Court", m.CourtName),
+            new("When", m.StartsAtLocal),
+            new(m.Direction is ShareDirection.Paid or ShareDirection.Returned ? "Taken from your balance" : "Added to your balance", Cr(m.AmountCredits)),
+        };
+        if (m.HeldUntilLocal is { } held) facts.Add(new("Held until", held));
+        var blocks = new List<EmailBlock> { new Paragraph(ShareSentence(m)), new Facts(facts) };
+
+        // B12: received shares are held to the deadline in case one has to go back (D11) — say so,
+        // or "added to your balance" reads as money to spend tonight.
+        if (m.HeldUntilLocal is { } until)
+        {
+            blocks.Add(new Callout(CalloutTone.Info,
+                $"It is held until {until} in case a share has to go back to a player, and you can spend it after that."));
+        }
+
+        // B8: a club collect may take a partner below zero, by name — tell them where they stand.
+        if (m.ByClub && m.BalanceAfterCredits is { } after && after < 0)
+        {
+            blocks.Add(new Callout(CalloutTone.Warning,
+                $"Your balance is now {Cr(after)}, below zero. Top up before you book again."));
+        }
+        blocks.Add(new CallToAction("Open the booking", m.BookingUrl));
+        blocks.Add(new Footnote("Shares move between players only. The club's price for the court is unchanged."));
+        return blocks;
+    }
+
+    /// <summary>The club added the reader to a game, or accepted one for them (B8).</summary>
+    public static EmailMessage ClubSeat(ClubIdentity club, string to, ClubSeatNotice n) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: n.Accepted ? $"The club put you in {n.OrganiserName}'s game — {n.CourtName}" : $"The club added you to {n.OrganiserName}'s game — {n.CourtName}",
+            Preheader: $"{n.StartsAtLocal}.",
+            Heading: n.Accepted ? "You're in a game" : "You've been added to a game",
+            Blocks: ClubSeatBlocks(n),
+            WhyThis: WhyGame));
+
+    private static List<EmailBlock> ClubSeatBlocks(ClubSeatNotice n)
+    {
+        var blocks = new List<EmailBlock>
+        {
+            new Paragraph(n.Accepted
+                ? $"The club has put you in the game {n.OrganiserName} booked for {n.CourtName} at {n.StartsAtLocal}."
+                : $"The club has added you to the game {n.OrganiserName} booked for {n.CourtName} at {n.StartsAtLocal}, and it is waiting for your answer."),
+            new Facts(
+            [
+                new FactRow("Court", n.CourtName),
+                new FactRow("When", n.StartsAtLocal),
+                new FactRow("Your share", n.ShareCredits > 0 ? Cr(n.ShareCredits) : "Nothing — covered"),
+            ]),
+        };
+        if (n.ShareCredits > 0)
+        {
+            blocks.Add(new Callout(CalloutTone.Info, n.Accepted
+                ? "Nothing is taken from your balance for your share until you accept it yourself in the app."
+                : "Nothing is taken until you accept. If you would rather not play, decline and the seat goes back to the organiser."));
+        }
+        blocks.Add(new CallToAction(n.Accepted ? "Open the booking" : "See the invite", n.Url));
+        return blocks;
+    }
 
     /// <summary>A share still waiting: the club's reminder, or the organiser's nudge.</summary>
     public static EmailMessage ShareReminder(ClubIdentity club, string to, ShareReminderNotice n) =>
@@ -199,6 +266,7 @@ public static partial class EmailTemplates
 
     private static string ShareSubject(ShareMovement m)
     {
+        if (m.ByClub && m.Direction == ShareDirection.Paid) return $"The club collected your share — {m.CourtName}";
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"Share paid — {m.CourtName}";
@@ -208,9 +276,10 @@ public static partial class EmailTemplates
         }
     }
 
-    private static string ShareHeading(ShareDirection d)
+    private static string ShareHeading(ShareMovement m)
     {
-        switch (d)
+        if (m.ByClub && m.Direction == ShareDirection.Paid) return "The club collected your share";
+        switch (m.Direction)
         {
             case ShareDirection.Paid: return "You paid your share";
             case ShareDirection.Received: return "A share has come in";
@@ -221,6 +290,7 @@ public static partial class EmailTemplates
 
     private static string ShareSentence(ShareMovement m)
     {
+        if (m.ByClub) return ClubShareSentence(m);
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"You paid {Cr(m.AmountCredits)} to {m.OtherName} for your share of the court.";
@@ -228,5 +298,13 @@ public static partial class EmailTemplates
             case ShareDirection.Refunded: return $"{Cr(m.AmountCredits)} of your share came back from {m.OtherName}.";
             default: return $"{Cr(m.AmountCredits)} of {m.OtherName}'s share went back to them from your balance.";
         }
+    }
+
+    /// <summary>B8: a share the CLUB collected — "You paid your share…" told the partner they had done something they had not.</summary>
+    private static string ClubShareSentence(ShareMovement m)
+    {
+        return m.Direction == ShareDirection.Paid
+            ? $"The club collected {Cr(m.AmountCredits)} from your balance for your share of the court {m.OtherName} booked."
+            : $"The club collected {Cr(m.AmountCredits)} from {m.OtherName} for their share of your booking.";
     }
 }

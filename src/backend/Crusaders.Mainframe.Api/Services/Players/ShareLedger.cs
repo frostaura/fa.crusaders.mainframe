@@ -372,7 +372,7 @@ public sealed class ShareLedger
         var before = await _ledger.GetBalanceAsync(partnerId, ct);
         var move = new ShareMove(seatId, partnerId, PayerOf(booking), delta, await NextSeqAsync(seatId, partnerId, ct));
         await record(seat, delta, before);
-        await StageReceiptsAsync(booking, move, ct);
+        await StageReceiptsAsync(booking, move, ct, clubCollect: before - delta);
         try
         {
             await _ledger.PostManyAsync(Pair(booking, move, actorUserId), ct);
@@ -422,7 +422,11 @@ public sealed class ShareLedger
     /// Both receipts, staged in the pair's own save — one per member, keyed on the pair, so a pair
     /// that rolls back leaves no receipt and a committed one cannot lose it.
     /// </summary>
-    private async Task StageReceiptsAsync(Booking booking, ShareMove move, CancellationToken ct)
+    /// <param name="clubCollect">
+    /// Set when the CLUB collected (an admin's collect): the partner's balance after it. Both
+    /// receipts then say the club did it, and the partner's says where their balance stands (B8).
+    /// </param>
+    private async Task StageReceiptsAsync(Booking booking, ShareMove move, CancellationToken ct, decimal? clubCollect = null)
     {
         var settings = await _settings.GetAsync(ct);
         var game = await GameText.ForAsync(_db, booking, settings, ct);
@@ -436,10 +440,18 @@ public sealed class ShareLedger
             ? (ShareDirection.Paid, ShareDirection.Received)
             : (ShareDirection.Refunded, ShareDirection.Returned);
 
-        Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount),
-            move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount), settings);
-        Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount),
-            move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount), settings);
+        // B12: what an organiser receives is held to the booking's deadline (D11); the receipt says until when.
+        var heldUntil = organiserSide == ShareDirection.Received
+            ? GameText.Local(PlayerSettings.ShareDeadline(booking, settings), settings)
+            : null;
+        var byClub = clubCollect is not null;
+
+        Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
+                ByClub: byClub, BalanceAfterCredits: clubCollect),
+            move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub), settings);
+        Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
+                HeldUntilLocal: heldUntil, ByClub: byClub),
+            move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub), settings);
     }
 
     private void Stage(SharePayload payload, Guid userId, string key, string headline, TenantSettingsView settings)
@@ -448,9 +460,11 @@ public sealed class ShareLedger
             userId, MemberEventCatalogue.ShareMoved, key, payload, headline, $"/bookings/{payload.BookingId}", payload.BookingId), settings);
     }
 
-    private static string ShareHeadline(ShareDirection d, string other, decimal amount)
+    private static string ShareHeadline(ShareDirection d, string other, decimal amount, bool byClub = false)
     {
         var cr = MoneyFormat.Credits(amount);
+        if (byClub && d == ShareDirection.Paid) return $"The club collected {cr} for your share";
+        if (byClub && d == ShareDirection.Received) return $"The club collected {other}'s share: {cr}";
         switch (d)
         {
             case ShareDirection.Paid: return $"You paid {other} {cr}";

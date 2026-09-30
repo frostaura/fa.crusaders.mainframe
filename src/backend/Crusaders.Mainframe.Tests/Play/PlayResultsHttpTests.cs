@@ -71,6 +71,29 @@ public sealed class PlayResultsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         await AssertNotRecordable(organiser, alone, "not_enough_players");
     }
 
+    /// <summary>
+    /// Review round 1, B15: a scan at the box during early entry checked the booking in, and a
+    /// result could then be recorded before the court time began. Recording opens at the start or
+    /// the check-in, whichever is later.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_result_waits_for_the_court_time_to_start_even_after_an_early_check_in()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await SeedAsync(f, "pr-early");
+        var organiser = club.Client(f, club.Organiser);
+
+        var soon = await club.GameAsync(f, DateTimeOffset.UtcNow.AddMinutes(20).Storable(), club.Organiser, [club.Sam], checkIn: false);
+        await club.CheckInAsync(f, soon, DateTimeOffset.UtcNow.AddMinutes(-1).Storable());   // early entry
+        await AssertNotRecordable(organiser, soon, "not_started");
+        Assert.Equal("not_started", (await ReadResultAsync(organiser, soon)).GetProperty("not_recordable_reason").GetString());
+
+        // Started, checked in after the start: recordable.
+        var started = await club.GameAsync(f, Earlier(1), club.Organiser, [club.Sam]);
+        Assert.Equal(HttpStatusCode.Created, (await RecordAsync(organiser, started, [U(club.Organiser)], [U(club.Sam)])).StatusCode);
+    }
+
     private static async Task AssertNotRecordable(HttpClient client, Guid booking, string reason)
     {
         var response = await RecordAsync(client, booking, [U(Guid.NewGuid())], [U(Guid.NewGuid())]);

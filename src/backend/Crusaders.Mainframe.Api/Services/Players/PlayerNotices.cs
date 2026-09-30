@@ -100,6 +100,28 @@ public static class PlayerNotices
             $"/bookings/{booking.Id}", booking.Id);
     }
 
+    /// <summary>
+    /// The club added the seat's member to the game, or accepted it for them (B8) — mailed, with
+    /// the invite link while they still have to answer and the booking once they are in.
+    /// <paramref name="keyPrefix"/> tells the add (<c>club-added</c>) from the acceptance
+    /// (<c>club-accepted</c>) so both can be told about one seat.
+    /// </summary>
+    public static async Task<MemberNotice> ClubSeatAsync(
+        MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, string keyPrefix, CancellationToken ct)
+    {
+        var game = await GameText.ForAsync(db, booking, settings, ct);
+        var organiser = await NameAsync(db, booking.UserId, "A member", ct);
+        var accepted = seat.Status == ParticipantStatus.Accepted;
+        var path = accepted ? $"/bookings/{booking.Id}" : InvitePath(seat.Id);
+        return new MemberNotice(
+            seat.UserId!.Value, MemberEventCatalogue.ClubSeat, $"{keyPrefix}:{seat.Id:N}",
+            new ClubSeatPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, accepted, path),
+            accepted
+                ? $"The club put you in {organiser}'s game — {game.CourtName}, {game.StartsLocal}"
+                : $"The club added you to {organiser}'s game — {game.CourtName}, {game.StartsLocal}",
+            path, booking.Id);
+    }
+
     /// <summary>A partner's answer, told to the organiser on the inbox only.</summary>
     public static async Task<MemberNotice> ResponseAsync(
         MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, string verb, CancellationToken ct)
