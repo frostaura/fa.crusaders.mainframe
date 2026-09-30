@@ -11,7 +11,7 @@ import { cellVerdict, type CellFacts, type GridReason, type ViewerRules } from "
 import { closedCellLabel, holdCellLabel, holdLiftLabel, pastCellLabel, quotaCellLabel, restrictionLabel, unavailableWhy } from "../lib/gridCopy";
 import {
   CELL_TEXT, PARTNER_CELL_WORD, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
-  mineCellLabel, minePastCellLabel, otherCellAdminLabel, partnerCellLabel,
+  mineCellLabel, minePastCellLabel, minePastOpenLabel, otherCellAdminLabel, partnerCellLabel,
 } from "../lib/bookingsCopy";
 import { isPartnerSlot } from "../lib/bookingsApi";
 import {
@@ -445,6 +445,7 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const { ctx, slot, where, facts, court, startsAtUtc } = props;
   const rows = spanOf(slot, startsAtUtc, facts.sliceMinutes, props.rowsLeft);
   const cell = { at: props.at, line: props.line, roving: props.roving, selecting: ctx.selection.active };
+  if (facts.isPast && slot.bookingId && !isPendingBooking(slot.bookingId)) return <MinePastCell {...props} slot={slot} />;
   if (facts.isPast || !slot.bookingId) {
     return (
       <Cell label={minePastCellLabel(where, slot.checkedIn)} selfFocus {...cell}>
@@ -477,6 +478,31 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
           <span className="min-w-0 truncate">{onCourt ? CELL_TEXT.onCourt : CELL_TEXT.mine}</span>
         </button>
       </Interactable>
+      </Block>
+    </Cell>
+  );
+}
+
+/**
+ * R2 F1-1 — the viewer's own past game (booked or a partner's seat) opens its booking page, where
+ * its result is recorded and confirmed. It was a dead "Past" block: a finished game was on no
+ * screen, and its result reachable only from an email.
+ */
+function MinePastCell(props: SlotCellProps & { slot: ScheduleSlot }) {
+  const { ctx, slot, where, facts, startsAtUtc } = props;
+  const rows = spanOf(slot, startsAtUtc, facts.sliceMinutes, props.rowsLeft);
+  return (
+    <Cell label={where} selfFocus={false} at={props.at} line={props.line} roving={props.roving} selecting={ctx.selection.active}>
+      <Block rows={rows}>
+        <Link
+          to={`/bookings/${slot.bookingId}`}
+          tabIndex={props.roving ? 0 : -1}
+          aria-label={minePastOpenLabel(where, slot.checkedIn)}
+          data-past-mine=""
+          className={cn(SURFACE, PRESSABLE, TONE.minePast, "items-start py-2 hover:border-control", ctx.selection.active && RECEDED)}
+        >
+          <span aria-hidden="true" className="min-w-0 truncate">{slot.checkedIn ? CELL_TEXT.played : CELL_TEXT.minePast}</span>
+        </Link>
       </Block>
     </Cell>
   );

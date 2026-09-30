@@ -19,6 +19,7 @@ import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet"
 import { BookingForBar } from "../components/bookings/BookingForBar";
 import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
+import { RecentGames } from "../components/bookings/RecentGames";
 import { CancelSheet, type CancelledOutcome } from "../components/bookings/CancelSheet";
 import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
@@ -145,7 +146,13 @@ export default function BookingsPage() {
       <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
         {bookAsUserId
           ? <BookingForBar booking={bookingFor} sliceMinutes={day?.sliceMinutes ?? 15} />
-          : <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />}
+          : (
+            <>
+              <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
+              {/* R2 F1-1 — finished games, whose results are recorded here. */}
+              <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
+            </>
+          )}
         <InvitesBadgeLink />
         <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} rateLine={explainer.rateLine} />
         <ScheduleNotices

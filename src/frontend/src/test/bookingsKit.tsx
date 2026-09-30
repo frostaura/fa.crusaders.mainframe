@@ -85,6 +85,8 @@ export function openBookings(options: OpenOptions = {}): FetchStub {
     { path: "/api/v1/wallet", body: { balance_credits: balance, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     // Review round 1, F1.12 — the upcoming games above the grid; none, unless a test says so.
     { path: "/api/v1/me/bookings/upcoming", body: { timezone: "Africa/Johannesburg", items: [] } },
+    // Review round 2, F1-1 — the recent games (C3); none, unless a test says so.
+    { path: "/api/v1/me/bookings/recent", body: { timezone: "Africa/Johannesburg", items: [] } },
   ]);
   const date = (day as { date?: string }).date ?? "2030-09-09";
   renderPage(<><BookingsPage /><LocationProbe /></>, {

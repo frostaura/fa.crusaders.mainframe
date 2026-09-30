@@ -31,6 +31,25 @@ export type UpcomingGame = {
 
 export type UpcomingGames = { timezone?: string; items: UpcomingGame[] };
 
+/* ─────────────────────────────── recent games (C3, R2 F1-1) ─────────────────────────────── */
+
+export type RecentResultStatus = "none" | "pending" | "confirmed" | "disputed";
+
+/**
+ * A game that ended within the result window (the last 7 days) — the upcoming item's shape, plus
+ * where its result stands and whether the caller may record one. Newest first, at most 50.
+ */
+export type RecentGame = UpcomingGame & { result_status: RecentResultStatus; can_record: boolean };
+
+export type RecentGames = { timezone?: string; items: RecentGame[] };
+
+/** What a recent game asks of the viewer, if anything: record it, or confirm the other side's. */
+export function recentAction(game: RecentGame): "record" | "confirm" | null {
+  if (game.result_status === "none" && game.can_record) return "record";
+  if (game.result_status === "pending" && game.needs_action) return "confirm";
+  return null;
+}
+
 /* ─────────────────────────────── booking for a member (F1.6) ─────────────────────────────── */
 
 /** Enough of a member for the "Booking for …" bar: who, what they may spend, what they pay. */
@@ -172,5 +191,6 @@ export function isPartnerSlot(slot: ScheduleSlot): boolean {
 
 export const bookingsApi = {
   upcoming: () => api.get<UpcomingGames>("/api/v1/me/bookings/upcoming"),
+  recent: () => api.get<RecentGames>("/api/v1/me/bookings/recent"),
   bookingFor: readBookingFor,
 };

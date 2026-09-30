@@ -1,14 +1,14 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Interactable } from "@/components/ui/interactable";
 import { CaretRight, Warning } from "@/components/ui/icons";
-import { clubClock } from "@/lib/clubClock";
 import { UPCOMING } from "@/lib/bookingsCopy";
 import { bookingsApi, type UpcomingGame } from "@/lib/bookingsApi";
-import { clubDayLabel } from "./bookFlow";
+import { useGamesRead } from "./useGamesRead";
+import { SHOWN, when } from "./gameWhen";
 
 /**
  * F1.12 — the member's upcoming games, above the grid (contract §2): every future game they
@@ -25,32 +25,9 @@ import { clubDayLabel } from "./bookFlow";
  * read is said in one line with a retry, never drawn as "no games".
  * </p>
  */
-const SHOWN = 3;
-
-type State =
-  | { status: "loading" }
-  | { status: "ready"; items: UpcomingGame[]; timezone: string | undefined }
-  | { status: "error" };
-
-function useUpcoming(refreshKey: unknown) {
-  const [attempt, setAttempt] = useState(0);
-  const [answer, setAnswer] = useState<{ key: string; state: State } | null>(null);
-  const key = `${String(refreshKey)}|${attempt}`;
-  useEffect(() => {
-    let live = true;
-    bookingsApi.upcoming().then(
-      (res) => { if (live) setAnswer({ key, state: { status: "ready", items: res.items ?? [], timezone: res.timezone } }); },
-      () => { if (live) setAnswer({ key, state: { status: "error" } }); },
-    );
-    return () => { live = false; };
-  }, [key]);
-  // A re-read keeps the list it had rather than flashing empty under a member's thumb.
-  const state: State = answer ? answer.state : { status: "loading" };
-  return { state, retry: () => setAttempt((n) => n + 1) };
-}
 
 export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknown; fallbackZone?: string }) {
-  const { state, retry } = useUpcoming(refreshKey);
+  const { state, retry } = useGamesRead(bookingsApi.upcoming, refreshKey);
   const [all, setAll] = useState(false);
   const headingId = useId();
   if (state.status === "loading") return null;
@@ -82,12 +59,8 @@ export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknow
   );
 }
 
-function when(game: UpcomingGame, zone: string | undefined): string {
-  const start = new Date(game.starts_at);
-  return `${clubDayLabel(start, zone)} · ${clubClock(start, zone)}–${clubClock(game.ends_at, zone)}`;
-}
-
-function GameCard({ game, zone }: { game: UpcomingGame; zone: string | undefined }) {
+/** One game, opening its booking page. `badges` replace the role badge's neighbours (R2 F1-1). */
+export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: string | undefined; badges?: ReactNode }) {
   const time = when(game, zone);
   const others = game.players.slice(0, 3);
   return (
@@ -100,7 +73,7 @@ function GameCard({ game, zone }: { game: UpcomingGame; zone: string | undefined
           <span className="flex flex-wrap items-center gap-2">
             <span className="break-words text-sm font-semibold text-text-primary">{game.court_name}</span>
             <Badge tone={game.role === "partner" ? "info" : "brand"}>{game.role === "partner" ? UPCOMING.partner : UPCOMING.organiser}</Badge>
-            {game.needs_action ? <Badge tone="warning">{UPCOMING.needsAction}</Badge> : null}
+            {badges ?? (game.needs_action ? <Badge tone="warning">{UPCOMING.needsAction}</Badge> : null)}
           </span>
           <span className="text-sm tabular-nums text-text-secondary">{time}</span>
           {others.length || game.my_share_credits !== null ? (

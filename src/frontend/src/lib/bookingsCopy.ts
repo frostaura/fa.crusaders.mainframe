@@ -446,6 +446,30 @@ export const UPCOMING = {
   share: (credits: number) => `your share ${formatCredits(credits)}`,
 } as const;
 
+/**
+ * R2 F1-1 — games that have finished within the result window (contract C3), under the upcoming
+ * ones: a finished game was reachable only from an email, so its result could not be recorded.
+ */
+export const RECENT = {
+  title: "Recent games",
+  failed: "Couldn't load your recent games.",
+  retry: "Try again",
+  record: "Record the result",
+  recordFor: (court: string, when: string) => `Record the result of ${court}, ${when}`,
+  confirm: "Confirm the result",
+  confirmFor: (court: string, when: string) => `Confirm the result of ${court}, ${when}`,
+  pending: "Waiting for a confirm",
+  confirmed: "Result in",
+  disputed: "Disputed",
+  more: (n: number) => `Show ${n} more`,
+  less: "Show fewer",
+} as const;
+
+/** R2 F1-1 — the viewer's own past booking on the grid opens its booking page (and its result). */
+export function minePastOpenLabel(where: string, checkedIn: boolean | null): string {
+  return `${minePastCellLabel(where, checkedIn)}. Open it`;
+}
+
 /** F1.12 — a partner's seat on the grid: theirs to open, never to cancel. */
 export function partnerCellLabel(where: string): string {
   return `${where} — a game you're playing in. Open it`;
