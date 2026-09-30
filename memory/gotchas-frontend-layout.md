@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-frontend-layout
 description: "Layout traps measured in Chromium (R3-R4): text overflow is invisible to element rects, a zero flex basis never wraps, implicit grid columns and min-widths beat max-widths at 200 %, ui heights are floors."
 type: gotcha
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Gotchas — layout, measured in a real browser (review round 3, lane F3)
@@ -45,3 +45,8 @@ last_verified: 2026-09-30
   24 px under "Forgot password?" at 200 %; `min(0px, calc((1lh - 44px) / 2))` is ~0 there.
 - **Measure "clipped label" on the `button-label` layer**, not scrollWidth: the hidden pending
   spinner overflows every icon button by a few px and is never seen.
+- **A rem `max-width` container query is a large-text query** (R4, lane F3): `[@container(max-width:18rem)]`
+  is 288 px at normal text and 576 px at 200 %, so a tile hides (or an avatar stacks) only when the
+  TEXT is large for the box — the switcher, the Overview's links and the member header use it.
+- **`auto-fit` cannot collapse a track that a `col-span-full` item spans**: the armed confirm's
+  sentence kept three tracks open and the pair took two of three (R4 A-15). Give the pair its own grid.

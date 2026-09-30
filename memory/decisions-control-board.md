@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-control-board
 description: "Which court box a control-board tile reports when several claim one court, and how the duplicate is surfaced to the console rather than silently resolved (review round 3, A-11)."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — the control board's box per court
@@ -26,3 +26,5 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
 - **Round 4 (A4-5):** the payload also lists every court box once (`boxes`: code, name, MAC, link,
   courts), so "boxes not calling in" counts boxes, not tiles; tiles and `other_boxes` carry
   `mac_address`, because every auto-registered box is named "Court box". Same six queries.
+- **R4 A4-5 (console):** where two boxes share a name (every one is "Court box" out of the factory)
+  each carries its code and MAC; "N boxes haven't called in" counts distinct boxes, never tiles.
