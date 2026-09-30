@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useId, useRef } from "react";
+import { Suspense, useEffect, useId, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import { useBalance } from "@/lib/balance";
 import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
-import { MoneyRows, SendingNote, SlotList, SlotSummary, Stepper, WaitingButton } from "./SheetParts";
+import { MoneyRows, SendingNote, SlotList, SlotSummary, Stepper } from "./SheetParts";
 import { slotCount, type BookAs } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
 import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
@@ -114,7 +114,6 @@ function BookFlowView(props: ViewProps) {
   const body = useRef<HTMLDivElement>(null);
   /** The sentence an unavailable Book button is described by. */
   const reasonId = useId();
-  const sendingId = useId();
 
   // A new step is a new screen: take a screen reader to its top rather than leaving it on a
   // button that has just changed meaning under it.
@@ -143,8 +142,7 @@ function BookFlowView(props: ViewProps) {
             : <StepView flow={flow} isAdmin={props.isAdmin} reasonId={reasonId} actorUserId={props.actorUserId} terms={props.cancelTerms} />}
         </div>
       </DialogBody>
-      <SendingNote text={sheetNote(flow)} refused={props.refused + flow.ignoredTaps} id={sendingId} />
-      <BookFooter flow={flow} onClose={props.onClose} reasonId={reasonId} sendingId={sendingId} />
+      <BookFooter flow={flow} onClose={props.onClose} reasonId={reasonId} note={<SendingNote text={sheetNote(flow)} refused={props.refused + flow.ignoredTaps} />} />
     </>
   );
 }
@@ -404,8 +402,10 @@ function isAdminRun(flow: BookFlow): boolean {
 
 /* ─────────────────────────────── the footer ─────────────────────────────── */
 
-function BookFooter({ flow, onClose, reasonId, sendingId }: { flow: BookFlow; onClose: () => void; reasonId: string; sendingId: string }) {
-  if (flow.run) return <ResultFooter flow={flow} onClose={onClose} sendingId={sendingId} />;
+type FooterProps = { flow: BookFlow; onClose: () => void; reasonId: string; note: ReactNode };
+
+function BookFooter({ flow, onClose, reasonId, note }: FooterProps) {
+  if (flow.run) return <ResultFooter flow={flow} onClose={onClose} note={note} />;
   if (flow.players.picking !== null) {
     // The picker is a panel inside the Players step: its way out is Back, to the seats.
     return (
@@ -418,9 +418,9 @@ function BookFooter({ flow, onClose, reasonId, sendingId }: { flow: BookFlow; on
   const way = first ? BOOK_SHEET.cancel : BOOK_SHEET.back;
   return (
     <DialogFooter>
-      {flow.busy
-        ? <WaitingButton label={way} describedBy={sendingId} />
-        : <Button variant="outline" onClick={first ? onClose : flow.back}>{way}</Button>}
+      {note}
+      {/* R4 I4-1 — no way out while the booking is on its way; the note above says why. */}
+      {flow.busy ? null : <Button variant="outline" onClick={first ? onClose : flow.back}>{way}</Button>}
       {flow.confirming ? <PrimaryButton flow={flow} reasonId={reasonId} /> : <Button onClick={flow.next}>{BOOK_SHEET.next}</Button>}
     </DialogFooter>
   );
@@ -450,7 +450,7 @@ function PrimaryButton({ flow, reasonId }: { flow: BookFlow; reasonId: string })
   );
 }
 
-function ResultFooter({ flow, onClose, sendingId }: { flow: BookFlow; onClose: () => void; sendingId: string }) {
+function ResultFooter({ flow, onClose, note }: Omit<FooterProps, "reasonId">) {
   const halted = flow.run?.halted === "insufficient_balance";
   const admin = isAdminRun(flow);
   return (
@@ -465,7 +465,8 @@ function ResultFooter({ flow, onClose, sendingId }: { flow: BookFlow; onClose: (
           {admin ? BOOK_SHEET.bookRestAnyway : BOOK_SHEET.retry}
         </Button>
       ) : null}
-      {flow.busy ? <WaitingButton label={BOOK_SHEET.done} describedBy={sendingId} /> : <Button onClick={onClose}>{BOOK_SHEET.done}</Button>}
+      {note}
+      {flow.busy ? null : <Button onClick={onClose}>{BOOK_SHEET.done}</Button>}
     </DialogFooter>
   );
 }

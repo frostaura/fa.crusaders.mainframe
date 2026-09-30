@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { Alert } from "@/components/Alert";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL } from "@/lib/bookingsCopy";
 import { BulkResults } from "./BulkResults";
-import { MoneyRows, SendingNote, SlotList, WaitingButton, type MoneyRow, type SlotLine } from "./SheetParts";
+import { MoneyRows, SendingNote, SlotList, type MoneyRow, type SlotLine } from "./SheetParts";
 import {
   bookingFace, cancelBookings, netOf, newCancelKey, quoteNote, totalsOf, useCancelQuotes,
   type CancelRun, type QuoteMap,
@@ -166,7 +166,6 @@ type CancelFlow = ReturnType<typeof useCancelFlow>;
 function CancelFlowView(props: FlowProps) {
   const flow = useCancelFlow(props);
   const count = props.bookings.length;
-  const sendingId = useId();
   const busy = flow.action.pending;
   return (
     <>
@@ -179,15 +178,14 @@ function CancelFlowView(props: FlowProps) {
           {flow.run ? <CancelResult run={flow.run} count={count} /> : <CancelBody flow={flow} bookings={props.bookings} />}
         </div>
       </DialogBody>
-      <SendingNote text={busy ? CANCEL_SHEET.sending : null} refused={props.refused} id={sendingId} />
       <DialogFooter>
+        <SendingNote text={busy ? CANCEL_SHEET.sending : null} refused={props.refused} />
         {flow.run ? (
           <Button onClick={props.onClose}>{CANCEL_SHEET.done}</Button>
         ) : (
           <>
-            {busy
-              ? <WaitingButton label={CANCEL_SHEET.keep(count)} describedBy={sendingId} />
-              : <Button variant="outline" onClick={props.onClose}>{CANCEL_SHEET.keep(count)}</Button>}
+            {/* R4 I4-1 — no way out while the cancel is on its way; the note says why. */}
+            {busy ? null : <Button variant="outline" onClick={props.onClose}>{CANCEL_SHEET.keep(count)}</Button>}
             <Button variant="danger" pending={flow.action.pending} onClick={flow.confirm}>
               {CANCEL_SHEET.confirm(count)}
             </Button>

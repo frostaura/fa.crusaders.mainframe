@@ -73,13 +73,9 @@ describe("BookSheet — nothing leaves the sheet while a booking is on its way (
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     fireEvent.click(bookButton(), { detail: 1 });
 
-    // In flight: the waiting line is on screen and Back is in its place, unavailable, saying why.
+    // In flight: the waiting line stands where Back was — no way out is offered, and it says why.
     await waitFor(() => expect(within(dialog()).getByText(BOOK_SHEET.sending)).toBeVisible());
-    const back = within(dialog()).getByRole("button", { name: BOOK_SHEET.back });
-    expect(back).toHaveAttribute("aria-disabled", "true");
-    expect(back.getAttribute("aria-describedby")).toBeTruthy();
-    fireEvent.click(back);
-    expect(within(dialog()).queryByText(BOOK_SHEET.steps.players)).toBeInTheDocument(); // stepper still there
+    expect(within(dialog()).queryByRole("button", { name: BOOK_SHEET.back })).toBeNull();
     expect(bookButton()).toHaveAttribute("aria-busy", "true"); // still on Confirm, still sending
 
     fireEvent.click(closeX());
@@ -147,9 +143,7 @@ describe("CancelSheet — Keep, the × and Escape wait for the club (I4-1)", () 
     render(<CancelSheet open onOpenChange={onOpenChange} bookings={[MINE]} isAdmin={false} />, { wrapper: Providers, reactStrictMode: true });
     fireEvent.click(await within(dialog()).findByRole("button", { name: CANCEL_SHEET.confirm(1) }));
     await waitFor(() => expect(within(dialog()).getByText(CANCEL_SHEET.sending)).toBeVisible());
-    const keep = within(dialog()).getByRole("button", { name: CANCEL_SHEET.keep(1) });
-    expect(keep).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(keep);
+    expect(within(dialog()).queryByRole("button", { name: CANCEL_SHEET.keep(1) })).toBeNull();
     fireEvent.click(closeX());
     fireEvent.keyDown(dialog(), { key: "Escape" });
     expect(onOpenChange).not.toHaveBeenCalled();

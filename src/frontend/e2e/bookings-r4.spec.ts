@@ -66,7 +66,7 @@ test.describe("I4-1 — a booking in flight keeps its sheet", () => {
     await sheet.getByRole("button", { name: /^Book · / }).click();
     await expect(sheet.getByText(BOOK_SHEET.sending)).toBeVisible();
 
-    await sheet.getByRole("button", { name: BOOK_SHEET.back }).click({ force: true });
+    await expect(sheet.getByRole("button", { name: BOOK_SHEET.back })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await sheet.getByRole("button", { name: /^Close/ }).click();
     await page.goBack();

@@ -306,7 +306,7 @@ export const BOOK_SHEET = {
    * a slow booking was charged with nothing on screen. Said beside the unavailable way out, and
    * said again when somebody tries the ×, Escape or Back.
    */
-  sending: "Booking… this stays open until the club answers, so you'll see what happened.",
+  sending: "Booking… waiting for the club's answer before this closes.",
   /**
    * R4 I4-2 — a double tap on Continue whose second half landed on Book: ignored, and said, so a
    * press never does nothing in silence.
@@ -376,7 +376,7 @@ export const CANCEL_SHEET = {
     (count === 1 ? "Here's what goes back if you cancel now." : "Here's what goes back if you cancel them now."),
   keep: (count: number) => (count === 1 ? "Keep booking" : "Keep bookings"),
   /** R4 I4-1 — the cancel sheet's waiting line; see BOOK_SHEET.sending. */
-  sending: "Cancelling… this stays open until the club answers, so you'll see what happened.",
+  sending: "Cancelling… waiting for the club's answer before this closes.",
   /** A cancellation that finished after its sheet had gone. */
   landedLate: (count: number) =>
     (count === 1 ? "The booking was cancelled." : `${count} bookings were cancelled.`) + " The wallet shows what came back.",
