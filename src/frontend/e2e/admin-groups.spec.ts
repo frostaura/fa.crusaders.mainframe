@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { ARCHIVE_COPY, ASSIGN_COPY, GROUP_ACTIONS, GROUP_SHEET, RATE_COPY } from "../src/lib/groupsCopy";
+import { CONFIRM_NOT_READY } from "../src/lib/confirmDialogCopy";
 
 /**
  * Groups (P6, D2, R21) — the one place for a group's court price, top-up rate, peak say, booking
@@ -177,15 +178,18 @@ test.describe("groups", () => {
     ]));
     await page.goto("/admin/groups");
 
-    await page.getByRole("button", { name: GROUP_ACTIONS.more("League") }).click();
-    await expect(page.getByRole("menuitem", { name: GROUP_ACTIONS.archive })).toHaveCount(0);
-    await page.keyboard.press("Escape");
+    // R3 X-2: nothing to offer the built-in group, so no ⋯ at all (it opened an empty menu).
+    await expect(page.getByRole("heading", { name: "League", exact: true, level: 2 })).toBeVisible();
+    await expect(page.getByRole("button", { name: GROUP_ACTIONS.more("League") })).toHaveCount(0);
 
     await page.getByRole("button", { name: GROUP_ACTIONS.more("Social evenings") }).click();
     await page.getByRole("menuitem", { name: GROUP_ACTIONS.archive }).click();
     const dialog = page.getByRole("dialog", { name: ARCHIVE_COPY.title("Social evenings") });
     await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: ARCHIVE_COPY.confirm })).toBeDisabled();
+    // R3 A-16: enabled; a press without a reason names it and sends nothing.
+    await dialog.getByRole("button", { name: ARCHIVE_COPY.confirm }).click();
+    await expect(dialog.getByText(CONFIRM_NOT_READY)).toBeVisible();
+    expect(patched).toHaveLength(0);
     await dialog.getByLabel(ARCHIVE_COPY.reasonLabel).fill("Season over");
     await shoot(page, "group-archive");
     await dialog.getByRole("button", { name: ARCHIVE_COPY.confirm }).click();

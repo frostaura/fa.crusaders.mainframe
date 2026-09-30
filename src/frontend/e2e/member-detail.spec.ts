@@ -135,8 +135,12 @@ test.describe("member detail", () => {
     await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible();
     expect(posted).toHaveLength(0);
 
-    // F3.9: a grant says why, as a revoke does (contract §7).
-    await expect(dialog.getByRole("button", { name: ADMIN_ROLE_COPY.grantConfirm })).toBeDisabled();
+    // F3.9: a grant says why, as a revoke does (contract §7). R3 A-16: the primary stays enabled
+    // and a press without the reason names it, focuses it and sends nothing.
+    await dialog.getByRole("button", { name: ADMIN_ROLE_COPY.grantConfirm }).click();
+    await expect(dialog.getByText(CONFIRM_NOT_READY)).toBeVisible();
+    await expect(dialog.getByRole("textbox", { name: ADMIN_ROLE_COPY.reason })).toBeFocused();
+    expect(posted).toHaveLength(0);
     await dialog.getByRole("textbox", { name: ADMIN_ROLE_COPY.reason }).fill("Joined the committee");
     await dialog.getByRole("button", { name: ADMIN_ROLE_COPY.grantConfirm }).click();
     await expect(dialog).toBeHidden();
