@@ -302,5 +302,8 @@ function inUse(active: Element | null): boolean {
   if (active.isContentEditable) return true;
   const tag = active.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  // R4 (X4-4): an open dialog — a sheet, the admin tour's mark — holds focus on purpose. A lazy
+  // page's heading arriving late pulled focus out of the replayed tour under load.
+  if (active.closest('[role="dialog"], [role="alertdialog"]') !== null) return true;
   return active.closest("[data-confirm]") !== null;
 }

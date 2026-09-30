@@ -278,3 +278,61 @@ test.describe("X4-4 — the account menu hands focus to where it went", () => {
     await expect(page.locator("#main-content h1")).toBeFocused();
   });
 });
+
+/* ------------------------------------------------------------------------------------------
+ * The integrator's asks after the bookings lane (R4): the selection bar and a sheet's header.
+ * ---------------------------------------------------------------------------------------- */
+
+const tomorrowUtc = () => { const d = new Date(); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+const COURT_1 = "aaaaaaaa-0000-4000-8000-00000000000a";
+
+async function openDay(page: Page) {
+  const date = tomorrowUtc();
+  await signIn(page);
+  await serveApi(page, [
+    ...memberShellRoutes(),
+    { path: "/api/v1/me/bookings/upcoming", body: { timezone: "UTC", items: [] } },
+    { path: "/api/v1/me/bookings/recent", body: { timezone: "UTC", items: [] } },
+    { path: "/api/v1/schedule", body: {
+      date, timezone: "UTC", sliceMinutes: 15, dayStartMinute: 7 * 60, dayEndMinute: 9 * 60,
+      advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
+      courts: [{ id: COURT_1, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }], slots: [],
+    } },
+  ]);
+  await page.goto(`/bookings?date=${date}`);
+  await page.waitForSelector('[role="grid"]');
+}
+
+test("the selection bar at 390 and 200 %: its words wrap whole and the actions go under them", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDay(page);
+  await page.getByRole("button", { name: "Select several slots" }).click();
+  for (const at of ["07:00", "07:15", "07:30", "07:45"]) await page.getByRole("button", { name: new RegExp(`^Book Court 1 at ${at}`) }).click();
+  await bigText(page);
+  const bar = page.getByRole("toolbar", { name: "Selected slots" });
+  await expect(bar).toBeVisible();
+  const cut = await bar.locator("p").evaluateAll((els) => els.map((el) => ({
+    text: el.textContent, ellipsis: getComputedStyle(el).textOverflow === "ellipsis" || getComputedStyle(el).webkitLineClamp !== "none",
+    over: el.scrollHeight - el.clientHeight, wide: el.scrollWidth - el.clientWidth,
+  })));
+  for (const c of cut) {
+    expect(c.ellipsis, `"${c.text}" is cut`).toBe(false);
+    expect(Math.max(c.over, c.wide), `"${c.text}" overflows its line box`).toBeLessThanOrEqual(1);
+  }
+  const b = (await bar.boundingBox())!;
+  expect(b.x + b.width).toBeLessThanOrEqual(390 + 1);
+  expect(await clipped(page, "[role=toolbar] button"), "an action's label is cut").toEqual([]);
+});
+
+test("a sheet at 320×640 and 200 %: the header leaves the body most of the room", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await openDay(page);
+  await page.getByRole("button", { name: /^Book Court 1 at 07:00/ }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toBeVisible();
+  await bigText(page);
+  const header = (await sheet.locator("[data-slot=dialog-header]").first().boundingBox())!;
+  const body = (await sheet.locator("[data-slot=dialog-body]").first().boundingBox())!;
+  expect(header.height, "the header takes more than a third of the screen").toBeLessThanOrEqual(640 / 3 + 1);
+  expect(body.height, "the body is a sliver").toBeGreaterThanOrEqual(header.height * 0.75);
+});

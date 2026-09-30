@@ -303,12 +303,21 @@ function DialogContent({ className, ...props }: SurfaceProps) {
   );
 }
 
-/** Title + description. Padded clear of the close × on the right. */
+/**
+ * Title + description. Padded clear of the close × on the right.
+ *
+ * R4: never more than a third of the screen's height — at 200 % text on a 320×640 phone the title,
+ * description and stepper took nearly the whole sheet and left the body a sliver. At normal text a
+ * header is far below the cap; at large text it scrolls on its own and the body keeps the rest.
+ */
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-1.5 pb-2 pl-4 pr-14 pt-4 sm:pl-6 sm:pt-6", className)}
+      className={cn(
+        "flex max-h-[33dvh] shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain pb-2 pl-4 pr-14 pt-4 sm:pl-6 sm:pt-6",
+        className,
+      )}
       {...props}
     />
   );

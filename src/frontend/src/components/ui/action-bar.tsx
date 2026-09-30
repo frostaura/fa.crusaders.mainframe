@@ -71,7 +71,8 @@ export function ActionBar(props: ActionBarProps) {
         aria-label={label}
         onKeyDown={onKeyDown}
         className={cn(
-          "pointer-events-auto mx-auto flex w-full max-w-screen-sm items-center gap-2 rounded-2xl border border-border",
+          // R4: wraps — at 200 % text the actions drop under the words instead of cutting them to "4 sl…".
+          "pointer-events-auto mx-auto flex w-full max-w-screen-sm flex-wrap items-center gap-2 rounded-2xl border border-border",
           "bg-bg-raised p-2 text-text-primary shadow-lg",
           "animate-sheet-up motion-reduce:animate-none",
         )}
@@ -86,13 +87,14 @@ export function ActionBar(props: ActionBarProps) {
         >
           <X size={20} aria-hidden="true" />
         </Toolbar.Button>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold tabular-nums">{headline}</p>
-          {/* Two lines, not one: on a phone the span line's last part is the time, and a bar that
-              cut "08:00–08:45" to an ellipsis hid the one fact worth checking before Book. */}
-          {detail ? <p className="line-clamp-2 text-xs text-text-secondary">{detail}</p> : null}
+        <div className="min-w-0 flex-1 basis-24">
+          <p className="break-words text-sm font-semibold tabular-nums">{headline}</p>
+          {/* Never cut: on a phone the span line's last part is the time, and a bar that cut
+              "08:00–08:45" to an ellipsis hid the one fact worth checking before Book (R4: nor
+              clamped to two lines — at 200 % text that left "That's 4…"). */}
+          {detail ? <p className="break-words text-xs text-text-secondary">{detail}</p> : null}
         </div>
-        {children ? <div className="flex shrink-0 items-center gap-2">{children}</div> : null}
+        {children ? <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">{children}</div> : null}
       </Toolbar.Root>
       <p role="status" aria-live="polite" className="sr-only">{headline}</p>
     </div>

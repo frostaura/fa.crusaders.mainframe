@@ -19,6 +19,19 @@ import { cn } from "@/lib/utils";
  * the fallback poll), because it is mounted exactly once for as long as a member is signed in.
  * </p>
  */
+/**
+ * R4 (V4-11): the badge's box grows with the text only to 28px and never rises more than 10px
+ * above the glyph — its normal-text overhang. At 200 % text a 1.25rem badge hung 20px above a
+ * 1.25rem glyph and was cut by the top of the screen; growing the bell's own box instead made the
+ * top bar 99px taller (B12 allows 45). A style, since utilities outside `ui/` may not use
+ * arbitrary lengths.
+ */
+const BADGE_BOX = {
+  top: "max(-0.625rem, -10px)",
+  height: "min(1.25rem, 28px)",
+  minWidth: "min(1.25rem, 28px)",
+} as const;
+
 export function NotificationBell({ className }: { className?: string }) {
   useUnreadCountDriver();
   const { count } = useUnreadCount();
@@ -32,10 +45,7 @@ export function NotificationBell({ className }: { className?: string }) {
       aria-label={bellLabel(count)}
       aria-current={here ? "page" : undefined}
       className={cn(
-        // R4 (V4-11): a floor, not a size, padded by the badge's overhang (half its 1.25rem height
-        // above a 1.25rem glyph): at 200 % text the badge rose 20px above the glyph and was cut by
-        // the top of the screen. At normal text this is the same 44px circle.
-        "no-lift relative inline-flex min-h-touch min-w-touch shrink-0 items-center justify-center rounded-full border border-transparent p-2.5",
+        "no-lift relative inline-flex size-touch shrink-0 items-center justify-center rounded-full border border-transparent",
         "text-text-secondary transition-colors duration-fast ease-standard hover:bg-bg-muted hover:text-text-primary motion-reduce:transition-none",
         here && "bg-accent-soft text-accent-strong",
         className,
@@ -53,9 +63,10 @@ export function NotificationBell({ className }: { className?: string }) {
             aria-hidden="true"
             data-unread-badge=""
             className={cn(
-              "absolute bottom-1/2 left-2/3 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1",
-              "bg-danger-solid text-xs font-semibold tabular-nums text-danger-ink ring-2 ring-bg-surface",
+              "absolute left-2/3 inline-flex items-center justify-center rounded-full px-1",
+              "bg-danger-solid text-xs font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
             )}
+            style={BADGE_BOX}
           >
             {badge}
           </span>

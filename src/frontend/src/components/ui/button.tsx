@@ -20,20 +20,18 @@ import { Spinner } from "./spinner";
  * </p>
  *
  * <p>
- * <b>Heights are floors, and a label may wrap (R4, V4-1).</b> At 200 % text a label is 28–32px
- * type on a 40–48px line, and fixed `h-*` boxes clipped it ("Submit application", the passkey
- * pill). The text sizes still give the same 36/44/52px at normal text; a label wraps only where
- * its box is given a width it cannot fit on one line (a block button, a grid cell). `shrink-0`
- * keeps what `whitespace-nowrap` used to guarantee in a flex row — a button never squeezes its
- * own label to make room for a sibling; the row wraps, or a caller opts in with `shrink`. The
- * side padding is capped at its normal-text pixels, so large text goes to the words and not to
- * the gutters (a 320px phone at 200 % left "Submit application" 108px); a word that still cannot
- * fit breaks rather than spilling out of the button (`overflow-wrap: anywhere`).
+ * <b>Heights are floors, and a block button's label wraps (R4, V4-1).</b> At 200 % text a label
+ * is 28–32px type on a 40–48px line, and fixed `h-*` boxes clipped it ("Submit application", the
+ * passkey pill). The text sizes still give the same 36/44/52px at normal text. A `block` button
+ * has the container's width, so its label wraps (a word that cannot fit breaks rather than spill);
+ * any other button stays `nowrap` as before, and a caller in a row opts in with
+ * `whitespace-normal`. The side padding is capped at its normal-text pixels, so large text goes to
+ * the words, not the gutters (a 320px phone at 200 % left "Submit application" 108px).
  * </p>
  */
 export const buttonVariants = cva(
   [
-    "relative inline-flex shrink-0 select-none items-center justify-center gap-2 text-center [overflow-wrap:anywhere]",
+    "relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap text-center",
     "rounded-lg border border-transparent font-semibold",
     "transition-colors duration-fast ease-standard motion-reduce:transition-none",
     "disabled:pointer-events-none disabled:opacity-50 aria-busy:cursor-progress",
@@ -57,7 +55,7 @@ export const buttonVariants = cva(
         icon: "size-touch [&_svg]:size-5",
         "icon-lg": "size-[52px] [&_svg]:size-6",
       },
-      block: { true: "w-full", false: "" },
+      block: { true: "w-full whitespace-normal [overflow-wrap:anywhere]", false: "" },
     },
     defaultVariants: { variant: "primary", size: "md", block: false },
   },
