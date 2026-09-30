@@ -34,8 +34,7 @@ reviewer found four admin writes that landed while the screen said they had fail
   (top-level keys of every anonymous object a handler returns) and `serverEnumMembers`.
   `AdminSchedules.contract.test.ts` pins every schedule envelope (`{ schedule, timezone }`,
   `{ schedule, rows_created }`, …); `ledgerTypes.contract.test.ts` pins the admin ledger types
-  (`AdminTopUp` is missing from `lib/api.ts`'s union, so the admin list lives in
-  `lib/creditAdjustment.ts`). **Why:** the detail page read the envelope as the row and rendered
+  AND the `LedgerEntryType` union in `lib/api.ts` (which now carries `AdminTopUp`). **Why:** the detail page read the envelope as the row and rendered
   "End undefined" over two green suites that each stubbed the other side with its own guess.
 
 ## Settings
@@ -46,4 +45,6 @@ reviewer found four admin writes that landed while the screen said they had fail
   after the restore and erased the kept draft; one unrelated key saved elsewhere dropped it whole.
 - After a save the save bar stays as a visible, focusable status until the next edit (no toast).
 - `ConfirmDialog` `notReady`: the primary stays enabled and a press names the missing reason and
-  focuses the field; `confirmDisabled` (disabled) remains for callers not yet moved.
+  focuses the field, beside a visible "(required)" and `aria-required`. Suspend, reject, reset
+  member code and match-result remove/keep use it; `AdminRoleSwitch` and `GroupCard` still use
+  `confirmDisabled`.
