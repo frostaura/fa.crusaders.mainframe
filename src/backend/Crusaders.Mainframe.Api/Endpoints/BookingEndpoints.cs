@@ -184,9 +184,25 @@ public static class BookingEndpoints
         if (waive && string.IsNullOrEmpty(reason))
             return Results.BadRequest(new { error = "waive_reason_required" });
 
+        // Review round 1 (lane F1): the desk sees the same truthful split refund the member does.
+        var split = ctx.RequestServices.GetRequiredService<SplitCancelView>();
+        var paidBefore = await split.PaidByPartnerAsync(bookingId, ct);
         var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: waive, ct, reason);
-        if (result is CancellationResult.Ok) await ctx.AfterSettlementAsync([bookingId], ct);
-        return ToHttpResult(result, ctx);
+        if (result is not CancellationResult.Ok ok) return ToHttpResult(result, ctx);
+        await ctx.AfterSettlementAsync([bookingId], ct);
+        return CancelledAnswer(ok, await split.AfterAsync(bookingId, paidBefore, ct));
+    }
+
+    /// <summary>A settled cancellation's answer: the refund, the penalty, each partner's refund and the organiser's net (B3).</summary>
+    private static IResult CancelledAnswer(CancellationResult.Ok ok, List<PartnerRefund> refunds)
+    {
+        return Results.Ok(new
+        {
+            refunded_credits = ok.RefundedCredits,
+            penalty_credits = ok.PenaltyCredits,
+            net_credits = ok.RefundedCredits - refunds.Sum(r => r.Credits),
+            partner_refunds = refunds,
+        });
     }
 
     /// <summary>
@@ -430,14 +446,7 @@ public static class BookingEndpoints
         if (result is not CancellationResult.Ok ok) return ToHttpResult(result, ctx);
 
         await ctx.AfterSettlementAsync([bookingId], ct);
-        var refunds = await split.AfterAsync(bookingId, paidBefore, ct);
-        return Results.Ok(new
-        {
-            refunded_credits = ok.RefundedCredits,
-            penalty_credits = ok.PenaltyCredits,
-            net_credits = ok.RefundedCredits - refunds.Sum(r => r.Credits),
-            partner_refunds = refunds,
-        });
+        return CancelledAnswer(ok, await split.AfterAsync(bookingId, paidBefore, ct));
     }
 
     /// <summary>

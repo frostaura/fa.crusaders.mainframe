@@ -85,6 +85,11 @@ public static class AdminBulkBookingEndpoints
             return Results.BadRequest(new { error = "duplicate_item", booking_id = duplicate.Key });
 
         var actorId = ctx.User.Id() ?? Guid.Empty;
+        // Review round 1 (lane F1): what each partner had paid, so each item can say what went
+        // back to them and what the organiser keeps — the member cancel's truth, in bulk.
+        var split = ctx.RequestServices.GetRequiredService<SplitCancelView>();
+        var paidBefore = new Dictionary<Guid, Dictionary<Guid, decimal>>();
+        foreach (var item in items) paidBefore[item.BookingId] = await split.PaidByPartnerAsync(item.BookingId, ct);
         var outcome = await bulk.CancelAsync(
             items.Select(i => new BulkCancelItem(i.BookingId, i.WaivePenalty)).ToList(),
             req.IdempotencyKey!.Trim(), reason, req.WaivePenalty, actorId, ct);
@@ -93,6 +98,11 @@ public static class AdminBulkBookingEndpoints
 
         // D11: each cancelled booking's partners are refunded their shares.
         await ctx.AfterSettlementAsync(outcome.Results.Where(r => r.Succeeded).Select(r => (Guid?)r.BookingId), ct);
+        var refunds = new Dictionary<Guid, List<PartnerRefund>>();
+        foreach (var r in outcome.Results.Where(r => r.Succeeded))
+        {
+            refunds[r.BookingId] = await split.AfterAsync(r.BookingId, paidBefore.GetValueOrDefault(r.BookingId) ?? [], ct);
+        }
 
         // ONE row per BATCH, not per item. The batch row is the INTENT — the admin's own words
         // about why a list of courts went away — and CancelAsync's per-booking audit_log rows
@@ -127,6 +137,8 @@ public static class AdminBulkBookingEndpoints
                 status = r.Status,
                 refund_credits = r.RefundCredits,
                 penalty_credits = r.PenaltyCredits,
+                net_credits = r.RefundCredits - refunds.GetValueOrDefault(r.BookingId, []).Sum(x => x.Credits),
+                partner_refunds = refunds.GetValueOrDefault(r.BookingId, []),
                 member_name = r.MemberName,
                 court_name = r.CourtName,
                 starts_at = r.StartsAt,

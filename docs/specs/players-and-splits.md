@@ -85,7 +85,9 @@ rule of its own:
 partners) and `partner_refunds: [{user_id, name, credits}]`, each computed by the share rule above
 against the cancelled booking; `POST /bookings/{id}/cancel` answers `{refunded_credits,
 penalty_credits, net_credits, partner_refunds}`, each partner's figure measured against what they
-had paid before the cancel (so a return that waits for cover is still named).
+had paid before the cancel (so a return that waits for cover is still named). The desk's `POST /admin/bookings/{id}/cancel`
+answers the same four fields, and each `POST /admin/bookings/bulk-cancel` result row carries
+`net_credits` and `partner_refunds` (lane F1's ask).
 
 **Idempotent**: it posts only the difference, so running it twice — or from the hook and the worker
 in the same minute — writes nothing the second time. **Locked on the debited member only**: a

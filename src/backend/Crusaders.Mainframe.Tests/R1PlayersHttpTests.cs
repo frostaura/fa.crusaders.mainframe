@@ -119,6 +119,42 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Assert.Equal(samBefore + 10m, await PlayersClub.BalanceAsync(f, club.Sam));
     }
 
+    /// <summary>Lane F1's ask: the desk's cancel and bulk cancel answer the same split truth.</summary>
+    [SkippableFact]
+    public async Task The_desks_cancel_and_bulk_cancel_name_the_partner_refunds_and_the_net()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await PlayersClub.SeedAsync(f, "r1deskcancel");
+        await club.CreditAsync(f, club.Organiser, 200m);
+        await club.CreditAsync(f, club.Sam, 100m);
+        var admin = club.Client(f, club.Admin, admin: true);
+
+        async Task<Guid> SplitGameAsync(int hour)
+        {
+            var (id, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }], at: PlayersClub.Tomorrow(hour));
+            await AcceptAsync(club, f, club.Sam, id, PlayersClub.SeatOf(body, 2));
+            return id;
+        }
+
+        var single = await SplitGameAsync(8);
+        var one = await JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/bookings/{single}/cancel", new { }));
+        Assert.Equal(32m, one.GetProperty("refunded_credits").GetDecimal());
+        Assert.Equal(16m, one.GetProperty("net_credits").GetDecimal());
+        var partner = Assert.Single(one.GetProperty("partner_refunds").EnumerateArray());
+        Assert.Equal(16m, partner.GetProperty("credits").GetDecimal());
+        Assert.Equal("Sam Partner", partner.GetProperty("name").GetString());
+
+        var bulkOne = await SplitGameAsync(10);
+        var bulk = await JsonAsync(await admin.PostAsJsonAsync("/api/v1/admin/bookings/bulk-cancel", new
+        {
+            idempotencyKey = "r1-bulk-split", reason = "Court resurfacing", items = new[] { new { bookingId = bulkOne } },
+        }));
+        var row = Assert.Single(bulk.GetProperty("results").EnumerateArray());
+        Assert.Equal(16m, row.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(16m, Assert.Single(row.GetProperty("partner_refunds").EnumerateArray()).GetProperty("credits").GetDecimal());
+    }
+
     [SkippableFact]
     public async Task A_booking_with_no_partners_quotes_its_net_as_its_refund()
     {
