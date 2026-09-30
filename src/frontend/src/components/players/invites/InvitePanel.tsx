@@ -10,10 +10,10 @@ import { SignOut } from "@/components/ui/icons";
 import { useProfileOrNull } from "@/components/onboarding/useOnboarding";
 import { useAuth } from "@/lib/auth";
 import type { Invite } from "@/lib/playersApi";
-import { INVITES_COPY, invitedLine, signedInAsLine } from "@/lib/playersCopy";
+import { INVITES_COPY, signedInAsLine } from "@/lib/playersCopy";
 import { AcceptActions } from "./AcceptActions";
 import { AcceptBody } from "./AcceptBody";
-import { organiserName } from "./inviteFacts";
+import { inviteHeading } from "./inviteFacts";
 import { useAcceptFlow, type AcceptPort } from "./useAcceptFlow";
 
 /**
@@ -28,11 +28,12 @@ export function InvitePanel({ invite, port }: { invite: Invite; port: AcceptPort
       <Link to="/bookings">{INVITES_COPY.toBookings}</Link>
     </Button>
   );
+  const heading = inviteHeading(invite, INVITES_COPY.linkTitle);
   return (
     <PageShell width="narrow">
       <PageHeader
-        title={panelTitle(flow.outcome?.kind)}
-        description={invitedLine(organiserName(invite), invite.open_link)}
+        title={panelTitle(flow.outcome?.kind, heading.title)}
+        description={heading.line}
         back={{ to: "/bookings/invites", label: INVITES_COPY.title }}
       />
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6">
@@ -49,10 +50,10 @@ export function InvitePanel({ invite, port }: { invite: Invite; port: AcceptPort
  * D6 — the heading follows the answer. It went on saying "You're invited" above "You're in",
  * which is a question the member had already answered.
  */
-function panelTitle(outcome: "accepted" | "declined" | undefined): string {
+function panelTitle(outcome: "accepted" | "declined" | undefined, asked: string): string {
   if (outcome === "accepted") return INVITES_COPY.acceptedTitle;
   if (outcome === "declined") return INVITES_COPY.declinedTitle;
-  return INVITES_COPY.linkTitle;
+  return asked;
 }
 
 /** The page while the invite is read — the panel's own shape. */

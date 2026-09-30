@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import InvitesPage from "./Invites";
 import { refuse, renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../test/harness";
 import {
-  INVITES_COPY, INVITE_REFUSAL, INVITE_UNSURE, OWED_BACK_EXPLAINER, PLAYERS_UNSURE, acceptLabel, owedBackLine, playersRefusal, shortByLine,
+  INVITES_COPY, INVITE_REFUSAL, INVITE_UNSURE, OWED_BACK_EXPLAINER, PLAYERS_UNSURE, acceptLabel, askedAgainLine, owedBackLine, playersRefusal, shortByLine,
 } from "../lib/playersCopy";
 import { ApiError } from "../lib/api";
 import { savePendingInvite } from "../lib/playersPending";
@@ -276,7 +276,7 @@ describe("the accept sheet", () => {
   it("a yes past the member's own daily limit is explained and cannot be pressed (D12)", async () => {
     const stub = openInvites({ invites: [invite({ cap: { cap: "slots", cap_slots: 4, booked_slots: 4, attempted_slots: 3, club_day: "2030-09-10" } })] });
     const sheet = await openSheet();
-    expect(sheet).toHaveTextContent("Saying yes would take you past your limit of 4 slots a day on 2030-09-10.");
+    expect(sheet).toHaveTextContent("Saying yes would take you past your limit of 4 slots a day on Tue 10 Sep.");
     expect(sheet).not.toHaveTextContent(INVITES_COPY.capCounts);
     const accept = within(sheet).getByRole("button", { name: acceptLabel(25) });
     expect(accept).toHaveAttribute("aria-disabled", "true");
@@ -299,6 +299,10 @@ describe("the accept sheet", () => {
     openInvites({ invites: [invite({ status: "accepted", needs_consent: true, share_credits: 30, to_pay_credits: 5 })] });
     fireEvent.click(await screen.findByRole("button", { name: /Sam invited you to play/ }));
     const sheet = await screen.findByRole("dialog");
+    // R4 M4-8 — they already said yes: the sheet says the share went up, not "Join this game?".
+    expect(within(sheet).getByRole("heading", { name: INVITES_COPY.askedAgainTitle })).toBeInTheDocument();
+    expect(within(sheet).queryByRole("heading", { name: INVITES_COPY.sheetTitle })).toBeNull();
+    expect(within(sheet).getByText(askedAgainLine("Sam", 30))).toBeInTheDocument();
     expect(within(sheet).getByText(INVITES_COPY.toPayNow).nextSibling).toHaveTextContent("5.00 cr");
     expect(within(sheet).getByRole("button", { name: acceptLabel(5) })).toBeInTheDocument();
     // Only an invited seat can be declined.

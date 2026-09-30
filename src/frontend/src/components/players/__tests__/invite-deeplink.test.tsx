@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import InviteDeepLinkPage from "../../../pages/InviteDeepLink";
 import { renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../../../test/harness";
-import { INVITES_COPY, acceptLabel, signedInAsLine } from "../../../lib/playersCopy";
+import { INVITES_COPY, acceptLabel, askedAgainLine, invitedLine, signedInAsLine } from "../../../lib/playersCopy";
 import LoginPage from "../../../pages/Login";
 import { tokenStore } from "../../../lib/api";
 import { LOGIN } from "../../../lib/authCopy";
@@ -49,6 +49,17 @@ function openDeepLink(routes: StubRoute[], participantId = SEAT): FetchStub {
 }
 
 describe("the invite mail's deep link", () => {
+  it("R4 M4-8: a partner who said yes and whose share went up reads \"Your share went up\", not an invitation", async () => {
+    openDeepLink([
+      { path: "/api/v1/me/invites", body: { items: [invite({ status: "accepted", needs_consent: true, share_credits: 30, to_pay_credits: 5 })], count: 1 } },
+    ]);
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.askedAgainTitle })).toBeInTheDocument();
+    expect(screen.getByText(askedAgainLine("Sam", 30))).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: INVITES_COPY.linkTitle })).toBeNull();
+    expect(screen.queryByText(invitedLine("Sam", false))).toBeNull();
+    expect(screen.getByRole("button", { name: acceptLabel(5) })).toBeInTheDocument();
+  });
+
   it("lands on the invite it names, ready to accept by seat", async () => {
     let accepted = false;
     const stub = openDeepLink([

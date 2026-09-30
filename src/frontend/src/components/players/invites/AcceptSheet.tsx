@@ -4,10 +4,10 @@ import {
   Dialog, DialogBody, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import type { Invite } from "@/lib/playersApi";
-import { INVITES_COPY, invitedLine } from "@/lib/playersCopy";
+import { INVITES_COPY } from "@/lib/playersCopy";
 import { AcceptActions } from "./AcceptActions";
 import { AcceptBody } from "./AcceptBody";
-import { organiserName } from "./inviteFacts";
+import { inviteHeading } from "./inviteFacts";
 import { seatPort, useAcceptFlow } from "./useAcceptFlow";
 
 /**
@@ -54,11 +54,12 @@ function SheetInner({ invite, onReread }: { invite: Invite; onReread: () => Prom
       <Button variant="outline">{flow.outcome ? INVITES_COPY.done : INVITES_COPY.cancel}</Button>
     </DialogClose>
   );
+  const heading = inviteHeading(invite, INVITES_COPY.sheetTitle);
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{INVITES_COPY.sheetTitle}</DialogTitle>
-        <DialogDescription>{invitedLine(organiserName(invite), invite.open_link)}</DialogDescription>
+        <DialogTitle>{heading.title}</DialogTitle>
+        <DialogDescription>{heading.line}</DialogDescription>
       </DialogHeader>
       <DialogBody className="pb-4">
         <AcceptBody flow={flow} reasonId={reasonId} />

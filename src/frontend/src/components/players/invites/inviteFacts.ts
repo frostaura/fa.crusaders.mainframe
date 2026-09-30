@@ -3,7 +3,8 @@ import { UnsureOutcome } from "@/lib/bookingOutcome";
 import { clubClock } from "@/lib/clubClock";
 import type { Invite, PartnerCap } from "@/lib/playersApi";
 import {
-  INVITE_REFUSAL, INVITE_UNSURE, INVITES_COPY, PLAYERS_UNSURE, acceptedUnpaidLine, firstName, playersRefusal, playersWhen,
+  INVITE_REFUSAL, INVITE_UNSURE, INVITES_COPY, PLAYERS_UNSURE, acceptedUnpaidLine, askedAgainLine, firstName, invitedLine,
+  playersRefusal, playersWhen,
 } from "@/lib/playersCopy";
 
 /**
@@ -18,6 +19,18 @@ export function inviteStatus(invite: Invite): { text: string; tone: InviteTone }
   if (invite.needs_consent) return { text: INVITES_COPY.statusAskedAgain, tone: "warning" };
   if (invite.status === "accepted") return { text: acceptedUnpaidLine(invite.to_pay_credits), tone: "info" };
   return { text: INVITES_COPY.statusWaiting, tone: "brand" };
+}
+
+/**
+ * R4 M4-8 — the heading and the line under it. A seat that already said yes and is asked again
+ * (its share went up) is not "invited": it reads "Your share went up" and names the new share.
+ */
+export function inviteHeading(invite: Invite, invitedTitle: string): { title: string; line: string } {
+  const organiser = organiserName(invite);
+  if (invite.status === "accepted" && invite.needs_consent) {
+    return { title: INVITES_COPY.askedAgainTitle, line: askedAgainLine(organiser, invite.share_credits) };
+  }
+  return { title: invitedTitle, line: invitedLine(organiser, invite.open_link) };
 }
 
 /** "Wed 30 Sep, 18:00–18:45" in the club's zone. */

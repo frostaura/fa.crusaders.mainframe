@@ -759,6 +759,8 @@ export const INVITES_COPY = {
   sheetTitle: "Join this game?",
   sheetDescription: "Check your share, then say yes or no.",
   linkTitle: "You're invited",
+  /** R4 M4-8 — a seat that already said yes, asked again because its share went up. */
+  askedAgainTitle: "Your share went up",
   court: "Court",
   when: "When",
   organiser: "Booked by",
@@ -847,6 +849,11 @@ export function invitesWaitingLabel(count: number): string {
 /** "Accepted — 5.00 cr still to pay". */
 export function acceptedUnpaidLine(toPay: number): string {
   return `Accepted — ${formatCredits(toPay)} still to pay`;
+}
+
+/** R4 M4-8 — "Sam changed the split: your share is now 30.00 cr. Check it and say yes again." */
+export function askedAgainLine(organiser: string, share: number): string {
+  return `${organiser} changed the split: your share is now ${formatCredits(share)}. Check it and say yes again.`;
 }
 
 /** "Sam invited you to take a seat" (open link) · "Sam invited you to play". */
