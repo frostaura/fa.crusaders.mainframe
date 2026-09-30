@@ -75,10 +75,10 @@ function Partners({ partners }: { partners: Partner[] }) {
       {partners.length === 0 ? <p className="text-sm text-text-secondary">{PEOPLE_COPY.partnersEmpty}</p> : (
         <ul data-partners="" className="flex flex-col gap-2">
           {partners.map((p) => (
-            <li key={p.user_id} className="flex items-center gap-3">
+            <li key={p.user_id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <PlayerAvatar name={p.name} photo={p.photo_url} />
-              <span className="min-w-0 flex-1 break-words text-sm font-medium text-text-primary">{p.name}</span>
-              <span className="text-xs tabular-nums text-text-secondary">{PEOPLE_COPY.sessionsWith(p.sessions)}</span>
+              <span className="min-w-0 grow basis-24 break-words text-sm font-medium text-text-primary">{p.name}</span>
+              <span className="break-words text-xs tabular-nums text-text-secondary">{PEOPLE_COPY.sessionsWith(p.sessions)}</span>
             </li>
           ))}
         </ul>
@@ -94,9 +94,9 @@ function Opponents({ opponents }: { opponents: Opponent[] }) {
       {opponents.length === 0 ? <p className="text-sm text-text-secondary">{PEOPLE_COPY.opponentsEmpty}</p> : (
         <ul data-opponents="" className="flex flex-col gap-2">
           {opponents.map((o) => (
-            <li key={o.user_id} className="flex items-center gap-3">
+            <li key={o.user_id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <PlayerAvatar name={o.name} photo={o.photo_url} />
-              <span className="min-w-0 flex-1 break-words text-sm font-medium text-text-primary">{o.name}</span>
+              <span className="min-w-0 grow basis-24 break-words text-sm font-medium text-text-primary">{o.name}</span>
               <span aria-hidden="true" className="text-sm font-semibold tabular-nums text-text-primary">
                 {PEOPLE_COPY.headToHead(o.won, o.lost)}
               </span>

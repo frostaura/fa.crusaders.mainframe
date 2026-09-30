@@ -43,7 +43,7 @@ export function StatsGrid({ stats }: { stats: PlayStatsFigures }) {
         <div
           key={tile.key}
           data-stat={tile.key}
-          className={cn("flex flex-col gap-0.5 rounded-xl border border-border bg-bg-surface p-3", statSpan(index, tiles.length))}
+          className={cn("flex min-w-0 flex-col gap-0.5 break-words rounded-xl border border-border bg-bg-surface p-3", statSpan(index, tiles.length))}
         >
           <dt className="text-xs text-text-secondary">{tile.label}</dt>
           <dd className="text-xl font-semibold tabular-nums text-text-primary">{tile.value}</dd>

@@ -49,6 +49,39 @@ type Open = { kind: "record" } | { kind: "edit" } | { kind: "confirm"; mode: Con
 export function ResultCard({ bookingId, freshAt = null }: { bookingId: string; freshAt?: number | null }) {
   const read = useResult(bookingId);
   useFollow(freshAt, read.reload);
+  const card = useCardHands(read);
+  // 404 is an answer: this viewer is not a player of the booking (an admin looking in), and a
+  // result is only ever shown to its players (§3.4). Nothing to say, so the card is not drawn.
+  // `result_not_found` is the one 404 that means something else — the booking is one the viewer played
+  // and simply has no result — so it reads as "no result yet", never as a hidden card.
+  if (!read.data && read.error instanceof ApiError && read.error.status === 404) {
+    return read.error.code === "result_not_found" ? <NoResultYet /> : null;
+  }
+  const { notice, say, params } = card;
+  // The data attribute leads: after braced props, lizard reads data-result-card="" as the start of
+  // something that never closes and scores every function below as part of this one.
+  return (
+    <Section data-result-card="" title={RESULT_CARD.title} description={RESULT_CARD.description}>
+      <StateBlock
+        loading={!read.data && read.loading}
+        error={read.data ? null : read.error}
+        action={RESULT_CARD.readAction}
+        codes={PLAY_REFUSAL}
+        onRetry={read.reload}
+        skeleton={<CardSkeleton />}
+      >
+        {read.data ? <CardBody view={read.data} read={read} choose={card.choose} say={say} /> : null}
+      </StateBlock>
+      <ConfirmGone param={params.get("result")} view={read.data} />
+      <p aria-live="polite" className="sr-only">{notice?.text ?? ""}</p>
+      {notice ? <Alert tone={notice.tone} live="off" data-result-notice="">{notice.text}</Alert> : null}
+      {read.data ? <Sheets view={read.data} open={card.open} close={card.close} done={card.done} stale={read.reload} /> : null}
+    </Section>
+  );
+}
+
+/** Which sheet is open (chosen, or deep-linked from the mail), what the card last said, and the sheets' ends. */
+function useCardHands(read: ResultRead) {
   const [chosen, setChosen] = useState<Open>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const say: Say = (text, tone = "success") => setNotice({ text, tone });
@@ -70,34 +103,7 @@ export function ResultCard({ bookingId, freshAt = null }: { bookingId: string; f
     // Radix has nothing to return focus to: the card's own heading takes it, never <body>.
     focusAfterAction(() => document.querySelector<HTMLElement>("[data-result-card] h2"));
   };
-  // 404 is an answer: this viewer is not a player of the booking (an admin looking in), and a
-  // result is only ever shown to its players (§3.4). Nothing to say, so the card is not drawn.
-  // `result_not_found` is the one 404 that means something else — the booking is one the viewer played
-  // and simply has no result — so it reads as "no result yet", never as a hidden card.
-  if (!read.data && read.error instanceof ApiError && read.error.status === 404) {
-    if (read.error.code !== "result_not_found") return null;
-    return <NoResultYet />;
-  }
-  // The data attribute leads: after braced props, lizard reads data-result-card="" as the start of
-  // something that never closes and scores every function below as part of this one.
-  return (
-    <Section data-result-card="" title={RESULT_CARD.title} description={RESULT_CARD.description}>
-      <StateBlock
-        loading={!read.data && read.loading}
-        error={read.data ? null : read.error}
-        action={RESULT_CARD.readAction}
-        codes={PLAY_REFUSAL}
-        onRetry={read.reload}
-        skeleton={<CardSkeleton />}
-      >
-        {read.data ? <CardBody view={read.data} read={read} choose={setChosen} say={say} /> : null}
-      </StateBlock>
-      <ConfirmGone param={params.get("result")} view={read.data} />
-      <p aria-live="polite" className="sr-only">{notice?.text ?? ""}</p>
-      {notice ? <Alert tone={notice.tone} live="off" data-result-notice="">{notice.text}</Alert> : null}
-      {read.data ? <Sheets view={read.data} open={open} close={close} done={done} stale={read.reload} /> : null}
-    </Section>
-  );
+  return { open, choose: setChosen, notice, say, params, close, done };
 }
 
 /** Re-read whenever `at` moves on — never for its first value (the card's own first read covers it). */

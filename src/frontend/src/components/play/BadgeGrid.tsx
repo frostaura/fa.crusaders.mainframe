@@ -66,7 +66,7 @@ function BadgeTile({ badge, timezone }: { badge: BadgeView; timezone?: string })
         <PopoverTrigger
           aria-label={`${badge.name}, ${spoken}`}
           className={cn(
-            "flex min-h-touch w-full items-center gap-3 rounded-xl border p-3 text-left",
+            "flex min-h-touch w-full flex-wrap items-center gap-3 rounded-xl border p-3 text-left",
             badge.earned ? "border-border bg-bg-surface" : "border-dashed border-control bg-bg-muted",
           )}
         >
@@ -79,11 +79,13 @@ function BadgeTile({ badge, timezone }: { badge: BadgeView; timezone?: string })
           >
             <BadgeMark badgeKey={badge.key} size={20} earned={badge.earned} />
           </span>
-          <span className="flex min-w-0 flex-col" aria-hidden="true">
+          {/* R3 X-3 — at 200 % text a tile is narrower than icon + words: the words drop under the icon
+              (flex-wrap on a basis) rather than collapsing to nothing beside it. */}
+          <span className="flex min-w-0 grow basis-16 flex-col" aria-hidden="true">
             <span className={cn("line-clamp-2 break-words text-sm font-semibold", badge.earned ? "text-text-primary" : "text-text-secondary")}>
               {badge.name}
             </span>
-            <span className="text-xs tabular-nums text-text-secondary">{status}</span>
+            <span className="break-words text-xs tabular-nums text-text-secondary">{status}</span>
           </span>
         </PopoverTrigger>
         <PopoverContent className="w-72" aria-label={badge.name}>

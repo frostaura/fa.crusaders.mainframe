@@ -97,8 +97,8 @@ function ProfileSkeleton() {
         <div className="flex items-center gap-5">
           <Skeleton className="size-24 shrink-0 rounded-full" />
           <div className="flex flex-1 flex-col gap-2">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-4 w-48 max-w-full" />
+            <Skeleton className="h-3 w-24 max-w-full" />
           </div>
         </div>
         <Skeleton className="h-touch" />
@@ -247,8 +247,8 @@ function PhotoPicker({ profile }: { profile: MyProfile }) {
         drop={{ onDragOver: (e) => { e.preventDefault(); setDragOver(true); }, onDragLeave: () => setDragOver(false), onDrop }}
       />
       <div className="flex min-w-0 flex-1 flex-col items-center gap-1 sm:items-start">
-        <p className="max-w-full break-words text-base font-semibold text-text-primary">{profile.full_name || profile.email}</p>
-        <p className="max-w-full break-words text-sm text-text-secondary">{profile.email}</p>
+        <p className="min-w-0 max-w-full break-words text-base font-semibold text-text-primary">{profile.full_name || profile.email}</p>
+        <p className="min-w-0 max-w-full break-all text-sm text-text-secondary">{profile.email}</p>
         {profile.membership_number && (
           <p className="font-mono text-xs tracking-code text-text-muted">{profile.membership_number}</p>
         )}
@@ -440,7 +440,7 @@ function PasswordCard() {
       {open ? (
         <ChangePasswordForm onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
       ) : (
-        <div><Button variant="outline" onClick={() => setOpen(true)}>{PASSWORD_OPEN}</Button></div>
+        <div><Button variant="outline" className="h-auto min-h-touch max-w-full whitespace-normal py-2" onClick={() => setOpen(true)}>{PASSWORD_OPEN}</Button></div>
       )}
     </ProfileCard>
   );
@@ -579,7 +579,7 @@ function AddPasskey({ onAdded }: { onAdded: () => Promise<void> }) {
             onChange={(e) => { setLabel(e.target.value); if (missing) setMissing(false); }}
             placeholder={PASSKEY_NAME_PLACEHOLDER}
           />
-          <Button type="submit" variant="secondary" icon={<Plus aria-hidden="true" />} pending={add.pending} className="shrink-0">
+          <Button type="submit" variant="secondary" icon={<Plus aria-hidden="true" />} pending={add.pending} className="h-auto min-h-touch max-w-full shrink-0 whitespace-normal py-2">
             {PASSKEY_ADD}
           </Button>
         </div>

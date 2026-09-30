@@ -39,7 +39,7 @@ export function SignOutEverywhere() {
 
   return (
     <ConfirmDialog
-      trigger={<Button variant="outline" icon={<SignOut weight="bold" />}>{COPY.open}</Button>}
+      trigger={<Button variant="outline" icon={<SignOut weight="bold" />} className="h-auto min-h-touch max-w-full whitespace-normal py-2">{COPY.open}</Button>}
       title={COPY.confirmTitle}
       description={COPY.confirmBody}
       confirmLabel={COPY.confirm}

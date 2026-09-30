@@ -37,9 +37,16 @@ export default function InboxPage() {
  */
 function UnreadBar({ feed }: { feed: InboxFeed }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <p className="text-sm font-medium text-text-secondary" data-unread-line="">{inboxUnreadLine(feed.count)}</p>
-      <Button variant="outline" size="sm" pending={feed.markAll.pending} onClick={() => void feed.markAll.run()}>
+    // R3 X-4 — at 200% text on a phone the label wraps inside its button (never past the page).
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="min-w-0 text-sm font-medium text-text-secondary" data-unread-line="">{inboxUnreadLine(feed.count)}</p>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-auto min-h-9 max-w-full whitespace-normal py-1.5"
+        pending={feed.markAll.pending}
+        onClick={() => void feed.markAll.run()}
+      >
         {COPY.markAll}
       </Button>
     </div>

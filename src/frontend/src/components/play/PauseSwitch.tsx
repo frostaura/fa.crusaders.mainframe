@@ -31,7 +31,7 @@ export function PauseSwitch({ pause, year, onChanged }: { pause: Pause; year: nu
   return (
     <div data-pause={pause.active ? "on" : "off"} className="flex flex-col gap-2 border-t border-border pt-4">
       <Field className="grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4">
-        <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-col gap-0.5 break-words">
           <FieldLabel className="inline-flex items-center gap-1.5">
             <PauseIcon size={16} aria-hidden="true" />
             {PAUSE_COPY.label}

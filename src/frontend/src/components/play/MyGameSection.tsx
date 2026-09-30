@@ -83,7 +83,7 @@ function MyGameSkeleton() {
       <div className="flex items-center gap-4">
         <Skeleton className="size-28 rounded-full" />
         <div className="flex flex-1 flex-col gap-2">
-          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 w-40 max-w-full" />
           <Skeleton className="h-3 w-24" />
         </div>
       </div>
@@ -166,7 +166,7 @@ function CelebrationsSwitch({ game, read }: { game: MyPlay; read: MyGameRead }) 
   return (
     <div className="flex flex-col gap-2">
       <Field controlId="celebrations-switch" className="grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4">
-        <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-col gap-0.5 break-words">
           <FieldLabel>{CELEBRATIONS_SWITCH.label}</FieldLabel>
           <FieldDescription className="break-words">{CELEBRATIONS_SWITCH.hint}</FieldDescription>
         </div>
