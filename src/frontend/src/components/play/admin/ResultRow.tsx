@@ -6,7 +6,6 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 import { playEndpoints, type AdminResult } from "@/lib/playApi";
-import { Alert } from "@/components/Alert";
 import { unsureSentence, writeOrReadBack } from "@/lib/lostReply";
 import { ADMIN_RESULT_UNSURE, ADMIN_RESULTS, FORMAT_LABEL, PLAY_REFUSAL, playWhen, RESULT_LOST, STATUS_WORD } from "@/lib/playCopy";
 import { ResultScore } from "../ResultScore";
@@ -80,57 +79,53 @@ async function decide(row: AdminResult, voiding: boolean, text: string) {
   );
 }
 
-/** The confirm step with its required reason. Both outcome-named; `Remove result` is danger. */
+/**
+ * The confirm step with its required reason. Both outcome-named; `Remove result` is danger.
+ *
+ * <p>
+ * R4 I4-6 — an unknown outcome is said INSIDE the dialog (`describe`), which stays open with the
+ * typed reason: it used to close, drop the reason and put its alert between the two buttons.
+ * </p>
+ */
 function Decision({ row, kind, onDecided }: DecisionProps) {
   const [reason, setReason] = useState("");
-  const [lost, setLost] = useState<string | null>(null);
   const voiding = kind === "void";
   const act = async () => {
-    setLost(null);
-    try {
-      const { value, proven } = await decide(row, voiding, reason.trim());
-      const done = voiding ? ADMIN_RESULTS.removed : ADMIN_RESULTS.kept;
-      onDecided(value, proven ? RESULT_LOST(done) : done);
-    } catch (error) {
-      // The dialog can only word a refusal: an unknown outcome closes it and is said on the row.
-      const sentence = unsureSentence(error, voiding ? ADMIN_RESULT_UNSURE.void : ADMIN_RESULT_UNSURE.uphold);
-      if (!sentence) throw error;
-      setLost(sentence);
-    }
+    const { value, proven } = await decide(row, voiding, reason.trim());
+    const done = voiding ? ADMIN_RESULTS.removed : ADMIN_RESULTS.kept;
+    onDecided(value, proven ? RESULT_LOST(done) : done);
   };
   return (
-    <>
-      {lost ? <Alert tone="warning" live="polite" className="basis-full" data-result-lost="">{lost}</Alert> : null}
-      <ConfirmDialog
-        trigger={<Button variant={voiding ? "danger-soft" : "outline"}>{voiding ? ADMIN_RESULTS.remove : ADMIN_RESULTS.keep}</Button>}
-        title={voiding ? ADMIN_RESULTS.removeTitle : ADMIN_RESULTS.keepTitle}
-        description={voiding ? ADMIN_RESULTS.removeBody : ADMIN_RESULTS.keepBody}
-        confirmLabel={voiding ? ADMIN_RESULTS.remove : ADMIN_RESULTS.keep}
-        cancelLabel={voiding ? ADMIN_RESULTS.removeKeep : ADMIN_RESULTS.keepCancel}
-        tone={voiding ? "danger" : "primary"}
-        action={voiding ? ADMIN_RESULTS.removeAction : ADMIN_RESULTS.keepAction}
-        codes={PLAY_REFUSAL}
-        onConfirm={act}
-        notReady={reason.trim() === ""}
-      >
-        <Field controlId={`reason-${kind}-${row.result_id}`}>
-          {/* Required, and said so (A11Y F3-18): pressing the primary without one names what is missing. */}
-          <span className="flex flex-wrap items-baseline gap-x-1.5">
-            <FieldLabel>{ADMIN_RESULTS.reasonLabel}</FieldLabel>
-            <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
-          </span>
-          <Textarea
-            rows={2}
-            required
-            aria-required="true"
-            maxLength={ADMIN_RESULTS.reasonMax}
-            value={reason}
-            placeholder={ADMIN_RESULTS.reasonPlaceholder}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          <FieldDescription>{ADMIN_RESULTS.reasonHint}</FieldDescription>
-        </Field>
-      </ConfirmDialog>
-    </>
+    <ConfirmDialog
+      trigger={<Button variant={voiding ? "danger-soft" : "outline"}>{voiding ? ADMIN_RESULTS.remove : ADMIN_RESULTS.keep}</Button>}
+      title={voiding ? ADMIN_RESULTS.removeTitle : ADMIN_RESULTS.keepTitle}
+      description={voiding ? ADMIN_RESULTS.removeBody : ADMIN_RESULTS.keepBody}
+      confirmLabel={voiding ? ADMIN_RESULTS.remove : ADMIN_RESULTS.keep}
+      cancelLabel={voiding ? ADMIN_RESULTS.removeKeep : ADMIN_RESULTS.keepCancel}
+      tone={voiding ? "danger" : "primary"}
+      action={voiding ? ADMIN_RESULTS.removeAction : ADMIN_RESULTS.keepAction}
+      codes={PLAY_REFUSAL}
+      onConfirm={act}
+      describe={(error) => unsureSentence(error, voiding ? ADMIN_RESULT_UNSURE.void : ADMIN_RESULT_UNSURE.uphold)}
+      notReady={reason.trim() === ""}
+    >
+      <Field controlId={`reason-${kind}-${row.result_id}`}>
+        {/* Required, and said so (A11Y F3-18): pressing the primary without one names what is missing. */}
+        <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <FieldLabel>{ADMIN_RESULTS.reasonLabel}</FieldLabel>
+          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+        </span>
+        <Textarea
+          rows={2}
+          required
+          aria-required="true"
+          maxLength={ADMIN_RESULTS.reasonMax}
+          value={reason}
+          placeholder={ADMIN_RESULTS.reasonPlaceholder}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <FieldDescription>{ADMIN_RESULTS.reasonHint}</FieldDescription>
+      </Field>
+    </ConfirmDialog>
   );
 }

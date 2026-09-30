@@ -89,10 +89,16 @@ describe("the admin's decision on a result", () => {
     expect((await screen.findAllByText(RESULT_LOST(ADMIN_RESULTS.removed))).length).toBeGreaterThan(0);
   });
 
-  it("a removal that did not land says the result is still on the list", async () => {
+  it("a removal that did not land says so inside its dialog, which keeps the typed reason (R4 I4-6)", async () => {
     routes(() => [], lost);
     await removeWithReason();
-    expect(await screen.findByText(ADMIN_RESULT_UNSURE.void.checked)).toBeInTheDocument();
-    expect(document.querySelector(`[data-admin-result="${RESULT_ID}"]`)).not.toBeNull();
+    const dialog = screen.getByRole("dialog", { name: ADMIN_RESULTS.removeTitle });
+    expect(await within(dialog).findByText(ADMIN_RESULT_UNSURE.void.checked)).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/Couldn't/);
+    expect(within(dialog).getByLabelText(ADMIN_RESULTS.reasonLabel)).toHaveValue("Wrong score");
+    // Nothing between the row's two buttons: the sentence lives in the dialog, not the row.
+    const row = document.querySelector(`[data-admin-result="${RESULT_ID}"]`);
+    expect(row).not.toBeNull();
+    expect(row).not.toHaveTextContent(ADMIN_RESULT_UNSURE.void.checked);
   });
 });

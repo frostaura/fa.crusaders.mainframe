@@ -161,12 +161,15 @@ describe("edit and withdraw", () => {
     await waitFor(() => expect(card().querySelector("[data-result-status]")).toHaveAttribute("data-result-status", "withdrawn"));
   });
 
-  it("a withdraw that did not land says the result is still there, beside the card", async () => {
+  it("a withdraw that did not land says the result is still there, inside the dialog it was asked in (R4)", async () => {
     serve([{ path: RESULT_PATH, body: submitterView() }, { method: "POST", path: `${RESULT_PATH}/withdraw`, respond: () => refuse(504, { error: "gateway_timeout" }) }]);
     renderCard();
     fireEvent.click(await screen.findByRole("button", { name: RESULT_CARD.withdraw }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: RESULT_CARD.withdraw }));
-    expect(await screen.findByText(RESULT_UNSURE.withdraw.checked, { selector: "[data-result-notice]" })).toBeInTheDocument();
+    // ConfirmDialog's `describe`: the lost-reply sentence, never "Couldn't withdraw …" over it.
+    expect(await within(dialog).findByText(RESULT_UNSURE.withdraw.checked)).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/Couldn't/);
+    expect(screen.getByRole("dialog")).toBe(dialog);
   });
 });

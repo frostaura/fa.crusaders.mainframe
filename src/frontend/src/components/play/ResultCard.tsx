@@ -21,7 +21,7 @@ import { ResultScore } from "./ResultScore";
 import { ResultSheet } from "./ResultSheet";
 import { confirmingNames, isViewer, outcomeLine, STATUS_TONE } from "./resultFacts";
 import { landedAs, resultWrite } from "./resultReadBack";
-import { unsureSentence } from "@/lib/lostReply";
+import { UnsureOutcome, unsureSentence } from "@/lib/lostReply";
 import { useResult, type EarlyResult, type ResultRead } from "./useResult";
 
 /**
@@ -291,9 +291,9 @@ function Actions({ view, read, choose, say }: BodyProps) {
 }
 
 /**
- * R3 I-1 — a withdraw whose reply was lost is read back: withdrawn is said as withdrawn; not
- * withdrawn, or unreadable, closes the question and says so beside the card (the dialog can only
- * word a refusal).
+ * R3 I-1 — a withdraw whose reply was lost is read back: withdrawn is said as withdrawn. Not
+ * withdrawn, or unreadable, is said INSIDE the dialog through its `describe` (R4), which stays
+ * open: pressing again is the member's call, and closing it is the way out.
  */
 function Withdraw({ result, read, say }: { result: MatchResult; read: ResultRead; say: Say }) {
   return (
@@ -311,12 +311,12 @@ function Withdraw({ result, read, say }: { result: MatchResult; read: ResultRead
           say(landed.proven ? RESULT_LOST(RESULT_CARD.withdrawn) : RESULT_CARD.withdrawn);
           read.adopt(landed.value);
         } catch (error) {
-          read.reload();
-          const lost = unsureSentence(error, RESULT_UNSURE.withdraw);
-          if (!lost) throw error;
-          say(lost, "warning");
+          // Known not to have landed: nothing to re-read. Anything else may have moved the card.
+          if (!(error instanceof UnsureOutcome && error.checked)) read.reload();
+          throw error;
         }
       }}
+      describe={(error) => unsureSentence(error, RESULT_UNSURE.withdraw)}
     />
   );
 }
