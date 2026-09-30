@@ -35,7 +35,9 @@ async function open(page: Page, path: string, options: { admin?: boolean; bigTex
     { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
     { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null } },
     { path: "/api/v1/admin/doors", body: { doors: [], shut_together: [], shut_individually: [], timezone: "Africa/Johannesburg" } },
-    { path: "/api/v1/admin/monitoring/summary", body: { open: { pending_applications: 28 } } },
+    // R3: the badge counts `open` faults (critical + error + warning); the old `pending_applications`
+    // was never read, so the count test below had no badge to measure and passed on nothing.
+    { path: "/api/v1/admin/monitoring/summary", body: { open: { critical: 28 } } },
     ...memberShellRoutes({ unread: 3, admin: options.admin }),
   ]);
   await page.goto(path);
@@ -68,11 +70,10 @@ test.describe("at 200 % text on a phone", () => {
       expect(labels[i].left, `"${labels[i - 1].text}" runs into "${labels[i].text}"`).toBeGreaterThanOrEqual(labels[i - 1].right - 1);
     }
     const badge = page.locator("[data-attention-badge]");
-    if (await badge.count()) {
-      const icon = await page.locator("nav[data-primary-nav] a[href='/admin'] svg").first().evaluate((el) => el.getBoundingClientRect().toJSON() as Box);
-      const b = await badge.evaluate((el) => el.getBoundingClientRect().toJSON() as Box);
-      expect(overlap(icon, b) / (icon.width * icon.height), "share of the Admin icon under its count").toBeLessThanOrEqual(0.25);
-    }
+    await expect(badge).toBeVisible();
+    const icon = await page.locator("nav[data-primary-nav] a[href='/admin'] svg").first().evaluate((el) => el.getBoundingClientRect().toJSON() as Box);
+    const b = await badge.evaluate((el) => el.getBoundingClientRect().toJSON() as Box);
+    expect(overlap(icon, b) / (icon.width * icon.height), "share of the Admin icon under its count").toBeLessThanOrEqual(0.25);
   });
 
   test("the wallet's two views stay on the screen", async ({ page }) => {

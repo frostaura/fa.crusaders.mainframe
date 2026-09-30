@@ -131,7 +131,7 @@ export default function AppShell() {
           chip and avatar drop to the next line together, right-aligned — two lines, not three.
           On one line the bell's auto margin takes the free space and the actions follow it.
         */}
-        <div className="mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 md:gap-x-6 lg:px-8">
+        <div className="mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8">
           <CrestLink to={signedIn ? LANDING_PATH : "/"} />
           {signedIn ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
           {signedIn ? <NotificationBell className="ml-auto md:-mr-4" /> : null}
