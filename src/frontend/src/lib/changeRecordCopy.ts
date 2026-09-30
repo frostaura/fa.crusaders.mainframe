@@ -1,5 +1,8 @@
 import { settingDef } from "./settingsSchema";
 import { clubCurrencySymbol } from "./currency";
+import { ADJUST_REASON_CODES, type AdjustReasonCode } from "./adminApi";
+import { reasonLabel } from "./topUpCopy";
+import { formatCredits, formatMoney } from "./utils";
 
 /**
  * The change record's own words — review round 1, F3.2.
@@ -38,4 +41,151 @@ export function changeFieldLabel(
   const def = isSetting ? settingDef(change.field) : undefined;
   if (def) return def.label.replaceAll("{currency}", clubCurrencySymbol());
   return change.label || inWords(change.field);
+}
+
+// ---------------------------------------------------------------------------------------
+// "Show what changed", in words — review round 2, F3-7
+// ---------------------------------------------------------------------------------------
+
+/**
+ * The server renders a diff from whatever the writer stored, and the writers store keys and
+ * tokens: the reviewer read `pending_approval`, `top_up_cash`, "Zar received 125.5", entry and
+ * booking UUIDs, "Balance credits 0.0 → 200.00", a collection whose balance pair and seat sat in
+ * the wrong columns, and schedule keys (`end_minute`, `days_of_week`). This layer is the last
+ * step before the page: labels a volunteer uses, money formatted as money, ids hidden, the
+ * balance pair joined into one row, and facts that are not a before → after (a seat, the amount
+ * collected) listed as facts rather than as something that was "removed".
+ */
+export type ChangeLine = { field: string; label: string; before: string | null; after: string | null };
+export type ChangeFact = { field: string; label: string; value: string };
+export type PresentedChanges = { changed: ChangeLine[]; facts: ChangeFact[] };
+
+type RawChange = { field: string; label?: string | null; before?: string | null; after?: string | null };
+
+const FIELD_LABEL: Record<string, string> = {
+  status: "Status",
+  balance_credits: "Balance",
+  amount_credits: "Amount",
+  collected_credits: "Collected",
+  reason_code: "Reason",
+  zar_received: "Money received",
+  is_admin: "Admin rights",
+  must_change_password: "Must choose a new password",
+  passkeys_removed: "Passkeys removed",
+  seat: "Seat",
+  court: "Court",
+  starts_at: "Starts",
+  minutes: "Length",
+  days_of_week: "Days",
+  start_minute: "Starts",
+  end_minute: "Ends",
+  start_date: "First date",
+  end_date: "Last date",
+  interval_weeks: "Every",
+  occurrence_date: "Date",
+  occurrences_cancelled: "Dates cancelled",
+  courts: "Courts",
+  name: "Name",
+  label: "Label on the grid",
+  part_of_batch: "Part of a batch",
+  self: "Their own booking",
+};
+
+/** Membership and result states as the Members page says them. */
+const STATE_WORDS: Record<string, string> = {
+  pending_approval: "Awaiting approval",
+  pendingapproval: "Awaiting approval",
+  active: "Active",
+  rejected: "Turned down",
+  suspended: "Suspended",
+  pending: "Waiting to be confirmed",
+  confirmed: "Confirmed",
+  disputed: "Disputed",
+  withdrawn: "Withdrawn",
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Fields that are the subject's own state; anything else on one side only is a fact. */
+const STATE_FIELDS = new Set(["status", "balance_credits", "is_admin", "must_change_password"]);
+
+function isIdField(field: string, change: RawChange): boolean {
+  if (field === "id" || field.endsWith("_id") || field.endsWith("_ids")) return true;
+  const values = [change.before, change.after].filter((v): v is string => typeof v === "string");
+  return values.length > 0 && values.every((v) => UUID.test(v.trim()));
+}
+
+/** A label for a field: the Settings caption, ours, the server's without its unit, or the key. */
+function labelFor(row: { area?: string | null; action?: string | null }, change: RawChange): string {
+  const isSetting = row.area === "setting" || (row.action ?? "").startsWith("settings.");
+  if (isSetting) return changeFieldLabel(row, change);
+  const known = FIELD_LABEL[change.field];
+  if (known) return known;
+  const server = change.label?.replace(/\s+(credits|zar)$/i, "").trim();
+  return server || inWords(change.field);
+}
+
+function money(field: string, value: string): string | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || value.trim() === "") return null;
+  if (field.endsWith("_credits")) return formatCredits(n);
+  if (field.endsWith("_zar") || field.startsWith("zar_")) return formatMoney(n);
+  return null;
+}
+
+/** One stored value in the words a volunteer uses. */
+export function changeValueInWords(field: string, value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const formatted = money(field, value);
+  if (formatted) return formatted;
+  const token = value.trim();
+  if (field === "reason_code" && (ADJUST_REASON_CODES as readonly string[]).includes(token)) {
+    return reasonLabel(token as AdjustReasonCode);
+  }
+  const state = STATE_WORDS[token.toLowerCase()];
+  if (state && (field === "status" || field.endsWith("_status"))) return state;
+  // A bare snake_case token is a code, not a sentence: say it in words.
+  if (/^[a-z]+(_[a-z]+)+$/.test(token)) return inWords(token);
+  return value;
+}
+
+/** The server's diff, as the page shows it: what changed, then the facts around it. */
+export function presentChanges(
+  row: { area?: string | null; action?: string | null; changes?: RawChange[] | null },
+): PresentedChanges {
+  const raw = (row.changes ?? []).filter((c) => !isIdField(c.field, c));
+  const byField = new Map(raw.map((c) => [c.field, c]));
+  const changed: ChangeLine[] = [];
+  const facts: ChangeFact[] = [];
+
+  // A collection or adjustment stores its balance as two AFTER fields; they are one change.
+  const before = byField.get("balance_before_credits");
+  const after = byField.get("balance_after_credits");
+  if (before || after) {
+    changed.push({
+      field: "balance_credits",
+      label: FIELD_LABEL.balance_credits,
+      before: changeValueInWords("balance_credits", before?.after ?? before?.before),
+      after: changeValueInWords("balance_credits", after?.after ?? after?.before),
+    });
+  }
+
+  for (const c of raw) {
+    if (c.field === "balance_before_credits" || c.field === "balance_after_credits") continue;
+    const label = labelFor(row, c);
+    const was = changeValueInWords(c.field, c.before);
+    const is = changeValueInWords(c.field, c.after);
+    const oneSided = (was === null) !== (is === null);
+    if (oneSided && !STATE_FIELDS.has(c.field) && !(row.area === "setting")) {
+      facts.push({ field: c.field, label, value: (is ?? was)! });
+    } else {
+      changed.push({ field: c.field, label, before: was, after: is });
+    }
+  }
+  return { changed, facts };
+}
+
+/** Whether a row has anything to show once ids are hidden. */
+export function hasChangeDiff(row: { area?: string | null; action?: string | null; changes?: RawChange[] | null }): boolean {
+  const { changed, facts } = presentChanges(row);
+  return changed.length + facts.length > 0;
 }

@@ -342,6 +342,38 @@ describe("the admin change record", () => {
     expect(screen.queryByText("1080")).not.toBeInTheDocument();
   });
 
+  /** Review round 2, F3-7: the rows the reviewer opened, as the server sends them. */
+  it("shows a collection's balance the right way round, its facts as facts, and no ids", async () => {
+    stubFetch(changeRoutes([{
+      ...change, area: "booking", action: "players.share_collected", headline: "Collected a member's share of a booking — Sam Okafor",
+      changes: [
+        { field: "collected_credits", label: "Collected credits", before: null, after: "100.00" },
+        { field: "balance_after_credits", label: "Balance after credits", before: null, after: "-100.00" },
+        { field: "balance_before_credits", label: "Balance before credits", before: null, after: "0.00" },
+        { field: "seat", label: "Seat", before: "2", after: null },
+        { field: "booking_id", label: "Booking id", before: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", after: null },
+      ],
+    }]));
+    renderPage(<AdminChangeRecordPage />);
+    fireEvent.click(await screen.findByText("Show what changed"));
+
+    expect(screen.getByText("Balance")).toBeInTheDocument();
+    expect(screen.getByText("0.00 cr")).toBeInTheDocument();
+    expect(screen.getByText("−100.00 cr")).toBeInTheDocument();
+    expect(screen.getByText("Collected")).toBeInTheDocument();
+    expect(screen.queryByText(/a5604dd3/)).toBeNull();
+    expect(screen.queryByText("-100.00")).toBeNull();
+  });
+
+  it("says the club's retention once, not in the subtitle beside the banner (F3-14)", async () => {
+    stubFetch(changeRoutes([change]));
+    renderPage(<AdminChangeRecordPage />);
+    await screen.findByText("Cancelled Thandi Mokoena's booking");
+    // The subtitle is the page's purpose alone; the server's retention sentence sits under the list.
+    expect(screen.getByText("Every admin action, in the order it happened.")).toBeInTheDocument();
+    expect(screen.getAllByText(/cannot be deleted/)).toHaveLength(1);
+  });
+
   it("admits an honest gap for a row written before the convention", async () => {
     stubFetch(changeRoutes([{ ...change, changes: null }]));
     renderPage(<AdminChangeRecordPage />);

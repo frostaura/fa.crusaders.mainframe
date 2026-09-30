@@ -339,6 +339,26 @@ describe("the change record", () => {
     expect(within(record).queryAllByRole("button")).toHaveLength(0);
   });
 
+  it("names what changed in words, never the stored keys (review round 2, F3-7)", async () => {
+    stubFetch(detailRoutes({
+      changes: { rows: [changeRowFixture({
+        action: "schedule.updated_future", headline: "Changed Tuesday league from Tue 13 Oct",
+        changes: [
+          { field: "end_minute", label: "End", before: "21:00", after: "21:30" },
+          { field: "days_of_week", label: "Days of week", before: "Tue", after: "Tue, Thu" },
+        ],
+      })], retention: "kept indefinitely" },
+    }));
+    renderDetail();
+
+    const record = await screen.findByRole("region", { name: "What has been changed here" });
+    expect(await within(record).findByText("Ends")).toBeInTheDocument();
+    expect(within(record).getByText("Days")).toBeInTheDocument();
+    expect(within(record).getByText("Tue, Thu")).toBeInTheDocument();
+    expect(within(record).queryByText("end_minute")).toBeNull();
+    expect(within(record).queryByText("days_of_week")).toBeNull();
+  });
+
   it("says nothing has been changed only when the read succeeded", async () => {
     stubFetch(detailRoutes().map((r) => (
       r.path === `${BASE}/changes` ? { ...r, status: 503, body: { error: "server_error" } } : r

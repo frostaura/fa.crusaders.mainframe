@@ -16,7 +16,8 @@ import {
 import {
   CHANGES_EMPTY, CHANGES_EXPORT_NOTE, CHANGES_NO_DIFF, CHANGES_STANDING_NOTICE,
 } from "../../lib/nightCopy";
-import { CHANGES_PAGE, changeFieldLabel, changeHeadline } from "../../lib/changeRecordCopy";
+import { CHANGES_PAGE, changeHeadline, hasChangeDiff } from "../../lib/changeRecordCopy";
+import { ChangeDiff } from "../../components/admin/ChangeDiff";
 import { describeFailure } from "../../lib/errors";
 
 /**
@@ -120,12 +121,9 @@ export function AdminChangeRecordPage() {
     <PageShell width="wide">
       <PageHeader
         title="Change record"
-        description={page?.retention
-          // The retention sentence comes from the SERVER, never composed here from a number.
-          // The two horizons on this estate are different — audit rows age out, these do not —
-          // and a page that hardcoded one of them would be wrong the day a club edits the other.
-          ? `Every admin action, in the order it happened. How long these are kept: ${page.retention}`
-          : "Every admin action, in the order it happened."}
+        // The retention sentence (the server's) sits under the list now: beside the banner it
+        // said "cannot be deleted" twice in a row (F3-14).
+        description="Every admin action, in the order it happened."
         actions={<RefreshButton onRefresh={() => void manual.run()} loading={manual.pending} />}
         freshness={<Freshness at={readAt} />}
       />
@@ -174,6 +172,11 @@ export function AdminChangeRecordPage() {
           {rows.map((row) => <ChangeRow key={row.id} row={row} timezone={timezone} />)}
         </ul>
         <div className="mt-3 flex flex-col items-start gap-2">
+          {page?.retention ? (
+            // From the SERVER, never composed here from a number: audit rows age out and these do
+            // not, and a page that hardcoded one horizon would be wrong the day a club edits it.
+            <p className="text-sm text-text-muted">{`How long these are kept: ${page.retention}`}</p>
+          ) : null}
           {typeof page?.total === "number" ? (
             <p className="text-sm text-text-muted" aria-live="polite">{CHANGES_PAGE.showing(rows.length, page.total)}</p>
           ) : null}
@@ -214,7 +217,6 @@ const PERIOD_OPTIONS: FilterOption[] = [
  * </p>
  */
 function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | undefined }) {
-  const diff = row.changes ?? [];
   return (
     <li className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
@@ -231,26 +233,13 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
       {row.subject?.label && <p className="text-sm text-text-secondary">{row.subject.label}</p>}
       {row.reason && <p className="text-sm text-text-secondary">{`Reason: “${row.reason}”`}</p>}
 
-      {diff.length > 0 ? (
+      {hasChangeDiff(row) ? (
         <details className="group mt-1">
           <summary className="no-lift inline-flex min-h-touch cursor-pointer list-none items-center gap-1 text-sm font-semibold text-accent-strong [&::-webkit-details-marker]:hidden">
             Show what changed
             <CaretDown size={16} aria-hidden="true" className="transition-transform duration-fast group-open:rotate-180 motion-reduce:transition-none" />
           </summary>
-          <dl className="mt-2 grid rounded-lg bg-bg-muted p-3 grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-text-muted">Field</dt>
-            <dd className="text-text-muted">Before</dd>
-            <dd className="text-text-muted">After</dd>
-            {diff.map((change) => (
-              <div key={change.field} className="contents">
-                <dt className="min-w-0 break-words text-text-secondary">{changeFieldLabel(row, change)}</dt>
-                {/* An em dash, not an empty cell: a blank reads as "the page did not load it"
-                    and a dash reads as "there was nothing there", which is the true one. */}
-                <dd className="min-w-0 break-words text-text-primary">{change.before ?? "—"}</dd>
-                <dd className="min-w-0 break-words text-text-primary">{change.after ?? "—"}</dd>
-              </div>
-            ))}
-          </dl>
+          <ChangeDiff row={row} />
         </details>
       ) : (
         <p className="text-sm text-text-muted">{CHANGES_NO_DIFF}</p>

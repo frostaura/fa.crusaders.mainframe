@@ -2,6 +2,8 @@ import { StateBlock } from "../ui/state-block";
 import { clubDayAndClock } from "../../lib/clubClock";
 import { CHANGES_HEADING, CHANGES_UNDELETABLE } from "../../lib/scheduleCopy";
 import type { AdminChangePage } from "../../lib/adminApi";
+import { ChangeDiff } from "../admin/ChangeDiff";
+import { hasChangeDiff } from "../../lib/changeRecordCopy";
 
 /**
  * This one schedule's own slice of the append-only admin change record.
@@ -61,18 +63,8 @@ export function ScheduleChangeList({
                   warning this follows; the code itself is the fallback, never `undefined`. */}
               <p className="text-sm text-text-primary">{row.headline ?? row.action ?? "Something the app has no word for"}</p>
               {row.reason && <p className="text-sm text-text-secondary">{`Reason: “${row.reason}”`}</p>}
-              {row.changes && row.changes.length > 0 && (
-                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-sm">
-                  {row.changes.map((change) => (
-                    <div key={change.field} className="contents">
-                      <dt className="text-text-muted">{change.field}</dt>
-                      <dd className="text-text-primary">
-                        {`${change.before ?? "—"} → ${change.after ?? "—"}`}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
+              {/* F3-7: labels and values in words — this printed `end_minute` and `days_of_week`. */}
+              {hasChangeDiff(row) && <ChangeDiff row={row} />}
             </li>
           ))}
         </ul>
