@@ -90,13 +90,22 @@ export const OTHER_BOOKING = "other";
 export type RecentBooking = { id: string; label: string };
 
 /**
+ * Every ledger type the backend writes. `LedgerEntryType` in `lib/api.ts` lacks `AdminTopUp`
+ * (the desk's cash / EFT / card-offline top-up, review round 1 B7), so desk top-ups showed the
+ * raw enum and the Type filter could not select them (review round 2, F3-5). The admin side
+ * carries the whole set here, and `ledgerTypes.contract.test.ts` pins it against the C# enum.
+ */
+export type AdminLedgerType = LedgerEntryType | "AdminTopUp";
+
+/**
  * What each ledger type is called in the picker — the wording LedgerRowMapper uses for
  * the same rows, so a booking reads the same here as on the ledger page. A Record over
  * the union, so a type added on the backend fails to compile here rather than showing
  * up unlabelled.
  */
-export const LEDGER_TYPE_LABEL: Record<LedgerEntryType, string> = {
+export const LEDGER_TYPE_LABEL: Record<AdminLedgerType, string> = {
   TopUp: "Wallet top-up",
+  AdminTopUp: "Desk top-up",
   BookingCharge: "Booking charge",
   CancellationRefund: "Cancellation refund",
   NoShowPenalty: "No-show penalty",
@@ -106,6 +115,20 @@ export const LEDGER_TYPE_LABEL: Record<LedgerEntryType, string> = {
   LightsPurchase: "Lights purchase",
   ShareTransfer: "Share of a split booking",
 };
+
+/** The Type filter's list, in the order an admin scans it: money in, bookings, then the rest. */
+export const ADMIN_LEDGER_TYPES: readonly AdminLedgerType[] = [
+  "TopUp", "AdminTopUp", "BookingCharge", "CancellationRefund", "LateCancellationPenalty",
+  "NoShowPenalty", "ShareTransfer", "LightsPurchase", "AdminAdjustment", "PaymentReversal",
+];
+
+/** A type's name for a person — never the enum, even for one this build has not met. */
+export function ledgerTypeLabel(type: string): string {
+  const known = (LEDGER_TYPE_LABEL as Record<string, string>)[type];
+  if (known) return known;
+  const words = type.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 /**
  * The bookings the ledger knows this member by, newest first, one entry per booking.
@@ -125,7 +148,7 @@ export function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
     seen.add(id);
     // The one short club date, in the club's calendar ("Thu 1 Oct 2026", never "01 Oct").
     const when = clubShortDate(row.at, undefined, { year: true });
-    out.push({ id, label: `${when} · ${LEDGER_TYPE_LABEL[row.type] ?? row.type} ${formatCredits(row.amountCredits)} · ${id.slice(0, 8)}` });
+    out.push({ id, label: `${when} · ${ledgerTypeLabel(row.type)} ${formatCredits(row.amountCredits)} · ${id.slice(0, 8)}` });
   }
   return out;
 }

@@ -151,3 +151,17 @@ function topLevelKeys(inner: string): string[] {
       return last ? last[1] : e;
     });
 }
+
+/**
+ * The member names of a C# enum, read from the source — so a frontend list of ledger types (or
+ * any other enum mirrored in copy) is compared with what the server can actually write.
+ */
+export function serverEnumMembers(relativeFile: string, name: string): string[] {
+  const source = readFileSync(resolve(BACKEND, relativeFile), "utf8");
+  const start = source.search(new RegExp(`enum\\s+${name}\\b`));
+  if (start < 0) throw new Error(`enum ${name} not found in ${relativeFile}`);
+  const open = source.indexOf("{", start);
+  const body = source.slice(open + 1, matching(source, open, "{", "}"))
+    .replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  return body.split(",").map((part) => part.split("=")[0].trim()).filter((part) => /^[A-Za-z_]\w*$/.test(part));
+}

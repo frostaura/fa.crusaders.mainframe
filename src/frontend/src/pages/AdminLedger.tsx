@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
+import { endpoints, type LedgerRow } from "../lib/api";
 import { formatSignedCredits } from "../lib/utils";
 import { LedgerTable } from "../components/LedgerTable";
 import { Badge } from "../components/ui/badge";
@@ -13,22 +13,21 @@ import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { StateBlock } from "../components/ui/state-block";
 import { MagnifyingGlass } from "../components/ui/icons";
 import { FilterBar, FilterDate, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
-import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
+import { ADMIN_LEDGER_TYPES, ledgerTypeLabel } from "../lib/creditAdjustment";
 import { LedgerDetailSheet } from "../components/admin/LedgerDetailSheet";
 import type { Column } from "../components/wallet/ledgerColumns";
 
 /** F3.8: the admin reads who made each movement and what kind it was, and opens any row. */
 const ADMIN_COLUMNS: Column[] = ["time", "from", "to", "category", "actor", "comment", "amount"];
 
-// Derived from the union in api.ts rather than hand-maintained here. This was a
-// literal array with no connection to the type, so a ledger type added on the
-// backend became unfilterable with nothing to warn anyone.
-const TYPES = LEDGER_ENTRY_TYPES;
+// Every type the backend writes, pinned against the C# enum (`ledgerTypes.contract.test.ts`).
+// The union in api.ts lacked `AdminTopUp`, so desk top-ups could not be filtered (R2 F3-5).
+const TYPES = ADMIN_LEDGER_TYPES;
 
 /** "All types" first, then every ledger type by the name an admin reads, never the enum. */
 const TYPE_OPTIONS: FilterOption[] = [
   { value: "", label: "All types" },
-  ...TYPES.map((t) => ({ value: t, label: LEDGER_TYPE_LABEL[t] ?? t })),
+  ...TYPES.map((t) => ({ value: t, label: ledgerTypeLabel(t) })),
 ];
 
 /**

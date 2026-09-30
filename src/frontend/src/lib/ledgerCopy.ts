@@ -1,5 +1,5 @@
 import type { LedgerRow } from "./api";
-import { LEDGER_TYPE_LABEL } from "./creditAdjustment";
+import { ledgerTypeLabel } from "./creditAdjustment";
 
 /**
  * The club ledger's "done by" and category — review round 1, F3.8.
@@ -12,7 +12,12 @@ import { LEDGER_TYPE_LABEL } from "./creditAdjustment";
  * only where the actor is somebody other than the member.
  * </p>
  */
-export type LedgerRowWithActor = LedgerRow & { actor_name?: string | null };
+export type LedgerRowWithActor = LedgerRow & {
+  actor_name?: string | null;
+  /** C5 — on a share transfer, the other member of the pair. Null on every other row. */
+  counterparty_name?: string | null;
+  counterparty_user_id?: string | null;
+};
 
 export const LEDGER_COPY = {
   actorHeader: "Done by",
@@ -33,6 +38,11 @@ export const LEDGER_COPY = {
 
 /** Who did it: the admin's name, "The member", or "The club's system". */
 export function ledgerDoneBy(row: LedgerRowWithActor): string {
+  // C5 (review round 2, F3-6): a share is moved by one of the two members. The organiser's row
+  // said "The club's system" because its actor — the partner who paid — is not its owner.
+  if (!row.actor_name && row.counterparty_name && row.actorUserId && row.actorUserId === row.counterparty_user_id) {
+    return row.counterparty_name;
+  }
   if ("actor_name" in row) {
     if (row.actor_name) return row.actor_name;
     return row.actorUserId && row.actorUserId === row.subjectUserId ? LEDGER_COPY.themselves : LEDGER_COPY.system;
@@ -43,5 +53,5 @@ export function ledgerDoneBy(row: LedgerRowWithActor): string {
 
 /** What kind of movement it was, in the Transactions filter's own words. */
 export function ledgerCategory(row: LedgerRow): string {
-  return LEDGER_TYPE_LABEL[row.type] ?? row.type;
+  return ledgerTypeLabel(row.type);
 }
