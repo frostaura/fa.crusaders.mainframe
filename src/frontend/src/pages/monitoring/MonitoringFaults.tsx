@@ -498,14 +498,16 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
     <li className="border-t border-border pt-4 first:border-t-0 first:pt-0">
       <div className="flex min-w-0 flex-wrap items-start gap-2">
         {!resolved && (
-          // The checkbox's own after: box extends its hit area to 44px; the span holds the row.
-          <span className="inline-flex size-touch shrink-0 items-center justify-center">
+          // The whole 44px box is the target (A11Y F3-19: the box itself measured 20 × 20; its
+          // `after:` extension is invisible to a pointer-size audit and to a reader of the page).
+          // A <label> activates the checkbox it holds, so a press anywhere in it toggles.
+          <label className="inline-flex size-touch shrink-0 cursor-pointer items-center justify-center">
             <Checkbox
               checked={selected}
               onCheckedChange={onToggle}
               aria-label={`Select ${said.title}`}
             />
-          </span>
+          </label>
         )}
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">

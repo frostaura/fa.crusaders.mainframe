@@ -57,7 +57,11 @@ describe("member detail — groups in the header", () => {
     ]);
     renderMember();
 
-    fireEvent.click(await screen.findByRole("button", { name: ASSIGN_COPY.changeFor("Thandi Mokoena") }));
+    const change = await screen.findByRole("button", { name: ASSIGN_COPY.changeFor("Thandi Mokoena") });
+    // 44 × 44 at the least (review round 2, A11Y F3-19: it measured 42 × 36 at 390).
+    expect(change.className).toMatch(/min-h-touch/);
+    expect(change.className).toMatch(/min-w-touch/);
+    fireEvent.click(change);
     const dialog = await screen.findByRole("dialog", { name: ASSIGN_COPY.title("Thandi Mokoena") });
     fireEvent.click(await within(dialog).findByRole("combobox", { name: /Add a group/ }));
     const option = await screen.findByRole("option", { name: /Juniors/ });

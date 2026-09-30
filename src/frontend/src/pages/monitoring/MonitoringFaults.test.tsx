@@ -208,6 +208,17 @@ describe("the fault list", () => {
     expect(screen.getByText(/Somebody else marked this one resolved/)).toBeInTheDocument();
   });
 
+  /** Review round 2 (A11Y F3-19): the 20px box was the only target; the 44px box around it is now. */
+  it("toggles a fault from anywhere in its 44px box, not only the 20px checkbox", async () => {
+    stubFetch(routes([deviceErrorFixture()]));
+    renderPage(<MonitoringFaultsPage />);
+    const box = (await screen.findAllByRole("checkbox"))[0];
+    const target = box.closest("label")!;
+    expect(target.className).toContain("size-touch");
+    fireEvent.click(target);
+    expect(box).toHaveAttribute("aria-checked", "true");
+  });
+
   it("renders a code it has never heard of, with the raw code still reachable", async () => {
     stubFetch(routes([deviceErrorFixture({
       code: "flux_capacitor_drift", headline: null, detail: "coil at 88mph",

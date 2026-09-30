@@ -219,6 +219,8 @@ function MemberGroups({ detail, name, state }: { detail: MemberDetail; name: str
           onClick={() => setOpen(true)}
           title={ASSIGN_COPY.changeFor(name)}
           icon={<PencilSimple aria-hidden="true" />}
+          // 44 × 44 at the least (A11Y F3-19: it measured 42 × 36 at 390).
+          className="min-h-touch min-w-touch"
         >
           {/* Below `sm` the pencil sits beside the chips and the words are for the ear only, so
               the control does not take a line of its own in an already tall header (P10 walk). */}
