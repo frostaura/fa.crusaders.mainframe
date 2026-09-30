@@ -481,3 +481,34 @@ describe("a decline whose reply was lost (R3 I-3)", () => {
     expect(await within(sheet).findByText(PLAYERS_UNSURE.decline.checked)).toBeInTheDocument();
   });
 });
+
+/** R3 I-9 — answering an invite marks its notice read on the server; the bell asks for the count again. */
+describe("answering reads the unread count again (R3 I-9)", () => {
+  const UNREAD = "/api/v1/me/notifications/unread-count";
+
+  it("after an accept", async () => {
+    const stub = openInvites({ routes: [
+      { path: UNREAD, body: { unread_count: 0 } },
+      { method: "POST", path: ACCEPT, body: { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 95 } },
+    ] });
+    const sheet = await openSheet();
+    const reads = () => stub.calls.filter((c) => c.path === UNREAD).length;
+    const before = reads();
+    fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
+    expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+  });
+
+  it("after a decline", async () => {
+    const stub = openInvites({ routes: [
+      { path: UNREAD, body: { unread_count: 0 } },
+      { method: "POST", path: DECLINE, body: { participant_id: SEAT, status: "declined" } },
+    ] });
+    const sheet = await openSheet();
+    const reads = () => stub.calls.filter((c) => c.path === UNREAD).length;
+    const before = reads();
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.decline }));
+    fireEvent.click(await within(sheet).findByRole("button", { name: INVITES_COPY.declineConfirm }));
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+  });
+});

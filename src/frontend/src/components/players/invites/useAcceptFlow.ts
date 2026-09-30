@@ -6,6 +6,7 @@ import { INVITES_COPY } from "@/lib/playersCopy";
 import { useAsyncAction, type AsyncAction } from "@/lib/useAsyncAction";
 import { codeOf } from "./inviteFacts";
 import { leaveOrProve } from "../detail/detailReadBack";
+import { useUnreadCount } from "@/components/inbox/useUnreadCount";
 import type { Landed } from "@/lib/lostReply";
 
 /**
@@ -62,6 +63,8 @@ export type AcceptFlow = {
 
 export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
   const balance = useBalance();
+  // R3 I-9 — answering an invite marks its notice read on the server: the bell reads the count again.
+  const { refresh: refreshUnread } = useUnreadCount();
   const [outcome, setOutcome] = useState<AcceptOutcome>(null);
   const [rereading, setRereading] = useState(false);
   const [askingDecline, setAskingDecline] = useState(false);
@@ -79,6 +82,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
       setOutcome({ kind: "accepted", answer: result.answer, proven: result.proven });
       void balance.refresh({ expectSelf: true });
       void port.reread();
+      void refreshUnread();
     },
     failure: (failure) => {
       // A lost reply may have moved money either way: the wallet is read again whatever the seat said.
@@ -92,7 +96,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     if (!decline) throw new Error("decline unavailable");
     return leaveOrProve(invite.participant_id, decline);
   }, {
-    success: ({ proven }) => { setOutcome({ kind: "declined", proven }); void port.reread(); },
+    success: ({ proven }) => { setOutcome({ kind: "declined", proven }); void port.reread(); void refreshUnread(); },
     failure: (failure) => { void afterRefusal(failure); },
   });
 
