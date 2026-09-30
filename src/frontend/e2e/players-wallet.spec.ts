@@ -54,7 +54,8 @@ test.describe("P11: the wallet, with shares", () => {
     await expect(held).toContainText(heldLine(20, tomorrowAt(20, 45), CLUB_ZONE));
     await expect(held).toContainText(spendableLine(100));
     await expect(held).toContainText(HELD_EXPLAINER);
-    // The chip's name carries it too; the figure stays the whole balance.
+    // The chip's name carries it too: the figure it shows is SPENDABLE (F1.11), and its name
+    // also says the whole balance and what is held.
     await expect(page.locator("[data-credits-chip]")).toHaveAttribute("aria-label", /120\.00 credits, 20\.00 held for partners/);
   });
 
