@@ -10,8 +10,10 @@ import {
 } from "@/components/ui/dialog";
 import { useBalance } from "@/lib/balance";
 import { playersEndpoints, type BookingDetail, type SplitMode } from "@/lib/playersApi";
-import { CHANGE_SPLIT, playersRefusal } from "@/lib/playersCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { CHANGE_SPLIT, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { splitOrProve } from "./detailReadBack";
 import { draftOf, splitChangeOf, splitEffects } from "./splitEditor";
 import type { Notice } from "./useOrganiserHands";
 
@@ -21,7 +23,13 @@ import type { Notice } from "./useOrganiserHands";
  * built from the live seats. Saving is `PUT /bookings/{id}/split`; the server asks again anyone
  * whose share went up, and a share that went down comes back at its reconcile.
  */
-type Props = { detail: BookingDetail; onClose: () => void; onDone: (notice: Notice) => void };
+type Props = {
+  detail: BookingDetail;
+  onClose: () => void;
+  onDone: (notice: Notice) => void;
+  /** Read the booking again — a lost reply that did not land, or could not be checked (R3). */
+  onStale?: () => void;
+};
 
 /**
  * What the BookSheet's Split step reads of its players state — and all an existing booking can
@@ -44,18 +52,27 @@ function useSplitEditor(detail: BookingDetail): SplitEditor {
   };
 }
 
-export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
+export function ChangeSplitDialog({ detail, onClose, onDone, onStale }: Props) {
   const editor = useSplitEditor(detail);
   const { refresh } = useBalance();
   const body = splitChangeOf(detail, editor.draft);
+  // R3 lost-reply audit — a lost reply is read back: the booking's mode and every seat's share
+  // as the preview said they would be.
   const save = useAsyncAction(
-    () => playersEndpoints.changeSplit(detail.booking_id, body ?? { mode: editor.draft.mode, seats: [] }),
+    () => {
+      const sent = body ?? { mode: editor.draft.mode, seats: [] };
+      const state = editor.preview.state;
+      const expected = state.status === "ready" && state.previews.length > 0 ? state.previews[0].shares : [];
+      return splitOrProve(detail.booking_id, sent, expected, () => playersEndpoints.changeSplit(detail.booking_id, sent));
+    },
     {
-      success: (answer) => {
-        const askedAgain = answer.shares.some((s) => s.needs_consent);
-        onDone({ tone: "success", text: askedAgain ? CHANGE_SPLIT.doneAskedAgain : CHANGE_SPLIT.done });
+      success: ({ value, proven }) => {
+        const askedAgain = value.shares.some((s) => s.needs_consent);
+        const text = askedAgain ? CHANGE_SPLIT.doneAskedAgain : CHANGE_SPLIT.done;
+        onDone({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
         void refresh({ expectSelf: true });
       },
+      failure: (error) => { if (error instanceof UnsureOutcome) { onStale?.(); void refresh({ expectSelf: true }); } },
     },
   );
   const blocked = body === null || editor.problem !== null || editor.preview.state.status !== "ready";
@@ -70,7 +87,7 @@ export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
           {/* The booking is paid for: "What saving does" below says what moves (R2 F2-3). */}
           <SplitStep players={editor} hidePayNow />
           <SplitEffects detail={detail} editor={editor} />
-          {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action })}</Alert> : null}
+          {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action, unsure: PLAYERS_UNSURE.split })}</Alert> : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{CHANGE_SPLIT.cancel}</Button>

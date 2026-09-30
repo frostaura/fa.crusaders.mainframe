@@ -10,9 +10,11 @@ import { Section } from "@/components/ui/page-shell";
 import { useBalance } from "@/lib/balance";
 import { formatCredits } from "@/lib/utils";
 import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_CANCELLED, DETAIL_PLAYER, playersRefusal, playersWhen } from "@/lib/playersCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { DETAIL_CANCELLED, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal, playersWhen } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { isCancelled, mySeat } from "./detailModel";
+import { leaveOrProve } from "./detailReadBack";
 import type { Notice } from "./useOrganiserHands";
 
 /**
@@ -103,32 +105,37 @@ const LEAVE = {
   withdraw: {
     title: DETAIL_PLAYER.withdrawTitle, body: DETAIL_PLAYER.withdrawBody, confirm: DETAIL_PLAYER.withdrawConfirm,
     keep: DETAIL_PLAYER.withdrawKeep, done: DETAIL_PLAYER.withdrawn, action: DETAIL_PLAYER.withdrawAction,
+    unsure: PLAYERS_UNSURE.withdraw,
   },
   decline: {
     title: DETAIL_PLAYER.declineTitle, body: DETAIL_PLAYER.declineBody, confirm: DETAIL_PLAYER.declineConfirm,
     keep: DETAIL_PLAYER.declineKeep, done: DETAIL_PLAYER.declined, action: DETAIL_PLAYER.declineAction,
+    unsure: PLAYERS_UNSURE.decline,
   },
 } as const;
 
 type LeaveProps = Props & { kind: Leave; seat: DetailPlayer; onClose: () => void };
 
 function LeaveDialog(props: LeaveProps) {
-  const { kind, detail, seat, onClose } = props;
+  const { kind, detail, seat, onClose, reload } = props;
   const copy = LEAVE[kind];
   const { refresh } = useBalance();
   const toast = useToast();
   const navigate = useNavigate();
+  // R3 lost-reply audit — a lost reply is read back off the member's own seat.
   const leave = useAsyncAction(
-    () => (kind === "withdraw" ? playersEndpoints.withdraw : playersEndpoints.decline)(detail.booking_id, seat.participant_id ?? ""),
+    () => leaveOrProve(seat.participant_id ?? "", () =>
+      (kind === "withdraw" ? playersEndpoints.withdraw : playersEndpoints.decline)(detail.booking_id, seat.participant_id ?? "")),
     {
       // R1 F2.9 — off the game, this page is a 404 to them: re-reading it put "Booking not found"
       // beside the success. Back to Bookings instead, with the outcome said there.
-      success: () => {
+      success: ({ proven }) => {
         onClose();
-        toast.push({ tone: "success", text: copy.done });
+        toast.push({ tone: "success", text: proven ? PLAYERS_LOST(copy.done) : copy.done });
         void refresh();
         navigate("/bookings", { replace: true });
       },
+      failure: (error) => { if (error instanceof UnsureOutcome) { reload(); void refresh(); } },
     },
   );
   return (
@@ -140,7 +147,7 @@ function LeaveDialog(props: LeaveProps) {
         </DialogHeader>
         {leave.error ? (
           <DialogBody>
-            <Alert tone="danger">{playersRefusal(leave.error, { action: copy.action })}</Alert>
+            <Alert tone="danger">{playersRefusal(leave.error, { action: copy.action, unsure: copy.unsure })}</Alert>
           </DialogBody>
         ) : null}
         <DialogFooter>

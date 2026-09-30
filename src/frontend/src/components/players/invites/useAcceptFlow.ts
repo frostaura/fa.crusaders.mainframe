@@ -5,6 +5,8 @@ import { inviteMoney, playersEndpoints, type AcceptAnswer, type Invite, type Sea
 import { INVITES_COPY } from "@/lib/playersCopy";
 import { useAsyncAction, type AsyncAction } from "@/lib/useAsyncAction";
 import { codeOf } from "./inviteFacts";
+import { leaveOrProve } from "../detail/detailReadBack";
+import type { Landed } from "@/lib/lostReply";
 
 /**
  * One invite's accept / decline, shared by the sheet (Invites page) and the link page.
@@ -29,7 +31,7 @@ export type AcceptPort = {
  * `proven` — the accept's reply was lost and the seat's own record said "accepted" (R2 F2-1): the
  * figures are the ones the member was shown, and the wallet is being re-read.
  */
-export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: boolean } | { kind: "declined" } | null;
+export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: boolean } | { kind: "declined"; proven?: boolean } | null;
 
 /** Why Accept cannot be pressed, most pressing first — or null when it can. */
 export type Blocked = "rereading" | "cap" | "short" | null;
@@ -44,7 +46,7 @@ export type AcceptFlow = {
   error: unknown;
   errorCode: string | null;
   acceptAction: AsyncAction<[number], Accepted>;
-  declineAction: AsyncAction<[], SeatAnswer>;
+  declineAction: AsyncAction<[], Landed<SeatAnswer>>;
   accept: () => void;
   /** The first tap: asks whether to decline for good (R1 F2.6). Nothing is sent. */
   decline: () => void;
@@ -84,11 +86,13 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
       void afterRefusal(failure);
     },
   });
+  // R3 I-3 — a decline whose reply was lost is read back off the member's own seat.
   const declineAction = useAsyncAction(() => {
-    if (!port.decline) throw new Error("decline unavailable");
-    return port.decline();
+    const decline = port.decline;
+    if (!decline) throw new Error("decline unavailable");
+    return leaveOrProve(invite.participant_id, decline);
   }, {
-    success: () => { setOutcome({ kind: "declined" }); void port.reread(); },
+    success: ({ proven }) => { setOutcome({ kind: "declined", proven }); void port.reread(); },
     failure: (failure) => { void afterRefusal(failure); },
   });
 

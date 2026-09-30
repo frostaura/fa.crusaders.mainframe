@@ -197,6 +197,7 @@ function OutcomeView({ flow, headed }: { flow: AcceptFlow; headed: boolean }) {
       <div role="status" className="flex flex-col gap-1" data-outcome="declined">
         {headed ? null : <p className="text-base font-semibold text-text-primary">{INVITES_COPY.declinedTitle}</p>}
         <p className="text-sm text-text-secondary">{declinedLine(name)}</p>
+        {flow.outcome.proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.declineProvenNote}</p> : null}
       </div>
     );
   }

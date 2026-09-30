@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/dialog";
 import { Bell, ShareNetwork, SlidersHorizontal, UserMinus, UserPlus } from "@/components/ui/icons";
 import { MAX_SEATS, type DetailPlayer } from "@/lib/playersApi";
-import { CHANGE_SPLIT, DETAIL_ACTIONS, playersRefusal, playersWhen } from "@/lib/playersCopy";
+import { CHANGE_SPLIT, DETAIL_ACTIONS, PLAYERS_UNSURE, playersRefusal, playersWhen } from "@/lib/playersCopy";
 import { ChangeSplitDialog } from "./ChangeSplitDialog";
 import { canNudge, canRemove, canShareLink, isCancelled, isLive, liveCount, seatName } from "./detailModel";
 import { ShareAskDialog } from "./ShareAskDialog";
@@ -89,7 +89,7 @@ export function OrganiserDialogs({ hands }: { hands: OrganiserHands }) {
         onPick={hands.pick}
       />
       {hands.asking ? <ShareAskDialog detail={detail} pick={hands.asking} onCancel={hands.cancelAsk} onAsk={hands.ask} /> : null}
-      {hands.changingSplit ? <ChangeSplitDialog detail={detail} onClose={hands.closeSplit} onDone={hands.splitDone} /> : null}
+      {hands.changingSplit ? <ChangeSplitDialog detail={detail} onClose={hands.closeSplit} onDone={hands.splitDone} onStale={hands.reload} /> : null}
       {hands.removing ? <RemoveDialog hands={hands} player={hands.removing} /> : null}
       {hands.sharing ? (
         <ShareLinkDialog
@@ -118,7 +118,7 @@ function RemoveDialog({ hands, player }: { hands: OrganiserHands; player: Detail
         </DialogHeader>
         {error ? (
           <DialogBody>
-            <Alert tone="danger">{playersRefusal(error, { action: DETAIL_ACTIONS.removeAction })}</Alert>
+            <Alert tone="danger">{playersRefusal(error, { action: DETAIL_ACTIONS.removeAction, unsure: PLAYERS_UNSURE.remove(name) })}</Alert>
           </DialogBody>
         ) : null}
         <DialogFooter>

@@ -4,9 +4,11 @@ import { useBalance } from "@/lib/balance";
 import {
   playersEndpoints, type AddPlayersAnswer, type BookingDetail, type DetailPlayer, type PlayerSpec,
 } from "@/lib/playersApi";
-import { DETAIL_ACTIONS, firstName, playersRefusal } from "@/lib/playersCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { DETAIL_ACTIONS, firstName, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy";
 import { focusAfterAction } from "@/lib/focusAfterAction";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { addOrProve, orNotKnown, removeOrProve } from "./detailReadBack";
 import { seatName } from "./detailModel";
 import { needsShareAsk } from "./splitEditor";
 import type { ShareTarget } from "./ShareLinkDialog";
@@ -31,10 +33,23 @@ function specOf(pick: PickedPlayer, figure: Figure = {}): PlayerSpec {
   return { link: true, ...figure };
 }
 
+/** Who a pick is, in the sentences that name them. */
+function pickName(pick: PickedPlayer): string {
+  if (pick.kind === "member") return firstName(pick.name);
+  if (pick.kind === "guest") return pick.name;
+  return DETAIL_ACTIONS.newOpenSeat;
+}
+
 function addedSentence(pick: PickedPlayer): string {
   if (pick.kind === "member") return DETAIL_ACTIONS.invited(firstName(pick.name));
   if (pick.kind === "guest") return DETAIL_ACTIONS.guestAdded(pick.name);
   return DETAIL_ACTIONS.openSeatAdded;
+}
+
+/** An open seat found by a read-back: no token to show, so the share dialog makes a new link. */
+function linkSeatToMake(answer: AddPlayersAnswer): ShareTarget | null {
+  const seat = answer.participants[0];
+  return seat ? { name: DETAIL_ACTIONS.openSeatName, participantId: seat.participant_id, path: null } : null;
 }
 
 /** The fresh open seat an add made — its token is shown this once. */
@@ -53,43 +68,60 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
   const [asking, setAsking] = useState<PickedPlayer | null>(null);
   const [changingSplit, setChangingSplit] = useState(false);
 
+  // R3 lost-reply audit — an add whose reply was lost is looked for on the booking.
   const invite = useAsyncAction(
-    ({ pick, figure }: InviteRequest) => playersEndpoints.add(bookingId, { players: [specOf(pick, figure)] }),
+    ({ pick, figure }: InviteRequest) => addOrProve(detail, pick, () => playersEndpoints.add(bookingId, { players: [specOf(pick, figure)] })),
     {
-      success: (answer, { pick }) => {
-        say({ tone: "success", text: addedSentence(pick) });
-        if (pick.kind === "link") setSharing(newLinkSeat(answer));
+      success: ({ value, proven }, { pick }) => {
+        say({ tone: "success", text: proven ? PLAYERS_LOST(addedSentence(pick)) : addedSentence(pick) });
+        // A link seat found by the read-back has no link: its token was in the lost reply, so the
+        // dialog offers to make one (path null) rather than showing nothing.
+        if (pick.kind === "link") setSharing(proven ? linkSeatToMake(value) : newLinkSeat(value));
         reload();
       },
-      failure: (error) => say({ tone: "danger", text: playersRefusal(error, { action: DETAIL_ACTIONS.inviteAction }) }),
+      failure: (error, { pick }) => {
+        say({ tone: "danger", text: playersRefusal(error, { action: DETAIL_ACTIONS.inviteAction, unsure: PLAYERS_UNSURE.add(pickName(pick)) }) });
+        if (error instanceof UnsureOutcome) reload();
+      },
     },
   );
 
   const nudge = useAsyncAction(
     (p: DetailPlayer) => {
       setNudgingId(p.participant_id);
-      return playersEndpoints.nudge(bookingId, p.participant_id ?? "");
+      // Nothing on the booking says a reminder went: a lost reply is said as not known.
+      return orNotKnown(() => playersEndpoints.nudge(bookingId, p.participant_id ?? ""));
     },
     {
       success: (answer, p) => {
         say({ tone: "success", text: DETAIL_ACTIONS.nudged(seatName(p, detail.players), answer.nudges_left) });
         reload();
       },
-      failure: (error) => say({ tone: "danger", text: playersRefusal(error, { action: DETAIL_ACTIONS.nudgeAction }) }),
+      failure: (error, p) => {
+        const name = seatName(p, detail.players);
+        const unknown = error instanceof UnsureOutcome;
+        say({ tone: unknown ? "info" : "danger", text: unknown ? PLAYERS_UNSURE.nudge(name) : playersRefusal(error, { action: DETAIL_ACTIONS.nudgeAction }) });
+      },
     },
   );
 
+  // R3 I-2 — a remove whose reply was lost is looked for on the booking before anything is said.
   const remove = useAsyncAction(
-    (p: DetailPlayer) => playersEndpoints.remove(bookingId, p.participant_id ?? ""),
+    (p: DetailPlayer) => removeOrProve(bookingId, p.participant_id ?? ""),
     {
-      success: (_answer, p) => {
+      success: ({ proven }, p) => {
         setRemoving(null);
-        say({ tone: "success", text: DETAIL_ACTIONS.removed(seatName(p, detail.players)) });
+        const text = DETAIL_ACTIONS.removed(seatName(p, detail.players));
+        say({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
         // R2 F2-12 — the dialog and the seat's Remove button are both gone: the Players heading
         // takes focus, never <body>.
         focusAfterAction(() => document.querySelector<HTMLElement>("[data-players-section] h2"));
         reload();
         void refresh();
+      },
+      failure: (error) => {
+        // Unknown or not landed: the list behind the dialog is read again, and so is the wallet.
+        if (error instanceof UnsureOutcome) { reload(); void refresh(); }
       },
     },
   );

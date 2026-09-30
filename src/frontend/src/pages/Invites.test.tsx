@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import InvitesPage from "./Invites";
 import { refuse, renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../test/harness";
 import {
-  INVITES_COPY, INVITE_REFUSAL, INVITE_UNSURE, OWED_BACK_EXPLAINER, acceptLabel, owedBackLine, playersRefusal, shortByLine,
+  INVITES_COPY, INVITE_REFUSAL, INVITE_UNSURE, OWED_BACK_EXPLAINER, PLAYERS_UNSURE, acceptLabel, owedBackLine, playersRefusal, shortByLine,
 } from "../lib/playersCopy";
 import { ApiError } from "../lib/api";
 import { savePendingInvite } from "../lib/playersPending";
@@ -435,5 +435,49 @@ describe("the sheet's structure and focus (R2 F2-10, F2-11)", () => {
       }
     }
     expect(within(sheet).getByText(INVITES_COPY.organiser).nextElementSibling).toHaveTextContent("Sam");
+  });
+});
+
+/**
+ * R3 I-3 — a decline whose reply was lost after the club had recorded it. The seat's own record
+ * is read back and believed: declined is said as declined (Accept no longer offered); still
+ * invited says nothing changed.
+ */
+describe("a decline whose reply was lost (R3 I-3)", () => {
+  const MY_SEAT = `/api/v1/me/invites/${SEAT}`;
+  function seatRecord(status: string) {
+    return {
+      participant_id: SEAT, booking_id: BOOKING, status, lapsed: false, settled_outside: false, booking_status: "booked",
+      court_name: "Court 1", starts_at: at(24), ends_at: at(24.75), organiser_name: "Sam Petersen", share_credits: 25,
+      timezone: "Africa/Johannesburg",
+    };
+  }
+
+  async function declineForGood(sheet: HTMLElement) {
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.decline }));
+    fireEvent.click(await within(sheet).findByRole("button", { name: INVITES_COPY.declineConfirm }));
+  }
+
+  it("the club recorded it: says you said no, and stops offering Accept", async () => {
+    let status = "invited";
+    openInvites({ routes: [
+      { method: "POST", path: DECLINE, respond: () => { status = "declined"; return refuse(504, { error: "gateway_timeout" }); } },
+      { path: MY_SEAT, respond: () => seatRecord(status) },
+    ] });
+    const sheet = await openSheet();
+    await declineForGood(sheet);
+    expect(await within(sheet).findByText(INVITE_UNSURE.declineProvenNote)).toBeInTheDocument();
+    expect(within(sheet).queryByRole("button", { name: acceptLabel(25) })).toBeNull();
+    expect(sheet).not.toHaveTextContent(/Couldn't decline/);
+  });
+
+  it("the club did not record it: says you're still invited, nothing changed", async () => {
+    openInvites({ routes: [
+      { method: "POST", path: DECLINE, respond: () => refuse(504, { error: "gateway_timeout" }) },
+      { path: MY_SEAT, body: seatRecord("invited") },
+    ] });
+    const sheet = await openSheet();
+    await declineForGood(sheet);
+    expect(await within(sheet).findByText(PLAYERS_UNSURE.decline.checked)).toBeInTheDocument();
   });
 });

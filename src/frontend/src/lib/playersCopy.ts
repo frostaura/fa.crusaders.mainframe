@@ -2,6 +2,8 @@ import { ApiError } from "./api";
 import { clubClock, clubShortDate } from "./clubClock";
 import { describeFailure } from "./errors";
 import { formatCredits } from "./utils";
+import { unsureSentence, type UnsureWords } from "./lostReply";
+import { LOST_REPLY, unsureWords } from "./lostReplyCopy";
 
 /**
  * Every word the players feature says (P11, D11–D13): the BookSheet's Players and Split steps,
@@ -228,6 +230,8 @@ export type RefusalOptions = {
   action?: string;
   /** The club's zone, for any time in the sentence. */
   timezone?: string;
+  /** R3 — the words for a lost reply that was read back (`lib/lostReply`). */
+  unsure?: UnsureWords;
 };
 
 /**
@@ -236,6 +240,8 @@ export type RefusalOptions = {
  * club's system), which `describeFailure` owns.
  */
 export function playersRefusal(error: unknown, options: RefusalOptions = {}): string {
+  const lost = options.unsure ? unsureSentence(error, options.unsure) : null;
+  if (lost) return lost;
   if (error instanceof ApiError) {
     const figured = withFigures(error, options.timezone);
     if (figured) return figured;
@@ -454,6 +460,8 @@ export const DETAIL_ACTIONS = {
   removed: (name: string) => `${name} is off this game.`,
   removeAction: "remove that player",
   openSeatName: "Open seat",
+  /** The seat an add was making, in the middle of a sentence (a lost reply). */
+  newOpenSeat: "the new open seat",
 } as const;
 
 /** R1 F2.1 — the organiser changing the split of a booking that already stands. */
@@ -509,6 +517,28 @@ export const SHARE_LINK = {
   shareText: (when: string) => `Squash on ${when} — tap to join and see your share.`,
   makeAction: "make a new link",
 } as const;
+
+/**
+ * R3 I-2/I-3 and the lost-reply audit — a players write whose reply was lost, after the club's
+ * record was read back: still as it was (nothing changed), or unreadable. A write that DID land
+ * is said with its own sentence and {@link PLAYERS_LOST}. Writes with nothing to read back
+ * (a reminder, a new link) say plainly that the outcome is not known.
+ */
+export const PLAYERS_UNSURE = {
+  remove: (name: string) => unsureWords(`${name} is still on this game`, `${name} came off this game`),
+  add: (name: string) => unsureWords(`${name} isn't on this game yet`, `${name} was added`),
+  split: unsureWords("the split is as it was", "the split was changed"),
+  withdraw: unsureWords("you're still on this game", "you're off this game"),
+  decline: unsureWords("you're still invited", "your answer went through"),
+  nudge: (name: string) =>
+    `The club didn't answer, so we can't tell whether the reminder reached ${name}. Give it a few minutes before reminding them again — they may already have it.`,
+  link: "The club didn't answer, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link to get one you can share.",
+  star: (name: string) =>
+    `The club didn't answer, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
+} as const;
+
+/** A players write that landed although its reply was lost: its own sentence, and that we checked. */
+export const PLAYERS_LOST = LOST_REPLY.proven;
 
 /** The money panel. Nobody is in debt: a share is asked for, and an unpaid one lapses. */
 export const DETAIL_MONEY = {
@@ -855,6 +885,8 @@ export const INVITE_UNSURE = {
   checked: "The club didn't answer, so we checked your invite: you're not on this game yet — nothing was taken. Try again in a moment.",
   unchecked: "The club didn't answer and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again.",
   provenNote: "The club's reply didn't arrive, so we checked your invite — you're in. Your wallet is being re-read.",
+  /** R3 I-3 — the decline landed although its reply was lost. */
+  declineProvenNote: "The club's reply didn't arrive, so we checked your invite — your answer went through.",
 } as const;
 
 export const INVITE_REFUSAL: Record<string, string> = {

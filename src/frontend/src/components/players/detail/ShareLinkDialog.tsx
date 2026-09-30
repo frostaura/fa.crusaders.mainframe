@@ -8,8 +8,10 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Copy, ShareNetwork } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { playersEndpoints } from "@/lib/playersApi";
-import { SHARE_LINK, playersRefusal } from "@/lib/playersCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { PLAYERS_UNSURE, SHARE_LINK, playersRefusal } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { orNotKnown } from "./detailReadBack";
 import { absoluteLink, copyLink, shareLink, type ShareOutcome } from "./shareLink";
 
 /** Button icons, hoisted: 16px, decorative — the label names the action. */
@@ -49,7 +51,8 @@ export function ShareLinkDialog(props: Props) {
   const { bookingId, target, onClose, onRotated } = props;
   const [path, setPath] = useState<string | null>(target.path);
   const rotate = useAsyncAction(
-    () => playersEndpoints.link(bookingId, target.participantId ?? ""),
+    // R3 lost-reply audit — a new link's token lives only in the reply: a lost one is not known.
+    () => orNotKnown(() => playersEndpoints.link(bookingId, target.participantId ?? "")),
     { success: (answer) => { setPath(answer.invite_path); onRotated(); } },
   );
   return (
@@ -76,7 +79,7 @@ function MakeStep({ name, rotate, onClose }: { name: string; rotate: Rotate; onC
       </DialogHeader>
       {rotate.error ? (
         <DialogBody>
-          <Alert tone="danger">{playersRefusal(rotate.error, { action: SHARE_LINK.makeAction })}</Alert>
+          <Alert tone="danger">{rotate.error instanceof UnsureOutcome ? PLAYERS_UNSURE.link : playersRefusal(rotate.error, { action: SHARE_LINK.makeAction })}</Alert>
         </DialogBody>
       ) : null}
       <DialogFooter>
