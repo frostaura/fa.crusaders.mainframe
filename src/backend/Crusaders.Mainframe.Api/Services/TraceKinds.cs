@@ -222,6 +222,20 @@ public static class TraceKinds
     /// </summary>
     public const string WalletShareMoved = "wallet.share_moved";
 
+    // ---- the account (review round 1, lane F3: the Night tab printed raw codes for these) ----
+
+    public const string AccountApplied = "account.applied";
+    public const string AccountApproved = "account.approved";
+    public const string AccountRejected = "account.rejected";
+    public const string AccountSuspended = "account.suspended";
+    public const string AccountReactivated = "account.reactivated";
+    public const string AccountMadeAdmin = "account.made_admin";
+    public const string AccountAdminRemoved = "account.admin_removed";
+    public const string AccountCodeReset = "account.code_reset";
+    public const string AccountPasskeysRemoved = "account.passkeys_removed";
+    public const string AccountPasswordChanged = "account.password_changed";
+    public const string AccountPasswordReset = "account.temporary_password";
+
     /// <summary>
     /// A row this server wrote that this vocabulary has no word for.
     ///
@@ -245,6 +259,9 @@ public static class TraceKinds
         LightsOn, LightsOff,
         WalletToppedUp, WalletToppedUpAtTheDesk, WalletSpent, WalletRefunded, WalletPenalised,
         WalletAdjustedByAdmin, WalletReversed, WalletShareMoved,
+        AccountApplied, AccountApproved, AccountRejected, AccountSuspended, AccountReactivated,
+        AccountMadeAdmin, AccountAdminRemoved, AccountCodeReset, AccountPasskeysRemoved,
+        AccountPasswordChanged, AccountPasswordReset,
         Unrecognised,
     ];
 
@@ -285,6 +302,9 @@ public static class TraceKinds
         "booking.lit_window_narrowed",
         "booking.payer_reassigned",
         "booking.block_lifted",
+        // The desk's credit movement is on the wallet strand already (its ledger row, with the
+        // balance beside it); its audit twin made one top-up read twice (review round 1, F3).
+        "credit.adjusted",
         DoorAuditActions.EventTimeClamped,
         Endpoints.AdminMemberDoorEndpoints.ViewedAction,
     ];
@@ -328,6 +348,30 @@ public static class TraceKinds
             "booking.displacement_reversed" => BookingDisplacementReversed,
             "booking.blocked" => BookingBlockedOver,
 
+            _ => OfAccountAction(action),
+        };
+    }
+
+    /// <summary>
+    /// The account's own story — applying, the club's decisions, admin rights, the code, passkeys
+    /// and passwords (review round 1, F3). Anything else is <see cref="Unrecognised"/>.
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static string OfAccountAction(string action)
+    {
+        return action switch
+        {
+            "member.registered" => AccountApplied,
+            "member.approved" => AccountApproved,
+            "member.rejected" => AccountRejected,
+            "member.suspended" => AccountSuspended,
+            "member.reactivated" => AccountReactivated,
+            "user.admin_granted" => AccountMadeAdmin,
+            "user.admin_revoked" => AccountAdminRemoved,
+            "member_code.rotated" => AccountCodeReset,
+            "member.passkeys_revoked" => AccountPasskeysRemoved,
+            "user.password_changed" => AccountPasswordChanged,
+            "user.password_reset_by_admin" => AccountPasswordReset,
             _ => Unrecognised,
         };
     }
@@ -475,6 +519,26 @@ public static class TraceKinds
             WalletReversed => $"A payment of {Credits(facts)} credits was reversed",
             WalletShareMoved => $"A share of a split booking moved: {Credits(facts)} credits",
 
+            _ => AccountHeadline(kind, facts),
+        };
+    }
+
+    /// <summary>The account sentences (F3). Block body for the lizard reason in <c>memory/gotchas.md</c>.</summary>
+    private static string AccountHeadline(string kind, TraceFacts facts)
+    {
+        return kind switch
+        {
+            AccountApplied => "Applied to join the club",
+            AccountApproved => $"{Who(facts)} approved their application",
+            AccountRejected => $"{Who(facts)} turned their application down",
+            AccountSuspended => $"{Who(facts)} suspended their membership",
+            AccountReactivated => $"{Who(facts)} reactivated their membership",
+            AccountMadeAdmin => $"{Who(facts)} made them an administrator",
+            AccountAdminRemoved => $"{Who(facts)} removed their administrator rights",
+            AccountCodeReset => "Their member code was changed and their sessions ended",
+            AccountPasskeysRemoved => "Their passkeys were removed",
+            AccountPasswordChanged => "Changed their password",
+            AccountPasswordReset => $"{Who(facts)} gave them a temporary password",
             _ => $"Something this club's records have no word for ({facts.RawAction ?? kind})",
         };
     }

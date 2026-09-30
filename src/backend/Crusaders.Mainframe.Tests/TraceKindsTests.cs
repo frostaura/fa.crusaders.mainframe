@@ -121,6 +121,13 @@ public sealed class TraceKindsTests
     [InlineData("booking.blocked", TraceKinds.BookingBlockedOver)]
     [InlineData("booking.displaced", TraceKinds.BookingDisplaced)]
     [InlineData("booking.no_show_reversed", TraceKinds.BookingNoShowReversed)]
+    // Review round 1 (F3): the account's own story had no words, so the Night tab printed codes.
+    [InlineData("member.registered", TraceKinds.AccountApplied)]
+    [InlineData("member.approved", TraceKinds.AccountApproved)]
+    [InlineData("user.admin_granted", TraceKinds.AccountMadeAdmin)]
+    [InlineData("user.admin_revoked", TraceKinds.AccountAdminRemoved)]
+    [InlineData("member_code.rotated", TraceKinds.AccountCodeReset)]
+    [InlineData("member.passkeys_revoked", TraceKinds.AccountPasskeysRemoved)]
     public void One_action_reaches_one_word(string action, string expected)
         => Assert.Equal(expected, TraceKinds.OfAudit(action, actorIsSubject: true));
 
@@ -173,6 +180,7 @@ public sealed class TraceKindsTests
     [InlineData("device.event_time_clamped")]
     [InlineData("device.boot")]
     [InlineData("device.fault")]
+    [InlineData("credit.adjusted")]   // review round 1 (F3): the ledger row carries it; the twin doubled a top-up
     public void The_rows_that_are_not_a_persons_night_are_declared(string action)
         => Assert.Null(TraceKinds.OfAudit(action, actorIsSubject: true));
 

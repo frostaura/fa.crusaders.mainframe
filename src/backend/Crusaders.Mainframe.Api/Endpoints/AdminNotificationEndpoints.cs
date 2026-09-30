@@ -84,13 +84,30 @@ public static class AdminNotificationEndpoints
     /// have. An opt-out naming a kind this build does not know is simply not listed.
     /// </summary>
     public static async Task<IResult> KindsAsync(
-        HttpContext ctx, UserPreferencesService preferences, CancellationToken ct)
+        HttpContext ctx, UserPreferencesService preferences, MainframeDbContext db, CancellationToken ct)
     {
-        var mine = (await preferences.GetAsync(ctx.User.Id() ?? Guid.Empty, ct)).AdminNotificationOptouts;
+        var me = ctx.User.Id() ?? Guid.Empty;
+        var mine = (await preferences.GetAsync(me, ct)).AdminNotificationOptouts;
+        var others = await OtherAdminsAsync(db, me, ct);
         return Results.Ok(new
         {
-            kinds = AdminEventCatalogue.All.Select(k => KindView(k, mine)).ToList(),
+            kinds = AdminEventCatalogue.All.Select(k => KindView(k, mine, others)).ToList(),
         });
+    }
+
+    /// <summary>
+    /// The OTHER admins a notice can reach — active, confirmed, not the caller, the dispatcher's own
+    /// test (<see cref="AdminRecipients"/>) — each with their opt-out list. Review round 1, F3: the
+    /// switch could not warn "nobody else will be told" without it.
+    /// </summary>
+    private static async Task<List<IReadOnlyList<string>>> OtherAdminsAsync(MainframeDbContext db, Guid me, CancellationToken ct)
+    {
+        var ids = await db.Users.AsNoTracking()
+            .Where(u => u.IsAdmin && u.Status == "active" && u.EmailVerified && u.Id != me)
+            .Select(u => u.Id).ToListAsync(ct);
+        var stored = await db.UserPreferences.AsNoTracking().Where(p => ids.Contains(p.UserId))
+            .ToDictionaryAsync(p => p.UserId, p => p.AdminNotificationOptoutsJson, ct);
+        return [.. ids.Select(id => stored.TryGetValue(id, out var json) ? UserPreferencesRules.ReadOptouts(json) : (IReadOnlyList<string>)[])];
     }
 
     /// <summary>
@@ -98,7 +115,7 @@ public static class AdminNotificationEndpoints
     /// kind becoming non-optional, and the toggle must describe what the notifier will do.
     /// Block body for the lizard reason in <c>memory/gotchas-build.md</c>.
     /// </summary>
-    private static object KindView(AdminEventKind kind, IReadOnlyList<string> optouts)
+    private static object KindView(AdminEventKind kind, IReadOnlyList<string> optouts, List<IReadOnlyList<string>> others)
     {
         return new
         {
@@ -107,6 +124,11 @@ public static class AdminNotificationEndpoints
             description = kind.Description,
             optional = kind.OptOutable,
             opted_out = kind.OptOutable && optouts.Contains(kind.Kind, StringComparer.Ordinal),
+            // How many OTHER admins are still told of this kind (F3) — zero means switching it
+            // off here leaves nobody told.
+            others_receiving = kind.OptOutable
+                ? others.Count(o => !o.Contains(kind.Kind, StringComparer.Ordinal))
+                : others.Count,
         };
     }
 

@@ -96,6 +96,10 @@ public static class AdminMemberDetailEndpoints
             // as the members list spells it — or null for an account with no membership row. The
             // account's own status is separate because they are two different switches.
             status = membership?.Status.ToString(),
+            // Review round 1 (F3): a turned-down applicant's page showed "Rejected" with no why.
+            // The club's decision, its words, when and by whom — null fields for anybody undecided.
+            rejection_reason = membership?.Status == MembershipStatus.Rejected ? membership.RejectionReason : null,
+            review = await ReviewAsync(db, membership, ct),
             account_status = user.Status,
             email_verified = user.EmailVerified,
             created_at = membership?.CreatedAt ?? user.CreatedAt,
@@ -125,6 +129,16 @@ public static class AdminMemberDetailEndpoints
             next_bookings = await NextBookingsAsync(db, userId, now, ct),
             counts_30d = await CountsAsync(db, userId, now, ct),
         });
+    }
+
+    /// <summary>When the club last decided on this membership (approve, reject, suspend, reactivate), and who. Null when it never has.</summary>
+    private static async Task<object?> ReviewAsync(MainframeDbContext db, Membership? membership, CancellationToken ct)
+    {
+        if (membership?.ReviewedAt is not { } at) return null;
+        var by = membership.ReviewedByUserId is { } who
+            ? await db.Memberships.AsNoTracking().Where(m => m.UserId == who).Select(m => m.FullName).FirstOrDefaultAsync(ct)
+            : null;
+        return new { reviewed_at = at, reviewed_by_user_id = membership.ReviewedByUserId, reviewed_by_name = by };
     }
 
     /// <summary>

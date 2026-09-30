@@ -69,11 +69,11 @@ public static class MemberGroupEndpoints
             .ToDictionaryAsync(x => x.GroupId, x => x.Count, ct);
 
         var s = await settings.GetAsync(ct);
-        var exampleCourtPrice = MoneySettings.SlicePriceCredits(s);
+        var prices = await CourtPrices.ForAsync(db, s, ct);
 
         return Results.Ok(new
         {
-            groups = groups.Select(x => Wire(x, windows, counts, exampleCourtPrice)).ToList(),
+            groups = groups.Select(x => Wire(x, windows, counts, prices)).ToList(),
         });
     }
 
@@ -81,7 +81,7 @@ public static class MemberGroupEndpoints
         MemberGroup group,
         IReadOnlyList<MemberGroupWindow> windows,
         IReadOnlyDictionary<Guid, int> counts,
-        decimal exampleCourtPrice)
+        CourtPrices prices)
     {
         var rules = ToRules(group, windows);
         return new
@@ -103,9 +103,12 @@ public static class MemberGroupEndpoints
                 mode = ModeName(group.PricingMode),
                 multiplier_bps = group.PriceMultiplierBps,
                 flat_slice_price_credits = group.FlatSlicePriceCredits,
-                // What this group would actually charge on a court at the club's default price —
-                // so an admin editing a multiplier reads credits rather than basis points.
-                effective_example_credits = GroupRules.PriceFor(rules, exampleCourtPrice),
+                // What this group would actually charge — on the club's REAL courts (review round
+                // 1, F3: this used the retired club default, "40 cr instead of 8"). The example is
+                // the cheapest active court; the range and the per-court list say the rest.
+                effective_example_credits = GroupRules.PriceFor(rules, prices.Cheapest),
+                effective_range_credits = prices.RangeFor([rules]),
+                effective_by_court = prices.PerCourt([rules]),
             },
             caps = new
             {
@@ -566,16 +569,16 @@ public static class MemberGroupEndpoints
         // the same MemberTariffs rule the top-up and the booking path read.
         var wouldBeTariff = MemberTariffs.Resolve(groups.Select(MemberTariffs.From).ToList(), s.CreditsPerZarRegular);
 
-        return Results.Ok(new { current, would_be = Resolved(s, proposed, d, wouldBeTariff) });
+        return Results.Ok(new { current, would_be = Resolved(s, proposed, d, wouldBeTariff, await CourtPrices.ForAsync(db, s, ct)) });
     }
 
     private static async Task<object> ResolvedAsync(
         BookingRules rules, MainframeDbContext db, TenantSettingsView s, Guid userId, DateOnly day, CancellationToken ct)
         => Resolved(s, await rules.GroupsForAsync(userId, day.DayOfWeek, s, ct), day,
-            await MemberTariffs.ForAsync(db, userId, s, ct));
+            await MemberTariffs.ForAsync(db, userId, s, ct), await CourtPrices.ForAsync(db, s, ct));
 
     private static object Resolved(
-        TenantSettingsView s, IReadOnlyList<MemberGroupRules> groups, DateOnly day, MemberTariff tariff)
+        TenantSettingsView s, IReadOnlyList<MemberGroupRules> groups, DateOnly day, MemberTariff tariff, CourtPrices prices)
     {
         var (openMinute, closeMinute) = s.HoursFor(day.DayOfWeek);
         var allowed = GroupRules.AllowedWindows(groups, new MinuteWindow(openMinute, closeMinute));
@@ -589,7 +592,11 @@ public static class MemberGroupEndpoints
                 start = BookingService.MinutesToHhmm(w.Start),
                 end = BookingService.MinutesToHhmm(w.End),
             }).ToList(),
-            slice_price_credits = GroupRules.PriceFor(groups, MoneySettings.SlicePriceCredits(s)),
+            // On the club's real courts (review round 1, F3), not the retired club default: the
+            // cheapest active court's price, then the range and each court.
+            slice_price_credits = GroupRules.PriceFor(groups, prices.Cheapest),
+            slice_price_range_credits = prices.RangeFor(groups),
+            slice_prices_by_court = prices.PerCourt(groups),
             max_slots_per_day = GroupRules.SlotCapFor(groups, BookingLimits.MaxSlotsPerDay(s)),
             max_minutes_per_day = GroupRules.MinuteCapFor(groups, BookingLimits.MaxMinutesPerDay(s)),
             advance_booking_days = GroupRules.AdvanceDaysFor(groups, s.AdvanceBookingDays),
@@ -695,3 +702,34 @@ public sealed record GroupMembersRequest(IReadOnlyList<Guid>? UserIds);
 internal sealed record GroupMoveSide(MemberGroup Group, IReadOnlyList<Guid> UserIds, bool Joined);
 
 public sealed record PreviewRequest(Guid UserId, DateOnly? Day, IReadOnlyList<Guid>? ProposedGroupIds);
+
+/// <summary>
+/// The club's active courts and their own slice prices (review round 1, F3) — what every group
+/// price is computed on. With no active court, the club default stands in so the figure is never
+/// empty; that is the only place the default is read.
+/// </summary>
+public sealed record CourtPrices(IReadOnlyList<(Guid Id, string Name, decimal Price)> Courts, decimal Fallback)
+{
+    public static async Task<CourtPrices> ForAsync(MainframeDbContext db, TenantSettingsView s, CancellationToken ct)
+    {
+        var courts = await db.Courts.AsNoTracking().Where(c => c.IsActive).OrderBy(c => c.CourtNumber)
+            .Select(c => new { c.Id, c.Name, c.SlicePriceCredits }).ToListAsync(ct);
+        return new CourtPrices([.. courts.Select(c => (c.Id, c.Name, c.SlicePriceCredits))], MoneySettings.SlicePriceCredits(s));
+    }
+
+    /// <summary>The cheapest active court's price, or the fallback.</summary>
+    public decimal Cheapest => Courts.Count == 0 ? Fallback : Courts.Min(c => c.Price);
+
+    /// <summary>The lowest and highest a member in these groups pays across the courts.</summary>
+    public object RangeFor(IReadOnlyList<MemberGroupRules> groups)
+    {
+        var each = Courts.Count == 0 ? [GroupRules.PriceFor(groups, Fallback)] : Courts.Select(c => GroupRules.PriceFor(groups, c.Price)).ToList();
+        return new { min = each.Min(), max = each.Max() };
+    }
+
+    /// <summary>What a member in these groups pays on each active court.</summary>
+    public List<object> PerCourt(IReadOnlyList<MemberGroupRules> groups)
+    {
+        return [.. Courts.Select(c => (object)new { court_id = c.Id, court_name = c.Name, credits = GroupRules.PriceFor(groups, c.Price) })];
+    }
+}
