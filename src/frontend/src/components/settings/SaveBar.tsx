@@ -3,7 +3,10 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { settingAnchorId } from "@/lib/tenantSettings";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
-import type { Blocker } from "./draft";
+import { afterCaption, type Blocker } from "./draft";
+import { IconButton } from "@/components/ui/icon-button";
+import { CheckCircle, X } from "@/components/ui/icons";
+import { pageHeading } from "@/lib/focusAfterAction";
 
 /**
  * The sticky save bar — "3 unsaved changes · Discard · Save changes" (plan R13).
@@ -40,6 +43,9 @@ export type SaveBarProps = {
   onSave: () => void;
   onDiscard: () => void;
   onFocusSetting: (key: string) => void;
+  /** After a save: what the bar keeps saying until the next edit (F3-4). */
+  savedNote?: string | null;
+  onDismissSaved?: () => void;
 };
 
 const OFFSET = { bottom: "calc(max(var(--app-bottom-bar-height, 0px), env(safe-area-inset-bottom, 0px)) + 12px)" };
@@ -60,7 +66,8 @@ function BlockerList({ id, blockers, onFocusSetting }: { id: string; blockers: B
               className="font-semibold underline underline-offset-2"
               onClick={(event) => { event.preventDefault(); onFocusSetting(blocker.key); }}
             >{blocker.label}</a>
-            {" — "}{blocker.message}
+            {/* The caption is the link; a message that opens with it goes on from there (F3-4). */}
+            {afterCaption(blocker.label, blocker.message) ?? ` — ${blocker.message}`}
           </li>
         ))}
       </ul>
@@ -95,26 +102,28 @@ function useKeepFieldsClearOfBar(shown: boolean, bar: React.RefObject<HTMLDivEle
 }
 
 /**
- * Where focus lands when the bar goes away under it (F4.7's settings half). A save — or a
- * discard — empties the change count, the bar unmounts, and the Save the admin pressed took
- * focus to <body> with it. A persistent, focusable status takes it instead and says what
- * happened.
+ * Where focus lands when a save empties the bar (F4.7's settings half, review round 2 F3-4).
+ *
+ * <p>
+ * A save — or a discard — empties the change count and the bar's buttons go, and the Save the
+ * admin pressed took focus to <body> with it. It used to land on a 1×1 screen-reader-only line
+ * that emptied itself three seconds later: a sighted keyboard user had focus on nothing they could
+ * see. After a save the bar stays as a VISIBLE status saying so — until the next edit or its ×
+ * — and focus lands on it; after a discard (no note) focus goes to the page heading.
+ * </p>
  */
-function useFocusLanding(shown: boolean) {
+function useFocusLanding(buttonsShown: boolean, noteShown: boolean) {
   const inside = useRef(false);
-  const status = useRef<HTMLParagraphElement>(null);
-  const [said, setSaid] = useState("");
+  const status = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (shown || !inside.current) return;
+    if (buttonsShown || !inside.current) return;
     inside.current = false;
-    status.current?.focus();
-  }, [shown]);
-  const element = (
-    <p ref={status} tabIndex={-1} data-save-landing="" className="sr-only">{said}</p>
-  );
+    if (noteShown) status.current?.focus();
+    else pageHeading()?.focus();
+  }, [buttonsShown, noteShown]);
   return {
-    element,
-    onFocus: () => { inside.current = true; setSaid(SETTINGS_COPY.saved); },
+    status,
+    onFocus: () => { inside.current = true; },
     onBlur: (e: React.FocusEvent) => {
       // Leaving to somewhere else on the page is a real move; only a removal lands here.
       if (e.relatedTarget) inside.current = false;
@@ -122,17 +131,40 @@ function useFocusLanding(shown: boolean) {
   };
 }
 
+/** The saved state of the bar: visible, focusable, and there until the next edit or its ×. */
+function SavedStatus({ note, onDismiss, landing }: {
+  note: string; onDismiss?: () => void; landing: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div className="pointer-events-none fixed inset-x-0 z-actionbar px-4" style={OFFSET}>
+      <div
+        ref={landing}
+        tabIndex={-1}
+        role="status"
+        data-save-landing=""
+        className="pointer-events-auto mx-auto flex w-full max-w-screen-sm items-center gap-3 rounded-2xl border border-success-strong bg-bg-raised p-3 text-sm font-semibold text-success-strong shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-accent-strong"
+      >
+        <CheckCircle aria-hidden="true" className="size-5 shrink-0" weight="fill" />
+        <p className="min-w-0 flex-1">{note}</p>
+        {onDismiss ? (
+          <IconButton label={SETTINGS_COPY.dismissSaved} onClick={onDismiss}><X aria-hidden="true" /></IconButton>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function SaveBar(props: SaveBarProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { changes, blockers, pending, onSave, onDiscard, onFocusSetting } = props;
+  const { changes, blockers, pending, onSave, onDiscard, onFocusSetting, savedNote, onDismissSaved } = props;
   const summaryId = useId();
   const [announcement, setAnnouncement] = useState("");
   const blocked = blockers.length > 0;
   const shown = changes > 0 || blocked;
   const bar = useRef<HTMLDivElement>(null);
   useKeepFieldsClearOfBar(shown, bar);
-  const landing = useFocusLanding(shown);
-  if (!shown) return landing.element;
+  const landing = useFocusLanding(shown, Boolean(savedNote));
+  if (!shown) return savedNote ? <SavedStatus note={savedNote} onDismiss={onDismissSaved} landing={landing.status} /> : null;
 
   const press = () => {
     if (!blocked) {
@@ -147,7 +179,6 @@ export function SaveBar(props: SaveBarProps) {
 
   return (
     <>
-    {landing.element}
     <div
       ref={bar}
       data-save-bar=""

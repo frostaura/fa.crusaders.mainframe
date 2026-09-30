@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Accordion } from "../components/ui/accordion";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
@@ -189,7 +189,7 @@ function SettingsEditor({ doc }: { doc: Doc }) {
     setRawQuery(next);
     sections.setSearchOpen(null);
   };
-  const barShown = changed.length > 0 || blockers.length > 0;
+  const barShown = changed.length > 0 || blockers.length > 0 || doc.savedNote !== null;
 
   return (
     <SettingsFormProvider value={form}>
@@ -235,9 +235,11 @@ function SettingsEditor({ doc }: { doc: Doc }) {
         changes={changed.length}
         blockers={blockers}
         pending={doc.save.pending}
-        onSave={() => void doc.save.run(draft)}
+        onSave={() => void doc.save.run(draft, saved)}
         onDiscard={doc.discard}
         onFocusSetting={focusSetting}
+        savedNote={doc.savedNote}
+        onDismissSaved={doc.dismissSavedNote}
       />
       <LeaveGuard changes={changed.length} />
     </SettingsFormProvider>
@@ -261,6 +263,9 @@ function SaveNotices({ doc, changes, currency, onGoTo }: {
       {doc.restored && changes > 0 ? (
         <Alert tone="info" live="polite" announceKey="settings-restored">{SETTINGS_COPY.draftRestored}</Alert>
       ) : null}
+      {doc.restored && doc.droppedLabels.length > 0 ? (
+        <Alert tone="warning" live="polite" announceKey="settings-dropped">{SETTINGS_COPY.draftDropped(doc.droppedLabels)}</Alert>
+      ) : null}
       {doc.failure && !doc.failure.sessionEnded ? (
         <SaveFailureBanner failure={doc.failure} currency={currency} onGoTo={onGoTo} />
       ) : null}
@@ -276,12 +281,24 @@ function SaveNotices({ doc, changes, currency, onGoTo }: {
 function SaveFailureBanner({ failure, currency, onGoTo }: {
   failure: NonNullable<Doc["failure"]>; currency: string; onGoTo: (key: string) => void;
 }) {
+  // F3-4: Save is pressed from the floating bar at the foot of the screen and this banner sits at
+  // the top of the page — off screen. It is brought into view and takes focus, so the answer is
+  // where the admin is looking and where a screen reader is.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollIntoView?.({ block: "center" });
+    el.focus({ preventScroll: true });
+  }, [failure]);
   return (
+    <div ref={ref} tabIndex={-1} data-save-failure="" className="scroll-mt-24 outline-none">
     <Alert tone="danger" live="assertive" announceKey={`settings-save-${failure.text}`}>
       <span className="flex flex-col items-start gap-2">
         {/* Said once: with a field, the reason is on the field and the banner points at it. */}
         <span>{failure.fieldKey ? SETTINGS_COPY.saveRefusedField(settingLabel(failure.fieldKey, currency)) : failure.text}</span>
-        <span>{SETTINGS_COPY.saveNotSaved}</span>
+        {/* "Fix what is named" only for a refusal: a lost reply names nothing and may have saved. */}
+        {failure.transient ? null : <span>{SETTINGS_COPY.saveNotSaved}</span>}
         {failure.fieldKey ? (
           <Button variant="outline" size="sm" onClick={() => onGoTo(failure.fieldKey!)}>
             {SETTINGS_COPY.saveGoTo(settingLabel(failure.fieldKey, currency))}
@@ -289,6 +306,7 @@ function SaveFailureBanner({ failure, currency, onGoTo }: {
         ) : null}
       </span>
     </Alert>
+    </div>
   );
 }
 

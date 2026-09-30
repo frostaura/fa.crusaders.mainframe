@@ -103,8 +103,10 @@ describe("the settings screen as a document", () => {
     expect(live.textContent).toBe("");
     // …and the complaint, named by its field, when the person moves on.
     fireEvent.blur(unlock, { relatedTarget: document.body });
-    await waitFor(() => expect(live.textContent).toContain("Unlock time (seconds)"));
+    await waitFor(() => expect(live.textContent).toContain("Unlock time"));
     expect(live.textContent).toContain("between 1 and 30");
+    // Named once (review round 2, F3-4): the message already opens with the caption.
+    expect(live.textContent).not.toMatch(/Unlock time.*Unlock time/);
 
     // A message cannot outlive the mistake it is about.
     fireEvent.change(unlock, { target: { value: "3" } });

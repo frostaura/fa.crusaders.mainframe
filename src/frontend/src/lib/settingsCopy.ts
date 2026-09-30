@@ -48,6 +48,14 @@ export const SETTINGS_COPY = {
   /** The banner when the refusal names a field: the reason itself is said AT the field. */
   saveRefusedField: (label: string) => `The club’s system refused ${label}. The reason is on the field.`,
   draftRestored: "Your unsaved changes were kept while you signed in again. They are not saved yet.",
+  /** F3-4: kept edits to a setting somebody else has saved since are not restored over theirs. */
+  draftDropped: (labels: string[]) =>
+    `${labels.join(", ")} ${labels.length === 1 ? "was" : "were"} saved by someone else while you were away, so your change${labels.length === 1 ? "" : "s"} there ${labels.length === 1 ? "was" : "were"} not brought back.`,
+  /** F3-4: a lost reply, and the club read again to find out. */
+  saveDidNotArrive: "That save didn't reach the club — the settings were read again and nothing changed. Your changes are still here; press Save again.",
+  saveUnknown: "It isn't known yet whether that saved: the reply got lost and the club couldn't be asked. Your changes are still here — saving again is safe, it sends the whole page.",
+  savedAfterLostReply: "Settings saved. The reply got lost, so the club was asked — your changes are on it.",
+  dismissSaved: "Dismiss",
   movedTo: (label: string) => `Settings cannot be saved yet. Moved to ${label}.`,
   saveBarLabel: "Unsaved settings",
 

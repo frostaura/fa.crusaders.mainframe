@@ -4,7 +4,7 @@ import { InfoPopover } from "@/components/ui/info-popover";
 import { cn } from "@/lib/utils";
 import { settingAnchorId } from "@/lib/tenantSettings";
 import { isServed, resolve, settingLabel, unitOf, type SettingDef } from "@/lib/settingsSchema";
-import { HIGHLIGHT_CLASS, takesDescription } from "./draft";
+import { HIGHLIGHT_CLASS, afterCaption, takesDescription } from "./draft";
 import { useSettingsForm } from "./form";
 import { Highlight } from "./Highlight";
 import { SettingControl, type ControlProps } from "./SettingControl";
@@ -93,7 +93,7 @@ const SettingRow = memo(function SettingRow(props: RowProps) {
         <Highlight text={describe(def, currency)} query={query} />
       </FieldDescription>
       {wired ? <p id={helpId} className="sr-only">{help}</p> : null}
-      <p aria-live="polite" className="sr-only">{left && error ? `${label}: ${error}` : ""}</p>
+      <p aria-live="polite" className="sr-only">{left && error ? (afterCaption(label, error) === null ? `${label}: ${error}` : error) : ""}</p>
     </Field>
   );
 });

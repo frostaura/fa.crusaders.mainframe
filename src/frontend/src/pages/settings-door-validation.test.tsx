@@ -126,8 +126,11 @@ describe("AdminSettings — Save stays reachable when it cannot save", () => {
     const save = saveButton();
     expect(save).toBeEnabled();
     expect(save).toHaveAttribute("aria-disabled", "true");
+    // Review round 2 (F3-4): the caption is the link and the sentence goes on from it — never
+    // "Unlock time (seconds) — Unlock time has to be…".
     expect(describedBy(save)).toContain(
-      "Unlock time has to be a whole number of seconds between 1 and 30.");
+      "Unlock time (seconds) has to be a whole number of seconds between 1 and 30.");
+    expect(describedBy(save)).not.toMatch(/Unlock time.*Unlock time/);
 
     save.focus();
     expect(document.activeElement).toBe(save);

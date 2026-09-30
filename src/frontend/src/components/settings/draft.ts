@@ -105,6 +105,64 @@ export function changedKeys(original: AdminSettings, draft: AdminSettings): stri
   return [...keys, ...days];
 }
 
+/**
+ * Unsaved edits carried onto a fresher copy of the club's settings — review round 2, F3-4.
+ *
+ * <p>
+ * Each edit made over `basis` survives unless the club's value for that key has moved since
+ * (someone else saved it): their save wins, and the key is named in `dropped`, because restoring
+ * over it would silently undo theirs. Every other key takes the fresh value. With nothing carried
+ * the fresh object itself comes back, so "no unsaved edits" stays `draft === saved`.
+ * </p>
+ *
+ * <p>
+ * <b>Why this exists.</b> The kept draft was restored once per mount and then a SECOND settings
+ * read (StrictMode's double effect in development, a retry in production) replaced the working
+ * copy with the server's and the mirror erased the kept draft — measured in a real browser:
+ * restored, then gone 300 ms later. And any unrelated setting saved by another admin threw the
+ * whole draft away.
+ * </p>
+ */
+export function carryEdits(
+  basis: AdminSettings, draft: AdminSettings, fresh: AdminSettings,
+): { merged: AdminSettings; carried: string[]; dropped: string[] } {
+  const before = basis as unknown as Held;
+  const edited = draft as unknown as Held;
+  const now = fresh as unknown as Held;
+  const merged: Held = { ...now };
+  const hours: Record<string, string | undefined> = { ...(fresh.operating_hours ?? {}) };
+  const carried: string[] = [];
+  const dropped: string[] = [];
+  for (const key of changedKeys(basis, draft)) {
+    const day = /^operating_hours_(.+)$/.exec(key)?.[1] as keyof NonNullable<AdminSettings["operating_hours"]> | undefined;
+    const was = day ? basis.operating_hours?.[day] : before[key];
+    const is = day ? fresh.operating_hours?.[day] : now[key];
+    if (!same(was, is)) { dropped.push(key); continue; }
+    carried.push(key);
+    if (day) hours[day] = draft.operating_hours?.[day];
+    else merged[key] = edited[key];
+  }
+  if (carried.length === 0) return { merged: fresh, carried, dropped };
+  if (carried.some((key) => key.startsWith("operating_hours_"))) {
+    merged.operating_hours = Object.fromEntries(Object.entries(hours).filter(([, v]) => v !== undefined));
+  }
+  return { merged: merged as unknown as AdminSettings, carried, dropped };
+}
+
+/**
+ * A blocker's or a refusal's sentence, without the caption said twice. Most messages already
+ * open with the setting's name ("Screen returns … has to be from 5 to 120."), and the list and the
+ * field's live region both put the caption in front of them — "X: X has to be…" (F3-4).
+ * Returns the part of the message after the caption, or null when it does not open with it.
+ */
+export function afterCaption(label: string, message: string): string | null {
+  const bare = label.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  for (const head of [label, bare]) {
+    if (head && message.toLowerCase().startsWith(head.toLowerCase())) return message.slice(head.length);
+  }
+  return null;
+}
+
 /** The sections holding at least one unsaved change — for each header's dot. */
 export function dirtySections(changed: readonly string[]): Set<SettingsSectionId> {
   const out = new Set<SettingsSectionId>();
@@ -181,8 +239,19 @@ export function describeSaveFailure(err: unknown, currency: string): string {
 /** Codes that say only "refused" — the banner replaces them with what to do. */
 const GENERIC_REFUSALS = new Set(["validation_failed", "invalid_request", "bad_request"]);
 
-/** A failed save, as the page's banner says it (F3.15): the sentence, and the field to go to. */
-export type SaveFailure = { text: string; fieldKey: string | null; sessionEnded: boolean };
+/**
+ * A failed save, as the page's banner says it (F3.15): the sentence, and the field to go to.
+ * `transient` (F3-4): the club was not reached, or its answer was lost and the settings were
+ * read again to find out — so the banner must not say "fix what is named".
+ */
+export type SaveFailure = { text: string; fieldKey: string | null; sessionEnded: boolean; transient?: boolean };
+
+/** Thrown by the save when its reply was lost; carries what re-reading the club found. */
+export class SaveNotConfirmed extends Error {
+  constructor(public readonly found: "not_saved" | "unknown") {
+    super(found);
+  }
+}
 
 /** snake_case of a ProblemDetails `errors` key ("SliceMinutes" / "sliceMinutes" → "slice_minutes"). */
 function snake(key: string): string {
@@ -210,6 +279,10 @@ function fieldOf(err: ApiError): string | null {
  * printing "validation failed"; one that names a field offers a way to it.
  */
 export function saveFailureOf(err: unknown, currency: string): SaveFailure {
+  if (err instanceof SaveNotConfirmed) {
+    const text = err.found === "not_saved" ? SETTINGS_COPY.saveDidNotArrive : SETTINGS_COPY.saveUnknown;
+    return { text, fieldKey: null, sessionEnded: false, transient: true };
+  }
   if (err instanceof ApiError && err.status === 401) {
     return { text: SETTINGS_COPY.saveFailed, fieldKey: null, sessionEnded: true };
   }
