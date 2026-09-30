@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import { Fragment, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ScrollArea } from "@/components/ScrollArea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -264,13 +264,23 @@ function Identity({ row }: { row: MemberRow }) {
             cut to "wa…" and "Membership number d…" beside columns with room to spare. The
             number and the address are two lines; an address breaks anywhere, a reason at words. */}
         {row.membership_number ? <p className="truncate text-xs text-text-muted" title={row.membership_number}>{row.membership_number}</p> : null}
-        <p className="break-all text-xs text-text-muted" title={sub}>{row.email}</p>
+        <p className="break-words text-xs text-text-muted" title={sub}><EmailWithBreaks email={row.email} /></p>
         {row.rejection_reason ? (
           <p className="line-clamp-2 break-words text-xs text-danger-strong" title={row.rejection_reason}>{row.rejection_reason}</p>
         ) : null}
       </div>
     </div>
   );
+}
+
+/**
+ * An address that may break after its "@" and before each "." (R3 V-14): `break-all` split it
+ * mid-word over three lines at 1280 ("eve.muo7664z@memb / er-r3.review.test"). With the break
+ * points offered, `break-words` breaks mid-word only where one part alone is wider than the cell.
+ */
+function EmailWithBreaks({ email }: { email: string }) {
+  const parts = email.split(/(?<=@)|(?=\.)/);
+  return <>{parts.map((part, i) => <Fragment key={i}>{i > 0 ? <wbr /> : null}{part}</Fragment>)}</>;
 }
 
 /**

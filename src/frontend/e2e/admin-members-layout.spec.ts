@@ -344,4 +344,33 @@ test.describe("opening a member from the list", () => {
     expect(await email.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     expect(await email.evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis");
   });
+
+  /** Review round 3, V-14: it wrapped with break-all, mid-word over three lines. */
+  test("breaks an address only after its @ or before a dot at 1280", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "a desktop width");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openMembers(page);
+    const emails = page.locator("tbody tr td p").filter({ hasText: /@/ });
+    await expect(emails.first()).toBeVisible();
+    const split = await emails.evaluateAll((els) => els.flatMap((el) => [...el.childNodes]
+      .filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent)
+      .filter((n) => { const r = document.createRange(); r.selectNodeContents(n); return r.getClientRects().length > 1; })
+      .map((n) => n.textContent)));
+    expect(split, "a part of an address broke mid-word").toEqual([]);
+  });
+
+  /** Review round 3, V-15: the search placeholder was clipped at 320. */
+  test("fits the members search placeholder on a 320 px phone", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await openMembers(page);
+    const search = page.getByRole("searchbox", { name: "Search members" });
+    const fits = await search.evaluate((input: HTMLInputElement) => {
+      const style = getComputedStyle(input);
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const room = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      return ctx.measureText(input.placeholder).width <= room;
+    });
+    expect(fits, "the placeholder is clipped").toBe(true);
+  });
 });

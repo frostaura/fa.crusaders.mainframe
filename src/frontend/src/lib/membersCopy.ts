@@ -24,7 +24,8 @@ export const MEMBERS_PAGE = {
   title: "Members",
   description: "Approve applicants, top up credit, and open anyone's record — their bookings, doors and night.",
   searchLabel: "Search members",
-  searchPlaceholder: "Name, email or membership number",
+  // R3 V-15: "membership number" was clipped at 320; "member no." fits the narrowest phone.
+  searchPlaceholder: "Name, email or member no.",
   filterLabel: "Show members",
   tableLabel: "Members table",
   refresh: "Refresh the member list",
