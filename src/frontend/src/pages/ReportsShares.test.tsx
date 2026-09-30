@@ -67,6 +67,9 @@ describe("the club's report: shares net to zero, and it says so", () => {
     renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
     const totals = await screen.findByRole("region", { name: "Club money — totals" });
     expect(within(totals.querySelector("dl")!).getByText(COPY.clubShares)).toBeInTheDocument();
+    // Ten figures, five across: whole rows, never two orphans (review round 2, VIS F3-15).
+    expect(totals.querySelector("dl")!.children).toHaveLength(10);
+    expect(totals.querySelector("dl")!.className).toContain("lg:grid-cols-5");
     expect(within(totals).getByText(new RegExp(COPY.clubCaption.slice(0, 40)))).toBeInTheDocument();
 
     const daily = within(await screen.findByRole("region", { name: "Daily breakdown" }));
@@ -77,8 +80,11 @@ describe("the club's report: shares net to zero, and it says so", () => {
   it("carries no share column or row against an older API", async () => {
     stubFetch(adminRoutes([DAY]));
     renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
-    await screen.findByRole("region", { name: "Club money — totals" });
+    const nine = await screen.findByRole("region", { name: "Club money — totals" });
     expect(screen.queryByText(COPY.clubShares)).toBeNull();
+    // Nine figures, three across (F3-15).
+    expect(nine.querySelector("dl")!.children).toHaveLength(9);
+    expect(nine.querySelector("dl")!.className).toContain("sm:grid-cols-3");
     const daily = within(await screen.findByRole("region", { name: "Daily breakdown" }));
     expect(daily.queryByRole("columnheader", { name: new RegExp(COPY.clubShares) })).toBeNull();
   });

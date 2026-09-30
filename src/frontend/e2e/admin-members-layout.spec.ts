@@ -316,4 +316,32 @@ test.describe("opening a member from the list", () => {
     await row.locator('td[data-label="Status"]').click();
     await expect(page).toHaveURL(new RegExp(`/admin/members/${uid(2)}$`));
   });
+
+  /**
+   * Review round 2, A11Y F3-17: radios must choose as the arrows move. The finding's screenshot is
+   * the member's own top-up page; the desk's quick amounts already do, and this keeps them doing so.
+   */
+  test("chooses the quick amount the arrow keys move to", async ({ page }) => {
+    await openMembers(page);
+    const row = page.locator("tbody tr", { hasText: "Sipho Dlamini" });
+    await row.getByRole("button", { name: "Top up" }).click();
+    const sheet = page.getByRole("dialog", { name: "Top up Sipho Dlamini" });
+    // Reached by keyboard, nothing chosen yet — the reviewer's path.
+    await sheet.getByRole("radio", { name: "+50.00 cr" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(sheet.getByRole("radio", { name: "+100.00 cr" })).toBeFocused();
+    await expect(sheet.getByRole("radio", { name: "+100.00 cr" })).toHaveAttribute("aria-checked", "true");
+    await expect(sheet.getByLabel("Another amount")).toHaveValue("100");
+  });
+
+  /** Review round 2, F3-15: the members table wraps an address and a reason instead of cutting them. */
+  test("shows a member's whole address at 1280 rather than cutting it", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "a desktop width");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openMembers(page);
+    const email = page.locator("tbody tr", { hasText: "Sipho Dlamini" }).getByText(/@/).first();
+    await expect(email).toBeVisible();
+    expect(await email.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    expect(await email.evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis");
+  });
 });

@@ -77,8 +77,9 @@ export function Carousel({ slides, label = "Charts", className }: { slides: Caro
           </ArrowButton>
 
           {/*
-            Dots. The pill a reader sees is 6px tall and the button around it is 24×24 — WCAG 2.2
-            SC 2.5.8's floor; each inactive dot was once a 6×6 target, and at 375px the dots are
+            Dots. The pill a reader sees is 6px tall and the button around it is 44×44 — the house
+            touch floor (review round 2, A11Y F3-19: 24×24 met SC 2.5.8 but not the 44 the rest of
+            the admin keeps); each inactive dot was once a 6×6 target, and at 375px the dots are
             the primary way between slides. `no-lift`: a dot that jumps under the finger reads as
             a mis-tap; the pill's own width change is the feedback.
           */}
@@ -91,7 +92,7 @@ export function Carousel({ slides, label = "Charts", className }: { slides: Caro
                 aria-label={`Go to slide ${i + 1}`}
                 aria-current={i === active ? "true" : undefined}
                 data-testid="carousel-dot"
-                className="no-lift group flex h-6 w-6 items-center justify-center"
+                className="no-lift group flex size-touch items-center justify-center"
               >
                 <span
                   aria-hidden

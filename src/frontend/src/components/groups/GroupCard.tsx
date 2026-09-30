@@ -101,7 +101,9 @@ export function GroupCard(props: {
         </CardAction>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4 text-sm">
+      {/* `flex-1`: two cards side by side are one grid row, equally tall, and the footer's
+          actions sit on the same line in both (VIS F3-15: they were at different heights). */}
+      <CardContent className="flex flex-1 flex-col gap-4 text-sm">
         <ul aria-label={`${group.name} at a glance`} className="flex flex-wrap gap-1.5">
           <li><Badge tone={group.credits_per_zar == null ? "neutral" : "info"} icon={<Coins size={14} weight="bold" aria-hidden="true" />}>{rateChip(group.credits_per_zar)}</Badge></li>
           <li><Badge tone={group.peak_priority === true ? "success" : group.peak_priority === false ? "warning" : "neutral"} icon={<Lightning size={14} weight="bold" aria-hidden="true" />}>{peakChip(group.peak_priority)}</Badge></li>

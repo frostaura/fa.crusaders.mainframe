@@ -55,13 +55,20 @@ function NumberControl(props: ControlProps) {
         step={def.step}
         value={shown(value as number | undefined)}
         aria-describedby={describedBy}
-        className={cn("tabular-nums", before ? "pl-10" : unit && "pr-16", invalid && "ring-1 ring-danger-strong")}
+        className={cn("tabular-nums", NO_SPINNER, before ? "pl-10" : unit && "pr-16", invalid && "ring-1 ring-danger-strong")}
         onChange={(event) => update(patch(def.key, toNumber(event.target.value)))}
       />
       {unit !== undefined && !before ? <Unit side="right">{unit}</Unit> : null}
     </div>
   );
 }
+
+/**
+ * No native stepper (VIS F3-15): Chrome draws it at the end of the content box, which is where the
+ * unit sits, and the two overlapped ("10 ▴▾s"). A 15px double arrow is no touch target anyway; the
+ * keyboard's arrows still step the value.
+ */
+const NO_SPINNER = "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
 /** The unit inside the control's edge. Hidden from assistive tech: the caption already says it. */
 function Unit({ side, children }: { side: "left" | "right"; children: string }) {
@@ -70,7 +77,7 @@ function Unit({ side, children }: { side: "left" | "right"; children: string }) 
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-y-0 flex items-center text-sm text-text-muted",
-        side === "left" ? "left-3" : "right-9",
+        side === "left" ? "left-3" : "right-3",
       )}
     >
       {children}

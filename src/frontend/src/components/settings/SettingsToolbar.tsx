@@ -70,8 +70,8 @@ export function SettingsToolbar(props: SettingsToolbarProps) {
           </Button>
         )}
       </div>
-      <p role="status" aria-live="polite" className={searching ? "text-sm text-text-secondary" : "sr-only"}>
-        {searching ? SETTINGS_COPY.matchCount(matches) : ""}
+      <p role="status" aria-live="polite" className="text-sm text-text-secondary">
+        {searching ? SETTINGS_COPY.matchCount(matches) : SETTINGS_COPY.searchHint}
       </p>
     </div>
   );

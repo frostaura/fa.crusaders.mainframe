@@ -260,9 +260,13 @@ function Identity({ row }: { row: MemberRow }) {
             {row.full_name}
           </Link>
         </div>
-        <p className="truncate text-xs text-text-muted" title={sub}>{sub}</p>
+        {/* Wrapped, not truncated (VIS F3-15): at 1280 the address and the rejection reason were
+            cut to "wa…" and "Membership number d…" beside columns with room to spare. The
+            number and the address are two lines; an address breaks anywhere, a reason at words. */}
+        {row.membership_number ? <p className="truncate text-xs text-text-muted" title={row.membership_number}>{row.membership_number}</p> : null}
+        <p className="break-all text-xs text-text-muted" title={sub}>{row.email}</p>
         {row.rejection_reason ? (
-          <p className="truncate text-xs text-danger-strong" title={row.rejection_reason}>{row.rejection_reason}</p>
+          <p className="line-clamp-2 break-words text-xs text-danger-strong" title={row.rejection_reason}>{row.rejection_reason}</p>
         ) : null}
       </div>
     </div>

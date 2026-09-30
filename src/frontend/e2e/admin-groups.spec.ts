@@ -124,6 +124,18 @@ test.describe("groups", () => {
     await shoot(page, "groups-list");
   });
 
+  /** Review round 2 (VIS F3-15): two cards side by side had their action rows at different heights. */
+  test("lines the action rows of side-by-side cards up", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "cards sit side by side from xl");
+    await serveApi(page, routes());
+    await page.goto("/admin/groups");
+    await expect(page.getByRole("heading", { level: 2, name: "League", exact: true })).toBeVisible();
+    const tops = await page.locator("[data-group-card] [data-slot=card-footer]").evaluateAll((els) =>
+      els.slice(0, 2).map((el) => Math.round(el.getBoundingClientRect().top)));
+    expect(tops).toHaveLength(2);
+    expect(Math.abs(tops[0] - tops[1])).toBeLessThanOrEqual(1);
+  });
+
   test("edits the rate and the peak say in the sheet, and sends both", async ({ page }) => {
     const patched: unknown[] = [];
     await serveApi(page, routes([

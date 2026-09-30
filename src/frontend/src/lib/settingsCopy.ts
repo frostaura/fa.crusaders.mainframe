@@ -14,7 +14,10 @@ export const SETTINGS_COPY = {
   description: "Court schedule, booking limits, penalty policy and court-box behaviour for this club.",
 
   searchLabel: "Search settings",
-  searchPlaceholder: "Search settings — try “peak” or “door”",
+  // Short enough to fit a 390px phone beside "Open all" (VIS F3-15 — it clipped to "— tr"); the
+  // example it carried is said under the field instead.
+  searchPlaceholder: "Search settings",
+  searchHint: "Try “peak” or “door” — a setting's name or what it does.",
   clearSearch: "Clear search",
   expandAll: "Open all",
   collapseAll: "Close all",

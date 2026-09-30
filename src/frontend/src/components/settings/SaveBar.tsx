@@ -80,14 +80,35 @@ function BlockerList({ id, blockers, onFocusSetting }: { id: string; blockers: B
  * phone the bar covered the field being typed in). `scroll-padding-bottom` on the document is
  * what the browser honours when it scrolls a focused control into view.
  */
+/**
+ * The element that actually scrolls the page. On the app shell it is `<main>` (overflow-auto), not
+ * the document — measured at 390 in review round 2 (F3-14): the padding set only on `<html>` since
+ * F3.23 was never read by anything, which is why the bar still covered the field being fixed.
+ */
+function pageScroller(): HTMLElement[] {
+  const out: HTMLElement[] = [document.documentElement];
+  for (let el = document.getElementById("main-content"); el; el = el.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) { out.push(el); break; }
+  }
+  return out;
+}
+
 function useKeepFieldsClearOfBar(shown: boolean, bar: React.RefObject<HTMLDivElement | null>) {
   useEffect(() => {
-    const root = document.documentElement;
     const el = bar.current;
     if (!shown || !el) return undefined;
+    const scrollers = pageScroller();
     const apply = () => {
       const top = el.getBoundingClientRect().top;
-      root.style.scrollPaddingBottom = `${Math.max(0, window.innerHeight - top) + 16}px`;
+      for (const scroller of scrollers) scroller.style.scrollPaddingBottom = `${Math.max(0, window.innerHeight - top) + 16}px`;
+      // The padding only counts when the browser scrolls a control INTO view; a bar that appears
+      // or grows (a blocker list) over the field already being typed in moved nothing, and at 390
+      // it covered the very field it named (F3-14). Lift that field above the bar's new top.
+      const focused = document.activeElement as HTMLElement | null;
+      if (focused && !el.contains(focused) && focused.matches("input, textarea, select, [role=combobox]")
+        && focused.getBoundingClientRect().bottom > top) {
+        focused.scrollIntoView?.({ block: "nearest" });
+      }
     };
     apply();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(apply);
@@ -96,7 +117,7 @@ function useKeepFieldsClearOfBar(shown: boolean, bar: React.RefObject<HTMLDivEle
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", apply);
-      root.style.scrollPaddingBottom = "";
+      for (const scroller of scrollers) scroller.style.scrollPaddingBottom = "";
     };
   }, [shown, bar]);
 }

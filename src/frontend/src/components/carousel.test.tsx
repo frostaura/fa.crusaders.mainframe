@@ -31,13 +31,12 @@ const SLIDES = [
 ];
 
 describe("carousel controls", () => {
-  it("gives every dot a 24px hit target around its 6px pill", () => {
+  it("gives every dot a 44px hit target around its 6px pill (review round 2, A11Y F3-19)", () => {
     render(<Carousel slides={SLIDES} />);
     const dots = screen.getAllByTestId("carousel-dot");
     expect(dots).toHaveLength(3);
     for (const dot of dots) {
-      expect(dot.className).toContain("w-6");
-      expect(dot.className).toContain("h-6");
+      expect(dot.className).toContain("size-touch");
       // The pill is a child, so shrinking it does not shrink what a thumb has to hit.
       expect(dot.querySelector("span")).not.toBeNull();
       expect(dot.querySelector("span")!.className).toContain("h-1.5");

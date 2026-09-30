@@ -42,6 +42,21 @@ describe("the control board", () => {
   });
   afterEach(() => { vi.useRealTimers(); });
 
+  /** Review round 2 (VIS F3-15): four courts in three columns left one alone on a second row. */
+  it("lays four courts out in whole rows, and three courts three across", async () => {
+    const four = [1, 2, 3, 4].map((n) => boardCourtFixture({ court_id: `c${n}`, court_number: n, name: `Court ${n}` }));
+    stubFetch(routes(boardFixture({ courts: four })));
+    const { unmount } = renderPage(<ControlBoardPage />);
+    const grid = (await screen.findByRole("heading", { name: "Court 4", level: 2 })).closest(".grid")!;
+    expect(grid.className).not.toContain("xl:grid-cols-3");
+    unmount();
+
+    stubFetch(routes(boardFixture({ courts: four.slice(0, 3) })));
+    renderPage(<ControlBoardPage />);
+    const three = (await screen.findByRole("heading", { name: "Court 3", level: 2 })).closest(".grid")!;
+    expect(three.className).toContain("xl:grid-cols-3");
+  });
+
   it("shows each court's state as a WORD, not as a colour", async () => {
     stubFetch(routes(boardFixture()));
     renderPage(<ControlBoardPage />);

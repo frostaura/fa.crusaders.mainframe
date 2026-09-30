@@ -179,7 +179,9 @@ export function ControlBoardPage() {
         emptyIcon={Racquet}
         skeleton={<TileGridSkeleton tiles={4} />}
       >
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {/* Whole rows (VIS F3-15): four courts in three columns left one alone on a second row.
+            Two or four courts stay two across; three, five or six go three across from `xl`. */}
+        <div className={cn("grid gap-4 sm:grid-cols-2", courts.length % 2 === 0 && courts.length <= 4 ? undefined : "xl:grid-cols-3")}>
           {courts.map((court) => (
             <CourtTile
               key={court.court_id}

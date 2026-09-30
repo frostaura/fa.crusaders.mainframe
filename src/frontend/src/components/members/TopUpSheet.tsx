@@ -20,7 +20,8 @@ import {
   parseCredits, parseZar, reasonChoicesFor, reasonLabel, receiptHeader, revenueNote, sheetTitle, validateAmount,
   validateReason, validateZar, type CreditDirection,
 } from "@/lib/topUpCopy";
-import { formatCredits, formatMoney } from "@/lib/utils";
+import { cn, formatCredits, formatMoney } from "@/lib/utils";
+import { Minus, Plus } from "@/components/ui/icons";
 
 /**
  * Add credit to a member, or take it back — two flows, never one signed field. (D3-B08, P5)
@@ -155,7 +156,9 @@ export function TopUpSheet(props: TopUpSheetProps) {
         <SheetBody className="flex flex-col gap-4 pb-4">
           <StepBody flow={flow} {...props} />
         </SheetBody>
-        <SheetFooter className="sm:items-end">
+        {/* The check step stacks on every width (F3-14): beside Back, the armed confirm — a
+            sentence over two buttons — had a third of a narrow sheet and "Add 200.00 cr" wrapped. */}
+        <SheetFooter className={cn("sm:items-end", flow.step === 3 && !flow.done && "sm:flex-col sm:items-stretch")}>
           <StepFooter flow={flow} {...props} />
         </SheetFooter>
       </SheetContent>
@@ -206,7 +209,13 @@ function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
         <FieldError>{flow.complaint}</FieldError>
       </Field>
       {warning ? <Alert tone="warning" live="polite">{warning}</Alert> : null}
-      <Button variant="ghost" className="self-start" onClick={flow.flip}>
+      {/* A button that looks like one (VIS F3-15): as a ghost it read as a line of text. */}
+      <Button
+        variant="outline"
+        className="self-start"
+        icon={flow.direction === "add" ? <Minus aria-hidden="true" /> : <Plus aria-hidden="true" />}
+        onClick={flow.flip}
+      >
         {flow.direction === "add" ? TAKE_BACK_LINK : ADD_LINK}
       </Button>
     </>
@@ -339,9 +348,8 @@ function ApplyControls({ flow, name, balance, busy, onApply }: TopUpSheetProps &
   return (
     <>
       <Button variant="outline" onClick={() => flow.setStep(2)}>{COPY.back}</Button>
-      {/* Its own growing column (F3.23): armed, the confirm is a sentence over two buttons, and
-          squeezed beside Back it wrapped into a cramped tower. */}
-      <div className="min-w-0 sm:flex-1">
+      {/* Its own full-width row (F3.23, F3-14): armed, the confirm is a sentence over two buttons. */}
+      <div className="min-w-0">
         <ConfirmButton
           idleLabel={direction === "add" ? `Add ${formatCredits(valid)}` : `Take back ${formatCredits(valid)}`}
           cancelLabel={COPY.cancel}

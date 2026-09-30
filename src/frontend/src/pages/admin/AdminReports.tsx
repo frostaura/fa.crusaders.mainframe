@@ -152,6 +152,8 @@ function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
   return (
     <Section title="Club money — totals" description="Every movement of member credit across the club in this period.">
       <TotalsCard
+        // Nine or ten figures: whole rows either way (VIS F3-15 — ten in four columns orphaned two).
+        columns={shares ? 5 : 3}
         footnote={(
           <>
             Credit held by members moved by <strong className="font-semibold tabular-nums text-text-primary">{formatSignedCredits(t.net)}</strong> over

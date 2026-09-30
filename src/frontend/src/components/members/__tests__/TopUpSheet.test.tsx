@@ -112,3 +112,30 @@ describe("the receipt is frozen at the press (F3.5)", () => {
     expect(screen.queryByText(/After \+50\.00 cr: 300\.00 cr/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Review round 2 — A11Y F3-17 (its screenshot is the MEMBER top-up page; the desk's quick amounts
+ * already chose on arrow, and this pins that they still do) and VIS F3-15 on the amount step.
+ */
+describe("the quick amounts are radios that choose as the arrows move", () => {
+  it("selects the amount the arrow key moves to", async () => {
+    renderPage(<Harness apply={vi.fn()} />);
+    const first = screen.getByRole("radio", { name: "+50.00 cr" });
+    fireEvent.click(first);
+    expect(first).toHaveAttribute("aria-checked", "true");
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+
+    const second = screen.getByRole("radio", { name: "+100.00 cr" });
+    await waitFor(() => expect(second).toHaveAttribute("aria-checked", "true"));
+    expect(screen.getByLabelText("Another amount")).toHaveValue("100");
+  });
+
+  it("offers taking credit back as a real button, not a line of text", () => {
+    renderPage(<Harness apply={vi.fn()} />);
+    const flip = screen.getByRole("button", { name: "Take credit back instead" });
+    // The outline look — a bordered surface — rather than the borderless ghost it was.
+    expect(flip.className).toMatch(/border-control/);
+    expect(flip.querySelector("svg")).not.toBeNull();
+  });
+});

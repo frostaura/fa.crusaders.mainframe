@@ -907,7 +907,18 @@ function VariableCatalogCard() {
             {ENVELOPE_VARS.map((v) => <VarChip key={v} name={v} />)}
           </div>
         </div>
-        <div className="rounded-lg border border-border">
+        {/* On a phone, one card per event (VIS F3-15): the three-column table at 390 made each row
+            ~240px tall with "What it means" off the right edge. The table is the sm+ reading. */}
+        <ul aria-label="Events and the variables each carries" className="flex flex-col divide-y divide-border rounded-lg border border-border sm:hidden">
+          {EVENTS.map((e) => (
+            <li key={e.name} className="flex flex-col gap-1.5 p-3">
+              <span className="font-mono text-xs font-semibold text-text-primary">{e.name}</span>
+              <span className="text-sm text-text-secondary">{e.description}</span>
+              <div className="flex flex-wrap gap-1.5">{e.vars.map((v) => <VarChip key={v} name={v} />)}</div>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden rounded-lg border border-border sm:block">
           <Table label="Events and the variables each carries">
             <TableHeader>
               <TableRow>
