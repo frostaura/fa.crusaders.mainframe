@@ -3,6 +3,7 @@ import { useToast } from "@/components/Toast";
 import { endpoints } from "@/lib/api";
 import { OUTCOMES } from "@/lib/membersCopy";
 import type { MemberRow } from "./membersModel";
+import { transitionTruth } from "./lostTransition";
 import { focusAfterAction, pageHeading } from "@/lib/focusAfterAction";
 
 export type ResetResult = { tempPassword: string; emailSentTo: string | null };
@@ -54,8 +55,13 @@ export function useMemberLifecycle({ load }: Deps) {
       toast.push(r.member_notified
         ? { tone: "success", text: OUTCOMES.approved(m.full_name) }
         : { tone: "warning", text: OUTCOMES.approvedUnnotified(m.full_name) });
-    } catch {
-      toast.push({ tone: "danger", text: OUTCOMES.approveFailed });
+    } catch (err) {
+      // F3-3: a lost reply is asked about, not reported as a failure — the approval may have
+      // committed before the connection dropped.
+      const truth = await transitionTruth(m.user_id, "Active", err);
+      if (truth === "done") toast.push({ tone: "warning", text: OUTCOMES.approvedAfterLostReply(m.full_name), durationMs: 8000 });
+      else if (truth === "unknown") toast.push({ tone: "warning", text: OUTCOMES.approveUnknown(m.full_name), durationMs: 8000 });
+      else toast.push({ tone: "danger", text: OUTCOMES.approveFailed });
     } finally {
       await load();
       // F3.20: the approved row leaves the Pending list and took focus with it, to <body>. The

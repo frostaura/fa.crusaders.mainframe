@@ -10,6 +10,7 @@ import { BalanceProvider } from "../lib/balance";
 import { ProfileProvider } from "../lib/profile";
 import { ToastProvider } from "../components/Toast";
 import { memberFixture, signIn, signOut } from "../test/harness";
+import { OUTCOMES } from "../lib/membersCopy";
 
 /**
  * Two numbers counting the same thing, on the same screen, disagreeing.
@@ -92,6 +93,12 @@ function stubClub(members: MemberRow[], commitButFail = false) {
     if (path.startsWith("/api/v1/wallet/stream-ticket")) return ok({ ticket: "t", expires_in_seconds: 60 });
     if (path.startsWith("/api/v1/wallet")) return ok(WALLET);
     if (path.startsWith("/api/v1/admin/biometric/enrollments")) return ok([]);
+    const one = /^\/api\/v1\/admin\/members\/([^/?]+)$/.exec(path);
+    if (method === "GET" && one) {
+      // F3-3: after a lost reply the console reads the member it acted on.
+      const m = state.members.find((row) => row.user_id === one[1]);
+      return m ? ok(m) : Promise.reject(new Error(`No member ${one[1]}`));
+    }
     if (path.startsWith("/api/v1/admin/members/")) {
       // The chrome asks for the pending set; the console asks for everything.
       return ok(path.includes("status=PendingApproval")
@@ -185,8 +192,10 @@ describe("the pending-applications badge, after an approval on the same screen",
 
     await userEvent.click((await screen.findAllByRole("button", { name: "Approve" }))[0]);
 
-    // The admin is correctly told the call failed...
-    expect(await screen.findByText("Approval failed.")).toBeInTheDocument();
+    // The approval committed and the reply was lost: the console asks, and says the truth
+    // (review round 2, F3-3) — never "Approval failed." about a member who is Active...
+    expect(await screen.findByText(OUTCOMES.approvedAfterLostReply("Applicant 1"))).toBeInTheDocument();
+    expect(screen.queryByText(OUTCOMES.approveFailed)).not.toBeInTheDocument();
     // ...and both numbers still tell them what is actually true of the club.
     await waitFor(() => expect(summaryLine(1)).toBeInTheDocument());
     await waitFor(() =>

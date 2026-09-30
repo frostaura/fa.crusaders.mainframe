@@ -215,6 +215,11 @@ export const OUTCOMES = {
   approvedUnnotified: (name: string) =>
     `${name} is approved, but the welcome email couldn't be sent. Their membership is active — tell them directly.`,
   approveFailed: "Approval failed.",
+  /** F3-3: the reply was lost, the member was read again, and they are Active. */
+  approvedAfterLostReply: (name: string) =>
+    `${name} is approved — the reply got lost, so the club was asked, and their membership is active. Check with them that the welcome email arrived.`,
+  approveUnknown: (name: string) =>
+    `It isn't known yet whether ${name} was approved: the reply got lost and the club couldn't be asked. Look at their status in the list before pressing Approve again.`,
   rejected: "Application rejected.",
   rejectedUnnotified: (name: string) =>
     `${name}'s application is rejected, but the email couldn't be sent. Tell them directly — they'll be refused at sign-in until someone does.`,

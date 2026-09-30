@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { endpoints } from "@/lib/api";
 import { ACTIONS_COPY as COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
 import type { MemberDetail } from "@/lib/memberDetailApi";
+import { transitionTruth } from "@/components/members/lostTransition";
 
 /**
  * The member's secondary actions behind one ⋯ (the founder: the old row of worded buttons was
@@ -46,6 +47,7 @@ function useLifecycleToast() {
 
 function useLifecycleItems({ detail, name, onChanged }: Props) {
   const say = useLifecycleToast();
+  const toast = useToast();
   const [reason, setReason] = useState("");
   const id = detail.membership_id;
   if (!id) return [];
@@ -58,8 +60,15 @@ function useLifecycleItems({ detail, name, onChanged }: Props) {
       title: COPY.approveTitle(name), description: COPY.approveBody, confirmLabel: COPY.approveConfirm, tone: "primary",
       action: COPY.approveAction,
       onConfirm: async () => {
-        const r = await endpoints.adminApprove(id);
-        say(r.member_notified, COPY.approved(name), COPY.approvedUnnotified(name));
+        try {
+          const r = await endpoints.adminApprove(id);
+          say(r.member_notified, COPY.approved(name), COPY.approvedUnnotified(name));
+        } catch (err) {
+          // F3-3: ask the club before saying anything — the approval may have committed.
+          const truth = await transitionTruth(detail.user_id, "Active", err);
+          if (truth === "not_done") throw err;
+          toast.push({ tone: "warning", text: truth === "done" ? COPY.approvedAfterLostReply(name) : COPY.approveUnknown(name), durationMs: 8000 });
+        }
         await settle();
       },
     },

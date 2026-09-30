@@ -91,6 +91,10 @@ export const ACTIONS_COPY = {
   approveAction: "approve this application",
   approved: (name: string) => `${name} is now an active member.`,
   approvedUnnotified: (name: string) => `${name} is active, but the email couldn't be sent. Tell them directly.`,
+  approvedAfterLostReply: (name: string) =>
+    `${name} is approved — the reply got lost, so the club was asked, and their membership is active. Check with them that the welcome email arrived.`,
+  approveUnknown: (name: string) =>
+    `It isn't known yet whether ${name} was approved: the reply got lost and the club couldn't be asked. Their status above has been read again.`,
 
   reject: "Reject application",
   rejectTitle: (name: string) => `Reject ${name}'s application?`,

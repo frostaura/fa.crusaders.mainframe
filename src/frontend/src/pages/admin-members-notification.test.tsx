@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
 import { memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { OUTCOMES } from "../lib/membersCopy";
 
 /**
  * What the console says, and does, when a membership transition succeeds and the email
@@ -27,6 +28,7 @@ import { memberFixture, renderPage, stubFetch, type StubRoute } from "../test/ha
  */
 
 const MEMBERSHIP = "33333333-3333-3333-3333-333333333333";
+const USER = "44444444-4444-4444-4444-444444444444";
 const APPLICANT = { status: "PendingApproval", full_name: "Ada Lovelace" };
 
 function routes(extra: StubRoute[], listSequence?: unknown[]): StubRoute[] {
@@ -78,20 +80,47 @@ describe("AdminMembers — approving when the mail server is down", () => {
     // that knows the truth. With the reload inside the `try` it never happened, and the row
     // went on offering Approve for a member who was already Active.
     const stub = stubFetch(routes(
-      [approveRoute({ error: "smtp" }, 500)],
+      [approveRoute({ error: "smtp" }, 500), { path: `/api/v1/admin/members/${USER}`, body: memberFixture({ status: "Active" }) }],
       [[memberFixture(APPLICANT)], [memberFixture({ status: "Active" })]],
     ));
     renderPage(<AdminMembersPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
 
-    expect(await screen.findByText("Approval failed.")).toBeInTheDocument();
+    // Review round 2 (F3-3): the member is read again and the toast says what is TRUE.
+    expect(await screen.findByText(OUTCOMES.approvedAfterLostReply("Ada Lovelace"))).toBeInTheDocument();
+    expect(screen.queryByText(OUTCOMES.approveFailed)).not.toBeInTheDocument();
     // Two list reads: the one on mount and the one the failure did not cancel.
     await waitFor(() =>
       expect(stub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/admin/members/")).length)
         .toBeGreaterThanOrEqual(2));
     // And the screen now shows the server's club, not the console's memory of it.
     await waitFor(() => expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument());
+  });
+
+  it("says it is not known — not that it failed — when the member cannot be read either", async () => {
+    stubFetch(routes([
+      approveRoute({ error: "gateway_timeout" }, 504),
+      { path: `/api/v1/admin/members/${USER}`, status: 503, body: { error: "server_error" } },
+    ]));
+    renderPage(<AdminMembersPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText(OUTCOMES.approveUnknown("Ada Lovelace"))).toBeInTheDocument();
+    expect(screen.queryByText(OUTCOMES.approveFailed)).not.toBeInTheDocument();
+  });
+
+  it("still says it failed when the club read back shows them waiting", async () => {
+    stubFetch(routes([
+      approveRoute({ error: "server_error" }, 500),
+      { path: `/api/v1/admin/members/${USER}`, body: memberFixture(APPLICANT) },
+    ]));
+    renderPage(<AdminMembersPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText(OUTCOMES.approveFailed)).toBeInTheDocument();
   });
 
   it("tells the truth about a rejection nobody received", async () => {
