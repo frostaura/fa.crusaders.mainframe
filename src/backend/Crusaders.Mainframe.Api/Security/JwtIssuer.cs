@@ -34,6 +34,14 @@ public interface IJwtIssuer
     /// </summary>
     string IssueOneTime(
         Guid userId, Guid tenantId, string tenantSlug, TicketScope scope, IEnumerable<string> roles, int sessionEpoch);
+
+    /// <summary>
+    /// The same access token, re-signed with the refresh family it belongs to
+    /// (<see cref="RefreshSessions.FamilyClaim"/>, review round 2, C1) — every token a sign-in or
+    /// a refresh hands out is bound, so a bearer refresh can be refused once that family is ended.
+    /// Only ever given a token this issuer has just minted; its claims and expiry are kept.
+    /// </summary>
+    string BindToFamily(string accessToken, Guid familyId);
 }
 
 /// <summary>What a one-time ticket is for, and for how long: its purpose (the one path it opens) and its lifetime.</summary>
@@ -76,6 +84,31 @@ public sealed class JwtIssuer : IJwtIssuer
     public string IssueOneTime(
         Guid userId, Guid tenantId, string tenantSlug, TicketScope scope, IEnumerable<string> roles, int sessionEpoch)
         => Issue(new TokenSubject(userId, tenantId, tenantSlug, sessionEpoch), scope.Purpose, scope.Ttl, roles);
+
+    public string BindToFamily(string accessToken, Guid familyId)
+    {
+        var minted = new JwtSecurityTokenHandler().ReadJwtToken(accessToken);
+        var claims = minted.Claims
+            .Where(c => !RegisteredOnReissue.Contains(c.Type))
+            .Append(new Claim(RefreshSessions.FamilyClaim, familyId.ToString()));
+        var secret = _config["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret missing");
+        var creds = new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)), SecurityAlgorithms.HmacSha256);
+        var token = new JwtSecurityToken(
+            issuer: _config["Jwt:Issuer"] ?? DefaultIssuer,
+            audience: _config["Jwt:Audience"] ?? DefaultAudience,
+            claims: claims,
+            notBefore: minted.ValidFrom,
+            expires: minted.ValidTo,
+            signingCredentials: creds);
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    /// <summary>Claims the token constructor writes itself, and the family claim being replaced.</summary>
+    private static readonly HashSet<string> RegisteredOnReissue = new(StringComparer.Ordinal)
+    {
+        JwtRegisteredClaimNames.Iss, JwtRegisteredClaimNames.Aud, JwtRegisteredClaimNames.Exp,
+        JwtRegisteredClaimNames.Nbf, JwtRegisteredClaimNames.Iat, RefreshSessions.FamilyClaim,
+    };
 
     /// <summary>Whose token it is, where, and under which session epoch.</summary>
     private sealed record TokenSubject(Guid UserId, Guid TenantId, string TenantSlug, int SessionEpoch);

@@ -107,8 +107,8 @@ public static class WebAuthnEndpoints
             var token = jwt.IssueAccess(user.Id, tenantRow.Id, tenantRow.Slug, roles, user.SessionEpoch);
 
             // The long-lived half of the session (B1), in the club the passkey belongs to.
-            await SessionCookies.StartAsync(ctx, user.Id, user.SessionEpoch, ct);
-            return Results.Ok(new { access_token = token, user_id = user.Id, is_admin = user.IsAdmin });
+            var family = await SessionCookies.StartAsync(ctx, user.Id, user.SessionEpoch, ct);
+            return Results.Ok(new { access_token = SessionCookies.Bind(ctx, token, family), user_id = user.Id, is_admin = user.IsAdmin });
         });
 
         // ---- Authenticated registration + management ------------------------------------

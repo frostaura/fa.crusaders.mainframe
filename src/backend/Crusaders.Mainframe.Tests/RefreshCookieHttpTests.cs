@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -337,5 +338,143 @@ public sealed class RefreshCookieHttpTests(PostgresFixture pg) : IClassFixture<P
         var legacy = await RefreshAsync(h, null, bearer);  // a session from before B1: no cookie
         Assert.Equal(HttpStatusCode.OK, legacy.StatusCode);
         Assert.False(string.IsNullOrEmpty(CookieValue(legacy)));
+    }
+
+    // ------------------------------------------------------------------ review round 2, C1: tokens bound to their family
+
+    private static Guid? FamilyIn(string accessToken) =>
+        Guid.TryParse(new JwtSecurityTokenHandler().ReadJwtToken(accessToken).Claims
+            .FirstOrDefault(c => c.Type == RefreshSessions.FamilyClaim)?.Value, out var id) ? id : null;
+
+    private Task<Guid> FamilyOfCookieAsync(Harness h, string cookie) =>
+        h.Club.ReadAsync(h.App, db => db.RefreshTokens.IgnoreQueryFilters()
+            .Where(t => t.TokenHash == TokenHashing.Hash(cookie)).Select(t => t.FamilyId).SingleAsync());
+
+    private static Task<HttpResponseMessage> LogoutAsync(Harness h, string? cookie, string? bearer)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/logout");
+        if (cookie is not null) request.Headers.Add("Cookie", $"{Cookie}={cookie}");
+        if (bearer is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        return h.Client().SendAsync(request);
+    }
+
+    /// <summary>
+    /// The IX-H resurrection: tab A signs out; tab B still holds a live bearer and refreshes with
+    /// it. It used to mint, find no cookie (A's sign-out cleared the shared jar) and START A NEW
+    /// FAMILY — the member was signed back in by the tab they did not touch.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_bearer_from_a_family_ended_by_sign_out_in_another_tab_cannot_refresh_or_start_a_new_family()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var h = await StartAsync("r2rfidout");
+        var (login, cookie) = await LoginAsync(h, "olga");
+        var tabA = await AccessTokenOf(login);
+        var second = await RefreshAsync(h, cookie, tabA);   // tab B's own token, from the one shared jar
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        var tabB = await AccessTokenOf(second);
+        var families = await h.Club.ReadAsync(h.App, db => db.RefreshTokens.IgnoreQueryFilters().CountAsync(t => t.UserId == h.Club.Olga));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await LogoutAsync(h, cookie, tabA)).StatusCode);
+
+        foreach (var jar in new[] { null, cookie })
+        {
+            var late = await RefreshAsync(h, jar, tabB);
+            Assert.Equal(HttpStatusCode.Unauthorized, late.StatusCode);
+            Assert.Equal("session_ended", await ErrorOf(late));
+            Assert.Null(SetCookieLine(late));
+        }
+        Assert.Equal(families, await h.Club.ReadAsync(h.App, db => db.RefreshTokens.IgnoreQueryFilters().CountAsync(t => t.UserId == h.Club.Olga)));
+    }
+
+    [SkippableFact]
+    public async Task Every_access_token_a_sign_in_or_refresh_hands_out_names_its_cookies_family()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var h = await StartAsync("r2rfidall");
+        var (login, cookie) = await LoginAsync(h, "olga");
+        Assert.Equal(await FamilyOfCookieAsync(h, cookie!), FamilyIn(await AccessTokenOf(login)));
+
+        var byCookie = await RefreshAsync(h, cookie);
+        var next = CookieValue(byCookie)!;
+        Assert.Equal(await FamilyOfCookieAsync(h, next), FamilyIn(await AccessTokenOf(byCookie)));
+
+        var byBearer = await RefreshAsync(h, next, await AccessTokenOf(byCookie));
+        Assert.Equal(HttpStatusCode.OK, byBearer.StatusCode);
+        Assert.Equal(await FamilyOfCookieAsync(h, next), FamilyIn(await AccessTokenOf(byBearer)));
+
+        // A bearer refresh with no cookie in the jar starts a family (B1) — and the token it
+        // answers is bound to THAT family, the one whose cookie it just set.
+        var jarless = await RefreshAsync(h, null, await AccessTokenOf(byBearer));
+        Assert.Equal(await FamilyOfCookieAsync(h, CookieValue(jarless)!), FamilyIn(await AccessTokenOf(jarless)));
+
+        var change = await h.Club.Bearer(h.App, await AccessTokenOf(byBearer)).PostAsync("/api/v1/me/password",
+            Json(new JsonObject { ["currentPassword"] = "OldPass!123", ["newPassword"] = "NewPass!456" }));
+        Assert.Equal(HttpStatusCode.OK, change.StatusCode);
+        Assert.Equal(await FamilyOfCookieAsync(h, CookieValue(change)!), FamilyIn(await AccessTokenOf(change)));
+
+        // The bound token is still a real session, with its roles intact.
+        var (admin, _) = await LoginAsync(h, "adm");
+        Assert.Equal(HttpStatusCode.OK, (await h.Club.Bearer(h.App, await AccessTokenOf(admin)).GetAsync("/api/v1/admin/members")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await h.Club.Bearer(h.App, await AccessTokenOf(change)).GetAsync("/api/v1/me/profile")).StatusCode);
+    }
+
+    /// <summary>A sign-out that carries only the bearer (a browser that never kept the cookie) still ends that bearer's family.</summary>
+    [SkippableFact]
+    public async Task Sign_out_with_only_the_bearer_ends_its_family()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var h = await StartAsync("r2rfidbear");
+        var (login, cookie) = await LoginAsync(h, "olga");
+        var (_, otherDevice) = await LoginAsync(h, "olga");
+
+        Assert.Equal(HttpStatusCode.NoContent, (await LogoutAsync(h, cookie: null, await AccessTokenOf(login))).StatusCode);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await RefreshAsync(h, cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await RefreshAsync(h, otherDevice)).StatusCode);
+    }
+
+    /// <summary>
+    /// The other side of the rule: a family that is merely ROTATING is live. Tab A exchanges the
+    /// cookie; tab B's bearer from the same family still refreshes — and so does a bearer from
+    /// before C1, which names no family at all.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_bearer_from_a_rotating_family_still_refreshes()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var h = await StartAsync("r2rfidlive");
+        var (login, cookie) = await LoginAsync(h, "olga");
+        var tabB = await AccessTokenOf(login);
+
+        var tabA = await RefreshAsync(h, cookie);
+        Assert.Equal(HttpStatusCode.OK, tabA.StatusCode);
+
+        var b = await RefreshAsync(h, CookieValue(tabA), tabB);
+        Assert.Equal(HttpStatusCode.OK, b.StatusCode);
+        Assert.Null(SetCookieLine(b));
+
+        var legacy = new DoorClub(h.Club.TenantId, h.Club.Slug, h.Club.DeviceKey, h.Club.AdminId, h.Club.Olga, h.Club.Courts[0])
+            .TokenFor(h.Club.Olga, null);
+        Assert.Null(FamilyIn(legacy));
+        Assert.Equal(HttpStatusCode.OK, (await RefreshAsync(h, CookieValue(tabA), legacy)).StatusCode);
+    }
+
+    /// <summary>Sign out everywhere ends every family, and a bearer from any of them is refused at refresh with the same code.</summary>
+    [SkippableFact]
+    public async Task After_sign_out_everywhere_a_bearer_refresh_is_session_ended()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var h = await StartAsync("r2rfidall2");
+        var (login, _) = await LoginAsync(h, "olga");
+        var (other, _) = await LoginAsync(h, "olga");
+        var bearer = await AccessTokenOf(other);
+
+        Assert.Equal(HttpStatusCode.OK, (await h.Club.Bearer(h.App, await AccessTokenOf(login)).PostAsync("/api/v1/me/sessions/revoke-all", null)).StatusCode);
+
+        // The epoch refuses this bearer on every route; with C1 the refresh route says so in words.
+        var refreshed = await RefreshAsync(h, null, bearer);
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshed.StatusCode);
+        Assert.Null(SetCookieLine(refreshed));
     }
 }

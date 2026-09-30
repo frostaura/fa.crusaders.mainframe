@@ -47,6 +47,15 @@ namespace Crusaders.Mainframe.Api.Security;
 public sealed class RefreshSessions
 {
     public const string CookieName = "crusaders_rt";
+
+    /// <summary>
+    /// The access-token claim naming the refresh family the token was minted from (review round 2,
+    /// C1). <b>Why:</b> a sign-out in one tab revoked the family, and a second tab still holding a
+    /// live bearer refreshed with it — the bearer path minted, found no cookie, and STARTED A NEW
+    /// FAMILY, resurrecting the session the member had just ended. A bearer whose family is ended
+    /// is now refused at refresh (<c>401 session_ended</c>).
+    /// </summary>
+    public const string FamilyClaim = "rfid";
     public const string CookiePath = "/api/v1/auth";
 
     /// <summary>How long a spent link is refused quietly (no family revocation) — a concurrent tab, not a thief.</summary>
@@ -154,6 +163,26 @@ public sealed class RefreshSessions
         var now = _clock.GetUtcNow();
         await RevokeWhereAsync(_db.RefreshTokens.IgnoreQueryFilters()
             .Where(t => t.TenantId == tenantId && t.UserId == userId && t.RevokedAt == null), now, ct);
+    }
+
+    /// <summary>The refresh family the bearer behind <paramref name="principal"/> was minted from; null for a token that names none.</summary>
+    public static Guid? FamilyOf(System.Security.Claims.ClaimsPrincipal principal)
+    {
+        return Guid.TryParse(principal.FindFirst(FamilyClaim)?.Value, out var family) ? family : null;
+    }
+
+    /// <summary>
+    /// Whether a family may still mint in this club: it exists here, no link of it was revoked
+    /// (sign-out, a replay, an epoch raise and a refused exchange all stamp EVERY link), and one of
+    /// its links is unexpired. Keyed on revocation rather than on "an unspent link exists", because
+    /// a rotation spends the old link a moment before its successor is written and a bearer refresh
+    /// landing between the two must not read the family as ended.
+    /// </summary>
+    public async Task<bool> IsFamilyLiveAsync(Guid tenantId, Guid familyId, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        var links = _db.RefreshTokens.IgnoreQueryFilters().AsNoTracking().Where(t => t.TenantId == tenantId && t.FamilyId == familyId);
+        return !await links.AnyAsync(t => t.RevokedAt != null, ct) && await links.AnyAsync(t => t.ExpiresAt > now, ct);
     }
 
     /// <summary>The family a presented link belongs to, in this club — for sign-out. Null when unknown.</summary>

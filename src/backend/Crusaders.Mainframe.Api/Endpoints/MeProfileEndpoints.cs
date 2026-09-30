@@ -181,8 +181,8 @@ public static class MeProfileEndpoints
     /// </summary>
     private static async Task<IResult> PasswordChangedAsync(HttpContext ctx, Guid userId, string? reissued, int epoch, CancellationToken ct)
     {
-        await SessionCookies.StartAsync(ctx, userId, epoch, ct);
-        return Results.Ok(new { changed = true, access_token = reissued });
+        var family = await SessionCookies.StartAsync(ctx, userId, epoch, ct);
+        return Results.Ok(new { changed = true, access_token = reissued is null ? null : SessionCookies.Bind(ctx, reissued, family) });
     }
 }
 
