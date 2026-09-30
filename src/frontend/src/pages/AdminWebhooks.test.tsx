@@ -20,7 +20,8 @@ function csSources(dir: string): string[] {
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminWebhooksPage from "./AdminWebhooks";
-import { renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { refuse, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { LOST_CREATE } from "../lib/webhooksCopy";
 
 /**
  * The webhooks console.
@@ -423,7 +424,8 @@ describe("AdminWebhooks", () => {
 
   /** F3.16: every failure said "Check the URL" in a toast — a 500 and a 429 are not the URL. */
   it.each([
-    [500, { error: "server_error" }, /it isn't the URL\. Refresh the list/],
+    // A 500 may have created it: the list is read again (review round 2, F3-11).
+    [500, { error: "server_error" }, LOST_CREATE.notCreated],
     [429, { error: "rate_limited" }, /Too many attempts in a short time/],
   ])("says what a %s means, in the dialog", async (status, body, said) => {
     stubFetch(routes([{ method: "POST", path: LIST, status, body }]));
@@ -432,6 +434,60 @@ describe("AdminWebhooks", () => {
     typeUrl();
     fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
     expect(await within(screen.getByRole("dialog")).findByText(said)).toBeInTheDocument();
+  });
+
+  /**
+   * Review round 2, F3-11: a dropped connection said "so nothing was created" — about a create
+   * that may have landed. The stubs below create the endpoint and then lose the reply.
+   */
+  describe("a create whose reply was lost", () => {
+    const NEW_URL = "https://lights.example.com/{court_number}";
+    function createdThenLost(listAfter: "ok" | "fails") {
+      const rows: unknown[] = [endpointFixture()];
+      let reads = 0;
+      return [
+        { path: LIST, respond: () => (++reads > 1 && listAfter === "fails" ? refuse(503, { error: "down" }) : rows) },
+        {
+          method: "POST", path: LIST,
+          respond: () => {
+            rows.push({ ...endpointFixture(), id: "ep-new", url_template: NEW_URL });
+            throw new TypeError("Failed to fetch");
+          },
+        },
+      ] as StubRoute[];
+    }
+
+    it("reads the list, finds the new endpoint and says it was created — and why no secret", async () => {
+      stubFetch(createdThenLost("ok"));
+      renderPage(<AdminWebhooksPage />);
+      fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+      typeUrl(NEW_URL);
+      fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
+
+      expect(await within(screen.getByRole("dialog")).findByText(LOST_CREATE.created)).toBeInTheDocument();
+      expect(screen.queryByText(/nothing was created/)).toBeNull();
+    });
+
+    it("says it is not known when the list cannot be read either, and puts the answer in view", async () => {
+      stubFetch(createdThenLost("fails"));
+      renderPage(<AdminWebhooksPage />);
+      fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+      typeUrl(NEW_URL);
+      fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
+
+      expect(await within(screen.getByRole("dialog")).findByText(LOST_CREATE.unknown)).toBeInTheDocument();
+      await waitFor(() => expect(document.activeElement).toHaveAttribute("data-create-error"));
+    });
+
+    it("never counts an endpoint that was already listed as this press's", async () => {
+      stubFetch([{ path: LIST, body: [endpointFixture()] }, { method: "POST", path: LIST, status: 502, body: { error: "bad_gateway" } }]);
+      renderPage(<AdminWebhooksPage />);
+      fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+      typeUrl();
+      fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
+
+      expect(await within(screen.getByRole("dialog")).findByText(LOST_CREATE.notCreated)).toBeInTheDocument();
+    });
   });
 
   it("creates an endpoint and shows the signing secret once", async () => {

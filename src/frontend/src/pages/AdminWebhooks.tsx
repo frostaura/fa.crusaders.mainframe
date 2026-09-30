@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { describeFailure } from "../lib/errors";
+import { LOST_CREATE } from "../lib/webhooksCopy";
 import { ActionsMenu } from "../components/admin/ActionsMenu";
 import { Alert } from "../components/Alert";
 import { Badge } from "../components/ui/badge";
@@ -301,7 +302,8 @@ export default function AdminWebhooksPage() {
       await load();
       toast.push({ tone: "success", text: "Endpoint created." });
     } catch (err) {
-      setCreateError(createRefusal(err));
+      const known = new Set(list.map((row) => row.id));
+      setCreateError(createRefusal(err) ?? await lostCreate({ url: url.trim(), filter: formatFilter(filterTokens), known }, setList));
     }
   };
 
@@ -531,7 +533,7 @@ function NewEndpointDialog(props: {
             <Input value={form.description} onChange={(e) => form.setDescription(e.target.value)} placeholder="Scoreboard — court lit" />
             <FieldDescription>What the endpoint is for, so the list says it in words.</FieldDescription>
           </Field>
-          {props.error ? <Alert tone="danger" live="assertive" announceKey={`webhook-create-${props.error}`}>{props.error}</Alert> : null}
+          {props.error ? <CreateError text={props.error} /> : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -539,6 +541,23 @@ function NewEndpointDialog(props: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Why the create failed, brought into view and given focus (F3-11): it sits at the foot of a
+ * dialog body that scrolls, and at 1280 it was below the fold — the press looked like nothing.
+ */
+function CreateError({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest" });
+    ref.current?.focus({ preventScroll: true });
+  }, [text]);
+  return (
+    <div ref={ref} tabIndex={-1} data-create-error="" className="outline-none">
+      <Alert tone="danger" live="assertive" announceKey={`webhook-create-${text}`}>{text}</Alert>
+    </div>
   );
 }
 
@@ -800,17 +819,32 @@ const CREATE_REFUSAL: Record<string, string> = {
  * to look at the list before trying again (the endpoint may exist), and an unreachable server says
  * so. Anything else goes through the house `describeFailure`.
  */
-function createRefusal(err: unknown): string {
-  if (!(err instanceof ApiError)) {
-    return "Couldn't reach the club's system, so nothing was created. Check your connection and try again.";
-  }
+function createRefusal(err: unknown): string | null {
+  // No answer, or a server failure: the outcome is not known, and `lostCreate` finds it out.
+  if (!(err instanceof ApiError) || err.status >= 500) return null;
   const code = err.code ?? "";
   if (code in CREATE_REFUSAL) return CREATE_REFUSAL[code];
   if (err.status === 429) return "Too many attempts in a short time. Wait a minute, then try again — nothing was created.";
-  if (err.status >= 500) {
-    return "The club's system failed while creating it — it isn't the URL. Refresh the list to see whether it was created before trying again.";
-  }
   return describeFailure(err, { action: "create the endpoint" });
+}
+
+/**
+ * A dropped connection or a server failure said "so nothing was created" — about a request that
+ * may well have been (review round 2, F3-11). The list is read again and an endpoint with this
+ * URL and these events is looked for; the list on screen follows what was read.
+ */
+async function lostCreate(
+  sent: { url: string; filter: string; known: ReadonlySet<string> }, show: (rows: WebhookEndpointDto[]) => void,
+): Promise<string> {
+  try {
+    const rows = await endpoints.adminWebhooksList();
+    show(rows);
+    // A NEW row with this URL and these events — one that was already listed is not this press's.
+    const mine = rows.some((r) => !sent.known.has(r.id) && r.url_template === sent.url && r.event_filter === sent.filter);
+    return mine ? LOST_CREATE.created : LOST_CREATE.notCreated;
+  } catch {
+    return LOST_CREATE.unknown;
+  }
 }
 
 /* ============================================================================
