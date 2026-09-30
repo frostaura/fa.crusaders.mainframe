@@ -1,6 +1,13 @@
 import { type Locator, type Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 
+/**
+ * The control's buttons: the idle trigger (a direct child), or the armed pair — in its own grid
+ * since R4 A-15, so the two fill the row instead of two of three tracks a col-span-full sentence
+ * kept open.
+ */
+const PAIR_BUTTONS = ":scope > button, :scope > [data-confirm-pair] > button";
+
 /** The design-system button's variants (`components/ui/button.tsx`). */
 const BUTTON_VARIANTS = ["primary", "secondary", "outline", "ghost", "danger", "danger-soft"];
 
@@ -155,18 +162,18 @@ for (const size of SIZES) {
 
       for (let i = 0; i < count; i += 1) {
         const wrapper = wrappers.nth(i);
-        const trigger = wrapper.locator("> button").first();
+        const trigger = wrapper.locator(PAIR_BUTTONS).first();
         const idle = (await trigger.innerText()).trim();
 
         await trigger.click();
 
         // Two buttons, side by side, and the consequence above them as page text.
-        await expect(wrapper.locator("> button")).toHaveCount(2);
+        await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
         // By ROLE in the pair, not by position. C-H1 moved the way out to the front — focus
         // lands on it and Tab must reach the other option — so an index here would have
         // silently swapped what every assertion below is about.
-        const confirm = wrapper.locator('> button[data-confirm="go"]');
-        const cancel = wrapper.locator('> button[data-confirm="stop"]');
+        const confirm = wrapper.locator('[data-confirm-pair] > button[data-confirm="go"]');
+        const cancel = wrapper.locator('[data-confirm-pair] > button[data-confirm="stop"]');
         const consequence = wrapper.locator("> p");
         await expect(consequence).toBeVisible();
 
@@ -320,7 +327,7 @@ for (const size of SIZES) {
         await expect(cancel).toBeFocused();
 
         await cancel.click();
-        await expect(wrapper.locator("> button")).toHaveCount(1);
+        await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(1);
       }
     });
   }
@@ -370,9 +377,9 @@ test("keeps the frame round its words in pixels, whatever the root font size", a
     const out: { label: string; x: number; y: number }[] = [];
     for (let i = 0; i < await wrappers.count(); i += 1) {
       const wrapper = wrappers.nth(i);
-      await wrapper.locator("> button").first().evaluate((n: HTMLElement) => n.click());
-      await expect(wrapper.locator("> button")).toHaveCount(2);
-      out.push(...await wrapper.locator("> button").evaluateAll((nodes) => nodes.map((node) => {
+      await wrapper.locator(PAIR_BUTTONS).first().evaluate((n: HTMLElement) => n.click());
+      await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
+      out.push(...await wrapper.locator(PAIR_BUTTONS).evaluateAll((nodes) => nodes.map((node) => {
         const style = getComputedStyle(node);
         return {
           label: (node as HTMLElement).innerText.trim().slice(0, 20),
@@ -380,7 +387,7 @@ test("keeps the frame round its words in pixels, whatever the root font size", a
           y: Number.parseFloat(style.paddingTop),
         };
       })));
-      await wrapper.locator('> button[data-confirm="stop"]').evaluate((n: HTMLElement) => n.click());
+      await wrapper.locator('[data-confirm-pair] > button[data-confirm="stop"]').evaluate((n: HTMLElement) => n.click());
     }
     return out;
   };
@@ -425,7 +432,7 @@ test("brings the armed block into view when the trigger was at the bottom edge",
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).last();
-  const trigger = wrapper.locator("> button").first();
+  const trigger = wrapper.locator(PAIR_BUTTONS).first();
 
   // Put the trigger's bottom on the viewport's bottom edge, so the block it grows has to
   // push past it. `scrollIntoView({block: "end"})` inside the scrolling <main>, not a
@@ -436,9 +443,9 @@ test("brings the armed block into view when the trigger was at the bottom edge",
   const before = await page.evaluate(() => document.querySelector("main")!.scrollTop);
   await trigger.click();
 
-  await expect(wrapper.locator("> button")).toHaveCount(2);
-  const confirm = wrapper.locator('> button[data-confirm="go"]');
-  const cancel = wrapper.locator('> button[data-confirm="stop"]');
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
+  const confirm = wrapper.locator('[data-confirm-pair] > button[data-confirm="go"]');
+  const cancel = wrapper.locator('[data-confirm-pair] > button[data-confirm="stop"]');
   await expect(wrapper.locator("> p")).toBeInViewport();
   await expect(confirm, "the confirm scrolled out of view when it armed").toBeInViewport();
   await expect(cancel, "the Cancel is below the fold — C7 exactly").toBeInViewport();
@@ -461,18 +468,18 @@ test("brings the armed block into view when the trigger was at the bottom edge",
    * </p>
    */
   await cancel.click();
-  await expect(wrapper.locator("> button")).toHaveCount(1);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(1);
   await page.getByRole("link", { name: "Skip to main content" }).focus();
   await trigger.evaluate((node) => node.scrollIntoView({ block: "end" }));
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await trigger.evaluate((node: HTMLElement) => node.click());
 
-  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
   // `ratio: 0.99` — a bare `toBeInViewport()` passes on a single visible pixel, and a Cancel
   // whose top row of pixels is on screen is exactly the defect C7 describes. That looseness is
   // what let the mutant survive the first draft of this case.
   await expect(
-    wrapper.locator("> button").last(),
+    wrapper.locator(PAIR_BUTTONS).last(),
     "armed without focus, nothing brought the block back into view",
   ).toBeInViewport({ ratio: 0.99 });
   await expect(wrapper.locator("> p")).toBeInViewport({ ratio: 0.99 });
@@ -483,11 +490,11 @@ test("brings the armed block into view when the trigger was at the bottom edge",
   // behaving like `center`, and a confirm that jumps the page under somebody's cursor every
   // time it arms is the cure being worse than C7.
   await cancel.click();
-  await expect(wrapper.locator("> button")).toHaveCount(1);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(1);
   await trigger.evaluate((node) => node.scrollIntoView({ block: "center" }));
   const settled = await page.evaluate(() => document.querySelector("main")!.scrollTop);
   await trigger.click();
-  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
   expect(
     await page.evaluate(() => document.querySelector("main")!.scrollTop),
     "arming a control that was already on screen jumped the page",
@@ -515,15 +522,15 @@ test("Tab from the armed way out reaches the confirm instead of leaving the cont
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).first();
-  const confirm = wrapper.locator('> button[data-confirm="go"]');
-  const cancel = wrapper.locator('> button[data-confirm="stop"]');
+  const confirm = wrapper.locator('[data-confirm-pair] > button[data-confirm="go"]');
+  const cancel = wrapper.locator('[data-confirm-pair] > button[data-confirm="stop"]');
   const live = wrapper.locator('> span[aria-live="polite"]');
 
   // Armed from the keyboard, which is the only way the finding reproduces: focus has to be on
   // the trigger for the control to hand it to the safe button.
-  await wrapper.locator("> button").first().focus();
+  await wrapper.locator(PAIR_BUTTONS).first().focus();
   await page.keyboard.press("Enter");
-  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
   await expect(cancel).toBeFocused();
 
   await page.keyboard.press("Tab");
@@ -531,13 +538,13 @@ test("Tab from the armed way out reaches the confirm instead of leaving the cont
   // Still armed, still saying what it was about to do, and the keyboard is on the other option
   // rather than on whatever came next in the document.
   await expect(confirm, "Tab left the armed pair instead of reaching the confirm").toBeFocused();
-  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
   await expect(live).not.toHaveText("Cancelled — nothing was changed.");
 
   // And back the way it came, which is the other half of a two-control group.
   await page.keyboard.press("Shift+Tab");
   await expect(cancel).toBeFocused();
-  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
 });
 
 /**
@@ -555,12 +562,12 @@ test("says out loud what it is about to do, and that it did not do it", async ({
   const live = wrapper.locator('> span[aria-live="polite"]');
   await expect(live).toHaveText("");
 
-  await wrapper.locator("> button").first().click();
+  await wrapper.locator(PAIR_BUTTONS).first().click();
   expect((await live.innerText()).trim().length).toBeGreaterThan(0);
 
   await page.keyboard.press("Escape");
   await expect(live).toHaveText("Cancelled — nothing was changed.");
-  await expect(wrapper.locator("> button")).toHaveCount(1);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(1);
 });
 
 /**
@@ -721,14 +728,37 @@ test.describe("under forced colours", () => {
     await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
     const wrapper = page.locator(CONFIRMS).first();
-    await wrapper.locator("> button").first().click();
-    await expect(wrapper.locator("> button")).toHaveCount(2);
+    await wrapper.locator(PAIR_BUTTONS).first().click();
+    await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
 
-    const widths = await wrapper.locator("> button").evaluateAll(
+    const widths = await wrapper.locator(PAIR_BUTTONS).evaluateAll(
       (nodes) => nodes.map((n) => Number.parseFloat(getComputedStyle(n).borderTopWidth)),
     );
     expect(widths).toHaveLength(2);
     for (const width of widths) expect(width).toBeGreaterThan(0);
+  });
+
+  /**
+   * R4 A-15 — the armed pair fills its row. In one grid with the col-span-full sentence, auto-fit
+   * kept every track a wide row fitted, so at 1280 the pair took two of three and the confirm
+   * wrapped "Add 100.00 / cr" beside empty space.
+   */
+  test("an armed pair fills its row, and neither label wraps when the row is wide", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await open(page, "/profile", 0);
+    await expect(page.getByText("iPhone 15").first()).toBeVisible();
+    const wrapper = page.locator(CONFIRMS).first();
+    await wrapper.locator(PAIR_BUTTONS).first().click();
+    const pair = wrapper.locator("[data-confirm-pair]");
+    await expect(pair.locator("> button")).toHaveCount(2);
+    const m = await pair.evaluate((row) => {
+      const [a, b] = [...row.children].map((c) => c.getBoundingClientRect());
+      const r = row.getBoundingClientRect();
+      const lines = [...row.children].map((c) => Math.round(c.getBoundingClientRect().height));
+      return { filled: b.right - a.left, width: r.width, sameRow: Math.abs(a.top - b.top) < 1, lines };
+    });
+    expect(m.sameRow, "side by side").toBe(true);
+    expect(m.filled, "the pair spans its row").toBeGreaterThanOrEqual(m.width - 1);
   });
 
   /**
@@ -753,10 +783,10 @@ test.describe("under forced colours", () => {
     await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
     const wrapper = page.locator(CONFIRMS).first();
-    await wrapper.locator("> button").first().click();
-    await expect(wrapper.locator("> button")).toHaveCount(2);
+    await wrapper.locator(PAIR_BUTTONS).first().click();
+    await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
 
-    const edges = () => wrapper.locator("> button").evaluateAll((nodes) => nodes.map((n) => {
+    const edges = () => wrapper.locator(PAIR_BUTTONS).evaluateAll((nodes) => nodes.map((n) => {
       const style = getComputedStyle(n);
       return {
         role: (n as HTMLElement).dataset.confirm,
@@ -793,13 +823,13 @@ test("a double-click arms the confirm and never commits it", async ({ page }) =>
 
   const wrapper = page.locator(CONFIRMS).first();
   // First click of the gesture: count 1, on the trigger.
-  await wrapper.locator("> button").first().click();
+  await wrapper.locator(PAIR_BUTTONS).first().click();
   // Second click of the SAME gesture: count 2, wherever the confirm now is.
   const box = (await wrapper.locator("[data-confirm='go']").boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down({ clickCount: 2 });
   await page.mouse.up({ clickCount: 2 });
 
-  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(wrapper.locator(PAIR_BUTTONS)).toHaveCount(2);
   expect(deletes).toEqual([]);
 });

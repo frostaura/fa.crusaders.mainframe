@@ -525,7 +525,16 @@ const CONTROL_CLASS = cn(
  * of what there is, whichever is smaller.
  * </p>
  */
-const ARMED_GRID_CLASS = "grid grid-cols-[repeat(auto-fit,minmax(min(6rem,100%),1fr))] gap-2";
+const ARMED_GRID_CLASS = "grid grid-cols-1 gap-2";
+
+/**
+ * The pair's own grid (R4 A-15). `auto-fit` collapses an empty track only when no item spans it,
+ * and the consequence above the pair and the live region below it are `col-span-full` — so in the
+ * one grid all three tracks a wide row fitted stayed, the pair took two of three, and at 1280 the
+ * confirm wrapped "Add 100.00 / cr" beside empty space. In a grid of their own the two buttons
+ * fill the row, and still stack when the floor will not fit twice.
+ */
+const PAIR_GRID_CLASS = "grid grid-cols-[repeat(auto-fit,minmax(min(6rem,100%),1fr))] gap-2";
 
 /**
  * A glyph in front of a label, WITHOUT turning the label into a flex item.
@@ -903,6 +912,7 @@ export function ConfirmButton({
             * The glyph is `aria-hidden` and sits beside the word, always.
             * </p>
             */}
+          <div data-confirm-pair="" className={PAIR_GRID_CLASS}>
           <button
             ref={cancelRef}
             type="button"
@@ -961,6 +971,7 @@ export function ConfirmButton({
                 that says nothing about what it is doing. */}
             <GlyphLabel glyph={pending ? <Spinner /> : outcomeGlyph}>{idleLabel}</GlyphLabel>
           </button>
+          </div>
         </>
       ) : (
         <button
