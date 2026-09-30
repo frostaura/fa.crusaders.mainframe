@@ -9,7 +9,7 @@ import { clubClock } from "@/lib/clubClock";
 import type { BookingDetail } from "@/lib/playersApi";
 import { DETAIL_ATTENDANCE, DETAIL_CANCEL } from "@/lib/playersCopy";
 import { liveCount } from "./detailModel";
-import { gridBookingOf } from "./gridBooking";
+import { gridBookingOf, rereadAsDay } from "./gridBooking";
 import type { Notice } from "./useOrganiserHands";
 
 /** Checked in or not, and how many of the players have scanned. */
@@ -60,6 +60,7 @@ export function CancelPanel({ detail, reload, say }: Props) {
         isAdmin={false}
         onCancelled={done}
         onStale={reload}
+        reread={() => rereadAsDay(detail.booking_id)}
       />
     </Section>
   );
