@@ -6,6 +6,7 @@ import { formatClubDayLabel } from "../components/ui/date-picker-day";
 import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
 import { LEDGER_COPY } from "../lib/ledgerCopy";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { forgetClubZone, rememberClubZone } from "../lib/clubZone";
 
 /**
  * Clearing a date on the admin ledger.
@@ -121,6 +122,7 @@ describe("Admin ledger — the filters are the URL", () => {
     stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger"));
 
   it("honours every filter a shared link carries, including the one with no control", async () => {
+    rememberClubZone("Africa/Johannesburg");
     const stub = renderAt("/admin/ledger?from=2026-01-01&to=2026-01-31&type=TopUp&userId=abc-123&q=Naledi");
 
     await vi.waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
@@ -130,8 +132,11 @@ describe("Admin ledger — the filters are the URL", () => {
     // to one member's movements silently showed the whole club's.
     expect(call.path).toContain("userId=abc-123");
     expect(call.path).toContain("type=TopUp");
-    expect(call.path).toContain("from=2026-01-01T00%3A00%3A00Z");
-    expect(call.path).toContain("to=2026-01-31T23%3A59%3A59Z");
+    // Club days, in the club's zone (R4 A4-7), half-open to the next midnight — never UTC days.
+    expect(call.path).toContain("from=2025-12-31T22%3A00%3A00.000Z");
+    expect(call.path).toContain("to=2026-01-31T22%3A00%3A00.000Z");
+    // And paged (R4 carry-over): the presence of `cursor` asks for a page.
+    expect(call.path).toContain("cursor=");
 
     // The dates the link named, on the pickers — not today's default window.
     expect(screen.getByRole("button", { name: /^From: / })).toHaveAccessibleName(`From: ${formatClubDayLabel("2026-01-01")}`);
@@ -350,4 +355,51 @@ describe("Admin ledger — done by, category, and a detail per row", () => {
     expect(sheet).toHaveTextContent("R200 cash, receipt 0412");
     expect(screen.getByRole("link", { name: LEDGER_COPY.openBooking })).toHaveAttribute("href", "/bookings/b-77");
   });
+});
+
+/**
+ * Review round 4 carry-over and A4-7: Transactions asked for `limit=1000` and summed what came
+ * back — "MOVEMENTS 1000" and credits/debits/net over a truncated set while the range held 1664.
+ * It now reads every page of the range, and shows totals only over a complete read.
+ */
+describe("Admin ledger — totals over the whole range, page by page", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
+
+  const row = (n: number) => ledgerRowFixture({
+    id: `r${n}`, comment: `Charge ${n}`, signedAmountCredits: -10, amountCredits: 10,
+  });
+
+  it("reads every page and totals all of them", async () => {
+    rememberClubZone("Africa/Johannesburg");
+    const pages = [
+      { items: [row(1), row(2)], next_cursor: "c1" },
+      { items: [row(3)], next_cursor: null },
+    ];
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      // `body` too: the stub refuses a route with neither body nor respond before it reads `sequence`.
+      { path: "/api/v1/admin/ledger", body: pages[1], sequence: pages },
+    ]);
+    renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
+
+    await screen.findByText("Charge 3");
+    const totals = await screen.findAllByText((_, el) => el?.hasAttribute("data-ledger-total") ?? false);
+    expect(totals[0]).toHaveTextContent("3");
+    expect(totals[2]).toHaveTextContent(/30\.00/);
+    const calls = stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger"));
+    expect(calls[1].path).toContain("cursor=c1");
+  });
+
+  it("shows no total at all when the range is too big to read whole", async () => {
+    rememberClubZone("Africa/Johannesburg");
+    const many = Array.from({ length: 500 }, (_, i) => row(i));
+    let n = 0;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/ledger", respond: () => ({ items: many.map((r) => ({ ...r, id: `${r.id}-${n}` })), next_cursor: `c${++n}` }) },
+    ]);
+    renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2020-01-01&to=2026-09-30"] });
+    expect(await screen.findByText(/too many to total here/, {}, { timeout: 15_000 })).toBeInTheDocument();
+    expect(document.querySelector("[data-ledger-total]")).toBeNull();
+  }, 30_000);
 });

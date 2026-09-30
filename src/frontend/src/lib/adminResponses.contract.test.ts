@@ -4,6 +4,7 @@ import {
   serverTypeProperties, type ServerScope,
 } from "../test/serverContract";
 import { groupAddResponse } from "../test/groupFixtures";
+import type { Page } from "./adminPaging";
 import * as F from "../test/adminResponseFixtures";
 
 /**
@@ -447,5 +448,19 @@ describe("notifications (lib/notificationsApi.ts)", () => {
     reads(only(at(FILE, "Project", "delivery = ")), F.adminNoticeDelivery());
     reads(last(ok(FILE, "KindsAsync")), F.adminNoticeKinds());
     reads(only(ok(FILE, "KindView")), F.adminNoticeKind());
+  });
+});
+
+describe("paged admin reads (R4 carry-over: Transactions totals over the whole range)", () => {
+  it("the ledger's page is { items, next_cursor }", () => {
+    const page: Required<Page<unknown>> = { items: [], next_cursor: null, total: 0 };
+    const { total: _total, ...ledger } = page;
+    void _total;
+    expect(server("Endpoints/AdminLedgerEndpoints.cs", "ListAsync").at(-1)).toEqual(sorted(ledger));
+  });
+
+  it("the members' page is { items, next_cursor, total }", () => {
+    const page: Required<Page<unknown>> = { items: [], next_cursor: null, total: 0 };
+    expect(server("Endpoints/AdminMemberEndpoints.cs", "ListAsync").at(-1)).toEqual(sorted(page));
   });
 });
