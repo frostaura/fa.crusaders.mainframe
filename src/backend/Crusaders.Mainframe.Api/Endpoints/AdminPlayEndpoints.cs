@@ -30,7 +30,7 @@ public static class AdminPlayEndpoints
 
         var writes = app.MapGroup("/api/v1/admin/play/results")
             .RequireAuthorization(p => p.RequireRole("admin"))
-            .RequireRateLimiting(RateLimitPolicies.Auth);
+            .RequireRateLimiting(RateLimitPolicies.Writes);
         writes.MapPost("/{resultId:guid}/void", VoidAsync);
         writes.MapPost("/{resultId:guid}/uphold", UpholdAsync);
         return app;

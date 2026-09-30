@@ -28,7 +28,7 @@ public static class MemberBulkBookingEndpoints
     {
         var g = app.MapGroup("/api/v1/bookings")
             .RequireAuthorization()
-            .RequireRateLimiting(RateLimitPolicies.Auth);
+            .RequireRateLimiting(RateLimitPolicies.Writes);
 
         g.MapPost("/bulk", BookAsync);
 

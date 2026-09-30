@@ -38,7 +38,7 @@ public static class PlayEndpoints
         reads.MapGet("/me/play/results", MyResultsAsync);
         reads.MapGet("/me/play/celebrations", CelebrationsAsync);
 
-        var writes = app.MapGroup("/api/v1").RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Auth);
+        var writes = app.MapGroup("/api/v1").RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Writes);
         writes.MapPost("/bookings/{bookingId:guid}/result", RecordAsync);
         writes.MapPut("/bookings/{bookingId:guid}/result", EditAsync);
         writes.MapPost("/bookings/{bookingId:guid}/result/confirm", ConfirmAsync);

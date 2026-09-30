@@ -43,7 +43,7 @@ public static class AdminBulkBookingEndpoints
     {
         var g = app.MapGroup("/api/v1/admin/bookings")
             .RequireAuthorization(p => p.RequireRole("admin"))
-            .RequireRateLimiting(RateLimitPolicies.Auth);
+            .RequireRateLimiting(RateLimitPolicies.Writes);
 
         g.MapPost("/bulk-cancel", CancelAsync);
         g.MapPost("/bulk", BookAsync);

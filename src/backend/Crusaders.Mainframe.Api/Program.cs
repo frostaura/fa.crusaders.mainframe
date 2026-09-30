@@ -297,6 +297,31 @@ builder.Services.AddRateLimiter(options =>
         });
     });
 
+    // Perf round (2026-09-30): booking, players, play and desk writes get their own per-member
+    // token bucket. They shared `auth`'s ten a minute with password and code guessing, so an
+    // organiser who booked, invited two partners, fixed the split and cancelled a mistake had
+    // spent half their minute, and a bulk-grid session hit 429 on its eleventh action. Never
+    // tighter than the auth ceiling: the policy exists to be the looser of the two, and a
+    // deployment that raised auth (a load test, the suite) must not find writes the tighter.
+    options.AddPolicy(RateLimitPolicies.Writes, ctx =>
+    {
+        var authFloor = builder.Configuration.GetValue("RateLimits:AuthPerMinute", 10);
+        var perMinute = Math.Max(builder.Configuration.GetValue("RateLimits:WritesPerMinute", 60), authFloor);
+        var burst = Math.Max(builder.Configuration.GetValue("RateLimits:WritesBurst", 20), authFloor);
+        // One token every 60/perMinute seconds below a token a second; whole tokens a second above.
+        var (period, tokens) = perMinute >= 60
+            ? (TimeSpan.FromSeconds(1), (perMinute + 59) / 60)
+            : (TimeSpan.FromMinutes(1) / Math.Max(1, perMinute), 1);
+        return RateLimitPartition.GetTokenBucketLimiter(AuthKey(ctx), _ => new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = burst,
+            ReplenishmentPeriod = period,
+            TokensPerPeriod = tokens,
+            AutoReplenishment = true,
+            QueueLimit = 0,
+        });
+    });
+
     static string DeviceKey(HttpContext ctx)
     {
         // By club when the device scheme recognised the key, else by client address —

@@ -93,10 +93,12 @@ public static class WalletEndpoints
 
         // Admin: manual credit adjustment
         // The one route in the API that moves money by hand, and the only limiter on it was the
-        // global 600/min per IP. A desk that can be scripted is a desk that can be drained.
+        // global 600/min per IP. A desk that can be scripted is a desk that can be drained — so
+        // it is bounded per admin, by `writes` (a flood bound) rather than `auth` (a guessing
+        // bound): the desk crediting a queue of members at the counter is not guessing.
         var admin = app.MapGroup("/api/v1/admin/credit")
             .RequireAuthorization(p => p.RequireRole("admin"))
-            .RequireRateLimiting(Security.RateLimitPolicies.Auth);
+            .RequireRateLimiting(Security.RateLimitPolicies.Writes);
 
         // The handler is a named method rather than an inline lambda: it is the most
         // consequential route in this file - it moves a member's balance by hand - and

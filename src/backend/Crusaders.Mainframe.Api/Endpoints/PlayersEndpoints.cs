@@ -38,8 +38,8 @@ public static class PlayersEndpoints
         reads.MapGet("/members/directory", DirectoryAsync);
         reads.MapPost("/players/split-preview", SplitPreview);
 
-        // Writes: the `auth` limiter, as the booking routes they sit beside.
-        var writes = app.MapGroup("/api/v1").RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Auth);
+        // Writes: the `writes` limiter, as the booking routes they sit beside.
+        var writes = app.MapGroup("/api/v1").RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Writes);
         writes.MapPost("/bookings/{bookingId:guid}/players", AddAsync);
         writes.MapDelete("/bookings/{bookingId:guid}/players/{participantId:guid}", RemoveAsync);
         writes.MapPost("/bookings/{bookingId:guid}/players/{participantId:guid}/nudge", NudgeAsync);
@@ -55,7 +55,7 @@ public static class PlayersEndpoints
 
         var admin = app.MapGroup("/api/v1/admin/bookings/{bookingId:guid}/players")
             .RequireAuthorization(p => p.RequireRole("admin"))
-            .RequireRateLimiting(RateLimitPolicies.Auth);
+            .RequireRateLimiting(RateLimitPolicies.Writes);
         admin.MapPost("/", AdminAddAsync);
         admin.MapPost("/{participantId:guid}/remove", (Guid bookingId, Guid participantId, AdminPlayerRequest? req, HttpContext ctx, PlayersAdminService svc, CancellationToken ct) =>
             Run(svc.RemoveAsync(Act(bookingId, participantId, ctx, req), ct)));
