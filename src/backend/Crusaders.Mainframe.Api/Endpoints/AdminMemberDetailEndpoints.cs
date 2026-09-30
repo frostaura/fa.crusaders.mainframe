@@ -172,8 +172,8 @@ public static class AdminMemberDetailEndpoints
     private static async Task<List<MemberBookingRow>> NextBookingsAsync(
         MainframeDbContext db, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
-        var rows = await db.Bookings.AsNoTracking()
-            .Where(b => b.UserId == userId && b.Status == BookingStatus.Booked && b.EndsAt > now)
+        var rows = await PlayedBy(db, userId)
+            .Where(b => b.Status == BookingStatus.Booked && b.EndsAt > now)
             .OrderBy(b => b.StartsAt).ThenBy(b => b.Id)
             .Take(NextBookingsShown)
             .ToListAsync(ct);
@@ -209,6 +209,18 @@ public static class AdminMemberDetailEndpoints
     // ------------------------------------------------------------------ bookings
 
     /// <summary>
+    /// The bookings a member is ON: the ones they organise and the ones they hold an accepted
+    /// partner seat on (review round 2, C6). <b>Why:</b> the desk's record of a member showed only
+    /// the courts they had booked, so a member who plays every week as somebody's partner read as
+    /// someone who never played. Each row says which (<c>role</c>) and names the organiser.
+    /// </summary>
+    private static IQueryable<Booking> PlayedBy(MainframeDbContext db, Guid userId)
+    {
+        var partnerOn = BookingPlayerQueries.PartnerBookingIds(db, userId);
+        return db.Bookings.AsNoTracking().Where(b => b.UserId == userId || partnerOn.Contains(b.Id));
+    }
+
+    /// <summary>
     /// <c>GET /api/v1/admin/members/{userId}/bookings?when=upcoming|past&amp;cursor&amp;limit</c>.
     ///
     /// <para>
@@ -236,7 +248,7 @@ public static class AdminMemberDetailEndpoints
             return Results.NotFound(new { error = MemberNotFound });
         }
 
-        var rows = await asked!.Apply(db.Bookings.AsNoTracking().Where(b => b.UserId == userId), DateTimeOffset.UtcNow)
+        var rows = await asked!.Apply(PlayedBy(db, userId), DateTimeOffset.UtcNow)
             .Take(asked.Limit + 1)
             .ToListAsync(ct);
 
@@ -358,6 +370,14 @@ public sealed record MemberBookingRow(
     [property: JsonPropertyName("cancelled_at")] DateTimeOffset? CancelledAt,
     [property: JsonPropertyName("booked_by")] MemberBookingActor BookedBy)
 {
+    /// <summary><c>organiser</c> — the member's own booking — or <c>partner</c>: a seat on somebody else's (C6).</summary>
+    [JsonPropertyName("role")]
+    public string Role { get; init; } = "organiser";
+
+    /// <summary>Whose booking it is: the organiser's id and name (C6). On an organiser row, the member themselves.</summary>
+    [JsonPropertyName("organiser")]
+    public MemberBookingActor? Organiser { get; init; }
+
     /// <summary>
     /// The rows, with their court names and the names of whoever booked them, in two reads
     /// rather than 2n.
@@ -380,7 +400,7 @@ public sealed record MemberBookingRow(
         var courts = await db.Courts.AsNoTracking()
             .Where(c => courtIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
-        var names = await PersonNames.ForAsync(db, rows.Select(r => (Guid?)r.ActorUserId), ct);
+        var names = await PersonNames.ForAsync(db, rows.Select(r => (Guid?)r.ActorUserId).Concat(rows.Select(r => r.UserId)), ct);
 
         return rows.Select(b => new MemberBookingRow(
             BookingId: b.Id,
@@ -395,7 +415,11 @@ public sealed record MemberBookingRow(
             BookedBy: new MemberBookingActor(
                 b.ActorUserId == Guid.Empty ? null : b.ActorUserId,
                 PersonNames.Of(b.ActorUserId, names),
-                b.ActorUserId == userId))).ToList();
+                b.ActorUserId == userId))
+        {
+            Role = b.UserId == userId ? "organiser" : "partner",
+            Organiser = new MemberBookingActor(b.UserId, PersonNames.Of(b.UserId, names), b.UserId == userId),
+        }).ToList();
     }
 }
 
