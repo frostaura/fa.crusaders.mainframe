@@ -65,7 +65,7 @@ export default function AdminReportsPage() {
       <StateBlock
         loading={report.loading && data === null}
         error={data === null ? report.error : null}
-        action={report.error ? "load the club's reports" : "the club's reports"}
+        action="load the club's reports"
         onRetry={report.refresh}
         skeleton={<ReportSkeleton />}
         className="gap-8"

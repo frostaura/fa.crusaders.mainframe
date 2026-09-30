@@ -177,7 +177,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
 
     // R12: the failure is the shared StateBlock's sentence — the action, then why.
-    expect(await screen.findByText(/Couldn't load wallet/)).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn't load your wallet/)).toBeInTheDocument();
     // "No movements yet" over a failed fetch tells a member their history is gone.
     expect(screen.queryByText(/No movements yet/)).not.toBeInTheDocument();
   });

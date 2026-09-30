@@ -190,7 +190,7 @@ export default function TopUpPage() {
       <StateBlock
         loading={options === null && !loadError}
         error={options === null ? loadError : null}
-        action={loadError ? "load the club's top-up settings" : "the club's top-up settings"}
+        action="load the club's top-up settings"
         onRetry={loadOptions}
         skeleton={<TopUpSkeleton />}
       >

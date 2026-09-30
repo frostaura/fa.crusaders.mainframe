@@ -87,7 +87,7 @@ export default function WalletActivityPage() {
         error={data === null ? report.error : null}
         // One prop, two grammars: the failure reads "Couldn't load your activity", the busy status
         // "Reading your activity…".
-        action={report.error ? "load your activity" : "your activity"}
+        action="load your activity"
         onRetry={report.refresh}
         skeleton={<ReportSkeleton />}
         className="gap-8"

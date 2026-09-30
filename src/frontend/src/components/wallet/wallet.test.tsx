@@ -188,7 +188,7 @@ describe("a wallet that will not load", () => {
     stubFetch([{ path: "/api/v1/wallet", status: 500, body: { error: "boom" } }]);
     renderPage(<WalletPage />);
 
-    expect(await screen.findByText(/Couldn't load wallet/)).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn't load your wallet/)).toBeInTheDocument();
     // Three states, not two: a failed read is not an empty wallet, and must not be dressed as
     // one — "you can't book until you top up" over a read that never landed is a lie.
     expect(screen.queryByText(BALANCE_SENTENCE.zero)).toBeNull();

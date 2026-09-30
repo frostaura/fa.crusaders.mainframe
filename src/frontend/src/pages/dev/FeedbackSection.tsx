@@ -63,7 +63,7 @@ function StaticFeedback() {
 function ReadStates() {
   return (
     <div className="flex flex-col gap-5">
-      <StateBlock loading action="the bookings" skeleton={<CardSkeleton />} />
+      <StateBlock loading action="read the bookings" skeleton={<CardSkeleton />} />
       <StateBlock
         empty
         emptyIcon={CalendarBlank}

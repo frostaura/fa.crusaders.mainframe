@@ -312,7 +312,7 @@ export default function WalletPage() {
       <StateBlock
         loading={!loaded}
         error={loaded ? null : error}
-        action={error ? "load wallet" : "your wallet"}
+        action="load your wallet"
         onRetry={refresh}
         skeleton={<WalletSkeleton />}
         className="gap-8"

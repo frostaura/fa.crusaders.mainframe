@@ -87,7 +87,7 @@ describe("StateBlock — what a screen may claim", () => {
   });
 
   it("names what it is waiting for, in a region a screen reader is given", () => {
-    render(<StateBlock loading action="the club's plans" />);
+    render(<StateBlock loading action="read the club's plans" />);
     expect(screen.getByRole("status")).toHaveTextContent("Reading the club's plans…");
   });
 

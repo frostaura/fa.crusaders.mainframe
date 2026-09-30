@@ -50,7 +50,7 @@ describe("StateBlock (ui) — the old component's claims, kept", () => {
   });
 
   it("names what it is waiting for, in a region a screen reader is given", () => {
-    render(<StateBlock loading action="the club's plans" />);
+    render(<StateBlock loading action="read the club's plans" />);
     expect(screen.getByRole("status")).toHaveTextContent("Reading the club's plans…");
   });
 
@@ -82,7 +82,7 @@ describe("StateBlock (ui) — the old component's claims, kept", () => {
 
 describe("StateBlock (ui) — the new slots", () => {
   it("shows a layout-shaped skeleton while loading, busy, with the sentence kept for screen readers", () => {
-    render(<StateBlock loading action="your bookings" skeleton={<Skeleton data-testid="bone" className="h-12" />} />);
+    render(<StateBlock loading action="read your bookings" skeleton={<Skeleton data-testid="bone" className="h-12" />} />);
     const region = document.querySelector<HTMLElement>("[data-state-block=loading]")!;
     expect(region).toHaveAttribute("aria-busy", "true");
     expect(screen.getByTestId("bone")).toBeInTheDocument();

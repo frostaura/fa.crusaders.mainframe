@@ -76,7 +76,7 @@ export default function ProfilePage() {
       <StateBlock
         loading={!profile && !failed}
         error={!profile && failed ? new Error("profile read failed") : null}
-        action={failed ? "load your profile" : "your profile"}
+        action="load your profile"
         onRetry={() => { clearFailed(); void refresh(); }}
         skeleton={<ProfileSkeleton />}
         className="gap-6"
@@ -479,7 +479,7 @@ function PasskeysCard() {
       <StateBlock
         loading={passkeys.rows === null && passkeys.loading}
         error={passkeys.rows === null ? passkeys.error : null}
-        action={passkeys.error ? "load your passkeys" : "your passkeys"}
+        action="load your passkeys"
         onRetry={() => void passkeys.load()}
         empty={passkeys.rows !== null && passkeys.rows.length === 0}
         emptyIcon={Fingerprint}
