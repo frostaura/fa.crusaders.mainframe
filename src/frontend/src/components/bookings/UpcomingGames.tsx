@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Interactable } from "@/components/ui/interactable";
 import { CaretRight, Warning } from "@/components/ui/icons";
 import { UPCOMING } from "@/lib/bookingsCopy";
-import { bookingsApi, type UpcomingGame } from "@/lib/bookingsApi";
+import { bookingsApi, type UpcomingGame, type UpcomingPlayer } from "@/lib/bookingsApi";
+import { firstName } from "@/lib/playersCopy";
 import { useGamesRead } from "./useGamesRead";
 import { SHOWN, when } from "./gameWhen";
 
@@ -62,7 +63,6 @@ export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknow
 /** One game, opening its booking page. `badges` replace the role badge's neighbours (R2 F1-1). */
 export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: string | undefined; badges?: ReactNode }) {
   const time = when(game, zone);
-  const others = game.players.slice(0, 3);
   return (
     <Interactable asChild surface="card" watermark>
       <Link
@@ -76,31 +76,45 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
             {badges ?? (game.needs_action ? <Badge tone="warning">{UPCOMING.needsAction}</Badge> : null)}
           </span>
           <span className="text-sm tabular-nums text-text-secondary">{time}</span>
-          {others.length || game.my_share_credits !== null ? (
-            // R2 F1-10: wraps rather than truncating — at twice the text size the share, the one
-            // figure on the card, was cut off. The amount itself never breaks.
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
-              {others.length ? (
-                // R2 F1-8: two pixels of overlap, which the ring covers — "VV" read "V\" when the
-                // next face sat six pixels over it.
-                <span aria-hidden="true" className="flex -space-x-0.5">
-                  {others.map((p) => (
-                    <Avatar key={`${p.name}-${p.status}`} size={24} className="ring-2 ring-bg-surface">
-                      {p.photo_url ? <AvatarImage src={p.photo_url} alt="" /> : null}
-                      <AvatarFallback name={p.name} />
-                    </Avatar>
-                  ))}
-                </span>
-              ) : null}
-              {others.length ? <span className="min-w-0 break-words">{others.map((p) => p.name.split(/\s+/)[0]).join(", ")}</span> : null}
-              {game.my_share_credits !== null ? (
-                <span className="whitespace-nowrap">{others.length ? "· " : ""}{UPCOMING.share(game.my_share_credits)}</span>
-              ) : null}
-            </span>
+          <GamePeople players={game.players} />
+          {game.my_share_credits !== null ? (
+            // R3 V-9: its own line, never "· your share" trailing the names — at 320 the share
+            // wrapped and the separator dangled at the start of the line. The amount never breaks.
+            <span className="text-xs tabular-nums text-text-secondary">{UPCOMING.share(game.my_share_credits)}</span>
           ) : null}
         </span>
         <CaretRight size={16} aria-hidden="true" className="shrink-0 text-text-muted" />
       </Link>
     </Interactable>
+  );
+}
+
+/**
+ * Who is playing: faces and first names of the ACCEPTED seats only (R3 M-3 — a partner who never
+ * said yes was listed as playing), and a count of the invites still out. A seat with no name —
+ * an invite link nobody has claimed — is never split or initialled (R3 V-1: it crashed the page).
+ */
+function GamePeople({ players }: { players: readonly UpcomingPlayer[] }) {
+  const playing = players.filter((p): p is UpcomingPlayer & { name: string } => p.status === "accepted" && Boolean(p.name?.trim()));
+  const waiting = players.filter((p) => p.status === "invited").length;
+  const faces = playing.slice(0, 3);
+  if (faces.length === 0 && waiting === 0) return null;
+  return (
+    // R2 F1-10: wraps rather than truncating.
+    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+      {faces.length ? (
+        // R2 F1-8: two pixels of overlap, which the ring covers — "VV" read "V\" when the
+        // next face sat six pixels over it.
+        <span aria-hidden="true" className="flex -space-x-0.5">
+          {faces.map((p, i) => (
+            <Avatar key={`${p.name}-${i}`} size={24} className="ring-2 ring-bg-surface">
+              {p.photo_url ? <AvatarImage src={p.photo_url} alt="" /> : null}
+              <AvatarFallback name={p.name} />
+            </Avatar>
+          ))}
+        </span>
+      ) : null}
+      <span className="min-w-0 break-words">{UPCOMING.people(faces.map((p) => firstName(p.name)), waiting)}</span>
+    </span>
   );
 }

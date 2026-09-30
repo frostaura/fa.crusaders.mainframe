@@ -444,7 +444,17 @@ export const UPCOMING = {
   needsAction: "Needs you",
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",
-  share: (credits: number) => `your share ${formatCredits(credits)}`,
+  share: (credits: number) => `Your share ${formatCredits(credits)}`,
+  /**
+   * R3 M-3 — "Dean, Sam · 1 still to answer": the accepted players by first name, then the seats
+   * asked but not taken (an invite, an open link), counted and never named as players. The space
+   * before the dot does not break, so a wrap never starts a line with it (R3 V-9).
+   */
+  people: (names: readonly string[], waiting: number) => {
+    const still = waiting ? `${waiting} still to answer` : "";
+    if (names.length === 0) return still;
+    return still ? `${names.join(", ")}\u00a0· ${still}` : names.join(", ");
+  },
 } as const;
 
 /**

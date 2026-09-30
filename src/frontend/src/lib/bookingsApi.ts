@@ -12,7 +12,12 @@ import type { ClockWindow, ViewerRules } from "./gridRules";
 
 /* ─────────────────────────────── upcoming games (§2) ─────────────────────────────── */
 
-export type UpcomingPlayer = { name: string; photo_url: string | null; status: string };
+/**
+ * One seat on a listed game. `name` is null for a seat nobody has claimed yet — an invite link
+ * still open (R3 V-1: `p.name.split` on one crashed the whole Bookings page). `status` is the
+ * seat's own ("accepted", "invited", …): only accepted seats are named as players (R3 M-3).
+ */
+export type UpcomingPlayer = { name: string | null; photo_url: string | null; status: string };
 
 export type UpcomingGame = {
   booking_id: string;
