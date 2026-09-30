@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-players-access
 description: "Players access and consent: only a live seat shows a booking, link claims by link only, accept names the share seen, the invite loop is closed, balance_credits always raw, member mail rides R23."
 type: decision
-last_verified: 2026-09-28
+last_verified: 2026-09-30
 ---
 
 # Live decisions — players: access, consent, invites and mail (D11–D13)
@@ -49,3 +49,11 @@ test in `PlayersReviewHttpTests`.
   outbox; quiet hours re-checked at delivery (a deferral hands back the attempt). Admin feed filters Audience = Admins.
 - **Preferences: `findable` / `show_in_leaderboards` (P2 names) stay canonical**; D13's
   `findable_in_directory` / `show_on_leaderboards` are accepted aliases; `share_results` stored only.
+- **Review round 1 (2026-09-30), pinned in `R1PlayersHttpTests` / `R1MailHttpTests`:** an ACCEPTED
+  partner's game is theirs — `GET /me/bookings/upcoming` lists it and the grid marks it `isMine`
+  with `role: partner` (B2); the cancel quote/answer name each partner's refund and the organiser's
+  `net_credits`, from the share rule itself (B3); `unpaid_credits` counts an unclaimed link seat
+  at its full share (B4); recent partners count only started, checked-in games (B11); a received
+  share's mail says it is held and until when (B12); a club collect, a club add and an
+  accept-on-behalf are told as the CLUB's doing (`players.club_seat`, B8). *Why:* each screen or
+  mail said something the money did not.

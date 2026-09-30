@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-play
 description: "D14 play MVP: results only on box-checked-in bookings with their own lineup, PAR-11 best of 3/5, confirm or 48 h silence; stats derived on read; weekly streak keyed by Monday date; badges never revoked; one mailed kind."
 type: decision
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Live decisions — play (D14 MVP)
@@ -51,5 +51,9 @@ This is the why.
 - **The result card tells two 404s apart.** `booking_not_found` (a non-player, e.g. an admin
   looking in) hides the card; `result_not_found` reads as "no result yet". *Why:* the backend
   lane added the second code, and one 404 rule would hide a member's own card.
+- **A result is recordable from the court time's start or the check-in, whichever is later**
+  (`not_started`, review round 1 B15). *Why:* a box scan during early entry opened recording before
+  a ball was hit. The same finding asked that attendance badges need the member's OWN seat scan;
+  **not done** — it reverses the attendance rule above, and is escalated to Dean.
 - **Open for Dean** (spec §14, defaults in use): My game on by default; unfinished matches not
-  recordable; admin card shows the W–L record.
+  recordable; admin card shows the W–L record; B15's own-scan badge rule (above).

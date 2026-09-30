@@ -56,3 +56,5 @@ last_verified: 2026-09-29
   `/me/invites` and `/me/notifications` now carry it. The browser zone is neither the club's
   nor UTC, so a zone-less screen cannot coincide with the right answer; spec processes run in
   UTC. An expectation built from a `lib/` formatter must pass `CLUB_ZONE` (`e2e/playersKit`).
+- **Two racing requests read two clocks** (review round 1, B18): a walk-up retry whose `now` was read
+  just BEFORE the winner's saw zero minutes left and was refused; any refusal now replays the nonce.

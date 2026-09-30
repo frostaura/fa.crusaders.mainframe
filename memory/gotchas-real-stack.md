@@ -12,8 +12,9 @@ Found getting `e2e-real/play.spec.ts` green on 2026-09-29. Each one failed the w
 - **Rebuild the frontend container too.** `docker compose up --build -d backend` leaves the
   12-hour-old nginx build serving a PWA with no new screens; the walk drives the production
   build behind the gateway, not Vite. `up --build -d backend frontend` — never `down -v`.
-- **Anonymous auth routes allow 10 a minute per IP**, and a walk that registers two members per
-  test in two viewports passes it. A `429` on `verify-email` renders **"That link didn't work"**
+- **Anonymous register/verify routes allow 10 a minute per IP** (sign-in and reset moved to a
+  per-account limit with a 60-per-IP ceiling on 2026-09-30, `decisions-sessions.md`), and a walk
+  that registers two members per test in two viewports passes it. A `429` on `verify-email` renders **"That link didn't work"**
   — a member would believe a good link is dead (a PWA defect, not fixed). The spec waits out
   `Retry-After` and repeats the step; a 429 is refused before the token is spent.
 - **A booking "for now" is `past_time`** once the current slice has begun — book the NEXT slice
