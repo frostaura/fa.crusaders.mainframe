@@ -125,7 +125,8 @@ test("the four-figure negative the signed charts can produce is drawn in full", 
 
   // Named explicitly, so a future change that quietly stops the chart reaching four figures
   // cannot turn the two tests above into assertions about nothing.
-  const negative = labels.filter((l) => /^-\d{4}\./.test(l.text));
+  // U+2212, the one minus sign every displayed amount uses (effbaafc) — never a hyphen.
+  const negative = labels.filter((l) => /^\u2212\d{4}\./.test(l.text));
   expect(negative.length).toBeGreaterThan(0);
   for (const label of negative) {
     expect(label.lines, label.text).toBeLessThanOrEqual(1);

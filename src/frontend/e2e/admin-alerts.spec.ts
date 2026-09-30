@@ -155,7 +155,8 @@ test("Settings → Admin alerts saves the club's thresholds snake_case, and the 
   const bar = page.getByRole("region", { name: "Unsaved settings" });
   await expect(bar).toContainText("2 unsaved changes");
   await bar.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByText("Settings saved.")).toBeVisible();
+  // The toast says it; the save bar's sr-only landing (d18ec923) carries the same words for focus.
+  await expect(page.getByLabel("Settings saved. — dismiss")).toBeVisible();
   expect(settingsPuts).toHaveLength(1);
   expect(settingsPuts[0]).toMatchObject({
     fault_spike_count: 8, topup_failure_cooldown_minutes: 45, overdraft_cooldown_minutes: 15, sliceMinutes: 15,
