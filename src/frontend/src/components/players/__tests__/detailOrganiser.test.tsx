@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { refuse, signOut } from "@/test/harness";
 import type { PlayerPickerDialogProps } from "@/components/players/PlayerPicker";
-import { DETAIL_ACTIONS, PLAYERS_REFUSAL, SHARE_LINK, playersRefusal } from "@/lib/playersCopy";
+import { DETAIL_ACTIONS, DETAIL_COPY, PLAYERS_REFUSAL, SHARE_LINK, playersRefusal } from "@/lib/playersCopy";
 import { ApiError } from "@/lib/api";
 import { ALEX_SEAT, DETAIL_PATH, OPEN_SEAT, PID, SAM_SEAT, detail, renderDetail, seat, serve } from "./detailKit";
 
@@ -134,6 +134,8 @@ describe("remove", () => {
     await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_ACTIONS.removed("Sam")));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(reads(stub.calls)).toBeGreaterThanOrEqual(2));
+    // R2 F2-12 — focus lands on the Players heading, never <body>.
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: DETAIL_COPY.playersTitle })).toHaveFocus());
   });
 
   it("keeps a refusal in the dialog as a sentence", async () => {

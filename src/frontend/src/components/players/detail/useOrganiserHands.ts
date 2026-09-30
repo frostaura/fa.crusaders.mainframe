@@ -5,6 +5,7 @@ import {
   playersEndpoints, type AddPlayersAnswer, type BookingDetail, type DetailPlayer, type PlayerSpec,
 } from "@/lib/playersApi";
 import { DETAIL_ACTIONS, firstName, playersRefusal } from "@/lib/playersCopy";
+import { focusAfterAction } from "@/lib/focusAfterAction";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { seatName } from "./detailModel";
 import { needsShareAsk } from "./splitEditor";
@@ -84,6 +85,9 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
       success: (_answer, p) => {
         setRemoving(null);
         say({ tone: "success", text: DETAIL_ACTIONS.removed(seatName(p, detail.players)) });
+        // R2 F2-12 — the dialog and the seat's Remove button are both gone: the Players heading
+        // takes focus, never <body>.
+        focusAfterAction(() => document.querySelector<HTMLElement>("[data-players-section] h2"));
         reload();
         void refresh();
       },

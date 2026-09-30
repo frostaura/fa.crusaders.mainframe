@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type AddPlayersAnswer, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
+import { focusAfterAction } from "@/lib/focusAfterAction";
 import { DETAIL_ACTIONS, DETAIL_ADMIN } from "@/lib/playersCopy";
 import type { AdminAct } from "../detail/detailModel";
 import type { ShareTarget } from "../detail/ShareLinkDialog";
@@ -20,7 +21,11 @@ export function useAdminHands(detail: BookingDetail, reload: () => void, say: (n
     acting,
     act: (act: AdminAct, player: DetailPlayer) => setActing({ act, player }),
     closeAct: () => setActing(null),
-    actDone: (notice: Notice) => { setActing(null); say(notice); reload(); },
+    actDone: (notice: Notice) => {
+      setActing(null); say(notice); reload();
+      // R2 F2-12 — the seat's menu may be gone with the seat: the Players heading takes focus.
+      focusAfterAction(() => document.querySelector<HTMLElement>("[data-players-section] h2"));
+    },
     adding,
     openAdd: () => setAdding(true),
     closeAdd: () => setAdding(false),

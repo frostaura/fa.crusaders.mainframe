@@ -295,3 +295,23 @@ describe("not enough players (R2 F2-8)", () => {
     expect(card()).not.toHaveTextContent(/two players or more on the booking/);
   });
 });
+
+describe("focus after recording (R2 F2-12)", () => {
+  it("lands on the card's heading once the sheet closes — never <body>", async () => {
+    serve([
+      { path: RESULT_PATH, body: view() },
+      { method: "POST", path: RESULT_PATH, body: result() },
+    ]);
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: RESULT_CARD.record }));
+    const dialog = await screen.findByRole("dialog", { name: RESULT_SHEET.title });
+    const games: [number, number][] = [[11, 7], [9, 11], [11, 5], [11, 8]];
+    games.forEach(([a, b], i) => {
+      fireEvent.change(within(dialog).getByRole("textbox", { name: RESULT_SHEET.scoreFor(i + 1, RESULT_SHEET.sideA) }), { target: { value: String(a) } });
+      fireEvent.change(within(dialog).getByRole("textbox", { name: RESULT_SHEET.scoreFor(i + 1, RESULT_SHEET.sideB) }), { target: { value: String(b) } });
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: RESULT_SHEET.submit }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("heading", { name: RESULT_CARD.title })).toHaveFocus());
+  });
+});

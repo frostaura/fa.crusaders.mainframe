@@ -121,6 +121,7 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
         title={DETAIL_COPY.playersTitle}
         description={cancelled ? DETAIL_CANCELLED.playersDescription : DETAIL_COPY.playersDescription}
         actions={canInvite ? <InviteButton hands={organiser} /> : null}
+        data-players-section=""
       >
         <PlayerChips detail={detail} actions={seatActions} />
       </Section>

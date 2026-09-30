@@ -14,6 +14,7 @@ import {
   CONFIRM_SHEET, FORMAT_LABEL, notRecordableLine, PLAY_REFUSAL, playRefusal, playWhen, RESULT_CARD, RESULT_SHEET,
   STATUS_WORD,
 } from "@/lib/playCopy";
+import { focusAfterAction } from "@/lib/focusAfterAction";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { ConfirmResultSheet, type ConfirmMode } from "./ConfirmResultSheet";
 import { ResultScore } from "./ResultScore";
@@ -53,6 +54,9 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
     close();
     setNotice(text);
     read.adopt(result);
+    // R2 F2-12 — the Record button that opened the sheet is replaced by the result it recorded, so
+    // Radix has nothing to return focus to: the card's own heading takes it, never <body>.
+    focusAfterAction(() => document.querySelector<HTMLElement>("[data-result-card] h2"));
   };
   // 404 is an answer: this viewer is not a player of the booking (an admin looking in), and a
   // result is only ever shown to its players (§3.4). Nothing to say, so the card is not drawn.
