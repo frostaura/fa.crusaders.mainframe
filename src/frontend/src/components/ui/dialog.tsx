@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  * </p>
  *
  * <p>
- * <b>Always a close ×.</b> Every dialog carries a 44px icon button named "Close", top-right — it is
+ * <b>Always a close ×.</b> Every dialog carries a 44px icon button named "Close" and its title, top-right — it is
  * rendered by the content itself, so a call site cannot forget it. It sits LAST in the DOM so the
  * default initial focus lands on the dialog's own first control, not on the way out.
  * </p>
@@ -37,6 +37,9 @@ import { cn } from "@/lib/utils";
  */
 
 /** What the dialog says when an outside click is refused because there is typed text in it. */
+/** The close ×'s own word; its accessible name is this plus the dialog's title (F4-9). */
+export const DIALOG_CLOSE = "Close";
+
 export const DIALOG_KEPT_OPEN =
   "Still here — your text hasn't been lost. Use Escape, or a button below, to close this.";
 
@@ -93,10 +96,29 @@ function composed<E>(theirs: ((event: E) => void) | undefined, ours: (event: E) 
   };
 }
 
-/** The 44px close ×, shared by dialog and sheet so there is one of it. */
-function CloseButton({ label }: { label: string }) {
+/**
+ * The 44px close ×, shared by dialog and sheet so there is one of it.
+ *
+ * <p>
+ * <b>Named "Close" + the dialog's own title (F4-9)</b> — "Close Top up", "Close Record a result" —
+ * through `aria-labelledby` pointing at its own word and at the title Radix already labels the
+ * dialog with. Call sites used to rename it "Cancel" or leave it "Close", and either way a screen
+ * reader's button list read two identical names, the × and the footer's own Cancel/Close, with no
+ * way to tell which was which. The title id is read off the rendered dialog (Radix does not export
+ * it), set as an attribute React never manages. A dialog with no title still says "Close".
+ * </p>
+ */
+function CloseButton() {
+  const wordId = React.useId();
+  const ref = React.useRef<HTMLButtonElement>(null);
+  React.useLayoutEffect(() => {
+    const button = ref.current;
+    const titleId = button?.closest("[role=dialog], [role=alertdialog]")?.getAttribute("aria-labelledby");
+    if (button && titleId && document.getElementById(titleId)) button.setAttribute("aria-labelledby", `${wordId} ${titleId}`);
+  });
   return (
     <DialogPrimitive.Close
+      ref={ref}
       data-slot="dialog-close"
       className={cn(
         "absolute right-2 top-2 inline-flex size-touch items-center justify-center rounded-lg",
@@ -105,7 +127,7 @@ function CloseButton({ label }: { label: string }) {
       )}
     >
       <X size={20} aria-hidden="true" />
-      <span className="sr-only">{label}</span>
+      <span id={wordId} className="sr-only">{DIALOG_CLOSE}</span>
     </DialogPrimitive.Close>
   );
 }
@@ -200,7 +222,10 @@ type SurfaceProps = React.ComponentProps<typeof DialogPrimitive.Content> & {
    * `<body>`.
    */
   initialFocus?: () => HTMLElement | null | undefined;
-  /** The close ×'s accessible name. "Close" unless the dialog's copy says otherwise. */
+  /**
+   * @deprecated Ignored (F4-9): the × is always "Close" + the dialog's title, so it can never
+   * share a name with a footer button. Kept only so call sites compile until they drop it.
+   */
   closeLabel?: string;
 };
 
@@ -212,7 +237,7 @@ function DialogSurface(props: SurfaceProps) {
   const {
     guardTyped = true,
     initialFocus,
-    closeLabel = "Close",
+    closeLabel: _ignoredCloseLabel,
     className,
     children,
     onOpenAutoFocus,
@@ -250,7 +275,7 @@ function DialogSurface(props: SurfaceProps) {
       {...rest}
     >
       {children}
-      <CloseButton label={closeLabel} />
+      <CloseButton />
       <span aria-live="polite" className="sr-only">
         <span key={guard.kept}>{guard.kept > 0 ? DIALOG_KEPT_OPEN : ""}</span>
       </span>
@@ -301,15 +326,19 @@ function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 /**
- * Actions. Source order is dismiss first, primary last: `flex-col-reverse` puts the primary on
- * top on a phone (under the thumb), `sm:flex-row sm:justify-end` puts it on the right on desktop.
+ * Actions. Source order is dismiss first, primary last, and the visual order is the SAME on every
+ * width (F4-8): stacked on a phone with the primary at the foot, under the thumb; in a row on
+ * desktop with the primary on the right. It used to be `flex-col-reverse`, which painted the
+ * primary on top while Tab still met Cancel first — keyboard and switch users ran the footer
+ * bottom-up (Cancel before Continue, Back before Book), and a dialog's first focus could land on
+ * the lower button.
  */
 function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex flex-col-reverse gap-2 px-4 pb-4 pt-2 sm:flex-row sm:justify-end sm:px-6 sm:pb-6",
+        "flex flex-col gap-2 px-4 pb-4 pt-2 sm:flex-row sm:justify-end sm:px-6 sm:pb-6",
         className,
       )}
       {...props}

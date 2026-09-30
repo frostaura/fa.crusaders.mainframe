@@ -189,8 +189,9 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   full-height Sheet below `sm`) · **date-picker** (club days `YYYY-MM-DD`; Popover ≥ `sm`, Sheet
   below; trigger reads "Tue 23 Sep" via `date-picker-day`; the react-day-picker **calendar** is a lazy
   chunk fetched on pointer/focus intent) · **checkbox** · **radio-group** + **RadioCard** · **switch**.
-- **dialog** — bottom sheet below 640px, centred `max-w-md` above; **always a close ×** (44px);
-  h2 title + description; body scrolls; footer `flex-col-reverse gap-2 sm:flex-row sm:justify-end`.
+- **dialog** — bottom sheet below 640px, centred `max-w-md` above; **always a close ×** (44px),
+  named "Close" + the dialog's title; h2 title + description; body scrolls; footer
+  `flex-col gap-2 sm:flex-row sm:justify-end` — never reversed, so Tab order is paint order.
   An outside click after typing keeps it open. **sheet** = Radix Dialog from bottom/right.
 - **popover · tooltip** (names icon buttons only; none on touch) · **info-popover** · **accordion** ·
   **tabs** (`segmented`, `underline`) · **toggle / toggle-group** · **dropdown-menu** · **command** ·

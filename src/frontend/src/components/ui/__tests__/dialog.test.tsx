@@ -84,10 +84,11 @@ function overlay(): HTMLElement {
 }
 
 describe("Dialog", () => {
-  it("always renders a 44px close button named Close, and it closes the dialog", async () => {
+  it("always renders a 44px close button named Close + the dialog's title, and it closes the dialog", async () => {
     render(<Suspend />, strict);
     const { dialog, trigger } = open();
-    const close = within(dialog).getByRole("button", { name: "Close" });
+    // F4-9 — never a bare "Close"/"Cancel" that a footer button shares.
+    const close = within(dialog).getByRole("button", { name: "Close Suspend member" });
     expect(close.className).toContain("size-touch");
     expect(close.className).not.toMatch(/outline-none|focus-visible:ring/);
     fireEvent.click(close);
@@ -134,7 +135,7 @@ describe("Dialog", () => {
     render(<Suspend />, strict);
     const { dialog } = open();
     const reason = within(dialog).getByRole("textbox", { name: "Reason" });
-    const close = within(dialog).getByRole("button", { name: "Close" });
+    const close = within(dialog).getByRole("button", { name: "Close Suspend member" });
     expect(document.activeElement).toBe(reason);
     act(() => close.focus());
     fireEvent.keyDown(close, { key: "Tab" });
@@ -186,11 +187,13 @@ describe("Dialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("orders the footer primary-last in source: on top on a phone, on the right on desktop", () => {
+  it("orders the footer primary-last in source AND on screen: at the foot on a phone, on the right on desktop (F4-8)", () => {
     render(<Suspend />, strict);
     const { dialog } = open();
     const footer = dialog.querySelector<HTMLElement>('[data-slot="dialog-footer"]');
-    expect(footer?.className).toContain("flex-col-reverse");
+    // Never reversed: Tab must run in the order the buttons are painted.
+    expect(footer?.className).not.toContain("reverse");
+    expect(footer?.className).toMatch(/(^| )flex-col( |$)/);
     expect(footer?.className).toContain("gap-2");
     expect(footer?.className).toContain("sm:flex-row");
     expect(footer?.className).toContain("sm:justify-end");
@@ -219,7 +222,7 @@ describe("Sheet", () => {
     const sheet = screen.getByRole("dialog", { name: "Filter the list" });
     expect(sheet).toHaveAttribute("data-side", "bottom");
     expect(sheet.className).toContain("animate-sheet-up");
-    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close Filter the list" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });

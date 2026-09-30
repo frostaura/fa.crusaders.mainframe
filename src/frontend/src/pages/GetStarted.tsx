@@ -125,7 +125,7 @@ function WizardFooter({ first, last, onMove }: { first: boolean; last: boolean; 
   const skip = useAsyncAction(dismiss, options);
 
   return (
-    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <Button variant="ghost" pending={skip.pending} onClick={() => void skip.run()} className="sm:mr-auto">
         {GET_STARTED.skip}
       </Button>
