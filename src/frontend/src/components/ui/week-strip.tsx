@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ToggleGroup } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { CaretLeft, CaretRight } from "./icons";
+import { dateTimeFormat } from "@/lib/intlCache";
 
 /**
  * The day picker for the booking grid (design-system.md, Patterns → Day picker): one week of
@@ -75,7 +76,7 @@ function clamp(date: string, low: string, high: string): string {
 }
 
 function todayIn(timeZone?: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const parts = dateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
   return parts.format(new Date());
 }
 

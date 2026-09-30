@@ -18,6 +18,7 @@
  */
 
 import { clubZone, isUsableZone, rememberClubZone } from "./clubZone";
+import { dateTimeFormat } from "./intlCache";
 
 /** The one locale that spells a date the way this product does. A format, not a language. */
 const CLUB_LOCALE = "en-GB";
@@ -46,7 +47,7 @@ const CLUB_LOCALE = "en-GB";
  */
 export function clubDayOf(atMs: number, timezone?: string): string {
   const zone = zoneFor(timezone);
-  const parts = new Intl.DateTimeFormat(CLUB_LOCALE, {
+  const parts = dateTimeFormat(CLUB_LOCALE, {
     timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(new Date(atMs));
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";

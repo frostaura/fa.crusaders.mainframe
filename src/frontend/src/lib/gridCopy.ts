@@ -1,4 +1,5 @@
 import { formatCredits } from "./utils";
+import { dateTimeFormat } from "./intlCache";
 
 /**
  * Every sentence the booking grid says, in one module.
@@ -32,7 +33,7 @@ export function weekdayName(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
   if (!y || !m || !d) return "that day";
   // Date-only arithmetic: a calendar date has a weekday with no instant and no zone in it.
-  return new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: "UTC" })
+  return dateTimeFormat("en-GB", { weekday: "long", timeZone: "UTC" })
     .format(new Date(Date.UTC(y, m - 1, d)));
 }
 

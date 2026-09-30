@@ -37,6 +37,7 @@
  */
 
 import { clubZone, isUsableZone, rememberClubZone } from "./clubZone";
+import { dateTimeFormat } from "./intlCache";
 
 /** The one locale every doors face is written in. See the note above: a format, not a language. */
 const CLUB_LOCALE = "en-GB";
@@ -98,7 +99,7 @@ export function clubCalendarDate(date: string, options: { weekday?: boolean; yea
 
 function shortDateIn(at: Date, timeZone: string | undefined, options: { weekday?: boolean; year?: boolean }): string {
   const { weekday = true, year = false } = options;
-  const parts = new Intl.DateTimeFormat(CLUB_LOCALE, {
+  const parts = dateTimeFormat(CLUB_LOCALE, {
     weekday: weekday ? "short" : undefined, day: "numeric", month: "short", year: year ? "numeric" : undefined,
     timeZone,
   }).formatToParts(at);
@@ -109,7 +110,10 @@ function shortDateIn(at: Date, timeZone: string | undefined, options: { weekday?
 
 /** "21:25" — a clock face in the club's day. */
 export function clubClock(iso: string | number | Date, timezone?: string): string {
-  return new Date(iso).toLocaleTimeString(CLUB_LOCALE, { ...CLOCK, timeZone: zoneFor(timezone) });
+  const at = new Date(iso);
+  // `toLocaleTimeString` said "Invalid Date" for a bad input; a formatter throws instead.
+  if (Number.isNaN(at.getTime())) return at.toLocaleTimeString(CLUB_LOCALE, CLOCK);
+  return dateTimeFormat(CLUB_LOCALE, { ...CLOCK, timeZone: zoneFor(timezone) }).format(at);
 }
 
 /**

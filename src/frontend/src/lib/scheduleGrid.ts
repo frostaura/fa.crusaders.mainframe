@@ -1,4 +1,5 @@
 import type { ScheduleDay, ScheduleSlot } from "./api";
+import { dateTimeFormat } from "./intlCache";
 
 export type TimeSlice = {
   /** ISO UTC instant this row starts at — the value the booking POST sends. */
@@ -13,7 +14,7 @@ export type TimeSlice = {
 
 /** Returns the IANA-timezone offset (minutes) for a given UTC instant. */
 export function tzOffsetMinutes(timezone: string, atUtcMs: number): number {
-  const dtf = new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "longOffset" });
+  const dtf = dateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "longOffset" });
   const tzPart = dtf.formatToParts(new Date(atUtcMs)).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
   const m = tzPart.match(/GMT([+-])(\d+)(?::(\d+))?/);
   if (!m) return 0;
