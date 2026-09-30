@@ -6,12 +6,14 @@ import { registerServiceWorker } from "./lib/pwa";
 import { installChunkReload } from "./lib/chunkLoad";
 import { ThemeProvider } from "./lib/theme";
 import { tokenStore } from "./lib/api";
+import { whenSessionCheckSent } from "./lib/auth";
 import { preloadRouteChunk } from "./routeChunks";
 import "./index.css";
 
 // Perf: with a session on this device, the opened page's code is fetched BESIDE the session check
-// rather than after it (`routeChunks`). No session: the page is sign-in, which is in the entry.
-if (tokenStore.get()) preloadRouteChunk(window.location.pathname);
+// rather than after it (`routeChunks`) — the moment that check is sent, so it is not queued behind
+// the page's files. No session: the page is sign-in, which is in the entry.
+if (tokenStore.get()) whenSessionCheckSent(() => preloadRouteChunk(window.location.pathname));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

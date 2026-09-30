@@ -186,6 +186,22 @@ async function whoamiRefreshingOnce(token: string): Promise<WhoAmI> {
   return endpoints.whoami();
 }
 
+/**
+ * Perf lane (2026-09-30) — the opened page's code is fetched BESIDE the session check, but after
+ * it is sent: queued first, ~30 chunk files held `whoami` behind them for a second on a phone's six
+ * connections. `main.tsx` registers the page's preload here; the bootstrap probe fires it once its
+ * request is out (at most once per page load).
+ */
+let afterSessionCheck: (() => void) | null = null;
+export function whenSessionCheckSent(run: () => void) {
+  afterSessionCheck = run;
+}
+function sessionCheckSent() {
+  const run = afterSessionCheck;
+  afterSessionCheck = null;
+  run?.();
+}
+
 /** Retry schedule for the bootstrap probe while the club is unreachable: 1s, 2s, 4s … 30s. */
 function nextProbeDelayMs(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 30_000);
@@ -489,7 +505,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const w = await whoamiRefreshingOnce(t);
+      const probe = whoamiRefreshingOnce(t);
+      // Sent: now whatever waited for the session check to go FIRST may start (`main.tsx`).
+      sessionCheckSent();
+      const w = await probe;
       if (w.is_authenticated && w.user_id) {
         probeAttempt.current = 0;
         // D3 — the only place a confirmed identity is written, because this is the only place
