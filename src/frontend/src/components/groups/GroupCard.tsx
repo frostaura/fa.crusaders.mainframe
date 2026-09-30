@@ -180,7 +180,7 @@ function Fact({ icon, term, children }: { icon: ReactNode; term: string; childre
         <span className="shrink-0">{icon}</span>
         {term}
       </dt>
-      <dd className="break-words pl-[26px] text-text-secondary">{children}</dd>
+      <dd className="break-words pl-6 text-text-secondary">{children}</dd>
     </div>
   );
 }

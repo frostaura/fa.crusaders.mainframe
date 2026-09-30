@@ -279,7 +279,8 @@ function SaveFailureBanner({ failure, currency, onGoTo }: {
   return (
     <Alert tone="danger" live="assertive" announceKey={`settings-save-${failure.text}`}>
       <span className="flex flex-col items-start gap-2">
-        <span>{failure.text}</span>
+        {/* Said once: with a field, the reason is on the field and the banner points at it. */}
+        <span>{failure.fieldKey ? SETTINGS_COPY.saveRefusedField(settingLabel(failure.fieldKey, currency)) : failure.text}</span>
         <span>{SETTINGS_COPY.saveNotSaved}</span>
         {failure.fieldKey ? (
           <Button variant="outline" size="sm" onClick={() => onGoTo(failure.fieldKey!)}>

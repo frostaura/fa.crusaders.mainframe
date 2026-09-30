@@ -131,6 +131,7 @@ function LedgerLine({ row, columns, onOpen }: { row: LedgerRow; columns: Column[
     <TableRow
       // The whole row is a pointer target; the button in the last cell is the keyboard's and
       // the screen reader's way in, so the row itself needs no role or tab stop.
+      data-interactive={onOpen ? "" : undefined}
       onClick={onOpen ? () => onOpen(row) : undefined}
       className={onOpen ? "cursor-pointer" : undefined}
     >

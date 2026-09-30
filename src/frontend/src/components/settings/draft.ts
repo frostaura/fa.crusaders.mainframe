@@ -178,6 +178,9 @@ export function describeSaveFailure(err: unknown, currency: string): string {
   return said;
 }
 
+/** Codes that say only "refused" — the banner replaces them with what to do. */
+const GENERIC_REFUSALS = new Set(["validation_failed", "invalid_request", "bad_request"]);
+
 /** A failed save, as the page's banner says it (F3.15): the sentence, and the field to go to. */
 export type SaveFailure = { text: string; fieldKey: string | null; sessionEnded: boolean };
 
@@ -214,7 +217,10 @@ export function saveFailureOf(err: unknown, currency: string): SaveFailure {
   const said = describeSaveFailure(err, currency);
   const code = err instanceof ApiError ? err.code : null;
   const raw = code !== null && said === code.replace(/_/g, " ");
-  const unnamed = err instanceof ApiError && err.status === 400 && fieldKey === null && (raw || code === null);
+  // Only a refusal that says NOTHING usable is replaced — no code, or the generic one. A token
+  // like "topup max below block" still names the problem better than any sentence here could.
+  const unnamed = err instanceof ApiError && err.status === 400 && fieldKey === null
+    && (code === null || (raw && GENERIC_REFUSALS.has(code)));
   return { text: unnamed ? SETTINGS_COPY.saveRefusedUnnamed : said, fieldKey, sessionEnded: false };
 }
 

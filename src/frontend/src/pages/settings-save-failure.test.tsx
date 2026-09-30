@@ -46,6 +46,9 @@ describe("a refused save stays on the page and says what to do", () => {
 
     expect(await screen.findByText(SETTINGS_COPY.saveNotSaved)).toBeInTheDocument();
     const label = settingDef("advance_booking_days")!.label;
+    expect(screen.getByText(SETTINGS_COPY.saveRefusedField(label))).toBeInTheDocument();
+    // The reason itself, said once — at the field.
+    expect(screen.getAllByText(/outside what the club’s system accepts/)).toHaveLength(1);
     expect(screen.getByRole("button", { name: SETTINGS_COPY.saveGoTo(label) })).toBeInTheDocument();
   });
 

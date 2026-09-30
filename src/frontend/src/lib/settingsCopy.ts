@@ -45,6 +45,8 @@ export const SETTINGS_COPY = {
   saveNotSaved: "Nothing was saved. Your changes are still here — fix what is named and press Save again.",
   saveRefusedUnnamed: "The club’s system refused these settings without naming the field. Nothing was saved — check the fields you changed, or discard and start again.",
   saveGoTo: (label: string) => `Go to ${label}`,
+  /** The banner when the refusal names a field: the reason itself is said AT the field. */
+  saveRefusedField: (label: string) => `The club’s system refused ${label}. The reason is on the field.`,
   draftRestored: "Your unsaved changes were kept while you signed in again. They are not saved yet.",
   movedTo: (label: string) => `Settings cannot be saved yet. Moved to ${label}.`,
   saveBarLabel: "Unsaved settings",
