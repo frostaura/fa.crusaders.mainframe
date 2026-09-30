@@ -331,13 +331,13 @@ public sealed class ShareSweep
 
         MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.Lapsed, $"lapsed:{seat.Id:N}:partner",
-            new LapsedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, unpaid, ToOrganiser: false),
+            new LapsedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, unpaid, ToOrganiser: false, seat.Id),
             $"Your invite closed — {game.CourtName}, {game.StartsLocal}", link, booking.Id), settings);
         if (booking.UserId is { } organiserId)
         {
             MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
                 organiserId, MemberEventCatalogue.Lapsed, $"lapsed:{seat.Id:N}:organiser",
-                new LapsedPayload(booking.Id, partner, game.CourtName, game.StartsLocal, unpaid, ToOrganiser: true),
+                new LapsedPayload(booking.Id, partner, game.CourtName, game.StartsLocal, unpaid, ToOrganiser: true, seat.Id),
                 $"{partner}'s share closed — {game.CourtName}", link, booking.Id), settings);
         }
     }

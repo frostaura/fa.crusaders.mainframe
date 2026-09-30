@@ -360,6 +360,18 @@ organiser receives as shares are **held**:
   its event — the inbox line and the outbox row together. Non-urgent kinds wait for the end of
   **quiet hours** (`member_quiet_start_minute`–`member_quiet_end_minute`, 21:00–07:00 club time);
   urgent ones (a share receipt, a cancelled game) go at once. The admin feed reads admin rows only.
+- **A held mail is re-derived when it leaves (review round 2, C8, `MemberMailRelease`).** Every
+  non-urgent member mail is judged against CURRENT state at the send, whatever held it: **dropped**
+  when obsolete (invite no longer open, game off, seat declined/removed/withdrawn/lapsed, result no
+  longer pending or not the reader's to confirm, reminder's share paid, a waiting return posted, a
+  removal undone by a re-add) — finished `Suppressed` with `dropped: <reason>` and its dedupe key
+  moved aside, so a later genuine event can still mail; **re-rendered** otherwise with today's
+  court, start, share, score and deadline; and **coalesced** per (member, booking, kind) for the
+  repeatable kinds (invite, club seat, reminder, share changed, result to confirm) — only the
+  latest goes. A lapse and a waiting return name one partner each and are never coalesced;
+  receipts (urgent kinds) are never re-derived. A night's mail leaves in the order it happened
+  (claim order `DueAt, CreatedAt`), and a cancellation never follows the invite it supersedes —
+  the invite is dropped.
   A named `notification` frame (`{"unread_count": n}`) is published on the member's wallet SSE
   stream after each change, so the bell can update without polling.
 

@@ -303,7 +303,7 @@ public sealed class ShareLedger
         {
             MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
                 to, MemberEventCatalogue.ReturnWaiting, $"{key}:{(toOrganiser ? "organiser" : "partner")}",
-                new ReturnWaitingPayload(booking.Id, other, game.CourtName, game.StartsLocal, amount, toOrganiser),
+                new ReturnWaitingPayload(booking.Id, other, game.CourtName, game.StartsLocal, amount, toOrganiser, seat.Id),
                 toOrganiser ? $"{Cr(amount)} for {other} is waiting on your balance" : $"{Cr(amount)} of your share is on its way back",
                 $"/bookings/{booking.Id}", booking.Id), settings);
         }

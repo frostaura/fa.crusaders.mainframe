@@ -232,14 +232,14 @@ public sealed class PlayersClub
             .First(p => p.GetProperty("seat").GetInt32() == seat).GetProperty("invite_token").GetString();
 }
 
-/// <summary>A mail server that keeps what it was handed.</summary>
+/// <summary>A mail server that keeps what it was handed, in the order it was handed it (C8 asserts the order).</summary>
 public sealed class CapturingMail : IEmailService
 {
-    public ConcurrentBag<EmailMessage> Sent { get; } = [];
+    public ConcurrentQueue<EmailMessage> Sent { get; } = [];
 
     public Task SendAsync(EmailMessage message, CancellationToken ct = default)
     {
-        Sent.Add(message);
+        Sent.Enqueue(message);
         return Task.CompletedTask;
     }
 

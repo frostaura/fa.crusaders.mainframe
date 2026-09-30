@@ -64,7 +64,7 @@ public static class PlayerNotices
         var organiser = await NameAsync(db, booking.UserId, "A member", ct);
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.Invited, $"{InvitedKeyPrefix}{seat.Id:N}",
-            new InvitePayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, InvitePath(seat.Id)),
+            new InvitePayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, InvitePath(seat.Id), seat.Id),
             $"{organiser} invited you — {game.CourtName}, {game.StartsLocal}", InvitePath(seat.Id), booking.Id);
     }
 
@@ -78,7 +78,7 @@ public static class PlayerNotices
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.Reminder, dedupeKey,
             new ReminderPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, deadline,
-                fromOrganiser, InvitePath(seat.Id)),
+                fromOrganiser, InvitePath(seat.Id), seat.Id),
             fromOrganiser ? $"{organiser} is waiting for your answer" : $"Your invite is still open — {game.CourtName}",
             InvitePath(seat.Id), booking.Id);
     }
@@ -95,7 +95,7 @@ public static class PlayerNotices
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.GameChanged, dedupeKey,
             new GameChangedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, removed,
-                removed ? null : seat.ShareCredits, needsConsent),
+                removed ? null : seat.ShareCredits, needsConsent, seat.Id),
             removed ? $"You were taken off {game.CourtName}, {game.StartsLocal}" : $"Your share changed — {game.CourtName}",
             $"/bookings/{booking.Id}", booking.Id);
     }
@@ -115,7 +115,7 @@ public static class PlayerNotices
         var path = accepted ? $"/bookings/{booking.Id}" : InvitePath(seat.Id);
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.ClubSeat, $"{keyPrefix}:{seat.Id:N}",
-            new ClubSeatPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, accepted, path),
+            new ClubSeatPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, accepted, path, seat.Id),
             accepted
                 ? $"The club put you in {organiser}'s game — {game.CourtName}, {game.StartsLocal}"
                 : $"The club added you to {organiser}'s game — {game.CourtName}, {game.StartsLocal}",

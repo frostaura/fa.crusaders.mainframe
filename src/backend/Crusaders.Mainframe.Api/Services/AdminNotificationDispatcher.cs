@@ -86,7 +86,9 @@ public sealed class AdminNotificationDispatcher
     }
 
     /// <summary>
-    /// Claims up to <see cref="BatchSize"/> due rows across every club, and answers their ids.
+    /// Claims up to <see cref="BatchSize"/> due rows across every club, and answers their ids —
+    /// oldest event first within one due instant (C8): everything quiet hours held falls due at
+    /// the same 07:00, and ordering on the id alone released a night's mail in random order.
     ///
     /// <para>
     /// On Postgres it is one statement: <c>FOR UPDATE SKIP LOCKED</c> picks rows no other worker
@@ -106,7 +108,7 @@ public sealed class AdminNotificationDispatcher
         var due = await db.AdminNotifications.IgnoreQueryFilters()
             .Where(n => n.State == AdminNotificationState.Pending && n.DueAt <= now
                         && (n.LockedUntil == null || n.LockedUntil <= now))
-            .OrderBy(n => n.DueAt).ThenBy(n => n.Id)
+            .OrderBy(n => n.DueAt).ThenBy(n => n.CreatedAt).ThenBy(n => n.Id)
             .Take(BatchSize)
             .ToListAsync(ct);
         foreach (var row in due)
@@ -124,11 +126,11 @@ public sealed class AdminNotificationDispatcher
           FROM (SELECT "Id" FROM admin_notifications
                  WHERE "State" = 0 AND "DueAt" <= @now
                    AND ("LockedUntil" IS NULL OR "LockedUntil" <= @now)
-                 ORDER BY "DueAt", "Id"
+                 ORDER BY "DueAt", "CreatedAt", "Id"
                  LIMIT @batch
                  FOR UPDATE SKIP LOCKED) AS due
          WHERE n."Id" = due."Id"
-        RETURNING n."Id"
+        RETURNING n."Id", n."DueAt", n."CreatedAt"
         """;
 
     private static async Task<IReadOnlyList<Guid>> ClaimOnPostgresAsync(MainframeDbContext db, DateTimeOffset now, CancellationToken ct)
@@ -144,10 +146,11 @@ public sealed class AdminNotificationDispatcher
             AddParameter(command, "now", now);
             AddParameter(command, "batch", BatchSize);
 
-            var ids = new List<Guid>();
+            // RETURNING promises no order, whatever the sub-select's: the order is re-imposed here.
+            var rows = new List<(Guid Id, DateTime DueAt, DateTime CreatedAt)>();
             await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
-            return ids;
+            while (await reader.ReadAsync(ct)) rows.Add((reader.GetGuid(0), reader.GetDateTime(1), reader.GetDateTime(2)));
+            return rows.OrderBy(r => r.DueAt).ThenBy(r => r.CreatedAt).ThenBy(r => r.Id).Select(r => r.Id).ToList();
         }
         finally
         {
@@ -263,6 +266,12 @@ public sealed class AdminNotificationDispatcher
             return false;
         }
 
+        // C8: what leaves is what is true NOW — dropped if obsolete, re-rendered otherwise, and
+        // only the latest of a repeatable kind per (member, booking).
+        var verdict = await MemberMailRelease.JudgeAsync(new ReleaseContext(d.Services, db, row, d.Settings, now), ct);
+        if (verdict.Dropped) return await DropAsync(db, row, now, verdict.DropReason!, ct);
+        row.PayloadJson = verdict.PayloadJson!;
+
         var to = await db.Users.AsNoTracking()
             .Where(u => u.Id == row.RecipientUserId && u.Status == "active" && u.EmailVerified)
             .Select(u => u.Email)
@@ -285,6 +294,18 @@ public sealed class AdminNotificationDispatcher
         row.DeliveredToJson = JsonSerializer.Serialize(new[] { row.RecipientUserId });
         row.RecipientCount = 1;
         return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
+    }
+
+    /// <summary>
+    /// A member mail that is no longer true is not sent (C8): finished <c>Suppressed</c> with the
+    /// reason, and its dedupe key moved aside so a later genuine event of the same identity — a
+    /// result recorded afresh after the one it asked about was withdrawn — can still be mailed.
+    /// </summary>
+    private static Task<bool> DropAsync(MainframeDbContext db, AdminNotification row, DateTimeOffset now, string reason, CancellationToken ct)
+    {
+        var freed = $"x:{row.Id:N}:{row.DedupeKey}";
+        row.DedupeKey = freed.Length <= AdminNotification.DedupeKeyMaxLength ? freed : freed[..AdminNotification.DedupeKeyMaxLength];
+        return FinishAsync(db, row, AdminNotificationState.Suppressed, now, $"dropped: {reason}", ct);
     }
 
     /// <summary>

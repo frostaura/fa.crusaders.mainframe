@@ -6,7 +6,9 @@ namespace Crusaders.Mainframe.Api.Services;
 
 // ---- The facts each member kind freezes onto its outbox row. Snake_case in the jsonb. ----
 
-public sealed record InvitePayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string Path);
+/// <param name="SeatId">The seat the invite is for — what the release reads the invite's fate from (C8). Null on older rows.</param>
+public sealed record InvitePayload(
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string Path, Guid? SeatId = null);
 
 /// <param name="HeldUntilLocal">On a share an organiser receives: when it stops being held (B12). Null on older rows.</param>
 /// <param name="ByClub">The club collected it (B8). False on older rows.</param>
@@ -17,17 +19,19 @@ public sealed record SharePayload(
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
 public sealed record ClubSeatPayload(
-    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, bool Accepted, string Path);
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, bool Accepted, string Path,
+    Guid? SeatId = null);
 
 public sealed record ReminderPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string DeadlineLocal,
-    bool FromOrganiser, string Path);
+    bool FromOrganiser, string Path, Guid? SeatId = null);
 
-public sealed record LapsedPayload(Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal UnpaidCredits, bool ToOrganiser);
+public sealed record LapsedPayload(
+    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal UnpaidCredits, bool ToOrganiser, Guid? SeatId = null);
 
 /// <summary>A return of a paid share that waits for the organiser's credits to cover it (review round 2).</summary>
 public sealed record ReturnWaitingPayload(
-    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, bool ToOrganiser);
+    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, bool ToOrganiser, Guid? SeatId = null);
 
 public sealed record GameCancelledPayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal);
 
@@ -36,7 +40,8 @@ public sealed record ResultToConfirmPayload(
     Guid BookingId, string SubmitterName, string CourtName, string WhenLocal, string ScoreLine, string ConfirmDueLocal);
 
 public sealed record GameChangedPayload(
-    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent);
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent,
+    Guid? SeatId = null);
 
 /// <summary>Everything one member mail needs.</summary>
 public sealed record MemberMailContext(ClubIdentity Club, string To, AdminNotification Row, string BaseUrl, TenantSettingsView Settings)

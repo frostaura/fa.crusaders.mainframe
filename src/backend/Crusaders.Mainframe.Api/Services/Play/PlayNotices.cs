@@ -5,16 +5,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
-/// <summary>What the notices about one result need to say who, where and when.</summary>
-/// <param name="Names">Display names by member id (every member in the lineup, and the actor).</param>
-public sealed record ResultContext(Booking Booking, string CourtName, TenantSettingsView Settings, IReadOnlyDictionary<Guid, string> Names)
-{
-    public string NameOf(Guid userId) => Names.TryGetValue(userId, out var n) ? n : "A member";
-
-    /// <summary>The club-local <c>Tue 30 Sep, 18:00</c> of the match.</summary>
-    public string When => PlayNotices.Local(Booking.StartsAt, Settings);
-}
-
 /// <summary>
 /// The member notices a result raises (D14, <c>docs/specs/play.md</c> §8), staged through
 /// <see cref="MemberNotices.Stage"/> in the result's own save. Only
@@ -58,11 +48,8 @@ public static class PlayNotices
         var mailed = await db.AdminNotifications.AsNoTracking()
             .Where(n => keys.Contains(n.DedupeKey)).Select(n => n.RecipientUserId).ToListAsync(ct);
 
-        var submitter = c.NameOf(r.SubmittedByUserId);
-        var line = $"{SideNames(r, MatchSide.A, c)} {r.GamesWonA}–{r.GamesWonB} {SideNames(r, MatchSide.B, c)}";
         var headline = $"{ToConfirmHeadline(r, c)} ({c.When}). Is it right?";
-        var payload = new ResultToConfirmPayload(
-            r.BookingId, submitter, c.CourtName, c.When, $"{line} ({GamesText(r)})", Local(r.ConfirmDueAt ?? r.SubmittedAt, c.Settings));
+        var payload = ToConfirmPayload(r, c);
         foreach (var user in confirming)
         {
             MemberNotices.Stage(db, r.TenantId, new MemberNotice(
@@ -73,6 +60,18 @@ public static class PlayNotices
                 MailDedupeKey = MailKey(r.BookingId, user),
             }, c.Settings);
         }
+    }
+
+    /// <summary>
+    /// The facts a <see cref="MemberEventCatalogue.ResultToConfirm"/> mail states, from the result as
+    /// it is NOW — at staging, and again when a held mail is released (C8), so a mail never shows a
+    /// score that was edited, withdrawn or re-recorded while it waited.
+    /// </summary>
+    public static ResultToConfirmPayload ToConfirmPayload(MatchResult r, ResultContext c)
+    {
+        var line = $"{SideNames(r, MatchSide.A, c)} {r.GamesWonA}–{r.GamesWonB} {SideNames(r, MatchSide.B, c)}";
+        var due = Local(r.ConfirmDueAt ?? r.SubmittedAt, c.Settings);
+        return new ResultToConfirmPayload(r.BookingId, c.NameOf(r.SubmittedByUserId), c.CourtName, c.When, $"{line} ({GamesText(r)})", due);
     }
 
     /// <summary>

@@ -644,7 +644,10 @@ A check-in is not hooked: the member is on court, and the minute worker is soon 
 
 Through P11's `MemberNotices.Stage` (inbox line + optional outbox row in the event's own save),
 quiet hours `member_quiet_start_minute`–`member_quiet_end_minute` (21:00–07:00) for anything
-mailed. Kinds are added to `MemberEventCatalogue`; only the mailed one joins `All`.
+mailed. Kinds are added to `MemberEventCatalogue`; only the mailed one joins `All`. A held
+`play.result_to_confirm` is re-derived at release (C8, `players-and-splits.md` §6): dropped when no
+result on the booking is pending for the reader to confirm, otherwise sent with the CURRENT
+result's score — a withdrawn 3–0 is never asked about at 07:00.
 
 | Kind | To | Mailed | Urgent | Dedupe key |
 | --- | --- | --- | --- | --- |
