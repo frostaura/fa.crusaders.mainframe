@@ -5,7 +5,7 @@ import { isGuid } from "@/lib/creditAdjustment";
 import { RELATED_BOOKING } from "@/lib/membersCopy";
 import { attemptAdjustment, type AdjustmentKey } from "./adjustmentAttempt";
 import { patchRow, type MemberRow } from "./membersModel";
-import type { AppliedAdjustment } from "./TopUpSheet";
+import type { ApplyResult } from "./TopUpSheet";
 
 /**
  * One hand movement of credit from the members list.
@@ -65,7 +65,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
    */
   const apply = useCallback(async (
     amount: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
-  ): Promise<AppliedAdjustment | null> => {
+  ): Promise<ApplyResult> => {
     if (!target || inFlight.current) return null;
     const bookingId = booking.trim();
     if (bookingId && !isGuid(bookingId)) {
@@ -83,7 +83,13 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
       if (outcome.kind === "booking") { setBookingError(outcome.message); return null; }
       if (outcome.kind === "failed") {
         toast.push({ tone: "danger", text: outcome.message, unchanged: outcome.unchanged, durationMs: 8000 });
-        return null;
+        const now = outcome.balanceNow;
+        if (typeof now === "number") {
+          // The sheet reads the target, the table reads the row: both were from before it landed.
+          setMembers((rows) => patchRow(rows, target.user_id, { balance_credits: now }));
+          setTarget((t) => (t ? { ...t, balance_credits: now } : t));
+        }
+        return { said: outcome.said };
       }
       // The row follows the server's answer at once — no refetch that would re-sort the table.
       const after = outcome.balanceAfterCredits;

@@ -4,7 +4,7 @@ import { isGuid } from "@/lib/creditAdjustment";
 import { type AdjustReasonCode } from "@/lib/adminApi";
 import { TOP_UP_COPY } from "@/lib/memberDetailCopy";
 import { attemptAdjustment, type AdjustmentKey } from "@/components/members/adjustmentAttempt";
-import type { AppliedAdjustment } from "@/components/members/TopUpSheet";
+import type { ApplyResult } from "@/components/members/TopUpSheet";
 
 /**
  * One hand movement of credit from the member's page — the members list's idempotency
@@ -46,7 +46,7 @@ export function useMemberTopUp(userId: string, name: string, onApplied: (balance
 
   const apply = useCallback(async (
     amount: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
-  ): Promise<AppliedAdjustment | null> => {
+  ): Promise<ApplyResult> => {
     if (inFlight.current) return null;
     const bookingId = booking.trim();
     if (bookingId && !isGuid(bookingId)) {
@@ -64,7 +64,9 @@ export function useMemberTopUp(userId: string, name: string, onApplied: (balance
       if (outcome.kind === "booking") { setBookingError(outcome.message); return null; }
       if (outcome.kind === "failed") {
         toast.push({ tone: "danger", text: outcome.message, unchanged: outcome.unchanged, durationMs: 8000 });
-        return null;
+        // A 409 reused key proved an earlier press landed: the header's figure is stale (R3 I-6).
+        if (outcome.balanceNow !== undefined) onApplied(outcome.balanceNow);
+        return { said: outcome.said };
       }
       onApplied(outcome.balanceAfterCredits);
       // No success toast: the sheet keeps its own receipt on screen, which is what money needs.

@@ -185,6 +185,19 @@ export const LOST_REPLY = {
 } as const;
 
 /**
+ * What the confirm's live region says when a press did not end on a receipt (review round 3,
+ * I-6): the full sentence is on the toast; this is the short line heard at the button. It said
+ * "That didn't go through." for every kind, including a movement that may have landed and one
+ * that the server proved HAD landed.
+ */
+export const LIVE_SAID = {
+  refused: "That didn't go through. Nothing was changed.",
+  absent: "Nothing arrived, and nothing was added.",
+  unknown: "It isn't known yet whether this went through.",
+  reused: "An earlier press of this already went through. Nothing more was added.",
+} as const;
+
+/**
  * `409 idempotency_key_reused`: an earlier press of this movement already landed with a
  * different amount, and the server says what it stored.
  */
@@ -275,8 +288,15 @@ export function adjustRefusal(err: unknown): string | null {
   }
 }
 
-export function validateReason(code: AdjustReasonCode | null, freeText: string): string | null {
-  if (code === null) return "Choose why this is happening.";
-  if (!freeText.trim()) return "Say why this one, in a few words. The member sees it on their wallet.";
-  return null;
+export const REASON_MISSING = {
+  code: "Choose why this is happening.",
+  detail: "Say why this one, in a few words. The member sees it on their wallet.",
+} as const;
+
+/** What the reason step's two fields are missing, each for its own field (review round 3, A-4). */
+export function reasonComplaints(code: AdjustReasonCode | null, freeText: string): { code?: string; detail?: string } {
+  return {
+    code: code === null ? REASON_MISSING.code : undefined,
+    detail: freeText.trim() ? undefined : REASON_MISSING.detail,
+  };
 }

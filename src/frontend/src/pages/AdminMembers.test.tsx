@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
 import { ASSIGN_COPY } from "../lib/groupsCopy";
 import { ledgerRowFixture, memberFixture, refuse, renderPage, stubFetch, type StubRoute } from "../test/harness";
-import { LOST_REPLY } from "../lib/topUpCopy";
+import { LIVE_SAID, LOST_REPLY } from "../lib/topUpCopy";
 import { CONFIRM_NOT_READY, REQUIRED_MARK } from "../lib/confirmDialogCopy";
 import {
   OUTCOMES, PASSWORD_DIALOG, RELATED_BOOKING, REJECT_DIALOG, RESET_DIALOG, ROW_ACTIONS, SUSPEND_DIALOG,
@@ -448,6 +448,33 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     expect(await screen.findByText(
       "An earlier press already went through: +7.00 cr (“coaching credit”). Nothing more was added — check the ledger before adding anything else.",
     )).toBeInTheDocument();
+  });
+
+  /**
+   * Review round 3, I-6: the 409 proves the earlier movement LANDED, so the balance on the sheet
+   * (and the row) was stale and the "after" figure summed onto it. The balance is re-read.
+   */
+  it("re-reads the balance after idempotency_key_reused, and never says it didn't go through", async () => {
+    stubFetch([
+      { path: "/api/v1/admin/members/", body: [memberFixture()] },
+      { path: `/api/v1/admin/members/${USER}`, body: { ...memberFixture(), balance_credits: 127 } },
+      { path: "/api/v1/admin/biometric/enrollments", body: [] },
+      { path: "/api/v1/admin/ledger/", body: [] },
+      {
+        method: "POST", path: ADJUST, status: 409,
+        body: { error: "idempotency_key_reused", stored: { amount_credits: 7, type: "AdminAdjustment", reason: "coaching credit" } },
+      },
+    ]);
+    renderPage(<AdminMembersPage />);
+
+    await fill("9", "coaching credit");
+    fireEvent.click(await armed());
+
+    await screen.findByText(/An earlier press already went through: \+7\.00 cr/);
+    expect(await screen.findByText("136.00 cr")).toBeInTheDocument();
+    const live = document.querySelector("[data-confirm-group] > [aria-live='polite']");
+    expect(live).toHaveTextContent(LIVE_SAID.reused);
+    expect(live).not.toHaveTextContent(/didn't go through/);
   });
 
   it("gives a CHANGED amount its own key once the first press was refused outright", async () => {

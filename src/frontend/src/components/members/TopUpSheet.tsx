@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Alert } from "@/components/Alert";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { Stepper } from "@/components/bookings/SheetParts";
@@ -15,10 +15,10 @@ import { useIsSmUp } from "@/components/ui/use-media-query";
 import { type AdjustReasonCode } from "@/lib/adminApi";
 import { TOP_UP_SHEET as COPY, signedAmount } from "@/lib/membersCopy";
 import {
-  ADD_LINK, LIVE_PUSH_NOTE, LOST_REPLY, MINUS_REFUSED, TAKE_BACK_CONSEQUENCE, TAKE_BACK_LINK,
+  ADD_LINK, LIVE_PUSH_NOTE, LIVE_SAID, LOST_REPLY, MINUS_REFUSED, TAKE_BACK_CONSEQUENCE, TAKE_BACK_LINK,
   ZAR_RECEIVED, balanceSentence, confirmConsequence, countsAsRevenue, doneSentence, overdraftWarning,
-  parseCredits, parseZar, reasonChoicesFor, reasonLabel, receiptHeader, revenueNote, sheetTitle, validateAmount,
-  validateReason, validateZar, type CreditDirection,
+  parseCredits, parseZar, reasonChoicesFor, reasonComplaints, reasonLabel, receiptHeader, revenueNote, sheetTitle,
+  validateAmount, validateZar, type CreditDirection,
 } from "@/lib/topUpCopy";
 import { cn, formatCredits, formatMoney } from "@/lib/utils";
 import { Minus, Plus } from "@/components/ui/icons";
@@ -59,6 +59,16 @@ type Applied = AppliedAdjustment;
 export type AppliedAdjustment = { balanceAfterCredits: number | null; recovered?: boolean };
 
 /**
+ * What a press came to: a receipt, or `{ said }` — the line the confirm's live region speaks when
+ * there is none (review round 3, I-6: it said "didn't go through" over an unknown outcome and over
+ * a 409 that proved the movement landed) — or null for a refusal shown at a field.
+ */
+export type ApplyResult = AppliedAdjustment | { said: string } | null;
+
+/** One complaint per field, so each is said at its own field (review round 3, A-4). */
+type Complaints = { amount?: string; code?: string; detail?: string; zar?: string };
+
+/**
  * The receipt, frozen at the press (F3.5): the balance BEFORE and the movement as they were when
  * the admin confirmed. The row's balance prop follows the server's answer, so a header worked
  * out from it read "has 250 · After +50: 300" above "now has 250".
@@ -75,7 +85,7 @@ export type TopUpSheetProps = {
   /** Signed: this component decides the sign from the DIRECTION — no field in the flow carries one. */
   onApply: (
     amountCredits: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
-  ) => Promise<Applied | null>;
+  ) => Promise<ApplyResult>;
   onClose: () => void;
   /** The "for a booking" field, rendered on the reason step. */
   renderBookingField?: () => ReactNode;
@@ -92,7 +102,9 @@ function useTopUpFlow() {
   const [reasonCode, setReasonCode] = useState<AdjustReasonCode | null>(null);
   const [reasonText, setReasonText] = useState("");
   const [zarText, setZarText] = useState("");
-  const [complaint, setComplaint] = useState<string | null>(null);
+  const [complaints, setComplaints] = useState<Complaints>({});
+  // Bumped by a Next that found a problem: the sheet then focuses the first invalid field.
+  const [refused, setRefused] = useState(0);
   const [done, setDone] = useState<Receipted | null>(null);
 
   const valid = parseCredits(amountText);
@@ -109,31 +121,37 @@ function useTopUpFlow() {
     setReasonCode(null);
     setReasonText("");
     setZarText("");
-    setComplaint(null);
+    setComplaints({});
     setStep(1);
   };
+
+  const clear = (field: keyof Complaints) => setComplaints((c) => ({ ...c, [field]: undefined }));
 
   const typeAmount = (text: string) => {
     setAmountText(text);
     // Said at the moment it is typed: a refusal that waits for submit reads as a broken form.
-    setComplaint(/^[-−]/.test(text.trim()) ? MINUS_REFUSED : null);
+    setComplaints(/^[-−]/.test(text.trim()) ? { amount: MINUS_REFUSED } : {});
   };
 
-  const toReason = () => {
-    const said = validateAmount(amountText);
-    setComplaint(said);
-    if (!said) setStep(2);
+  const settle = (found: Complaints, next: 2 | 3) => {
+    setComplaints(found);
+    if (Object.values(found).some(Boolean)) setRefused((n) => n + 1);
+    else setStep(next);
   };
 
-  const toCheck = () => {
-    const said = validateReason(reasonCode, reasonText) ?? (asksZar ? validateZar(zarText) : null);
-    setComplaint(said);
-    if (!said) setStep(3);
-  };
+  const toReason = () => settle({ amount: validateAmount(amountText) ?? undefined }, 2);
+
+  /** Every field's own complaint at once, each at its own field — not the first one under the last field. */
+  const toCheck = () => settle({
+    ...reasonComplaints(reasonCode, reasonText),
+    zar: asksZar ? validateZar(zarText) ?? undefined : undefined,
+  }, 3);
+
+  const back = (to: 1 | 2) => { setComplaints({}); setStep(to); };
 
   return {
-    direction, step, setStep, amountText, typeAmount, reasonCode, setReasonCode, reasonText, setReasonText,
-    zarText, setZarText, asksZar, zar, complaint, setComplaint, done, setDone, valid, flip, toReason, toCheck,
+    direction, step, back, amountText, typeAmount, reasonCode, setReasonCode, reasonText, setReasonText,
+    zarText, setZarText, asksZar, zar, complaints, clear, refused, done, setDone, valid, flip, toReason, toCheck,
   };
 }
 
@@ -141,6 +159,7 @@ export function TopUpSheet(props: TopUpSheetProps) {
   const { name, onClose } = props;
   const wide = useIsSmUp();
   const flow = useTopUpFlow();
+  useFocusFirstInvalid(flow.refused);
   return (
     <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
       <SheetContent side={wide ? "right" : "bottom"} data-sheet="top-up">
@@ -157,7 +176,9 @@ export function TopUpSheet(props: TopUpSheetProps) {
           <StepBody flow={flow} {...props} />
         </SheetBody>
         {/* The check step stacks on every width (F3-14): beside Back, the armed confirm — a
-            sentence over two buttons — had a third of a narrow sheet and "Add 200.00 cr" wrapped. */}
+            sentence over two buttons — had a third of a narrow sheet and "Add 200.00 cr" wrapped.
+            Stacked, BOTH rows run the sheet's width (R3 V-3): the primary was left at its own
+            width under a full-width Back. */}
         <SheetFooter className={cn("sm:items-end", flow.step === 3 && !flow.done && "sm:flex-col sm:items-stretch")}>
           <StepFooter flow={flow} {...props} />
         </SheetFooter>
@@ -207,7 +228,7 @@ function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
           placeholder={COPY.amountPlaceholder}
           onChange={(e) => flow.typeAmount(e.target.value)}
         />
-        <FieldError>{flow.complaint}</FieldError>
+        <FieldError>{flow.complaints.amount}</FieldError>
       </Field>
       {warning ? <Alert tone="warning" live="polite">{warning}</Alert> : null}
       {/* A button that looks like one (VIS F3-15): as a ghost it read as a line of text. */}
@@ -221,14 +242,14 @@ function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
 function ReasonStep({ flow, bookingError, renderBookingField }: {
   flow: Flow; bookingError: string | null; renderBookingField?: () => ReactNode;
 }) {
-  const missingCode = flow.complaint !== null && flow.reasonCode === null;
+  const { complaints } = flow;
   return (
     <>
       <Field>
         <FieldLabel>{COPY.reasonLabel}</FieldLabel>
         <Select
           value={flow.reasonCode ?? ""}
-          onValueChange={(code) => { flow.setReasonCode(code as AdjustReasonCode); flow.setComplaint(null); }}
+          onValueChange={(code) => { flow.setReasonCode(code as AdjustReasonCode); flow.clear("code"); }}
         >
           <SelectTrigger>
             <SelectValue placeholder={COPY.reasonPlaceholder} />
@@ -242,7 +263,7 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
         <FieldDescription>
           {flow.reasonCode ? `${COPY.reasonDescription} ${revenueNote(flow.reasonCode, flow.zar)}` : COPY.reasonDescription}
         </FieldDescription>
-        <FieldError>{missingCode ? flow.complaint : null}</FieldError>
+        <FieldError>{complaints.code}</FieldError>
       </Field>
       <Field>
         <FieldLabel>{COPY.detailLabel}</FieldLabel>
@@ -250,9 +271,9 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
           autoComplete="off"
           value={flow.reasonText}
           placeholder={COPY.detailPlaceholder}
-          onChange={(e) => { flow.setReasonText(e.target.value); flow.setComplaint(null); }}
+          onChange={(e) => { flow.setReasonText(e.target.value); flow.clear("detail"); }}
         />
-        <FieldError>{missingCode || flow.asksZar ? null : flow.complaint}</FieldError>
+        <FieldError>{complaints.detail}</FieldError>
       </Field>
       {flow.asksZar ? (
         <Field>
@@ -262,10 +283,10 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
             autoComplete="off"
             value={flow.zarText}
             placeholder={ZAR_RECEIVED.placeholder}
-            onChange={(e) => { flow.setZarText(e.target.value); flow.setComplaint(null); }}
+            onChange={(e) => { flow.setZarText(e.target.value); flow.clear("zar"); }}
           />
           <FieldDescription>{ZAR_RECEIVED.help}</FieldDescription>
-          <FieldError>{missingCode ? null : flow.complaint}</FieldError>
+          <FieldError>{complaints.zar}</FieldError>
         </Field>
       ) : null}
       {renderBookingField?.()}
@@ -330,7 +351,7 @@ function StepFooter({ flow, ...props }: TopUpSheetProps & { flow: Flow }) {
   if (flow.step === 2) {
     return (
       <>
-        <Button variant="outline" onClick={() => { flow.setComplaint(null); flow.setStep(1); }}>{COPY.back}</Button>
+        <Button variant="outline" onClick={() => flow.back(1)}>{COPY.back}</Button>
         <Button onClick={flow.toCheck}>{COPY.next}</Button>
       </>
     );
@@ -343,8 +364,9 @@ function ApplyControls({ flow, name, balance, busy, onApply }: TopUpSheetProps &
   if (valid === null || reasonCode === null) return null;
   return (
     <>
-      <Button variant="outline" onClick={() => flow.setStep(2)}>{COPY.back}</Button>
-      {/* Its own full-width row (F3.23, F3-14): armed, the confirm is a sentence over two buttons. */}
+      <Button variant="outline" onClick={() => flow.back(2)}>{COPY.back}</Button>
+      {/* Its own full-width row (F3.23, F3-14): armed, the confirm is a sentence over two buttons.
+          `w-full` on the idle button too (R3 V-3, A-15): at its own width "Add 50.00 cr" wrapped. */}
       <div className="min-w-0">
         <ConfirmButton
           idleLabel={direction === "add" ? `Add ${formatCredits(valid)}` : `Take back ${formatCredits(valid)}`}
@@ -363,13 +385,29 @@ function ApplyControls({ flow, name, balance, busy, onApply }: TopUpSheetProps &
             const applied = await onApply(
               direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim(), flow.zar ?? undefined,
             );
-            if (!applied) return COPY.failed;
+            if (!applied) return LIVE_SAID.refused;
+            if ("said" in applied) return applied.said;
             flow.setDone({ ...applied, before, amount: valid });
             return doneSentence(name, applied.balanceAfterCredits);
           }}
-          className="min-h-touch"
+          className="min-h-touch w-full"
         />
       </div>
     </>
   );
+}
+
+/**
+ * After a Next that found a problem, focus the FIRST field that has one (review round 3, A-4):
+ * the complaints are said at their fields, and the keyboard goes to where the fixing starts.
+ * After the render, because the field's `aria-invalid` is what marks it.
+ */
+function useFocusFirstInvalid(refused: number) {
+  useEffect(() => {
+    if (refused === 0) return;
+    const frame = requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-sheet='top-up'] [aria-invalid='true']")?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [refused]);
 }

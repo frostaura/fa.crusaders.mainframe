@@ -2,7 +2,7 @@ import { ApiError, endpoints } from "@/lib/api";
 import { adminEndpoints, type AdjustReasonCode } from "@/lib/adminApi";
 import { newIdempotencyKey, relatedBookingRefusal } from "@/lib/creditAdjustment";
 import { memberDetailEndpoints } from "@/lib/memberDetailApi";
-import { LOST_REPLY, adjustRefusal } from "@/lib/topUpCopy";
+import { LIVE_SAID, LOST_REPLY, adjustRefusal } from "@/lib/topUpCopy";
 
 /**
  * One press of the desk's "Add / Take back" — posted, and when its reply is lost, FOUND.
@@ -47,7 +47,17 @@ export type AdjustmentInput = {
 export type AdjustmentOutcome =
   | { kind: "applied"; balanceAfterCredits: number | null; recovered: boolean }
   | { kind: "booking"; message: string }
-  | { kind: "failed"; message: string; unchanged: boolean };
+  | {
+    kind: "failed"; message: string; unchanged: boolean;
+    /** The short line the confirm's live region says — never "didn't go through" over an unknown. */
+    said: string;
+    /**
+     * `409 idempotency_key_reused` proved an earlier press landed, so the balance on screen is
+     * stale: the member's balance re-read (null where that read failed), for the caller to show.
+     * Undefined for every other refusal, which moved nothing.
+     */
+    balanceNow?: number | null;
+  };
 
 const ADJUSTMENT_TYPES = new Set(["AdminAdjustment", "AdminTopUp"]);
 /** How far before the press a row may be dated and still be this press's — client/server skew. */
@@ -105,8 +115,8 @@ async function afterLostReply(input: AdjustmentInput, pressedAt: number, keyRef:
   }
   if (keyRef.current) keyRef.current = { ...keyRef.current, unresolved: found === "unknown" };
   return found === "absent"
-    ? { kind: "failed", message: LOST_REPLY.absent, unchanged: true }
-    : { kind: "failed", message: LOST_REPLY.unknown(input.name), unchanged: false };
+    ? { kind: "failed", message: LOST_REPLY.absent, unchanged: true, said: LIVE_SAID.absent }
+    : { kind: "failed", message: LOST_REPLY.unknown(input.name), unchanged: false, said: LIVE_SAID.unknown };
 }
 
 export async function attemptAdjustment(
@@ -131,8 +141,13 @@ export async function attemptAdjustment(
     if (!refusedOutright(err)) return afterLostReply(input, pressedAt, keyRef);
     // A refusal settles the question. `idempotency_key_reused` settles it the other way: the
     // earlier movement DID land, the sentence says what it was, and the next press is a new one.
-    if (err instanceof ApiError && err.code === "idempotency_key_reused") keyRef.current = null;
-    else if (keyRef.current) keyRef.current = { ...keyRef.current, unresolved: false };
-    return { kind: "failed", message: adjustRefusal(err) ?? LOST_REPLY.refused, unchanged: true };
+    const message = adjustRefusal(err) ?? LOST_REPLY.refused;
+    if (err instanceof ApiError && err.code === "idempotency_key_reused") {
+      keyRef.current = null;
+      // It LANDED, so the figure the sheet shows is from before it (review round 3, I-6).
+      return { kind: "failed", message, unchanged: true, said: LIVE_SAID.reused, balanceNow: await balanceNow(input.userId) };
+    }
+    if (keyRef.current) keyRef.current = { ...keyRef.current, unresolved: false };
+    return { kind: "failed", message, unchanged: true, said: LIVE_SAID.refused };
   }
 }
