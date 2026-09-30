@@ -1,8 +1,9 @@
 import { ApiError } from "@/lib/api";
+import { UnsureOutcome } from "@/lib/bookingOutcome";
 import { clubClock } from "@/lib/clubClock";
 import type { Invite, PartnerCap } from "@/lib/playersApi";
 import {
-  INVITE_REFUSAL, INVITES_COPY, acceptedUnpaidLine, firstName, playersRefusal, playersWhen,
+  INVITE_REFUSAL, INVITE_UNSURE, INVITES_COPY, acceptedUnpaidLine, firstName, playersRefusal, playersWhen,
 } from "@/lib/playersCopy";
 
 /**
@@ -39,6 +40,7 @@ export function inviteCapSentence(cap: PartnerCap): string {
 
 /** A refusal on the partner's side of an invite: second-person where it matters, else shared. */
 export function inviteRefusal(error: unknown, action: string = INVITES_COPY.acceptAction): string {
+  if (error instanceof UnsureOutcome) return error.checked ? INVITE_UNSURE.checked : INVITE_UNSURE.unchecked;
   if (error instanceof ApiError && error.code && error.code in INVITE_REFUSAL) return INVITE_REFUSAL[error.code];
   return playersRefusal(error, { action });
 }

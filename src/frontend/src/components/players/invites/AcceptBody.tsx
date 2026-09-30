@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Warning } from "@/components/ui/icons";
 import { TextLink } from "@/components/ui/text-link";
 import {
-  heldLine, HELD_EXPLAINER, INVITES_COPY, OWED_BACK_EXPLAINER, acceptedLine, deadlineLine, declinedLine, owedBackLine, playersCount,
+  heldLine, HELD_EXPLAINER, INVITE_UNSURE, INVITES_COPY, OWED_BACK_EXPLAINER, acceptedLine, deadlineLine, declinedLine, owedBackLine, playersCount,
   shortByLine,
 } from "@/lib/playersCopy";
 import { signedCredits } from "@/lib/bookingsCopy";
@@ -197,12 +197,14 @@ function OutcomeView({ flow, headed }: { flow: AcceptFlow; headed: boolean }) {
     );
   }
   const answer = flow.outcome?.kind === "accepted" ? flow.outcome.answer : null;
+  const proven = flow.outcome?.kind === "accepted" && flow.outcome.proven === true;
   return (
     <div className="flex flex-col items-start gap-3" data-outcome="accepted">
       <Alert tone="success" className="w-full">
         {headed ? null : <span className="font-semibold">{INVITES_COPY.acceptedTitle}</span>}
         {headed ? acceptedLine(answer?.paid_credits ?? 0, name) : ` — ${acceptedLine(answer?.paid_credits ?? 0, name)}`}
       </Alert>
+      {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.provenNote}</p> : null}
       <TextLink to={`/bookings/${answer?.booking_id ?? flow.invite.booking_id}`} variant="standalone">
         {INVITES_COPY.seeBooking}
       </TextLink>

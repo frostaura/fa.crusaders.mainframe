@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useBalance } from "@/lib/balance";
+import { UnsureOutcome, outcomeUnknown } from "@/lib/bookingOutcome";
 import { inviteMoney, playersEndpoints, type AcceptAnswer, type Invite, type SeatAnswer } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 import { useAsyncAction, type AsyncAction } from "@/lib/useAsyncAction";
@@ -24,7 +25,11 @@ export type AcceptPort = {
   reread: () => Promise<unknown>;
 };
 
-export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer } | { kind: "declined" } | null;
+/**
+ * `proven` — the accept's reply was lost and the seat's own record said "accepted" (R2 F2-1): the
+ * figures are the ones the member was shown, and the wallet is being re-read.
+ */
+export type AcceptOutcome = { kind: "accepted"; answer: AcceptAnswer; proven?: boolean } | { kind: "declined" } | null;
 
 /** Why Accept cannot be pressed, most pressing first — or null when it can. */
 export type Blocked = "rereading" | "cap" | "short" | null;
@@ -38,7 +43,7 @@ export type AcceptFlow = {
   /** The last refusal or failure, from either action. */
   error: unknown;
   errorCode: string | null;
-  acceptAction: AsyncAction<[number], AcceptAnswer>;
+  acceptAction: AsyncAction<[number], Accepted>;
   declineAction: AsyncAction<[], SeatAnswer>;
   accept: () => void;
   /** The first tap: asks whether to decline for good (R1 F2.6). Nothing is sent. */
@@ -58,19 +63,23 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
   const [askingDecline, setAskingDecline] = useState(false);
 
   const afterRefusal = useCallback(async (failure: unknown) => {
-    // Only the API's own answers mean the invite moved; a dropped connection changed nothing.
-    if (codeOf(failure) === null) return;
+    // Only the API's own answers mean the invite moved — or a lost reply that was read back.
+    if (codeOf(failure) === null && !(failure instanceof UnsureOutcome)) return;
     setRereading(true);
     try { await port.reread(); } finally { setRereading(false); }
   }, [port]);
 
-  const acceptAction = useAsyncAction((expected: number) => port.accept(expected), {
-    success: (answer) => {
-      setOutcome({ kind: "accepted", answer });
+  const acceptAction = useAsyncAction((expected: number) => acceptOrProve(port, invite, expected), {
+    success: (result) => {
+      setOutcome({ kind: "accepted", answer: result.answer, proven: result.proven });
       void balance.refresh({ expectSelf: true });
       void port.reread();
     },
-    failure: (failure) => { void afterRefusal(failure); },
+    failure: (failure) => {
+      // A lost reply may have moved money either way: the wallet is read again whatever the seat said.
+      if (failure instanceof UnsureOutcome) void balance.refresh({ expectSelf: true });
+      void afterRefusal(failure);
+    },
   });
   const declineAction = useAsyncAction(() => {
     if (!port.decline) throw new Error("decline unavailable");
@@ -106,6 +115,36 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
     acceptAction, declineAction, accept, decline, askingDecline, confirmDecline, keepInvite,
     readingAgain: INVITES_COPY.readingAgain,
   };
+}
+
+/** A yes: the server's own answer, or (`proven`) one read back off the seat after a lost reply. */
+type Accepted = { answer: AcceptAnswer; proven: boolean };
+
+/**
+ * R2 F2-1 — Accept, and when its reply is lost (5xx, timeout, dropped connection) the seat's own
+ * record is read back (`GET /me/invites/{pid}`) and believed: accepted is a yes with the figures
+ * the member was shown; anything else is an {@link UnsureOutcome} that says what was found. It
+ * used to say "Couldn't accept" after the money had been taken.
+ */
+async function acceptOrProve(port: AcceptPort, invite: Invite, expected: number): Promise<Accepted> {
+  try {
+    return { answer: await port.accept(expected), proven: false };
+  } catch (error) {
+    if (!outcomeUnknown(error)) throw error;
+    let seat;
+    try {
+      seat = await playersEndpoints.mySeat(invite.participant_id);
+    } catch {
+      throw new UnsureOutcome(error, false);
+    }
+    if (seat.status !== "accepted" || seat.lapsed || seat.booking_status === "cancelled") throw new UnsureOutcome(error, true);
+    const answer: AcceptAnswer = {
+      participant_id: seat.participant_id, booking_id: seat.booking_id, status: seat.status,
+      share_credits: seat.share_credits, consented_credits: seat.share_credits, paid_credits: invite.to_pay_credits,
+      balance_credits: invite.balance_credits,
+    };
+    return { answer, proven: true };
+  }
 }
 
 /** The seat's routes — by seat id, as the invite mail and the list both know it. */

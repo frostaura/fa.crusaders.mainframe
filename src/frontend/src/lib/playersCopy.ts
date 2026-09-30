@@ -819,6 +819,16 @@ export function declinedLine(organiser: string): string {
  * organiser ("That player was taken off…"), so the invites screens say them in the second person;
  * every other code is `playersRefusal`'s.
  */
+/**
+ * R2 F2-1 — an accept whose reply was lost, after the seat was read back. Never "Couldn't
+ * accept" about a yes the club had taken the money for.
+ */
+export const INVITE_UNSURE = {
+  checked: "The club didn't answer, so we checked your invite: you're not on this game yet — nothing was taken. Try again in a moment.",
+  unchecked: "The club didn't answer and your invite couldn't be checked either, so we can't tell whether you're in. Check your bookings and your wallet before trying again.",
+  provenNote: "The club's reply didn't arrive, so we checked your invite — you're in. Your wallet is being re-read.",
+} as const;
+
 export const INVITE_REFUSAL: Record<string, string> = {
   player_previously_removed: "You were taken off this game, so you can't rejoin it. Talk to whoever booked it.",
   already_in_booking: "You're already on this game.",

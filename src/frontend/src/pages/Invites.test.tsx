@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import InvitesPage from "./Invites";
 import { refuse, renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../test/harness";
 import {
-  INVITES_COPY, INVITE_REFUSAL, OWED_BACK_EXPLAINER, acceptLabel, owedBackLine, playersRefusal, shortByLine,
+  INVITES_COPY, INVITE_REFUSAL, INVITE_UNSURE, OWED_BACK_EXPLAINER, acceptLabel, owedBackLine, playersRefusal, shortByLine,
 } from "../lib/playersCopy";
 import { ApiError } from "../lib/api";
 import { savePendingInvite } from "../lib/playersPending";
@@ -351,5 +351,61 @@ describe("the accept sheet", () => {
     if (code === "insufficient_balance") {
       expect(within(sheet).getByRole("link", { name: INVITES_COPY.topUp })).toHaveAttribute("href", TOP_UP);
     }
+  });
+});
+
+/**
+ * R2 F2-1 — an accept whose reply was lost after the club had taken the money. The seat's own
+ * record is read back (`GET /me/invites/{pid}`) and believed; the wallet is read again either way.
+ */
+describe("an accept whose reply was lost (R2 F2-1)", () => {
+  const MY_SEAT = `/api/v1/me/invites/${SEAT}`;
+  function seatRecord(status: string) {
+    return {
+      participant_id: SEAT, booking_id: BOOKING, status, lapsed: false, settled_outside: false, booking_status: "booked",
+      court_name: "Court 1", starts_at: at(24), ends_at: at(24.75), organiser_name: "Sam Petersen", share_credits: 25,
+      timezone: "Africa/Johannesburg",
+    };
+  }
+
+  it("the club took it: says you're in, with the figure shown, and re-reads the wallet", async () => {
+    const stub = openInvites({ routes: [
+      // The action happened; only the reply was lost.
+      { method: "POST", path: ACCEPT, status: 504, body: { error: "gateway_timeout" } },
+      { path: MY_SEAT, body: seatRecord("accepted") },
+    ] });
+    const sheet = await openSheet();
+    const walletReads = () => stub.calls.filter((c) => c.path === "/api/v1/wallet").length;
+    await waitFor(() => expect(walletReads()).toBeGreaterThan(0));
+    const before = walletReads();
+    fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
+    expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
+    expect(sheet).toHaveTextContent("25.00 cr paid to Sam");
+    expect(within(sheet).getByText(INVITE_UNSURE.provenNote)).toBeInTheDocument();
+    expect(sheet).not.toHaveTextContent(/Couldn't accept/);
+    expect(stub.calls.some((c) => c.path === MY_SEAT)).toBe(true);
+    await waitFor(() => expect(walletReads()).toBeGreaterThan(before));
+  });
+
+  it("the club did not take it: says so — nothing taken — and Accept is offered again", async () => {
+    openInvites({ routes: [
+      { method: "POST", path: ACCEPT, status: 502, body: { error: "bad_gateway" } },
+      { path: MY_SEAT, body: seatRecord("invited") },
+    ] });
+    const sheet = await openSheet();
+    fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
+    expect(await within(sheet).findByText(INVITE_UNSURE.checked)).toBeInTheDocument();
+    expect(await within(sheet).findByRole("button", { name: acceptLabel(25) })).toBeInTheDocument();
+  });
+
+  it("the seat cannot be read either: says it can't tell, never 'couldn't accept'", async () => {
+    openInvites({ routes: [
+      { method: "POST", path: ACCEPT, respond: () => { throw new Error("offline"); } },
+      { path: MY_SEAT, status: 503, body: { error: "unavailable" } },
+    ] });
+    const sheet = await openSheet();
+    fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
+    expect(await within(sheet).findByText(INVITE_UNSURE.unchecked)).toBeInTheDocument();
+    expect(sheet).not.toHaveTextContent(/Couldn't accept/);
   });
 });
