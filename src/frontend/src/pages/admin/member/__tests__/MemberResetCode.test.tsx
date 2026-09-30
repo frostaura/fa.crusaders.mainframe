@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { signOut, type StubRoute } from "@/test/harness";
+import { CONFIRM_NOT_READY, REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 import { ACTIONS_COPY as COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
 import { BASE, baseRoutes, detailFixture, renderMember, serve } from "./memberKit";
 
@@ -56,11 +57,23 @@ describe("member detail — reset member code", () => {
     expect(within(dialog).getByText(COPY.resetCodeBody)).toBeInTheDocument();
     expect(within(dialog).getByRole("switch", { name: COPY.revokePasskeys })).toHaveAttribute("aria-checked", "true");
     expect(within(dialog).getByText(COPY.revokePasskeysHint)).toBeInTheDocument();
-    // No reason, no reset (contract §7): the change record and the member's email both quote it.
-    expect(within(dialog).getByRole("button", { name: COPY.resetCodeConfirm })).toBeDisabled();
-    giveReason(dialog);
-    expect(within(dialog).getByRole("button", { name: COPY.resetCodeConfirm })).toBeEnabled();
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("names a missing reason when the reset is pressed without one, and sends nothing (F3-18 notReady)", async () => {
+    const { stub, dialog } = await openReset([{ method: "POST", path: RESET, body: answer(true, 0) }]);
+    const reason = within(dialog).getByRole("textbox", { name: COPY.resetCodeReason });
+    // Required, and said so: a visible mark and the attribute, not a disabled button as the only cue.
+    expect(reason).toHaveAttribute("aria-required", "true");
+    expect(within(dialog).getByText(REQUIRED_MARK)).toBeVisible();
+    // No reason, no reset (contract §7) — but the primary stays in the tab order and says why.
+    const confirm = within(dialog).getByRole("button", { name: COPY.resetCodeConfirm });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
+    expect(reason).toHaveFocus();
+    expect(stub.calls.find((c) => c.path === RESET)).toBeUndefined();
+    expect(screen.getByRole("dialog", { name: COPY.resetCodeTitle(NAME) })).toBeInTheDocument();
   });
 
   it("sends revoke_passkeys:true by default, shows pending, toasts the count and re-reads the member", async () => {

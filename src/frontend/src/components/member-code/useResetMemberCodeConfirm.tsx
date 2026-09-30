@@ -4,6 +4,7 @@ import { useToast } from "@/components/Toast";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { adminEndpoints } from "@/lib/adminApi";
+import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 import { ACTIONS_COPY as COPY } from "@/lib/memberDetailCopy";
 import { RevokePasskeysSwitch } from "./RevokePasskeysSwitch";
 
@@ -32,8 +33,12 @@ export function useResetMemberCodeConfirm(name: string, membershipId: string, on
     children: (
       <>
         <Field controlId="reset-code-reason">
-          <FieldLabel>{COPY.resetCodeReason}</FieldLabel>
-          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={COPY.resetCodeReasonPlaceholder} />
+          {/* Required, and said so (A11Y F3-18): the disabled button used to be the only cue. */}
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <FieldLabel>{COPY.resetCodeReason}</FieldLabel>
+            <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+          </span>
+          <Textarea value={reason} required aria-required="true" onChange={(e) => setReason(e.target.value)} placeholder={COPY.resetCodeReasonPlaceholder} />
           <FieldDescription>{COPY.resetCodeReasonHint}</FieldDescription>
         </Field>
         <RevokePasskeysSwitch
@@ -41,7 +46,8 @@ export function useResetMemberCodeConfirm(name: string, membershipId: string, on
         />
       </>
     ),
-    confirmDisabled: reason.trim() === "",
+    // The primary stays enabled; pressing it without a reason says what is missing (F3-18).
+    notReady: reason.trim() === "",
     onConfirm: async () => {
       const r = await adminEndpoints.memberCodeReset(membershipId, { revokePasskeys, reason: reason.trim() });
       toast.push({ tone: "success", text: COPY.codeReset(name, r.passkeys_revoked, r.passkeys_removed) });
