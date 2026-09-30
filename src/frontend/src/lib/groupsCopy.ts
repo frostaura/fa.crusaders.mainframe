@@ -1,7 +1,7 @@
 import { ApiError } from "./api";
 import { unsureWords } from "./lostReplyCopy";
 import { describeFailure } from "./errors";
-import type { AdminItemResult, GroupPricingMode, Weekday } from "./adminApi";
+import type { GroupAddResult, GroupAddRow, GroupPricingMode, Weekday } from "./adminApi";
 import {
   CREDITS_PER_ZAR_DECIMALS, MAX_CREDITS_PER_ZAR, UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert,
   countSlots, creditsFor, formatClock, intersect, type Interval, type RateProblem,
@@ -593,23 +593,49 @@ export function addMembersLabel(count: number, groupName: string): string {
  * One row of an add-members result.
  *
  * <p>
- * `POST /member-groups/{id}/members` answers per item, so the screen shows per item. A batch
- * reported as one toast is four seconds to read six outcomes, over a viewport that deliberately
- * carries no live region — and "already in this group" is not a failure, which a single
- * success/failure count cannot express at all.
+ * `POST /member-groups/{id}/members` answers per item (`{ user_id, result }`), so the screen
+ * shows per item. A batch reported as one toast is four seconds to read six outcomes, over a
+ * viewport that deliberately carries no live region — and "already in this group" is not a
+ * failure, which a single success/failure count cannot express at all.
  * </p>
  */
-export function addResultLine(result: AdminItemResult, name: string): string {
-  if (result.status === "added") return `${name} — added.`;
-  if (result.status === "already_a_member") return `${name} — already in this group; nothing changed.`;
-  const reason = result.error
-    ? ADD_FAILURE_REASONS[result.error] ?? "the club's system refused it and did not say why."
-    : "the club's system refused it and did not say why.";
-  return `${name} — ${reason}`;
+export function addResultLine(row: GroupAddRow, name: string): string {
+  if (row.result === "added") return `${name} — added.`;
+  if (row.result === "already_a_member") return `${name} — already in this group; nothing changed.`;
+  return `${name} — ${ADD_FAILURE_REASONS[row.result] ?? "the club's system refused it and did not say why."}`;
 }
+
+/** A row the club refused — neither added nor already there. */
+export function addRowFailed(row: GroupAddRow): boolean {
+  return row.result !== "added" && row.result !== "already_a_member";
+}
+
+/**
+ * The heading over the rows, counted on the screen because the server sends no counts (A4-2).
+ * "Already in" is said as itself, never folded into "done" or into "failed".
+ */
+export function addResultHeading(result: GroupAddResult): string {
+  const asked = result.results.length;
+  const added = result.results.filter((r) => r.result === "added").length;
+  const already = result.results.filter((r) => r.result === "already_a_member").length;
+  const failed = asked - added - already;
+  const parts = [`${added} of ${asked} added`];
+  if (already > 0) parts.push(`${already} already in`);
+  if (failed > 0) parts.push(`${failed} refused`);
+  return `${parts.join(", ")}.`;
+}
+
+/** The note beside a result the reply of which was lost and the members list was read instead. */
+export const ADD_LOST = {
+  proven: "The club's reply didn't arrive, so we checked who is in the group now.",
+  checked: (name: string) => `The club didn't answer, so we checked: nobody new is in ${name} — nothing changed. Try again in a moment.`,
+  unchecked: (name: string) => `The club didn't answer and we couldn't check either, so we can't tell whether they were added to ${name}. Refresh the group before trying again.`,
+} as const;
 
 const ADD_FAILURE_REASONS: Record<string, string> = {
   member_not_found: "the club's system does not have this member any more.",
+  // Read back after a lost reply: the group does not have them, and the reply that would say why is gone.
+  not_added: "not in the group — the club's record shows they weren't added.",
   not_a_member: "this person is not a member of the club.",
   group_limit_reached: "this group is full.",
   too_many_members: "too many at once — try a smaller batch.",

@@ -76,6 +76,25 @@ export function serverResponseKeys(relativeFile: string, method: string): string
   return shapes;
 }
 
+/**
+ * The keys of every anonymous object a method builds right after `anchor` — the ITEMS of a list
+ * the response carries (`results.Add(new { user_id, result })`), which `serverResponseKeys` cannot
+ * see because it reads only what is returned. Review round 4 (A4-2): the group add answered
+ * `{ results: [{ user_id, result }] }`, the screen read `{ id, status }` rows and counts the
+ * server never sends, and said a success was a refusal.
+ */
+export function serverItemKeys(relativeFile: string, method: string, anchor: string): string[][] {
+  const source = readFileSync(resolve(BACKEND, relativeFile), "utf8");
+  const body = methodBody(source, method, relativeFile);
+  const shapes: string[][] = [];
+  for (let at = body.indexOf(anchor); at >= 0; at = body.indexOf(anchor, at + anchor.length)) {
+    const next = anonymousObjectAfter(body, at + anchor.length);
+    if (next) shapes.push(topLevelKeys(next));
+  }
+  if (shapes.length === 0) throw new Error(`no anonymous item after ${anchor} in ${method} (${relativeFile})`);
+  return shapes;
+}
+
 function methodBody(source: string, method: string, file: string): string {
   const decl = new RegExp(`static[^;{}=]*?\\b${method}\\(`).exec(source);
   if (!decl) throw new Error(`method ${method} not found in ${file}`);

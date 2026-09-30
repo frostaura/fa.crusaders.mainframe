@@ -8,9 +8,12 @@ import { MemberCombobox } from "../ui/member-combobox";
 import { Skeleton } from "../ui/skeleton";
 import { StateBlock } from "../ui/state-block";
 import { clubDayAndClock } from "../../lib/clubClock";
-import { ASSIGN_COPY, addMembersLabel, addResultLine, memberCountLine } from "../../lib/groupsCopy";
+import { Alert } from "../Alert";
+import {
+  ASSIGN_COPY, addMembersLabel, addResultHeading, addResultLine, addRowFailed, memberCountLine,
+} from "../../lib/groupsCopy";
 import { useAsyncAction } from "../../lib/useAsyncAction";
-import type { AdminBulkResult, MemberGroup } from "../../lib/adminApi";
+import type { GroupAddResult, MemberGroup } from "../../lib/adminApi";
 
 /**
  * Who is in this group, and the two ways somebody gets in or out — the group sheet's Members tab.
@@ -48,7 +51,12 @@ export function GroupMembers(props: {
   current: GroupMemberRow[];
   loading: boolean;
   error: unknown;
-  result: AdminBulkResult | null;
+  result: GroupAddResult | null;
+  /**
+   * What is known about the last add beyond its rows: the reply-lost note when the rows were
+   * read back from the group, or the unknown-outcome sentence when they could not be.
+   */
+  addNote?: { tone: "info" | "danger"; text: string } | null;
   adding: boolean;
   onAdd: (userIds: string[]) => void;
   onRemove: (userId: string) => Promise<unknown>;
@@ -69,6 +77,7 @@ export function GroupMembers(props: {
   return (
     <div data-group-members="" className="flex flex-col gap-6">
       <p className="text-sm text-text-secondary">{memberCountLine(group.member_count)}</p>
+      {props.addNote && <Alert tone={props.addNote.tone} live="polite">{props.addNote.text}</Alert>}
       {result && <AddResult result={result} nameOf={nameOf} onRetry={onAdd} />}
 
       <AddMembers
@@ -88,35 +97,33 @@ export function GroupMembers(props: {
   );
 }
 
-/** The per-item answer to a batch: a screen, one row per person, with the retry for the failed. */
+/** The per-item answer to a batch: a screen, one row per person, with the retry for the refused. */
 function AddResult({ result, nameOf, onRetry }: {
-  result: AdminBulkResult;
+  result: GroupAddResult;
   nameOf: (id: string) => string;
   onRetry: (ids: string[]) => void;
 }) {
+  const refused = result.results.filter(addRowFailed);
+  // A person the club no longer has cannot be added by asking again; only an unexplained refusal can.
+  const retryable = refused.filter((r) => r.result !== "member_not_found" && r.result !== "not_added");
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-bg-muted p-3">
-      <h3 className="text-base font-semibold" aria-live="polite">
-        {`${result.succeeded} of ${result.requested} done.`}
-      </h3>
+      <h3 className="text-base font-semibold" aria-live="polite">{addResultHeading(result)}</h3>
       <ul className="flex flex-col gap-1 text-sm">
         {result.results.map((row) => {
-          const failed = row.status === "failed";
+          const failed = addRowFailed(row);
           const Mark = failed ? XCircle : CheckCircle;
           return (
-            <li key={row.id} className={failed ? "flex items-start gap-2 text-danger-strong" : "flex items-start gap-2 text-text-secondary"}>
+            <li key={row.user_id} className={failed ? "flex items-start gap-2 text-danger-strong" : "flex items-start gap-2 text-text-secondary"}>
               <Mark size={16} weight="fill" aria-hidden="true" className={failed ? "mt-0.5 shrink-0" : "mt-0.5 shrink-0 text-success-strong"} />
-              <span>{addResultLine(row, nameOf(row.id))}</span>
+              <span className="min-w-0">{addResultLine(row, nameOf(row.user_id))}</span>
             </li>
           );
         })}
       </ul>
-      {result.failed > 0 && (
-        <Button
-          variant="outline" className="self-start"
-          onClick={() => onRetry(result.results.filter((r) => r.status === "failed").map((r) => r.id))}
-        >
-          {`Try the ${result.failed} that failed`}
+      {retryable.length > 0 && (
+        <Button variant="outline" className="self-start" onClick={() => onRetry(retryable.map((r) => r.user_id))}>
+          {`Try the ${retryable.length} that failed`}
         </Button>
       )}
     </div>

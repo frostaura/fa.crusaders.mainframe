@@ -3,11 +3,11 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { AdminGroupsPage } from "./AdminGroups";
 import { SETTINGS_FIXTURE, memberFixture, refuse, renderPage, signIn, stubFetch, type StubRoute } from "../test/harness";
 import {
-  bookingRulesFixture, groupFixture, groupMemberFixture, restrictedGroupFixture, weekdayWindows,
+  bookingRulesFixture, groupAddResponse, groupFixture, groupMemberFixture, restrictedGroupFixture, weekdayWindows,
 } from "../test/groupFixtures";
 import type { MemberGroup } from "../lib/adminApi";
 import { CONFIRM_NOT_READY } from "../lib/confirmDialogCopy";
-import { ARCHIVED_HEADING, ARCHIVE_COPY, ASSIGN_COPY, GROUP_ACTIONS, GROUP_SHEET, RATE_COPY } from "../lib/groupsCopy";
+import { ADD_LOST, ARCHIVED_HEADING, ARCHIVE_COPY, ASSIGN_COPY, GROUP_ACTIONS, GROUP_SHEET, RATE_COPY } from "../lib/groupsCopy";
 
 /**
  * A card's consequential actions live behind its ⋯ menu and a confirm dialog (P3 — they were
@@ -355,23 +355,41 @@ describe("assigning members from the group", () => {
     open([OFF_PEAK], [membersRoute, {
       method: "POST",
       path: "/api/v1/admin/member-groups/g-offpeak/members",
-      body: {
-        requested: 2, succeeded: 1, failed: 1,
-        results: [
-          { id: "44444444-4444-4444-4444-444444444444", status: "added" },
-          { id: "u2", status: "failed", error: "member_not_found" },
-        ],
-      },
+      // The server's own shape (A4-2, pinned in adminResponses.contract.test.ts): rows only.
+      body: groupAddResponse([
+        { user_id: "44444444-4444-4444-4444-444444444444", result: "added" },
+        { user_id: "u2", result: "member_not_found" },
+      ]),
     }]);
     fireEvent.click(await screen.findByRole("button", { name: /Members of Off-peak/ }));
     await pickMember(/^Add somebody/, /Ada Lovelace/);
     await pickMember(/^Add somebody/, /Thandi Nkosi/);
     fireEvent.click(await screen.findByRole("button", { name: "Add 2 members to Off-peak" }));
 
-    expect(await screen.findByText("1 of 2 done.")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 2 added, 1 refused.")).toBeInTheDocument();
     expect(screen.getByText(/Ada Lovelace — added\./)).toBeInTheDocument();
     expect(screen.getByText(/does not have this member any more/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Try the 1 that failed/ })).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+    // A member the club no longer has cannot be added by asking again.
+    expect(screen.queryByRole("button", { name: /Try the/ })).not.toBeInTheDocument();
+  });
+
+  /** A4-2: the round-4 reviewer's exact answer — two added — read as a refusal with a green tick. */
+  it("says an all-added batch is all added, never a refusal", async () => {
+    open([OFF_PEAK], [membersRoute, {
+      method: "POST",
+      path: "/api/v1/admin/member-groups/g-offpeak/members",
+      body: groupAddResponse([
+        { user_id: "44444444-4444-4444-4444-444444444444", result: "added" },
+        { user_id: "u2", result: "added" },
+      ]),
+    }]);
+    fireEvent.click(await screen.findByRole("button", { name: /Members of Off-peak/ }));
+    await pickMember(/^Add somebody/, /Ada Lovelace/);
+    await pickMember(/^Add somebody/, /Thandi Nkosi/);
+    fireEvent.click(await screen.findByRole("button", { name: "Add 2 members to Off-peak" }));
+    expect(await screen.findByText("2 of 2 added.")).toBeInTheDocument();
+    expect(screen.queryByText(/refused/)).not.toBeInTheDocument();
   });
 });
 
@@ -649,6 +667,51 @@ describe("a group write whose reply was lost", () => {
     open(null, lost("PATCH", false));
     await archiveFromMenu("Off-peak", "Season over");
     expect(await within(screen.getByRole("dialog")).findByText(/we checked: Off-peak is still active — nothing changed/)).toBeInTheDocument();
+  });
+
+  /** R4 carry-over: the add performs, then the reply dies; the group itself is read back. */
+  function lostAdd(landed: boolean, readable = true): StubRoute[] {
+    let members = [groupMemberFixture({ user_id: "u9", name: "Sipho Dlamini", membership_number: "CR-0009" })];
+    let reads = 0;
+    return [
+      {
+        path: "/api/v1/admin/member-groups/g-offpeak/members",
+        respond: () => (++reads > 1 && !readable ? refuse(503, { error: "down" }) : { members, total: members.length, cursor: null }),
+      },
+      {
+        method: "POST", path: "/api/v1/admin/member-groups/g-offpeak/members",
+        respond: () => {
+          if (landed) members = [...members, groupMemberFixture({ user_id: "u2", name: "Thandi Nkosi" })];
+          return refuse(504, { error: "gateway_timeout" });
+        },
+      },
+    ];
+  }
+
+  async function addThandi() {
+    fireEvent.click(await screen.findByRole("button", { name: /Members of Off-peak/ }));
+    await pickMember(/^Add somebody/, /Thandi Nkosi/);
+    fireEvent.click(await screen.findByRole("button", { name: "Add 1 member to Off-peak" }));
+  }
+
+  it("says an add landed, per person, when the group now has them", async () => {
+    open([OFF_PEAK], lostAdd(true));
+    await addThandi();
+    expect(await screen.findByText("1 of 1 added.")).toBeInTheDocument();
+    expect(screen.getByText(ADD_LOST.proven)).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't reach the club/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing changed when the group does not have them", async () => {
+    open([OFF_PEAK], lostAdd(false));
+    await addThandi();
+    expect(await screen.findByText(ADD_LOST.checked("Off-peak"))).toBeInTheDocument();
+  });
+
+  it("says it cannot tell when the group cannot be read either", async () => {
+    open([OFF_PEAK], lostAdd(true, false));
+    await addThandi();
+    expect(await screen.findByText(ADD_LOST.unchecked("Off-peak"))).toBeInTheDocument();
   });
 
   it("says it cannot tell whether a delete happened when the list cannot be read either", async () => {

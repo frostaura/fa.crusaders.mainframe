@@ -17,11 +17,11 @@ import { GroupSheet, type GroupSheetTab } from "../components/groups/GroupSheet"
 import { GroupAssign } from "../components/members/GroupAssign";
 import { ApiError, endpoints, type AdminCourt } from "../lib/api";
 import {
-  adminEndpoints, type AdminBulkResult, type MemberBookingRules, type MemberGroup,
+  adminEndpoints, type GroupAddResult, type MemberBookingRules, type MemberGroup,
   type MemberGroupBody, type Weekday,
 } from "../lib/adminApi";
 import {
-  ARCHIVE_COPY, ARCHIVED_HEADING, GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, GROUP_LOST, GROUP_SHEET, MOST_RESTRICTIVE_STANDING,
+  ADD_LOST, ARCHIVE_COPY, ARCHIVED_HEADING, GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, GROUP_LOST, GROUP_SHEET, MOST_RESTRICTIVE_STANDING,
   deleteRefusalSentence, explainGroupRefusal, groupChangeConsequence,
 } from "../lib/groupsCopy";
 import { UnsureOutcome, unsureSentence, writeOrReadBack } from "../lib/lostReply";
@@ -159,6 +159,22 @@ function usePageReads() {
 async function groupNow(id: string, holds: (group: MemberGroup | undefined) => boolean): Promise<object | null> {
   const { groups } = await adminEndpoints.memberGroups();
   return holds(groups.find((g) => g.id === id)) ? {} : null;
+}
+
+/**
+ * An add whose reply was lost, answered from the group itself: the rows the server would have
+ * sent, or null when nobody asked for is newly in the group (the press did not land).
+ */
+async function addedAccordingToGroup(groupId: string, asked: string[], before: Set<string>): Promise<GroupAddResult | null> {
+  const page = await adminEndpoints.memberGroupMembers(groupId);
+  const inNow = new Set(page.members.map((m) => m.user_id));
+  if (!asked.some((id) => inNow.has(id) && !before.has(id))) return null;
+  return {
+    results: asked.map((user_id) => ({
+      user_id,
+      result: !inNow.has(user_id) ? "not_added" : before.has(user_id) ? "already_a_member" : "added",
+    })),
+  };
 }
 
 /** A success sentence, with the reply-lost note when the list had to be asked. */
@@ -499,7 +515,8 @@ function GroupMembersPanel({ group, clubMembers, timezone, onChanged, onChangeGr
   const [current, setCurrent] = useState<GroupMemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [result, setResult] = useState<AdminBulkResult | null>(null);
+  const [result, setResult] = useState<GroupAddResult | null>(null);
+  const [addNote, setAddNote] = useState<{ tone: "info" | "danger"; text: string } | null>(null);
   const [adding, setAdding] = useState(false);
 
   const read = useCallback(async () => {
@@ -520,13 +537,27 @@ function GroupMembersPanel({ group, clubMembers, timezone, onChanged, onChangeGr
 
   const add = async (userIds: string[]) => {
     setAdding(true);
+    setAddNote(null);
+    const before = new Set(current.map((m) => m.user_id));
     try {
       // Per item, never all-or-nothing — and shown as a screen, because four seconds of toast
-      // is not long enough to read six outcomes.
-      setResult(await adminEndpoints.memberGroupAddMembers(group.id, userIds));
+      // is not long enough to read six outcomes. A lost reply reads the group back (R4 carry-over):
+      // one save adds everybody or nobody, so anybody new in the group proves the press landed.
+      const { value, proven } = await writeOrReadBack(
+        () => adminEndpoints.memberGroupAddMembers(group.id, userIds),
+        () => addedAccordingToGroup(group.id, userIds, before),
+      );
+      setResult(value);
+      if (proven) setAddNote({ tone: "info", text: ADD_LOST.proven });
       await read();
       onChanged();
     } catch (err) {
+      if (err instanceof UnsureOutcome) {
+        setResult(null);
+        setAddNote({ tone: "danger", text: err.checked ? ADD_LOST.checked(group.name) : ADD_LOST.unchecked(group.name) });
+        void read();
+        return;
+      }
       const refused = err instanceof ApiError && err.status >= 400 && err.status < 500;
       toast.push({
         tone: "danger",
@@ -554,6 +585,7 @@ function GroupMembersPanel({ group, clubMembers, timezone, onChanged, onChangeGr
       loading={loading}
       error={error}
       result={result}
+      addNote={addNote}
       adding={adding}
       onAdd={(ids) => void add(ids)}
       onRemove={drop}

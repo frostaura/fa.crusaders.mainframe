@@ -106,6 +106,19 @@ export type AdminBulkResult = {
   results: AdminItemResult[];
 };
 
+/**
+ * What `POST /admin/member-groups/{id}/members` answers: ONE row per person asked for, and
+ * nothing else — no counts (`MemberGroupEndpoints.AddMembersAsync`). Round 4 (A4-2): the screen
+ * read it as an {@link AdminBulkResult} and said "undefined of undefined done" and "refused… did
+ * not say why" over people who had been added. The shape is pinned against the C# handler in
+ * `adminResponses.contract.test.ts`; the counts are derived on the screen.
+ */
+export type GroupAddOutcome = "added" | "already_a_member" | "member_not_found";
+
+export type GroupAddRow = { user_id: string; result: GroupAddOutcome | (string & {}) };
+
+export type GroupAddResult = { results: GroupAddRow[] };
+
 // ---------------------------------------------------------------------------------------
 // Control board — GOAL item 10 (D2 §10.2)
 // ---------------------------------------------------------------------------------------
@@ -873,7 +886,7 @@ export const adminEndpoints = {
       cursor?: string | null;
     }>(`/api/v1/admin/member-groups/${id}/members${qs({ ...page })}`),
   memberGroupAddMembers: (id: string, userIds: string[]) =>
-    api.post<AdminBulkResult>(`/api/v1/admin/member-groups/${id}/members`, { userIds }),
+    api.post<GroupAddResult>(`/api/v1/admin/member-groups/${id}/members`, { userIds }),
   memberGroupRemoveMember: (id: string, userId: string) =>
     api.del<void>(`/api/v1/admin/member-groups/${id}/members/${userId}`),
   /** What WOULD apply, nothing saved — so a membership change states its consequence first. */

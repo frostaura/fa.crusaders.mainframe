@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultLine,
+  GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultHeading, addResultLine, addRowFailed,
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
   misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine, COURTS_UNREAD, rulesChangeLines, membersOf,
@@ -389,11 +389,21 @@ describe("counts and labels, at 0, 1 and 2", () => {
   });
 
   it("says per item what happened, including the ones that were already in", () => {
-    expect(addResultLine({ id: "u1", status: "added" }, "Ada Lovelace")).toBe("Ada Lovelace — added.");
-    expect(addResultLine({ id: "u1", status: "already_a_member" }, "Ada Lovelace"))
+    expect(addResultLine({ user_id: "u1", result: "added" }, "Ada Lovelace")).toBe("Ada Lovelace — added.");
+    expect(addResultLine({ user_id: "u1", result: "already_a_member" }, "Ada Lovelace"))
       .toBe("Ada Lovelace — already in this group; nothing changed.");
-    expect(addResultLine({ id: "u1", status: "failed", error: "member_not_found" }, "Ada Lovelace"))
+    expect(addResultLine({ user_id: "u1", result: "member_not_found" }, "Ada Lovelace"))
       .toBe("Ada Lovelace — the club's system does not have this member any more.");
+  });
+
+  it("counts the heading from the rows, with already-in said as itself (A4-2)", () => {
+    expect(addResultHeading({ results: [{ user_id: "a", result: "added" }, { user_id: "b", result: "added" }] }))
+      .toBe("2 of 2 added.");
+    expect(addResultHeading({ results: [
+      { user_id: "a", result: "added" }, { user_id: "b", result: "already_a_member" }, { user_id: "c", result: "member_not_found" },
+    ] })).toBe("1 of 3 added, 1 already in, 1 refused.");
+    expect(addRowFailed({ user_id: "a", result: "already_a_member" })).toBe(false);
+    expect(addRowFailed({ user_id: "a", result: "member_not_found" })).toBe(true);
   });
 });
 

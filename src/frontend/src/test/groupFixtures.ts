@@ -1,4 +1,4 @@
-import type { GroupWindow, MemberGroup, MemberBookingRules, Weekday } from "../lib/adminApi";
+import type { GroupAddRow, GroupAddResult, GroupWindow, MemberGroup, MemberBookingRules, Weekday } from "../lib/adminApi";
 
 /**
  * Fixtures for member groups — GOAL items 3 + 19.
@@ -110,4 +110,12 @@ export function groupMemberFixture(overrides: Record<string, unknown> = {}) {
     added_by_name: "Priya Naidoo",
     ...overrides,
   };
+}
+
+/**
+ * `POST /member-groups/{id}/members`'s answer, key for key as `AddMembersAsync` writes it (pinned
+ * in `adminResponses.contract.test.ts`): rows only, no counts (A4-2).
+ */
+export function groupAddResponse(rows: GroupAddRow[]): GroupAddResult {
+  return { results: rows.map((row) => ({ user_id: row.user_id, result: row.result })) };
 }
