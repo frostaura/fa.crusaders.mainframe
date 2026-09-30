@@ -55,7 +55,7 @@ export function RowActions({ row, handlers }: { row: MemberRow; handlers: RowAct
     <div className="flex flex-row items-center justify-end gap-2">
       {row.status === "PendingApproval" ? (
         <>
-          <Button size="sm" pending={approve.pending} onClick={() => void approve.run()}>{COPY.approve}</Button>
+          <Button size="sm" data-approve-row={row.user_id} pending={approve.pending} onClick={() => void approve.run()}>{COPY.approve}</Button>
           <Button size="sm" variant="danger-soft" onClick={() => handlers.reject(row)}>{COPY.reject}</Button>
         </>
       ) : null}

@@ -3,6 +3,7 @@ import { useToast } from "@/components/Toast";
 import { endpoints } from "@/lib/api";
 import { OUTCOMES } from "@/lib/membersCopy";
 import type { MemberRow } from "./membersModel";
+import { focusAfterAction, pageHeading } from "@/lib/focusAfterAction";
 
 export type ResetResult = { tempPassword: string; emailSentTo: string | null };
 
@@ -57,6 +58,9 @@ export function useMemberLifecycle({ load }: Deps) {
       toast.push({ tone: "danger", text: OUTCOMES.approveFailed });
     } finally {
       await load();
+      // F3.20: the approved row leaves the Pending list and took focus with it, to <body>. The
+      // keyboard goes to the next application's Approve — the queue's next step — or the heading.
+      focusAfterAction(() => document.querySelector<HTMLElement>("[data-approve-row]") ?? pageHeading());
     }
   }), [load, once, toast]);
 

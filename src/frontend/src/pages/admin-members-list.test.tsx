@@ -89,6 +89,25 @@ describe("the row is the way into a member", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: ACTIONS_COPY.resetCodeTitle("Ada Lovelace") })).toBeNull());
   });
 
+  it("keeps the keyboard in the queue after an approval: the next Approve, never <body> (F3.20)", async () => {
+    const HEDY = memberFixture({
+      membership_id: "m8", user_id: "u8", full_name: "Hedy Lamarr", email: "hedy@example.com",
+      membership_number: "CR-0008", status: "PendingApproval",
+    });
+    stubFetch([
+      { path: "/api/v1/admin/members/", body: null, sequence: [[GRACE, HEDY], [HEDY], [HEDY]] },
+      { path: "/api/v1/admin/biometric/enrollments", body: [] },
+      { method: "POST", path: `/api/v1/admin/members/${GRACE.membership_id}/approve`, body: { approved: true, member_notified: true } },
+    ]);
+    renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members?status=PendingApproval"] });
+    const first = (await screen.findAllByRole("button", { name: ROW_ACTIONS.approve }))
+      .find((b) => b.getAttribute("data-approve-row") === GRACE.user_id)!;
+    first.focus();
+    fireEvent.click(first);
+
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("data-approve-row", HEDY.user_id));
+  });
+
   it("offers a turned-down applicant's approval from the row ⋯ (F3.23)", async () => {
     const REJECTED = memberFixture({
       membership_id: "m9", user_id: "u9", full_name: "Rita Rejected", email: "rita@example.com",

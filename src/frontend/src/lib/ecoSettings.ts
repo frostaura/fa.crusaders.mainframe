@@ -57,7 +57,7 @@ export const DEVICE_TIMING_RULES: readonly NumericSettingRule[] = [
   {
     key: "lcd_revert_seconds",
     label: "Screen returns to the start after (seconds)",
-    hint: "5–120. GOAL item 1. How long the box's screen stays on a result — a scan, a refusal, "
+    hint: "5–120. How long the box's screen stays on a result — a scan, a refusal, "
       + "a court chosen — before it goes back to “Scan code to get started”. Every screen on "
       + "the box has this timeout, which is what stops one getting stuck with no way out.",
     min: 5, max: 120, integer: true,
@@ -65,7 +65,7 @@ export const DEVICE_TIMING_RULES: readonly NumericSettingRule[] = [
   {
     key: "rapid_scan_window_seconds",
     label: "Next person may scan within (seconds)",
-    hint: "0–60. GOAL item 18. After somebody scans, the box stays ready for the next person "
+    hint: "0–60. After somebody scans, the box stays ready for the next person "
       + "for this long and shows the time left. 0 turns rapid scanning off, and the box goes "
       + "straight back to the start after each scan.",
     min: 0, max: 60, integer: true, zeroMeans: "one person at a time",
@@ -87,7 +87,7 @@ export const CAP_RULES: readonly NumericSettingRule[] = [
   {
     key: "member_max_slots_per_day",
     label: "Slots per member per day",
-    hint: "0–96. GOAL item 19. The most slots any one member may hold on one day. 0 means no "
+    hint: "0–96. The most slots any one member may hold on one day. 0 means no "
       + "limit. Admins are never limited.",
     min: 0, max: 96, integer: true, zeroMeans: "no limit",
   },
@@ -217,7 +217,7 @@ export const MAX_CURRENCY_SYMBOL_LENGTH = 4;
  */
 export const MEMBER_TRACE_LABEL = "Allow an admin to look at one member's night";
 export const MEMBER_TRACE_HINT
-  = "GOAL item 6. When this is off, the page is not there at all — not greyed out, not "
+  = "When this is off, the page is not there at all — not greyed out, not "
   + "refused, simply absent. When it is on, every look is recorded in the change record with "
   + "the admin's name, the member's name and the night, and the member may ask to see it.";
 
