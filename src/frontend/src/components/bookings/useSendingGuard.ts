@@ -60,7 +60,7 @@ function useOptionalPush() {
  * Whether the sheet is still there to say an outcome itself, and a way to say it when it is not.
  * `live()` is false once the flow's view has unmounted or the sheet has been closed.
  */
-export function useLateLanding(open: boolean) {
+export function useLateLanding(open = true) {
   const mounted = useRef(false);
   const openNow = useRef(open);
   const push = useOptionalPush();
@@ -77,5 +77,9 @@ export function useLateLanding(open: boolean) {
   const say = useCallback((tone: "success" | "danger", text: string) => {
     pushRef.current?.({ tone, text });
   }, []);
-  return { live, say };
+  /** Says `text()` in a toast only when the sheet is gone — otherwise the sheet says it itself. */
+  const sayIfGone = useCallback((tone: "success" | "danger", text: () => string) => {
+    if (!live()) say(tone, text());
+  }, [live, say]);
+  return { live, say, sayIfGone };
 }

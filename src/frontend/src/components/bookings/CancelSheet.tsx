@@ -129,7 +129,7 @@ function useCancelFlow(props: FlowProps) {
         const own = bookings.every((b) => b.mine);
         props.onCancelled?.({ cancelledIds: result.cancelledIds, ownMoneyMoved: own });
         // Gone before the answer came (a forced route): the batch's rows have nowhere to show.
-        if (!result.single && !late.live()) late.say("success", CANCEL_SHEET.landedLate(result.cancelledIds.length));
+        if (!result.single) late.sayIfGone("success", () => CANCEL_SHEET.landedLate(result.cancelledIds.length));
         if (!result.single) {
           setRun(result);
           return;
@@ -141,7 +141,7 @@ function useCancelFlow(props: FlowProps) {
       },
       failure: (error) => {
         if (provesStaleGrid(error)) props.onStale?.();
-        if (!late.live()) late.say("danger", failureSentence(error));
+        late.sayIfGone("danger", () => failureSentence(error));
       },
     },
   );

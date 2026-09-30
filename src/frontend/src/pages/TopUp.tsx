@@ -166,6 +166,34 @@ function firstAmount(o: Options): string {
   return left >= o.min_zar ? String(left) : "";
 }
 
+/** `refusalFor`'s answer when the refusal's figures went into the screen and the field says it. */
+const LIMIT_TAKEN = Symbol("limit-taken");
+
+/**
+ * What a refused start does to the screen: a moved rate is re-quoted (not an error — nothing was
+ * charged), a cap refusal's figures are taken in (M4-2: the presets, the limits line and the
+ * field's sentence then say what is left), anything else is a sentence. Null: nothing to say.
+ */
+function refusalFor(
+  err: unknown,
+  setOptions: React.Dispatch<React.SetStateAction<Options | null>>,
+  setRestated: React.Dispatch<React.SetStateAction<RestatedQuote | null>>,
+): string | typeof LIMIT_TAKEN | null {
+  const payload = err instanceof ApiError && isRecord(err.payload) ? err.payload : null;
+  const code = payload ? String(payload.error ?? "") : "";
+  if (code === "topup_rate_changed" && payload) {
+    reQuote(payload, setOptions, setRestated);
+    return null;
+  }
+  if (code === "amount_exceeds_member_cap" && payload && typeof payload.remaining_zar === "number") {
+    const remaining = payload.remaining_zar;
+    const already = typeof payload.already_zar === "number" ? payload.already_zar : undefined;
+    setOptions((o) => (o ? { ...o, remaining_zar: remaining, ...(already === undefined ? {} : { already_zar: already }) } : o));
+    return LIMIT_TAKEN;
+  }
+  return START_ERRORS[code] ?? (err instanceof ApiError ? NOT_STARTED : UNREACHABLE);
+}
+
 /** The club's top-up rules, read on mount and again whenever the tab regains focus. */
 function useTopUpOptions(setAmount: (update: (current: string) => string) => void) {
   const [options, setOptions] = useState<Options | null>(null);
@@ -297,21 +325,9 @@ function TopUpForm(props: FormProps) {
       rememberTopUpReturn(res.topup_id, returnTo);
       postToGateway(res.redirect_url, res.form_fields);
     } catch (err) {
-      const payload = err instanceof ApiError && isRecord(err.payload) ? err.payload : null;
-      const code = payload ? String(payload.error ?? "") : "";
-      if (code === "topup_rate_changed" && payload) {
-        // Not an error: nothing went wrong and nothing was charged, the price simply moved.
-        reQuote(payload, setOptions, setRestated);
-      } else if (code === "amount_exceeds_member_cap" && payload && typeof payload.remaining_zar === "number") {
-        // M4-2 — the refusal carries what is left: the screen takes it (presets, the limits line,
-        // the field's sentence) instead of the bare "more than the club's limit".
-        const remaining = payload.remaining_zar;
-        const already = typeof payload.already_zar === "number" ? payload.already_zar : undefined;
-        setOptions((o) => (o ? { ...o, remaining_zar: remaining, ...(already === undefined ? {} : { already_zar: already }) } : o));
-        setTried(true);
-      } else {
-        setError(START_ERRORS[code] ?? (err instanceof ApiError ? NOT_STARTED : UNREACHABLE));
-      }
+      const said = refusalFor(err, setOptions, setRestated);
+      if (said === LIMIT_TAKEN) setTried(true);
+      else if (said !== null) setError(said);
       setLoading(false);
     }
   };

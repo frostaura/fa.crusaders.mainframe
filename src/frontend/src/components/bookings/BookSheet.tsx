@@ -1,9 +1,9 @@
-import { Suspense, useEffect, useId, useRef, type ReactNode } from "react";
+import { Suspense, useEffect, useId, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { AnimatedAlert, AnimatedCheck } from "@/components/ui/feedback-marks";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
@@ -15,13 +15,13 @@ import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
 import { worthRetrying } from "@/lib/bookingErrors";
 import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine, heldPartsLine } from "@/lib/bookingsCopy";
-import { heldPartsOf, type HeldPart } from "@/lib/bookingsApi";
+import { firstNameOf, heldPartsOf, type HeldPart } from "@/lib/bookingsApi";
 import { useBalance } from "@/lib/balance";
-import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
+import { heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
 import { MoneyRows, SendingNote, SlotList, SlotSummary, Stepper } from "./SheetParts";
-import { slotCount, type BookAs } from "./bookFlow";
+import { isAdminRun, slotCount, type BookAs } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
 import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
 import { ConfirmPlayers, ResultPlayers } from "./PlayersOutcomeView";
@@ -29,6 +29,7 @@ import { LazySplitStep, loadSplitStep, usePrefetchWhen } from "./lazyParts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { refusalSentence, useBookFlow, type BookFlow, type BookFlowInput } from "./useBookFlow";
 import { useSendingGuard } from "./useSendingGuard";
+import { BookFooter } from "./BookSheetFooter";
 
 export type { BookedOutcome } from "./useBookFlow";
 
@@ -393,80 +394,5 @@ function resultHeading(booked: number, total: number, run: NonNullable<BookFlow[
 }
 
 function firstName(name: string | null): string | null {
-  return name ? name.trim().split(/\s+/)[0] ?? name : null;
-}
-
-function isAdminRun(flow: BookFlow): boolean {
-  return flow.steps.includes("slots");
-}
-
-/* ─────────────────────────────── the footer ─────────────────────────────── */
-
-type FooterProps = { flow: BookFlow; onClose: () => void; reasonId: string; note: ReactNode };
-
-function BookFooter({ flow, onClose, reasonId, note }: FooterProps) {
-  if (flow.run) return <ResultFooter flow={flow} onClose={onClose} note={note} />;
-  if (flow.players.picking !== null) {
-    // The picker is a panel inside the Players step: its way out is Back, to the seats.
-    return (
-      <DialogFooter>
-        <Button variant="outline" onClick={flow.back}>{BOOK_PLAYERS.pickerBack}</Button>
-      </DialogFooter>
-    );
-  }
-  const first = flow.stepIndex === 0;
-  const way = first ? BOOK_SHEET.cancel : BOOK_SHEET.back;
-  return (
-    <DialogFooter>
-      {note}
-      {/* R4 I4-1 — no way out while the booking is on its way; the note above says why. */}
-      {flow.busy ? null : <Button variant="outline" onClick={first ? onClose : flow.back}>{way}</Button>}
-      {flow.confirming ? <PrimaryButton flow={flow} reasonId={reasonId} /> : <Button onClick={flow.next}>{BOOK_SHEET.next}</Button>}
-    </DialogFooter>
-  );
-}
-
-function PrimaryButton({ flow, reasonId }: { flow: BookFlow; reasonId: string }) {
-  const { primary } = flow;
-  if (primary.kind === "none") return null;
-  if (primary.kind === "unavailable") {
-    // `aria-disabled`, never `disabled`: it stays focusable, so a reader reaches it and hears
-    // why (its description) — and with no handler, a press does nothing.
-    return (
-      <Button aria-disabled="true" aria-describedby={reasonId} data-unavailable="" className="cursor-not-allowed opacity-50 hover:bg-primary">
-        {primary.label}
-      </Button>
-    );
-  }
-  if (primary.kind === "reading") {
-    return <Button pending data-reading="">{primary.label}</Button>;
-  }
-  // R4 I4-2 — ready the moment it appears: only a double tap's second half is ignored (its click
-  // count says so), never a deliberate first tap.
-  return (
-    <Button pending={flow.busy} onClick={(e) => flow.submit(primary.allowNegativeBalance, e.detail)}>
-      {primary.label}
-    </Button>
-  );
-}
-
-function ResultFooter({ flow, onClose, note }: Omit<FooterProps, "reasonId">) {
-  const halted = flow.run?.halted === "insufficient_balance";
-  const admin = isAdminRun(flow);
-  return (
-    <DialogFooter>
-      {halted && !admin ? (
-        <Button variant="outline" asChild>
-          <Link to="/wallet/topup">{BOOK_SHEET.topUp}</Link>
-        </Button>
-      ) : null}
-      {halted ? (
-        <Button variant="outline" pending={flow.busy} onClick={(e) => flow.submit(admin, e.detail)}>
-          {admin ? BOOK_SHEET.bookRestAnyway : BOOK_SHEET.retry}
-        </Button>
-      ) : null}
-      {note}
-      {flow.busy ? null : <Button onClick={onClose}>{BOOK_SHEET.done}</Button>}
-    </DialogFooter>
-  );
+  return name ? firstNameOf(name) : null;
 }

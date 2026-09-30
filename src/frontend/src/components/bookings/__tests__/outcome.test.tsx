@@ -364,6 +364,8 @@ describe("F1.13 — the desk cancelling a split booking says the truth even when
     const money = document.querySelector("dl")!;
     expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}125.00 cr`);
     expect(money).toHaveTextContent(`${CANCEL_SHEET.goesBack("Adm")}125.00 cr`);
+    // R4 A4-4: a desk cancel of somebody else's booking always carries a reason.
+    fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Court closed" } });
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
     expect(await screen.findByText("Booking cancelled. 125.00 cr back to Adm's credit; 125.00 cr to Sam.")).toBeTruthy();
     expect(screen.queryByText(/250\.00 cr back to Adm/)).toBeNull();

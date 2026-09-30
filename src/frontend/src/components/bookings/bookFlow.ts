@@ -382,3 +382,8 @@ async function bookAsAdmin(req: BookRequest): Promise<BookRun> {
 export function placeBooking(req: BookRequest): Promise<BookRun> {
   return req.isAdmin ? bookAsAdmin(req) : bookAsMember(req);
 }
+
+/** Whether a run was the desk's — an admin's steps start with Slots. */
+export function isAdminRun(flow: { steps: readonly StepId[] }): boolean {
+  return flow.steps.includes("slots");
+}

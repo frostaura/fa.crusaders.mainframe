@@ -104,6 +104,47 @@ function useStepSettle() {
   return { arm, isDoubleTapTail };
 }
 
+/**
+ * R4 I4-1 / I4-2 — the one gate every write and every step change passes. `busy` is true from
+ * Book until the club answers: its own flag, not `action.pending`, which a reset (a step or payer
+ * change) cleared while the write was still on its way. While it is up nothing changes what the
+ * sheet sends and nothing leaves it; `onBusy` tells the sheet at once (not in an effect), so a
+ * press on the × a frame later is refused too. `ignoredTaps` counts a double tap's second half,
+ * so the sheet can say why nothing happened.
+ */
+function useSendGate(onBusy: ((busy: boolean) => void) | undefined) {
+  const settle = useStepSettle();
+  const [busy, setBusy] = useState(false);
+  const [ignoredTaps, setIgnoredTaps] = useState(0);
+  const busyNow = useRef(false);
+  /** `fn`, except while a write is in flight — then nothing (a step, payer or player change). */
+  const whenIdle = <A extends unknown[]>(fn: (...args: A) => void) => (...args: A) => {
+    if (!busyNow.current) fn(...args);
+  };
+  /** A step change re-arms the double-tap window. */
+  const arm = () => {
+    settle.arm();
+    setIgnoredTaps(0);
+  };
+  const send = (clicks: number, work: () => Promise<unknown>) => {
+    if (busyNow.current) return;
+    if (settle.isDoubleTapTail(clicks)) {
+      setIgnoredTaps((n) => n + 1);
+      return;
+    }
+    setIgnoredTaps(0);
+    busyNow.current = true;
+    setBusy(true);
+    onBusy?.(true);
+    void work().finally(() => {
+      busyNow.current = false;
+      setBusy(false);
+      onBusy?.(false);
+    });
+  };
+  return { busy, ignoredTaps, whenIdle, arm, send };
+}
+
 /* ─────────────────────────────── members (admin) ─────────────────────────────── */
 
 type MemberList = { list: ComboboxMember[]; loading: boolean };
@@ -221,23 +262,16 @@ export function useBookFlow(input: BookFlowInput) {
   const [key, setKey] = useState(() => newIdempotencyKey(isAdmin ? "ab" : "mb"));
   const [showProblem, setShowProblem] = useState(false);
   const [run, setRun] = useState<BookRun | null>(null);
-  const settle = useStepSettle();
-  // R4 I4-1 — true from Book until the club answers. Its own flag, not `action.pending`, which a
-  // reset (a step change, a payer change) would clear while the write was still on its way.
-  const [busy, setBusy] = useState(false);
-  // I4-2 — a double tap's second half, ignored: counted, so the sheet says why nothing happened.
-  const [ignoredTaps, setIgnoredTaps] = useState(0);
-  const busyNow = useRef(false);
-  const late = useLateLanding(input.sheetOpen ?? true);
+  const gate = useSendGate(input.onBusy);
+  const late = useLateLanding(input.sheetOpen);
 
   const members = useSheetMembers(isAdmin, input.members, actorUserId);
 
-  const onEdit = () => {
-    if (busyNow.current) return;
+  const onEdit = gate.whenIdle(() => {
     // A different game is a different request: never let a retry of the last one reuse its key.
     setKey(newIdempotencyKey("mb"));
     action.reset();
-  };
+  });
   const players = usePlayersStep({
     enabled: !isAdmin, prices: slots.map((s) => s.priceCredits), step: stepId, onEdit: () => onEdit(),
   });
@@ -273,7 +307,7 @@ export function useBookFlow(input: BookFlowInput) {
     {
       success: (result) => {
         setRun(result);
-        if (!late.live()) late.say("success", BOOK_SHEET.landedLate(result.booked.map(face)));
+        late.sayIfGone("success", () => BOOK_SHEET.landedLate(result.booked.map(face)));
         const viewerPaid = !isAdmin || who.kind === "self";
         input.onBooked?.({
           booked: result.booked,
@@ -286,29 +320,26 @@ export function useBookFlow(input: BookFlowInput) {
       // A re-read already happened on the way here when there was one to make.
       failure: (error) => {
         input.onSending?.(null);
-        if (!late.live()) late.say("danger", refusalSentence(error, Boolean(players.payload)));
+        late.sayIfGone("danger", () => refusalSentence(error, Boolean(players.payload)));
         const reread = Boolean(input.reread) && worthRereading(error);
         if (!reread && provesStaleGrid(error)) input.onStale?.();
       },
     },
   );
 
-  const setWho = (next: BookAs) => {
-    if (busyNow.current) return;
+  const setWho = gate.whenIdle((next: BookAs) => {
     setWhoState(next);
     setShowProblem(false);
     // A different payer is a different request: never let a retry of the last one reuse its key.
     setKey(newIdempotencyKey(isAdmin ? "ab" : "mb"));
     action.reset();
-  };
+  });
 
-  const moveTo = (id: StepId) => {
-    if (busyNow.current) return;
-    settle.arm();
-    setIgnoredTaps(0);
+  const moveTo = gate.whenIdle((id: StepId) => {
+    gate.arm();
     action.reset();
     setStepId(id);
-  };
+  });
 
   const next = () => {
     if (step === "slots" && whoProblem(who)) {
@@ -327,21 +358,7 @@ export function useBookFlow(input: BookFlowInput) {
 
   /** @param clicks the press's `event.detail` — see `useStepSettle`. */
   const submit = (allowNegativeBalance: boolean, clicks = 0) => {
-    if (busyNow.current) return;
-    if (settle.isDoubleTapTail(clicks)) {
-      setIgnoredTaps((n) => n + 1);
-      return;
-    }
-    setIgnoredTaps(0);
-    // Told to the sheet at once, not in an effect: a press on the × a frame later is refused too.
-    busyNow.current = true;
-    setBusy(true);
-    input.onBusy?.(true);
-    void action.run(allowNegativeBalance).finally(() => {
-      busyNow.current = false;
-      setBusy(false);
-      input.onBusy?.(false);
-    });
+    gate.send(clicks, () => action.run(allowNegativeBalance));
   };
 
   /** In grid slots, the unit the action bar counted in — see `slotCount`. */
@@ -387,8 +404,8 @@ export function useBookFlow(input: BookFlowInput) {
     action, run,
     next, back, submit, face, timezone,
     /** A write is on its way: nothing may leave the sheet or change what it sends (R4 I4-1). */
-    busy,
-    ignoredTaps,
+    busy: gate.busy,
+    ignoredTaps: gate.ignoredTaps,
     held: memberHeld,
     /**
      * What of the payer's balance cannot be spent — the member's held + owed back, or the
