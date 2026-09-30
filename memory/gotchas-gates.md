@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-gates
 description: "Gates that report a red run as green or trip on a function nobody wrote: complexity exits 1 on stdout, lizard's C# and .tsx lexers mis-scope (one form of it no single member causes — split the file), ls-files misses untracked work."
 type: gotcha
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Gotchas — the quality gates and their lint tooling
@@ -12,14 +12,13 @@ gate failures: [`gotchas-env.md`](gotchas-env.md).
 
 - **`make complexity` prints its warning to stdout and exits 1** — piping it through `tail` loses
   the exit code and reports a red gate as green. That is how a failing gate reached CI. Read `$?`.
-- **lizard's `.tsx` lexer desyncs four ways** — a bare `<` in an object literal, an odd number of
-  bare apostrophes in JSX text, an inline object type inside a generic argument, or **a component
-  whose own name appears later in the file as a JSX closing tag** — each reporting a function
-  nobody wrote; the tell is that the *enclosing* component stops being reported at all. The
-  cure is the text, not the code: name the type, reword the sentence, hoist the literal. For the
-  fourth, the declaration is run on to its own `</Name>`: `ChartFrame` is 38 lines and was
-  reported at 271, tripping `-L 200`. **Move the component to its own file** — the span then has
-  no unrelated code to swallow, and a file with 28 functions wanted splitting anyway.
+- **lizard's `.tsx` lexer desyncs seven ways** — a bare `<` in an object literal, an odd number of
+  bare apostrophes in JSX text, an inline object type in a generic argument, a `//` comment or a
+  `data-x=""` prop placed after a braced JSX prop, a JSX spread prop, or **a component whose own
+  name appears later as a JSX closing tag** — each scoring a function nobody wrote (the tell: the
+  enclosing function stops being reported). Cure the text, not the code: name the type, reorder the
+  props, pass the spread's fields by name. For the last, `ChartFrame` (38 lines) was reported at
+  271: **move it to its own file**. Round 2's five "grown" functions were four desyncs, one real.
 - **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces**
   (`=> new { … }`, `=> x switch { … }`, a property pattern), dumping the rest of the file into a
   `*global*` pseudo-function the length of the file — the gate trips naming no real function at line
