@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas-real-stack
-description: "Real-stack walk (e2e-real) traps: the anonymous auth limit, past_time for a booking now, the box's cue window, courts held by earlier runs, sessions expiring in the wait, celebrations mid-walk, 21:00 quiet hours."
+description: "Real-stack walk (e2e-real) traps: the anonymous auth limit, past_time for a booking now, the box's cue window, courts held by earlier runs, sessions expiring in the wait, celebrations mid-walk, the 07:00–21:00 play window."
 type: gotcha
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Gotchas — the real-stack walk (`e2e-real/`)
@@ -31,4 +31,7 @@ Found getting `e2e-real/play.spec.ts` green on 2026-09-29. Each one failed the w
 - **A fresh member's "First court" celebration arrives within the play worker's minute and may
   cover the booking page** mid-step (allowed there by §9.3). Dismiss it before clicking.
 - **`play.result_to_confirm` is held by quiet hours (21:00–07:00 club time).** After 21:00 the
-  confirm mail never arrives and the walk's mail step times out — run it in the evening, early.
+  confirm mail never arrives and the walk's mail step times out; before the club opens (06:00) it
+  fails earlier, `409 out_of_hours` on the booking. **The play walk runs only 07:00–21:00.**
+- **`session.spec.ts` proves the refresh cookie through a proxy**: run it at the gateway and with
+  `E2E_REAL_BASE_URL=http://localhost:4173` for the Vite dev proxy — both passed 2026-09-30.

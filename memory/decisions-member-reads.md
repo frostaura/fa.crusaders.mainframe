@@ -19,6 +19,9 @@ Asked by the frontend lanes; built in lane B. Tests: `R1PlayersHttpTests`, `R1Ma
 - **`GET /api/v1/me/invites/{participantId}` returns the caller's own seat in ANY state** with the
   booking's status, so a mail deep link can say "you're in / it was cancelled / you're off it".
   Anybody else's seat — the organiser included — is 404: a participant id proves nothing.
+- **The PWA asks both instead of inferring (R1 integration):** `/j/:token` signed out shows the
+  preview's facts (404 → "no longer open", no Join); `/invites/:id` reads its fate from the seat
+  (cancelled / accepted → in / anything else → off). *Why:* the inbox search missed old notices.
 - **An "Is it right?" line is retired by whatever answers or replaces it** (confirm, dispute,
   edit, withdraw, void, keep, auto-confirm): marked read in that act's save. *Why:* the inbox kept
   actionable asks about results that no longer existed. The headline is the recorder's side in

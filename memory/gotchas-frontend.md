@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-frontend
 description: "React and harness traps: renderPage(<StrictMode>…) is INERT, user-event typing hangs under jsdom 28, only the repo's Chromium registers a SW, worktrees serve no webfonts, lazy chunks race tests, Select.Value drops className."
 type: gotcha
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Gotchas — frontend, vitest and the browser harness
@@ -13,9 +13,10 @@ last_verified: 2026-09-29
   Measured with a probe: bare `render(<StrictMode><Probe/></StrictMode>)` logs mount → cleanup →
   mount; the wrapped form logs only "mount". **The working form is the render OPTION:**
   `renderPage(ui, { reactStrictMode: true })`, which RTL applies outside its wrapper.
-- **StrictMode's mount → cleanup → mount has produced two real defects unit tests could not see**:
-  a `mounted` ref written only on cleanup is false before the first click — a confirm stuck on
-  "Working…" after a booking, and an outage screen's retry dead for the life of the tab.
+- **A `mounted` ref is set in a LAYOUT effect, never a passive one.** Written only on cleanup it was
+  false before the first click (a confirm stuck on "Working…", a dead outage retry); set in a
+  passive `useEffect` it was false for a press landing between commit and effect flush, and the
+  pending state was dropped (outage-ux flaked 2 in 6 full runs, 2026-09-30; `useAsyncAction`).
 - **`@testing-library/user-event`'s keyboard and typing paths never settle under jsdom 28 +
   vitest 4 here.** `user.type()` / `user.keyboard()` hang to the test timeout and read as a
   component ignoring input. `user.click` is fine. Use `fireEvent.change` / `fireEvent.keyDown`

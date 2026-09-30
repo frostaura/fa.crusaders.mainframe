@@ -20,9 +20,9 @@ remote branch was deleted. **All three PRs are MERGED and none is open.** `origi
 **Work goes directly onto `main` by founder decision (2026-09-23)** — no branch, no PR — so
 every push runs the release half of CI as well as the gates. `git rev-list --left-right --count
 origin/main...HEAD` answering `0 0` is the check before claiming anything is safe. **Integration
-line `main-work` (local, UNPUSHED)**: P7, P11 and the parallel test path reached `origin/main`
-(76b5815); on top of it, 2026-09-29, **P12 play** — both lanes merged, the contract aligned,
-every gate green — ahead of `origin/main` and not pushed (checked by `git rev-list` that day).
+line `main-work` (local, UNPUSHED)** carries P12 play (2026-09-29) and **review round 1** (five
+lanes + an integration pass, 2026-09-30): `0 104` against `origin/main` after a fetch that day.
+Every gate green then except the real-stack play walk, which cannot run before 07:00.
 
 **What CI does on `main`.** Every gate runs **and the release half runs too**: the six image
 jobs and three manifest steps are gated on a push to `main`, so unlike a pull request they are
