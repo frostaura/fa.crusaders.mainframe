@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, endpoints, noteWalletMoved, setMoneyRequestListener, STREAM_SILENCE_MS, tokenStore } from "./api";
 import { heldPartsOf, type HeldPart } from "./bookingsApi";
 
+/** The chip reads a balance, not a ledger: one row is the smallest page the wallet serves. */
+const CHIP_WALLET_ROWS = 1;
+
 /**
  * Item 8 — the live balance, as a POLICY that knows nothing about the transport.
  *
@@ -393,7 +396,10 @@ export function useLiveBalance({
     const asked = generation.current;
     if (options?.expectSelf) expectSelf.current = true;
     try {
-      const w = await endpoints.wallet();
+      // P4-7 / M4-9 (R4): the balance and the held parts are top-level on any page of the wallet,
+      // so the chip asks for the smallest page (the server's floor is one row), not a hundred.
+      // A first-page read already in flight for more rows (the page's) still answers it.
+      const w = await endpoints.wallet(CHIP_WALLET_ROWS);
       if (asked !== generation.current) return;
       setHeldFigures(heldFrom(w));
       record(w.balance_credits);

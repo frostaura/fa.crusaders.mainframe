@@ -393,3 +393,21 @@ describe("a re-read can say whose doing it was", () => {
     expect(screen.getByTestId("delta")).toHaveTextContent("club:100.00");
   });
 });
+
+/**
+ * P4-7 / M4-9 (review round 4) — the chip read a hundred ledger rows to show one number. It wants
+ * the balance and the held parts, which the wallet answers at the top level of any page, so it
+ * asks for the smallest page there is; the Wallet page's own read (with its share summaries)
+ * cannot be joined by the chip's anyway, so a direct /wallet load was two full ledger reads.
+ */
+describe("the chip's read", () => {
+  it("asks for one ledger row, not a page of them", async () => {
+    const t = fakeTransport();
+    const { stub } = await mount(t.transport);
+    await act(async () => {});
+    const reads = stub.calls.filter((c) => c.path.startsWith("/api/v1/wallet"));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) expect(new URL(read.path, "http://x").searchParams.get("limit"), read.path).toBe("1");
+    expect(screen.getByTestId("balance")).toHaveTextContent("100.00");
+  });
+});
