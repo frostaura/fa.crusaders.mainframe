@@ -488,6 +488,21 @@ export function occurrenceStatusWord(status: string | undefined): string {
   return (status && STATUS_WORDS[status]) ?? "Not known";
 }
 
+/**
+ * A write whose reply was lost, read back (review round 3): what the record still shows, and
+ * what cannot be told. Composed by `lib/lostReplyCopy`'s `unsureWords`.
+ */
+export const SCHEDULE_LOST = {
+  stillHeld: (date: string) => `${clubDateShort(date)} is still held`,
+  whetherSkipped: (date: string) => `${clubDateShort(date)} was skipped`,
+  stillSkipped: (date: string) => `${clubDateShort(date)} is still skipped`,
+  whetherRestored: (date: string) => `${clubDateShort(date)} was restored`,
+  stillRunning: "it is still running",
+  whetherEnded: "it was ended",
+  hoursUnchanged: (date: string) => `${clubDateShort(date)} still has its old hours`,
+  whetherHours: (date: string) => `the hours of ${clubDateShort(date)} changed`,
+} as const;
+
 /** Ruling 2's sentence, verbatim: both halves said, and no softer word than "nobody". */
 export const CHANGES_UNDELETABLE = "Nobody can delete these from the app, including admins.";
 

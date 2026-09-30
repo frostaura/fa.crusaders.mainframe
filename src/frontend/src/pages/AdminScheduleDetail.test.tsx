@@ -3,7 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AdminScheduleDetailPage } from "./AdminScheduleDetail";
-import { renderPage, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
+import { refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
 import {
   SCHEDULE_ID, changeRowFixture, occurrenceFixture, scheduleDetailResponse, scheduleEndResponse,
   scheduleOccurrenceResponse, scheduleOccurrencesResponse, scheduleRowFixture, scheduleUpdateResponse,
@@ -406,5 +406,60 @@ describe("an ended schedule, and the next date after a skip (R3 A-6)", () => {
 
     expect(await screen.findByText("Next on Tue 20 Oct, 18:00.")).toBeInTheDocument();
     expect(screen.queryByText(/Next on Tue 13 Oct/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Review round 3 (admin lost-reply audit): a skip or an end whose reply is lost is looked up
+ * before anything is said. The stubs perform the write, then fail the reply.
+ */
+describe("a schedule write whose reply was lost", () => {
+  function lostSkip(landed: boolean, readable = true): StubRoute[] {
+    let skipped = false;
+    let reads = 0;
+    return [
+      ...detailRoutes().filter((r) => r.path !== `${BASE}/occurrences`),
+      {
+        path: `${BASE}/occurrences`,
+        respond: () => {
+          reads += 1;
+          if (!readable && reads > 1) return refuse(503, { error: "server_error" });
+          return scheduleOccurrencesResponse([
+            occurrenceFixture("2026-10-13", skipped ? { status: "skipped", courts: [] } : {}),
+            occurrenceFixture("2026-10-20"),
+          ]);
+        },
+      },
+      {
+        method: "PATCH", path: `${BASE}/occurrences/2026-10-13`,
+        respond: () => { if (landed) skipped = true; return refuse(504, { error: "gateway_timeout" }); },
+      },
+    ];
+  }
+  async function skip() {
+    await userEvent.click(await screen.findByRole("button", { name: "Skip Tue 13 Oct" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Skip Tue 13 Oct" }));
+  }
+
+  it("treats a skip the club has as done, and never says it did not happen", async () => {
+    stubFetch(lostSkip(true));
+    renderDetail();
+    await skip();
+    expect(await screen.findByRole("button", { name: "13 October 2026 — restore this Tuesday" })).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't change that repeating booking/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing changed when the date is still held", async () => {
+    stubFetch(lostSkip(false));
+    renderDetail();
+    await skip();
+    expect(await screen.findByText(/we checked: Tue 13 Oct is still held — nothing changed/)).toBeInTheDocument();
+  });
+
+  it("says it cannot tell when the dates cannot be read either", async () => {
+    stubFetch(lostSkip(true, false));
+    renderDetail();
+    await skip();
+    expect(await screen.findByText(/can't tell whether Tue 13 Oct was skipped/)).toBeInTheDocument();
   });
 });

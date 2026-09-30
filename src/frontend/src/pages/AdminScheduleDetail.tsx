@@ -19,6 +19,9 @@ import {
   type ScheduleOccurrence, type ScheduleOccurrencesResponse, type ScheduleRow,
 } from "../lib/adminApi";
 import { describeFailure } from "../lib/errors";
+import { UnsureOutcome, unsureSentence, writeOrReadBack, type UnsureWords } from "../lib/lostReply";
+import { LOST_REPLY } from "../lib/lostReplyCopy";
+import { endCheck, hoursCheck, skipCheck, type ScheduleCheck } from "../lib/scheduleReadBack";
 import {
   DATES_EMPTY, clampedNotice, clubDateShort, endConsequence, nextHeldOccurrence, nextOccurrenceLine, occurrenceStatusWord,
   partialMaterialisation, ruleSentence, scheduleCodes, skipChipLabel, skipConsequence,
@@ -235,6 +238,9 @@ function ScheduleHeadline({ row, days, partial, next, timezone }: {
 
 const BACK = { to: "/admin/schedules", label: "Repeating bookings" };
 
+/** A failed write, with the words for an unsure outcome when it had a read-back (R3). Named: lizard's .tsx lexer desyncs on an inline object type in a generic argument. */
+type WriteFailure = { error: unknown; words?: UnsureWords };
+
 /** The page's `<h1>`, made focusable for a programmatic move (it is not in the tab order). */
 function headingIn(shell: HTMLElement | null): HTMLElement | null {
   const heading = shell?.querySelector<HTMLElement>("h1") ?? null;
@@ -319,7 +325,8 @@ export function AdminScheduleDetailPage() {
 
   const [changing, setChanging] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [writeError, setWriteError] = useState<unknown>(null);
+  // The error AND the words for an unsure outcome, when the write had a read-back (R3).
+  const [writeError, setWriteError] = useState<WriteFailure | null>(null);
   const [clampedTo, setClampedTo] = useState<string | null>(null);
   const [endReason, setEndReason] = useState("");
   const shellRef = useRef<HTMLDivElement>(null);
@@ -338,20 +345,27 @@ export function AdminScheduleDetailPage() {
     reloadChanges();
   }, [reloadSchedule, reloadOccurrences, reloadChanges]);
 
-  async function runWrite(work: () => Promise<{ effective_from_clamped_to?: string } | unknown>): Promise<string> {
+  /**
+   * One write, then every read again. With a `check`, a lost reply is looked up before anything
+   * is said (review round 3): it said "That did not happen." over a 5xx that may have landed.
+   */
+  async function runWrite(work: () => Promise<{ effective_from_clamped_to?: string } | unknown>, check?: ScheduleCheck): Promise<string> {
     setBusy(true);
     setWriteError(null);
     setClampedTo(null);
     try {
-      const result = await work() as { effective_from_clamped_to?: string } | null;
+      const landed = check ? await writeOrReadBack(work, check.readBack) : { value: await work(), proven: false };
+      const result = landed.value as { effective_from_clamped_to?: string } | null;
       // `effective_from` is clamped, never refused — an admin typing last Tuesday means "from
       // now on" — and the screen has to say it moved, or the admin believes the past changed.
       if (result?.effective_from_clamped_to) setClampedTo(result.effective_from_clamped_to);
       setChanging(null);
       afterWrite();
-      return "Done.";
+      return landed.proven ? LOST_REPLY.proven("Done.") : "Done.";
     } catch (err) {
-      setWriteError(err);
+      setWriteError({ error: err, words: check?.words });
+      // An unsure outcome is not a "no": the reads are refreshed so the page shows the record.
+      if (err instanceof UnsureOutcome) { afterWrite(); return "It isn't known yet whether that happened."; }
       return "That did not happen.";
     } finally {
       setBusy(false);
@@ -360,19 +374,18 @@ export function AdminScheduleDetailPage() {
 
   function submitChange(date: string, choice: { scope: EditScope; start: string; end: string; reason: string }) {
     if (!row) return;
-    void runWrite(() => (choice.scope === "only"
-      ? adminEndpoints.scheduleOccurrenceUpdate(id, date, {
-        start: choice.start, end: choice.end, reason: choice.reason,
-      })
-      : adminEndpoints.scheduleUpdate(id, {
-        ...scheduleBodyOf(row), start: choice.start, end: choice.end, effectiveFrom: date,
-        reason: choice.reason,
-      })));
+    const { start, end, reason } = choice;
+    const body = { ...scheduleBodyOf(row), start, end, effectiveFrom: date, reason };
+    const work = choice.scope === "only"
+      ? () => adminEndpoints.scheduleOccurrenceUpdate(id, date, { start, end, reason })
+      : () => adminEndpoints.scheduleUpdate(id, body);
+    void runWrite(work, hoursCheck(id, date, choice, scheduleRead.data?.timezone));
   }
 
   const notice = writeError !== null ? (
     <Alert tone="danger" live="polite" announceKey="schedule-write">
-      {describeFailure(writeError, { action: "change that repeating booking", codes })}
+      {(writeError.words && unsureSentence(writeError.error, writeError.words))
+        || describeFailure(writeError.error, { action: "change that repeating booking", codes })}
     </Alert>
   ) : null;
 
@@ -419,7 +432,7 @@ export function AdminScheduleDetailPage() {
       <SkippedDateChips
         skipped={skipped}
         busy={busy}
-        onRestore={(date) => { void runWrite(() => adminEndpoints.scheduleOccurrenceUpdate(id, date, { skip: false })); }}
+        onRestore={(date) => { void runWrite(() => adminEndpoints.scheduleOccurrenceUpdate(id, date, { skip: false }), skipCheck(id, date, false)); }}
       />
 
       <Card>
@@ -452,6 +465,7 @@ export function AdminScheduleDetailPage() {
                 onSubmitChange={(choice) => submitChange(o.date, choice)}
                 onSkip={() => runWrite(
                   () => adminEndpoints.scheduleOccurrenceUpdate(id, o.date, { skip: true }),
+                  skipCheck(id, o.date, true),
                 )}
                 focusAfter={focusHeading}
                 notice={notice}
@@ -477,7 +491,7 @@ export function AdminScheduleDetailPage() {
             refundCredits: 0,
           })}
           focusAfter={focusHeading}
-          onEnd={() => runWrite(() => adminEndpoints.scheduleEnd(id, { reason: endReason.trim() }))}
+          onEnd={() => runWrite(() => adminEndpoints.scheduleEnd(id, { reason: endReason.trim() }), endCheck(id))}
         />
       )}
 
