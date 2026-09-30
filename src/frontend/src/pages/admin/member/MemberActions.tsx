@@ -9,6 +9,7 @@ import { endpoints } from "@/lib/api";
 import { ACTIONS_COPY as COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
 import type { MemberDetail } from "@/lib/memberDetailApi";
 import { transitionTruth } from "@/components/members/lostTransition";
+import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 
 /**
  * The member's secondary actions behind one ⋯ (the founder: the old row of worded buttons was
@@ -31,8 +32,12 @@ type Props = { detail: MemberDetail; name: string; onChanged: () => void | Promi
 function ReasonField({ id, value, onChange }: { id: string; value: string; onChange: (next: string) => void }) {
   return (
     <Field controlId={id}>
-      <FieldLabel>{COPY.reason}</FieldLabel>
-      <Textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={COPY.reasonPlaceholder} />
+      {/* Required, and said so (A11Y F3-18): the disabled button used to be the only cue. */}
+      <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <FieldLabel>{COPY.reason}</FieldLabel>
+          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+        </span>
+      <Textarea value={value} required aria-required="true" onChange={(e) => onChange(e.target.value)} placeholder={COPY.reasonPlaceholder} />
       <FieldDescription>{COPY.reasonHint}</FieldDescription>
     </Field>
   );
@@ -77,7 +82,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props) {
     label: COPY.reject, icon: <UserMinus aria-hidden="true" />, danger: true,
     confirm: {
       title: COPY.rejectTitle(name), description: COPY.rejectBody, confirmLabel: COPY.rejectConfirm,
-      action: COPY.rejectAction, children: reasonField, confirmDisabled: !reason.trim(),
+      action: COPY.rejectAction, children: reasonField, notReady: !reason.trim(),
       onConfirm: async () => {
         const r = await endpoints.adminReject(id, reason.trim());
         say(r.member_notified, COPY.rejected(name), COPY.rejectedUnnotified(name));
@@ -101,7 +106,7 @@ function useLifecycleItems({ detail, name, onChanged }: Props) {
     label: COPY.suspend, icon: <Prohibit aria-hidden="true" />, danger: true,
     confirm: {
       title: COPY.suspendTitle(name), description: COPY.suspendBody, confirmLabel: COPY.suspendConfirm,
-      action: COPY.suspendAction, children: reasonField, confirmDisabled: !reason.trim(),
+      action: COPY.suspendAction, children: reasonField, notReady: !reason.trim(),
       onConfirm: async () => {
         const r = await endpoints.adminSuspend(id, reason.trim());
         say(r.member_notified, COPY.suspended(name), COPY.suspendedUnnotified(name));

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { CONFIRM_NOT_READY } from "@/lib/confirmDialogCopy";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { signOut, unreachable } from "@/test/harness";
 import { ACTIONS_COPY, MEMBER_COPY, MEMBER_TABS, OVERVIEW_COPY, withPlayersLine } from "@/lib/memberDetailCopy";
@@ -157,7 +158,12 @@ describe("member detail — the ⋯ menu", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: ACTIONS_COPY.suspend }));
     const dialog = await screen.findByRole("dialog");
     const confirm = within(dialog).getByRole("button", { name: ACTIONS_COPY.suspendConfirm });
-    expect(confirm).toBeDisabled();
+    // Review round 2 (A11Y F3-18): pressable, and it answers — never a silent disabled button.
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
+    expect(within(dialog).getByRole("textbox", { name: ACTIONS_COPY.reason })).toHaveAttribute("aria-required", "true");
+    expect(stub.calls.some((c) => c.path.endsWith("/suspend"))).toBe(false);
 
     fireEvent.change(within(dialog).getByRole("textbox", { name: ACTIONS_COPY.reason }), { target: { value: "Subs unpaid" } });
     fireEvent.click(confirm);

@@ -1,4 +1,5 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
+import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -86,12 +87,16 @@ function ReasonDialog({ kind, member, onOpenChange, lifecycle }: Props & {
       description={copy.description}
       confirmLabel={copy.confirm}
       action={copy.action}
-      confirmDisabled={!reason.trim()}
+      notReady={!reason.trim()}
       onConfirm={() => run(member, reason)}
     >
       <Field>
-        <FieldLabel>{copy.reasonLabel}</FieldLabel>
-        <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={copy.reasonPlaceholder} />
+        {/* Required, and said so (A11Y F3-18): the disabled button used to be the only cue. */}
+        <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <FieldLabel>{copy.reasonLabel}</FieldLabel>
+          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+        </span>
+        <Input value={reason} required aria-required="true" onChange={(e) => setReason(e.target.value)} placeholder={copy.reasonPlaceholder} />
       </Field>
     </ConfirmDialog>
   );

@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactElement, type ReactNode } from "react";
+import { CONFIRM_NOT_READY } from "@/lib/confirmDialogCopy";
 import { Alert } from "../Alert";
 import { Button } from "../ui/button";
 import {
@@ -56,8 +57,16 @@ export type ConfirmDialogProps = {
   codes?: Record<string, string>;
   /** Extra body — a reason field, a list of what is affected. */
   children?: ReactNode;
-  /** The primary cannot be pressed yet (a required reason is empty). */
+  /** The primary cannot be pressed yet (a required reason is empty). Prefer `notReady`. */
   confirmDisabled?: boolean;
+  /**
+   * The work is not ready to run (a required reason is empty), and the primary stays ENABLED: a
+   * disabled button was the only cue, gave no reason and left the tab order (review round 2,
+   * A11Y F3-18). Pressing it says what is missing and puts focus on the field instead.
+   */
+  notReady?: boolean;
+  /** What pressing a not-ready primary says. Defaults to the reason sentence. */
+  notReadyMessage?: string;
   /** Where focus lands after a success that removed the trigger. */
   focusAfter?: () => HTMLElement | null | undefined;
 };
@@ -87,12 +96,15 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   };
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [notReady, setNotReady] = useState(false);
+  const body = useRef<HTMLDivElement>(null);
   const succeeded = useRef(false);
 
   const change = (next: boolean) => {
     if (pending) return;
     if (next) {
       setError(null);
+      setNotReady(false);
       succeeded.current = false;
     }
     setOpen(next);
@@ -100,6 +112,12 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
 
   const confirm = async () => {
     if (pending) return;
+    if (props.notReady) {
+      setNotReady(true);
+      body.current?.querySelector<HTMLElement>("textarea, input, [role=combobox]")?.focus();
+      return;
+    }
+    setNotReady(false);
     setPending(true);
     setError(null);
     try {
@@ -131,8 +149,11 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {children || error ? (
-          <DialogBody className="flex flex-col gap-4">
+          <DialogBody ref={body} className="flex flex-col gap-4">
             {children}
+            {notReady && props.notReady ? (
+              <Alert tone="warning" live="assertive" announceKey="confirm-not-ready">{props.notReadyMessage ?? CONFIRM_NOT_READY}</Alert>
+            ) : null}
             {error ? <Alert tone="danger" live="assertive">{describeFailure(error, { action, codes })}</Alert> : null}
           </DialogBody>
         ) : null}

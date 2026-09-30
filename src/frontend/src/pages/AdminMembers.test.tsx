@@ -4,6 +4,7 @@ import AdminMembersPage from "./AdminMembers";
 import { ASSIGN_COPY } from "../lib/groupsCopy";
 import { ledgerRowFixture, memberFixture, refuse, renderPage, stubFetch, type StubRoute } from "../test/harness";
 import { LOST_REPLY } from "../lib/topUpCopy";
+import { CONFIRM_NOT_READY, REQUIRED_MARK } from "../lib/confirmDialogCopy";
 import {
   OUTCOMES, PASSWORD_DIALOG, RELATED_BOOKING, REJECT_DIALOG, RESET_DIALOG, ROW_ACTIONS, SUSPEND_DIALOG,
   TOP_UP_SHEET, UNVERIFIED,
@@ -612,9 +613,17 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     await fromMenu(ROW_ACTIONS.suspend);
     const dialog = await screen.findByRole("dialog", { name: SUSPEND_DIALOG.title("Ada Lovelace") });
 
-    // The reason is not optional: the member is emailed it.
+    // The reason is not optional: the member is emailed it. Review round 2 (A11Y F3-18): the
+    // field says it is required, and the button stays pressable and answers instead of sitting
+    // disabled with no reason given.
     const confirm = within(dialog).getByRole("button", { name: SUSPEND_DIALOG.confirm });
-    expect(confirm).toBeDisabled();
+    expect(confirm).toBeEnabled();
+    expect(within(dialog).getByPlaceholderText(/Membership dues unpaid/)).toHaveAttribute("aria-required", "true");
+    expect(dialog).toHaveTextContent(REQUIRED_MARK);
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
+    expect(document.activeElement).toBe(within(dialog).getByPlaceholderText(/Membership dues unpaid/));
+    expect(stub.calls.some((c) => c.path.endsWith("/suspend"))).toBe(false);
     expect(dialog).toHaveTextContent(/credit balance/);
     expect(dialog).toHaveTextContent(/reactivating restores/);
 
