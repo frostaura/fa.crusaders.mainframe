@@ -15,7 +15,8 @@ import type { SplitEditor } from "./usePlayersStep";
  * court with guests alone goes straight to Confirm, because a guest pays nothing to split.
  */
 
-export function SplitStep({ players }: { players: SplitEditor }) {
+/** <code>hidePayNow</code>: passed to the totals — a standing booking's change sheet (R2 F2-3). */
+export function SplitStep({ players, hidePayNow = false }: { players: SplitEditor; hidePayNow?: boolean }) {
   const { draft } = players;
   const labelId = useId();
   const pick = (value: string) => {
@@ -42,7 +43,7 @@ export function SplitStep({ players }: { players: SplitEditor }) {
         <p className="text-sm text-text-secondary">{BOOK_SPLIT.modeHint[draft.mode]}</p>
       </div>
       {draft.mode === "equal" ? null : <SeatFigures players={players} />}
-      <SplitTotals players={players} />
+      <SplitTotals players={players} hidePayNow={hidePayNow} />
     </>
   );
 }

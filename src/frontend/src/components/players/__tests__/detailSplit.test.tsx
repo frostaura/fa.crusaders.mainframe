@@ -197,6 +197,20 @@ describe("after the booking stands (R2 F2-3)", () => {
       .toHaveTextContent(CHANGE_SPLIT.goesBack("Sam", "5.00 cr")));
   });
 
+  it("the change sheet's totals say no 'You pay … now' — the booking is paid for; the effects box says what moves", async () => {
+    serve({ extra: [{ method: "POST", path: PREVIEW, respond: previewOf }] });
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: CHANGE_SPLIT.open }));
+    const dialog = await screen.findByRole("dialog", { name: CHANGE_SPLIT.title });
+    fireEvent.click(within(dialog).getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") }), { target: { value: "37" } });
+    await within(dialog).findByRole("region", { name: CHANGE_SPLIT.effectsTitle });
+    const totals = within(dialog).getByRole("region", { name: BOOK_SPLIT.totalsLabel });
+    await waitFor(() => expect(totals.querySelector("[data-totals]")).not.toBeNull());
+    expect(totals).not.toHaveTextContent(/You pay .* now/);
+    expect(totals).toHaveTextContent(BOOK_SPLIT.addsUp("100.00 cr"));
+  });
+
   it("the money box says a part-paid partner is asked for more — never 'hasn't paid yet'", async () => {
     const bob = { ...SAM_SEAT, share_credits: 37, target_credits: 37, paid_credits: 25, unpaid_credits: 12, consented_credits: 37 };
     serve({ detail: detail({ players: [seat(), bob] }) });

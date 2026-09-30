@@ -67,7 +67,8 @@ export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
           <DialogDescription>{CHANGE_SPLIT.description}</DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-4 pb-4">
-          <SplitStep players={editor} />
+          {/* The booking is paid for: "What saving does" below says what moves (R2 F2-3). */}
+          <SplitStep players={editor} hidePayNow />
           <SplitEffects detail={detail} editor={editor} />
           {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action })}</Alert> : null}
         </DialogBody>

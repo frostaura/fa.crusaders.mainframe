@@ -31,7 +31,9 @@ function heading(preview: SplitPreview, count: number, bulk: boolean): string | 
   return bulk ? BOOK_SPLIT.eachBooking : null;
 }
 
-function TotalsBlock({ preview, draft, title }: { preview: SplitPreview; draft: PlayersDraft; title: string | null }) {
+type TotalsBlockProps = { preview: SplitPreview; draft: PlayersDraft; title: string | null; hidePayNow: boolean };
+
+function TotalsBlock({ preview, draft, title, hidePayNow }: TotalsBlockProps) {
   const back = partnersTotal(preview.shares);
   return (
     <div className="grid gap-2" data-totals={preview.price_credits}>
@@ -44,9 +46,11 @@ function TotalsBlock({ preview, draft, title }: { preview: SplitPreview; draft: 
           </div>
         ))}
       </dl>
-      <p className="border-t border-border pt-2 font-semibold text-text-primary">
-        {BOOK_SPLIT.youPayNow(formatCredits(preview.price_credits), formatCredits(back))}
-      </p>
+      {hidePayNow ? null : (
+        <p className="border-t border-border pt-2 font-semibold text-text-primary">
+          {BOOK_SPLIT.youPayNow(formatCredits(preview.price_credits), formatCredits(back))}
+        </p>
+      )}
       <p className="text-xs text-text-secondary">{BOOK_SPLIT.addsUp(formatCredits(preview.price_credits))}</p>
     </div>
   );
@@ -67,7 +71,12 @@ function TotalsSkeleton({ rows }: { rows: number }) {
   );
 }
 
-export function SplitTotals({ players }: { players: SplitEditor }) {
+/**
+ * <code>hidePayNow</code> (R2 F2-3): leave out the "You pay … now · you get … back" line. A booking
+ * that already stands is paid for; its change-split sheet says what saving moves in a box of its
+ * own, and the line read as a second charge. The BookSheet leaves it on.
+ */
+export function SplitTotals({ players, hidePayNow = false }: { players: SplitEditor; hidePayNow?: boolean }) {
   const state = players.preview.state;
   if (state.status === "invalid") {
     return <Alert tone="danger" live="polite">{PLAYERS_REFUSAL[state.error] ?? PLAYERS_REFUSAL.split_preview_invalid}</Alert>;
@@ -84,7 +93,10 @@ export function SplitTotals({ players }: { players: SplitEditor }) {
     <section aria-label={BOOK_SPLIT.totalsLabel} data-split-totals="" className="grid gap-4 rounded-xl bg-bg-muted p-4 text-sm">
       {state.status === "ready"
         ? state.previews.map((p) => (
-          <TotalsBlock key={p.price_credits} preview={p} draft={players.draft} title={heading(p, state.previews.length, players.bulk)} />
+          <TotalsBlock
+            key={p.price_credits} preview={p} draft={players.draft} hidePayNow={hidePayNow}
+            title={heading(p, state.previews.length, players.bulk)}
+          />
         ))
         : <TotalsSkeleton rows={players.draft.seats.length + 1} />}
     </section>
