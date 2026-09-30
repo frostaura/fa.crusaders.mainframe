@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-gotchas-frontend-rendering
-description: "Browser rendering traps the unit suite cannot see: forced colours backplate a HighlightText label into invisibility, Chromium won't scroll a sticky header into view on focus, and a fixture field nobody reads."
+description: "Rendering traps the unit suite cannot see: forced-colours backplates, sticky headers not scrolled into view on focus, a fixture field nobody reads, and an inherited change on <body> restyling every node."
 type: gotcha
 last_verified: 2026-09-30
 ---
@@ -28,3 +28,9 @@ last_verified: 2026-09-30
   phone a row of rem gutters around a word leaves the word no room and `break-words` splits it
   ("Overvie/w"). Let a count WRAP under its label rather than stand beside it as a column; a
   pixel box goes in an inline `style` — `theme-vocabulary` bans `p-[8px]`-style classes outside ui/.
+- **Anything a modal sets on `<body>` that INHERITS restyles the whole page** — measured
+  2026-09-30 (perf lane) at 56 ms per change at 4x CPU on the Bookings grid, twice per sheet:
+  react-remove-scroll-bar's `--removed-body-scroll-bar-size` (a custom property; `index.css`
+  registers it `inherits: false` with `@property`) and Radix's `pointer-events: none` (the grid
+  declares its own value while a sheet is up). Find these with a trace (`UpdateLayoutTree`
+  elementCount ≈ the whole DOM), not by reading code; content-visibility did not help.

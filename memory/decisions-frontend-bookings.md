@@ -51,3 +51,10 @@ Each came from a finding reproduced on the running app; the pinning tests are
   reply was lost reads the day back like book and cancel do (gone = lifted).
 - **A sheet closing over a re-drawn cell returns focus to the grid's tab stop** (R3 X-6,
   `gridTabStop`), not `<main>`; the dialog's own return stands while the opener still exists.
+- **Money is never optimistic; waiting is never silent (perf lane, 2026-09-30).** Book reports the
+  slots it sends (`onSending`) and the grid draws them "Holding…" (busy, not pressable, no price,
+  no claim of a booking or charge); a refusal takes it back at once, a landed booking becomes the
+  confirming cell in the SAME commit (`startTransition`), a sheet closed mid-flight drops it. The
+  confirmation is drawn from the POST answer and commits before the grid's re-draw.
+- **The 300 ms guard after Continue is visible** (`useStepSettle`); it silently ate quick taps.
+  Under an open sheet the grid states `pointer-events: auto` (see gotchas-frontend-rendering).
