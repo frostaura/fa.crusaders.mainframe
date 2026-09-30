@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-sessions
-description: "Sessions outlive the 15-minute access token through a rotating, hashed, single-use refresh cookie (review round 1, B1); sign-in is rate-limited per account, not per club Wi-Fi address (B14)."
+description: "Sessions outlive the 15-minute access token via a rotating, hashed refresh cookie (B1); every token names its family (rfid, C1); sign-in and the global backstop limit per account, not per club address."
 type: decision
 last_verified: 2026-09-30
 ---
@@ -38,3 +38,13 @@ Tests: `RefreshCookieHttpTests`, `SignInRateLimitHttpTests`. Epoch rules: `decis
   typed, per purpose — login and reset separately); the per-address bucket on the `sign-in` policy
   is a ceiling (`AuthPerIpPerMinute`, 60). *Why:* the whole club shares one Wi-Fi address; guessing
   is against an account. An unknown address is limited like a known one — no oracle.
+- **Every access token names its refresh family — claim `rfid` (review round 2, C1).** Bound at
+  every hand-out (sign-ins, passkey, password change, both refresh paths) by re-signing the minted
+  token. A bearer refresh whose family is ended is `401 session_ended`, **no Set-Cookie** (the jar
+  may hold a newer family). *Why:* tab B's live bearer refreshed after tab A signed out, found no
+  cookie and STARTED a family — the session came back. Live = no link revoked AND one unexpired —
+  never "an unspent link exists", which is false for a moment mid-rotation. Sign-out revokes the
+  cookie's family and the bearer's. Mutation-checked (7 mutants, `RefreshCookieHttpTests`).
+- **The global backstop is per MEMBER** (B-10): `GlobalPerMinute` (600) per signed-in user;
+  anonymous requests per address at `GlobalPerIpPerMinute` (6000). 429 = `rate_limited` +
+  `retry_after_seconds`. *Why:* 600 per address 429'd a whole club behind one router.

@@ -51,9 +51,10 @@ This is the why.
 - **The result card tells two 404s apart.** `booking_not_found` (a non-player, e.g. an admin
   looking in) hides the card; `result_not_found` reads as "no result yet". *Why:* the backend
   lane added the second code, and one 404 rule would hide a member's own card.
-- **A result is recordable from the court time's start or the check-in, whichever is later**
-  (`not_started`, review round 1 B15). *Why:* a box scan during early entry opened recording before
-  a ball was hit. The same finding asked that attendance badges need the member's OWN seat scan;
-  **not done** — it reverses the attendance rule above, and is escalated to Dean.
+- **A result is recordable, and a session attended, from the court time's start or the check-in,
+  whichever is later** (B15; attendance: review round 2 B-11). A booking not yet started is not
+  attended; the check-in's recompute marker is staged for `max(now, StartsAt)`, so badges come —
+  and are dated — at the start. *Why:* "First court" at 06:24 for a 06:30 court. The own-seat-scan
+  rule B15 also asked for is still **not done** (it reverses the partner rule; escalated to Dean).
 - **Open for Dean** (spec §14, defaults in use): My game on by default; unfinished matches not
   recordable; admin card shows the W–L record; B15's own-scan badge rule (above).

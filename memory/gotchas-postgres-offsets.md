@@ -31,9 +31,9 @@ the fixture traps are [`gotchas.md`](gotchas.md).
   non-zero offset is the whole test; asserting harder against a UTC club proves nothing. Pick a
   zone whose offset is never zero (`Pacific/Auckland`, `Africa/Johannesburg`) rather than one
   that is zero for half the year.
-- **And a fixture's own writes have to be normalised too.** A test that writes an `audit_log`
-  row at a club-local instant hits the same refusal from the seeding side and reads as a broken
-  endpoint.
+- **And a fixture's own writes have to be normalised too** — seeding at a club-local instant is
+  refused the same way. **Request bodies are normalised once** (review round 2, B-9):
+  `UtcInstantConverter` reads every body instant as UTC; query-string instants still are not.
 
 ## The other half: precision, which fails silently rather than loudly
 

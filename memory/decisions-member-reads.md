@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-member-reads
-description: "Review round 1 member-facing reads: an anonymous invite preview keyed on the link token alone, a member's own seat in any state, obsolete result asks retired, and one club date format for mail and ledger comments."
+description: "Member and desk reads from review rounds 1-2: anonymous invite preview, own seat in any state, one club date format, recent games, held parts, share counterparties, partner games on the admin record."
 type: decision
 last_verified: 2026-09-30
 ---
@@ -32,3 +32,14 @@ Asked by the frontend lanes; built in lane B. Tests: `R1PlayersHttpTests`, `R1Ma
   mail date and new ledger comment (`Booking Court 1 · Thu 1 Oct, 10:00`); the receipt adds the
   year. *Why:* one booking read three ways (`Thu 01 Oct`, ISO, the screens'). Historical ledger
   rows keep the ISO text they were written with — a comment is part of the record.
+- **Review round 2 (lane B), pinned in `R2*HttpTests`:** `GET /me/bookings/recent` (C3) lists
+  games that ENDED within `result_record_days` (organiser or accepted partner, newest first, cap
+  50) with `result_status` and `can_record` — the upcoming list omits both; `held_parts
+  [{credits, until}]` (C4) splits held credit per share deadline, soonest first, `held_until` kept;
+  a `ShareTransfer` ledger row carries `counterparty_name`/`_user_id` (C5, the twin row's owner;
+  membership name only, never an address) and reads member to member; the admin member record
+  includes accepted partner games with `role` and `organiser {user_id, name, is_self}` (C6).
+  *Why:* each screen had no honest way to show it. Schedule response shapes are pinned server-side
+  too (`R2ScheduleResponseShapeHttpTests`, C7) — change it with `serverContract.ts`.
+- **A cancellation mail names court AND time** (`CancelledSlot`, B-7); a club collect or removal
+  is told as the club's, with the admin's reason (B-8).
