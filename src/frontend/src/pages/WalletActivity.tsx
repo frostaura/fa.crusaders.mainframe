@@ -1,3 +1,4 @@
+import { Suspense, lazy, type ReactNode } from "react";
 import { endpoints, type DailyMePoint, type WalletReport } from "../lib/api";
 import { formatCredits, formatMinutes, formatSignedCredits } from "../lib/utils";
 import { useAsyncAction } from "../lib/useAsyncAction";
@@ -8,7 +9,7 @@ import { Button } from "../components/ui/button";
 import { Alert } from "../components/Alert";
 import { ChartBar, DownloadSimple } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
-import { MyBalanceLineChart, MyBookingsBarChart, MyFlowBarChart } from "../components/Charts";
+import { Skeleton } from "../components/ui/skeleton";
 import { WalletNav } from "../components/wallet/WalletNav";
 import { REPORT_SHARES_COPY } from "../lib/playersCopy";
 import {
@@ -16,6 +17,20 @@ import {
   type Tile,
 } from "../components/reports/ReportParts";
 import { dayMarkers, prettyDay, useReport, useReportRange, type ReportRange } from "../components/reports/range";
+
+/*
+ * R4 P4-6 — the charts (the chart library, ~125 KB gz) load with the chart card, not with the
+ * page: a static import put them in the member route's own chunk, which the service worker
+ * precaches for every member at install. The tiles, totals and the daily table need none of it.
+ */
+const MyBalanceLineChart = lazy(() => import("../components/Charts").then((m) => ({ default: m.MyBalanceLineChart })));
+const MyFlowBarChart = lazy(() => import("../components/Charts").then((m) => ({ default: m.MyFlowBarChart })));
+const MyBookingsBarChart = lazy(() => import("../components/Charts").then((m) => ({ default: m.MyBookingsBarChart })));
+
+/** A chart when it has arrived; its footprint until then, so the carousel does not jump. */
+function LazyChart({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<Skeleton aria-hidden="true" className="h-64 w-full" />}>{children}</Suspense>;
+}
 
 /**
  * `/wallet/activity` — a member's own report: what came in, what went out, and when they played.
@@ -116,9 +131,9 @@ function ActivityBody({ data }: { data: Activity }) {
         {days.length > 0 ? (
           <ChartsCard
             slides={[
-              { key: "balance", title: "Wallet balance", node: <MyBalanceLineChart data={days} /> },
-              { key: "flow", title: "Daily money flow", node: <MyFlowBarChart data={days} /> },
-              { key: "bk", title: "My bookings", node: <MyBookingsBarChart data={days} /> },
+              { key: "balance", title: "Wallet balance", node: <LazyChart><MyBalanceLineChart data={days} /></LazyChart> },
+              { key: "flow", title: "Daily money flow", node: <LazyChart><MyFlowBarChart data={days} /></LazyChart> },
+              { key: "bk", title: "My bookings", node: <LazyChart><MyBookingsBarChart data={days} /></LazyChart> },
             ]}
           />
         ) : (
