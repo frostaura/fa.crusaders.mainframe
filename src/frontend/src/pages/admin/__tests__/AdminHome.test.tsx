@@ -167,6 +167,8 @@ describe("the admin Overview", () => {
     const region = needsAttention();
     expect(await within(region).findByText("No doors set up yet.")).toBeInTheDocument();
     expect(within(region).queryByText("Every door is reporting.")).toBeNull();
+    // Review round 2 (VIS F3-15): not an empty box — it says what would put a door here.
+    expect(within(region).getByText(/once its board is added under Boards/)).toBeInTheDocument();
   });
 
   it("never says All clear over a failed read — it says what could not be read, and offers a retry", async () => {

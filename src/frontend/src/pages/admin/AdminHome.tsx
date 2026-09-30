@@ -79,7 +79,7 @@ type AttentionCardProps = {
   count: number;
   failed: boolean;
   tone: CardTone;
-  copy: { title: string; clear: string; cta: string; detail?: ReactNode };
+  copy: { title: string; clear: string; clearHint?: string; cta: string; detail?: ReactNode };
 };
 
 function CardEyebrow({ item, tone }: { item: AdminNavItem; tone: CardTone | "muted" }) {
@@ -114,14 +114,18 @@ function FailedCard({ item }: { item: AdminNavItem }) {
 }
 
 /** A source that was read and has nothing waiting. Not a link: there is nothing to go and do. */
-function ClearCard({ item, sentence }: { item: AdminNavItem; sentence: string }) {
+function ClearCard({ item, sentence, hint }: { item: AdminNavItem; sentence: string; hint?: string }) {
+  // The answer sits under the eyebrow, where the other cards put their figure, and says what
+  // would change it (VIS F3-15: beside two busy cards the Doors card was an empty box with one
+  // line at its foot).
   return (
     <div data-attention-card={item.id} data-state="clear" className={cn(CARD, "shadow-none")}>
       <CardEyebrow item={item} tone="muted" />
-      <p className="mt-auto flex items-center gap-2 text-sm font-medium text-text-secondary">
-        <CheckCircle size={20} weight="fill" aria-hidden="true" className="shrink-0 text-success-strong" />
+      <p className="flex items-center gap-2 text-base font-semibold text-text-primary">
+        <CheckCircle size={24} weight="fill" aria-hidden="true" className="shrink-0 text-success-strong" />
         <span>{sentence}</span>
       </p>
+      {hint ? <p className="text-sm text-text-secondary">{hint}</p> : null}
     </div>
   );
 }
@@ -167,7 +171,7 @@ function WaitingCard(props: AttentionCardProps) {
 
 function AttentionCard(props: AttentionCardProps) {
   if (props.failed) return <FailedCard item={props.item} />;
-  if (props.count <= 0) return <ClearCard item={props.item} sentence={props.copy.clear} />;
+  if (props.count <= 0) return <ClearCard item={props.item} sentence={props.copy.clear} hint={props.copy.clearHint} />;
   return <WaitingCard {...props} />;
 }
 
@@ -210,6 +214,7 @@ function AttentionGrid({ attention }: { attention: AdminAttention }) {
         copy={{
           title: pendingApplicationsLabel(attention.pending),
           clear: "No applications waiting.",
+          clearHint: "A new application shows here the moment it arrives.",
           cta: "Review applications",
           detail: "New members can’t book until an admin approves them.",
         }}
@@ -223,6 +228,9 @@ function AttentionGrid({ attention }: { attention: AdminAttention }) {
         copy={{
           title: doorsAttentionLabel(attention.doors),
           clear: attention.doorsTotal === 0 ? "No doors set up yet." : "Every door is reporting.",
+          clearHint: attention.doorsTotal === 0
+            ? "A door appears here once its board is added under Boards and given a door name."
+            : "A door that stops calling in, or refuses members, shows here.",
           cta: "Open Doors",
           detail: <DoorReasons reasons={attention.doorReasons} />,
         }}
@@ -236,6 +244,7 @@ function AttentionGrid({ attention }: { attention: AdminAttention }) {
         copy={{
           title: faultsAttentionLabel(attention.faults),
           clear: "No faults need attention.",
+          clearHint: "A board that reports a fault shows here until someone resolves it.",
           cta: "Open Faults",
           detail: <FaultBreakdown counts={attention.faultCounts} />,
         }}
