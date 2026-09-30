@@ -220,3 +220,19 @@ describe("share a seat's link", () => {
     expect(await screen.findByText(PLAYERS_REFUSAL.conflict_retry)).toBeInTheDocument();
   });
 });
+
+describe("seat buttons are full touch targets (R2 F2-15)", () => {
+  it("Remind, Share link and Remove are the 44 px size, not the 36 px small one", async () => {
+    serve();
+    renderDetail();
+    const buttons = [
+      await screen.findByRole("button", { name: DETAIL_ACTIONS.nudgeFor("Alex") }),
+      screen.getByRole("button", { name: DETAIL_ACTIONS.linkFor("Open seat") }),
+      screen.getByRole("button", { name: DETAIL_ACTIONS.removeFor("Sam") }),
+    ];
+    for (const b of buttons) {
+      expect(b.className).toContain("min-h-touch");
+      expect(b.className).not.toMatch(/\bh-9\b/);
+    }
+  });
+});

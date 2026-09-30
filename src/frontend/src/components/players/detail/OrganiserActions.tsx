@@ -23,7 +23,8 @@ const SPLIT_ICON = <SlidersHorizontal aria-hidden="true" />;
 /**
  * What the organiser can do to one seat, as buttons under its chip: Remind, Share link, Remove.
  * Each is named for the player it acts on, so a screen reader walking four chips of buttons
- * hears "Remind Alex", not four "Remind"s.
+ * hears "Remind Alex", not four "Remind"s. Full 44 px targets (R2 F2-15): the small size drew
+ * 36 px buttons side by side on a phone.
  */
 export function OrganiserSeatButtons({ player, hands }: { player: DetailPlayer; hands: OrganiserHands }) {
   const name = seatName(player, hands.detail.players);
@@ -31,7 +32,7 @@ export function OrganiserSeatButtons({ player, hands }: { player: DetailPlayer; 
     <>
       {canNudge(player) ? (
         <Button
-          size="sm" variant="secondary" icon={BELL_ICON}
+          variant="secondary" icon={BELL_ICON}
           aria-label={DETAIL_ACTIONS.nudgeFor(name)}
           pending={hands.isNudging(player)}
           onClick={() => void hands.nudge.run(player)}
@@ -40,12 +41,12 @@ export function OrganiserSeatButtons({ player, hands }: { player: DetailPlayer; 
         </Button>
       ) : null}
       {canShareLink(player) ? (
-        <Button size="sm" variant="outline" icon={SHARE_ICON} aria-label={DETAIL_ACTIONS.linkFor(name)} onClick={() => hands.share(player)}>
+        <Button variant="outline" icon={SHARE_ICON} aria-label={DETAIL_ACTIONS.linkFor(name)} onClick={() => hands.share(player)}>
           {DETAIL_ACTIONS.link}
         </Button>
       ) : null}
       {canRemove(player) ? (
-        <Button size="sm" variant="danger-soft" icon={USERMINUS_ICON} aria-label={DETAIL_ACTIONS.removeFor(name)} onClick={() => hands.askRemove(player)}>
+        <Button variant="danger-soft" icon={USERMINUS_ICON} aria-label={DETAIL_ACTIONS.removeFor(name)} onClick={() => hands.askRemove(player)}>
           {DETAIL_ACTIONS.remove}
         </Button>
       ) : null}
