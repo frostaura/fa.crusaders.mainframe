@@ -32,5 +32,8 @@ path. Tests: `R2MailReleaseHttpTests`. Spec: `players-and-splits.md` §6, `play.
   re-imposed in C# after `RETURNING` (which promises none). *Why:* everything quiet hours hold
   falls due at one instant, and id order released a night's mail at random — a mutant ordering by
   id alone fails the five-invite test.
-- **A cancellation never follows the invite it supersedes**: the cancellation is urgent (sent at
-  once) and the held invite is dropped at release (`game_off`).
+- **A cancellation never follows the invite it supersedes**: the held invite is dropped at release
+  (`game_off`), and since round 4 (M4-5) an UNANSWERED invitee is not mailed the cancellation at
+  all — inbox line only (`ShareSweep.TellCancelledAsync`, `Email` = accepted). *Why:* the kind is
+  urgent, so a game cancelled at 23:00 mailed a stranger to it at once while their invite was held;
+  they never said yes and lose nothing. Accepted partners are still mailed at once.

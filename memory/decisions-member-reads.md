@@ -55,3 +55,6 @@ Asked by the frontend lanes; built in lane B. Tests: `R1PlayersHttpTests`, `R1Ma
   share); the organiser's `my_share_credits` counts ACCEPTED partners only (M-3 — an unanswered
   invite had it say "your share 25" of a court they had paid 50 for). Answering an invite marks its
   invite/reminder lines read+resolved; a receipt of your own move is born read (I-9).
+- **Round 4 (lane B1):** "own move" now covers the organiser's remove, split change and CANCEL
+  (`ReconcileOptions.OwnActionBy`, the request's user via `ShareHookHttp`; ledger actor unchanged),
+  and a cancelled game's `returned_credits` counts only returns from `CancelledAt` on (M4-4).

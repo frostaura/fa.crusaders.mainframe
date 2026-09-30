@@ -12,7 +12,15 @@ public sealed record ShareMove(Guid ParticipantId, Guid PartnerUserId, Guid Orga
 
 /// <summary>Who is reconciling, and whether one seat may be collected below zero (an admin's explicit collect).</summary>
 /// <param name="ClubRemoval">The club took this seat off the game (an admin's remove): its return's receipts say so, with the reason (review round 2, B-8).</param>
-public sealed record ReconcileOptions(Guid ActorUserId, Guid? OverdraftSeatId = null, ClubRemoval? ClubRemoval = null);
+public sealed record ReconcileOptions(Guid ActorUserId, Guid? OverdraftSeatId = null, ClubRemoval? ClubRemoval = null)
+{
+    /// <summary>
+    /// The member whose own action caused this reconcile — the organiser's remove, split change or
+    /// cancellation (review round 4, I4-5). Their receipts are born read, as an accept's already
+    /// are; it changes nothing else (the ledger rows keep <see cref="ActorUserId"/>).
+    /// </summary>
+    public Guid? OwnActionBy { get; init; }
+}
 
 /// <summary>The club removed <paramref name="SeatId"/>'s member, for <paramref name="Reason"/>.</summary>
 public sealed record ClubRemoval(Guid SeatId, string? Reason);
@@ -118,15 +126,23 @@ public sealed class ShareLedger
     /// What has come BACK to this seat's partner (review round 2, F2-4): the sum of the return legs
     /// on their wallet (<c>share:{seat}:*</c> rows with a positive amount). <see cref="PaidOfAsync"/>
     /// nets these out, so a cancelled game's detail read "paid 0" and nobody could see the refund.
+    ///
+    /// <para>
+    /// <b><paramref name="since"/></b> keeps only the returns posted from that instant on — the
+    /// booking's cancellation (review round 4, M4-4): a partner whose share was lowered from 31 to
+    /// 25 and then refunded read "31.00 back" for a cancellation that returned 25.
+    /// </para>
     /// </summary>
-    public static async Task<decimal> ReturnedOfAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
+    public static async Task<decimal> ReturnedOfAsync(
+        MainframeDbContext db, BookingParticipant seat, CancellationToken ct, DateTimeOffset? since = null)
     {
         if (seat.UserId is not { } partner) return 0m;
         var prefix = Prefix(seat.Id);
-        return await db.LedgerEntries.AsNoTracking()
+        var rows = db.LedgerEntries.AsNoTracking()
             .Where(l => l.UserId == partner && l.Type == LedgerEntryType.ShareTransfer && l.AmountCredits > 0
-                        && l.ExternalReference != null && l.ExternalReference.StartsWith(prefix))
-            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
+                        && l.ExternalReference != null && l.ExternalReference.StartsWith(prefix));
+        if (since is { } from) rows = rows.Where(l => l.CreatedAt >= from);
+        return await rows.SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
     }
 
     /// <summary>
@@ -296,7 +312,7 @@ public sealed class ShareLedger
 
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
-        await StageReceiptsAsync(now.Booking, move, options.ActorUserId, ct, RemovalReceipt(options, move));
+        await StageReceiptsAsync(now.Booking, move, options, ct, RemovalReceipt(options, move));
         await _ledger.PostManyAsync(Pair(now.Booking, move, options.ActorUserId), ct);
         await payerLock.CommitAsync(ct);
         return move;
@@ -383,7 +399,7 @@ public sealed class ShareLedger
     {
         var partner = seat.UserId ?? throw new InvalidOperationException("a seat with no member pays nothing");
         var move = new ShareMove(seat.Id, partner, PayerOf(booking), delta, await NextSeqAsync(seat.Id, partner, ct));
-        await StageReceiptsAsync(booking, move, actorUserId, ct);
+        await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct);
         return Pair(booking, move, actorUserId);
     }
 
@@ -424,7 +440,7 @@ public sealed class ShareLedger
         var before = await _ledger.GetBalanceAsync(partnerId, ct);
         var move = new ShareMove(seatId, partnerId, PayerOf(booking), delta, await NextSeqAsync(seatId, partnerId, ct));
         await record(seat, delta, before);
-        await StageReceiptsAsync(booking, move, actorUserId, ct, new ClubReceipt(true, before - delta, reason));
+        await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct, new ClubReceipt(true, before - delta, reason));
         try
         {
             await _ledger.PostManyAsync(Pair(booking, move, actorUserId), ct);
@@ -479,8 +495,10 @@ public sealed class ShareLedger
     /// club did it, and the partner's where their balance stands, B8) or a removal's return; either
     /// way with the admin's reason (review round 2, B-8).
     /// </param>
-    private async Task StageReceiptsAsync(Booking booking, ShareMove move, Guid actorUserId, CancellationToken ct, ClubReceipt? club = null)
+    /// <param name="who">Who moved it (<see cref="ReconcileOptions.ActorUserId"/>) and whose own action it was (<see cref="ReconcileOptions.OwnActionBy"/>).</param>
+    private async Task StageReceiptsAsync(Booking booking, ShareMove move, ReconcileOptions who, CancellationToken ct, ClubReceipt? club = null)
     {
+        bool Own(Guid reader) => who.ActorUserId == reader || who.OwnActionBy == reader;
         var settings = await _settings.GetAsync(ct);
         var game = await GameText.ForAsync(_db, booking, settings, ct);
         var names = await PersonNames.ForAsync(_db, [move.PartnerUserId, move.OrganiserUserId], ct);
@@ -504,11 +522,11 @@ public sealed class ShareLedger
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterCredits: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason),
             move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub), settings,
-            actorUserId == move.PartnerUserId);
+            Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason),
             move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub), settings,
-            actorUserId == move.OrganiserUserId);
+            Own(move.OrganiserUserId));
     }
 
     /// <param name="ownAction">

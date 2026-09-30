@@ -51,7 +51,9 @@ Guests are in the split with share 0 and are not a head in an equal split. **The
 partners are rounded down to whole credits, and the organiser — who chose to split — takes the odd
 credit and any sub-credit fraction. Adding a player re-splits an `equal`/`ratio` booking (every
 share goes down); removing, declining or withdrawing does NOT re-split — the organiser absorbs the
-freed share until they re-split themselves.
+freed share until they re-split themselves, and their own seat's `share_credits` says so: it is
+recomputed as `P − Σ live partners` in one statement after the seat change commits (review round 4,
+M4-6).
 
 ## 3. What a partner pays — the reconcile
 
@@ -371,7 +373,9 @@ organiser receives as shares are **held**:
   latest goes. A lapse and a waiting return name one partner each and are never coalesced;
   receipts (urgent kinds) are never re-derived. A night's mail leaves in the order it happened
   (claim order `DueAt, CreatedAt`), and a cancellation never follows the invite it supersedes —
-  the invite is dropped.
+  the invite is dropped, and an unanswered invitee is never mailed the cancellation (M4-5).
+  A receipt of the reader's OWN action is born read: an accept's payment, and the organiser's own
+  remove, split change or cancellation (review round 4, I4-5).
   A named `notification` frame (`{"unread_count": n}`) is published on the member's wallet SSE
   stream after each change, so the bell can update without polling.
 
@@ -381,7 +385,7 @@ organiser receives as shares are **held**:
 | `players.share_moved` | both sides of every pair | yes | yes |
 | `players.reminder` | an unanswered / unpaid partner (club cadence, or the organiser's nudge) | yes | no |
 | `players.lapsed` | the partner and the organiser | yes | no |
-| `players.game_cancelled` | every live partner | yes | yes |
+| `players.game_cancelled` | every live partner | accepted partners only; an unanswered invitee gets the inbox line (M4-5) | yes |
 | `players.game_changed` | a removed partner, or one whose share moved | yes | no |
 | `players.response` | the organiser (accepted / declined / withdrew) | inbox only | — |
 | `players.return_waiting` | the partner and the organiser, once, when a return starts waiting (§3) | yes | no |
@@ -397,7 +401,7 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `POST /api/v1/bookings` | + optional `players: [{userId?, guestName?, link?, seat?, weight?, amount?}]`, `splitMode`, `organiserWeight`. Validated in full (against the quoted price) BEFORE booking. → `{booking_id, balance_after_credits, players: {booking_id, participants: [{participant_id, seat, user_id, guest_name, status, share_credits, invite_token, invite_path}]}, players_error}` |
 | `POST /api/v1/bookings/bulk` | + the same `players`/`splitMode`/`organiserWeight`, applied to every newly booked item → adds `players: [{booking_id, players, players_error}]`. The payload's shape is checked price-free, then the split against EVERY item's price, before anything is booked: any failure books nothing |
 | `POST /api/v1/players/split-preview` | `{priceCredits, splitMode, organiserWeight, players}` → `{price_credits, shares: [{seat, team, share_credits, weight}]}` — pure, for the live totals bar |
-| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_credits, weight, consented_credits, paid_credits, target_credits, unpaid_credits, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_credits, organiser_owed_credits, shares_received_credits, organiser_net_credits, unpaid_credits, share_deadline, is_split} (`unpaid_credits` counts every live partner seat still owing, an unclaimed open link seat at its full share until the seat closes or the game is off — review round 1, B4), attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
+| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_credits, weight, consented_credits, paid_credits, target_credits, unpaid_credits, returned_credits, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_credits, organiser_owed_credits, shares_received_credits, organiser_net_credits, unpaid_credits, share_deadline, is_split} (`unpaid_credits` counts every live partner seat still owing, an unclaimed open link seat at its full share until the seat closes or the game is off — review round 1, B4; `returned_credits` is, on a cancelled game, what the cancellation sent back and, elsewhere, every return so far — review round 4, M4-4), attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
 | `POST /api/v1/bookings/{id}/players` | organiser: `{players, splitMode?, organiserWeight?}` → as the create's `players`; `409 player_previously_declined` / `player_previously_removed {user_id}`, `409 player_invite_limit {limit, invites_made}` |
 | `DELETE /api/v1/bookings/{id}/players/{pid}` | organiser → `{participant_id, status}` |
 | `POST /api/v1/bookings/{id}/players/{pid}/nudge` | organiser → `{participant_id, nudges_left}`; `429 nudge_limit {limit, retry_after}`; `409 nothing_to_nudge` |

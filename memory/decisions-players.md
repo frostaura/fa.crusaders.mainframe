@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-players
 description: "D11–D13: single-payer booking; shares move as ShareTransfer pairs via one idempotent reconcile off Owed; consent caps collection; no debts, and shares received are held to the deadline; Dean's two 2026-09-28 rulings."
 type: decision
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Live decisions — players and splits (D11–D13)
@@ -25,8 +25,7 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
   The accept also takes a per-SEAT advisory lock after the member's: two members claiming one open
   link seat hold different member locks and deadlocked (40P01, ~1 in 5 runs of the racing test)
   until it did. Order is always member-then-seat.
-- **Every "who is on this booking" subquery goes through `BookingPlayerQueries`** — gate, court box,
-  cap, pay-for — so P7's `IBookingPlayers` roster seam wires to it in one line.
+- **Every "who is on this booking" subquery goes through `BookingPlayerQueries`** (gate, box, cap, pay-for).
 - **Consent caps collection; lowering a share lowers consent; raising needs a new accept.** *Why:*
   otherwise a share lowered then raised back would be re-debited without asking.
 - **No debts.** A collection the partner cannot cover is simply not posted; after the deadline
@@ -43,8 +42,9 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
   second balance). *Cost:* an organiser cannot reuse shares until ~48 h after the game.
 - **Late-cancel penalty is the organiser's alone** (cancelled without check-in → partners 0);
   **no-show penalty is shared pro rata**. Rounding is toward zero per seat so partners never sum past Owed.
-- **Split rounding: partners floor to whole credits, organiser takes the remainder.** Removing/declining
-  never auto-resplits — the organiser absorbs the freed share.
+- **Split rounding: partners floor, the organiser takes the remainder** — also after a remove, decline or
+  withdraw (no auto re-split): their seat is set to P − Σ live partners by ONE SQL update after the commit,
+  no version bump (R4 M4-6: the seat kept its old figure; a tracked write would 409 one of two declines at once).
 - **D12 cap: accepted seats count against the partner's own cap**, checked on the first accept of a
   future game under the partner's lock (the cap's unit). Peak/windows/price bind the organiser only.
 - **A payer override on a split booking is silently ignored** (the scan still checks in); pay-for

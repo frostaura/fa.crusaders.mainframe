@@ -173,12 +173,19 @@ public sealed partial class PlayersQuery
             if (!IsShown(s, d.Role, d.MySeatId)) continue;
             var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
             var money = new SeatMoney(paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open,
-                s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct) : 0m);
+                s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct, CancelledSince(d.Booking)) : 0m);
             players.Add(SeatView(s, d.People, money));
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
     }
+
+    /// <summary>
+    /// On a cancelled game, <c>returned_credits</c> is what the CANCELLATION sent back (M4-4), not
+    /// every return the seat ever had; elsewhere it stays the running total.
+    /// </summary>
+    private static DateTimeOffset? CancelledSince(Booking b) =>
+        b.Status == BookingStatus.Cancelled ? b.CancelledAt : null;
 
     /// <summary>
     /// Whether a seat is a row of the viewer's table: every live seat; a dead one (who said no)

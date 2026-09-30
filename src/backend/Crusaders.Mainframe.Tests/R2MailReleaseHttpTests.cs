@@ -135,8 +135,13 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
 
     // ------------------------------------------------------------------ the invite
 
+    /// <summary>
+    /// Review round 4, M4-5 turned this test round: it used to expect the cancellation mailed at
+    /// once — to an invitee who had never heard of the game, at night, while the invite that would
+    /// have told them was held. An unanswered invitee now gets the inbox line and no mail at all.
+    /// </summary>
     [SkippableFact]
-    public async Task A_held_invite_to_a_game_cancelled_before_morning_is_dropped_and_the_cancellation_goes_at_once()
+    public async Task A_held_invite_to_a_game_cancelled_before_morning_is_dropped_and_no_cancellation_is_mailed()
     {
         Skip.IfNot(pg.Available, Skipped);
         await using var factory = CreateFactory();
@@ -150,12 +155,12 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         var cancel = await club.Client(f, club.Organiser).PostAsync($"/api/v1/bookings/{bookingId}/cancel", null);
         Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
         await DeliverAsync(f, DateTimeOffset.UtcNow);
-        var atOnce = Assert.Single(To(mail, "sam.partner"));
-        Assert.StartsWith("Game cancelled", atOnce.Subject);
+        Assert.Empty(To(mail, "sam.partner"));
 
         await DeliverAsync(f, release);
 
-        Assert.Single(To(mail, "sam.partner"));
+        Assert.Empty(To(mail, "sam.partner"));
+        Assert.DoesNotContain(await MemberOutboxAsync(f, club, club.Sam), n => n.Kind == MemberEventCatalogue.GameCancelled);
         var invite = Assert.Single(await MemberOutboxAsync(f, club, club.Sam), n => n.Kind == MemberEventCatalogue.Invited);
         Assert.Equal(AdminNotificationState.Suppressed, invite.State);
         Assert.Equal($"dropped: {MemberMailRelease.GameOff}", invite.LastError);

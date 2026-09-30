@@ -415,13 +415,39 @@ public sealed partial class PlayersService
 
     // ------------------------------------------------------------------ the organiser's other actions
 
+    /// <summary>
+    /// A partner seat died (removed, declined, withdrawn): the organiser absorbs its share — no
+    /// auto re-split (D11) — and their own seat now SAYS so (review round 4, M4-6). It kept its old
+    /// figure, so the open-seat prompt read "You cover 30.00" beside a Money panel saying 50.
+    /// The organiser's share is only ever the remainder: the price less every live partner's.
+    ///
+    /// <para>
+    /// <b>One statement, after the seat's own commit, and no version bump.</b> Written through the
+    /// tracked organiser seat, two partners declining at once would both bump its version and one be
+    /// answered 409. Computed in SQL from committed rows instead, so whichever runs last sees both.
+    /// </para>
+    /// </summary>
+    internal async Task AbsorbFreedShareAsync(Booking booking, CancellationToken ct)
+    {
+        var price = booking.AmountChargedCredits;
+        var bookingId = booking.Id;
+        await _db.BookingParticipants
+            .Where(o => o.BookingId == bookingId && o.Seat == 1
+                        && (o.Status == ParticipantStatus.Invited || o.Status == ParticipantStatus.Accepted))
+            .ExecuteUpdateAsync(u => u.SetProperty(o => o.ShareCredits, o => Math.Max(0m, price - (_db.BookingParticipants
+                .Where(p => p.BookingId == bookingId && p.Seat > 1
+                            && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted))
+                .Sum(p => (decimal?)p.ShareCredits) ?? 0m))), ct);
+    }
+
     /// <summary>Takes a player off the booking. Anything they paid comes back at the reconcile.</summary>
     public async Task<PlayerOutcome> RemoveAsync(Guid bookingId, Guid seatId, Guid organiserId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
         var game = await LoadAsync(bookingId, ct);
         if (OrganiserGate(game, organiserId, now) is { } refused) return refused;
-        return await RemoveSeatAsync(game!, seatId, now, ct);
+        // I4-5: the organiser's own removal — their "went back" receipt is born read.
+        return await RemoveSeatAsync(game!, seatId, now, ct, new ReconcileOptions(Guid.Empty) { OwnActionBy = organiserId });
     }
 
     /// <param name="options">The admin's authority for the return, when an admin removes (review H1); null for the organiser.</param>
@@ -446,6 +472,7 @@ public sealed partial class PlayersService
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
+        await AbsorbFreedShareAsync(game.Booking, ct);
         await AfterAsync(game.Booking.Id, seat.UserId is { } u ? [u] : [], ct, options);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
     }
@@ -540,7 +567,8 @@ public sealed partial class PlayersService
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
-        await AfterAsync(game.Booking.Id, changed.Select(s => s.UserId!.Value), ct);
+        // I4-5: the organiser's own split change — their receipts are born read.
+        await AfterAsync(game.Booking.Id, changed.Select(s => s.UserId!.Value), ct, new ReconcileOptions(Guid.Empty) { OwnActionBy = organiserId });
         return PlayerOutcome.Ok(new
         {
             booking_id = game.Booking.Id,

@@ -1,3 +1,4 @@
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -72,13 +73,13 @@ public sealed class ShareHook
     }
 
     /// <summary>Reconciles one booking in its own scope; a failure is logged and marks it due. Never throws.</summary>
-    private async Task SettleOneAsync(Guid tenantId, string? tenantSlug, Guid bookingId, string after, CancellationToken ct)
+    private async Task SettleOneAsync(Guid tenantId, string? tenantSlug, Guid bookingId, string after, CancellationToken ct, Guid? ownActionBy = null)
     {
         try
         {
             using var scope = _scopes.CreateScope();
             scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug ?? "");
-            await scope.ServiceProvider.GetRequiredService<ShareSweep>().SettleBookingAsync(bookingId, ct);
+            await scope.ServiceProvider.GetRequiredService<ShareSweep>().SettleBookingAsync(bookingId, ct, ownActionBy);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -87,7 +88,12 @@ public sealed class ShareHook
         }
     }
 
-    public async Task AfterSettlementAsync(Guid tenantId, string? tenantSlug, IEnumerable<Guid?> bookingIds, CancellationToken requestAborted)
+    /// <param name="ownActionBy">
+    /// The member whose own request settled it (review round 4, I4-5): an organiser's cancellation
+    /// tells them "25.00 went back to Bongani" born read. Null from the workers.
+    /// </param>
+    public async Task AfterSettlementAsync(
+        Guid tenantId, string? tenantSlug, IEnumerable<Guid?> bookingIds, CancellationToken requestAborted, Guid? ownActionBy = null)
     {
         var ct = FollowUp(requestAborted);
         var ids = bookingIds.Where(i => i is not null).Select(i => i!.Value).Distinct().ToList();
@@ -97,7 +103,7 @@ public sealed class ShareHook
         // marked due (review round 5), so the next minute sweep makes it good however old the
         // booking is — the catch-up at start does not reach every kind of game, and a swallowed
         // failure used to be forgotten.
-        foreach (var id in ids) await SettleOneAsync(tenantId, tenantSlug, id, "after settlement", ct);
+        foreach (var id in ids) await SettleOneAsync(tenantId, tenantSlug, id, "after settlement", ct, ownActionBy);
     }
 
     /// <summary>
@@ -126,13 +132,17 @@ public sealed class ShareHook
     }
 }
 
-/// <summary>The request-side spelling of the hook: the club is the request's own.</summary>
+/// <summary>
+/// The request-side spelling of the hook: the club is the request's own, and so is the action —
+/// the signed-in member's own receipts are born read (I4-5). An admin acting on somebody else's
+/// game is not a party to it, so this marks nothing of theirs.
+/// </summary>
 public static class ShareHookHttp
 {
     public static Task AfterSettlementAsync(this HttpContext ctx, IEnumerable<Guid?> bookingIds, CancellationToken ct)
     {
         var tenant = ctx.RequestServices.GetRequiredService<ITenantContext>();
         return ctx.RequestServices.GetRequiredService<ShareHook>()
-            .AfterSettlementAsync(tenant.TenantId, tenant.TenantSlug, bookingIds, ct);
+            .AfterSettlementAsync(tenant.TenantId, tenant.TenantSlug, bookingIds, ct, ctx.User.Id());
     }
 }

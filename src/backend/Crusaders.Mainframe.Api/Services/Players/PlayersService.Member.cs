@@ -268,6 +268,7 @@ public sealed partial class PlayersService
         MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "declined", ct), game.Settings);
         await PlayerNotices.AnsweredAsync(_db, game.Booking.Id, me, now, ct);
         if (await SaveAsync(ct) is { } conflict) return conflict;
+        await AbsorbFreedShareAsync(game.Booking, ct);
         await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
     }
@@ -298,6 +299,7 @@ public sealed partial class PlayersService
         seat.UpdatedAt = now.Storable();
         MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "withdrew", ct), game.Settings);
         if (await SaveAsync(ct) is { } conflict) return conflict;
+        await AbsorbFreedShareAsync(game.Booking, ct);
         await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
     }

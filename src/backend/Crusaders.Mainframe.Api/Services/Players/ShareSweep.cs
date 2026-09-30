@@ -112,7 +112,8 @@ public sealed class ShareSweep
     /// After a settlement path committed: move the shares, and tell every player once when the
     /// game has been cancelled. A booking with no seats costs one indexed read.
     /// </summary>
-    public async Task SettleBookingAsync(Guid bookingId, CancellationToken ct)
+    /// <param name="ownActionBy">Whose own request settled it; their receipts are born read (I4-5).</param>
+    public async Task SettleBookingAsync(Guid bookingId, CancellationToken ct, Guid? ownActionBy = null)
     {
         var started = DateTimeOffset.UtcNow.Storable();
         var seats = await _db.BookingParticipants.AsNoTracking().Where(p => p.BookingId == bookingId).ToListAsync(ct);
@@ -124,7 +125,8 @@ public sealed class ShareSweep
             return;
         }
 
-        var moves = await _shares.ReconcileAsync(bookingId, ct);
+        var moves = await _shares.ReconcileAsync(
+            bookingId, ct, ownActionBy is null ? null : new ReconcileOptions(Guid.Empty) { OwnActionBy = ownActionBy });
         var told = await TellCancelledAsync(bookingId, seats, ct);
 
         await ClearMarkerAsync(bookingId, started, ct);
@@ -136,6 +138,13 @@ public sealed class ShareSweep
     /// <summary>
     /// "The game is off" to every player still in it but the organiser, once per booking and
     /// player. The organiser is told by the cancellation itself.
+    ///
+    /// <para>
+    /// <b>An unanswered invitee gets the inbox line, not the mail</b> (review round 4, M4-5). They
+    /// never said yes, paid nothing and lose nothing, and the kind is urgent (sent at once, quiet
+    /// hours or not): an invite held overnight was dropped at release while this reached them at
+    /// 23:00 for a game they had never heard of. Their invite now reads as a game that is off.
+    /// </para>
     /// </summary>
     private async Task<IReadOnlyList<Guid>> TellCancelledAsync(Guid bookingId, List<BookingParticipant> seats, CancellationToken ct)
     {
@@ -151,7 +160,10 @@ public sealed class ShareSweep
             var notice = new MemberNotice(
                 seat.UserId!.Value, MemberEventCatalogue.GameCancelled, $"game-cancelled:{bookingId:N}:{seat.UserId:N}",
                 new GameCancelledPayload(bookingId, organiser, game.CourtName, game.StartsLocal),
-                $"Cancelled — {game.CourtName}, {game.StartsLocal}", $"/bookings/{bookingId}", bookingId);
+                $"Cancelled — {game.CourtName}, {game.StartsLocal}", $"/bookings/{bookingId}", bookingId)
+            {
+                Email = seat.Status == ParticipantStatus.Accepted,
+            };
             if (await MemberNotices.RaiseAsync(_db, _tenant.TenantId, notice, settings, ct)) told.Add(seat.UserId.Value);
         }
         return told;
