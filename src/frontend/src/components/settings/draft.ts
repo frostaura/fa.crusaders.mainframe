@@ -287,20 +287,26 @@ function fieldOf(err: ApiError): string | null {
  * the sign-in (see `settingsDraftStore`); a refusal that names no field says so instead of
  * printing "validation failed"; one that names a field offers a way to it.
  */
-export function saveFailureOf(err: unknown, currency: string): SaveFailure {
+/**
+ * The failures that name no field and ask for no fix: a lost reply (F3-4), an ended session, and
+ * the club's rate limit (review round 3, A-12), which turns a save away before it is read — so
+ * nothing was saved and nothing is wrong with a field. Null for a refusal.
+ */
+function notARefusal(err: unknown): SaveFailure | null {
   if (err instanceof SaveNotConfirmed) {
     const text = err.found === "not_saved" ? SETTINGS_COPY.saveDidNotArrive : SETTINGS_COPY.saveUnknown;
     return { text, fieldKey: null, sessionEnded: false, transient: true };
   }
-  if (err instanceof ApiError && err.status === 401) {
-    return { text: SETTINGS_COPY.saveFailed, fieldKey: null, sessionEnded: true };
-  }
-  // Review round 3, A-12: the club's rate limit turns a save away before it is read, so nothing
-  // was saved and nothing is wrong with a field — "fix what is named" named nothing.
-  if (err instanceof ApiError && err.status === 429) {
-    const seconds = Number(err.detail("retry_after_seconds")) || null;
-    return { text: SETTINGS_COPY.saveRateLimited(rateLimitedSentence(seconds)), fieldKey: null, sessionEnded: false, transient: true };
-  }
+  if (!(err instanceof ApiError)) return null;
+  if (err.status === 401) return { text: SETTINGS_COPY.saveFailed, fieldKey: null, sessionEnded: true };
+  if (err.status !== 429) return null;
+  const seconds = Number(err.detail("retry_after_seconds")) || null;
+  return { text: SETTINGS_COPY.saveRateLimited(rateLimitedSentence(seconds)), fieldKey: null, sessionEnded: false, transient: true };
+}
+
+export function saveFailureOf(err: unknown, currency: string): SaveFailure {
+  const settled = notARefusal(err);
+  if (settled) return settled;
   const fieldKey = err instanceof ApiError ? fieldOf(err) : null;
   const said = describeSaveFailure(err, currency);
   const code = err instanceof ApiError ? err.code : null;

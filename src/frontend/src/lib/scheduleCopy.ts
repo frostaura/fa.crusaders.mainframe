@@ -142,14 +142,18 @@ export function ruleSentence(rule: RuleWords): string {
     ? `every ${interval} weeks on ${daysPhrase(rule.days)}`
     : `on ${daysPhrase(rule.days)}`;
   const named = rule.label ? `, called “${rule.label}”` : "";
-  // Ended before its first date (review round 3, A-6): "from Wed 30 Sep until Tue 29 Sep" read
-  // as a range running backwards. An ISO date compares as text.
-  const until = !rule.endDate
-    ? `from ${clubDateShort(rule.startDate)} with no end date`
-    : rule.endDate < rule.startDate
-      ? `from ${clubDateShort(rule.startDate)} — it ended before that first date`
-      : `from ${clubDateShort(rule.startDate)} until ${clubDateShort(rule.endDate)}`;
-  return `Holds ${courtsPhrase(rule.courtNames)} ${when} from ${rule.start} to ${rule.end}${named}, ${until}.`;
+  return `Holds ${courtsPhrase(rule.courtNames)} ${when} from ${rule.start} to ${rule.end}${named}, ${datesPhrase(rule.startDate, rule.endDate)}.`;
+}
+
+/**
+ * The dates the rule runs between. Ended before its first date (review round 3, A-6): "from Wed
+ * 30 Sep until Tue 29 Sep" read as a range running backwards. An ISO date compares as text.
+ */
+function datesPhrase(startDate: string, endDate?: string | null): string {
+  const from = `from ${clubDateShort(startDate)}`;
+  if (!endDate) return `${from} with no end date`;
+  if (endDate < startDate) return `${from} — it ended before that first date`;
+  return `${from} until ${clubDateShort(endDate)}`;
 }
 
 export type ConsequenceInput = {
