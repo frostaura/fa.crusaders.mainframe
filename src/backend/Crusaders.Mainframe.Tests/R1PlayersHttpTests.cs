@@ -53,11 +53,13 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
             Assert.Equal(["name", "photo_url", "status"], p.EnumerateObject().Select(o => o.Name).Order()));
         Assert.Equal(3, names.Distinct().Count());
 
-        // The organiser sees it as theirs, carrying the remainder after the partners' shares.
+        // The organiser sees it as theirs, carrying the remainder after the ACCEPTED partners'
+        // shares — Sam's 10; Alex is only invited, so his 10 is still the organiser's (review
+        // round 3, M-3: this read 12 and the list said "your share" for money not yet coming back).
         var organiser = Assert.Single((await JsonAsync(await club.Client(f, club.Organiser).GetAsync("/api/v1/me/bookings/upcoming")))
             .GetProperty("items").EnumerateArray(), i => i.GetProperty("booking_id").GetGuid() == bookingId);
         Assert.Equal("organiser", organiser.GetProperty("role").GetString());
-        Assert.Equal(12m, organiser.GetProperty("my_share_credits").GetDecimal());
+        Assert.Equal(22m, organiser.GetProperty("my_share_credits").GetDecimal());
         Assert.DoesNotContain((await JsonAsync(await club.Client(f, club.Organiser).GetAsync("/api/v1/me/bookings/upcoming")))
             .GetProperty("items").EnumerateArray(), i => i.GetProperty("booking_id").GetGuid() == past);
 
