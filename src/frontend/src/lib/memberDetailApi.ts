@@ -210,7 +210,8 @@ export const memberDetailEndpoints = {
     fetchCsv(`${base(userId)}/trace.csv${qs({ day: range.day })}`, "member-night.csv"),
 
   /**
-   * R20 — grant or revoke admin rights. `reason` is required on a revoke; `confirmSelf` is the
+   * R20 — grant or revoke admin rights. `reason` is required both ways (review round 1, B10 —
+   * the server answers 400 `reason_required` without it); `confirmSelf` is the
    * second yes an admin gives before removing their OWN rights.
    */
   setAdmin: (userId: string, body: { grant: boolean; reason?: string; confirmSelf?: boolean }) =>

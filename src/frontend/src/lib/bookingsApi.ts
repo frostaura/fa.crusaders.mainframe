@@ -107,7 +107,7 @@ export function splitCancelOf(source: CancellationQuote | Record<string, unknown
 
 /** A day cell the caller holds a partner's seat on — theirs to open, never to cancel. */
 export function isPartnerSlot(slot: ScheduleSlot): boolean {
-  return slot.isMine && (slot as ScheduleSlot & { role?: string }).role === "partner";
+  return slot.isMine && slot.role === "partner";
 }
 
 export const bookingsApi = {

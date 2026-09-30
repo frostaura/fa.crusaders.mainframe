@@ -536,6 +536,12 @@ export type ScheduleSlot = {
   checkedIn: boolean | null;
   /** What the booking cost. Null for another member's booking, for the same reason. */
   amountChargedCredits: number | null;
+  /**
+   * The viewer's side of a booking that `isMine` (review round 1, B2): `partner` for an accepted
+   * seat on somebody else's game — theirs to open, never to cancel. Absent on an older API and
+   * null on everybody else's.
+   */
+  role?: "organiser" | "partner" | null;
 };
 export type ScheduleCourt = {
   id: string; courtNumber: number; name: string;
@@ -2150,16 +2156,6 @@ export const endpoints = {
     }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string | null; member_notified: boolean; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
-  /**
-   * Reset a member's code — the desk's answer to "I lost my phone" (member-code §10, §13). Takes
-   * the MEMBERSHIP id. The code rotates and every session they have ends; with `revokePasskeys`
-   * (the server's default is true here) their passkeys go too, because the lost phone's passkey
-   * would otherwise sign straight back in and enrol for the new code.
-   */
-  adminResetMemberCode: (memberId: string, revokePasskeys: boolean) =>
-    api.post<{ rotated: boolean; generation: number; passkeys_revoked: boolean; passkeys_removed: number }>(
-      `/api/v1/admin/members/${memberId}/code/reset`, { revoke_passkeys: revokePasskeys }),
-
   // D2 deleted `POST /admin/members/{id}/class` with the member class. A member's groups — which
   // now carry the top-up rate and the peak say — are set with `adminEndpoints.memberGroupsSet`.
 

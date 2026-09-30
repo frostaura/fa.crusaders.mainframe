@@ -238,6 +238,10 @@ export function adjustRefusal(err: unknown): string | null {
     }
     case "amount_not_whole_cents": return "Credits go to two decimal places. Nothing was changed.";
     case "zar_received_required": return "Say how much money was received — a top-up that counts as revenue needs it. Nothing was changed.";
+    case "zar_received_out_of_range": {
+      const max = typeof payload.max === "number" ? ` — the most is ${formatMoney(payload.max)}` : "";
+      return `That amount of money received can't be right${max}. Nothing was changed.`;
+    }
     default: return null;
   }
 }
