@@ -106,7 +106,13 @@ export function needsShareAsk(d: BookingDetail, pick: PickedPlayer): boolean {
 
 /** What the organiser covers now — the most an added seat can be asked for under an amount split. */
 export function organiserShare(d: BookingDetail): number {
-  return d.players.find((p) => p.kind === "organiser")?.share_credits ?? d.money.price_credits;
+  const own = d.players.find((p) => p.kind === "organiser")?.share_credits ?? d.money.price_credits;
+  if (d.split_mode !== "amount") return own;
+  // R4 M4-6 — an amount split's organiser covers what the live partner seats are NOT asked for.
+  // Derived here, not read off the organiser's seat: that figure went stale after a removal
+  // ("You cover 30.00 cr now" beside a Money panel saying 50) and capped the ask with it.
+  const asked = partnerSeats(d).reduce((sum, p) => sum + p.share_credits, 0);
+  return Math.max(0, Math.round((d.money.price_credits - asked) * 100) / 100);
 }
 
 /**

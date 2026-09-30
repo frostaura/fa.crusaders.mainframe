@@ -123,6 +123,19 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     expect(post?.body).toEqual({ players: [{ userId: "u-jo", amount: 30 }] });
   });
 
+  it("R4 M4-6: after a removal the prompt names what the organiser covers now, not the seat's stale figure", async () => {
+    // Bongani (asked 30) was removed; the organiser's own seat still reads its old 30.
+    const removed = seat({ participant_id: "p-bongani", seat: 3, team: "B", kind: "member", user_id: "u-b", name: "Bongani Dube", status: "removed", share_credits: 30 });
+    serve({ detail: detail({ split_mode: "amount", players: [seat({ share_credits: 30 }), { ...SAM_SEAT, share_credits: 40 }, removed] }) });
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
+    fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
+    const ask = await screen.findByRole("dialog", { name: SHARE_ASK.title("Jo") });
+    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("60.00 cr"));
+    // ⌊100 / 3⌋, no longer capped at the stale 30.
+    expect(within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") })).toHaveValue("33.00");
+  });
+
   it("refuses more than the organiser covers, in the field, and sends nothing", async () => {
     const stub = serve({ detail: amountSplit() });
     renderDetail();
