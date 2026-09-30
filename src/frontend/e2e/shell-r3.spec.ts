@@ -1,6 +1,6 @@
 import { type Page } from "@playwright/test";
 import { serveApi, signIn, test, expect } from "./fixtures";
-import { memberShellRoutes } from "./playersKit";
+import { BOOKING, detailFixture, memberShellRoutes } from "./playersKit";
 
 /**
  * Review round 3 — the shell and the admin section bar, at the widths and text sizes the visual
@@ -107,4 +107,19 @@ test.describe("V-16 / X-10 — 200 % text on a 390 px phone", () => {
     expect(overlap(icon, b) / (icon.width * icon.height), "share of the Admin icon under its count").toBeLessThanOrEqual(0.1);
     expect(b.right, "the count stays on the screen").toBeLessThanOrEqual(390);
   });
+});
+
+test("X-9 — a booking opened straight from a link names the booking in the tab, without taking focus", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: `/api/v1/bookings/${BOOKING}`, body: detailFixture() },
+    ...memberShellRoutes(),
+  ]);
+  await page.goto(`/bookings/${BOOKING}`);
+  const heading = page.locator("#main-content h1");
+  await expect(heading).not.toHaveText(/^Booking$/);
+  const name = (await heading.textContent())!.trim();
+  await expect(page).toHaveTitle(`${name} — Booking — Crusaders Mainframe`);
+  await expect(heading).not.toBeFocused();
+  await expect(page.getByTestId("route-announcer")).toHaveText("");
 });

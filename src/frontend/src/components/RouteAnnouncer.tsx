@@ -98,7 +98,9 @@ export function RouteAnnouncer() {
     // emailed deep link has a target, and landing at the top of the page is the D9 failure.
     // F4-6 — except the landing of the member's own Retry, which is treated as the navigation it is.
     const retried = initial && !location.hash && isRetryLanding(location.pathname);
-    if (initial && !location.hash && !retried) return;
+    // X-9 — but the TAB still names the record once its heading says which: a direct load of an
+    // emailed booking link kept "Booking — Crusaders Mainframe" for good. Silent, and no focus.
+    if (initial && !location.hash && !retried) return titleSilently(location.pathname);
 
     // The NAME, only where the name has changed. A fragment jump inside one page would
     // otherwise announce the page the person is already on.
@@ -192,7 +194,7 @@ function takeFocus(hash: string, onHeading: (heading: HTMLElement) => void): () 
  * anything else the person has moved to since), and the page is named again from it.
  * </p>
  */
-function watchHeading(landed: HTMLElement, onHeading: (heading: HTMLElement) => void, timer: { id?: number }) {
+function watchHeading(landed: HTMLElement, onHeading: (heading: HTMLElement) => void, timer: { id?: number }, moveFocus = true) {
   let checks = 0;
   let text = landed.textContent ?? "";
   const check = () => {
@@ -209,15 +211,39 @@ function watchHeading(landed: HTMLElement, onHeading: (heading: HTMLElement) => 
       const next = document.querySelector<HTMLElement>("#main-content h1");
       if (next) {
         const active = document.activeElement;
-        if (!active || active === document.body) focusHeading(next, false);
+        if (moveFocus && (!active || active === document.body)) focusHeading(next, false);
         onHeading(next);
-        watchHeading(next, onHeading, timer);
+        watchHeading(next, onHeading, timer, moveFocus);
         return;
       }
     }
     if (checks < 50) timer.id = window.setTimeout(check, 100);
   };
   timer.id = window.setTimeout(check, 100);
+}
+
+/**
+ * X-9 — a first paint of a record's page: find its `<h1>` and follow it (renamed in place, or
+ * replaced) for the same five seconds as a navigation does, naming the TAB only. Nothing is
+ * announced — the browser has just announced the document — and focus is never moved.
+ */
+function titleSilently(pathname: string): (() => void) | undefined {
+  if (!isEntityRoute(pathname)) return undefined;
+  const named = nameTheRecord(pathname, null);
+  const timer: { id?: number } = {};
+  let attempts = 0;
+  const attempt = () => {
+    attempts += 1;
+    const heading = document.querySelector<HTMLElement>("#main-content h1");
+    if (heading) {
+      named(heading);
+      watchHeading(heading, named, timer, false);
+      return;
+    }
+    if (attempts < 50) timer.id = window.setTimeout(attempt, 100);
+  };
+  attempt();
+  return () => { if (timer.id !== undefined) window.clearTimeout(timer.id); };
 }
 
 /**

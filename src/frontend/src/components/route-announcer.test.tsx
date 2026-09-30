@@ -556,3 +556,53 @@ describe("the ring on programmatically focused elements (D13)", () => {
   });
 });
 
+
+/**
+ * X-9 (review round 3) — a DIRECT load of a record's page (an emailed deep link, a reload) kept
+ * the generic title "Booking — Crusaders Mainframe": the first-paint branch returned before the
+ * record was named, so only a navigation inside the app ever titled it. A first paint still says
+ * nothing and moves nothing; it titles the tab once the heading names the record.
+ */
+describe("a record's page opened directly (X-9)", () => {
+  it("titles the tab from a heading renamed in place, silently and without taking focus", async () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    render(
+      <MemoryRouter initialEntries={["/bookings/b-1"]}>
+        <RouteAnnouncer />
+        <Routes><Route path="/bookings/:bookingId" element={<SameHeadingRenamed />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(document.title).toBe("Booking — Crusaders Mainframe");
+    act(() => { screen.getByRole("button", { name: "finish reading" }).click(); });
+    await waitFor(() => expect(document.title).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking — Crusaders Mainframe"));
+    expect(screen.getByTestId("route-announcer").textContent).toBe("");
+    expect(screen.getByRole("heading", { name: "Court 1 · Thu 1 Oct, 10:15" })).not.toHaveFocus();
+  });
+
+  it("titles the tab from a heading that replaces the placeholder, and leaves focus where it was", async () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    render(
+      <MemoryRouter initialEntries={["/admin/members/u-1"]}>
+        <RouteAnnouncer />
+        <Routes><Route path="/admin/members/:userId" element={<LoadingThenNamed placeholder="Member" name="Thandi Probe" />} /></Routes>
+      </MemoryRouter>,
+    );
+    const finish = screen.getByRole("button", { name: "finish reading" });
+    act(() => { finish.click(); });
+    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Mainframe"));
+    expect(screen.getByTestId("route-announcer").textContent).toBe("");
+    expect(screen.getByRole("heading", { name: "Thandi Probe" })).not.toHaveFocus();
+  });
+
+  it("titles a record whose heading is already named on the first paint", async () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/members/u-1"]}>
+        <RouteAnnouncer />
+        <Routes><Route path="/admin/members/:userId" element={<Page title="Thandi Probe" />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Mainframe"));
+    expect(screen.getByTestId("route-announcer").textContent).toBe("");
+    expect(screen.getByRole("heading", { name: "Thandi Probe" })).not.toHaveFocus();
+  });
+});
