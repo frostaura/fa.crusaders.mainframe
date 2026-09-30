@@ -102,11 +102,19 @@ public static class AttendanceQuery
 
         return rows
             .Select(r => new AttendedSession(
-                r.Id, r.StartsAt, (r.Own ?? r.CheckedInAt)!.Value, PlayedMinutes(r.StartsAt, r.EndsAt, r.CancelledAt),
+                r.Id, r.StartsAt, AttendedAt(r.StartsAt, (r.Own ?? r.CheckedInAt)!.Value), PlayedMinutes(r.StartsAt, r.EndsAt, r.CancelledAt),
                 seated[r.Id].Prepend(r.UserId).Where(u => u != userId).Distinct().ToList()))
             .OrderBy(s => s.EvidenceAt).ThenBy(s => s.BookingId)
             .ToList();
     }
+
+    /// <summary>
+    /// When a session counts as attended (review round 2, B-11): the court time's start or the
+    /// check-in, whichever is later — the rule a result already keeps (B15). A scan during early
+    /// entry is evidence the member came, not the instant they played.
+    /// </summary>
+    public static DateTimeOffset AttendedAt(DateTimeOffset startsAt, DateTimeOffset checkedIn) =>
+        checkedIn > startsAt ? checkedIn : startsAt;
 
     /// <summary>
     /// Played minutes of an attended booking (§1), from the row as it stands — a released tail has

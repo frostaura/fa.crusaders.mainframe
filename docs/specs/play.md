@@ -33,6 +33,13 @@ beyond a result on a booking they both played. `show_in_leaderboards` and `share
 
   Booking status is not consulted: a cancellation after check-in (S4) and a reversed no-show (S6)
   were attended; a no-show and a displaced booking (S8) were not, because they carry no check-in.
+
+  **From when** (review round 2, B-11): a session counts from its court time or its check-in,
+  whichever is later (`AttendanceQuery.AttendedAt`) — the rule a result already keeps (§3.1). A
+  booking whose court time has not started is not yet attended, so a scan during early entry
+  awards nothing until the court starts: the check-in's recompute marker is staged for the start
+  (`PlayRecomputeDueAt = max(now, StartsAt)`), and the badge is dated then. The scan is evidence
+  the member came, not the instant they played ("First court" at 06:24 for a 06:30 court).
 - **Session** — one attended booking, from one member's point of view.
 - **Played minutes** of an attended booking — `max(0, min(EndsAt, CancelledAt ?? EndsAt) − StartsAt)`
   in whole minutes, from the row as it stands (a released tail has already truncated `EndsAt`).

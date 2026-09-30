@@ -47,7 +47,9 @@ public sealed class PlayStreakHttpTests(PostgresFixture pg) : IClassFixture<Post
         await club.GameAsync(f, At("2026-10-25T23:30:00Z"), club.Organiser, [club.Sam]);
         await PauseAsync(club, f, club.Sam, At("2026-11-11T12:00:00Z"), At("2026-11-20T12:00:00Z"));
 
-        var record = await RecordAtAsync(club, f, club.Sam, At("2026-12-08T12:00:00Z"));
+        // 20:00, after the last game's 18:00 court time: since review round 2 (B-11) a session is
+        // attended from its court time, and at noon the 18:00 game had not started yet.
+        var record = await RecordAtAsync(club, f, club.Sam, At("2026-12-08T20:00:00Z"));
         var states = record.Walk.Weeks.Select(w => (w.Week.ToString("MM-dd", CultureInfo.InvariantCulture), w.State, w.StreakAfter)).ToList();
         Assert.Equal(
             [
@@ -60,7 +62,7 @@ public sealed class PlayStreakHttpTests(PostgresFixture pg) : IClassFixture<Post
         Assert.Equal(2, record.Coverage.UsedIn(2026));
 
         // The organiser played the same weeks and paused nothing: 11-09 spends the rest week, 11-16 breaks.
-        var olive = await RecordAtAsync(club, f, club.Organiser, At("2026-12-08T12:00:00Z"));
+        var olive = await RecordAtAsync(club, f, club.Organiser, At("2026-12-08T20:00:00Z"));
         Assert.Equal(1, olive.Walk.State.Streak);
         Assert.Equal(8, olive.Walk.State.Longest);
 

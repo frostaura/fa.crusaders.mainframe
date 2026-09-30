@@ -28,7 +28,11 @@ public sealed record PlayRecord(
     {
         var zone = ClubClock.ZoneOf(settings);
         var rules = PlaySettings.StreakRulesOf(settings);
-        var sessions = await AttendanceQuery.SessionsAsync(db, userId, ct);
+        // Review round 2, B-11: a session counts from its court time, not the scan — a check-in at
+        // 06:24 for a 06:30 court awarded "First court" and "Early bird" six minutes before a ball
+        // was hit. Not yet started is not yet attended; the check-in's recompute marker is staged
+        // for the court's start (MainframeDbContext.PlayStaging), which is when this runs again.
+        var sessions = (await AttendanceQuery.SessionsAsync(db, userId, ct)).Where(s => s.StartsAt <= now).ToList();
         var results = await ConfirmedResultsAsync(db, userId, ct);
         var pauses = await db.MemberStreakPauses.AsNoTracking().Where(p => p.UserId == userId).OrderBy(p => p.StartedAt).ToListAsync(ct);
         var profile = await db.MemberPlayProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.UserId == userId, ct);

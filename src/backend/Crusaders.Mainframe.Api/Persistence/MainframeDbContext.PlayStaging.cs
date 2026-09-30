@@ -50,7 +50,7 @@ public partial class MainframeDbContext
                          && (e.Property(b => b.Status).IsModified || e.Property(b => b.CheckedInAt).IsModified))
                         || (e.State == EntityState.Added && e.Entity.CheckedInAt != null);
             if (!moves) continue;
-            e.Entity.PlayRecomputeDueAt = at;
+            e.Entity.PlayRecomputeDueAt = DueFor(e.Entity, at);
             riding.Add(e.Entity.Id);
         }
 
@@ -69,11 +69,20 @@ public partial class MainframeDbContext
             // A booking this save is writing anyway: the marker rides its row.
             var entry = ChangeTracker.Entries<Booking>().First(e => e.Entity.Id == id);
             if (entry.Entity.UserId is null) continue;
-            entry.Entity.PlayRecomputeDueAt = at;
+            entry.Entity.PlayRecomputeDueAt = DueFor(entry.Entity, at);
             riding.Add(id);
         }
         return fromSeat.Concat(fromResult).Where(id => !riding.Contains(id) && !tracked.Contains(id)).Distinct().ToList();
     }
+
+    /// <summary>
+    /// The marker for a booking changed at <paramref name="at"/>: then, or the court time's start
+    /// if that is later (review round 2, B-11). A session is not attended before its court time,
+    /// so a check-in during early entry is evaluated when the court starts — without this the
+    /// pass at the scan found nothing to award and nothing ran again.
+    /// </summary>
+    private static DateTimeOffset DueFor(Booking booking, DateTimeOffset at) =>
+        booking.StartsAt > at ? booking.StartsAt.ToUniversalTime().Storable() : at;
 
     /// <summary>Only a member's booking has players to evaluate; an admin block has none.</summary>
     private IQueryable<Booking> MemberBookings(List<Guid> bookingIds) =>
@@ -82,13 +91,13 @@ public partial class MainframeDbContext
     private Task<int> StagePlayRecomputeAsync(List<Guid> bookingIds, CancellationToken ct)
     {
         var at = DateTimeOffset.UtcNow.Storable();
-        return MemberBookings(bookingIds).ExecuteUpdateAsync(u => u.SetProperty(b => b.PlayRecomputeDueAt, at), ct);
+        return MemberBookings(bookingIds).ExecuteUpdateAsync(u => u.SetProperty(b => b.PlayRecomputeDueAt, b => b.StartsAt > at ? b.StartsAt : at), ct);
     }
 
     private int StagePlayRecompute(List<Guid> bookingIds)
     {
         var at = DateTimeOffset.UtcNow.Storable();
-        return MemberBookings(bookingIds).ExecuteUpdate(u => u.SetProperty(b => b.PlayRecomputeDueAt, at));
+        return MemberBookings(bookingIds).ExecuteUpdate(u => u.SetProperty(b => b.PlayRecomputeDueAt, b => b.StartsAt > at ? b.StartsAt : at));
     }
 
     /// <summary>
