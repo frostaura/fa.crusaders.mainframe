@@ -57,10 +57,21 @@ namespace Crusaders.Mainframe.Tests;
 /// appends every seed's steps and answers there. <c>PLAYERS_PROPERTY_CONCURRENT_WEIGHT</c>=n (the
 /// default weight is 1) leans every seed to the concurrent step, to hunt races under load.
 /// </para>
+///
+/// <para>
+/// <b>Five classes, one seed per theory row</b> (review round 4). It was ONE fact looping 150
+/// seeds — at 196-734 s the whole suite's floor, because a class is serial and runs on one
+/// thread. The seeds are dealt round-robin to five nested classes (xUnit runs classes in
+/// parallel, each on its own cloned database and shared host), and each seed is its own row, so
+/// a failure names its seed in the test name. Same seeds, same scenario, same invariants.
+/// </para>
 /// </summary>
-public sealed class PlayersPropertyHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
+public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
+
+    /// <summary>How many classes the seeds are dealt to.</summary>
+    private const int Shards = 5;
 
     /// <summary>Seeds the refuter's search found the round-6 defect with; always run.</summary>
     private static readonly int[] RegressionSeeds = [1005, 1053, 1113];
@@ -72,33 +83,73 @@ public sealed class PlayersPropertyHttpTests(PostgresFixture pg) : IClassFixture
         return RegressionSeeds.Concat(Enumerable.Range(first, Math.Max(0, count - RegressionSeeds.Length))).Distinct().ToList();
     }
 
-    [SkippableFact]
-    public async Task Players_money_holds_its_invariants_across_random_scenarios()
+    /// <summary>The seeds dealt to one shard, one theory row each.</summary>
+    public static TheoryData<int> SeedsOf(int shard)
+    {
+        var rows = new TheoryData<int>();
+        var seeds = Seeds();
+        for (var i = shard; i < seeds.Count; i += Shards) rows.Add(seeds[i]);
+        return rows;
+    }
+
+    /// <summary>One seed's scenario on this class's shared host.</summary>
+    protected async Task RunSeedAsync(int seed)
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
-        var seeds = Seeds();
-        foreach (var seed in seeds)
+        var f = pg.SharedHost;
+        var run = new Scenario(f, seed);
+        try
         {
-            var run = new Scenario(f, seed);
-            try
+            await run.RunAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new Xunit.Sdk.XunitException($"seed {seed} failed:\n{string.Join("\n", run.Log)}\n{ex}");
+        }
+        finally
+        {
+            await run.ForgetMailAsync();
+            // Opt-in: every seed's steps and answers, to see what the generator actually did.
+            if (Environment.GetEnvironmentVariable("PLAYERS_PROPERTY_TRACE") is { Length: > 0 } trace)
             {
-                await run.RunAsync();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                throw new Xunit.Sdk.XunitException($"seed {seed} failed after {seeds.ToList().IndexOf(seed)} passing seeds:\n{string.Join("\n", run.Log)}\n{ex}");
-            }
-            finally
-            {
-                await run.ForgetMailAsync();
-                // Opt-in: every seed's steps and answers, to see what the generator actually did.
-                if (Environment.GetEnvironmentVariable("PLAYERS_PROPERTY_TRACE") is { Length: > 0 } trace)
-                {
-                    await File.AppendAllLinesAsync(trace, run.Log.Prepend($"== seed {seed}"));
-                }
+                await File.AppendAllLinesAsync(trace, run.Log.Prepend($"== seed {seed}"));
             }
         }
+    }
+
+    public sealed class Shard0(PostgresFixture pg) : PlayersPropertyHttpTests(pg), IClassFixture<PostgresFixture>
+    {
+        [SkippableTheory]
+        [MemberData(nameof(SeedsOf), 0)]
+        public Task Players_money_holds_its_invariants_across_random_scenarios(int seed) => RunSeedAsync(seed);
+    }
+
+    public sealed class Shard1(PostgresFixture pg) : PlayersPropertyHttpTests(pg), IClassFixture<PostgresFixture>
+    {
+        [SkippableTheory]
+        [MemberData(nameof(SeedsOf), 1)]
+        public Task Players_money_holds_its_invariants_across_random_scenarios(int seed) => RunSeedAsync(seed);
+    }
+
+    public sealed class Shard2(PostgresFixture pg) : PlayersPropertyHttpTests(pg), IClassFixture<PostgresFixture>
+    {
+        [SkippableTheory]
+        [MemberData(nameof(SeedsOf), 2)]
+        public Task Players_money_holds_its_invariants_across_random_scenarios(int seed) => RunSeedAsync(seed);
+    }
+
+    public sealed class Shard3(PostgresFixture pg) : PlayersPropertyHttpTests(pg), IClassFixture<PostgresFixture>
+    {
+        [SkippableTheory]
+        [MemberData(nameof(SeedsOf), 3)]
+        public Task Players_money_holds_its_invariants_across_random_scenarios(int seed) => RunSeedAsync(seed);
+    }
+
+    public sealed class Shard4(PostgresFixture pg) : PlayersPropertyHttpTests(pg), IClassFixture<PostgresFixture>
+    {
+        [SkippableTheory]
+        [MemberData(nameof(SeedsOf), 4)]
+        public Task Players_money_holds_its_invariants_across_random_scenarios(int seed) => RunSeedAsync(seed);
     }
 
     /// <summary>One seeded scenario: a club, its games, a random walk, and the checks after every step.</summary>
