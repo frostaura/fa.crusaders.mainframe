@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -66,13 +66,14 @@ export function PlayerPicker(props: PlayerPickerProps) {
   // Read here, not in the tab, so the picker can open on Recent when Favourites is empty (R1 F1.21).
   const recent = useRecent();
   const tab = usePickerTab(favourites.state, recent.state);
+  const list = useFollowSelectedTab(tab.value);
   const excludedKey = excludeUserIds.join(",");
   const excluded = useMemo(() => new Set(excludedKey ? excludedKey.split(",") : []), [excludedKey]);
   const pickMember = (m: PublicMember) => onPick({ kind: "member", userId: m.user_id, name: m.name, photoUrl: m.photo_url });
   const tabProps = { favourites, excluded, onPick: pickMember };
   return (
     <Tabs variant="underline" value={tab.value} onValueChange={tab.choose} data-player-picker="">
-      <TabsList aria-label={PICKER.tabsLabel}>
+      <TabsList ref={list} aria-label={PICKER.tabsLabel}>
         <TabsTrigger value="favourites">{PICKER.favourites}</TabsTrigger>
         <TabsTrigger value="recent">{PICKER.recent}</TabsTrigger>
         <TabsTrigger value="members">{PICKER.members}</TabsTrigger>
@@ -88,6 +89,25 @@ export function PlayerPicker(props: PlayerPickerProps) {
       ) : null}
     </Tabs>
   );
+}
+
+/**
+ * R2 F2-13 — the picker opens on Favourites and may then settle on Members once the reads land
+ * (R1 F1.21). The dialog's first focus had already gone to the Favourites trigger, so a keyboard
+ * or screen-reader user sat on a tab that was not the selected one. When the selection moves and
+ * focus is on one of this list's triggers, it follows to the selected trigger. A tab the member
+ * chose themselves already holds focus, so this changes nothing for them.
+ */
+function useFollowSelectedTab(value: string) {
+  const list = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = list.current;
+    const active = document.activeElement;
+    if (!root || !(active instanceof HTMLElement) || !root.contains(active)) return;
+    const selected = root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (selected && selected !== active) selected.focus({ preventScroll: true });
+  }, [value]);
+  return list;
 }
 
 export type PlayerPickerDialogProps = PlayerPickerProps & {

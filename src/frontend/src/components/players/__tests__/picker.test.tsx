@@ -252,3 +252,17 @@ describe("PlayerPickerDialog", () => {
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ kind: "member", userId: "sam" }));
   });
 });
+
+describe("PlayerPickerDialog — first focus (R2 F2-13)", () => {
+  it("follows the tab the picker settles on: Members selected means Members focused, not Favourites", async () => {
+    stubFetch([
+      { path: "/api/v1/me/partners/favourites", body: { items: [] } },
+      { path: "/api/v1/me/partners/recent", body: { items: [] } },
+    ]);
+    renderPage(<PlayerPickerDialog open onOpenChange={() => undefined} title="Invite a player" onPick={vi.fn()} excludeUserIds={[]} />);
+    const members = await screen.findByRole("tab", { name: PICKER.members });
+    await waitFor(() => expect(members).toHaveAttribute("aria-selected", "true"));
+    await waitFor(() => expect(document.activeElement?.getAttribute("role")).toBe("tab"));
+    await waitFor(() => expect(members).toHaveFocus());
+  });
+});
