@@ -180,6 +180,7 @@ function StepBody({ flow, ...props }: TopUpSheetProps & { flow: Flow }) {
 function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
   const preset = QUICK.map(String).includes(flow.amountText.trim()) ? flow.amountText.trim() : "";
   const warning = flow.direction === "take_back" ? overdraftWarning(balance, flow.valid) : null;
+  const flipIcon = flow.direction === "add" ? <Minus aria-hidden="true" /> : <Plus aria-hidden="true" />;
   return (
     <>
       <ToggleGroup
@@ -210,12 +211,7 @@ function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
       </Field>
       {warning ? <Alert tone="warning" live="polite">{warning}</Alert> : null}
       {/* A button that looks like one (VIS F3-15): as a ghost it read as a line of text. */}
-      <Button
-        variant="outline"
-        className="self-start"
-        icon={flow.direction === "add" ? <Minus aria-hidden="true" /> : <Plus aria-hidden="true" />}
-        onClick={flow.flip}
-      >
+      <Button variant="outline" className="self-start" onClick={flow.flip} icon={flipIcon}>
         {flow.direction === "add" ? TAKE_BACK_LINK : ADD_LINK}
       </Button>
     </>
