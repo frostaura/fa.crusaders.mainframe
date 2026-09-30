@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { refuse, renderPage, stubFetch, type StubCall } from "@/test/harness";
 import { PICKER, PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
@@ -19,6 +19,7 @@ const JO = { user_id: "jo", name: "Jo van Wyk", photo_url: null };
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  window.sessionStorage.clear();
 });
 
 function routes(extra: Parameters<typeof stubFetch>[0] = []) {
@@ -68,6 +69,9 @@ describe("PlayerPicker — the tabs", () => {
     ]);
     show();
     expect(document.querySelector('[data-state-block="loading"]')).not.toBeNull();
+    // Nobody anywhere: the picker opens on Members (R1 F1.21); Favourites still says why it is empty.
+    await waitFor(() => expect(screen.getByRole("tab", { name: PICKER.members })).toHaveAttribute("aria-selected", "true"));
+    await openTab(PICKER.favourites);
     expect(await screen.findByText(PICKER.favouritesEmpty)).toBeTruthy();
     expect(screen.getByText(PICKER.favouritesEmptyHint)).toBeTruthy();
   });
@@ -110,6 +114,45 @@ describe("PlayerPicker — the tabs", () => {
     fireEvent.change(screen.getByLabelText(PICKER.guestLabel), { target: { value: "  Jo  " } });
     fireEvent.click(screen.getByRole("button", { name: PICKER.guestAdd }));
     expect(onPick).toHaveBeenLastCalledWith({ kind: "guest", name: "Jo" });
+  });
+});
+
+describe("PlayerPicker — the tab it opens on (R1 F1.21)", () => {
+  const selected = (name: string) => screen.getByRole("tab", { name });
+  const empty = { path: "/api/v1/me/partners/favourites", body: { items: [] } };
+
+  it("opens on Favourites when there are any", async () => {
+    routes();
+    show();
+    await screen.findByRole("button", { name: PICKER.add(SAM.name) });
+    expect(selected(PICKER.favourites)).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens on Recent when Favourites is empty and Recent has people", async () => {
+    stubFetch([empty, { path: "/api/v1/me/partners/recent", body: { items: [{ ...ALEX, last_played_at: "2030-09-09T16:00:00Z", games: 3 }] } }]);
+    show();
+    expect(await screen.findByRole("button", { name: PICKER.add(ALEX.name) })).toBeTruthy();
+    expect(selected(PICKER.recent)).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens on Members when both are empty", async () => {
+    stubFetch([empty, { path: "/api/v1/me/partners/recent", body: { items: [] } }]);
+    show();
+    await waitFor(() => expect(selected(PICKER.members)).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByLabelText(PICKER.searchLabel)).toBeTruthy();
+  });
+
+  it("a tab the member picked wins for the rest of the session", async () => {
+    routes();
+    show();
+    await screen.findByRole("button", { name: PICKER.add(SAM.name) });
+    await openTab(PICKER.guest);
+    cleanup();
+    routes();
+    show();
+    await screen.findAllByRole("tab");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(selected(PICKER.guest)).toHaveAttribute("aria-selected", "true");
   });
 });
 

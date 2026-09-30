@@ -8,7 +8,8 @@ import type { PublicMember } from "@/lib/playersApi";
 import { PICKER } from "@/lib/playersCopy";
 import { FavouritesTab, MembersTab, RecentTab } from "./picker/MemberTabs";
 import { GuestTab, LinkTab } from "./picker/OtherTabs";
-import { useFavourites } from "./picker/usePickerReads";
+import { useFavourites, useRecent } from "./picker/usePickerReads";
+import { usePickerTab } from "./picker/usePickerTab";
 
 /**
  * P11 — the player picker: Favourites · Recent · Members · Link · Guest (D11–D13).
@@ -62,12 +63,15 @@ const PANEL = "min-h-80";
 export function PlayerPicker(props: PlayerPickerProps) {
   const { onPick, excludeUserIds, allowGuest = true, allowLink = true } = props;
   const favourites = useFavourites();
+  // Read here, not in the tab, so the picker can open on Recent when Favourites is empty (R1 F1.21).
+  const recent = useRecent();
+  const tab = usePickerTab(favourites.state, recent.state);
   const excludedKey = excludeUserIds.join(",");
   const excluded = useMemo(() => new Set(excludedKey ? excludedKey.split(",") : []), [excludedKey]);
   const pickMember = (m: PublicMember) => onPick({ kind: "member", userId: m.user_id, name: m.name, photoUrl: m.photo_url });
   const tabProps = { favourites, excluded, onPick: pickMember };
   return (
-    <Tabs variant="underline" defaultValue="favourites" data-player-picker="">
+    <Tabs variant="underline" value={tab.value} onValueChange={tab.choose} data-player-picker="">
       <TabsList aria-label={PICKER.tabsLabel}>
         <TabsTrigger value="favourites">{PICKER.favourites}</TabsTrigger>
         <TabsTrigger value="recent">{PICKER.recent}</TabsTrigger>
@@ -76,7 +80,7 @@ export function PlayerPicker(props: PlayerPickerProps) {
         {allowGuest ? <TabsTrigger value="guest">{PICKER.guest}</TabsTrigger> : null}
       </TabsList>
       <TabsContent value="favourites" className={PANEL}><FavouritesTab {...tabProps} /></TabsContent>
-      <TabsContent value="recent" className={PANEL}><RecentTab {...tabProps} /></TabsContent>
+      <TabsContent value="recent" className={PANEL}><RecentTab {...tabProps} recent={recent} /></TabsContent>
       <TabsContent value="members" className={PANEL}><MembersTab {...tabProps} /></TabsContent>
       {allowLink ? <TabsContent value="link" className={PANEL}><LinkTab onPick={() => onPick({ kind: "link" })} /></TabsContent> : null}
       {allowGuest ? (

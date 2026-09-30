@@ -7,7 +7,7 @@ import { ApiError } from "@/lib/api";
 import type { PublicMember, RecentPartner } from "@/lib/playersApi";
 import { PICKER, playersRefusal, playersWhen } from "@/lib/playersCopy";
 import { MemberRow, MemberRowsSkeleton } from "./MemberRow";
-import { MIN_QUERY, useDirectory, useRecent, type Favourites } from "./usePickerReads";
+import { MIN_QUERY, useDirectory, type useRecent, type Favourites } from "./usePickerReads";
 
 /**
  * The three member tabs — Favourites, Recent, Members. Each is the honest read (failed ·
@@ -58,9 +58,9 @@ function recentDetail(p: RecentPartner): string {
   return `${played} · ${PICKER.lastPlayed(day)}`;
 }
 
-export function RecentTab(props: MemberTabProps) {
-  const { favourites, excluded, onPick } = props;
-  const recent = useRecent();
+/** Recent is read by the picker itself (it decides the opening tab), and handed in. */
+export function RecentTab(props: MemberTabProps & { recent: ReturnType<typeof useRecent> }) {
+  const { favourites, excluded, onPick, recent } = props;
   const { state } = recent;
   const rows = state.status === "ready" ? state.data : [];
   return (
