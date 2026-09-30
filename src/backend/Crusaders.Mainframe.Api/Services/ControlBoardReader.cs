@@ -155,8 +155,10 @@ public sealed class ControlBoardReader
 
         // The box whose court list CONTAINS this court number, and the position in that list
         // is the relay. A relay is an index into one board's own wiring, never a court number.
-        var device = data.Devices.FirstOrDefault(d => d.CourtNumbers.Contains(court.CourtNumber));
+        var claiming = data.Devices.Where(d => d.CourtNumbers.Contains(court.CourtNumber)).ToList();
+        var device = BoxFor(claiming);
         var relay = device?.CourtNumbers.IndexOf(court.CourtNumber);
+        var enabled = claiming.Where(d => d.Enabled).ToList();
 
         return new Dictionary<string, object?>
         {
@@ -168,7 +170,33 @@ public sealed class ControlBoardReader
             ["current"] = CurrentBlock(current, data, now),
             ["next"] = NextBlock(next, data, now),
             ["device"] = DeviceBlock(device, relay, data, now, effective, offlineAfter),
+
+            // Review round 3, A-11: how many ENABLED boxes claim this court, and the ones the tile
+            // is not reporting. More than one is a wiring or commissioning mistake the console
+            // must warn about, not a choice the board may make silently.
+            ["boxes_on_court"] = enabled.Count,
+            ["other_boxes"] = enabled.Where(d => d.Id != device?.Id).Select(OtherBox).ToList(),
         };
+    }
+
+    /// <summary>
+    /// The box a court's tile reports (review round 3, A-11): the freshest ENABLED box claiming it,
+    /// or — when none is enabled — the freshest of the rest, so a board taken out of service still
+    /// says so. It was the first row the database returned, and a box replaced 22 hours earlier
+    /// made the tile contradict its own light state.
+    /// </summary>
+    private static Device? BoxFor(List<Device> claiming)
+    {
+        return claiming
+            .OrderByDescending(d => d.Enabled)
+            .ThenByDescending(d => d.LastSeenAt ?? DateTimeOffset.MinValue)
+            .ThenBy(d => d.DeviceCode, StringComparer.Ordinal)
+            .FirstOrDefault();
+    }
+
+    private static object OtherBox(Device d)
+    {
+        return new { device_id = d.Id, device_code = d.DeviceCode, name = d.Name, last_seen_at = d.LastSeenAt };
     }
 
     /// <summary>
