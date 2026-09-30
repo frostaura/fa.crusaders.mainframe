@@ -3,6 +3,7 @@ import { ConfirmDialog } from "../admin/ConfirmDialog";
 import { useToast } from "../Toast";
 import { Checkbox } from "../ui/checkbox";
 import { Field, FieldDescription, FieldLabel } from "../ui/field";
+import { REQUIRED_MARK } from "../../lib/confirmDialogCopy";
 import { Lock } from "../ui/icons";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
@@ -118,7 +119,9 @@ export function AdminRoleSwitch(props: AdminRoleSwitchProps) {
           returnFocus={() => control.current}
           {...dialogWords(mode, self, name)}
           codes={ADMIN_ROLE_CODES}
-          confirmDisabled={!act.ready(mode === "grant")}
+          // R3 A-16: enabled, and a press names what is missing and focuses the reason.
+          notReady={!act.ready(mode === "grant")}
+          notReadyMessage={act.reason.trim() ? COPY.confirmSelfMissing : undefined}
           onConfirm={() => act.run(mode === "grant")}
         >
           <ReasonFields grant={mode === "grant"} self={self} act={act} />
@@ -141,8 +144,13 @@ function ReasonFields({ grant, self, act }: { grant: boolean; self: boolean; act
   return (
     <>
       <Field controlId="admin-role-reason">
-        <FieldLabel>{COPY.reason}</FieldLabel>
+        <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <FieldLabel>{COPY.reason}</FieldLabel>
+          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+        </span>
         <Textarea
+          required
+          aria-required="true"
           value={act.reason}
           onChange={(e) => act.setReason(e.target.value)}
           placeholder={grant ? COPY.grantReasonPlaceholder : COPY.reasonPlaceholder}

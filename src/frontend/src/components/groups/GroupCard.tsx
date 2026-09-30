@@ -5,6 +5,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
 import { Field, FieldDescription, FieldLabel } from "../ui/field";
+import { REQUIRED_MARK } from "../../lib/confirmDialogCopy";
 import {
   Archive, ArrowCounterClockwise, CalendarDots, Clock, Coins, Lightning, Lock, PencilSimple, SlidersHorizontal, Tag, Trash, Users,
 } from "../ui/icons";
@@ -207,15 +208,19 @@ function ArchiveDialog(props: {
       title={ARCHIVE_COPY.title(group.name)}
       description={ARCHIVE_COPY.body(group.name, group.member_count)}
       confirmLabel={ARCHIVE_COPY.confirm}
-      confirmDisabled={reason.trim() === ""}
+      // R3 A-16: enabled, and a press names the missing reason and focuses it (never a dead button).
+      notReady={reason.trim() === ""}
       action={`archive ${group.name}`}
       codes={GROUP_REFUSAL_CODES}
       onConfirm={() => onArchive(reason.trim())}
       returnFocus={() => document.querySelector<HTMLElement>(`[data-group-card="${CSS.escape(group.id)}"] [data-slot="card-action"] button`)}
     >
       <Field>
-        <FieldLabel>{ARCHIVE_COPY.reasonLabel}</FieldLabel>
-        <Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <FieldLabel>{ARCHIVE_COPY.reasonLabel}</FieldLabel>
+          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+        </span>
+        <Textarea rows={3} value={reason} required aria-required="true" onChange={(e) => setReason(e.target.value)} />
         <FieldDescription>{ARCHIVE_COPY.reasonHelp}</FieldDescription>
       </Field>
     </ConfirmDialog>

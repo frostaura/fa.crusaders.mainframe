@@ -42,6 +42,9 @@ export function ActionsMenu({ label, items }: { label: string; items: ReadonlyAr
   const safe = shown.filter((item) => !item.danger);
   const danger = shown.filter((item) => item.danger);
   const active = confirming === null ? null : shown[confirming] ?? null;
+  // Nothing to offer, no ⋯ (review round 3, X-2): a built-in group's menu opened empty and
+  // unnamed — a control that does nothing is worse than no control.
+  if (shown.length === 0) return null;
 
   const row = (item: ActionsMenuItem) => (
     <DropdownMenuItem

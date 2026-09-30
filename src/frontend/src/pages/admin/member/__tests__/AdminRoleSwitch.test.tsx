@@ -4,6 +4,7 @@ import { signOut, type StubRoute } from "@/test/harness";
 import { ADMIN_ROLE_CODES, ADMIN_ROLE_COPY as COPY } from "@/lib/memberDetailCopy";
 import type { MemberDetail } from "@/lib/memberDetailApi";
 import { ADMIN_ID, BASE, MEMBER_ID, baseRoutes, detailFixture, renderMember, serve } from "./memberKit";
+import { CONFIRM_NOT_READY, REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 
 /**
  * R20 — granting and revoking admin rights from a member's page.
@@ -53,8 +54,15 @@ describe("AdminRoleSwitch", () => {
     // Pressing the switch changed nothing yet.
     expect(stub.calls.some((c) => c.path === ROLE)).toBe(false);
     const confirm = within(dialog).getByRole("button", { name: COPY.grantConfirm });
-    // Review round 1, F3.9 (contract §7): a grant says why, exactly as a revoke does.
-    expect(confirm).toBeDisabled();
+    // Review round 1, F3.9 (contract §7): a grant says why, exactly as a revoke does. R3 A-16:
+    // the primary stays enabled; a press names the missing reason, sends nothing, focuses it.
+    expect(within(dialog).getByText(REQUIRED_MARK)).toBeInTheDocument();
+    expect(within(dialog).getByRole("textbox", { name: COPY.reason })).toHaveAttribute("aria-required", "true");
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
+    expect(within(dialog).getByRole("textbox", { name: COPY.reason })).toHaveFocus();
+    expect(stub.calls.some((c) => c.path === ROLE)).toBe(false);
     fireEvent.change(within(dialog).getByRole("textbox", { name: COPY.reason }), { target: { value: "Joined the committee" } });
     fireEvent.click(confirm);
 
@@ -70,7 +78,9 @@ describe("AdminRoleSwitch", () => {
     fireEvent.click(await roleSwitch());
     const dialog = await screen.findByRole("dialog", { name: COPY.revokeTitle("Thandi Mokoena") });
     const confirm = within(dialog).getByRole("button", { name: COPY.revokeConfirm });
-    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.path === ROLE)).toBe(false);
 
     fireEvent.change(within(dialog).getByRole("textbox", { name: COPY.reason }), { target: { value: "Left the committee" } });
     expect(confirm).toBeEnabled();
@@ -90,8 +100,10 @@ describe("AdminRoleSwitch", () => {
     const confirm = within(dialog).getByRole("button", { name: COPY.revokeConfirm });
 
     fireEvent.change(within(dialog).getByRole("textbox", { name: COPY.reason }), { target: { value: "Handing over" } });
-    // A reason alone is not enough for yourself.
-    expect(confirm).toBeDisabled();
+    // A reason alone is not enough for yourself — and a press says what else is missing.
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText(COPY.confirmSelfMissing)).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.path === selfRole)).toBe(false);
     fireEvent.click(within(dialog).getByRole("checkbox", { name: COPY.confirmSelf }));
     fireEvent.click(confirm);
     await waitFor(() => expect(stub.calls.find((c) => c.path === selfRole)?.body)

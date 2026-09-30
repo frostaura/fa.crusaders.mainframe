@@ -6,6 +6,7 @@ import {
   bookingRulesFixture, groupFixture, groupMemberFixture, restrictedGroupFixture, weekdayWindows,
 } from "../test/groupFixtures";
 import type { MemberGroup } from "../lib/adminApi";
+import { CONFIRM_NOT_READY } from "../lib/confirmDialogCopy";
 import { ARCHIVED_HEADING, ARCHIVE_COPY, ASSIGN_COPY, GROUP_ACTIONS, GROUP_SHEET, RATE_COPY } from "../lib/groupsCopy";
 
 /**
@@ -28,7 +29,10 @@ async function archiveFromMenu(group: string, reason = "Season over") {
   fireEvent.click(await screen.findByRole("menuitem", { name: GROUP_ACTIONS.archive }));
   const dialog = await screen.findByRole("dialog");
   const confirm = within(dialog).getByRole("button", { name: ARCHIVE_COPY.confirm });
-  expect(confirm, "no archive without a reason").toBeDisabled();
+  // R3 A-16: enabled; a press without a reason names it and sends nothing.
+  fireEvent.click(confirm);
+  expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
+  expect(within(dialog).getByLabelText(ARCHIVE_COPY.reasonLabel)).toHaveFocus();
   fireEvent.change(within(dialog).getByLabelText(ARCHIVE_COPY.reasonLabel), { target: { value: reason } });
   fireEvent.click(confirm);
 }
@@ -522,9 +526,9 @@ describe("the top-up rate and peak hours (D2: groups replaced the class)", () =>
     await screen.findByRole("heading", { name: "League" });
     expect(screen.getByText("Built in")).toBeInTheDocument();
     expect(screen.getByText(/replaced the league \/ over-65 member class/)).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: GROUP_ACTIONS.more("League") }), { button: 0, ctrlKey: false, pointerType: "mouse" });
-    // Nothing safe or destructive to offer: the menu has no archive and no delete.
-    await waitFor(() => expect(screen.queryByRole("menuitem", { name: GROUP_ACTIONS.archive })).not.toBeInTheDocument());
+    // Nothing safe or destructive to offer, so no ⋯ at all (R3 X-2: it opened an empty, unnamed menu).
+    expect(screen.queryByRole("button", { name: GROUP_ACTIONS.more("League") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: GROUP_ACTIONS.archive })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: GROUP_ACTIONS.remove })).not.toBeInTheDocument();
   });
 

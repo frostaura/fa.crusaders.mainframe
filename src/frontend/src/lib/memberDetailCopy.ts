@@ -408,6 +408,8 @@ export const ADMIN_ROLE_COPY = {
   /** A grant asks for its reason too (F3.9, contract §7): the change record says why either way. */
   grantReasonPlaceholder: "e.g. Joined the committee as treasurer",
   confirmSelf: "Yes — remove my own admin rights",
+  /** R3 A-16: the reason is there, the second yes is not. */
+  confirmSelfMissing: "Tick “Yes — remove my own admin rights” first. Nothing was changed.",
   unchanged: (name: string, isAdmin: boolean) =>
     isAdmin ? `${name} was already an administrator.` : `${name} already wasn't an administrator.`,
 } as const;
