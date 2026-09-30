@@ -33,6 +33,7 @@ public static class PlayersEndpoints
         reads.MapGet("/invites/{token}", InviteAsync);
         reads.MapGet("/me/partners/recent", RecentAsync);
         reads.MapGet("/me/bookings/upcoming", UpcomingAsync);
+        reads.MapGet("/me/bookings/recent", RecentGamesAsync);
         reads.MapGet("/me/partners/favourites", FavouritesAsync);
         reads.MapGet("/members/directory", DirectoryAsync);
         reads.MapPost("/players/split-preview", SplitPreview);
@@ -129,6 +130,13 @@ public static class PlayersEndpoints
     {
         var zone = DoorClock.ZoneOf(await settings.GetAsync(ct)).Name;
         return Results.Ok(new { timezone = zone, items = await games.ForAsync(Me(ctx), DateTimeOffset.UtcNow, ct) });
+    }
+
+    /// <summary>C3: the caller's games that ended within the result window, newest first, with their result state.</summary>
+    private static async Task<IResult> RecentGamesAsync(HttpContext ctx, UpcomingGames games, TenantSettingsAccessor settings, CancellationToken ct)
+    {
+        var view = await settings.GetAsync(ct);
+        return Results.Ok(new { timezone = DoorClock.ZoneOf(view).Name, items = await games.RecentAsync(Me(ctx), DateTimeOffset.UtcNow, view, ct) });
     }
 
     private static async Task<IResult> FavouritesAsync(HttpContext ctx, PlayersQuery query, CancellationToken ct)
