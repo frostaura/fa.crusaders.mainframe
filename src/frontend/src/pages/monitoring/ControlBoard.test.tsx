@@ -166,6 +166,24 @@ describe("the control board", () => {
     expect(warning).toHaveTextContent("Also claiming it: Court 2 box (old) (never heard from).");
   });
 
+  /** R4 A4-5: every box is called "Court box" out of the factory — the code tells them apart. */
+  it("tells same-named boxes apart by the code each reports", async () => {
+    const court = boardCourtFixture();
+    stubFetch(routes(boardFixture({
+      courts: [{
+        ...court,
+        device: { ...court.device!, name: "Court box", device_code: "box-ffee01" },
+        boxes_on_court: 2,
+        other_boxes: [{ device_id: "d-old", device_code: "box-a1b2c3", name: "Court box", last_seen_at: null }],
+      }],
+    })));
+    renderPage(<ControlBoardPage />);
+
+    const warning = await screen.findByText(/2 boxes are set to this court/);
+    expect(warning).toHaveTextContent("This tile follows Court box (box-ffee01), the one heard from most recently.");
+    expect(warning).toHaveTextContent("Also claiming it: Court box (box-a1b2c3) (never heard from).");
+  });
+
   it("says nothing about duplicates for a court with one box", async () => {
     stubFetch(routes(boardFixture({ courts: [{ ...boardCourtFixture(), boxes_on_court: 1, other_boxes: [] }] })));
     renderPage(<ControlBoardPage />);

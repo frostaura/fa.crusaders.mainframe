@@ -55,8 +55,8 @@ import {
  * Named rather than counted: "3 of 4 boards reported" sends nobody anywhere, and the whole
  * value of this page to somebody standing in a club is that it says which shelf to walk to.
  */
-function silentCourtNames(courts: ControlBoardCourt[]): string[] {
-  return courts.filter((c) => courtExpectation(c) === "unknown").map((c) => c.name);
+function silentCourts(courts: ControlBoardCourt[]): ControlBoardCourt[] {
+  return courts.filter((c) => courtExpectation(c) === "unknown");
 }
 
 /**
@@ -106,7 +106,7 @@ export function ControlBoardPage() {
   const courts: ControlBoardCourt[] = view?.courts ?? [];
   const timezone = view?.timezone;
   const readAtFace = readAt === null ? null : clubClock(readAt, timezone);
-  const silent = silentCourtNames(courts);
+  const silent = silentCourts(courts);
   const partial = partialBoardNotice(silent, readAtFace);
   /*
    * `error` is `unknown` — deliberately, because `describeFailure` is the only thing that may

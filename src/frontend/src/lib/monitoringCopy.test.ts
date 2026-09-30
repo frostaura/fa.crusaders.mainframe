@@ -248,9 +248,23 @@ describe("the health strip, and how fresh the page itself is", () => {
   });
 
   it("names the silent box rather than counting it", () => {
-    expect(partialBoardNotice(["Court 2"], "18:31")).toContain("Court 2's box hasn't called in");
-    expect(partialBoardNotice(["Court 2", "Court 3"], "18:31")).toContain("2 boxes haven't called in");
+    const tile = (n: number, box: string | null) => ({
+      court_id: `c${n}`, name: `Court ${n}`, device: box ? { device_id: box, device_code: box } : null,
+    });
+    expect(partialBoardNotice([tile(2, "b1")], "18:31")).toContain("Court 2's box hasn't called in");
+    expect(partialBoardNotice([tile(2, "b1"), tile(3, "b2")], "18:31")).toContain("2 boxes haven't called in");
     expect(partialBoardNotice([], "18:31"), "a notice about nothing").toBeNull();
+  });
+
+  /** R4 A4-5: one box drives up to four courts; one silent box read "4 boxes haven't called in". */
+  it("counts silent boxes, not tiles", () => {
+    const tile = (n: number, box: string | null) => ({
+      court_id: `c${n}`, name: `Court ${n}`, device: box ? { device_id: box, device_code: box } : null,
+    });
+    const one = partialBoardNotice([tile(1, "b1"), tile(2, "b1"), tile(3, "b1"), tile(4, "b1")], "18:31");
+    expect(one).toContain("The box for Court 1, Court 2, Court 3 and Court 4 hasn't called in");
+    expect(one).not.toContain("4 boxes");
+    expect(partialBoardNotice([tile(1, "b1"), tile(2, "b1"), tile(3, null)], null)).toContain("2 boxes haven't called in");
   });
 
   it("says out loud what the board is, and that lights cannot be switched from it", () => {

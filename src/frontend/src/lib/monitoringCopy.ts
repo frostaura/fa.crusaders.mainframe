@@ -279,14 +279,32 @@ export function healthLine(
 export function duplicateBoxesWarning(court: ControlBoardCourt, now: number): string | null {
   const count = court.boxes_on_court ?? 0;
   if (count <= 1) return null;
-  const main = court.device?.name ?? court.device?.device_code ?? "one box";
-  const others = (court.other_boxes ?? []).map((box) => {
-    const name = box.name ?? box.device_code ?? "an unnamed box";
+  const main = court.device ?? null;
+  const rest = court.other_boxes ?? [];
+  // Review round 4, A4-5: every box was called "Court box", so "follows Court box … Also
+  // claiming it: Court box" could not be acted on. Where names clash, each box carries the code
+  // it reports (and its MAC when the club's system sends one) — what Boards lists it by.
+  const names = [main, ...rest].map((box) => box?.name ?? box?.device_code ?? null);
+  const clash = (name: string | null) => name !== null && names.filter((n) => n === name).length > 1;
+  const mainName = main ? boxLabel(main, clash(names[0])) : "one box";
+  const others = rest.map((box, i) => {
+    const name = boxLabel(box, clash(names[i + 1]));
     return `${name} (${box.last_seen_at ? `heard ${relative(box.last_seen_at, now)}` : "never heard from"})`;
   });
   const also = others.length > 0 ? ` Also claiming it: ${others.join(", ")}.` : "";
-  return `${count} boxes are set to this court. This tile follows ${main}, the one heard from most recently.${also}`
+  return `${count} boxes are set to this court. This tile follows ${mainName}, the one heard from most recently.${also}`
     + " Only one box should switch a court's lights — take the others out of service on Boards.";
+}
+
+/** A box's name, with its reported code (and MAC, when sent) where another box shares the name. */
+function boxLabel(
+  box: { name?: string | null; device_code?: string | null; mac?: string | null },
+  clashes: boolean,
+): string {
+  const name = box.name ?? box.device_code ?? "an unnamed box";
+  if (!clashes) return name;
+  const ids = [box.device_code && box.device_code !== name ? box.device_code : null, box.mac ?? null].filter(Boolean);
+  return ids.length > 0 ? `${name} (${ids.join(", ")})` : name;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -354,15 +372,30 @@ export function boardStaleBand(readAt: string | null): string {
     : "Can't reach the club, and nothing has been read yet.";
 }
 
-/** One box silent, the rest fine — named, so an admin knows which shelf to walk to. */
-export function partialBoardNotice(names: string[], readAt: string | null): string | null {
-  if (names.length === 0) return null;
-  const which = names.length === 1
-    ? `${names[0]}'s box hasn't called in`
-    : `${names.length} boxes haven't called in`;
+/**
+ * Boxes silent, the rest fine — named, so an admin knows which shelf to walk to.
+ *
+ * <p>
+ * Counted in BOXES, not tiles (review round 4, A4-5): one box drives up to four courts, so one
+ * silent box read "4 boxes haven't called in". Courts whose box is not known are each their own.
+ * </p>
+ */
+export function partialBoardNotice(
+  silent: ReadonlyArray<Pick<ControlBoardCourt, "name" | "court_id" | "device">>, readAt: string | null,
+): string | null {
+  if (silent.length === 0) return null;
+  const boxes = new Set(silent.map((c) => c.device?.device_id ?? c.device?.device_code ?? `court:${c.court_id}`));
+  const courts = silent.length === 1 ? "that court" : "those courts";
+  const which = boxes.size > 1
+    ? `${boxes.size} boxes haven't called in`
+    : silent.length === 1 ? `${silent[0].name}'s box hasn't called in` : `The box for ${courtList(silent.map((c) => c.name))} hasn't called in`;
   return readAt
-    ? `${which}. What you see for ${names.length === 1 ? "that court" : "those courts"} is what we last knew at ${readAt}.`
-    : `${which}, so nothing can be said about ${names.length === 1 ? "that court" : "those courts"}.`;
+    ? `${which}. What you see for ${courts} is what we last knew at ${readAt}.`
+    : `${which}, so nothing can be said about ${courts}.`;
+}
+
+function courtList(names: string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 export const BOARD_EMPTY_NOTICE = "This club has no courts set up yet, so there is nothing to watch.";
