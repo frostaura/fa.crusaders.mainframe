@@ -72,11 +72,18 @@ public sealed class MemberApprovalService
     public async Task<TransitionReport> ApproveAsync(Guid memberId, Guid actorId, CancellationToken ct)
     {
         var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.Id == memberId, ct);
-        if (membership is null || membership.Status != MembershipStatus.PendingApproval)
+        // A rejection can be reversed (review round 3, A-2): the console offers "Approve
+        // application" on a rejected applicant, and a club that turned somebody down by mistake
+        // approves them exactly as it would have the first time — audited, on the change record
+        // FROM "rejected", welcomed by the same email. Nothing else is approvable.
+        if (membership is null
+            || membership.Status is not (MembershipStatus.PendingApproval or MembershipStatus.Rejected))
             return TransitionReport.Refused(MembershipTransition.NotFound);
 
+        var from = membership.Status == MembershipStatus.Rejected ? "rejected" : "pending_approval";
         var user = await _db.Users.FirstAsync(u => u.Id == membership.UserId, ct);
         membership.Status = MembershipStatus.Active;
+        membership.RejectionReason = null;
         membership.ReviewedAt = DateTimeOffset.UtcNow;
         membership.ReviewedByUserId = actorId;
 
@@ -96,7 +103,7 @@ public sealed class MemberApprovalService
             SubjectUserId = user.Id,
             Action = "member.approved",
         });
-        await StageChangeAsync(AdminChangeActions.MemberApproved, membership, actorId, null, ("pending_approval", "active"), ct);
+        await StageChangeAsync(AdminChangeActions.MemberApproved, membership, actorId, null, (from, "active"), ct);
 
         await _db.SaveChangesAsync(ct);
 
