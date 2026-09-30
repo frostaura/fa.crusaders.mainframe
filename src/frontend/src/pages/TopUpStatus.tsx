@@ -40,6 +40,30 @@ const FAILURE_COPY: Record<string, string> = {
 };
 
 /**
+ * What a Cancelled top-up says, by who closed it (R4 M4-1). The member's own cancel keeps the
+ * sentence it always had; one the club closed because nothing came back from PayFast for an hour
+ * (`expired`) is not something the member did, and used to be told "You cancelled".
+ */
+const CANCELLED_COPY: Record<string, string> = {
+  expired: "This payment was never finished, so nothing was charged and no credits were added.",
+};
+
+/**
+ * R4 M4-1 — the cancel return tells the club, so the attempt stops counting against the member's
+ * top-up limit. Whatever happens to that call, the row is then read back and the read is what
+ * the page believes: a lost reply is the lost-reply rule (the cancel is idempotent, and a row the
+ * club already closed is answered as it stands), and a 404 may be a server that predates the
+ * cancel route rather than a missing top-up — the read's own 404 is the page's "no such top-up".
+ */
+async function cancelAtReturn(topupId: string): Promise<TopUpStatus> {
+  try {
+    return await endpoints.topupCancel(topupId);
+  } catch {
+    return endpoints.topupStatus(topupId);
+  }
+}
+
+/**
  * How long to wait before asking again, or null when this page should stop asking.
  *
  * <p>
@@ -70,10 +94,12 @@ function pollDelayMs(attempt: number): number | null {
  * F4.2 — what the page shows for a snapshot, given how the member came back from PayFast.
  *
  * <p>
- * PayFast sends no ITN for a cancel, so the row stays Pending on the server; its cancel URL is
- * the only word the page gets (`TopUpEndpoints.cs` sets `?cancelled=1`). A Pending snapshot on
- * that return is the member's own cancel — shown as Cancelled, and not polled for six minutes
- * under "Waiting for confirmation". Anything final the club reports still wins over the flag.
+ * PayFast sends no ITN for a cancel; its cancel URL is the only word the page gets
+ * (`TopUpEndpoints.cs` sets `?cancelled=1`), and the page now passes it on (`cancelAtReturn`).
+ * When even that could not be said — the cancel's reply was lost and the read still shows
+ * Pending — the snapshot is the member's own cancel all the same: shown as Cancelled, and not
+ * polled for six minutes under "Waiting for confirmation". Anything final the club reports
+ * still wins over the flag.
  * </p>
  */
 function shownStatus(snap: TopUpStatus, cancelledReturn: boolean): TopUpStatus {
@@ -125,12 +151,16 @@ export default function TopUpStatusPage() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
     let first = true;
+    // The cancel return is said once per round, on its first read; the polls after it only read.
+    let tellCancel = cancelledReturn;
 
     const settled = () => { if (first) { first = false; setChecking(false); } };
 
     const tick = async () => {
       try {
-        const snap = shownStatus(await endpoints.topupStatus(topupId), cancelledReturn);
+        const read = tellCancel ? cancelAtReturn(topupId) : endpoints.topupStatus(topupId);
+        tellCancel = false;
+        const snap = shownStatus(await read, cancelledReturn);
         if (cancelled) return;
         settled();
         setS(snap);
@@ -336,7 +366,8 @@ function StatusBody(props: BodyProps) {
     );
   }
   const failed = status.status === "Failed";
-  const sentence = failed ? ((status.failure_code && FAILURE_COPY[status.failure_code]) ?? FAILED_FALLBACK) : CANCELLED;
+  const copy = failed ? FAILURE_COPY : CANCELLED_COPY;
+  const sentence = (status.failure_code && copy[status.failure_code]) || (failed ? FAILED_FALLBACK : CANCELLED);
   return (
     <>
       <p className={failed ? "text-sm font-medium text-danger-strong" : "text-sm text-text-secondary"}>{sentence}</p>

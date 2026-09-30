@@ -2395,6 +2395,13 @@ export const endpoints = {
   topupStart: (amountZar: number, quotedConversionRate: number) =>
     api.post<TopUpStart>("/api/v1/credit/topup", { amountZar, quotedConversionRate }),
   topupStatus: (topupId: string) => api.get<TopUpStatus>(`/api/v1/credit/topup/${topupId}`),
+  /**
+   * R4 M4-1 — the member came back through PayFast's cancel URL (`?cancelled=1`). PayFast sends
+   * no ITN for a cancel, so the row stayed Pending and counted against the member's limit for
+   * ever. Own row only (404 otherwise), idempotent, and it never overwrites a completion; the
+   * reply is the status read's shape (`failure_code: "cancelled_at_return"`).
+   */
+  topupCancel: (topupId: string) => api.post<TopUpStatus>(`/api/v1/credit/topup/${topupId}/cancel`),
 
   // Webhooks (admin)
   adminWebhooksList: () => api.get<WebhookEndpointDto[]>("/api/v1/admin/webhooks/"),

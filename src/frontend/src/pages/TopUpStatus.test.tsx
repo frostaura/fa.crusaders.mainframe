@@ -464,6 +464,9 @@ describe("Top-up status — back from PayFast after cancelling", () => {
   function show(status: string, search = "?cancelled=1") {
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      // R4 M4-1: the cancel return is told to the club; this server has not closed the row (an
+      // older one, or a reply the page could not use), so the page reads it back.
+      { method: "POST", path: `/api/v1/credit/topup/${ID}/cancel`, status: 503, body: { error: "unavailable" } },
       { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status, amount_zar: 200, conversion_rate: 1, failure_code: null } },
       { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
@@ -484,7 +487,8 @@ describe("Top-up status — back from PayFast after cancelling", () => {
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/topup");
     await new Promise((r) => setTimeout(r, 2_300));
-    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/credit/topup/${ID}`))).toHaveLength(1);
+    // One cancel (whose reply failed) and one read back — then nothing more.
+    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/credit/topup/${ID}`)).map((c) => c.method)).toEqual(["POST", "GET"]);
   }, 10_000);
 
   it("still believes the club when the payment went through after all", async () => {
