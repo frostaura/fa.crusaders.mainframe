@@ -46,21 +46,22 @@ public static class AdminScheduleEndpoints
         var (zone, timezone, _) = DoorClock.ZoneOf(view);
 
         var wanted = status?.Trim().ToLowerInvariant() ?? "active";
-        var query = db.BookingSchedules.AsNoTracking();
-        query = wanted switch
-        {
-            "ended" => query.Where(s => s.Status == ScheduleStatus.Ended),
-            "all" => query,
-            _ => query.Where(s => s.Status == ScheduleStatus.Active),
-        };
+        var today = ScheduleClock.Today(zone, DateTimeOffset.UtcNow);
 
-        var rows = await query.OrderBy(s => s.Name).ToListAsync(ct);
+        // Filtered on the status the wire reports rather than the stored one (A4-10): a series
+        // ended from a future date runs until then, and one past its last date has ended.
+        var all = await db.BookingSchedules.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
+        var rows = wanted == "all"
+            ? all
+            : all.Where(s => HasEnded(s, today) == (wanted == "ended")).ToList();
+
         var courts = await CourtsByScheduleAsync(db, rows.Select(r => r.Id).ToList(), ct);
         var names = await PersonNames.ForAsync(db, rows.Select(r => (Guid?)r.CreatedByUserId), ct);
+        var next = await NextOccurrencesAsync(db, rows, zone, ct);
 
         return Results.Ok(new
         {
-            schedules = rows.Select(s => Project(s, courts, names, zone)).ToList(),
+            schedules = rows.Select(s => Project(s, courts, names, zone, next)).ToList(),
             timezone,
         });
     }
@@ -77,8 +78,9 @@ public static class AdminScheduleEndpoints
 
         var courts = await CourtsByScheduleAsync(db, [id], ct);
         var names = await PersonNames.ForAsync(db, [row.CreatedByUserId], ct);
+        var next = await NextOccurrencesAsync(db, [row], zone, ct);
 
-        return Results.Ok(new { schedule = Project(row, courts, names, zone), timezone });
+        return Results.Ok(new { schedule = Project(row, courts, names, zone, next), timezone });
     }
 
     /// <summary>
@@ -109,32 +111,15 @@ public static class AdminScheduleEndpoints
         var exceptions = await db.BookingScheduleExceptions.AsNoTracking()
             .Where(x => x.ScheduleId == id).ToListAsync(ct);
 
-        var rows = await db.Bookings.AsNoTracking()
+        var held = await db.Bookings.AsNoTracking()
             .Where(b => b.ScheduleId == id && b.Status != BookingStatus.Cancelled)
-            .Select(b => new { b.Id, b.CourtId, b.ScheduleOccurrenceDate })
+            .Select(b => new HeldRow(b.Id, b.CourtId, b.ScheduleOccurrenceDate, b.StartsAt, b.EndsAt))
             .ToListAsync(ct);
         var courtNames = await db.Courts.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
 
-        var occurrences = ScheduleOccurrences
-            .Expand(schedule, exceptions, zone, windowFrom, windowTo)
-            .Select(o => new
-            {
-                date = o.Date,
-                starts_at = o.StartsAt,
-                ends_at = o.EndsAt,
-                status = o.StartsAt <= now ? "past" : o.Status switch
-                {
-                    ScheduleOccurrenceStatus.Skipped => "skipped",
-                    ScheduleOccurrenceStatus.Overridden => "overridden",
-                    _ => "scheduled",
-                },
-                courts = rows.Where(r => r.ScheduleOccurrenceDate == o.Date).Select(r => new
-                {
-                    court_id = r.CourtId,
-                    court_name = courtNames.GetValueOrDefault(r.CourtId),
-                    booking_id = r.Id,
-                }).ToList(),
-            })
+        var rule = ScheduleOccurrences.Expand(schedule, exceptions, zone, windowFrom, windowTo).ToList();
+        var occurrences = ScheduleDates.Project(rule, held, zone, windowFrom, windowTo, now)
+            .Select(d => ProjectDate(d, courtNames))
             .ToList();
 
         return Results.Ok(new { occurrences, timezone });
@@ -199,10 +184,11 @@ public static class AdminScheduleEndpoints
         var courts = await CourtsByScheduleAsync(db, [row.Id], ct);
         var names = await PersonNames.ForAsync(db, [actorId], ct);
         var (zone, _, _) = DoorClock.ZoneOf(view);
+        var next = await NextOccurrencesAsync(db, [row], zone, ct);
 
         return Results.Created($"/api/v1/admin/schedules/{row.Id}", new
         {
-            schedule = Project(row, courts, names, zone),
+            schedule = Project(row, courts, names, zone, next),
             rows_created = outcome.RowsWritten,
         });
     }
@@ -259,17 +245,18 @@ public static class AdminScheduleEndpoints
             SubjectLabel: row.Name,
             Reason: req.Reason?.Trim(),
             Before: before,
-            After: Snapshot(spec)), ct);
+            After: WithEffectiveFrom(Snapshot(spec), effective)), ct);
         await db.SaveChangesAsync(ct);
 
         var outcome = await schedules.MaterialiseAsync(row, ct);
 
         var courts = await CourtsByScheduleAsync(db, [row.Id], ct);
         var names = await PersonNames.ForAsync(db, [actorId], ct);
+        var next = await NextOccurrencesAsync(db, [row], zone, ct);
 
         return Results.Ok(new
         {
-            schedule = Project(row, courts, names, zone),
+            schedule = Project(row, courts, names, zone, next),
             rows_created = outcome.RowsWritten,
             effective_from = effective,
             effective_from_clamped_to = asked < today ? today : (DateOnly?)null,
@@ -408,7 +395,10 @@ public static class AdminScheduleEndpoints
 
         var cancelled = await schedules.CancelFutureAsync(id, ScheduleClock.InstantAt(zone, effective, 0), ct);
 
-        row.Status = ScheduleStatus.Ended;
+        // Ended now only when it ends from today (A4-10). Ended from a future date, the series
+        // keeps running — and materialising — until then, and reads "ended" once that date is
+        // behind it (HasEnded); marking it ended at once hid the nights it still holds.
+        if (effective <= today) row.Status = ScheduleStatus.Ended;
         // EndDate is the last date the series may produce, and `effective` is the first it may
         // not — so the stored end is the day before. A series ended "from today" still owns the
         // nights it already ran, which is what keeps the past readable.
@@ -427,7 +417,7 @@ public static class AdminScheduleEndpoints
 
         return Results.Ok(new
         {
-            status = "ended",
+            status = HasEnded(row, today) ? "ended" : "active",
             end_date = row.EndDate,
             occurrences_cancelled = cancelled,
             effective_from = effective,
@@ -596,8 +586,10 @@ public static class AdminScheduleEndpoints
 
     private static object Project(
         BookingSchedule s, IReadOnlyDictionary<Guid, List<(Guid Id, string Name)>> courts,
-        IReadOnlyDictionary<Guid, string> names, TimeZoneInfo zone)
+        IReadOnlyDictionary<Guid, string> names, TimeZoneInfo zone,
+        IReadOnlyDictionary<Guid, DateTimeOffset?> next)
     {
+        var today = ScheduleClock.Today(zone, DateTimeOffset.UtcNow);
         // Block body for the lizard reason — see Snapshot above.
         return new
         {
@@ -610,9 +602,9 @@ public static class AdminScheduleEndpoints
             start_date = s.StartDate,
             end_date = s.EndDate,
             interval_weeks = s.IntervalWeeks,
-            status = s.Status == ScheduleStatus.Ended ? "ended" : "active",
+            status = HasEnded(s, today) ? "ended" : "active",
             courts = courts.GetValueOrDefault(s.Id, []).Select(c => new { id = c.Id, name = c.Name }).ToList(),
-            next_occurrence = NextOccurrence(s, zone),
+            next_occurrence = next.GetValueOrDefault(s.Id),
             materialised_through = s.MaterialisedThrough,
             created_by_name = PersonNames.Of(s.CreatedByUserId, names),
             created_at = s.CreatedAt,
@@ -620,24 +612,107 @@ public static class AdminScheduleEndpoints
     }
 
     /// <summary>
-    /// The next date this rule produces after now, or null when the series has run out.
+    /// Whether a series has ended: ended outright, or past its last date (A4-10). A series
+    /// ended from a future date is still running until then.
+    /// </summary>
+    private static bool HasEnded(BookingSchedule s, DateOnly today)
+    {
+        if (s.Status == ScheduleStatus.Ended) return true;
+        return s.EndDate is { } last && last < today;
+    }
+
+    /// <summary>
+    /// The next start of each series after now, from what it HOLDS first (A4-3).
     ///
     /// <para>
-    /// Computed from the RULE rather than read from the materialised rows: a horizon that has
-    /// stalled on a conflict still has a next occurrence, and a schedule whose rows are all
-    /// behind it should say "none" rather than repeat its last night.
+    /// A "from this date on" change leaves the dates before it held at their old hours, so the
+    /// rule alone named the new hours for nights the club is holding at the old ones. The next
+    /// held row wins; the rule speaks only for dates after the last one held — a horizon that
+    /// stalled on a clash still has a next night — with its skipped dates left out.
     /// </para>
     /// </summary>
-    private static DateTimeOffset? NextOccurrence(BookingSchedule s, TimeZoneInfo zone)
+    private static async Task<Dictionary<Guid, DateTimeOffset?>> NextOccurrencesAsync(
+        MainframeDbContext db, IReadOnlyList<BookingSchedule> schedules, TimeZoneInfo zone, CancellationToken ct)
     {
+        var ids = schedules.Select(s => s.Id).ToList();
         var now = DateTimeOffset.UtcNow;
+        var held = await db.Bookings.AsNoTracking()
+            .Where(b => b.ScheduleId != null && ids.Contains(b.ScheduleId.Value) && b.Status != BookingStatus.Cancelled)
+            .GroupBy(b => b.ScheduleId!.Value)
+            .Select(g => new
+            {
+                Id = g.Key,
+                Next = g.Where(b => b.StartsAt > now).Min(b => (DateTimeOffset?)b.StartsAt),
+                Last = g.Max(b => b.ScheduleOccurrenceDate),
+            })
+            .ToDictionaryAsync(h => h.Id, ct);
+        var exceptions = await db.BookingScheduleExceptions.AsNoTracking()
+            .Where(x => ids.Contains(x.ScheduleId)).ToListAsync(ct);
+
+        var answer = new Dictionary<Guid, DateTimeOffset?>();
+        foreach (var s in schedules)
+        {
+            var mine = held.GetValueOrDefault(s.Id);
+            var fromRule = RuleNextAfter(s, exceptions, zone, mine?.Last, now);
+            var fromRows = mine?.Next is { } n ? TimeZoneInfo.ConvertTime(n, zone) : (DateTimeOffset?)null;
+            answer[s.Id] = Earliest(fromRows, fromRule);
+        }
+        return answer;
+    }
+
+    private static DateTimeOffset? RuleNextAfter(
+        BookingSchedule s, IReadOnlyCollection<BookingScheduleException> exceptions, TimeZoneInfo zone,
+        DateOnly? lastHeld, DateTimeOffset now)
+    {
         var today = ScheduleClock.Today(zone, now);
+        var from = lastHeld is { } last && last >= today ? last.AddDays(1) : today;
 
         return ScheduleOccurrences
-            .Expand(s, [], zone, today, s.EndDate ?? today.AddYears(1))
-            .Where(o => o.StartsAt > now)
+            .Expand(s, exceptions, zone, from, s.EndDate ?? from.AddYears(1))
+            .Where(o => o.Status != ScheduleOccurrenceStatus.Skipped && o.StartsAt > now)
             .Select(o => (DateTimeOffset?)o.StartsAt)
             .FirstOrDefault();
+    }
+
+    private static DateTimeOffset? Earliest(DateTimeOffset? a, DateTimeOffset? b)
+    {
+        if (a is null) return b;
+        if (b is null) return a;
+        return a <= b ? a : b;
+    }
+
+    /// <summary>The change record's "after" for a this-and-future edit, naming the date it runs from (A4-3).</summary>
+    private static Dictionary<string, object?> WithEffectiveFrom(object snapshot, DateOnly effective)
+    {
+        var after = System.Text.Json.JsonSerializer.SerializeToElement(snapshot)
+            .EnumerateObject()
+            .ToDictionary(p => p.Name, p => (object?)p.Value.Clone());
+        after["effective_from"] = effective.ToString("yyyy-MM-dd");
+        return after;
+    }
+
+    private static object ProjectDate(ScheduleDate d, IReadOnlyDictionary<Guid, string> courtNames)
+    {
+        // Block body for the lizard reason — see Snapshot above.
+        return new
+        {
+            date = d.Date,
+            starts_at = d.StartsAt,
+            ends_at = d.EndsAt,
+            status = d.Status,
+            // The rule's own times for the date, and whether the date is held at them (A4-3).
+            rule_starts_at = d.RuleStartsAt,
+            rule_ends_at = d.RuleEndsAt,
+            on_rule = d.OnRule,
+            courts = d.Rows.Select(r => new
+            {
+                court_id = r.CourtId,
+                court_name = courtNames.GetValueOrDefault(r.CourtId),
+                booking_id = r.Id,
+                starts_at = r.StartsAt,
+                ends_at = r.EndsAt,
+            }).ToList(),
+        };
     }
 
     private static async Task<Dictionary<Guid, List<(Guid Id, string Name)>>> CourtsByScheduleAsync(

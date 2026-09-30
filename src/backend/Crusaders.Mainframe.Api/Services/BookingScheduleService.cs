@@ -255,9 +255,16 @@ public sealed class BookingScheduleService
 
         var existing = await _db.Bookings.AsNoTracking()
             .Where(b => b.ScheduleId == schedule.Id && b.Status != BookingStatus.Cancelled)
-            .Select(b => new { b.CourtId, b.StartsAt })
+            .Select(b => new { b.CourtId, b.StartsAt, b.ScheduleOccurrenceDate })
             .ToListAsync(ct);
-        var already = existing.Select(e => (e.CourtId, e.StartsAt.ToUniversalTime())).ToHashSet();
+        // Keyed by DATE, not by start instant (review round 4, A4-3). A "from this date on" change
+        // keeps the dates before it at their old hours; keyed by instant, each of those dates
+        // looked unheld at the new hours, a second row was tried over the first, and the series'
+        // own row "collided" — stalling the horizon and mailing the admins a clash with itself.
+        var already = existing
+            .Select(e => (e.CourtId, e.ScheduleOccurrenceDate
+                ?? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(e.StartsAt, zone).DateTime)))
+            .ToHashSet();
 
         var written = 0;
         var collisions = 0;
@@ -302,7 +309,7 @@ public sealed class BookingScheduleService
 
     private async Task<(int Rows, int Collisions)> WriteOccurrenceAsync(
         BookingSchedule schedule, ScheduleOccurrence occurrence, IReadOnlyList<Guid> courts,
-        HashSet<(Guid, DateTimeOffset)> already, TenantSettingsView view, CancellationToken ct)
+        HashSet<(Guid, DateOnly)> already, TenantSettingsView view, CancellationToken ct)
     {
         var startsAt = occurrence.StartsAt.ToUniversalTime();
         var endsAt = occurrence.EndsAt.ToUniversalTime();
@@ -314,7 +321,7 @@ public sealed class BookingScheduleService
 
         foreach (var courtId in courts)
         {
-            if (already.Contains((courtId, startsAt))) continue;
+            if (already.Contains((courtId, occurrence.Date))) continue;
 
             _db.Bookings.Add(new Booking
             {
@@ -338,7 +345,7 @@ public sealed class BookingScheduleService
             try
             {
                 await _db.SaveChangesAsync(ct);
-                already.Add((courtId, startsAt));
+                already.Add((courtId, occurrence.Date));
                 rows++;
             }
             catch (DbUpdateException ex) when (IsOverlapViolation(ex))
