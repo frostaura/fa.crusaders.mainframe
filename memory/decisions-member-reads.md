@@ -43,3 +43,9 @@ Asked by the frontend lanes; built in lane B. Tests: `R1PlayersHttpTests`, `R1Ma
   too (`R2ScheduleResponseShapeHttpTests`, C7) — change it with `serverContract.ts`.
 - **A cancellation mail names court AND time** (`CancelledSlot`, B-7); a club collect or removal
   is told as the club's, with the admin's reason (B-8).
+- **Asked by F2 after round 2:** `/me/notifications` items carry `resolved_at`, stamped when a
+  result ask is retired (confirm, dispute, edit, withdraw, void, keep) even if already read —
+  migration `AddMemberNotificationResolvedAt`; the ask speaks TO the reader ("Sam says they won
+  3–0 — confirm or dispute", "… say you and Jo won …"), never naming them; streak weeks before
+  the join week (earliest `member.approved` audit row, else membership creation) are
+  `before_joining`; each detail seat carries `returned_credits` (a cancelled game read "paid 0").
