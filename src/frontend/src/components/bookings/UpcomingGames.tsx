@@ -10,6 +10,7 @@ import { bookingsApi, type UpcomingGame, type UpcomingPlayer } from "@/lib/booki
 import { firstName } from "@/lib/playersCopy";
 import { useGamesRead } from "./useGamesRead";
 import { SHOWN, when } from "./gameWhen";
+import { RESULT_READABLE } from "@/lib/bookingLink";
 
 /**
  * F1.12 — the member's upcoming games, above the grid (contract §2): every future game they
@@ -67,6 +68,7 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
     <Interactable asChild surface="card" watermark>
       <Link
         to={`/bookings/${game.booking_id}`}
+        state={RESULT_READABLE}
         className="flex min-h-touch items-center gap-3 rounded-xl border border-border bg-bg-surface p-3 text-left shadow-xs"
       >
         <span className="grid min-w-0 flex-1 gap-1">

@@ -8,6 +8,7 @@ import { bookingsApi, recentAction, type RecentGame } from "@/lib/bookingsApi";
 import { GameCard } from "./UpcomingGames";
 import { SHOWN, when } from "./gameWhen";
 import { useGamesRead } from "./useGamesRead";
+import { RESULT_READABLE } from "@/lib/bookingLink";
 
 /**
  * R2 F1-1 — the games that finished within the result window (contract C3), under the upcoming
@@ -73,6 +74,7 @@ function RecentCard({ game, zone }: { game: RecentGame; zone: string | undefined
         <Button asChild variant={action === "confirm" ? "primary" : "outline"} className="justify-self-stretch sm:justify-self-start">
           <Link
             to={`/bookings/${game.booking_id}?result=${action}`}
+            state={RESULT_READABLE}
             aria-label={action === "record" ? RECENT.recordFor(game.court_name, time) : RECENT.confirmFor(game.court_name, time)}
           >
             {action === "record" ? RECENT.record : RECENT.confirm}

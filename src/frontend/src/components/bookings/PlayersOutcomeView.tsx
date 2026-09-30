@@ -9,6 +9,7 @@ import { inviteUrl, type BookingPlayers, type PlayersOutcome } from "./playersOu
 import { seatName } from "./playersDraft";
 import type { PlayersStepState } from "./usePlayersStep";
 import type { SelectedSlot } from "./types";
+import { RESULT_READABLE } from "@/lib/bookingLink";
 
 /**
  * The players on the Confirm step (who, and the one sentence saying who pays what) and on the
@@ -97,7 +98,7 @@ function BookingBlock({ booking, face, titled }: { booking: BookingPlayers; face
         />
       ))}
       <Button asChild variant="outline" className="justify-self-start">
-        <Link to={`/bookings/${booking.bookingId}`}>{BOOK_CONFIRM.seeBooking}</Link>
+        <Link to={`/bookings/${booking.bookingId}`} state={RESULT_READABLE}>{BOOK_CONFIRM.seeBooking}</Link>
       </Button>
     </div>
   );

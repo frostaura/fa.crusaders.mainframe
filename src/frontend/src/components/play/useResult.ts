@@ -25,14 +25,22 @@ type Held = { key: string; id: string; data: BookingResultView | null; error: un
 
 const EMPTY: Held = { key: "", id: "", data: null, error: null };
 
-export function useResult(bookingId: string): ResultRead {
+/**
+ * `first` — a read of THIS booking's result the page already started (perf: beside the booking's
+ * own read, not a round trip after it). Used for the first read only; every re-read asks again.
+ */
+/** A result read a page started early, and which booking it is for. */
+export type EarlyResult = { bookingId: string; read: Promise<BookingResultView> };
+
+export function useResult(bookingId: string, first?: EarlyResult | null): ResultRead {
   const [nonce, setNonce] = useState(0);
   const [held, setHeld] = useState<Held>(EMPTY);
   const asked = `${bookingId}:${nonce}`;
+  const early = nonce === 0 && first?.bookingId === bookingId ? first.read : null;
 
   useEffect(() => {
     let live = true;
-    playEndpoints.bookingResult(bookingId).then(
+    (early ?? playEndpoints.bookingResult(bookingId)).then(
       (data) => { if (live) setHeld({ key: asked, id: bookingId, data, error: null }); },
       (error: unknown) => {
         if (!live) return;
@@ -40,7 +48,7 @@ export function useResult(bookingId: string): ResultRead {
       },
     );
     return () => { live = false; };
-  }, [asked, bookingId]);
+  }, [asked, bookingId, early]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const adopt = useCallback((result: MatchResult) => {

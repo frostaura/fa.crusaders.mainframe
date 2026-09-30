@@ -17,6 +17,7 @@ import { isPartnerSlot } from "../lib/bookingsApi";
 import {
   bookedKey, isPendingBooking, selectionKey, type GridCoord, type SelectionApi, type SelectionKey,
 } from "../lib/gridSelection";
+import { RESULT_READABLE } from "../lib/bookingLink";
 
 /**
  * The booking grid's cells — one per court per time slice (design-system.md, "Slot-state
@@ -517,6 +518,7 @@ function MinePastCell(props: SlotCellProps & { slot: ScheduleSlot }) {
       <Block rows={rows}>
         <Link
           to={`/bookings/${slot.bookingId}`}
+          state={RESULT_READABLE}
           tabIndex={props.roving ? 0 : -1}
           aria-label={minePastOpenLabel(where, slot.checkedIn)}
           data-past-mine=""
@@ -543,6 +545,7 @@ function PartnerCell(props: SlotCellProps & { slot: ScheduleSlot }) {
         <Interactable asChild surface="cell" watermark>
           <Link
             to={`/bookings/${slot.bookingId}`}
+            state={RESULT_READABLE}
             tabIndex={props.roving ? 0 : -1}
             aria-label={partnerCellLabel(where)}
             data-partner-cell=""

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { AdminDialogs, AdminSection } from "@/components/players/admin/AdminPanel";
 import { useAdminHands } from "@/components/players/admin/useAdminHands";
@@ -25,8 +25,11 @@ import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
 import { useAuth } from "@/lib/auth";
+import { playEndpoints } from "@/lib/playApi";
+import type { EarlyResult } from "@/components/play/useResult";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
+import { vouchesForResult } from "@/lib/bookingLink";
 
 /**
  * `/bookings/:bookingId` — the booking's own page (P11, D11–D13): the four seats and who is on
@@ -42,6 +45,7 @@ import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@
 export default function BookingDetailPage() {
   const { bookingId = "" } = useParams();
   const read = useBookingDetail(bookingId);
+  const earlyResult = useEarlyResult(bookingId);
   // R3 M-2 / I-8 — re-read at the start and end, on coming back, on a wallet movement, and on a
   // slow poll while the game is live and nobody is in yet.
   useDetailLiveness(read.data, read.readAt, read.reload);
@@ -59,9 +63,38 @@ export default function BookingDetailPage() {
         freshness={<Freshness at={read.readAt} />}
       />
       {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice="">{shown.text}</Alert> : null}
-      <DetailBody read={read} say={setNotice} />
+      <DetailBody read={read} say={setNotice} earlyResult={earlyResult} />
     </PageShell>
   );
+}
+
+/**
+ * Perf lane (2026-09-30) — the result card's first read, started BESIDE the booking's own read
+ * rather than a round trip after it (the card mounts only once the booking has arrived), when the
+ * link that opened the page vouched that the game is live. Not for
+ * an admin: another member's game shows an admin no result (`showsResult`), so theirs would be a
+ * wasted read — an admin's own game reads when its card appears, as before. Started once per
+ * booking (a ref, so StrictMode's second effect run does not send it twice).
+ */
+function useEarlyResult(bookingId: string): EarlyResult | null {
+  const auth = useAuth();
+  // Only when the link that brought us here knew the game is live (`lib/bookingLink`): a
+  // cancelled game asks for no result at all (F2.15).
+  const vouched = vouchesForResult(useLocation().state);
+  const member = auth.status === "authenticated" && !auth.isAdmin && vouched;
+  const started = useRef<EarlyResult | null>(null);
+  const [early, setEarly] = useState<EarlyResult | null>(null);
+  useEffect(() => {
+    if (!member || !bookingId) return;
+    if (started.current?.bookingId !== bookingId) {
+      const read = playEndpoints.bookingResult(bookingId);
+      // Its failure is the card's to show when it takes it; untaken, it is dropped.
+      read.catch(() => undefined);
+      started.current = { bookingId, read };
+    }
+    setEarly(started.current);
+  }, [member, bookingId]);
+  return early?.bookingId === bookingId ? early : null;
 }
 
 function headerLine(d: BookingDetail): string {
@@ -71,7 +104,7 @@ function headerLine(d: BookingDetail): string {
   return status ? `${by} · ${status}` : by;
 }
 
-function DetailBody({ read, say }: { read: DetailRead; say: (notice: Notice) => void }) {
+function DetailBody({ read, say, earlyResult }: { read: DetailRead; say: (notice: Notice) => void; earlyResult: EarlyResult | null }) {
   if (read.notFound) {
     return (
       <StateBlock
@@ -98,14 +131,16 @@ function DetailBody({ read, say }: { read: DetailRead; say: (notice: Notice) => 
   return (
     <>
       {read.error ? <Alert tone="warning" live="polite">{DETAIL_COPY.refreshFailed}</Alert> : null}
-      <DetailView detail={read.data} readAt={read.readAt} reload={read.reload} say={say} />
+      <DetailView detail={read.data} readAt={read.readAt} reload={read.reload} say={say} earlyResult={earlyResult} />
     </>
   );
 }
 
-type ViewProps = { detail: BookingDetail; readAt: number | null; reload: () => void; say: (notice: Notice) => void };
+type ViewProps = {
+  detail: BookingDetail; readAt: number | null; reload: () => void; say: (notice: Notice) => void; earlyResult: EarlyResult | null;
+};
 
-function DetailView({ detail, readAt, reload, say }: ViewProps) {
+function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
   const auth = useAuth();
   const isAdmin = auth.status === "authenticated" && auth.isAdmin;
   const organiser = useOrganiserHands(detail, reload, say);
@@ -142,7 +177,7 @@ function DetailView({ detail, readAt, reload, say }: ViewProps) {
           {cancelled && !detail.attendance.checked_in_at ? null : <Attendance detail={detail} />}
           {/* P12 — the match result, below attendance: it can be recorded once the box saw the court.
               Asked for only by the game's own players, and never on a cancelled game (R1 F2.15). */}
-          {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} freshAt={readAt} /> : null}
+          {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} freshAt={readAt} firstRead={earlyResult} /> : null}
         </div>
       </div>
       <CancelPanel detail={detail} reload={reload} say={say} />

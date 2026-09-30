@@ -1,5 +1,5 @@
 import { render, type RenderOptions } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, type InitialEntry } from "react-router-dom";
 import { vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import { ToastProvider } from "../components/Toast";
@@ -246,7 +246,7 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
  * nothing — {@link signIn} is what turns it on.
  * </p>
  */
-function Providers({ children, entries }: { children: ReactNode; entries?: string[] }) {
+function Providers({ children, entries }: { children: ReactNode; entries?: InitialEntry[] }) {
   return (
     <MemoryRouter initialEntries={entries}>
       <AuthProvider>
@@ -293,7 +293,7 @@ export function signOut() { tokenStore.clear(); }
  */
 export function renderPage(
   ui: ReactElement,
-  options?: Omit<RenderOptions, "wrapper"> & { initialEntries?: string[] },
+  options?: Omit<RenderOptions, "wrapper"> & { initialEntries?: InitialEntry[] },
 ) {
   const { initialEntries, ...rest } = options ?? {};
   const wrapper = ({ children }: { children: ReactNode }) => <Providers entries={initialEntries}>{children}</Providers>;

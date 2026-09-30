@@ -22,7 +22,7 @@ import { ResultSheet } from "./ResultSheet";
 import { confirmingNames, isViewer, outcomeLine, STATUS_TONE } from "./resultFacts";
 import { landedAs, resultWrite } from "./resultReadBack";
 import { unsureSentence } from "@/lib/lostReply";
-import { useResult, type ResultRead } from "./useResult";
+import { useResult, type EarlyResult, type ResultRead } from "./useResult";
 
 /**
  * The booking's result (§9.2), below attendance on `/bookings/:id`: record it, see it, confirm
@@ -46,8 +46,12 @@ type Open = { kind: "record" } | { kind: "edit" } | { kind: "confirm"; mode: Con
  * `freshAt` — when the page around the card last read the booking (R3 I-8): each new read reads
  * the result again too, so Record appears once the court time starts without a reload.
  */
-export function ResultCard({ bookingId, freshAt = null }: { bookingId: string; freshAt?: number | null }) {
-  const read = useResult(bookingId);
+export function ResultCard({ bookingId, freshAt = null, firstRead = null }: {
+  bookingId: string; freshAt?: number | null;
+  /** The page's own early read of this result (see `useResult`'s `first`). */
+  firstRead?: EarlyResult | null;
+}) {
+  const read = useResult(bookingId, firstRead);
   useFollow(freshAt, read.reload);
   const card = useCardHands(read);
   // 404 is an answer: this viewer is not a player of the booking (an admin looking in), and a
