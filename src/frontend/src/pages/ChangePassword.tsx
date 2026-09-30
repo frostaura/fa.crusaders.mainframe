@@ -128,7 +128,7 @@ export function ChangePasswordForm({ onDone, onCancel, forced }: FormProps) {
         value={form.values.confirm} onChange={form.set("confirm")} autoComplete="new-password" ref={confirmRef} />
       {problems > 0 ? <Alert>{checkFields(problems)}</Alert> : null}
       {failure ? <Alert>{failure}</Alert> : null}
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
         {onCancel ? <Button type="button" variant="ghost" onClick={onCancel}>{CHANGE_PASSWORD.cancel}</Button> : null}
         <Button type="submit" pending={change.pending} block={!onCancel}>{CHANGE_PASSWORD.submit}</Button>
       </div>
