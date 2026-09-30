@@ -9,8 +9,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { errorCode } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { playEndpoints, type MatchResult } from "@/lib/playApi";
-import { CONFIRM_SHEET, FORMAT_LABEL, NOTE_MAX, playRefusal, playWhen, RESULT_CARD } from "@/lib/playCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { CONFIRM_SHEET, FORMAT_LABEL, NOTE_MAX, playRefusal, playWhen, RESULT_CARD, RESULT_UNSURE } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { landedAs, resultWrite } from "./resultReadBack";
 import { ResultScore } from "./ResultScore";
 
 /**
@@ -32,7 +34,8 @@ export type ConfirmResultSheetProps = {
   result: MatchResult;
   /** Open straight at the note ("Something's wrong" on the card). */
   initialMode?: ConfirmMode;
-  onDone: (result: MatchResult, mode: ConfirmMode) => void;
+  /** `proven` — the reply was lost and the result was read back (R3 I-1). */
+  onDone: (result: MatchResult, mode: ConfirmMode, proven: boolean) => void;
   onStale: () => void;
 };
 
@@ -48,17 +51,20 @@ const STALE = new Set(["result_changed", "result_not_pending"]);
 
 function useConfirmFlow(props: ConfirmResultSheetProps) {
   const { result, onDone, onStale } = props;
+  const auth = useAuth();
+  const me = auth.status === "authenticated" ? auth.userId : null;
   const [mode, setMode] = useState<ConfirmMode>(props.initialMode ?? "confirm");
   const [note, setNote] = useState("");
-  const failure = (error: unknown) => { if (STALE.has(errorCode(error) ?? "")) onStale(); };
-  const confirm = useAsyncAction(() => playEndpoints.confirm(result.booking_id, result.version), {
-    success: (answer) => onDone(answer, "confirm"),
-    failure,
-  });
-  const dispute = useAsyncAction(() => playEndpoints.dispute(result.booking_id, result.version, note.trim() || undefined), {
-    success: (answer) => onDone(answer, "dispute"),
-    failure,
-  });
+  const failure = (error: unknown) => { if (error instanceof UnsureOutcome || STALE.has(errorCode(error) ?? "")) onStale(); };
+  const bookingId = result.booking_id;
+  const confirm = useAsyncAction(
+    () => resultWrite(bookingId, () => playEndpoints.confirm(bookingId, result.version), landedAs.confirmed(result)),
+    { success: (landed) => onDone(landed.value, "confirm", landed.proven), failure },
+  );
+  const dispute = useAsyncAction(
+    () => resultWrite(bookingId, () => playEndpoints.dispute(bookingId, result.version, note.trim() || undefined), landedAs.disputed(result, me)),
+    { success: (landed) => onDone(landed.value, "dispute", landed.proven), failure },
+  );
   return { mode, setMode, note, setNote, confirm, dispute };
 }
 
@@ -81,7 +87,11 @@ function ConfirmBody(props: ConfirmResultSheetProps) {
           </p>
         </div>
         {flow.mode === "dispute" ? <NoteField note={flow.note} onChange={flow.setNote} /> : null}
-        {error ? <Alert tone="danger" live="assertive">{playRefusal(error, CONFIRM_SHEET.action)}</Alert> : null}
+        {error ? (
+          <Alert tone="danger" live="assertive">
+            {playRefusal(error, CONFIRM_SHEET.action, flow.mode === "confirm" ? RESULT_UNSURE.confirm : RESULT_UNSURE.dispute)}
+          </Alert>
+        ) : null}
       </DialogBody>
       <DialogFooter>
         {flow.mode === "confirm" ? (

@@ -13,12 +13,14 @@ import { useAuth } from "@/lib/auth";
 import {
   MATCH_FORMATS, playEndpoints, type BookingResultView, type MatchFormat, type MatchResult, type ResultPlayer, type Side,
 } from "@/lib/playApi";
-import { FORMAT_LABEL, GAME_REASON, playRefusal, progressLine, RESULT_SHEET } from "@/lib/playCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { FORMAT_LABEL, GAME_REASON, playRefusal, progressLine, RESULT_SHEET, RESULT_UNSURE } from "@/lib/playCopy";
 import { MAX_POINTS, matchProgress, rowState, type DraftGame } from "@/lib/playScore";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { typography } from "@/lib/typography";
 import { cn } from "@/lib/utils";
 import { PlayerAvatar } from "./PlayerAvatar";
+import { landedAs, resultWrite } from "./resultReadBack";
 import {
   draftFrom, newDraft, newIdempotencyKey, readiness, swapped, withFormat, withScore, withSide, type Draft,
 } from "./resultDraft";
@@ -40,7 +42,8 @@ export type ResultSheetProps = {
   view: BookingResultView;
   /** Set to edit that pending result; absent to record a new one. */
   editing?: MatchResult | null;
-  onDone: (result: MatchResult) => void;
+  /** `proven` — the reply was lost and the result was read back (R3 I-1). */
+  onDone: (result: MatchResult, proven: boolean) => void;
   /** The result changed under the sheet (someone else recorded, or edited) — re-read the card. */
   onStale: () => void;
 };
@@ -63,13 +66,20 @@ function useSheet(props: ResultSheetProps) {
   const [draft, setDraft] = useState<Draft>(() => (editing ? draftFrom(view, editing) : newDraft(view)));
   const [key] = useState(newIdempotencyKey);
   const ready = readiness(draft, viewerKey);
+  const me = auth.status === "authenticated" ? auth.userId : null;
   const send = useAsyncAction(async () => {
     if (!ready.ready) throw new Error("not ready");
-    if (editing) return playEndpoints.edit(view.booking_id, { ...ready.body, expectedVersion: editing.version });
-    return playEndpoints.record(view.booking_id, { ...ready.body, idempotencyKey: key });
+    const body = ready.body;
+    if (editing) {
+      return resultWrite(view.booking_id, () => playEndpoints.edit(view.booking_id, { ...body, expectedVersion: editing.version }),
+        landedAs.edited(editing, body.games));
+    }
+    return resultWrite(view.booking_id, () => playEndpoints.record(view.booking_id, { ...body, idempotencyKey: key }),
+      landedAs.recorded(me, view.result?.result_id ?? null));
   }, {
-    success: (result) => onDone(result),
-    failure: (error) => { if (STALE.has(errorCode(error) ?? "")) onStale(); },
+    success: (landed) => onDone(landed.value, landed.proven),
+    // A lost reply that was read back and had not landed: the card is read again too.
+    failure: (error) => { if (error instanceof UnsureOutcome || STALE.has(errorCode(error) ?? "")) onStale(); },
   });
   return { draft, setDraft, ready, send, viewerKey };
 }
@@ -94,7 +104,11 @@ function SheetBody(props: ResultSheetProps) {
         <FormatPicker format={draft.format} onChange={(f) => sheet.setDraft((d) => withFormat(d, f))} />
         <LineupPicker sheet={sheet} candidates={props.view.candidates} />
         <GameRows draft={draft} onScore={(i, side, value) => sheet.setDraft((d) => withScore(d, i, side, value))} />
-        {send.error ? <Alert tone="danger" live="assertive">{playRefusal(send.error, RESULT_SHEET.action)}</Alert> : null}
+        {send.error ? (
+          <Alert tone="danger" live="assertive">
+            {playRefusal(send.error, RESULT_SHEET.action, props.editing ? RESULT_UNSURE.edit : RESULT_UNSURE.record)}
+          </Alert>
+        ) : null}
       </DialogBody>
       <DialogFooter className="items-stretch sm:items-center">
         {/* DOM: dismiss, primary, reason — the footer reverses on a phone, so the reason reads

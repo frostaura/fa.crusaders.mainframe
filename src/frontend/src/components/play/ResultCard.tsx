@@ -11,8 +11,8 @@ import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { playEndpoints, type BookingResultView, type MatchResult } from "@/lib/playApi";
 import {
-  CONFIRM_SHEET, FORMAT_LABEL, notRecordableLine, PLAY_REFUSAL, playRefusal, playWhen, RESULT_CARD, RESULT_SHEET,
-  STATUS_WORD,
+  CONFIRM_SHEET, FORMAT_LABEL, notRecordableLine, PLAY_REFUSAL, playRefusal, playWhen, RESULT_CARD, RESULT_LOST, RESULT_SHEET,
+  RESULT_UNSURE, STATUS_WORD,
 } from "@/lib/playCopy";
 import { focusAfterAction } from "@/lib/focusAfterAction";
 import { useAsyncAction } from "@/lib/useAsyncAction";
@@ -20,6 +20,8 @@ import { ConfirmResultSheet, type ConfirmMode } from "./ConfirmResultSheet";
 import { ResultScore } from "./ResultScore";
 import { ResultSheet } from "./ResultSheet";
 import { confirmingNames, isViewer, outcomeLine, STATUS_TONE } from "./resultFacts";
+import { landedAs, resultWrite } from "./resultReadBack";
+import { unsureSentence } from "@/lib/lostReply";
 import { useResult, type ResultRead } from "./useResult";
 
 /**
@@ -34,12 +36,17 @@ import { useResult, type ResultRead } from "./useResult";
  * query so a reload does not reopen it.
  * </p>
  */
+/** What the card last said: an outcome, or (R3 I-1) a lost reply that did not land or could not be checked. */
+type Notice = { text: string; tone: "success" | "warning" };
+type Say = (text: string, tone?: Notice["tone"]) => void;
+
 type Open = { kind: "record" } | { kind: "edit" } | { kind: "confirm"; mode: ConfirmMode } | null;
 
 export function ResultCard({ bookingId }: { bookingId: string }) {
   const read = useResult(bookingId);
   const [chosen, setChosen] = useState<Open>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const say: Say = (text, tone = "success") => setNotice({ text, tone });
   const [params, setParams] = useSearchParams();
   const open = chosen ?? deepLinked(params.get("result"), read.data);
   const close = () => {
@@ -50,9 +57,9 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
       setParams(next, { replace: true });
     }
   };
-  const done = (result: MatchResult, text: string) => {
+  const done = (result: MatchResult, text: string, proven: boolean) => {
     close();
-    setNotice(text);
+    say(proven ? RESULT_LOST(text) : text);
     read.adopt(result);
     // R2 F2-12 — the Record button that opened the sheet is replaced by the result it recorded, so
     // Radix has nothing to return focus to: the card's own heading takes it, never <body>.
@@ -78,11 +85,11 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
         onRetry={read.reload}
         skeleton={<CardSkeleton />}
       >
-        {read.data ? <CardBody view={read.data} read={read} choose={setChosen} say={setNotice} /> : null}
+        {read.data ? <CardBody view={read.data} read={read} choose={setChosen} say={say} /> : null}
       </StateBlock>
       <ConfirmGone param={params.get("result")} view={read.data} />
-      <p aria-live="polite" className="sr-only">{notice ?? ""}</p>
-      {notice ? <Alert tone="success" live="off" data-result-notice="">{notice}</Alert> : null}
+      <p aria-live="polite" className="sr-only">{notice?.text ?? ""}</p>
+      {notice ? <Alert tone={notice.tone} live="off" data-result-notice="">{notice.text}</Alert> : null}
       {read.data ? <Sheets view={read.data} open={open} close={close} done={done} stale={read.reload} /> : null}
     </Section>
   );
@@ -101,7 +108,7 @@ type SheetsProps = {
   view: BookingResultView;
   open: Open;
   close: () => void;
-  done: (result: MatchResult, text: string) => void;
+  done: (result: MatchResult, text: string, proven: boolean) => void;
   stale: () => void;
 };
 
@@ -114,7 +121,7 @@ function Sheets({ view, open, close, done, stale }: SheetsProps) {
         onOpenChange={(next) => { if (!next) close(); }}
         view={view}
         editing={open?.kind === "edit" ? result : null}
-        onDone={(r) => done(r, open?.kind === "edit" ? RESULT_SHEET.saved : RESULT_SHEET.recorded)}
+        onDone={(r, proven) => done(r, open?.kind === "edit" ? RESULT_SHEET.saved : RESULT_SHEET.recorded, proven)}
         onStale={stale}
       />
       {result ? (
@@ -123,7 +130,7 @@ function Sheets({ view, open, close, done, stale }: SheetsProps) {
           onOpenChange={(next) => { if (!next) close(); }}
           result={result}
           initialMode={open?.kind === "confirm" ? open.mode : "confirm"}
-          onDone={(r, mode) => done(r, mode === "confirm" ? CONFIRM_SHEET.confirmed : CONFIRM_SHEET.disputed)}
+          onDone={(r, mode, proven) => done(r, mode === "confirm" ? CONFIRM_SHEET.confirmed : CONFIRM_SHEET.disputed, proven)}
           onStale={stale}
         />
       ) : null}
@@ -145,7 +152,7 @@ type BodyProps = {
   view: BookingResultView;
   read: ResultRead;
   choose: (open: Open) => void;
-  say: (text: string) => void;
+  say: Say;
 };
 
 function CardBody({ view, read, choose, say }: BodyProps) {
@@ -232,8 +239,11 @@ function StatusLines({ result }: { result: MatchResult }) {
 
 function Actions({ view, read, choose, say }: BodyProps) {
   const { permissions, result } = view;
-  const confirm = useAsyncAction(() => playEndpoints.confirm(view.booking_id, result?.version ?? 0), {
-    success: (answer) => { say(CONFIRM_SHEET.confirmed); read.adopt(answer); },
+  const confirm = useAsyncAction(async () => {
+    if (!result) throw new Error("no result");
+    return resultWrite(view.booking_id, () => playEndpoints.confirm(view.booking_id, result.version), landedAs.confirmed(result));
+  }, {
+    success: (landed) => { say(landed.proven ? RESULT_LOST(CONFIRM_SHEET.confirmed) : CONFIRM_SHEET.confirmed); read.adopt(landed.value); },
     failure: () => read.reload(),
   });
   const any = permissions.can_record || permissions.can_confirm || permissions.can_dispute || permissions.can_edit || permissions.can_withdraw;
@@ -241,7 +251,7 @@ function Actions({ view, read, choose, say }: BodyProps) {
   return (
     <div className="flex flex-col gap-3">
       {permissions.can_confirm ? <p className="text-sm font-medium text-text-primary">{RESULT_CARD.waitingForYou}</p> : null}
-      {confirm.error ? <Alert tone="danger" live="assertive">{playRefusal(confirm.error, RESULT_CARD.action)}</Alert> : null}
+      {confirm.error ? <Alert tone="danger" live="assertive">{playRefusal(confirm.error, RESULT_CARD.action, RESULT_UNSURE.confirm)}</Alert> : null}
       <div className="flex flex-wrap gap-2">
         {permissions.can_record ? <Button onClick={() => choose({ kind: "record" })}>{RESULT_CARD.record}</Button> : null}
         {permissions.can_confirm ? <Button pending={confirm.pending} onClick={() => void confirm.run()}>{RESULT_CARD.confirm}</Button> : null}
@@ -255,7 +265,12 @@ function Actions({ view, read, choose, say }: BodyProps) {
   );
 }
 
-function Withdraw({ result, read, say }: { result: MatchResult; read: ResultRead; say: (text: string) => void }) {
+/**
+ * R3 I-1 — a withdraw whose reply was lost is read back: withdrawn is said as withdrawn; not
+ * withdrawn, or unreadable, closes the question and says so beside the card (the dialog can only
+ * word a refusal).
+ */
+function Withdraw({ result, read, say }: { result: MatchResult; read: ResultRead; say: Say }) {
   return (
     <ConfirmDialog
       trigger={<Button variant="danger-soft">{RESULT_CARD.withdraw}</Button>}
@@ -267,12 +282,14 @@ function Withdraw({ result, read, say }: { result: MatchResult; read: ResultRead
       codes={PLAY_REFUSAL}
       onConfirm={async () => {
         try {
-          const answer = await playEndpoints.withdraw(result.booking_id, result.version);
-          say(RESULT_CARD.withdrawn);
-          read.adopt(answer);
+          const landed = await resultWrite(result.booking_id, () => playEndpoints.withdraw(result.booking_id, result.version), landedAs.withdrawn(result));
+          say(landed.proven ? RESULT_LOST(RESULT_CARD.withdrawn) : RESULT_CARD.withdrawn);
+          read.adopt(landed.value);
         } catch (error) {
           read.reload();
-          throw error;
+          const lost = unsureSentence(error, RESULT_UNSURE.withdraw);
+          if (!lost) throw error;
+          say(lost, "warning");
         }
       }}
     />

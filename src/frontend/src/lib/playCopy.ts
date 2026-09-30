@@ -6,6 +6,8 @@ import { describeFailure } from "./errors";
 import type { GameReason, MatchProgress } from "./playScore";
 import type { MatchFormat, NotRecordableReason, ResultStatus, WeekState } from "./playApi";
 import { listNames, playersWhen } from "./playersCopy";
+import { unsureSentence, type UnsureWords } from "./lostReply";
+import { LOST_REPLY, unsureWords } from "./lostReplyCopy";
 
 /**
  * Every word the play feature says (P12, D14): My game on Profile, the result card and sheets on
@@ -198,6 +200,22 @@ export const CONFIRM_SHEET = {
   disputed: "Sent to the club. They'll look at it.",
   action: "answer the result",
 } as const;
+
+/**
+ * R3 I-1 — a result write whose reply was lost, after the result was read back: what the result
+ * still shows (nothing changed), or that it could not be read either. A write that DID land is
+ * said with its own sentence and {@link RESULT_LOST}.
+ */
+export const RESULT_UNSURE = {
+  record: unsureWords("no result from you is on this booking", "your result was recorded"),
+  edit: unsureWords("the result still shows the score from before", "your change was saved"),
+  confirm: unsureWords("the result is still waiting for an answer", "your confirmation went through"),
+  dispute: unsureWords("the result is still waiting for an answer", "your message reached the club"),
+  withdraw: unsureWords("the result is still on the booking", "the result was withdrawn"),
+} as const;
+
+/** A result write that landed although its reply was lost: its own sentence, and that we checked. */
+export const RESULT_LOST = LOST_REPLY.proven;
 
 export const NOTE_MAX = 280;
 
@@ -535,8 +553,13 @@ function withFigures(e: ApiError): string | null {
   }
 }
 
-/** The one sentence for anything a play route answers with. */
-export function playRefusal(error: unknown, action?: string): string {
+/**
+ * The one sentence for anything a play route answers with. `unsure` words a lost reply that was
+ * read back (R3 I-1) — without them an unknown outcome falls through to the transport sentence.
+ */
+export function playRefusal(error: unknown, action?: string, unsure?: UnsureWords): string {
+  const lost = unsure ? unsureSentence(error, unsure) : null;
+  if (lost) return lost;
   if (error instanceof ApiError) {
     const figured = withFigures(error);
     if (figured) return figured;
