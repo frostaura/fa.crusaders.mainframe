@@ -417,6 +417,42 @@ describe("a heading replaced after focus landed (F4.6)", () => {
   });
 });
 
+/**
+ * F4-10 — the booking page keeps ONE `<h1>` node and changes its words when the read lands
+ * ("Booking" → "Court 1 · Thu 1 Oct, 10:15"). Nothing was replaced, so the watcher never looked
+ * again and the page stayed titled and announced as just "Booking".
+ */
+function SameHeadingRenamed() {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <main id="main-content" tabIndex={-1}>
+      <h1>{loaded ? "Court 1 · Thu 1 Oct, 10:15" : "Booking"}</h1>
+      <button type="button" onClick={() => setLoaded(true)}>finish reading</button>
+    </main>
+  );
+}
+
+describe("a heading renamed in place after focus landed (F4-10)", () => {
+  it("names the booking in the tab and the announcement once its heading says which", async () => {
+    render(
+      <MemoryRouter initialEntries={["/bookings"]}>
+        <RouteAnnouncer />
+        <Nav to="/bookings/b-1" />
+        <Routes>
+          <Route path="/bookings" element={<Page title="Bookings" />} />
+          <Route path="/bookings/:bookingId" element={<SameHeadingRenamed />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    act(() => { screen.getByRole("button", { name: "Go" }).click(); });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Booking" })).toHaveFocus());
+    act(() => { screen.getByRole("button", { name: "finish reading" }).click(); });
+
+    await waitFor(() => expect(document.title).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking — Crusaders Mainframe"));
+    expect(screen.getByTestId("route-announcer").textContent).toBe("Court 1 · Thu 1 Oct, 10:15 — Booking");
+  });
+});
+
 describe("a fragment that names an accordion header", () => {
   it("focuses the header's button rather than the heading around it", () => {
     render(

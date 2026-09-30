@@ -182,15 +182,24 @@ function takeFocus(hash: string, onHeading: (heading: HTMLElement) => void): () 
  * <p>
  * A page that says "Member" while it reads and then renders the member's own header swaps its
  * `<h1>` for a new node; the old one leaves the document with focus on it, and focus falls to
- * `<body>` — measured on the member page. For three seconds after landing, a heading that has
+ * `<body>` — measured on the member page. For five seconds after landing, a heading that has
  * gone is followed to its replacement: focus moves to it when focus fell to the body (never off
  * anything else the person has moved to since), and the page is named again from it.
  * </p>
  */
 function watchHeading(landed: HTMLElement, onHeading: (heading: HTMLElement) => void, timer: { id?: number }) {
   let checks = 0;
+  let text = landed.textContent ?? "";
   const check = () => {
     checks += 1;
+    // F4-10 — the SAME node can change its words: the booking page's header says "Booking" while
+    // it reads and then "Court 1 · Thu 1 Oct, 10:15" in place, so no replacement ever happened and
+    // the page stayed named "Booking". A changed text is the record arriving; name it from it.
+    const now = landed.textContent ?? "";
+    if (landed.isConnected && now !== text) {
+      text = now;
+      onHeading(landed);
+    }
     if (!landed.isConnected) {
       const next = document.querySelector<HTMLElement>("#main-content h1");
       if (next) {
@@ -201,7 +210,7 @@ function watchHeading(landed: HTMLElement, onHeading: (heading: HTMLElement) => 
         return;
       }
     }
-    if (checks < 30) timer.id = window.setTimeout(check, 100);
+    if (checks < 50) timer.id = window.setTimeout(check, 100);
   };
   timer.id = window.setTimeout(check, 100);
 }
