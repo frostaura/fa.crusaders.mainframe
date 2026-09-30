@@ -1,5 +1,6 @@
 using Crusaders.Mainframe.Api.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Crusaders.Mainframe.Api.Multitenancy;
 
@@ -78,7 +79,18 @@ public sealed class TenantResolutionMiddleware
         _logger = logger;
     }
 
-    public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, MainframeDbContext db, IConfiguration config)
+    /// <summary>
+    /// How long a slug's club is remembered (perf round, 2026-09-30). The lookup ran on every
+    /// tenant-scoped request — one of the two to six reads every GET paid before its handler. A
+    /// club row is only ever ADDED (the bootstrap and the seeder; nothing renames a slug or deletes
+    /// a club), so a remembered hit cannot go stale; a miss is never remembered, so a club being
+    /// bootstrapped is found the moment it exists. Per host (<see cref="IMemoryCache"/>), never static.
+    /// </summary>
+    internal static readonly TimeSpan SlugCacheFor = TimeSpan.FromMinutes(5);
+
+    private sealed record KnownTenant(Guid Id, string Slug);
+
+    public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, MainframeDbContext db, IConfiguration config, IMemoryCache cache)
     {
         var path = context.Request.Path.Value ?? string.Empty;
         if (TenantlessPathPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
@@ -116,7 +128,7 @@ public sealed class TenantResolutionMiddleware
             return;
         }
 
-        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == resolvedSlug);
+        var tenant = await KnownAsync(db, cache, resolvedSlug);
         if (tenant is null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -153,6 +165,20 @@ public sealed class TenantResolutionMiddleware
     /// every other route of that session got <c>401</c>.
     /// </para>
     /// </remarks>
+    private static async Task<KnownTenant?> KnownAsync(MainframeDbContext db, IMemoryCache cache, string slug)
+    {
+        // Ordinal key: the database match below is case-sensitive, and so is the memory of it.
+        var key = "tenant-slug:" + slug;
+        if (cache.TryGetValue(key, out KnownTenant? known) && known is not null) return known;
+
+        known = await db.Tenants.AsNoTracking()
+            .Where(t => t.Slug == slug)
+            .Select(t => new KnownTenant(t.Id, t.Slug))
+            .FirstOrDefaultAsync();
+        if (known is not null) cache.Set(key, known, SlugCacheFor);
+        return known;
+    }
+
     private static bool HasRejectedBearerToken(HttpContext context)
     {
         if (context.User?.Identity?.IsAuthenticated == true) return false;
