@@ -44,7 +44,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
     private const string Chicago =
         """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"America/Chicago","heartbeat_seconds":45}""";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static string Trace(Guid userId) => $"/api/v1/admin/members/{userId}/trace";
 

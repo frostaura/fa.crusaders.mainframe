@@ -13,7 +13,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class PlayIdorHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     [SkippableFact]
     public async Task A_non_player_of_this_club_gets_404_on_every_result_route_and_nothing_changes()

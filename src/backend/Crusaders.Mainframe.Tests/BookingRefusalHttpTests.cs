@@ -50,7 +50,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid LeagueUserId, Guid CourtId, Guid SecondCourtId);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
     /// Finder B's own club, verbatim: 15-minute slices at 50 credits, peak 16:00–19:00 with

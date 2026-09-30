@@ -42,7 +42,7 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
         Guid DeviceId, string Mac, string ApiKey, Guid TenantId, string Slug,
         IReadOnlyDictionary<int, Guid> CourtIds, Guid MemberId, string Timezone);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>A club with a funded member and one box driving <paramref name="courtNumbers"/> in relay order.</summary>
     private static async Task<Box> SeedAsync(TestWebAppFactory factory, params int[] courtNumbers)

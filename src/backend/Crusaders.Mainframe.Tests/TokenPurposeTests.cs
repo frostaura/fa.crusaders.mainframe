@@ -132,7 +132,7 @@ public sealed class TokenPurposeTests : IClassFixture<PostgresFixture>
         return new Seeded(user.Id, tenant.Id, slug);
     }
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static async Task<HttpStatusCode> GetWithAsync(HttpClient client, string token)
     {

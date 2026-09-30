@@ -17,7 +17,7 @@ public sealed class R1AdminReadsHttpTests(PostgresFixture pg) : IClassFixture<Po
     public async Task Group_prices_are_the_courts_own_not_the_retired_club_default()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "r1prices");
         // The retired club default says 40; the courts say 8, and one says 12.
@@ -47,7 +47,7 @@ public sealed class R1AdminReadsHttpTests(PostgresFixture pg) : IClassFixture<Po
     public async Task A_turned_down_applicant_shows_the_clubs_reason_and_who_decided()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "r1rejected");
         await club.WriteAsync(app, async db =>
@@ -68,7 +68,7 @@ public sealed class R1AdminReadsHttpTests(PostgresFixture pg) : IClassFixture<Po
     public async Task Each_notice_kind_says_how_many_other_admins_are_still_told()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "r1others");
         // A second admin: Pam.

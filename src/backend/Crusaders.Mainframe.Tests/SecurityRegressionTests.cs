@@ -34,7 +34,7 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
 
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private sealed record Club(Guid TenantId, string Slug, Guid AdminId, Guid VictimId, Guid AttackerId, Guid BookingId);
 

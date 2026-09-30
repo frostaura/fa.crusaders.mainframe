@@ -93,7 +93,7 @@ public sealed class AdminWebhookHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
@@ -160,7 +160,7 @@ public sealed class AdminWebhookHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 

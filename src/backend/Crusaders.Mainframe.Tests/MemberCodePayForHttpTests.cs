@@ -36,7 +36,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task Quote_then_confirm_moves_the_charge_to_the_payer_refunds_the_booker_and_mails_both()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var r = await RigAsync(factory, "payok");
         await using var _ = r.App;
         var c = r.Club;
@@ -76,7 +76,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task A_retried_confirm_is_answered_with_the_first_payment_and_never_charges_twice()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var r = await RigAsync(factory, "payreplay");
         await using var _ = r.App;
         var c = r.Club;
@@ -102,7 +102,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task Concurrent_confirms_of_one_nonce_pay_exactly_once()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var r = await RigAsync(factory, "payrace");
         await using var _ = r.App;
         var c = r.Club;
@@ -122,7 +122,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task A_booking_nobody_has_started_is_activated_for_the_payer_and_the_court_lights()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var r = await RigAsync(factory, "paylight");
         await using var _ = r.App;
         var c = r.Club;
@@ -143,7 +143,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task The_decision_table()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var r = await RigAsync(factory, "paytable");
         await using var _ = r.App;
         var c = r.Club;
@@ -191,7 +191,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task After_one_member_pays_a_second_is_told_it_is_already_paid_and_the_used_code_is_code_used()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var r = await RigAsync(factory, "paytwice");
         await using var _ = r.App;
         var c = r.Club;
@@ -216,7 +216,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task The_same_nonce_at_two_clubs_is_two_payments()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new StubEmailService();
         await using var app = MemberCodeClub.Wired(factory, mail);
         var a = await MemberCodeClub.SeedAsync(app, "noncea");

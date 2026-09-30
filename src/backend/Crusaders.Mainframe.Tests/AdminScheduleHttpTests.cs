@@ -35,7 +35,7 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string Path = "/api/v1/admin/schedules";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>A UTC club, so an occurrence's instant is its wall clock and a test can read it.</summary>
     private static Task<DoorClub> ClubAsync(TestWebAppFactory factory, string prefix)

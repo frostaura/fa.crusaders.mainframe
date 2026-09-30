@@ -19,7 +19,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_lost_phone_is_signed_out_by_the_desks_reset_cannot_enrol_and_its_old_codes_are_refused()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "lostphone");
 
@@ -58,7 +58,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task Enrolment_and_refresh_read_the_epoch_from_the_row_not_the_cache()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "cutrow");
 
@@ -89,7 +89,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_refresh_inside_a_rotation_in_flight_mints_nothing_that_survives_it()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "refrace");
 
@@ -119,7 +119,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_token_with_no_epoch_is_epoch_zero()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "epochzero");
 
@@ -133,7 +133,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task Changing_the_password_keeps_the_callers_session_on_a_new_token_and_ends_every_other()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "pwkeep");
 
@@ -160,7 +160,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task Sign_out_everywhere_ends_every_session_including_the_callers_and_rotates()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "revokeall");
 
@@ -194,7 +194,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_suspension_ends_the_members_open_sessions()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "suspsess");
 
@@ -231,7 +231,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task The_desks_reset_removes_passkeys_by_default_and_says_so()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "resetpk");
         await AddPasskeyAsync(club, app, club.Olga);
@@ -259,7 +259,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task Sign_out_everywhere_keeps_passkeys_unless_asked()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "selfpk");
         await AddPasskeyAsync(club, app, club.Pam);
@@ -281,7 +281,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task An_open_wallet_stream_closes_when_a_rotation_ends_its_session()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "streamcut");
         var session = club.Bearer(app, await club.LoginAsync(app, "olga"));
@@ -323,7 +323,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task An_open_wallet_stream_closes_within_a_keep_alive_of_its_session_signing_out()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "streamout");
         var bearer = await club.LoginAsync(app, "olga");
@@ -372,7 +372,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_sign_in_with_the_old_password_inside_the_rotation_does_not_survive_it()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "signinrace");
 
@@ -404,7 +404,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task Every_rotation_raises_the_epoch_again_after_its_save()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "tworaises");
         var admin = club.Member(app, club.AdminId, "admin");

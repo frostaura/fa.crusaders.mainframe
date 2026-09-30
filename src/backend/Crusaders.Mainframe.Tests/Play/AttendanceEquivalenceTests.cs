@@ -17,7 +17,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class AttendanceEquivalenceTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     [SkippableFact]
     public async Task The_two_read_sessions_query_returns_what_the_single_statement_did_for_every_member()

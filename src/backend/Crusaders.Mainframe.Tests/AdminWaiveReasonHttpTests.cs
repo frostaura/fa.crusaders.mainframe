@@ -53,7 +53,7 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid BookingId);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
     /// A booking already paid for and starting in five minutes, so the cancellation is

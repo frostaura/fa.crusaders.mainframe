@@ -40,7 +40,7 @@ public sealed class DeviceFaultIngestHttpTests : IClassFixture<PostgresFixture>
 
     private sealed record Box(Guid DeviceId, string Mac, string ApiKey, Guid TenantId, string Slug);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static async Task<Box> SeedAsync(TestWebAppFactory factory)
     {

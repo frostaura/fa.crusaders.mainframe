@@ -83,7 +83,7 @@ internal sealed class MemberCodeClub
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        await db.Database.MigrateAsync();
+        // No MigrateAsync: the database is a clone of the template PostgresFixture migrated once.
 
         var slug = $"{(prefix.Length > 10 ? prefix[..10] : prefix)}-{Guid.NewGuid():N}"[..24];
         var tenant = new Tenant

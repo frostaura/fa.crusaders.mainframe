@@ -35,7 +35,7 @@ public sealed class AdminSettingsRecordAndBlockReportTests : IClassFixture<Postg
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string SettingsPath = "/api/v1/admin/settings/";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>The PUT is a full replace of the required members, so every save sends all eight.</summary>
     private static Dictionary<string, object?> BaseSave() => new()

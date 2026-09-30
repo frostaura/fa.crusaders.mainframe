@@ -27,7 +27,7 @@ public sealed class SeederIdempotenceTests(PostgresFixture pg) : IClassFixture<P
     {
         Skip.IfNot(pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();
@@ -86,7 +86,7 @@ public sealed class SeederIdempotenceTests(PostgresFixture pg) : IClassFixture<P
     {
         Skip.IfNot(pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();

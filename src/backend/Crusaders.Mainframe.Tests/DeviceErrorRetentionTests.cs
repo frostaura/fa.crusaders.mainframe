@@ -34,7 +34,7 @@ public sealed class DeviceErrorRetentionTests : IClassFixture<PostgresFixture>
     private const string ShortRetention =
         """{"slice_minutes":15,"timezone":"UTC","heartbeat_seconds":60,"device_error_retention_days":7}""";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>One whole sweep, through the worker the container actually hosts.</summary>
     private static Task TickAsync(TestWebAppFactory factory)

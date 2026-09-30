@@ -16,7 +16,7 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public sealed class R2RecentGamesHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static async Task<JsonElement> RecentAsync(HttpClient client)
     {

@@ -17,7 +17,7 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     /// <summary>A played game past its deadline whose 16 return to <paramref name="partner"/> waits on an organiser at 0.</summary>
     private static async Task<Guid> WaitingAsync(PlayersClub club, TestWebAppFactory f, Guid partner, int daysAgo)

@@ -63,7 +63,7 @@ public sealed class PayerLockPublishTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
 
         var bus = factory.Services.GetRequiredService<IRealtimeBus>();
@@ -120,7 +120,7 @@ public sealed class PayerLockPublishTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
 
         var bus = factory.Services.GetRequiredService<IRealtimeBus>();

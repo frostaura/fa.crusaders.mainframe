@@ -21,7 +21,7 @@ public sealed class PlayersRefute2HttpTests(PostgresFixture pg) : IClassFixture<
     /// <summary>The kind the partner and the organiser are told a return is waiting under.</summary>
     private const string ReturnWaitingKind = "players.return_waiting";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();

@@ -23,7 +23,7 @@ public sealed class R2OffsetsAndErrorsHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_booking_sent_in_the_clubs_own_offset_is_booked_at_that_instant()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r2offset");
         await club.CreditAsync(f, club.Organiser, 100m);
         var utc = PlayersClub.Tomorrow(8);
@@ -43,7 +43,7 @@ public sealed class R2OffsetsAndErrorsHttpTests(PostgresFixture pg) : IClassFixt
     public async Task The_admin_ledger_and_spend_reads_take_an_offset_range()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r2offq");
         var admin = club.Client(f, club.Admin, admin: true);
         var from = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-2).ToOffset(TimeSpan.FromHours(2)).ToString("yyyy-MM-dd'T'HH:mm:sszzz"));
@@ -58,7 +58,7 @@ public sealed class R2OffsetsAndErrorsHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_malformed_instant_is_still_a_400()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r2offbad");
         using var body = new StringContent(
             $$"""{"courtId":"{{club.CourtId}}","startsAt":"tomorrow at ten","sliceCount":2}""", System.Text.Encoding.UTF8, "application/json");
@@ -81,7 +81,7 @@ public sealed class R2OffsetsAndErrorsHttpTests(PostgresFixture pg) : IClassFixt
     public async Task An_unhandled_exception_is_a_stable_500_with_no_trace_in_any_environment(string environment)
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(factory, "r2err");
         var f = factory.WithWebHostBuilder(b =>
         {

@@ -16,7 +16,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class PlayResultsHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static DateTimeOffset Earlier(int hours = 2) => DateTimeOffset.UtcNow.AddHours(-hours).Storable();
 

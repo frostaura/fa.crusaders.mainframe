@@ -48,7 +48,7 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
     public async Task Both_cancellation_mails_name_the_court_and_the_time()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2cxdate");
@@ -75,7 +75,7 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
     public async Task A_club_collect_carries_the_admins_reason_to_both_sides()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2collect");
@@ -99,7 +99,7 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
     public async Task A_partner_the_club_removes_is_told_the_club_did_it_and_why()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2clubrm");
@@ -133,7 +133,7 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
     public async Task An_organisers_own_removal_keeps_its_own_words()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2ownrm");

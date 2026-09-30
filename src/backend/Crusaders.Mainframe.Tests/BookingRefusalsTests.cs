@@ -117,7 +117,7 @@ public sealed class BookingRefusalPathsHttpTests : IClassFixture<PostgresFixture
 
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     [SkippableFact]
     public async Task A_refusal_reads_the_same_on_the_single_route_both_bulks_and_the_quote()

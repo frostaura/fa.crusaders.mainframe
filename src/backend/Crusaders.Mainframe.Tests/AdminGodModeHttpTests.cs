@@ -44,7 +44,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
     private const decimal CourtSliceCredits = 8m;
     private const decimal GroupSliceCredits = 12m;
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>Two days out, on the hour, in UTC — outside every clock trap in gotchas-clock.</summary>
     private static DateTimeOffset Slot(int hour, int minute = 0)

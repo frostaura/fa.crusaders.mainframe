@@ -14,7 +14,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class PlayTenancyHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private sealed record Other(PlayersClub Club, Guid Booking, Guid Result, int Version, Guid Celebration);
 

@@ -29,7 +29,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
     private const string AdminBulkPath = "/api/v1/admin/bookings/bulk";
     private const string MemberBulkPath = "/api/v1/bookings/bulk";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>A morning slot <paramref name="days"/> days out, in UTC — clear of every clock trap.</summary>
     private static DateTimeOffset Morning(int days, int hour = 8)

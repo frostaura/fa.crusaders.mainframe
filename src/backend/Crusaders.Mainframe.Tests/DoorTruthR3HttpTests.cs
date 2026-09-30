@@ -45,7 +45,7 @@ public sealed class DoorTruthR3HttpTests : IClassFixture<PostgresFixture>
     private const string LogPath = "/api/v1/admin/doors/activity";
     private const string CsvPath = "/api/v1/admin/doors/activity.csv";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static List<JsonElement> Items(JsonElement body) => body.GetProperty("items").EnumerateArray().ToList();
 

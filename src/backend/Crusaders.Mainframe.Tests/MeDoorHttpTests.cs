@@ -38,7 +38,7 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
     private const string DoorPath = "/api/v1/me/door";
     private const string HistoryPath = "/api/v1/me/door/history";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static List<JsonElement> Items(JsonElement body) => body.GetProperty("items").EnumerateArray().ToList();
 

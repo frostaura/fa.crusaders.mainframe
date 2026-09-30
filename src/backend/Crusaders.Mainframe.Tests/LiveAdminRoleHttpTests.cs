@@ -24,7 +24,7 @@ public sealed class LiveAdminRoleHttpTests : IClassFixture<PostgresFixture>
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string AdminList = "/api/v1/admin/members";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     [SkippableFact]
     public async Task A_demoted_admins_existing_token_loses_admin_access_on_the_very_next_request()

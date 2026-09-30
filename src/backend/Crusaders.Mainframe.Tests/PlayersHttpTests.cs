@@ -32,7 +32,7 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static object[] SamAndAlex(PlayersClub club) => [new { userId = club.Sam }, new { userId = club.Alex }];
 

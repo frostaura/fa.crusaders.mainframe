@@ -20,7 +20,7 @@ public sealed class R3MemberDecisionsHttpTests(PostgresFixture pg) : IClassFixtu
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         var mail = new StubEmailService();
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, mail);
         var club = await MemberCodeClub.SeedAsync(app, "r3approverej");
         var admin = club.Member(app, club.AdminId, "admin");
@@ -58,7 +58,7 @@ public sealed class R3MemberDecisionsHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task An_active_member_still_cannot_be_approved_again()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "r3approveact");
         var admin = club.Member(app, club.AdminId, "admin");

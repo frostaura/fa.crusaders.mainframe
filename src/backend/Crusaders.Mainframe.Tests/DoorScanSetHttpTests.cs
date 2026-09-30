@@ -33,7 +33,7 @@ public sealed class DoorScanSetHttpTests : IClassFixture<PostgresFixture>
 
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static List<JsonElement> Items(JsonElement body) => body.GetProperty("items").EnumerateArray().ToList();
 

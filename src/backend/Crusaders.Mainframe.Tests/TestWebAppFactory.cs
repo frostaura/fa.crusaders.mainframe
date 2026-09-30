@@ -6,6 +6,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -184,6 +186,13 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         // "Testing" rather than "Development": Program.cs runs the Seeder under
         // IsDevelopment(), and the Seeder talks to the database.
         builder.UseEnvironment(EnvironmentName ?? "Testing");
+
+        // The console gets warnings and errors only. At the app's own Information level every
+        // EF command was printed with its SQL: 2.2 million lines (243 MB) a full run, measured
+        // 2026-09-30 in the run's trx, formatted on the test's own thread and marshalled through
+        // the runner's stdout pipe — output no test reads and no person could. Other providers,
+        // and any a test adds to capture logs, keep their levels.
+        builder.ConfigureLogging(logging => logging.AddFilter<ConsoleLoggerProvider>(null, LogLevel.Warning));
 
         builder.ConfigureServices(services =>
         {

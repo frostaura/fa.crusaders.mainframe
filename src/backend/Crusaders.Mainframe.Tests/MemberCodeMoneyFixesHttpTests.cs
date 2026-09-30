@@ -61,7 +61,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task Racing_payers_one_pays_and_every_other_is_told_already_paid_and_can_retry()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         // Codes at steps −1, 0 and +1 of a pinned step: a boundary crossed mid-test turned the −1
         // codes into not_recognised ~1 run in 8 (memory/gotchas-clock.md).
         var clock = new PinnedClock();
@@ -113,7 +113,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task A_nonce_a_crash_left_unpaid_is_decided_afresh_once_stale()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "paystale");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -10, checkedIn: true);
@@ -167,7 +167,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task An_activation_that_throws_gives_its_use_back_so_the_retry_is_not_code_used()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = Throwing(MemberCodeClub.Wired(factory, new StubEmailService()));
         var club = await MemberCodeClub.SeedAsync(app, "throwact");
         await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -186,7 +186,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task A_pay_for_that_throws_gives_back_its_nonce_and_its_use_and_the_retry_pays()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = Throwing(MemberCodeClub.Wired(factory, new StubEmailService()));
         var club = await MemberCodeClub.SeedAsync(app, "throwpay");
         await club.BookAsync(app, club.Olga, courtIndex: 0, startsInMinutes: 2, minutes: 45);   // unstarted, cue open: activates
@@ -212,7 +212,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task A_booking_never_charged_is_not_paid_for_at_the_box_whose_glass_would_say_booker_refunded()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new StubEmailService();
         var clock = new PinnedClock();
         await using var app = MemberCodeClub.Wired(factory, mail, clock);
@@ -247,7 +247,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task An_out_of_range_cue_window_is_read_clamped_by_the_pay_for_and_the_activation_alike()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "cueclamp");
         await club.SetAsync(app, "activation_cue_window_minutes", -30);
@@ -274,7 +274,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task A_confirm_pays_only_for_the_booking_its_quote_named()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "quotepin");
         var five = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -59, minutes: 60, checkedIn: true);
@@ -309,7 +309,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task Identical_walk_up_retries_in_flight_together_are_one_purchase_and_none_is_code_used()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "walktwins", MemberCodeClub.SettingsAtNoon());
         var device = app.CreateClient();
@@ -345,7 +345,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     public async Task A_walk_up_voided_after_its_purchase_committed_keeps_its_use()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService()).WithWebHostBuilder(b => b.ConfigureServices(s =>
         {
             s.RemoveAll<CourtActivationService>();

@@ -14,7 +14,7 @@ public sealed class R2ShareCounterpartyHttpTests(PostgresFixture pg) : IClassFix
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static JsonElement ShareRow(IEnumerable<JsonElement> rows, Guid owner) =>
         rows.Single(r => r.GetProperty("type").GetString() == "ShareTransfer" && r.GetProperty("subjectUserId").GetGuid() == owner);

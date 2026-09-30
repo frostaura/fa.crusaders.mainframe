@@ -13,7 +13,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class R2BadgeAtCourtTimeHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     [SkippableFact]
     public async Task A_check_in_during_early_entry_earns_nothing_until_the_court_time_starts()

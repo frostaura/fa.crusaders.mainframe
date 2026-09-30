@@ -42,7 +42,7 @@ public sealed class DoorContactHttpTests : IClassFixture<PostgresFixture>
     private const string LoginPath = "/api/v1/auth/login";
     private const string Password = "Review!2345";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
     /// The settings PUT is a WHOLE document — every economics field is required and bounded —

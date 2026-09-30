@@ -13,7 +13,7 @@ public sealed class R2HeldPartsHttpTests(PostgresFixture pg) : IClassFixture<Pos
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static async Task AcceptAsync(PlayersClub club, TestWebAppFactory f, Guid bookingId, Guid seat)
     {

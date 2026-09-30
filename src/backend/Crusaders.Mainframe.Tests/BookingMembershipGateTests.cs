@@ -55,7 +55,7 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid CourtId);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static async Task<Seeded> SeedAsync(TestWebAppFactory factory, MembershipStatus memberStatus)
     {

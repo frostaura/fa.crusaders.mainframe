@@ -15,7 +15,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class PlayAdminHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static async Task<(Guid Booking, JsonElement Result)> DisputedAsync(PlayersClub club, TestWebAppFactory f, int hoursAgo)
     {

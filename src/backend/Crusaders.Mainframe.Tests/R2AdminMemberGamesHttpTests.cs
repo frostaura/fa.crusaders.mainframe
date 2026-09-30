@@ -14,7 +14,7 @@ public sealed class R2AdminMemberGamesHttpTests(PostgresFixture pg) : IClassFixt
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static async Task<JsonElement> GetAsync(HttpClient admin, string path)
     {

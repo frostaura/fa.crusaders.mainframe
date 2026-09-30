@@ -22,7 +22,7 @@ public sealed class R3ControlBoardBoxesHttpTests(PostgresFixture pg) : IClassFix
     public async Task A_court_with_two_boxes_reports_the_freshest_and_flags_the_duplicate()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var club = await ControlBoardClub.SeedAsync(factory, "r3a11dup");
         await club.AddCourtAsync(factory, 1);
         await club.AddCourtAsync(factory, 2);
@@ -52,7 +52,7 @@ public sealed class R3ControlBoardBoxesHttpTests(PostgresFixture pg) : IClassFix
     public async Task An_enabled_box_outranks_a_fresher_one_out_of_service_and_a_lone_disabled_box_still_shows()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var club = await ControlBoardClub.SeedAsync(factory, "r3a11dis");
         await club.AddCourtAsync(factory, 1);
         await club.AddCourtAsync(factory, 2);

@@ -38,6 +38,31 @@ public sealed class PostgresFixture : IAsyncLifetime
     public bool Available => ConnectionString is not null;
 
     private TestDatabase? _database;
+    private SharedHostFactory? _sharedHost;
+
+    /// <summary>
+    /// ONE host over this class's database, booted by the first test that asks for it and
+    /// disposed with the fixture — never by a test. A test's <c>await using var factory =
+    /// CreateFactory()</c> is left exactly as written: disposing the shared host is a no-op.
+    ///
+    /// <para>
+    /// Why: booting a host costs about a second of CPU (the DI container, 200 endpoint delegates,
+    /// the first request's pipeline), measured 2026-09-30, and most Postgres-backed tests booted
+    /// one each — some 2,100 boots a run for the ~3,000 tests. The tests in a class already share
+    /// this database, run one after another, and each seeds its own club, so a shared host
+    /// changes nothing they can observe. The isolation BETWEEN classes is untouched: every class
+    /// still has its own database and now its own host.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Only for a plain host.</b> A test that needs a host configured differently — rate
+    /// limits, proxy trust, a replaced service, a pinned clock — keeps building its own
+    /// (<c>new TestWebAppFactory { … }</c> or <c>WithWebHostBuilder</c>, which derives a separate
+    /// host from this one). And a test must never mutate this host's singletons: the next test in
+    /// the class would inherit it.
+    /// </para>
+    /// </summary>
+    public TestWebAppFactory SharedHost => _sharedHost ??= new SharedHostFactory { ConnectionString = ConnectionString };
 
     public async Task InitializeAsync()
     {
@@ -52,9 +77,40 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        if (_sharedHost is not null)
+        {
+            await _sharedHost.ReleaseAsync();
+        }
+
         if (_database is not null)
         {
             await _database.DisposeAsync();
+        }
+    }
+}
+
+/// <summary>
+/// The class-wide host behind <see cref="PostgresFixture.SharedHost"/>: disposing it from a test
+/// does nothing; <see cref="ReleaseAsync"/>, called by the fixture after the class's last test,
+/// disposes it for real.
+/// </summary>
+internal sealed class SharedHostFactory : TestWebAppFactory
+{
+    private bool _released;
+
+    public override ValueTask DisposeAsync() => _released ? base.DisposeAsync() : ValueTask.CompletedTask;
+
+    public ValueTask ReleaseAsync()
+    {
+        _released = true;
+        return base.DisposeAsync();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (_released)
+        {
+            base.Dispose(disposing);
         }
     }
 }

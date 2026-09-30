@@ -30,7 +30,7 @@ public sealed class AdminDoorsOverviewHttpTests : IClassFixture<PostgresFixture>
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string DoorsPath = "/api/v1/admin/doors";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static JsonElement DoorNamed(JsonElement body, string deviceCode)
         => body.GetProperty("doors").EnumerateArray()

@@ -367,7 +367,7 @@ public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
         return body;
     }
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static async Task<TenantSettingsView> EngineSettingsAsync(TestWebAppFactory factory, Seeded s)
     {

@@ -30,7 +30,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_scan_in_the_second_of_two_back_to_back_slots_is_that_slots_attendance()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "backtoback");
         var first = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -62, minutes: 60);   // "17:00", ended 2 min ago
@@ -47,7 +47,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_scan_in_the_first_slot_and_the_next_ones_cue_window_is_the_first_slots()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "b2bcue");
         var first = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -55, minutes: 60);   // ends in 5
@@ -70,7 +70,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task The_same_boards_fallback_of_an_online_grant_is_a_receipt_not_a_forgery()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "fallback");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -104,7 +104,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task The_same_doors_fallback_of_an_online_open_is_a_receipt_not_a_forgery()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "doorfallback");
         var device = app.CreateClient();
@@ -125,7 +125,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_re_upload_after_a_failed_one_recognises_its_own_claim()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "strandclaim");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -158,7 +158,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task An_old_generation_is_honoured_only_within_a_rosters_life_of_the_rotation(int hoursAgo, bool genuine)
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, $"oldgen{hoursAgo}");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -180,7 +180,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task An_old_generation_is_never_honoured_for_a_member_not_active_at_the_scan()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "oldgensusp");
         await club.WriteAsync(app, async db =>
@@ -210,7 +210,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_v1_code_on_a_clamped_event_is_unverifiable_not_forged()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "clamped");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -60, minutes: 120);
@@ -236,7 +236,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_clamped_event_still_raises_reuse_and_a_failed_on()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "clampalarm");
         var secondDoor = Guid.NewGuid().ToString("N")[..12];
@@ -265,7 +265,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_genuine_code_on_a_clamped_event_is_not_attendance()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "clampgen");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -287,7 +287,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task An_offline_event_clearly_earlier_than_the_same_boards_online_claim_is_a_reuse()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "earlierev");
         var device = app.CreateClient();
@@ -304,7 +304,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixt
     public async Task An_offline_event_at_or_after_the_same_boards_online_claim_is_the_same_act()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "laterev");
         var device = app.CreateClient();

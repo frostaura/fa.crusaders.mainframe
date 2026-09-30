@@ -12,7 +12,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class PlayWorkerHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     [SkippableFact]
     public async Task The_minute_sweep_confirms_every_result_whose_deadline_has_passed_and_no_other()

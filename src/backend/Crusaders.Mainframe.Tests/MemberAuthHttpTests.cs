@@ -33,7 +33,7 @@ public sealed class MemberAuthHttpTests : IClassFixture<PostgresFixture>
 
     public MemberAuthHttpTests(PostgresFixture pg) => _pg = pg;
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private sealed record Club(Guid TenantId, string Slug, Guid AdminId, Guid MemberId, Guid MembershipId, string MemberEmail);
 

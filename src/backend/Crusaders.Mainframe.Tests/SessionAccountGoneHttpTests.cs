@@ -21,7 +21,7 @@ public sealed class SessionAccountGoneHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_token_for_an_account_that_was_deleted_is_refused_on_every_route()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "gonerow");
 
@@ -41,7 +41,7 @@ public sealed class SessionAccountGoneHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_token_from_another_database_naming_no_account_here_is_refused_on_every_route()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "foreignrow");
 
@@ -67,7 +67,7 @@ public sealed class SessionAccountGoneHttpTests(PostgresFixture pg) : IClassFixt
     public async Task A_token_naming_a_real_account_under_the_wrong_club_is_refused()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var home = await MemberCodeClub.SeedAsync(app, "homeclub");
         var other = await MemberCodeClub.SeedAsync(app, "otherclub");

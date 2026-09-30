@@ -16,7 +16,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class PlayBadgesHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static Task<PlayEvaluator.Evaluation> EvaluateAsync(PlayersClub club, TestWebAppFactory f, Guid user) =>
         club.InClubAsync(f, sp => sp.GetRequiredService<PlayEvaluator>().EvaluateAsync(user, DateTimeOffset.UtcNow, default));

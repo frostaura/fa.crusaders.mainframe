@@ -38,7 +38,7 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
     public async Task A_rollback_to_legacy_holds_against_the_next_heartbeat_until_an_admin_moves_forward()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "holdleg");
         var device = app.CreateClient();
@@ -77,7 +77,7 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
     public async Task A_rollback_from_v1_only_to_v1_restarts_the_cut_off_clock_instead_of_firing_again()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "holdv1");
         var device = app.CreateClient();
@@ -102,7 +102,7 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
     public async Task The_hold_can_be_set_and_cleared_without_moving_the_phase()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "holdset");
         var device = app.CreateClient();
@@ -121,7 +121,7 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
     public async Task An_unacknowledged_board_neither_blocks_the_cut_over_nor_can_cast_the_deciding_vote()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "unackvote");
         var device = app.CreateClient();

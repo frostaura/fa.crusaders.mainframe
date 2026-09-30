@@ -21,7 +21,7 @@ public sealed class PlayersRefute4HttpTests(PostgresFixture pg) : IClassFixture<
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     /// <summary>
     /// A played game past its deadline on which <paramref name="partner"/> paid 16; the organiser

@@ -94,7 +94,7 @@ public sealed record DoorClub(
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        await db.Database.MigrateAsync();
+        // No MigrateAsync: the database is a clone of the template PostgresFixture migrated once.
 
         // The PREFIX is truncated and the random half never is.
         //

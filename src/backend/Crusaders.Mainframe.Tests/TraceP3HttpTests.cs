@@ -39,7 +39,7 @@ public sealed class TraceP3HttpTests : IClassFixture<PostgresFixture>
 
     private const string Unwired = "The trace route is not registered — Program.cs needs app.MapAdminMemberTraceEndpoints().";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
     /// Whether this application has the trace route at all.

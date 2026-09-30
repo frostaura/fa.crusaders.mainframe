@@ -25,7 +25,7 @@ public sealed class R3InboxReadStateHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task Answering_an_invite_reads_it_and_your_own_payment_receipt_is_born_read()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r3i9inbox");
         await club.CreditAsync(f, club.Organiser, 100m);
         await club.CreditAsync(f, club.Sam, 100m);

@@ -56,7 +56,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
 
         // 22:30Z is 00:30 the NEXT day in Johannesburg; 21:30Z is 23:30 the SAME day. One
         // instant either side of the club's midnight, so a fix that shifts every row by a
@@ -99,7 +99,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
 
         var lateNight = new DateTimeOffset(2026, 3, 2, 22, 30, 0, TimeSpan.Zero);
         var evening = new DateTimeOffset(2026, 3, 2, 21, 30, 0, TimeSpan.Zero);
@@ -170,7 +170,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var tz = TimeZoneInfo.FindSystemTimeZoneById(timezone);
 
         // Five probes, all written as CLUB wall-clock times, which is the only clock the
@@ -243,7 +243,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var tz = TimeZoneInfo.FindSystemTimeZoneById(ClubZone);
         var day = new DateOnly(2026, 9, 2);
 

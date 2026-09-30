@@ -33,7 +33,7 @@ public sealed class AdminMemberDoorHttpTests : IClassFixture<PostgresFixture>
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string ClubLogPath = "/api/v1/admin/doors/activity";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static string DoorsPath(Guid userId, string query = "") => $"/api/v1/admin/members/{userId}/doors{query}";
 

@@ -28,7 +28,7 @@ public sealed class R1ChangeRecordHttpTests(PostgresFixture pg) : IClassFixture<
     public async Task Every_membership_decision_lands_on_the_change_record_with_who_whom_and_why()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "r1changes");
         var admin = club.Member(app, club.AdminId, "admin");
@@ -73,7 +73,7 @@ public sealed class R1ChangeRecordHttpTests(PostgresFixture pg) : IClassFixture<
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         var mail = new StubEmailService();
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, mail);
         var club = await MemberCodeClub.SeedAsync(app, "r1codereset");
         var admin = club.Member(app, club.AdminId, "admin");
@@ -106,7 +106,7 @@ public sealed class R1ChangeRecordHttpTests(PostgresFixture pg) : IClassFixture<
     public async Task Granting_admin_needs_a_reason_and_records_it()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "r1grant");
         var admin = club.Member(app, club.AdminId, "admin");
@@ -140,7 +140,7 @@ public sealed class R1ChangeRecordHttpTests(PostgresFixture pg) : IClassFixture<
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         var clock = new MovableClock();
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService()).WithWebHostBuilder(b => b.ConfigureServices(s =>
         {
             s.RemoveAll<TimeProvider>();

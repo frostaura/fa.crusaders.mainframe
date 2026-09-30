@@ -52,7 +52,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     public async Task A_split_bookings_roster_entry_names_the_organiser_then_the_accepted_partner_and_nobody_else()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var g = await SplitGameAsync(app, "seamroster");
         var c = g.Club;
@@ -80,7 +80,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     public async Task A_partners_own_code_opens_the_door_and_lights_the_court_as_her_own_attendance_and_moves_no_money()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var clock = new PinnedClock();
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
         var g = await SplitGameAsync(app, "seamaccess");
@@ -122,7 +122,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     public async Task A_partners_offline_scan_uploaded_as_evidence_is_her_attendance_and_a_declined_members_is_nobodys()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var g = await SplitGameAsync(app, "seamevid");
         var c = g.Club;
@@ -141,7 +141,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     public async Task Pay_for_at_the_box_refuses_a_split_booking_and_a_declined_seat_does_not_make_one_split()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var clock = new PinnedClock();
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
         var g = await SplitGameAsync(app, "seampay");
@@ -176,7 +176,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     public async Task A_partner_is_on_the_v1_roster_when_her_organiser_is_suspended_and_the_organiser_is_not()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var c = await MemberCodeClub.SeedAsync(app, "seambarred");
         var booking = await c.BookAsync(app, c.Sid, courtIndex: 1, startsInMinutes: -5);

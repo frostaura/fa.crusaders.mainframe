@@ -14,7 +14,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class R2BeforeJoiningHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     [SkippableFact]
     public async Task Weeks_before_the_member_joined_are_before_joining_and_weeks_after_are_missed()

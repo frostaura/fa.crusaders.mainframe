@@ -36,7 +36,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid PlayerUserId, Guid BookingId, int CourtNumber);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>A tenant with a court, a funded player holding a PIN, and a live booking.</summary>
     private static async Task<Seeded> SeedAsync(TestWebAppFactory factory)

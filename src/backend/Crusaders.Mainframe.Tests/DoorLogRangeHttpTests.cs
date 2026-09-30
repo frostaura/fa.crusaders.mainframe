@@ -50,7 +50,7 @@ public sealed class DoorLogRangeHttpTests : IClassFixture<PostgresFixture>
     private const string JohannesburgSettings =
         """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"Africa/Johannesburg","heartbeat_seconds":45}""";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static List<JsonElement> Items(JsonElement body) => body.GetProperty("items").EnumerateArray().ToList();
 

@@ -35,7 +35,7 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
     private const string FeedPath = "/api/v1/admin/notifications";
     private const string KindsPath = "/api/v1/admin/notifications/kinds";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static WebApplicationFactory<Program> WithMail(TestWebAppFactory factory, IEmailService mail) =>
         factory.WithWebHostBuilder(b => b.ConfigureServices(s =>

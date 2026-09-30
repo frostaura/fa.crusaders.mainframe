@@ -31,7 +31,7 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
 
     private static string RolePath(Guid userId) => $"/api/v1/admin/members/{userId}/admin";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>The app with a recording mail service and, optionally, an <c>Admins:Emails</c> list.</summary>
     private static WebApplicationFactory<Program> Wired(TestWebAppFactory factory, StubEmailService mail, params string[] configAdmins)

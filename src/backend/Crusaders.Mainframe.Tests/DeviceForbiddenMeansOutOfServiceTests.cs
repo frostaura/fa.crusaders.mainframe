@@ -245,7 +245,7 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var (key, mac) = await ClubWithABoardAsync(factory);
         var client = factory.CreateClient();
 
@@ -279,7 +279,7 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var (key, mac) = await ClubWithABoardAsync(factory);
         var client = factory.CreateClient();
 

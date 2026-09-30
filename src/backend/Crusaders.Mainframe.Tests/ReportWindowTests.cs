@@ -103,7 +103,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory, timezone);
         using var client = Client(factory, seed, admin: true);
 
@@ -159,7 +159,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory);
         using var client = Client(factory, seed, admin: false);
 
@@ -215,7 +215,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory);
         using var member = Client(factory, seed, admin: false);
 
@@ -240,7 +240,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory);
         using var member = Client(factory, seed, admin: false);
 
@@ -268,7 +268,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory);
         using var admin = Client(factory, seed, admin: true);
 
@@ -289,7 +289,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory);
         using var admin = Client(factory, seed, admin: true);
 
@@ -310,7 +310,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory);
         using var admin = Client(factory, seed, admin: true);
 
@@ -342,7 +342,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seed = await SeedAsync(factory);
         using var admin = Client(factory, seed, admin: true);
 

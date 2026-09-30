@@ -43,7 +43,7 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
 
         Guid tenantId;
         string slug;

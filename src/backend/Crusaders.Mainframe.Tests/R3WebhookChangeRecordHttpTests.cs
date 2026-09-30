@@ -32,7 +32,7 @@ public sealed class R3WebhookChangeRecordHttpTests(PostgresFixture pg) : IClassF
     public async Task Adding_and_removing_a_club_webhook_are_both_on_the_change_record_without_its_secrets()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var club = await DoorClub.SeedAsync(factory, "r3hooks");
         var admin = club.AdminClient(factory);
 
@@ -77,7 +77,7 @@ public sealed class R3WebhookChangeRecordHttpTests(PostgresFixture pg) : IClassF
     public async Task A_webhook_with_no_description_is_named_by_its_host()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var club = await DoorClub.SeedAsync(factory, "r3hooknd");
         var admin = club.AdminClient(factory);
 

@@ -93,7 +93,7 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var client = ClientFor(factory, seeded, seeded.AdminUserId, admin: true);
 
@@ -114,7 +114,7 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var client = ClientFor(factory, seeded, seeded.AdminUserId, admin: true);
 
@@ -142,7 +142,7 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var client = ClientFor(factory, seeded, seeded.AdminUserId, admin: true);
 
@@ -167,7 +167,7 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var client = ClientFor(factory, seeded, seeded.MemberUserId, admin: false);
 
@@ -180,7 +180,7 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         await SeedAsync(factory);
 
         // BadRequest is as good as Unauthorized here and not a weakening: the admin surface
@@ -203,7 +203,7 @@ public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var alpha = await SeedAsync(factory);
         var bravo = await SeedAsync(factory);
 

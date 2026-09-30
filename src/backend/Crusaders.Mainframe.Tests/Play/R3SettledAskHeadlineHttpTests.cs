@@ -11,7 +11,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class R3SettledAskHeadlineHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static async Task<string> AskHeadlineAsync(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> f, Guid member) =>
         Assert.Single(await InboxAsync(f, member, MemberEventCatalogue.ResultToConfirm)).Headline;

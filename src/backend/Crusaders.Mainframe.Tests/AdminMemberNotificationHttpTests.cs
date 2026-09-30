@@ -57,7 +57,7 @@ public sealed class AdminMemberNotificationHttpTests : IClassFixture<PostgresFix
                 System.Net.Mail.SmtpStatusCode.MailboxUnavailable, "Connection refused (test).");
     }
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static WebApplicationFactory<Program> WithMail(TestWebAppFactory factory, IEmailService mail)
         => factory.WithWebHostBuilder(b => b.ConfigureServices(s =>

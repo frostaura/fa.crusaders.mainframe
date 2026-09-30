@@ -63,7 +63,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();
@@ -191,7 +191,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         await BoxAsync(factory, seeded, [4, 3, 2, 1]);
         var client = AdminClient(factory, seeded);
@@ -215,7 +215,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory, twoCourtsOnly: true);
         var client = AdminClient(factory, seeded);
 
@@ -245,7 +245,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
@@ -276,7 +276,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
@@ -301,7 +301,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
@@ -322,7 +322,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory,
             """{"timezone":"UTC","button_map":["court:A","none","none","none","minutes:15","minutes:30","minutes:45","minutes:60"]}""");
         var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
@@ -346,7 +346,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
@@ -406,7 +406,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
@@ -426,7 +426,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 

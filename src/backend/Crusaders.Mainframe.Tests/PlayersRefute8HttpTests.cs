@@ -17,7 +17,7 @@ public sealed class PlayersRefute8HttpTests(PostgresFixture pg) : IClassFixture<
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     /// <summary>
     /// A 32-credit game played 20 days ago (deadline long passed, far outside the sweep's window):

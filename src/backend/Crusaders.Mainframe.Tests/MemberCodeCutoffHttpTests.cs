@@ -24,7 +24,7 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task After_the_cut_off_the_kiosk_and_the_payer_override_refuse_legacy_codes()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "kiosk");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -49,7 +49,7 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task Before_the_cut_off_the_kiosk_still_takes_a_booking_code()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "kioskv1");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -71,7 +71,7 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task Legacy_evidence_is_honoured_only_for_a_scan_before_the_cut_off(int cutoffMinutesAgo, bool attended)
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, $"legev{(attended ? "a" : "b")}");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -30, minutes: 60);
@@ -91,7 +91,7 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task The_cut_off_by_hand_ends_every_legacy_code_in_the_table()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "expire");
         var other = await MemberCodeClub.SeedAsync(app, "expireother");
@@ -119,7 +119,7 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task The_automatic_cut_off_ends_every_legacy_code_in_the_table()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "autoexp");
         var mine = Code(club, club.Pam, AccessCodePurpose.MemberIdent);
@@ -140,7 +140,7 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task A_rollback_out_of_v1_only_gives_back_the_codes_the_cut_off_ended()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "restore");
         var live = Code(club, club.Pam, AccessCodePurpose.MemberIdent);
@@ -184,7 +184,7 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixtur
     public async Task A_rollback_never_revives_the_code_of_a_booking_that_is_no_longer_live()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "restorebk");
         var live = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: 30);

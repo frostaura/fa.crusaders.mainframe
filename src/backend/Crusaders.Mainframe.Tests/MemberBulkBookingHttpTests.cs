@@ -29,7 +29,7 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string BulkPath = "/api/v1/bookings/bulk";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static List<JsonElement> Results(JsonElement body) => body.GetProperty("results").EnumerateArray().ToList();
 

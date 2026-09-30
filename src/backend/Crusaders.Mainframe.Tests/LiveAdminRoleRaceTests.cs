@@ -68,7 +68,7 @@ public sealed class LiveAdminRoleRaceTests : IClassFixture<PostgresFixture>
     {
         Skip.IfNot(_pg.Available, Skipped);
 
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         var club = await DoorClub.SeedAsync(factory, "liverace");
         var live = new LiveAdminRole(new MemoryCache(new MemoryCacheOptions()));
 

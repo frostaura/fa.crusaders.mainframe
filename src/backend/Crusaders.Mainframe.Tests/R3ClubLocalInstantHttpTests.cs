@@ -32,7 +32,7 @@ public sealed class R3ClubLocalInstantHttpTests(PostgresFixture pg) : IClassFixt
 
     private static readonly TimeZoneInfo Johannesburg = TimeZoneInfo.FindSystemTimeZoneById("Africa/Johannesburg");
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static DateOnly NextTuesday(int weeksAhead)
     {

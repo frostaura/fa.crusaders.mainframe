@@ -328,7 +328,7 @@ public sealed class ControlBoardHttpTests : IClassFixture<PostgresFixture>
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string BoardPath = "/api/v1/admin/control-board";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static JsonElement CourtNumbered(JsonElement body, int number)
         => body.GetProperty("courts").EnumerateArray()

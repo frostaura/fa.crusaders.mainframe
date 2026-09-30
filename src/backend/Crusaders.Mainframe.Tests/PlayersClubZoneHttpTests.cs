@@ -20,7 +20,7 @@ public sealed class PlayersClubZoneHttpTests(PostgresFixture pg) : IClassFixture
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static string SettingsIn(string zone) => PlayersClub.Settings.Replace("\"timezone\":\"UTC\"", $"\"timezone\":\"{zone}\"");
 

@@ -41,7 +41,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid MemberUserId, string Email);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static string N(decimal v) => v.ToString(System.Globalization.CultureInfo.InvariantCulture);
 

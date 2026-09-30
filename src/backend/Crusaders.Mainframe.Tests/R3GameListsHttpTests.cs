@@ -24,7 +24,7 @@ public sealed class R3GameListsHttpTests(PostgresFixture pg) : IClassFixture<Pos
     public async Task The_organisers_figure_counts_only_accepted_partners_and_says_what_was_actually_paid()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r3m3lists");
         await club.CreditAsync(f, club.Organiser, 100m);
         await club.CreditAsync(f, club.Sam, 100m);

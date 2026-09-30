@@ -12,7 +12,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 /// </summary>
 public sealed class R3WinWaitsForConfirmHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     [SkippableFact]
     public async Task A_recorded_win_awards_and_celebrates_nothing_until_it_is_confirmed()

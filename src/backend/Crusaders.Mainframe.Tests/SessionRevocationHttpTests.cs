@@ -33,7 +33,7 @@ public sealed class SessionRevocationHttpTests : IClassFixture<PostgresFixture>
 
     public SessionRevocationHttpTests(PostgresFixture pg) => _pg = pg;
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
     /// A client that names the club in its Host header.

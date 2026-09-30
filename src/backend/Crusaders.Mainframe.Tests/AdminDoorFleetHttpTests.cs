@@ -38,7 +38,7 @@ public sealed class AdminDoorFleetHttpTests : IClassFixture<PostgresFixture>
     private const string ShutAll = "/api/v1/admin/doors/shut-all";
     private const string ReopenAll = "/api/v1/admin/doors/reopen-all";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static List<JsonElement> Doors(JsonElement body) => body.GetProperty("doors").EnumerateArray().ToList();
 

@@ -36,7 +36,7 @@ public sealed class MonitoringStreamTests : IClassFixture<PostgresFixture>
 
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private Task<ControlBoardClub> SeedAsync(TestWebAppFactory factory, string prefix)
         => ControlBoardClub.SeedAsync(factory, prefix, MonitoringFixture.Settings);

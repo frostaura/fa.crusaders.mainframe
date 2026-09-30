@@ -21,7 +21,7 @@ public sealed class R2ReturnedCreditsHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_cancelled_games_detail_says_what_came_back_to_each_partner()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r2returned");
         await club.CreditAsync(f, club.Organiser, 100m);
         await club.CreditAsync(f, club.Sam, 100m);

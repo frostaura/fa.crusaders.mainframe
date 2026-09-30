@@ -42,7 +42,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid MemberUserId, string Email, Guid LeagueGroupId);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
     /// Invariant formatting, not the ambient culture: this machine's is en-ZA, so

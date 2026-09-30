@@ -32,7 +32,7 @@ public sealed class DoorSettingsHttpTests : IClassFixture<PostgresFixture>
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string SettingsPath = "/api/v1/admin/settings/";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>The keys the PUT requires whatever else is being changed.</summary>
     private const string Required =

@@ -33,7 +33,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_board_without_caps_gets_its_old_body_and_an_m1_board_in_legacy_gets_the_clock_and_empty_arrays()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "capsold");
         var device = app.CreateClient();
@@ -61,7 +61,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task The_club_cuts_over_when_every_enabled_board_speaks_m1_and_then_rosters_carry_players_and_keys()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         // A club whose local noon is now. Everything below is about the cut-over, not the club's
         // midnight — but a booking live at 23:05 Johannesburg runs into tomorrow, and a roster
@@ -113,7 +113,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_disabled_board_does_not_block_the_cut_over_and_an_enabled_silent_one_does()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "blocking");
         var device = app.CreateClient();
@@ -139,7 +139,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task An_unacknowledged_box_gets_empty_arrays_after_cut_over_and_a_legacy_board_raises_a_notice()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "unack");
         await club.BookAsync(app, club.Olga, courtIndex: 0, startsInMinutes: -5);
@@ -164,7 +164,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task The_cut_off_follows_the_clubs_delay_and_never_before_it()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "cutoff");
         var device = app.CreateClient();
@@ -193,7 +193,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task The_settings_page_reads_and_bounds_the_rollout_keys()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "settings");
         var admin = club.Member(app, club.AdminId, "admin");
@@ -230,7 +230,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_genuine_offline_activation_is_attendance_and_is_recorded_as_a_use()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "evidok");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -251,7 +251,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task A_forged_offline_activation_is_receipted_but_is_not_attendance_and_pages_every_admin(string kind)
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "evidbad");
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
@@ -280,7 +280,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task One_code_opening_two_doors_offline_is_flagged_the_second_time()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var club = await MemberCodeClub.SeedAsync(app, "evidtwice");
         var secondDoor = Guid.NewGuid().ToString("N")[..12];

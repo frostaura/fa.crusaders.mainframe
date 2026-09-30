@@ -34,7 +34,7 @@ public sealed class DoorLogRefusalHttpTests : IClassFixture<PostgresFixture>
     private const string CsvPath = "/api/v1/admin/doors/activity.csv";
     private const string HistoryPath = "/api/v1/me/door/history";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>A date that is not a date is refused by name, on the log AND on the export.</summary>
     [SkippableTheory]

@@ -43,7 +43,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static async Task<Seeded> SeedAsync(TestWebAppFactory factory)
     {

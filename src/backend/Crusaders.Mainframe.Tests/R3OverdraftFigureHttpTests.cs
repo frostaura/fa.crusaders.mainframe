@@ -56,7 +56,7 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
     public async Task The_overdraft_notice_and_record_state_what_the_member_can_spend_the_figure_the_desk_confirmed()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r3odfig");
         await WaitingReturnAsync(club, f);
         var desk = club.Client(f, club.Admin, admin: true);

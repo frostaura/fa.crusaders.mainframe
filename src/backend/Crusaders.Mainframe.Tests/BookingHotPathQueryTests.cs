@@ -62,7 +62,7 @@ public sealed class BookingHotPathQueryTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         var recorder = new RecordingInterceptor();
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        await using var factory = _pg.SharedHost;
         await using var app = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s =>
             s.ConfigureDbContext<MainframeDbContext>(o => o.AddInterceptors(recorder))));
 

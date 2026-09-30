@@ -51,7 +51,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
     private sealed record Club(Guid TenantId, string Slug, Guid CourtId, Guid MemberId, Guid VolunteerId, Guid DeviceId);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>One tenant, one court, a funded member and a funded volunteer.</summary>
     private static async Task<Club> SeedAsync(TestWebAppFactory factory)

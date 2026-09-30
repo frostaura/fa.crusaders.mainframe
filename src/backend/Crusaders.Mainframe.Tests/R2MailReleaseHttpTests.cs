@@ -19,7 +19,7 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     /// <summary>A players club whose quiet hours started an hour ago and end two hours from now.</summary>
     private static Task<PlayersClub> QuietClubAsync(WebApplicationFactory<Program> f, string prefix)

@@ -24,7 +24,7 @@ public sealed class R2ScheduleResponseShapeHttpTests(PostgresFixture pg) : IClas
         "next_occurrence", "materialised_through", "created_by_name", "created_at",
     ];
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
     private static DateOnly NextTuesday(int weeksAhead)
     {

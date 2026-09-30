@@ -158,7 +158,7 @@ public sealed class DeviceAuthHttpTests : IClassFixture<PostgresFixture>
         return req;
     }
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     [SkippableFact]
     public async Task An_unknown_board_registers_itself_and_the_response_resolves_the_tenant()

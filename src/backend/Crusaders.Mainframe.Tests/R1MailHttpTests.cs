@@ -40,7 +40,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
     public async Task A_share_received_says_it_is_held_and_until_when()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1held");
@@ -67,7 +67,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
     public async Task The_club_accepting_and_collecting_for_a_member_is_told_to_them_as_the_clubs_doing()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1clubdid");
@@ -106,7 +106,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
     public async Task A_member_the_club_adds_to_a_game_is_told_the_club_did_it()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1clubadd");
@@ -130,7 +130,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
     public async Task The_booking_mail_names_the_member_code_and_no_pin()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var factory = pg.SharedHost;
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1codeonly");

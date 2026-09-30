@@ -32,7 +32,7 @@ public sealed class ControlBoardStreamTests : IClassFixture<PostgresFixture>
     private const string TicketPath = "/api/v1/admin/control-board/stream-ticket";
     private const string StreamPath = "/api/v1/admin/control-board/stream";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static async Task<string> TicketAsync(HttpClient client)
     {

@@ -31,7 +31,7 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
     private const string CancelPath = "/api/v1/admin/bookings/bulk-cancel";
     private const string BookPath = "/api/v1/admin/bookings/bulk";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static List<JsonElement> Results(JsonElement body)
         => body.GetProperty("results").EnumerateArray().ToList();

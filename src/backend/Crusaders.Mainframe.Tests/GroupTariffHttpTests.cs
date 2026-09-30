@@ -24,7 +24,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
 
     public GroupTariffHttpTests(PostgresFixture pg) => _pg = pg;
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     private static string MemberGroupsPath(Guid userId) => $"/api/v1/admin/members/{userId}/groups";
 

@@ -43,7 +43,7 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid CourtId);
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
     /// Hours 00:00–24:00 and no peak window, so every assertion here is about the balance
