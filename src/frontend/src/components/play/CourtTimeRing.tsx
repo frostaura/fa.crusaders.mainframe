@@ -30,8 +30,15 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
     );
   }
   const fraction = ring.goal_minutes > 0 ? Math.min(1, ring.attended_minutes / ring.goal_minutes) : 0;
+  // F4.11 — ring, words and the edit button used to share one row, which left the words a
+  // narrow column on a phone (a 112px ring and a 44px button beside them). A grid: on a phone the
+  // ring and the button share the first row and the words take the whole second; from `sm` all
+  // three sit on one row.
   return (
-    <div data-ring={ring.reached ? "reached" : "open"} className="flex items-center gap-4">
+    <div
+      data-ring={ring.reached ? "reached" : "open"}
+      className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+    >
       <div role="img" aria-label={RING_COPY.aria(ring.attended_minutes, ring.goal_minutes)} className="relative size-28 shrink-0">
         <svg viewBox="0 0 100 100" className="size-full -rotate-90" aria-hidden="true">
           <circle cx="50" cy="50" r={R} fill="none" strokeWidth="8" className="stroke-current text-bg-muted" />
@@ -50,7 +57,7 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
           <span className="text-sm font-semibold tabular-nums leading-tight text-text-primary">{RING_COPY.centre(ring.attended_minutes)}</span>
         </span>
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div data-ring-words="" className="col-span-2 row-start-2 flex min-w-0 flex-col gap-1 sm:col-span-1 sm:col-start-2 sm:row-start-1">
         <p className="text-sm font-semibold text-text-primary">{RING_COPY.title}</p>
         <p className="text-sm text-text-secondary">{RING_COPY.caption(ring.goal_minutes)}</p>
         <p className="text-xs text-text-secondary">{RING_COPY.sessions(ring.sessions)}</p>
@@ -61,7 +68,7 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
           </p>
         ) : null}
       </div>
-      <IconButton label={RING_COPY.editGoal} onClick={onEditGoal} className="shrink-0 self-start">
+      <IconButton label={RING_COPY.editGoal} onClick={onEditGoal} className="col-start-2 row-start-1 self-start justify-self-end sm:col-start-3">
         <Target aria-hidden="true" />
       </IconButton>
     </div>
