@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-gotchas-frontend-layout
-description: "Layout traps measured in Chromium in review round 3: cn keeps h-touch beside h-auto, text overflow is invisible to element rects, a zero flex basis never wraps, an implicit grid column is floored at its longest word."
+description: "Layout traps measured in Chromium (R3, R4): cn keeps h-touch beside h-auto, text overflow is invisible to rects, a zero flex basis never wraps, 200 % text needs rem container queries."
 type: gotcha
 last_verified: 2026-09-30
 ---
@@ -24,3 +24,12 @@ last_verified: 2026-09-30
 - **A save-bar "covers the field" test must put the field where the bar grows over it**: a filtered,
   short settings page cannot scroll there, so shorten the viewport instead (a resize is also what
   makes the bar re-measure). Seen green on the broken code until it did.
+- **For 200 % text, measure the COMPONENT in rem, not the viewport** (R4, lane F2):
+  `[container-type:inline-size]` on a wrapper and `[@container(min-width:17rem)]:…` variants follow
+  the text size, where `sm:` (640 CSS px) never does. Inbox rows, Profile stats and badges use it.
+  Give each width range ONE rule (`_and_(max-width:…)`): two container variants that set the same
+  property compete by stylesheet order. Write every class whole — `${WIDE}:col-span-1` built
+  from parts is never seen by Tailwind's scanner and emits nothing.
+- **A rem-sized badge dot on a px glyph hides it at 200 %** (a 24px dot over a 20px icon).
+- **A figure beside a name wraps UNDER it, not squeezes it**: `flex flex-wrap justify-between`
+  with `ml-auto` on the figure; a `shrink-0` figure broke names mid-word ("Bon/gani").

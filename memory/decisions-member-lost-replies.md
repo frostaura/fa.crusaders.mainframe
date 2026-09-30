@@ -23,9 +23,13 @@ The admin side is `decisions-admin-lost-replies.md`; this is the member side (pl
   the unread count / newest page; admin void/uphold off Match results under the new status.
 - **Nothing to read back → "not known"**: a reminder (nudge) and a new share link (its token lived
   only in the lost reply). An open seat found by a read-back offers "make a new link" (path null).
-- **`ConfirmDialog` can only word a refusal** (it calls `describeFailure`), so an unknown outcome
-  from inside one (result withdraw, admin void/uphold) is caught, the dialog closes and the
-  sentence is said beside the card / on the row. Owed upstream: a `describe` prop on ConfirmDialog.
+- **An unknown outcome inside a `ConfirmDialog` is said by its `describe` prop** (R4): result
+  withdraw and admin Remove/Keep. The dialog stays open with the typed reason; closing it is the
+  way out. **Why:** closing it lost the admin's reason and put the alert between the row's two
+  buttons (I4-6). A withdraw known not to have landed does not re-read the card.
+- **A seat that already said yes and is asked again reads "Your share went up"** (R4 M4-8,
+  `inviteHeading`), never "You're invited"; the share ask's "You cover X now" is price minus the
+  live partner seats (R4 M4-6), because the organiser seat's own figure went stale on removal.
 - **The booking page keeps up** (`useDetailLiveness`): re-read at start and end (the door's
   `useBoundaryRefresh`, only instants AFTER the last read — a past one would fire on every load),
   on return to view when the read is >10 s old, when the wallet stream's balance/unread moves
