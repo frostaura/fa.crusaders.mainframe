@@ -7,7 +7,7 @@ import type { HeldFigures, LiveState } from "@/lib/liveBalance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn, formatCredits } from "@/lib/utils";
-import { movementSentence } from "@/lib/walletCopy";
+import { heldPartsLine, movementSentence } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/auth";
 import { namedShareMovement } from "./shareMovement";
 import { useToast } from "../Toast";
@@ -78,13 +78,14 @@ function useClubMovementToast() {
  * or owed back the two are the same number and nothing changes; with something set aside the
  * figure is the spendable one and the name and title say what the rest is.
  */
-type ChipFigures = { shown: number | null; parted: boolean; held: number; owedBack: number };
+type ChipFigures = { shown: number | null; parted: boolean; held: number; owedBack: number; heldParts: string | null };
 
 function chipFigures(balance: number | null, held: HeldFigures | null): ChipFigures {
   const heldCredits = held && held.held > 0 ? held.held : 0;
   const owedBack = held && held.owedBack > 0 ? held.owedBack : 0;
   const parted = balance !== null && held !== null && (heldCredits > 0 || owedBack > 0);
-  return { shown: parted ? held!.spendable : balance, parted, held: heldCredits, owedBack };
+  // F4-18 — each held part with its own release, when there are two or more deadlines.
+  return { shown: parted ? held!.spendable : balance, parted, held: heldCredits, owedBack, heldParts: heldCredits > 0 ? heldPartsLine(held?.parts) : null };
 }
 
 /** ", 20.00 held for partners, 16.00 owed back to partners" — the parts, in words. */
@@ -115,7 +116,7 @@ function chipTitle(state: string, loading: boolean, balance: number | null, f: C
   if (loading) return "Refreshing balance…";
   if (!f.parted || balance === null || f.shown === null) return "Wallet balance — tap to top up";
   const parts = [
-    f.held > 0 ? `${formatCredits(f.held)} held for partners` : null,
+    f.held > 0 ? `${formatCredits(f.held)} held for partners${f.heldParts ? ` (${f.heldParts})` : ""}` : null,
     f.owedBack > 0 ? `${formatCredits(f.owedBack)} owed back to partners` : null,
   ].filter(Boolean).join(", ");
   return `${formatCredits(Math.max(0, f.shown))} to spend — ${formatCredits(balance)} in your wallet, ${parts}. Tap to top up.`;

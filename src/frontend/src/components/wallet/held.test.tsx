@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import WalletPage from "@/pages/Wallet";
 import { walletLabel } from "@/lib/balance";
 import { HELD_EXPLAINER, OWED_BACK_EXPLAINER, heldLine, owedBackLine } from "@/lib/playersCopy";
-import { chipHeldTitle, creditArrivedSentence, creditLeftSentence, spendableLine } from "@/lib/walletCopy";
+import { chipHeldTitle, creditArrivedSentence, creditLeftSentence, heldPartsLine, spendableLine } from "@/lib/walletCopy";
 import { renderPage, signIn, signOut, stubFetch } from "@/test/harness";
 import { CreditsChip } from "../shell/CreditsChip";
 
@@ -41,6 +41,20 @@ describe("the wallet card's held line", () => {
     expect(screen.getByText(HELD_EXPLAINER)).toBeInTheDocument();
     expect(heldLine(20, UNTIL)).toBe("20.00 cr held until Fri 2 Oct, 20:45");
     expect(spendableLine(100)).toBe("You can spend 100.00 cr");
+  });
+
+  // F4-18 (C4) — one release date for the whole amount was wrong when two games' shares were held.
+  it("explains each held part with its own release when there are two deadlines", async () => {
+    const parts = [
+      { credits: 35, until: "2026-10-04T08:30:00Z" },
+      { credits: 25, until: "2026-10-02T04:45:00Z" },
+    ];
+    stub(wallet({ held_credits: 60, spendable_credits: 60, held_until: "2026-10-02T04:45:00Z", held_parts: parts }));
+    renderPage(<WalletPage />);
+    const line = await screen.findByText(heldLine(60, null));
+    const block = line.closest("[data-held-line]")!;
+    expect(block.querySelector("[data-held-parts]")).toHaveTextContent("25.00 cr until Fri 2 Oct, 06:45 · 35.00 cr until Sun 4 Oct, 10:30");
+    expect(heldPartsLine(parts.slice(0, 1))).toBeNull();
   });
 
   it("says nothing when nothing is held", async () => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, endpoints, setMoneyRequestListener, STREAM_SILENCE_MS, tokenStore } from "./api";
+import { heldPartsOf, type HeldPart } from "./bookingsApi";
 
 /**
  * Item 8 — the live balance, as a POLICY that knows nothing about the transport.
@@ -80,6 +81,8 @@ export type BalanceFrame = {
   held_credits?: number;
   spendable_credits?: number;
   held_until?: string | null;
+  /** C4 — the held credit per share deadline, soonest first; sums to `held_credits`. */
+  held_parts?: { credits: number; until: string }[];
   /**
    * P11 — credits the organiser OWES BACK to partners whose return is waiting because the
    * organiser's balance could not cover it. No release date: incoming credit pays it first.
@@ -94,10 +97,19 @@ export type BalanceFrame = {
  * nothing is held — including against an API that predates the fields, where the balance IS
  * the spendable figure. `spendable` may be NEGATIVE when more is owed back than the balance.
  */
-export type HeldFigures = { held: number; owedBack: number; spendable: number; until: string | null };
+export type HeldFigures = {
+  held: number; owedBack: number; spendable: number; until: string | null;
+  /**
+   * C4 / F4-18 — the held credit per share deadline, soonest first. One release date for the whole
+   * amount was wrong whenever shares from two games were held: "60.00 held until Fri" when 35.00
+   * of it stays until Sunday. Empty (or absent) when the API predates C4 or nothing is held.
+   */
+  parts?: HeldPart[];
+};
 
 type HeldWire = {
   balance_credits: number; held_credits?: number; spendable_credits?: number; held_until?: string | null; owed_back_credits?: number;
+  held_parts?: unknown;
 };
 
 function positive(value: number | undefined): number {
@@ -109,7 +121,7 @@ export function heldFrom(frame: HeldWire): HeldFigures {
   const held = positive(frame.held_credits);
   const owedBack = positive(frame.owed_back_credits);
   const spendable = typeof frame.spendable_credits === "number" ? frame.spendable_credits : frame.balance_credits - held - owedBack;
-  return { held, owedBack, spendable, until: held > 0 ? frame.held_until ?? null : null };
+  return { held, owedBack, spendable, until: held > 0 ? frame.held_until ?? null : null, parts: held > 0 ? heldPartsOf(frame) : [] };
 }
 
 export type BalanceTransport = {

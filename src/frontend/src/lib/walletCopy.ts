@@ -155,6 +155,15 @@ export function spendableLine(spendable: number): string {
   return `You can spend ${formatCredits(spendable)}`;
 }
 
+/**
+ * F4-18 (C4) — each held part with its own release: "25.00 cr until Fri 2 Oct, 06:45 · 35.00 cr
+ * until Sun 4 Oct, 10:30". Null when there is one part or none, and the single held line stands.
+ */
+export function heldPartsLine(parts: readonly { credits: number; until: string }[] | undefined, timezone?: string): string | null {
+  if (!parts || parts.length < 2) return null;
+  return parts.map((p) => `${formatCredits(p.credits)} until ${playersWhen(p.until, timezone)}`).join(" · ");
+}
+
 /** The chip's hover title when part of the balance is held or owed back to partners. */
 export function chipHeldTitle(held: number, owedBack = 0): string {
   const parts = [

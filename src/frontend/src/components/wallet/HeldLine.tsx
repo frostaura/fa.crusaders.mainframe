@@ -1,6 +1,6 @@
 import type { HeldFigures } from "@/lib/liveBalance";
 import { HELD_EXPLAINER, OWED_BACK_EXPLAINER, heldLine, owedBackLine } from "@/lib/playersCopy";
-import { spendableLine } from "@/lib/walletCopy";
+import { heldPartsLine, spendableLine } from "@/lib/walletCopy";
 
 /**
  * D11 §3a — the part of the balance a member cannot spend yet, said where the balance is.
@@ -20,12 +20,15 @@ import { spendableLine } from "@/lib/walletCopy";
  */
 export function HeldLine({ held }: { held: HeldFigures | null }) {
   if (!held || (held.held <= 0 && held.owedBack <= 0)) return null;
+  // F4-18 — two or more share deadlines: the total without a date, then each part with its own.
+  const parts = heldPartsLine(held.parts);
   return (
     <div data-held-line="" className="mt-3 flex max-w-prose flex-col gap-1 border-t border-border pt-3 text-sm">
       <p className="font-semibold tabular-nums text-text-primary">
-        {held.held > 0 ? <>{heldLine(held.held, held.until)}<span className="text-text-secondary"> · </span></> : null}
+        {held.held > 0 ? <>{heldLine(held.held, parts ? null : held.until)}<span className="text-text-secondary"> · </span></> : null}
         <span className="text-text-primary">{spendableLine(held.spendable)}</span>
       </p>
+      {parts ? <p data-held-parts="" className="tabular-nums text-text-primary">{parts}</p> : null}
       {held.held > 0 ? <p className="text-text-secondary">{HELD_EXPLAINER}</p> : null}
       {held.owedBack > 0 ? (
         <>
