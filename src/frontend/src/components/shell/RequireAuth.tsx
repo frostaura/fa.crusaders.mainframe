@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
+import { tokenStore } from "../../lib/api";
 import { readLastIdentity, useAuth } from "../../lib/auth";
 import { BootSplash, ConnectionLost } from "./SessionScreens";
 import { LANDING_PATH } from "./nav";
@@ -52,7 +53,12 @@ export function RequireAuth(props: { children: ReactNode; admin?: boolean; allow
   const { children, admin = false, allowAnonymous = false } = props;
   const auth = useAuth();
   const location = useLocation();
-  if (auth.status === "loading") return <BootSplash />;
+  // P4-1 (R4) — an offline-capable route does not wait for the session check. On bad signal at
+  // the court `whoami` took up to 20 s behind the splash, on the one page built to need no signal.
+  // The same two conditions as offline (the route is on the list, this device has confirmed a
+  // member) plus a token to be checked — with none, the check is only the anonymous probe and the
+  // page renders signed out once it answers; the check's answer still decides everything after.
+  if (auth.status === "loading") return tokenStore.get() && copesWithoutClub(location.pathname) ? <>{children}</> : <BootSplash />;
   // A session we cannot confirm is not a session we have lost. Bouncing to /login here is what
   // turned a few seconds of backend downtime into a permanent sign-out for everyone on the site.
   //

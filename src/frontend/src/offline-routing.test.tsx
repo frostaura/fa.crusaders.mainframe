@@ -162,3 +162,52 @@ describe("what may render while the club cannot be reached", () => {
     expect(screen.queryByText("the member code page")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * P4-1 (review round 4, performance lens) — My Code waited for the session check.
+ *
+ * <p>
+ * On bad signal at the court `whoami` took up to 20 s, and `RequireAuth` showed the boot splash
+ * for all of it: the one page built to work with no signal was the one a slow signal hid. Now a
+ * device holding a token AND an identity the club has confirmed renders My Code at once while the
+ * check is out; the check's answer still decides everything after (a refusal still ends the
+ * session). Nothing else renders early, and a token with no confirmed identity still waits.
+ * </p>
+ */
+describe("while the session check is still out", () => {
+  /** A club that never answers — the check stays in flight for the whole test. */
+  function neverAnswers() {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+  }
+
+  it("renders My Code at once for the member this device last confirmed", async () => {
+    tokenStore.set("member.jwt.value");
+    localStorage.setItem(LAST_IDENTITY_KEY, "44444444-4444-4444-4444-444444444444");
+    neverAnswers();
+
+    renderAt("/my-code");
+
+    expect(await screen.findByText("the member code page")).toBeInTheDocument();
+  });
+
+  it("keeps every other route on the splash", async () => {
+    tokenStore.set("member.jwt.value");
+    localStorage.setItem(LAST_IDENTITY_KEY, "44444444-4444-4444-4444-444444444444");
+    neverAnswers();
+
+    renderAt("/schedule");
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(screen.queryByText("the bookings page")).not.toBeInTheDocument();
+  });
+
+  it("waits on a token nobody has confirmed", async () => {
+    tokenStore.set("member.jwt.value");
+    neverAnswers();
+
+    renderAt("/my-code");
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(screen.queryByText("the member code page")).not.toBeInTheDocument();
+  });
+});

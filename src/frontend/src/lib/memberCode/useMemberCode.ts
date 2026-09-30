@@ -76,6 +76,10 @@ function useIdentity(): { userId: string | null; canAsk: boolean; signedOut: boo
   if (auth.status === "authenticated") return { userId: auth.userId, canAsk: true, signedOut: false };
   if (auth.status === "offline") return { userId: readLastIdentity(), canAsk: true, signedOut: false };
   if (auth.status === "anonymous") return { userId: readLastIdentity(), canAsk: false, signedOut: true };
+  // P4-1 (R4): while the session check is out, the phone's key for the member it last confirmed is
+  // painted at once; the club is asked only once the check has answered (and then for whoever it
+  // names — a different member re-keys the page).
+  if (auth.status === "loading") return { userId: readLastIdentity(), canAsk: false, signedOut: false };
   return { userId: null, canAsk: false, signedOut: false };
 }
 
