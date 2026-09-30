@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { CONFIRM_NOT_READY } from "@/lib/confirmDialogCopy";
 import { Alert } from "../Alert";
 import { Button } from "../ui/button";
@@ -104,7 +104,15 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   const [error, setError] = useState<unknown>(null);
   const [notReady, setNotReady] = useState(false);
   const body = useRef<HTMLDivElement>(null);
+  const said = useRef<HTMLDivElement>(null);
   const succeeded = useRef(false);
+
+  // R4: at 390 px with 200 % text the alert under the reason field sat below the visible part of
+  // the dialog body — announced, but a sighted admin saw nothing until they scrolled. `nearest`
+  // keeps the focused field in view where both fit.
+  useEffect(() => {
+    if (error || notReady) said.current?.scrollIntoView?.({ block: "nearest" });
+  }, [error, notReady]);
 
   const change = (next: boolean) => {
     if (pending) return;
@@ -157,10 +165,12 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         {children || error ? (
           <DialogBody ref={body} className="flex flex-col gap-4">
             {children}
-            {notReady && props.notReady ? (
-              <Alert tone="warning" live="assertive" announceKey="confirm-not-ready">{props.notReadyMessage ?? CONFIRM_NOT_READY}</Alert>
-            ) : null}
-            {error ? <Alert tone="danger" live="assertive">{props.describe?.(error) ?? describeFailure(error, { action, codes })}</Alert> : null}
+            <div ref={said} className="flex flex-col gap-4 empty:hidden">
+              {notReady && props.notReady ? (
+                <Alert tone="warning" live="assertive" announceKey="confirm-not-ready">{props.notReadyMessage ?? CONFIRM_NOT_READY}</Alert>
+              ) : null}
+              {error ? <Alert tone="danger" live="assertive">{props.describe?.(error) ?? describeFailure(error, { action, codes })}</Alert> : null}
+            </div>
           </DialogBody>
         ) : null}
         <DialogFooter>

@@ -33,6 +33,26 @@ function Harness({ onConfirm }: { onConfirm: () => unknown }) {
 }
 
 describe("ConfirmDialog", () => {
+  /**
+   * R4 (integrator, from the players lane's walk): at 390 px / 200 % text the refusal under a
+   * reason field sat below the dialog body's visible part — announced, never seen.
+   */
+  it("brings a refusal into view in the dialog body", async () => {
+    const seen: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { seen.push(this); };
+    try {
+      render(<Harness onConfirm={() => Promise.reject(new ApiError(409, { error: "conflict" }))} />, strict);
+      fireEvent.click(screen.getByRole("button", { name: "Delete webhook" }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete webhook" }));
+      const alert = await within(dialog).findByRole("alert");
+      await waitFor(() => expect(seen.some((el) => el.contains(alert))).toBe(true));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it("asks, states the consequence, and offers Cancel, the outcome-named primary and a close ×", async () => {
     render(<Harness onConfirm={vi.fn()} />, strict);
     fireEvent.click(screen.getByRole("button", { name: "Delete webhook" }));
