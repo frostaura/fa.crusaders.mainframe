@@ -32,6 +32,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import vm from "node:vm";
+import { stampServiceWorker } from "../swBuild";
 
 export const ORIGIN = "https://club.example";
 
@@ -167,6 +168,8 @@ export type SwSandbox = {
   caches: FakeCacheStorage;
   /** Every request the worker passed to the network, in order. */
   networkCalls: SwRequest[];
+  /** The `init` each of those was sent with (P4-2: how it asked the HTTP cache). */
+  networkInits: (RequestInit | undefined)[];
   dispatchFetch(request: SwRequest): Promise<FakeFetchEvent>;
   dispatchMessage(data: unknown): Promise<FakeMessageEvent>;
   /** Runs the worker's `install` handler to completion (precache included). */
@@ -182,17 +185,21 @@ export type SwSandbox = {
  *               answers 200 with its own name as the body, which is enough for identity
  *               assertions ("whose wallet came back?").
  */
-export function loadServiceWorker(routes: Record<string, () => Response> = {}): SwSandbox {
-  const source = readFileSync(resolve(__dirname, "../../public/sw.js"), "utf8");
+export function loadServiceWorker(routes: Record<string, () => Response> = {}, options: { build?: string } = {}): SwSandbox {
+  const shipped = readFileSync(resolve(__dirname, "../../public/sw.js"), "utf8");
+  // P4-3: the build writes its id into the worker it ships; a test names the build it is running.
+  const source = options.build ? stampServiceWorker(shipped, options.build) : shipped;
   const listeners = new Map<string, Listener[]>();
   const cacheStorage = new FakeCacheStorage();
   const networkCalls: SwRequest[] = [];
+  const networkInits: (RequestInit | undefined)[] = [];
   let claimed = false;
 
-  const fetchImpl = async (input: SwRequest | string): Promise<Response> => {
+  const fetchImpl = async (input: SwRequest | string, init?: RequestInit): Promise<Response> => {
     // The worker's own install fetches pass a bare path (`fetch("/index.html", …)`).
     const request = typeof input === "string" ? swRequest(input) : input;
     networkCalls.push(request);
+    networkInits.push(init);
     const path = new URL(request.url, ORIGIN).pathname;
     const route = routes[path];
     return route ? route() : new Response(`network:${path}`, { status: 200 });
@@ -230,6 +237,7 @@ export function loadServiceWorker(routes: Record<string, () => Response> = {}): 
   return {
     caches: cacheStorage,
     networkCalls,
+    networkInits,
     async dispatchFetch(request) {
       const event = new FakeFetchEvent(request);
       await dispatch("fetch", event);

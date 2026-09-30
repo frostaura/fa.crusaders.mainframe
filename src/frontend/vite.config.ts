@@ -3,7 +3,9 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import fs from "node:fs";
 import type { Plugin } from "vite";
+import { createHash } from "node:crypto";
 import { SHIPPED_ICON_WEIGHTS } from "./src/components/ui/iconWeights";
+import { stampServiceWorker } from "./src/swBuild";
 
 /**
  * F4.3 — `precache.json`: every JS and CSS file the build emitted, for the service worker to fetch
@@ -15,18 +17,54 @@ import { SHIPPED_ICON_WEIGHTS } from "./src/components/ui/iconWeights";
  * fallback, and the worker caches them on first use).
  */
 function precacheManifest(): Plugin {
+  let publicDir = "";
+  let build = "";
   return {
     name: "crusaders-precache-manifest",
     apply: "build",
+    configResolved(config) {
+      publicDir = config.publicDir;
+    },
     generateBundle(_options, bundle) {
       const assets = Object.keys(bundle)
         .filter((file) => file.startsWith("assets/") && /\.(?:js|css)$/.test(file))
         .sort()
         .map((file) => `/${file}`);
       const first = memberFirst(bundle).filter((file) => assets.includes(file));
-      this.emitFile({ type: "asset", fileName: "precache.json", source: JSON.stringify({ assets, first }) });
+      build = buildId(Object.keys(bundle), publicDir);
+      this.emitFile({ type: "asset", fileName: "precache.json", source: JSON.stringify({ build, assets, first }) });
+    },
+    // P4-3 (R4): the shipped worker carries this build's id (`src/swBuild.ts` says why). The public
+    // copy is already in the output by now; it is rewritten in place, never in `public/`.
+    writeBundle(options) {
+      const worker = path.join(options.dir ?? "dist", "sw.js");
+      if (!build || !fs.existsSync(worker)) return;
+      fs.writeFileSync(worker, stampServiceWorker(fs.readFileSync(worker, "utf8"), build));
     },
   };
+}
+
+/**
+ * The build's id: every emitted file's name (content-hashed, so a changed chunk is a changed name)
+ * and every public file's bytes (un-hashed: the theme boot script, the manifest, the icons), bar the
+ * worker itself. 16 hex characters of SHA-256 — the same inputs always give the same id, so a
+ * rebuild of the same sources does not make every phone reinstall.
+ */
+function buildId(emitted: string[], publicDir: string): string {
+  const hash = createHash("sha256");
+  for (const file of [...emitted].sort()) hash.update(`emit:${file}\n`);
+  const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? walk(full) : [full];
+  });
+  if (publicDir && fs.existsSync(publicDir)) {
+    for (const file of walk(publicDir).sort()) {
+      const name = path.relative(publicDir, file);
+      if (name === "sw.js") continue;
+      hash.update(`public:${name}\n`).update(fs.readFileSync(file));
+    }
+  }
+  return hash.digest("hex").slice(0, 16);
 }
 
 /** Pages only the club's desk opens — precached last. Everything else a member can reach. */

@@ -62,15 +62,26 @@
  * caching path cannot accidentally route around the rule.
  */
 
-const VERSION = "v3";
-const SHELL_CACHE = `crusaders-shell-${VERSION}`;
-const ASSET_CACHE = `crusaders-assets-${VERSION}`;
+/**
+ * The build this worker ships with (P4-3, review round 4), written in by the build
+ * (`vite.config.ts` → `src/swBuild.ts`); the placeholder is what an unbuilt copy carries.
+ *
+ * It used to be a hand-kept "v3", so the file never changed across deploys: a browser installs a
+ * new worker only when its bytes change, so no deploy ever installed one — the new build's chunks
+ * were never precached, and `crusaders-assets-v3` gathered every build's files for ever. Now each
+ * build is its own worker with its own caches, and activating it removes every other build's.
+ */
+const BUILD = "__CRUSADERS_BUILD__";
+const SHELL_CACHE = `crusaders-shell-${BUILD}`;
+const ASSET_CACHE = `crusaders-assets-${BUILD}`;
 const OWNED = [SHELL_CACHE, ASSET_CACHE];
+/** Earlier builds' asset caches, read (never written) at install for files this build still names. */
+const ASSET_PREFIX = "crusaders-assets-";
 
 /**
  * Every cache this worker has ever owned starts with this prefix, including `crusaders-api-v1`
- * from the leaking version. The activate sweep below is what removes that one from devices the
- * old worker already ran on — the version bump is load-bearing, not cosmetic.
+ * from the leaking version and every earlier build's shell and assets. The activate sweep below is
+ * what removes them from devices the old worker already ran on.
  */
 const CACHE_PREFIX = "crusaders-";
 
@@ -229,6 +240,16 @@ async function precacheRest() {
   }
 }
 
+/** The file from an earlier build's asset cache, when one holds it; never this build's own. */
+async function fromEarlierBuild(url) {
+  const names = (await caches.keys()).filter((n) => n.startsWith(ASSET_PREFIX) && n !== ASSET_CACHE);
+  for (const name of names) {
+    const hit = await (await caches.open(name)).match(url);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** Fetches and stores `urls`, `lanes` at a time. One asset that will not fetch costs only itself. */
 async function fetchInto(urls, lanes, generation = cacheGeneration, cacheMustExist = false) {
   const queue = [...urls];
@@ -237,9 +258,15 @@ async function fetchInto(urls, lanes, generation = cacheGeneration, cacheMustExi
   const wanted = async () => generation === cacheGeneration && (!cacheMustExist || (await caches.has(ASSET_CACHE)));
   const lane = async () => {
     while (queue.length > 0 && (await wanted())) {
+      // Checked AFTER the await: every lane passed the length check before any of them took a
+      // URL, so the spare lanes used to fetch `undefined` — "/undefined", which the SPA fallback
+      // answers 200 with the shell, stored in the asset cache (found in R4).
       const url = queue.shift();
+      if (url === undefined) return;
       try {
-        const asset = await fetch(url);
+        // A content-hashed file this build still names is the same bytes the last build cached:
+        // take it from there rather than the network (a deploy re-downloads only what changed).
+        const asset = (await fromEarlierBuild(url)) || (await fetch(url));
         if (!(await wanted())) return;
         // Through `cachePut`, not `cache.add`: one chokepoint decides what may be stored, and
         // a second path into the cache is how the rule above gets quietly broken.
@@ -254,10 +281,17 @@ async function fetchInto(urls, lanes, generation = cacheGeneration, cacheMustExi
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
-    const cache = await caches.open(SHELL_CACHE);
     // Individually, not addAll: addAll is atomic, so one 404 on one file throws the whole
-    // install away and the app silently has no offline support at all.
-    await Promise.all(SHELL.map((url) => cache.add(url).catch(() => undefined)));
+    // install away and the app silently has no offline support at all. P4-2 (R4): past the HTTP
+    // cache (`no-cache` revalidates), because `cache.add` took whatever the browser held — an
+    // index.html heuristically cached for hours named the previous build's files.
+    await Promise.all(SHELL.map(async (url) => {
+      try {
+        await cachePut(SHELL_CACHE, new Request(url), await fetch(url, { cache: "no-cache" }));
+      } catch {
+        // One shell file that will not fetch costs only itself.
+      }
+    }));
     await precacheBuild();
     await self.skipWaiting();
   })());
@@ -265,11 +299,15 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
-    // Removes the previous build's asset cache AND `crusaders-api-v1`, the cache the leaking
-    // version filled with member data on every device it ever ran on.
-    await purgeOwnedCaches(OWNED);
+    // Removes every earlier build's shell AND `crusaders-api-v1`, the cache the leaking version
+    // filled with member data on every device it ever ran on — at once.
+    const earlierAssets = (await caches.keys()).filter((n) => n.startsWith(ASSET_PREFIX) && n !== ASSET_CACHE);
+    await purgeOwnedCaches([...OWNED, ...earlierAssets]);
     await self.clients.claim();
+    // The desk's chunks, taking any file the last build already had from its cache (P4-3)…
     await precacheRest();
+    // …and then the last build's assets go too: this build's cache now holds everything it names.
+    await purgeOwnedCaches(OWNED);
   })());
 });
 
@@ -303,7 +341,9 @@ async function cacheFirst(request, cacheName) {
 
 async function networkFirstShell(request) {
   try {
-    const response = await fetch(request);
+    // P4-2 (R4): revalidated with the server every time — the document names this build's files,
+    // and a copy the HTTP cache kept past a deploy is a page asking for files that are gone.
+    const response = await fetch(request, { cache: "no-cache" });
     // Keyed on /index.html rather than on the navigated URL, so every route falls back to the
     // one shell. `cachePut` still gets the real request, so its rules still apply.
     if (mayCache(request, response)) {

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ORIGIN, loadServiceWorker, swRequest } from "./test/swHarness";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { ORIGIN, loadServiceWorker, swRequest, type SwSandbox } from "./test/swHarness";
+import { SW_BUILD_PLACEHOLDER, stampServiceWorker } from "./swBuild";
+
+/** The one asset cache a worker has made (its name carries the build). */
+function assetCacheOf(sw: SwSandbox): string {
+  const names = [...sw.caches.stores.keys()].filter((n) => n.startsWith("crusaders-assets-"));
+  expect(names).toHaveLength(1);
+  return names[0];
+}
 
 /**
  * E-F06 — the offline cache must not bleed between members on a shared device.
@@ -235,7 +245,7 @@ describe("install precaches every chunk the build lists", () => {
       }), { status: 200 }),
     });
     await sw.install();
-    const assets = await (await sw.caches.open("crusaders-assets-v3")).keys();
+    const assets = await (await sw.caches.open(assetCacheOf(sw))).keys();
     expect(assets.sort()).toEqual([
       "/assets/Schedule-DDDD.js", "/assets/Schedule-EEEE.css", "/assets/Wallet-CCCC.js",
       "/assets/index-AAAA.js", "/assets/index-BBBB.css",
@@ -286,3 +296,91 @@ describe("install precaches every chunk the build lists", () => {
     expect(sw.caches.storedUrls()).toContain(`${ORIGIN}/assets/index-AAAA.js`);
   });
 });
+
+/**
+ * P4-2 / P4-3 (review round 4, performance lens) — a deploy reaches the phone.
+ *
+ * <p>
+ * The worker was byte-identical across deploys (`VERSION = "v3"`), so no deploy ever installed a
+ * new one: the new build's chunks were never precached, and `crusaders-assets-v3` gathered every
+ * build's files for ever. And the shell was fetched through the HTTP cache, which held an
+ * `index.html` without a Cache-Control header heuristically for hours — naming the last build's
+ * files. The build now stamps its id into the worker; each build's worker owns caches named for
+ * it, reuses what the last build already cached, and removes the last build's on activate.
+ * </p>
+ */
+describe("a new build replaces the last one", () => {
+  const INDEX_A = '<script type="module" src="/assets/index-AAAA.js"></script>';
+  const INDEX_B = '<script type="module" src="/assets/index-BBBB.js"></script>';
+
+  it("ships with exactly one build placeholder, and the stamp replaces it", () => {
+    const source = readFileSync(resolve(__dirname, "../public/sw.js"), "utf8");
+    expect(source.split(SW_BUILD_PLACEHOLDER)).toHaveLength(2);
+    const stamped = stampServiceWorker(source, "b2b2b2b2b2b2");
+    expect(stamped).toContain('const BUILD = "b2b2b2b2b2b2"');
+    expect(stamped).not.toContain(SW_BUILD_PLACEHOLDER);
+    expect(() => stampServiceWorker(stamped, "b3b3b3b3b3b3")).toThrow(/exactly once/);
+    expect(() => stampServiceWorker(source, "../evil")).toThrow(/build id/);
+  });
+
+  it("names its caches after its build, and on activate keeps nothing of the last build's", async () => {
+    // The last build's worker, installed and running, on a device a member has used.
+    const a = loadServiceWorker({
+      "/index.html": () => new Response(INDEX_A, { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({ assets: ["/assets/Same-1111.js", "/assets/Gone-2222.js"] }), { status: 200 }),
+    }, { build: "aaaaaaaaaaaa" });
+    await a.install();
+    await a.activate();
+    expect(await a.caches.keys()).toEqual(expect.arrayContaining(["crusaders-assets-aaaaaaaaaaaa", "crusaders-shell-aaaaaaaaaaaa"]));
+
+    // The next build's worker, on the same device (the same CacheStorage).
+    const b = loadServiceWorker({
+      "/index.html": () => new Response(INDEX_B, { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({ assets: ["/assets/Same-1111.js", "/assets/New-3333.js"] }), { status: 200 }),
+    }, { build: "bbbbbbbbbbbb" });
+    for (const [name, store] of a.caches.stores) b.caches.stores.set(name, store);
+    await b.install();
+    await b.activate();
+
+    expect((await b.caches.keys()).sort()).toEqual(["crusaders-assets-bbbbbbbbbbbb", "crusaders-shell-bbbbbbbbbbbb"]);
+    const stored = b.caches.storedUrls();
+    expect(stored).toEqual(expect.arrayContaining([
+      `${ORIGIN}/assets/index-BBBB.js`, `${ORIGIN}/assets/Same-1111.js`, `${ORIGIN}/assets/New-3333.js`,
+    ]));
+    expect(stored.filter((u) => /index-AAAA|Gone-2222/.test(u)), "the last build's files are pruned").toEqual([]);
+    expect(stored.filter((u) => new URL(u).pathname.startsWith("/api/")), "never member data").toEqual([]);
+  });
+
+  it("takes a file the last build already cached from that cache, not the network", async () => {
+    const b = loadServiceWorker({
+      "/index.html": () => new Response(INDEX_B, { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({ assets: ["/assets/Same-1111.js"] }), { status: 200 }),
+    }, { build: "bbbbbbbbbbbb" });
+    const earlier = await b.caches.open("crusaders-assets-aaaaaaaaaaaa");
+    await earlier.put(`${ORIGIN}/assets/Same-1111.js`, new Response("same bytes", { status: 200 }));
+    await b.install();
+    const fetched = b.networkCalls.map((r) => new URL(r.url, ORIGIN).pathname);
+    expect(fetched).not.toContain("/assets/Same-1111.js");
+    expect(await (await (await b.caches.open("crusaders-assets-bbbbbbbbbbbb")).match(`${ORIGIN}/assets/Same-1111.js`))!.text()).toBe("same bytes");
+  });
+
+  it("never asks for a URL that is not on the list when the list is shorter than the lanes", async () => {
+    const sw = loadServiceWorker({ "/index.html": () => new Response(INDEX_B, { status: 200 }) }, { build: "bbbbbbbbbbbb" });
+    await sw.install();
+    expect(sw.networkCalls.every((r) => r && !String(r.url).includes("undefined")), "a lane fetched `undefined`").toBe(true);
+    expect(sw.caches.storedUrls().filter((u) => u.includes("undefined"))).toEqual([]);
+  });
+
+  it("asks for the shell and every navigation past the HTTP cache", async () => {
+    const sw = loadServiceWorker({ "/index.html": () => new Response(INDEX_B, { status: 200 }) }, { build: "bbbbbbbbbbbb" });
+    await sw.install();
+    await sw.dispatchFetch(swRequest("/bookings", { mode: "navigate" }));
+    const asked = sw.networkCalls.map((r, i) => ({ path: new URL(r.url, ORIGIN).pathname, cache: sw.networkInits[i]?.cache }));
+    for (const path of ["/", "/index.html", "/theme-boot.js", "/manifest.webmanifest", "/precache.json", "/bookings"]) {
+      const calls = asked.filter((c) => c.path === path);
+      expect(calls.length, `${path} was never asked for`).toBeGreaterThan(0);
+      for (const call of calls) expect(call.cache, `${path} went through the HTTP cache`).toBe("no-cache");
+    }
+  });
+});
+
