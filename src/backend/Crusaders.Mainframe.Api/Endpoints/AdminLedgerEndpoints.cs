@@ -45,8 +45,9 @@ public static class AdminLedgerEndpoints
                 : emailByUserId.TryGetValue(id, out var e) ? e
                 : "(unknown)";
             var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
+            var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
 
-            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains)).ToList();
+            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
             return Results.Ok(rows);
         });
 
@@ -65,10 +66,60 @@ public static class LedgerRowMapper
     public const string Treasury = "Club treasury";
     public const string PaymentGateway = "PayFast";
 
-    public static LedgerRowDto Build(LedgerEntry e, Func<Guid, string> nameFor, Func<Guid, bool>? isAdmin = null)
+    /// <summary>The name a share's other member is given when the club holds none for them. Never an email: members see names only.</summary>
+    public const string SomeMember = "A member";
+
+    /// <summary>
+    /// For each <see cref="LedgerEntryType.ShareTransfer"/> row among <paramref name="entries"/>,
+    /// the OTHER member of its pair (review round 2, C5) — the owner of the twin row, found by
+    /// reference (<c>share:{seat}:{seq}:out</c> ↔ <c>…:in</c>, unique). Names from this club's
+    /// memberships only, never an address: the wallet is a member-facing read.
+    /// </summary>
+    public static async Task<Dictionary<Guid, ShareCounterparty>> ShareCounterpartiesAsync(
+        MainframeDbContext db, IReadOnlyCollection<LedgerEntry> entries, CancellationToken ct)
+    {
+        var twins = entries
+            .Where(e => e.Type == LedgerEntryType.ShareTransfer && e.ExternalReference is not null && TwinOf(e.ExternalReference) is not null)
+            .ToDictionary(e => e.Id, e => TwinOf(e.ExternalReference!)!);
+        if (twins.Count == 0) return [];
+
+        var refs = twins.Values.Distinct().ToList();
+        var owners = (await db.LedgerEntries.AsNoTracking()
+                .Where(l => l.ExternalReference != null && refs.Contains(l.ExternalReference))
+                .Select(l => new { Reference = l.ExternalReference!, l.UserId })
+                .ToListAsync(ct))
+            .GroupBy(o => o.Reference)
+            .ToDictionary(g => g.Key, g => g.First().UserId);
+        var people = owners.Values.Distinct().ToList();
+        var names = await db.Memberships.AsNoTracking().Where(m => people.Contains(m.UserId))
+            .Select(m => new { m.UserId, m.FullName }).ToListAsync(ct);
+        var nameOf = names.GroupBy(n => n.UserId).ToDictionary(g => g.Key, g => g.First().FullName);
+
+        var result = new Dictionary<Guid, ShareCounterparty>();
+        foreach (var (entryId, twin) in twins)
+        {
+            if (!owners.TryGetValue(twin, out var other)) continue;
+            result[entryId] = new ShareCounterparty(other, nameOf.GetValueOrDefault(other) ?? SomeMember);
+        }
+        return result;
+    }
+
+    /// <summary>The reference of a share row's other half, or null for a reference that is not one.</summary>
+    public static string? TwinOf(string reference)
+    {
+        if (!reference.StartsWith("share:", StringComparison.Ordinal)) return null;
+        if (reference.EndsWith(":out", StringComparison.Ordinal)) return reference[..^4] + ":in";
+        if (reference.EndsWith(":in", StringComparison.Ordinal)) return reference[..^3] + ":out";
+        return null;
+    }
+
+    public static LedgerRowDto Build(
+        LedgerEntry e, Func<Guid, string> nameFor, Func<Guid, bool>? isAdmin = null,
+        IReadOnlyDictionary<Guid, ShareCounterparty>? counterparties = null)
     {
         var subject = nameFor(e.UserId);
         var actor = nameFor(e.ActorUserId);
+        var other = counterparties is not null && counterparties.TryGetValue(e.Id, out var found) ? found : null;
 
         // Direction: positive amount = funds flow INTO the subject's wallet; negative = OUT.
         // The other party depends on the entry type.
@@ -95,6 +146,9 @@ public static class LedgerRowMapper
                 (Treasury, e.Reason ?? "Admin adjustment"),
             LedgerEntryType.PaymentReversal =>
                 (PaymentGateway, e.Reason ?? "Payment reversal"),
+            // C5: a share moves between two members — "Sam → Alice", never via the treasury.
+            LedgerEntryType.ShareTransfer when other is not null =>
+                (other.Name, e.Reason ?? "Share transfer"),
             _ => (Treasury, e.Reason ?? e.Type.ToString()),
         };
 
@@ -118,6 +172,8 @@ public static class LedgerRowMapper
             RelatedBookingId: e.RelatedBookingId)
         {
             DoneBy = DoneByOf(e, actor, isAdmin),
+            CounterpartyName = other?.Name,
+            CounterpartyUserId = other?.UserId,
         };
     }
 
@@ -170,4 +226,15 @@ public sealed record LedgerRowDto(
     /// </summary>
     [System.Text.Json.Serialization.JsonPropertyName("actor_name")]
     public string? DoneBy { get; init; }
+
+    /// <summary>On a share transfer: the other member of the pair (C5). Null on every other row.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("counterparty_name")]
+    public string? CounterpartyName { get; init; }
+
+    /// <summary>On a share transfer: the other member's user id (C5). Null on every other row.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("counterparty_user_id")]
+    public Guid? CounterpartyUserId { get; init; }
 }
+
+/// <summary>The other member of a share transfer, as a ledger row names them.</summary>
+public sealed record ShareCounterparty(Guid UserId, string Name);

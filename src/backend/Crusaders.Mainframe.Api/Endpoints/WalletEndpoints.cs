@@ -54,7 +54,8 @@ public static class WalletEndpoints
                 : "(unknown)";
 
             var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
-            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains)).ToList();
+            var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
+            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
 
             return Results.Ok(new
             {
