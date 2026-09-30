@@ -221,7 +221,9 @@ public sealed class MonitoringStreamTests : IClassFixture<PostgresFixture>
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get, $"{MonitoringFixture.StreamPath}?ticket={Uri.EscapeDataString(forged)}");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // Only the headers are awaited, so this is a budget for a loaded machine, not a wait: a full
+        // run at load ~130 took longer than 10 s to answer and failed on the timeout, not the status.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var response = await factory.CreateClient()
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
 
