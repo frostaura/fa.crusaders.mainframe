@@ -409,3 +409,31 @@ describe("an accept whose reply was lost (R2 F2-1)", () => {
     expect(sheet).not.toHaveTextContent(/Couldn't accept/);
   });
 });
+
+describe("the sheet's structure and focus (R2 F2-10, F2-11)", () => {
+  it("F2-10: Decline's question opens on 'Keep the invite' — a second Enter never declines — and keeping returns to Decline", async () => {
+    openInvites({ routes: [{ method: "POST", path: DECLINE, body: { participant_id: SEAT, status: "declined" } }] });
+    const sheet = await openSheet();
+    const decline = within(sheet).getByRole("button", { name: INVITES_COPY.decline });
+    decline.focus();
+    fireEvent.click(decline);
+    expect(within(sheet).getByRole("button", { name: INVITES_COPY.declineKeep })).toHaveFocus();
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.declineKeep }));
+    expect(within(sheet).getByRole("button", { name: INVITES_COPY.decline })).toHaveFocus();
+  });
+
+  it("F2-11: every child of the facts list is a dt/dd group — no stray wrapper, no avatar straight in the dl", async () => {
+    openInvites();
+    const sheet = await openSheet();
+    const lists = sheet.querySelectorAll("dl");
+    expect(lists.length).toBeGreaterThan(0);
+    for (const dl of lists) {
+      for (const child of Array.from(dl.children)) {
+        if (child.tagName === "DT" || child.tagName === "DD") continue;
+        expect(child.tagName).toBe("DIV");
+        expect(Array.from(child.children).map((c) => c.tagName)).toEqual(["DT", "DD"]);
+      }
+    }
+    expect(within(sheet).getByText(INVITES_COPY.organiser).nextElementSibling).toHaveTextContent("Sam");
+  });
+});

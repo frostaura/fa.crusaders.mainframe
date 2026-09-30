@@ -54,9 +54,13 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
   );
 }
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * One term and its value. The wrapping `div` is the only element between the `dl` and its
+ * `dt`/`dd` (R2 F2-11, axe `definition-list`): a layout class goes on it, never on another wrapper.
+ */
+function Fact({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
+    <div className={`flex min-w-0 flex-col gap-0.5 ${className}`}>
       <dt className="text-xs font-medium text-text-muted">{label}</dt>
       <dd className="min-w-0 break-words text-sm font-medium text-text-primary">{children}</dd>
     </div>
@@ -70,16 +74,16 @@ function GameFacts({ flow }: { flow: AcceptFlow }) {
     <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-3 sm:p-4">
       <Fact label={INVITES_COPY.court}>{invite.court_name ?? INVITES_COPY.court}</Fact>
       <Fact label={INVITES_COPY.players}>{playersCount(invite.players)}</Fact>
-      <div className="col-span-2">
-        <Fact label={INVITES_COPY.when}>{inviteWhen(invite)}</Fact>
-      </div>
-      <div className="col-span-2 flex items-center gap-3">
-        <Avatar size={32}>
-          {invite.organiser?.photo_url ? <AvatarImage src={invite.organiser.photo_url} alt="" /> : null}
-          <AvatarFallback name={name} />
-        </Avatar>
-        <Fact label={INVITES_COPY.organiser}>{name}</Fact>
-      </div>
+      <Fact label={INVITES_COPY.when} className="col-span-2">{inviteWhen(invite)}</Fact>
+      <Fact label={INVITES_COPY.organiser} className="col-span-2">
+        <span className="flex items-center gap-3">
+          <Avatar size={32}>
+            {invite.organiser?.photo_url ? <AvatarImage src={invite.organiser.photo_url} alt="" /> : null}
+            <AvatarFallback name={name} />
+          </Avatar>
+          <span className="min-w-0">{name}</span>
+        </span>
+      </Fact>
     </dl>
   );
 }
