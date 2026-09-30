@@ -67,11 +67,18 @@ function buildId(emitted: string[], publicDir: string): string {
   return hash.digest("hex").slice(0, 16);
 }
 
-/** Pages only the club's desk opens — precached last. Everything else a member can reach. */
-const DESK_PAGES = /\/src\/pages\/(?:admin\/|monitoring\/|Admin[A-Z]|DevPrimitives|dev\/)/;
+/**
+ * What a member's install does NOT fetch — precached last, once the worker is in control. The
+ * desk's pages and its frame (`adminFrame.ts` — it was in the member set, 20 kB gzip, because the
+ * entry names it lazily), and (R4, P4-6) the report parts: 124 kB gzip of charts that only the
+ * wallet's Activity tab and the desk's reports draw, which made up a fifth of a member's install.
+ */
+const DESK_PAGES = /\/src\/(?:pages\/(?:admin\/|monitoring\/|Admin[A-Z]|DevPrimitives|dev\/)|adminFrame\.ts$)/;
+/** Chart code, by module: a shared chunk has no facade to test, so its modules are looked at. */
+const CHART_MODULES = /\/src\/components\/(?:reports\/|Charts\.tsx$)/;
 
 type BundleEntry = {
-  type: string; fileName: string; isEntry?: boolean; facadeModuleId?: string | null;
+  type: string; fileName: string; isEntry?: boolean; facadeModuleId?: string | null; moduleIds?: string[];
   imports?: string[]; dynamicImports?: string[]; viteMetadata?: { importedCss?: Set<string> };
 };
 
@@ -91,6 +98,7 @@ function memberFirst(bundle: Record<string, unknown>): string[] {
   const visit = (file: string) => {
     const chunk = byName.get(file);
     if (!chunk || seen.has(file) || DESK_PAGES.test(chunk.facadeModuleId ?? "")) return;
+    if ((chunk.moduleIds ?? []).some((id) => CHART_MODULES.test(id))) return;
     seen.add(file);
     for (const css of chunk.viteMetadata?.importedCss ?? []) seen.add(css);
     for (const dep of [...(chunk.imports ?? []), ...(chunk.dynamicImports ?? [])]) visit(dep);

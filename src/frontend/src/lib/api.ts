@@ -117,13 +117,29 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  apiInFlight += 1;
   try {
     return await fetch(path, { ...init, signal: controller.signal });
   } catch (cause) {
     throw new NetworkError(timedOut ? "timeout" : "unreachable", { cause });
   } finally {
     clearTimeout(timer);
+    apiInFlight -= 1;
+    if (apiInFlight === 0) for (const done of quietWaiters.splice(0)) done();
   }
+}
+
+/**
+ * R4 (the first-Bookings regression) — the club's reads this tab has in flight, so a page's code
+ * that is only a HINT (`routeChunks`: Wallet and Profile before they are opened) waits until the
+ * open page's own reads have come back instead of queueing in front of them on a phone's six
+ * connections. Streams (EventSource) are not counted; they never finish.
+ */
+let apiInFlight = 0;
+const quietWaiters: (() => void)[] = [];
+export function whenApiQuiet(): Promise<void> {
+  if (apiInFlight === 0) return Promise.resolve();
+  return new Promise((resolve) => { quietWaiters.push(resolve); });
 }
 
 // Paths that should not trigger session-expired handling on 401. Login itself returns 401 on bad

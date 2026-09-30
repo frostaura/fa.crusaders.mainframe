@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { prefetchNavChunks, preloadRouteChunk, routeChunks } from "./routeChunks";
+import { prefetchNavChunks, preloadAtSessionCheck, preloadRouteChunk, routeChunks } from "./routeChunks";
 
 /** Perf lane (2026-09-30) — a page's code fetched before it is opened, as a hint and nothing more. */
 const never = () => new Promise<never>(() => {});
@@ -70,5 +70,60 @@ describe("prefetchNavChunks — the tab bar's pages, once idle", () => {
     cancelled();
     vi.advanceTimersByTime(5_000);
     expect(spies.schedule).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * R4 — the first-Bookings regression: the tab bar's prefetch came after the tap, and Wallet's and
+ * Profile's code could queue in front of the open page's own reads.
+ */
+describe("preloadAtSessionCheck — the opened page, then Bookings", () => {
+  it("asks for Bookings' code straight away from a page in the entry (My Code)", () => {
+    const spies = watch();
+    expect(preloadAtSessionCheck("/my-code")).toBe(true);
+    expect(spies.schedule).toHaveBeenCalledTimes(1);
+    expect(spies.wallet).not.toHaveBeenCalled();
+  });
+
+  it("asks for the opened page's code first, and Bookings' once that has arrived", async () => {
+    let arrive: (v: { default: () => null }) => void = () => undefined;
+    const wallet = vi.spyOn(routeChunks, "wallet").mockImplementation(() => new Promise((r) => { arrive = r; }));
+    const schedule = vi.spyOn(routeChunks, "schedule").mockImplementation(never);
+    expect(preloadAtSessionCheck("/wallet")).toBe(true);
+    expect(wallet).toHaveBeenCalledTimes(1);
+    expect(schedule).not.toHaveBeenCalled();
+    arrive({ default: () => null });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks once on Bookings itself, and nothing offline", () => {
+    const spies = watch();
+    expect(preloadAtSessionCheck("/bookings")).toBe(true);
+    expect(spies.schedule).toHaveBeenCalledTimes(1);
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    expect(preloadAtSessionCheck("/my-code")).toBe(false);
+    expect(spies.schedule).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("prefetchNavChunks — Wallet and Profile wait for the open page's reads", () => {
+  it("fetches nothing after Bookings until the club's reads are back", async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    for (const name of ["schedule", "wallet", "profile"] as const) {
+      vi.spyOn(routeChunks, name).mockImplementation(async () => { order.push(name); return { default: () => null }; });
+    }
+    let quietNow: () => void = () => undefined;
+    const quiet = vi.fn(() => new Promise<void>((r) => { quietNow = r; }));
+    prefetchNavChunks(10, false, quiet);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(order).toEqual(["schedule"]);
+    quietNow();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(order).toEqual(["schedule", "wallet"]);
+    quietNow();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(order).toEqual(["schedule", "wallet", "profile"]);
   });
 });

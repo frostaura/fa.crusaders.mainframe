@@ -149,6 +149,20 @@ function noMemberData(report: Awaited<ReturnType<typeof cacheReport>>) {
   }
 }
 
+/**
+ * P4-6 (R4) — what a member's install fetches before the worker takes control: their pages, not
+ * the desk's frame (20 kB gzip, named lazily by the entry) and not the report charts (124 kB gzip,
+ * a fifth of the install, drawn only by the wallet's Activity tab and the desk's reports). Both
+ * are still precached once the worker is in control (`precacheRest`).
+ */
+test("a member's install set leaves out the desk's frame and the charts", () => {
+  const list = JSON.parse(readFileSync(join(distA, "precache.json"), "utf8")) as { assets: string[]; first: string[] };
+  const later = list.first.filter((p) => /\/(ReportParts|Charts|adminFrame)-[^/]*\.js$/.test(p));
+  expect(later).toEqual([]);
+  expect(list.assets.some((p) => /\/ReportParts[^/]*\.js$/.test(p)), "the charts are still listed for later").toBe(true);
+  expect(list.first.some((p) => /\/index-[^/]+\.js$/.test(p))).toBe(true);
+});
+
 const buildOf = (dist: string) => (JSON.parse(readFileSync(join(dist, "precache.json"), "utf8")) as { build: string }).build;
 
 test("a deploy installs the new build's worker, prunes the old build and caches nothing of the member's", async ({ page }) => {

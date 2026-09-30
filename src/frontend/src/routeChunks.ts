@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { whenApiQuiet } from "./lib/api";
 
 /**
  * The member pages' code, by route — one loader per lazy page, shared by `App.tsx`'s `lazy()` and
@@ -57,6 +58,30 @@ function hint(name: ChunkName) {
 }
 
 
+/**
+ * At boot, once the session check is SENT (`main.tsx`): the opened page's code, then Bookings'.
+ *
+ * <p>
+ * R4 (the first-Bookings regression, measured on :8088, slow 4G + 4x CPU): a member opening the
+ * app on My Code and tapping Bookings as soon as the code showed waited 2.1 s, 1.4 s of it for
+ * Bookings' ~30 files, because the tab bar's prefetch waited for sign-in, then 0.5 s, then an idle
+ * callback — which on a busy phone came after the tap. Bookings is the next tap from every page,
+ * so its code is asked for straight after the opened page's own; Wallet and Profile stay behind
+ * the open page's reads (`prefetchNavChunks`). Returns whether anything was asked for.
+ * </p>
+ */
+export function preloadAtSessionCheck(pathname: string): boolean {
+  if (!worthFetching()) return false;
+  // The desk's console is its own chunk; a desk page is not where Bookings is the next tap.
+  if (/^\/admin(\/|$)/.test(pathname)) return preloadRouteChunk(pathname);
+  const current = BY_PATH.find(([pattern]) => pattern.test(pathname))?.[1];
+  const next = () => hint("schedule");
+  // After the opened page's code where there is one — it is what the member is waiting for.
+  if (current && current !== "schedule") routeChunks[current]().then(next, next);
+  else next();
+  return true;
+}
+
 /** Start fetching the code of the page at `pathname`, if it is one of these. Returns whether it did. */
 export function preloadRouteChunk(pathname: string): boolean {
   if (!worthFetching()) return false;
@@ -70,24 +95,36 @@ export function preloadRouteChunk(pathname: string): boolean {
   return true;
 }
 
-/** Once the phone is idle, fetch the tab bar's pages (and an admin's console). Returns a cancel. */
-export function prefetchNavChunks(delayMs = 500, admin = false): () => void {
+/**
+ * Once the phone is idle, fetch the tab bar's pages (and an admin's console). Returns a cancel.
+ *
+ * <p>
+ * R4: each page after Bookings waits until the club's reads this tab has in flight have come back
+ * (`quiet`) — a hint must not queue in front of the open page's own reads.
+ * </p>
+ */
+export function prefetchNavChunks(delayMs = 500, admin = false, quiet: () => Promise<void> = whenApiQuiet): () => void {
   if (!worthFetching()) return () => undefined;
   let idle: number | null = null;
+  let cancelled = false;
   const timer = window.setTimeout(() => {
     // One page at a time, Bookings first: all of them at once put ~50 files in front of the
     // member's own next tap on HTTP/1.1's six connections (measured: 1.2 s → 2.2 s).
     const run = async () => {
       for (const name of NAV_CHUNKS) {
-        if (!worthFetching()) return;
+        if (name !== "schedule") await quiet();
+        if (cancelled || !worthFetching()) return;
         await routeChunks[name]().catch(() => undefined);
       }
-      if (admin && worthFetching()) await loadAdminFrame().catch(() => undefined);
+      if (!admin) return;
+      await quiet();
+      if (!cancelled && worthFetching()) await loadAdminFrame().catch(() => undefined);
     };
     if (typeof window.requestIdleCallback === "function") idle = window.requestIdleCallback(() => void run(), { timeout: 4_000 });
     else void run();
   }, delayMs);
   return () => {
+    cancelled = true;
     window.clearTimeout(timer);
     if (idle !== null && typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(idle);
   };
