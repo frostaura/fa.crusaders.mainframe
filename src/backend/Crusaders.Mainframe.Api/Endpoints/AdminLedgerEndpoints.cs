@@ -15,44 +15,82 @@ public static class AdminLedgerEndpoints
     {
         var g = app.MapGroup("/api/v1/admin/ledger").RequireAuthorization(p => p.RequireRole("admin"));
 
-        g.MapGet("/", async (
-            DateTimeOffset? from, DateTimeOffset? to,
-            Guid? userId, string? type, int? limit,
-            MainframeDbContext db, CancellationToken ct) =>
-        {
-            // B-9: a query-string instant keeps the offset it was sent with; Npgsql refuses one.
-            var fromUtc = (from ?? DateTimeOffset.UtcNow.AddDays(-90)).ToUniversalTime();
-            var toUtc = (to ?? DateTimeOffset.UtcNow.AddDays(1)).ToUniversalTime();
-            var take = Math.Clamp(limit ?? 500, 1, 5000);
-
-            var q = db.LedgerEntries.AsNoTracking()
-                .Where(l => l.CreatedAt >= fromUtc && l.CreatedAt < toUtc);
-            if (userId is { } u) q = q.Where(l => l.UserId == u);
-            if (!string.IsNullOrWhiteSpace(type) && Enum.TryParse<LedgerEntryType>(type, true, out var t))
-                q = q.Where(l => l.Type == t);
-
-            var entries = await q.OrderByDescending(l => l.CreatedAt).Take(take).ToListAsync(ct);
-
-            // Resolve display names for both subjects and actors in one round-trip.
-            var ids = entries.Select(e => e.UserId).Concat(entries.Select(e => e.ActorUserId)).Distinct().ToList();
-            var nameByUserId = await db.Memberships.AsNoTracking().IgnoreQueryFilters()
-                .Where(m => ids.Contains(m.UserId))
-                .ToDictionaryAsync(m => m.UserId, m => m.FullName, ct);
-            var emailByUserId = await db.Users.AsNoTracking().IgnoreQueryFilters()
-                .Where(u2 => ids.Contains(u2.Id))
-                .ToDictionaryAsync(u2 => u2.Id, u2 => u2.Email, ct);
-
-            string nameFor(Guid id) => nameByUserId.TryGetValue(id, out var n) ? n
-                : emailByUserId.TryGetValue(id, out var e) ? e
-                : "(unknown)";
-            var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
-            var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
-
-            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
-            return Results.Ok(rows);
-        });
+        g.MapGet("/", ListAsync);
 
         return app;
+    }
+
+    /// <summary>
+    /// The query string. <c>cursor</c> is the perf round's (2026-09-30) additive paging switch:
+    /// ABSENT, the answer is the bare array it always was (newest first, <c>limit</c> default 500,
+    /// max 5000); PRESENT — even empty, for the first page — it is <c>{ items, next_cursor }</c>,
+    /// keyset-paged newest first by (at, id), <c>limit</c> default 100, max 500.
+    /// </summary>
+    public sealed record LedgerQuery(DateTimeOffset? From, DateTimeOffset? To, Guid? UserId, string? Type, int? Limit, string? Cursor);
+
+    private static async Task<IResult> ListAsync([AsParameters] LedgerQuery query, HttpContext ctx, MainframeDbContext db, CancellationToken ct)
+    {
+        var paged = ctx.Request.Query.ContainsKey("cursor");
+        var after = AdminChangeCursor.Parse(query.Cursor);
+        if (paged && !string.IsNullOrEmpty(query.Cursor) && after is null)
+        {
+            return Results.BadRequest(new { error = "cursor_invalid" });
+        }
+
+        var take = paged ? Math.Clamp(query.Limit ?? 100, 1, 500) : Math.Clamp(query.Limit ?? 500, 1, 5000);
+        var entries = await Filtered(db, query, after).Take(paged ? take + 1 : take).ToListAsync(ct);
+        var more = paged && entries.Count > take;
+        if (more) entries.RemoveAt(entries.Count - 1);
+
+        var rows = await RowsAsync(db, entries, ct);
+        if (!paged) return Results.Ok(rows);
+        return Results.Ok(new
+        {
+            items = rows,
+            next_cursor = more ? new AdminChangeCursor(entries[^1].CreatedAt, entries[^1].Id).Encode() : null,
+        });
+    }
+
+    /// <summary>The window, the filters and the keyset, newest first with the id as tie-break.</summary>
+    private static IQueryable<LedgerEntry> Filtered(MainframeDbContext db, LedgerQuery query, AdminChangeCursor? after)
+    {
+        // B-9: a query-string instant keeps the offset it was sent with; Npgsql refuses one.
+        var fromUtc = (query.From ?? DateTimeOffset.UtcNow.AddDays(-90)).ToUniversalTime();
+        var toUtc = (query.To ?? DateTimeOffset.UtcNow.AddDays(1)).ToUniversalTime();
+
+        var q = db.LedgerEntries.AsNoTracking()
+            .Where(l => l.CreatedAt >= fromUtc && l.CreatedAt < toUtc);
+        if (query.UserId is { } u) q = q.Where(l => l.UserId == u);
+        if (!string.IsNullOrWhiteSpace(query.Type) && Enum.TryParse<LedgerEntryType>(query.Type, true, out var t))
+        {
+            q = q.Where(l => l.Type == t);
+        }
+        if (after is not null)
+        {
+            var (at, id) = (after.At, after.Id);
+            q = q.Where(l => l.CreatedAt < at || (l.CreatedAt == at && l.Id.CompareTo(id) < 0));
+        }
+        return q.OrderByDescending(l => l.CreatedAt).ThenByDescending(l => l.Id);
+    }
+
+    private static async Task<List<LedgerRowDto>> RowsAsync(MainframeDbContext db, List<LedgerEntry> entries, CancellationToken ct)
+    {
+        // Resolve display names for both subjects and actors in one round-trip.
+        var ids = entries.Select(e => e.UserId).Concat(entries.Select(e => e.ActorUserId)).Distinct().ToList();
+        var nameByUserId = await db.Memberships.AsNoTracking().IgnoreQueryFilters()
+            .Where(m => ids.Contains(m.UserId))
+            .ToDictionaryAsync(m => m.UserId, m => m.FullName, ct);
+        var emailByUserId = await db.Users.AsNoTracking().IgnoreQueryFilters()
+            .Where(u2 => ids.Contains(u2.Id))
+            .ToDictionaryAsync(u2 => u2.Id, u2 => u2.Email, ct);
+
+        string nameFor(Guid id) => nameByUserId.TryGetValue(id, out var n) ? n
+            : emailByUserId.TryGetValue(id, out var e) ? e
+            : "(unknown)";
+        var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
+        var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
+
+        return entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
     }
 }
 

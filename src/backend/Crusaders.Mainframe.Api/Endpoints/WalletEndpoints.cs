@@ -13,6 +13,25 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 
 public static class WalletEndpoints
 {
+    /// <summary>
+    /// <c>GET /wallet</c>'s query string. <c>include=share_bookings</c> (perf round, 2026-09-30) adds
+    /// a summary of every booking this page's share rows name, keyed by booking id — what the
+    /// Wallet page had fetched with one <c>GET /bookings/{id}</c> per booking. Absent, the field is
+    /// null and nothing is read for it.
+    /// </summary>
+    public sealed record WalletQuery(int? Limit, int? Offset, string? Include);
+
+    private static async Task<Dictionary<Guid, object?>?> ShareBookingsAsync(
+        WalletQuery query, IReadOnlyCollection<LedgerEntry> entries, HttpContext ctx, PlayersQuery players, CancellationToken ct)
+    {
+        if (!string.Equals(query.Include, "share_bookings", StringComparison.OrdinalIgnoreCase)) return null;
+        var ids = entries
+            .Where(e => e.Type == LedgerEntryType.ShareTransfer && e.RelatedBookingId is not null)
+            .Select(e => e.RelatedBookingId!.Value)
+            .ToList();
+        return await players.ShareSummariesAsync(ids, ctx.User.Id() ?? Guid.Empty, ctx.User.IsInRole("admin"), ct);
+    }
+
     public static IEndpointRouteBuilder MapWalletEndpoints(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/v1").RequireAuthorization();
@@ -22,8 +41,9 @@ public static class WalletEndpoints
         // fine at 32 rows and is three years of movements on a page a member opens on a
         // phone while arguing about their balance. The balance itself is still the full sum,
         // never the sum of the page.
-        g.MapGet("/wallet", async (int? limit, int? offset, HttpContext ctx, LedgerService ledger, MainframeDbContext db, CancellationToken ct) =>
+        g.MapGet("/wallet", async ([AsParameters] WalletQuery query, HttpContext ctx, LedgerService ledger, MainframeDbContext db, PlayersQuery players, CancellationToken ct) =>
         {
+            var (limit, offset) = (query.Limit, query.Offset);
             var userId = ctx.User.Id() ?? Guid.Empty;
             var take = Math.Clamp(limit ?? 100, 1, 500);
             var skip = Math.Max(offset ?? 0, 0);
@@ -56,6 +76,7 @@ public static class WalletEndpoints
             var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
             var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
             var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
+            var shareBookings = await ShareBookingsAsync(query, entries, ctx, players, ct);
 
             return Results.Ok(new
             {
@@ -73,6 +94,7 @@ public static class WalletEndpoints
                 total_entries = total,
                 offset = skip,
                 limit = take,
+                share_bookings = shareBookings,
             });
         });
 

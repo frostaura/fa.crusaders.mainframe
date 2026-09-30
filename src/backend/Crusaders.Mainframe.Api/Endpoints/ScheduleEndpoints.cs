@@ -11,6 +11,7 @@ public static class ScheduleEndpoints
 
         g.MapGet("/schedule", async (
             DateOnly? date,
+            string? photos,
             HttpContext ctx,
             ScheduleService schedule,
             TenantSettingsAccessor settings,
@@ -22,7 +23,15 @@ public static class ScheduleEndpoints
             // bookable, and no error anywhere. Every real club is outside UTC.
             var d = date ?? ClubClock.Today(await settings.GetAsync(ct));
             var day = await schedule.GetDayAsync(d, ctx.User.Id(), ctx.User.IsInRole("admin"), ct);
-            return Results.Ok(day);
+            // Perf round: `photos=url` hands a stored data-URI photo out as a link (PhotoEndpoints)
+            // instead of repeating it in every slot the member holds. Absent, nothing changes.
+            if (!PhotoEndpoints.Wanted(photos)) return Results.Ok(day);
+            return Results.Ok(day with
+            {
+                Slots = day.Slots.ConvertAll(s => s.OwnerUserId is { } owner
+                    ? s with { OwnerPhotoUrl = PhotoEndpoints.Link(owner, s.OwnerPhotoUrl) }
+                    : s),
+            });
         });
 
         return app;

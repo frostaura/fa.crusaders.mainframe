@@ -720,6 +720,7 @@ app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
+app.MapPhotoEndpoints();
 app.MapAdminChangeEndpoints();
 app.MapAdminNotificationEndpoints();
 app.MapAdminMemberTraceEndpoints();

@@ -40,6 +40,7 @@ public sealed class TenantResolutionMiddleware
         "/api/v1/credit/topup/callback",  // PayFast ITN — resolves tenant from query
         "/uploads/",                      // static-served media
         "/api/v1/device/",                // device surface — DeviceAuthenticationHandler sets the tenant from the device row
+        "/api/v1/photos/",                // a member's photo for an <img>: no token; the URL's hash is the check (PhotoEndpoints)
     };
 
     /// <summary>

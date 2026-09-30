@@ -15,67 +15,7 @@ public static class AdminMemberEndpoints
     {
         var g = app.MapGroup("/api/v1/admin/members").RequireAuthorization(p => p.RequireRole("admin"));
 
-        g.MapGet("/", async (string? status, MainframeDbContext db, InherentAdmins inherent, CancellationToken ct) =>
-        {
-            // An array, not the set itself: EF translates Contains over an array to `= ANY(...)`,
-            // and it is the list's `admin_source` below that needs it.
-            var configAdmins = inherent.Emails.ToArray();
-            var q = db.Memberships.AsNoTracking().Include(m => m.User).AsQueryable();
-            if (Enum.TryParse<MembershipStatus>(status, true, out var s)) q = q.Where(m => m.Status == s);
-            var rows = await q.OrderBy(m => m.CreatedAt).Select(m => new
-            {
-                membership_id = m.Id,
-                user_id = m.UserId,
-                email = m.User!.Email,
-                full_name = m.FullName,
-                membership_number = m.MembershipNumber,
-                photo_url = m.PhotoUrl,
-                status = m.Status.ToString(),
-                // An unverified member cannot sign in and nothing on this screen said so,
-                // so "they say the app won't let them in" had no answer here. The console
-                // now shows it and offers a resend.
-                email_verified = m.User!.EmailVerified,
-                // R20. Who can administer the club, and where that came from: "config" is an
-                // address in Admins:Emails, which only an operator can remove, so the console
-                // can say so before anybody presses Remove and meets a 409; "granted" is
-                // everyone the club appointed itself; null is not an admin.
-                is_admin = m.User!.IsAdmin,
-                admin_source = m.User!.IsAdmin
-                    ? (configAdmins.Contains(m.User!.Email) ? AdminSource.Config : AdminSource.Granted)
-                    : null,
-                created_at = m.CreatedAt,
-                rejection_reason = m.RejectionReason,
-                // Correlated subquery — EF translates to a single per-row SUM. Cheap at member-list scale.
-                balance_credits = db.LedgerEntries.Where(l => l.UserId == m.UserId).Sum(l => (decimal?)l.AmountCredits) ?? 0m,
-            }).ToListAsync(ct);
-
-            // D2: the member's active groups replace their class — one read for the whole list,
-            // not one per row. `member_class` stays for ONE release, derived from the league
-            // group, so the members screen in production keeps its column until it is rebuilt.
-            var groups = await MemberTariffs.GroupsOfManyAsync(db, rows.Select(r => r.user_id).ToList(), ct);
-            return Results.Ok(rows.Select(r =>
-            {
-                var mine = groups.GetValueOrDefault(r.user_id) ?? [];
-                return new
-                {
-                    r.membership_id,
-                    r.user_id,
-                    r.email,
-                    r.full_name,
-                    r.membership_number,
-                    r.photo_url,
-                    r.status,
-                    groups = GroupsWire(mine),
-                    member_class = MemberTariff.LegacyClassOf(mine),
-                    r.email_verified,
-                    r.is_admin,
-                    r.admin_source,
-                    r.created_at,
-                    r.rejection_reason,
-                    r.balance_credits,
-                };
-            }).ToList());
-        });
+        g.MapGet("/", AdminMembersList.ListAsync);
 
         // D2: POST /{memberId}/class is gone with the member class. A member's groups are set
         // with PUT /api/v1/admin/members/{userId}/groups (AdminMemberDetailEndpoints) or one
@@ -362,3 +302,133 @@ public static class AdminMemberEndpoints
 
 public sealed record RejectRequest(string Reason);
 public sealed record SuspendRequest(string Reason);
+
+/// <summary>
+/// <c>GET /api/v1/admin/members/</c>. The perf round (2026-09-30) made it pageable WITHOUT
+/// changing what an existing caller gets: with no <c>cursor</c> in the query string the answer is
+/// the bare array of every member it always was; with one — empty for the first page — it is
+/// <c>{ items, next_cursor, total }</c>, keyset-paged oldest first by (created_at, id), <c>limit</c>
+/// default 50, max 200. <c>photos=url</c> hands a stored data-URI photo out as a link
+/// (<see cref="PhotoEndpoints"/>) in either shape.
+/// </summary>
+public static class AdminMembersList
+{
+    public sealed record Query(string? Status, int? Limit, string? Cursor, string? Photos);
+
+    public static async Task<IResult> ListAsync([AsParameters] Query query, HttpContext ctx, MainframeDbContext db, InherentAdmins inherent, CancellationToken ct)
+    {
+        var paged = ctx.Request.Query.ContainsKey("cursor");
+        var after = AdminChangeCursor.Parse(query.Cursor);
+        if (paged && !string.IsNullOrEmpty(query.Cursor) && after is null)
+        {
+            return Results.BadRequest(new { error = "cursor_invalid" });
+        }
+
+        var q = db.Memberships.AsNoTracking().AsQueryable();
+        if (Enum.TryParse<MembershipStatus>(query.Status, true, out var s)) q = q.Where(m => m.Status == s);
+        var take = Math.Clamp(query.Limit ?? 50, 1, 200);
+        var page = paged ? Page(q, after).Take(take + 1) : q.OrderBy(m => m.CreatedAt);
+        var rows = await RowsAsync(page, db, inherent, ct);
+        var more = paged && rows.Count > take;
+        if (more) rows.RemoveAt(rows.Count - 1);
+
+        var items = await WireAsync(rows, db, PhotoEndpoints.Wanted(query.Photos), ct);
+        if (!paged) return Results.Ok(items);
+        return Results.Ok(new
+        {
+            items,
+            next_cursor = more ? new AdminChangeCursor(rows[^1].CreatedAt, rows[^1].MembershipId).Encode() : null,
+            total = await q.CountAsync(ct),
+        });
+    }
+
+    private static IQueryable<Membership> Page(IQueryable<Membership> q, AdminChangeCursor? after)
+    {
+        if (after is not null)
+        {
+            var (at, id) = (after.At, after.Id);
+            q = q.Where(m => m.CreatedAt > at || (m.CreatedAt == at && m.Id.CompareTo(id) > 0));
+        }
+        return q.OrderBy(m => m.CreatedAt).ThenBy(m => m.Id);
+    }
+
+    private sealed class Row
+    {
+        public Guid MembershipId { get; init; }
+        public Guid UserId { get; init; }
+        public string Email { get; init; } = "";
+        public string FullName { get; init; } = "";
+        public string MembershipNumber { get; init; } = "";
+        public string? PhotoUrl { get; init; }
+        public string Status { get; init; } = "";
+        public bool EmailVerified { get; init; }
+        public bool IsAdmin { get; init; }
+        public string? AdminSource { get; init; }
+        public DateTimeOffset CreatedAt { get; init; }
+        public string? RejectionReason { get; init; }
+        public decimal BalanceCredits { get; init; }
+    }
+
+    private static async Task<List<Row>> RowsAsync(IQueryable<Membership> q, MainframeDbContext db, InherentAdmins inherent, CancellationToken ct)
+    {
+        // An array, not the set itself: EF translates Contains over an array to `= ANY(...)`,
+        // and it is the list's `admin_source` below that needs it.
+        var configAdmins = inherent.Emails.ToArray();
+        return await q.Select(m => new Row
+        {
+            MembershipId = m.Id,
+            UserId = m.UserId,
+            Email = m.User!.Email,
+            FullName = m.FullName,
+            MembershipNumber = m.MembershipNumber,
+            PhotoUrl = m.PhotoUrl,
+            Status = m.Status.ToString(),
+            // An unverified member cannot sign in and nothing on this screen said so,
+            // so "they say the app won't let them in" had no answer here. The console
+            // now shows it and offers a resend.
+            EmailVerified = m.User!.EmailVerified,
+            // R20. Who can administer the club, and where that came from: "config" is an
+            // address in Admins:Emails, which only an operator can remove, so the console
+            // can say so before anybody presses Remove and meets a 409; "granted" is
+            // everyone the club appointed itself; null is not an admin.
+            IsAdmin = m.User!.IsAdmin,
+            AdminSource = m.User!.IsAdmin
+                ? (configAdmins.Contains(m.User!.Email) ? AdminSource.Config : AdminSource.Granted)
+                : null,
+            CreatedAt = m.CreatedAt,
+            RejectionReason = m.RejectionReason,
+            // Correlated subquery — EF translates to a single per-row SUM. Cheap at member-list scale.
+            BalanceCredits = db.LedgerEntries.Where(l => l.UserId == m.UserId).Sum(l => (decimal?)l.AmountCredits) ?? 0m,
+        }).ToListAsync(ct);
+    }
+
+    private static async Task<List<object>> WireAsync(List<Row> rows, MainframeDbContext db, bool photoLinks, CancellationToken ct)
+    {
+        // D2: the member's active groups replace their class — one read for the whole list,
+        // not one per row. `member_class` stays for ONE release, derived from the league
+        // group, so the members screen in production keeps its column until it is rebuilt.
+        var groups = await MemberTariffs.GroupsOfManyAsync(db, rows.Select(r => r.UserId).ToList(), ct);
+        return rows.Select(r =>
+        {
+            var mine = groups.GetValueOrDefault(r.UserId) ?? [];
+            return (object)new
+            {
+                membership_id = r.MembershipId,
+                user_id = r.UserId,
+                email = r.Email,
+                full_name = r.FullName,
+                membership_number = r.MembershipNumber,
+                photo_url = photoLinks ? PhotoEndpoints.Link(r.UserId, r.PhotoUrl) : r.PhotoUrl,
+                status = r.Status,
+                groups = AdminMemberEndpoints.GroupsWire(mine),
+                member_class = MemberTariff.LegacyClassOf(mine),
+                email_verified = r.EmailVerified,
+                is_admin = r.IsAdmin,
+                admin_source = r.AdminSource,
+                created_at = r.CreatedAt,
+                rejection_reason = r.RejectionReason,
+                balance_credits = r.BalanceCredits,
+            };
+        }).ToList();
+    }
+}

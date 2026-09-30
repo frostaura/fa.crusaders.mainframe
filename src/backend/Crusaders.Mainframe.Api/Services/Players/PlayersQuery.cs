@@ -56,7 +56,7 @@ public sealed record PublicMember(Guid UserId, string Name, string? PhotoUrl);
 /// the directory adds the opt-in on top: a member is findable by name only once they said so.
 /// </para>
 /// </summary>
-public sealed class PlayersQuery
+public sealed partial class PlayersQuery
 {
     private readonly MainframeDbContext _db;
     private readonly TenantSettingsAccessor _settings;
@@ -170,7 +170,7 @@ public sealed class PlayersQuery
             var open = await OpenAsync(d, s, ct);
             received += s.IsPartner ? paid : 0m;
             unpaid += open;
-            if (!s.IsLive && (s.Seat == 1 || (d.Role == "player" && s.Id != d.MySeatId))) continue;
+            if (!IsShown(s, d.Role, d.MySeatId)) continue;
             var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
             var money = new SeatMoney(paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open,
                 s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct) : 0m);
@@ -179,6 +179,13 @@ public sealed class PlayersQuery
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
     }
+
+    /// <summary>
+    /// Whether a seat is a row of the viewer's table: every live seat; a dead one (who said no)
+    /// to the organiser and admins, never the organiser's own seat, and to a player only their own.
+    /// </summary>
+    private static bool IsShown(BookingParticipant s, string role, Guid? mySeatId) =>
+        s.IsLive || !(s.Seat == 1 || (role == "player" && s.Id != mySeatId));
 
     /// <summary>
     /// What one live partner seat still owes. An OPEN LINK SEAT (nobody has claimed it yet) owes
