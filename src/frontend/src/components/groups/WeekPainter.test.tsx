@@ -242,3 +242,22 @@ describe("saying what it means without colour", () => {
     expect(screen.getByText(/Tuesdays 06:07–08:00/)).toBeInTheDocument();
   });
 });
+
+/** Review round 1, F3.22: the painter was one tab stop per row button, 72 on a long day. */
+describe("the painter's keyboard stops", () => {
+  it("gives the column of row buttons ONE tab stop, moved by Up and Down", () => {
+    paint();
+    const rowButtons = screen.getAllByRole("button", { name: / on every day$/ });
+    expect(rowButtons.filter((b) => b.tabIndex === 0)).toHaveLength(1);
+    rowButtons[0].focus();
+    fireEvent.keyDown(rowButtons[0], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rowButtons[1]);
+    expect(rowButtons[1].tabIndex).toBe(0);
+    expect(rowButtons[0].tabIndex).toBe(-1);
+  });
+
+  it("names the corner of the grid", () => {
+    paint();
+    expect(screen.getAllByRole("columnheader")[0]).toHaveTextContent("Time");
+  });
+});

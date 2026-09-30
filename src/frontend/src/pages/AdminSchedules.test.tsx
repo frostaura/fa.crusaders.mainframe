@@ -488,6 +488,20 @@ describe("creating one", () => {
     expect(options.every((t) => /:(00|30)$/.test(t ?? ""))).toBe(true);
   });
 
+  it("names the Courts and Days popovers, which Radix makes dialogs (F3.22)", async () => {
+    stubFetch([
+      ...sessionRoutes(),
+      { path: SCHEDULES, body: { schedules: [] } },
+      ...editorPrerequisiteRoutes(),
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText("No repeating bookings yet.");
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+    await userEvent.click(screen.getByRole("button", { name: /^Courts: / }));
+    expect(await screen.findByRole("dialog", { name: "Courts" })).toBeInTheDocument();
+  });
+
   it("is operable by keyboard alone, every field of it (D3 §12, story P6)", async () => {
     // Every field is a design-system control (P3, R7) with its own name, and tab order IS
     // document order, so the sentence reads in the order it is spoken.

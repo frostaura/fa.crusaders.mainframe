@@ -173,12 +173,14 @@ function GroupFacts(props: Parameters<typeof GroupCard>[0]) {
 
 function Fact({ icon, term, children }: { icon: ReactNode; term: string; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 gap-2.5">
-      <span className="mt-0.5 shrink-0 text-text-muted">{icon}</span>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <dt className="text-xs font-medium uppercase tracking-overline text-text-muted">{term}</dt>
-        <dd className="break-words text-text-secondary">{children}</dd>
-      </div>
+    // dt and dd are the wrapper's DIRECT children (F3.22): a <dl> may group each pair in one
+    // <div>, and nothing deeper — the icon lives inside the term, the value is indented under it.
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="flex items-center gap-2.5 text-xs font-medium uppercase tracking-overline text-text-muted">
+        <span className="shrink-0">{icon}</span>
+        {term}
+      </dt>
+      <dd className="break-words pl-[26px] text-text-secondary">{children}</dd>
     </div>
   );
 }

@@ -83,6 +83,14 @@ describe("the admin rail", () => {
     expect(within(nav).getByRole("link", { name: "Control board" })).not.toHaveAttribute("aria-current");
   });
 
+  it("puts no complementary landmark inside main — the nav is the landmark (F3.22)", async () => {
+    stubFetch(routes({}));
+    renderFrame("/admin/members");
+    await within(rail()).findByRole("navigation", { name: "Admin" });
+    expect(rail().querySelector("aside")).toBeNull();
+    expect(within(rail()).queryByRole("complementary")).toBeNull();
+  });
+
   it("lights the control board, not Doors, on /admin/monitoring", async () => {
     stubFetch(routes({}));
     renderFrame("/admin/monitoring");

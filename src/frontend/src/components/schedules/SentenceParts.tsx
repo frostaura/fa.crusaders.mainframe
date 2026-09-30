@@ -205,7 +205,9 @@ export function SentenceChoices(props: SentenceChoicesProps) {
           <CaretDown size={16} aria-hidden="true" className="shrink-0 text-text-secondary" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-2">
+      {/* Named by its own heading (F3.22): Radix makes the content a dialog, and an unnamed
+          dialog is announced as just "dialog". */}
+      <PopoverContent align="start" className="w-64 p-2" aria-labelledby={groupId}>
         <p id={groupId} className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</p>
         <div role="group" aria-labelledby={groupId} className="flex flex-col">
           {options.map((option) => (

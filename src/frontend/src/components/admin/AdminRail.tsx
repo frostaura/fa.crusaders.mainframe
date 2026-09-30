@@ -164,7 +164,9 @@ export function AdminRail({ pathname, counts }: { pathname: string; counts: Badg
   // the page, and the aside inside it is the part that sticks.
   return (
     <div data-admin-rail="" className="hidden w-64 shrink-0 border-r border-border bg-bg-surface xl:block print:hidden">
-      <aside
+      {/* A div, not <aside> (F3.22): the rail renders inside <main>, where a complementary
+          landmark is misplaced (axe landmark-complementary-is-top-level). The <nav> is the landmark. */}
+      <div
         className="sticky overflow-y-auto overscroll-contain"
         style={{ top: "var(--app-content-top, 0px)", maxHeight: "calc(100dvh - var(--app-chrome-height, 0px))" }}
       >
@@ -172,7 +174,7 @@ export function AdminRail({ pathname, counts }: { pathname: string; counts: Badg
           <p aria-hidden="true" className={cn(typography({ variant: "overline" }), "px-3 text-accent-strong")}>Admin console</p>
           <AdminNavList pathname={pathname} counts={counts} density="rail" />
         </nav>
-      </aside>
+      </div>
     </div>
   );
 }

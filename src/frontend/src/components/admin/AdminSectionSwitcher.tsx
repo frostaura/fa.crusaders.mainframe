@@ -78,6 +78,7 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
 export function AdminSectionSwitcher({ pathname, attention, className }: AdminSectionSwitcherProps) {
   const [open, setOpen] = useState(false);
   const navigatedAway = useRef(false);
+  const bar = useRef<HTMLButtonElement>(null);
   const item = currentItem(pathname);
 
   const onNavigate = (_item: AdminNavItem, wasActive: boolean) => {
@@ -90,6 +91,7 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <button
+            ref={bar}
             type="button"
             // One phrase, as an aria-label: hidden spans beside flex items read "Members , 2 …"
             // in Chromium (see `attentionName` in AdminRail). Opens with the words on screen.
@@ -106,7 +108,11 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
         <SheetContent
           aria-describedby={undefined}
           onCloseAutoFocus={(event) => {
-            if (navigatedAway.current) event.preventDefault();
+            // Placed here rather than left to the surface: the shared dialog returns focus to
+            // whatever HAD focus at open, and a tap that opened this (Safari and touch never
+            // focus a button on click) left that as <body> → <main>, not the bar.
+            event.preventDefault();
+            if (!navigatedAway.current) bar.current?.focus();
             navigatedAway.current = false;
           }}
         >

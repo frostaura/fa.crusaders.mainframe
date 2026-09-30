@@ -202,6 +202,18 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
     apply(weekday, row, gestureRef.current.allowed);
   };
 
+  /** Up/Down between the row buttons — the roving stop moves with them. */
+  const rowHeaderKey = (event: React.KeyboardEvent, row: number) => {
+    const delta = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    if (delta === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const next = Math.max(0, Math.min(rows.length - 1, row + delta));
+    setFocus((current) => ({ ...current, row: next }));
+    event.currentTarget.closest("[role='grid']")
+      ?.querySelector<HTMLElement>(`[data-row-header='${next}']`)?.focus();
+  };
+
   const onKeyDown = (event: React.KeyboardEvent) => {
     const steps: Record<string, [number, number]> = {
       ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1],
@@ -256,7 +268,8 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
           onKeyUp={(e) => { if (e.key === "Shift") endGesture(); }}
         >
           <div role="row" className="flex">
-            <span role="columnheader" className="w-16 shrink-0" />
+            {/* Named, not empty (F3.22): the corner heads the column of times. */}
+            <span role="columnheader" className="w-16 shrink-0"><span className="sr-only">Time</span></span>
             {WEEK_IN_READING_ORDER.map((day) => (
               <div role="columnheader" key={day} className="flex-1 px-0.5 pb-1">
                 <Button
@@ -267,6 +280,8 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
                   disabled={disabled}
                   aria-label={`${dayIsFull(day) ? "Clear" : "Paint"} all of ${dayName(day)}`}
                   onClick={() => setMany(rows.map((_, index) => ({ day, index })), !dayIsFull(day))}
+                  // A touch target on a phone (F3.22: these were 36 px); compact under a mouse.
+                  className="min-h-touch [@media(pointer:fine)]:min-h-8"
                 >
                   {dayName(day).slice(0, 3)}
                 </Button>
@@ -284,6 +299,11 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
                   block
                   disabled={disabled}
                   aria-label={`${rowIsFull(cells, row, rows, isOpen) ? "Clear" : "Paint"} ${formatClock(start)} on every day`}
+                  // One tab stop for the whole column of row buttons, not one per row (F3.22: the
+                  // painter was 72 tab stops). It follows the row the grid is on; Up/Down move it.
+                  tabIndex={focus.row === row ? 0 : -1}
+                  data-row-header={row}
+                  onKeyDown={(e) => rowHeaderKey(e, row)}
                   onClick={() => setMany(
                     WEEK_IN_READING_ORDER.map((day) => ({ day, index: row })),
                     !rowIsFull(cells, row, rows, isOpen),

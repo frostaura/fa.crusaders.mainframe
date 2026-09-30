@@ -175,6 +175,18 @@ describe("the standing statement and the three honest reads", () => {
     expect(screen.queryByText(/— 8 credits/)).not.toBeInTheDocument();
   });
 
+  it("builds each card's facts as a valid description list (F3.22)", async () => {
+    open([groupFixture()]);
+    await screen.findByText(/One slot costs what the court costs/);
+    const terms = [...document.querySelectorAll("dt")];
+    expect(terms.length).toBeGreaterThan(0);
+    for (const dt of terms) {
+      // A <dl> may group a pair in ONE <div>, and nothing deeper.
+      const parent = dt.parentElement!;
+      expect(parent.tagName === "DL" || (parent.tagName === "DIV" && parent.parentElement?.tagName === "DL")).toBe(true);
+    }
+  });
+
   it("says what a top-up block buys, because “1.6” means nothing to a volunteer", async () => {
     open([groupFixture()]);
     // A group that inherits is quoted at the club's rate: one R100 block, 160 credits.
