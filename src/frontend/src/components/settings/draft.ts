@@ -230,6 +230,108 @@ export function wireBody(settings: AdminSettings): Record<string, unknown> {
 }
 
 /**
+ * The document's version, when the API serves one (review round 4, A4-1): a hash of the stored
+ * settings, sent back with a save so a page opened before somebody else's save is refused 409
+ * rather than quietly putting their old values back. An older API serves none.
+ */
+export function versionOf(settings: AdminSettings): string | null {
+  const version = (settings as unknown as Held).version;
+  return typeof version === "string" && version !== "" ? version : null;
+}
+
+/** The same settings, stamped with the version the club answered with. */
+export function withVersion(settings: AdminSettings, version: unknown): AdminSettings {
+  return typeof version === "string" && version !== ""
+    ? ({ ...(settings as unknown as Held), version } as unknown as AdminSettings)
+    : settings;
+}
+
+/**
+ * Only what this save changed (A4-1): the keys edited since the copy the page was read from, and
+ * the whole weekday map when any day moved (the API takes the map whole; an empty one is an
+ * instruction). The API reads every absent key as unchanged.
+ */
+export function changedPayload(base: AdminSettings, sent: AdminSettings): AdminSettings {
+  const held = sent as unknown as Held;
+  const out: Held = {};
+  for (const key of changedKeys(base, sent)) {
+    if (key.startsWith("operating_hours_")) out.operating_hours = sent.operating_hours ?? {};
+    else out[key] = held[key];
+  }
+  return savePayload(out as unknown as AdminSettings);
+}
+
+/**
+ * The PUT body. Against an API that versions the document: the edited keys and the version they
+ * were made over. Against one that does not: the whole page, as before — that API requires the
+ * eight booking keys on every save.
+ */
+export function saveBody(base: AdminSettings, sent: AdminSettings): Record<string, unknown> {
+  const version = versionOf(base);
+  if (version === null) return wireBody(savePayload(sent));
+  const body: Record<string, unknown> = { version };
+  const partial = changedPayload(base, sent) as unknown as Held;
+  const defs = settingsFor(sent);
+  for (const [key, value] of Object.entries(partial)) {
+    const wire = key === "operating_hours" ? "camel" : defs.find((def) => def.key === key)?.wire ?? "camel";
+    if (wire !== "snake") body[camel(key)] = value;
+    if (wire !== "camel") body[key] = value;
+  }
+  return body;
+}
+
+/** Thrown by the save when the club refused it as stale (409 `settings_changed`), with what is in force now. */
+export class SettingsChanged extends Error {
+  constructor(public readonly current: AdminSettings) {
+    super("settings_changed");
+  }
+}
+
+/**
+ * What a stale save means for the page (A4-1): what somebody else changed, which of this admin's
+ * edits still stand on top of it, and which of them clashed with theirs. `merged` is the working
+ * copy to show — theirs, with every edit that did not clash carried over.
+ */
+export type SettingsConflict = {
+  merged: AdminSettings;
+  /** Keys somebody else saved since this page was read. */
+  theirs: string[];
+  /** This admin's edits carried onto theirs, still unsaved. */
+  kept: string[];
+  /** Keys both changed, to different values: theirs shows, and `mine` can put this admin's back. */
+  clashed: string[];
+  mine: AdminSettings;
+  /** Every "their" change is the value this page was saving: an earlier press of ours landed. */
+  ours: boolean;
+};
+
+function valueAt(settings: AdminSettings, key: string): unknown {
+  const day = /^operating_hours_(.+)$/.exec(key)?.[1];
+  return day ? settings.operating_hours?.[day as keyof NonNullable<AdminSettings["operating_hours"]>] : (settings as unknown as Held)[key];
+}
+
+export function conflictOf(base: AdminSettings, draft: AdminSettings, fresh: AdminSettings): SettingsConflict {
+  const theirs = changedKeys(base, fresh);
+  const { merged, carried, dropped } = carryEdits(base, draft, fresh);
+  const clashed = dropped.filter((key) => !same(valueAt(fresh, key), valueAt(draft, key)));
+  const ours = theirs.length > 0 && theirs.every((key) => same(valueAt(fresh, key), valueAt(draft, key)));
+  return { merged, theirs, kept: carried, clashed, mine: draft, ours };
+}
+
+/** The working copy with this admin's values put back on the keys that clashed. */
+export function reapplyMine(draft: AdminSettings, conflict: SettingsConflict): AdminSettings {
+  const out = { ...(draft as unknown as Held) };
+  const hours = { ...(draft.operating_hours ?? {}) } as Record<string, string | undefined>;
+  let dayTouched = false;
+  for (const key of conflict.clashed) {
+    const day = /^operating_hours_(.+)$/.exec(key)?.[1];
+    if (day) { hours[day] = valueAt(conflict.mine, key) as string | undefined; dayTouched = true; } else out[key] = valueAt(conflict.mine, key);
+  }
+  if (dayTouched) out.operating_hours = Object.fromEntries(Object.entries(hours).filter(([, v]) => v !== undefined));
+  return out as unknown as AdminSettings;
+}
+
+/**
  * A refused save, in words. The shared device-error dictionary first (a code that HAS a sentence
  * gets it); then the two refusals this page can name better than a token read aloud: a value
  * outside the server's bound, named by the field's own caption — the only bound the page knows

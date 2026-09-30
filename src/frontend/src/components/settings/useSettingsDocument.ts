@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, api, endpoints, type AdminSettings } from "@/lib/api";
 import { readCurrencySymbol } from "@/lib/currency";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
@@ -10,7 +10,8 @@ import {
 import { settingLabel } from "@/lib/settingsSchema";
 import { DAY_KEYS, DAY_NAMES } from "@/lib/tenantSettings";
 import {
-  SaveNotConfirmed, carryEdits, changedKeys, saveFailureOf, savePayload, wireBody, type SaveFailure,
+  SaveNotConfirmed, SettingsChanged, carryEdits, changedKeys, conflictOf, reapplyMine, saveBody, saveFailureOf,
+  withVersion, type SaveFailure, type SettingsConflict,
 } from "./draft";
 
 /**
@@ -60,11 +61,22 @@ function landed(base: AdminSettings, sent: AdminSettings, fresh: AdminSettings):
   return changedKeys(base, sent).every((key) => !differs.has(key));
 }
 
+/** A 409 `settings_changed` with the settings in force now, or null for any other failure. */
+function staleSave(err: unknown): SettingsChanged | null {
+  if (!(err instanceof ApiError) || err.status !== 409 || err.code !== "settings_changed") return null;
+  const current = typeof err.payload === "object" && err.payload !== null
+    ? (err.payload as { settings?: unknown }).settings : null;
+  if (typeof current !== "object" || current === null) return null;
+  return new SettingsChanged(withVersion(current as AdminSettings, err.detail("version")));
+}
+
 async function putSettings(sent: AdminSettings, base: AdminSettings): Promise<{ sent: AdminSettings; recovered: boolean }> {
   try {
-    await api.put<{ saved: true }>("/api/v1/admin/settings/", wireBody(savePayload(sent)));
-    return { sent, recovered: false };
+    const reply = await api.put<{ saved: true; version?: string }>("/api/v1/admin/settings/", saveBody(base, sent));
+    return { sent: withVersion(sent, reply?.version), recovered: false };
   } catch (err) {
+    const stale = staleSave(err);
+    if (stale) throw stale;
     // A 4xx is the club's answer (a refusal, or a session that ended); anything else may have landed.
     if (err instanceof ApiError && err.status < 500) throw err;
     let fresh: AdminSettings;
@@ -73,7 +85,7 @@ async function putSettings(sent: AdminSettings, base: AdminSettings): Promise<{ 
     } catch {
       throw new SaveNotConfirmed("unknown");
     }
-    if (landed(base, sent, fresh)) return { sent, recovered: true };
+    if (landed(base, sent, fresh)) return { sent: withVersion(sent, (fresh as { version?: unknown }).version), recovered: true };
     throw new SaveNotConfirmed("not_saved");
   }
 }
@@ -116,6 +128,25 @@ export function useSettingsDocument() {
   /** The sentence the save bar keeps on screen after a save, until the next edit (F3-4). */
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const { restored, setRestored, userId } = useKeptDraft(doc, setDoc);
+  /** A4-1: somebody else saved since this page was read, and the save was refused as stale. */
+  const [conflict, setConflict] = useState<SettingsConflict | null>(null);
+  const docNow = useRef(doc);
+  useLayoutEffect(() => { docNow.current = doc; });
+
+  /** The stale save's answer: theirs becomes the baseline, this admin's other edits ride on it. */
+  const takeConflict = (stale: SettingsChanged) => {
+    const now = docNow.current;
+    if (!now) return;
+    const found = conflictOf(now.saved, now.draft, stale.current);
+    if (found.ours) {
+      // Our own earlier press had landed (its reply was lost): nothing of anybody else's is here.
+      setDoc({ saved: stale.current, draft: found.merged });
+      setSavedNote(SETTINGS_COPY.savedAfterLostReply);
+      return;
+    }
+    setDoc({ saved: stale.current, draft: found.merged });
+    setConflict(found);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -135,8 +166,10 @@ export function useSettingsDocument() {
 
   const save = useAsyncAction(putSettings, {
     success: ({ sent, recovered }) => {
-      setDoc((prev) => (prev ? { saved: sent, draft: prev.draft } : prev));
+      // The version rides on the working copy too, so an edit made after this save is sent over it.
+      setDoc((prev) => (prev ? { saved: sent, draft: withVersion(prev.draft, (sent as { version?: unknown }).version) } : prev));
       setFailure(null);
+      setConflict(null);
       setRestored(null);
       setSavedNote(recovered ? SETTINGS_COPY.savedAfterLostReply : SETTINGS_COPY.saved);
     },
@@ -144,6 +177,11 @@ export function useSettingsDocument() {
     // the next step. Through the shared device-error dictionary, so a code that HAS a sentence
     // gets it and a `<key>_out_of_range` names the field by its caption.
     failure: (err, sent) => {
+      if (err instanceof SettingsChanged) {
+        setFailure(null);
+        takeConflict(err);
+        return;
+      }
       const failed = saveFailureOf(err, readCurrencySymbol(sent.currency_symbol));
       // The kept draft will next be seen after a sign-in, and may say so (R3 A-9).
       if (failed.sessionEnded && userId) noteSettingsDraftSessionEnded(userId);
@@ -156,17 +194,29 @@ export function useSettingsDocument() {
     setDoc((current) => (current ? { ...current, draft: { ...current.draft, ...patch } } : current));
   }, []);
 
+  /** "Put my values back" on the keys both admins changed; saving is still the admin's press. */
+  const reapply = useCallback(() => {
+    if (!conflict) return;
+    setDoc((current) => (current ? { ...current, draft: reapplyMine(current.draft, conflict) } : current));
+    setConflict(null);
+  }, [conflict]);
+
   const discard = useCallback(() => {
     setDoc((current) => (current ? { ...current, draft: current.saved } : current));
+    setConflict(null);
     setFailure(null);
     setRestored(null);
   }, [setRestored]);
 
   const currency = readCurrencySymbol(doc?.draft.currency_symbol);
-  const droppedLabels = (restored?.dropped ?? []).map((key) => {
+  const labelOf = (key: string) => {
     const day = DAY_KEYS.findIndex((d) => key === `operating_hours_${d}`);
     return day >= 0 ? SETTINGS_COPY.dayHoursLabel(DAY_NAMES[DAY_KEYS[day]]) : settingLabel(key, currency);
-  });
+  };
+  const droppedLabels = (restored?.dropped ?? []).map(labelOf);
+  const conflictWords = conflict
+    ? { theirs: conflict.theirs.map(labelOf), kept: conflict.kept.length, clashed: conflict.clashed.map(labelOf) }
+    : null;
 
   return {
     saved: doc?.saved ?? null,
@@ -177,5 +227,8 @@ export function useSettingsDocument() {
     droppedLabels,
     savedNote,
     dismissSavedNote: () => setSavedNote(null),
+    conflict: conflictWords,
+    reapply,
+    dismissConflict: () => setConflict(null),
   };
 }

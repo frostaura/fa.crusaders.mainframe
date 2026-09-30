@@ -22,6 +22,7 @@ import { SettingsFormProvider, type SettingsForm } from "../components/settings/
 import { LeaveGuard } from "../components/settings/LeaveGuard";
 import { OperatingHours } from "../components/settings/OperatingHours";
 import { SaveBar } from "../components/settings/SaveBar";
+import { SettingsConflictBanner } from "../components/settings/SettingsConflictBanner";
 import { SettingsIntro } from "../components/settings/SettingsIntro";
 import { SettingsSection } from "../components/settings/SettingsSection";
 import { SettingsToolbar } from "../components/settings/SettingsToolbar";
@@ -267,7 +268,7 @@ function fieldErrors(failure: Doc["failure"], blockers: ReturnType<typeof blocke
   };
 }
 
-/** The two notices over the sections (F3.15): edits kept across a sign-in, and a refused save. */
+/** The notices over the sections (F3.15): edits kept across a sign-in, a refused save, a stale one (A4-1). */
 function SaveNotices({ doc, changes, currency, onGoTo }: {
   doc: Doc; changes: number; currency: string; onGoTo: (key: string) => void;
 }) {
@@ -283,6 +284,9 @@ function SaveNotices({ doc, changes, currency, onGoTo }: {
       ) : null}
       {doc.failure && !doc.failure.sessionEnded ? (
         <SaveFailureBanner failure={doc.failure} currency={currency} onGoTo={onGoTo} />
+      ) : null}
+      {doc.conflict ? (
+        <SettingsConflictBanner conflict={doc.conflict} onReapply={doc.reapply} onDismiss={doc.dismissConflict} />
       ) : null}
     </>
   );

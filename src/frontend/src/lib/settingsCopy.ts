@@ -1,3 +1,9 @@
+/** "A", "A and B", "A, B and C". */
+function listed(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? "";
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+
 /**
  * The Settings page's own words (plan R13). Tests query by these, so a copy change is one edit.
  *
@@ -60,7 +66,17 @@ export const SETTINGS_COPY = {
     `${labels.join(", ")} ${labels.length === 1 ? "was" : "were"} saved by someone else while you were away, so your change${labels.length === 1 ? "" : "s"} there ${labels.length === 1 ? "was" : "were"} not brought back.`,
   /** F3-4: a lost reply, and the club read again to find out. */
   saveDidNotArrive: "That save didn't reach the club — the settings were read again and nothing changed. Your changes are still here; press Save again.",
-  saveUnknown: "It isn't known yet whether that saved: the reply got lost and the club couldn't be asked. Your changes are still here — saving again is safe, it sends the whole page.",
+  saveUnknown: "It isn't known yet whether that saved: the reply got lost and the club couldn't be asked. Your changes are still here — saving again is safe: if the first one landed, the page will say so.",
+  /** A4-1: a save refused because somebody else saved since this page was read. */
+  conflictTitle: "Someone else saved Settings while you had this page open. Nothing of yours was saved.",
+  conflictTheirs: (labels: string[]) =>
+    `They changed ${listed(labels)}. The page now shows their ${labels.length === 1 ? "value" : "values"}.`,
+  conflictKept: (n: number) =>
+    `Your ${n === 1 ? "other change is" : `${n} other changes are`} still here on top of theirs, not saved yet — check, then press Save.`,
+  conflictClashed: (labels: string[]) =>
+    `You both changed ${listed(labels)}: theirs is showing now.`,
+  conflictReapply: (n: number) => (n === 1 ? "Put my value back" : "Put my values back"),
+  conflictDismiss: "Keep theirs",
   savedAfterLostReply: "Settings saved. The reply got lost, so the club was asked — your changes are on it.",
   dismissSaved: "Dismiss",
   movedTo: (label: string) => `Settings cannot be saved yet. Moved to ${label}.`,
