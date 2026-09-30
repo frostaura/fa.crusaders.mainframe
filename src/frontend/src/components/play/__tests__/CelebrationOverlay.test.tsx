@@ -164,3 +164,12 @@ describe("reduced motion", () => {
     }
   });
 });
+
+describe("a queued badge says when it was earned (R3)", () => {
+  it("dates the moment, so an earlier confirmed win never reads as the result on screen", async () => {
+    served([celebration({ created_at: "2026-09-29T17:00:00Z" })]);
+    renderAt("/bookings");
+    const dialog = await screen.findByRole("dialog", { name: /First win/ });
+    expect(dialog).toHaveTextContent(CELEBRATION_COPY.earned("Tue 29 Sep, 19:00"));
+  });
+});

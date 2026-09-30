@@ -396,6 +396,12 @@ export const CELEBRATION_COPY = {
   manyBody: "You've earned a few since you last looked. They're all on your profile.",
   keepPlaying: "Keep playing",
   seeMyGame: "See my game",
+  /**
+   * R3 — when the badge was earned. A celebration waits in a queue until it is seen, so one earned
+   * by an earlier confirmed win can open over a booking whose own result still waits: the date
+   * says it is about its own moment, not about the result on screen.
+   */
+  earned: (when: string) => `Earned ${when}.`,
 } as const;
 
 /* ═══════════════════════════════════ RESULTS HISTORY ═══════════════════════════════════ */

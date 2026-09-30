@@ -5,7 +5,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Medal, Target } from "@/components/ui/icons";
-import { CELEBRATION_COPY, MY_GAME } from "@/lib/playCopy";
+import { CELEBRATION_COPY, MY_GAME, playWhen } from "@/lib/playCopy";
 import { typography } from "@/lib/typography";
 import { cn } from "@/lib/utils";
 import { BadgeMark } from "./BadgeGrid";
@@ -82,6 +82,7 @@ export function CelebrationOverlay() {
 
 function MomentWords({ moment }: { moment: Moment }) {
   const { overline, name, body } = wordsFor(moment);
+  const earned = moment.kind === "one" && moment.celebration.kind === "badge" ? CELEBRATION_COPY.earned(playWhen(moment.celebration.created_at)) : null;
   return (
     <DialogHeader className="items-center pl-4 pr-4 text-center sm:pl-6 sm:pr-6">
       <DialogTitle className="flex flex-col items-center gap-1">
@@ -90,6 +91,7 @@ function MomentWords({ moment }: { moment: Moment }) {
         {name ? <span className="text-xl font-semibold text-text-primary">{name}</span> : null}
       </DialogTitle>
       <DialogDescription>{body}</DialogDescription>
+      {earned ? <p data-celebration-earned="" className="text-xs text-text-secondary">{earned}</p> : null}
     </DialogHeader>
   );
 }
