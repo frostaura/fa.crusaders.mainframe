@@ -194,9 +194,9 @@ function Identity({ detail, name, state }: { detail: MemberDetail; name: string;
     // at normal text (a 360 phone keeps the avatar beside the name) and 480px at 200%, where the
     // avatar beside "Admin" left it a word-wide column.
     <div className="flex min-w-0 items-start gap-3 sm:items-center sm:gap-4 [@container(max-width:15rem)]:flex-col">
-      {/* Pixel sizes, not rem (R4 V4-9): at 200% text a size-10 avatar was 80px and squeezed the
-          status badge beside it into "Act / ive" at 320. */}
-      <Avatar size={56} className="size-[40px] text-sm sm:size-[56px] sm:text-lg">
+      {/* At 200% text a size-10 avatar is 80px; beside the badges it squeezed "Active" into "Act /
+          ive" at 320 (R4 V4-9) — so at large text the row stacks (the container query above). */}
+      <Avatar size={56} className="size-10 text-sm sm:size-14 sm:text-lg">
         {detail.photo_url ? <AvatarImage src={detail.photo_url} alt="" /> : null}
         <AvatarFallback name={name} />
       </Avatar>
