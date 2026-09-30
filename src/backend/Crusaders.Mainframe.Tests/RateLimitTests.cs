@@ -99,7 +99,7 @@ public sealed class RateLimitTests : IClassFixture<PostgresFixture>
     {
         await using var factory = new TestWebAppFactory
         {
-            RateLimits = new Dictionary<string, int> { ["GlobalPerMinute"] = 3 },
+            RateLimits = new Dictionary<string, int> { ["GlobalPerIpPerMinute"] = 3 },
         };
         var client = factory.CreateClient();
 

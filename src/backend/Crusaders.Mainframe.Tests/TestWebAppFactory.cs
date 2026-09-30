@@ -37,7 +37,7 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
 
     /// <summary>
     /// Per-minute rate-limit ceilings, keyed by the <c>RateLimits:*</c> suffix
-    /// ("AuthPerMinute", "DevicePerMinute", "GlobalPerMinute", "FirmwarePerMinute").
+    /// ("AuthPerMinute", "DevicePerMinute", "GlobalPerMinute", "GlobalPerIpPerMinute", "FirmwarePerMinute").
     ///
     /// <para>
     /// Defaults are raised far above production so an ordinary test suite never trips a
@@ -101,6 +101,7 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         ["AuthPerIpPerMinute"] = 100_000,
         ["DevicePerMinute"] = 100_000,
         ["GlobalPerMinute"] = 100_000,
+        ["GlobalPerIpPerMinute"] = 100_000,
         ["FirmwarePerMinute"] = 100_000,
     };
 
@@ -112,7 +113,7 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         "Database__AutoMigrateOnStartup", "Jwt__Secret", "MemberCodes__MasterKey",
         "ConnectionStrings__DefaultConnection", "Gateway__TrustedProxies", "Gateway__ForwardLimit",
         "RateLimits__AuthPerMinute", "RateLimits__AuthPerIpPerMinute", "RateLimits__DevicePerMinute", "RateLimits__GlobalPerMinute",
-        "RateLimits__FirmwarePerMinute",
+        "RateLimits__GlobalPerIpPerMinute", "RateLimits__FirmwarePerMinute",
     ];
 
     static TestWebAppFactory()

@@ -302,19 +302,32 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0,
         }));
 
+    // Review round 2, B-10: the backstop is PER MEMBER for a signed-in request
+    // (RateLimits:GlobalPerMinute, 600) and per address only for the anonymous rest, at a much
+    // higher ceiling (RateLimits:GlobalPerIpPerMinute, 6000). It was 600 per ADDRESS for
+    // everything, and a club's members all share one router — an evening's app traffic tripped
+    // it for the whole club at once.
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(ClientKey(ctx), _ => new FixedWindowRateLimiterOptions
+    {
+        var member = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.Id() : null;
+        var (key, limit) = member is { } id
+            ? ($"user:{id:N}", builder.Configuration.GetValue("RateLimits:GlobalPerMinute", 600))
+            : ($"ip:{ClientKey(ctx)}", builder.Configuration.GetValue("RateLimits:GlobalPerIpPerMinute", 6000));
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = builder.Configuration.GetValue("RateLimits:GlobalPerMinute", 600),
+            PermitLimit = limit,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
-        }));
+        });
+    });
 
+    // The stable code a client words ("too many requests — wait a moment"), apart from a
+    // network failure, with the wait in the body as well as the header.
     options.OnRejected = async (ctx, ct) =>
     {
         ctx.HttpContext.Response.Headers.RetryAfter = "60";
         await ctx.HttpContext.Response.WriteAsJsonAsync(
-            new { error = "rate_limited", message = "Too many requests. Try again shortly." }, ct);
+            new { error = "rate_limited", message = "Too many requests. Try again shortly.", retry_after_seconds = 60 }, ct);
     };
 });
 
