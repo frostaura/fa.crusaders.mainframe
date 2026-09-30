@@ -138,11 +138,16 @@ test("F1-11 — forced colours: the selected day, and the current court chip, ca
     return colour;
   });
   expect(selected.split("|")[0], "selected day not in Highlight").toBe(highlight);
-  // The past recedes: no border drawn round a day that cannot be chosen.
+  // The past recedes but keeps an edge: dashed, in GrayText — never Highlight.
   const past = page.locator("[data-week-strip] [data-past][disabled]").first();
   if (await past.count()) {
-    const border = await past.evaluate((el) => getComputedStyle(el).borderTopColor);
-    expect(border, "past day drawn with a border").toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    const edge = await past.evaluate((el) => {
+      const s = getComputedStyle(el); return { style: s.borderTopStyle, colour: s.borderTopColor, width: s.borderTopWidth };
+    });
+    expect(edge.style, "past day has no dashed edge").toBe("dashed");
+    expect(edge.width).not.toBe("0px");
+    expect(edge.colour, "past day edge invisible").not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    expect(await past.evaluate((el) => getComputedStyle(el).backgroundColor), "past day in Highlight").not.toBe(highlight);
   }
   const chips = page.getByRole("group", { name: BOOKINGS_COPY.courtChips });
   await expect(chips).toBeVisible();

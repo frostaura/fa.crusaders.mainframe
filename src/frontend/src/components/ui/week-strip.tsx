@@ -129,13 +129,14 @@ function chipName(day: Day, markedLabel: string): string {
  * R2 F1-11 — forced colours (Windows High Contrast). The mode throws the fills away, so the
  * selected day read like every other and the disabled past, drawn in the system's GrayText,
  * read as highlighted. The chip opts out of the override and draws in system colours only:
- * the selected day in Highlight, every other day in ButtonText with a border, the past with
- * none, and today's ring in CanvasText.
+ * the selected day in Highlight, every other day in ButtonText with a border, the past with a
+ * dashed GrayText edge (still a visible edge — the gallery's forced-colours check), and today's
+ * ring in CanvasText.
  */
 const FORCED = cn(
   "forced-colors:[forced-color-adjust:none] forced-colors:border-[ButtonText] forced-colors:bg-[ButtonFace] forced-colors:text-[ButtonText]",
   "forced-colors:data-[state=on]:border-[Highlight] forced-colors:data-[state=on]:bg-[Highlight] forced-colors:data-[state=on]:text-[HighlightText]",
-  "forced-colors:disabled:border-transparent forced-colors:disabled:text-[GrayText]",
+  "forced-colors:disabled:border-dashed forced-colors:disabled:border-[GrayText] forced-colors:disabled:text-[GrayText]",
   "forced-colors:ring-[CanvasText]",
 );
 
