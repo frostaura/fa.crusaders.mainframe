@@ -6,6 +6,7 @@ import {
 import { createElement } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { formatCredits } from "../lib/utils";
+import { clubCalendarDate } from "@/lib/clubClock";
 import { ChartFrame, type ChartPalette } from "./ChartFrame";
 
 /**
@@ -196,10 +197,8 @@ function stackedExtremes(rows: readonly Record<string, unknown>[], stacks: reado
 /** Which series share a stack, per chart — mirroring the `stackId`s on the bars below. */
 const CLUB_FLOW_STACKS = [["top_ups_credits"], ["booking_charges_credits", "penalties_credits"]];
 const MEMBER_FLOW_STACKS = [["top_ups_credits", "refunds_credits"], ["spent_credits"]];
-const fmtDate = (d: string) => {
-  const dt = new Date(d + "T00:00:00Z");
-  return dt.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
-};
+/** F4-15 — the axis in the club's format ("1 Sep"), not the reader's locale ("Sep 01"). */
+const fmtDate = (d: string) => clubCalendarDate(d, { weekday: false });
 
 /**
  * The y-axis floor for a chart plotting ledger movements: zero, or below it exactly as far as

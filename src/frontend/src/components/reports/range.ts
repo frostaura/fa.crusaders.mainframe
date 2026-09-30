@@ -1,3 +1,4 @@
+import { clubCalendarDate } from "@/lib/clubClock";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { clubDayOf, shiftClubDay } from "@/lib/gridClock";
@@ -152,7 +153,11 @@ export function useReport<T>(range: ReportRange, load: (markers: { from: string;
   };
 }
 
-/** A report row's club day, as a person reads it: "01 Sep 2026". */
+/**
+ * A report row's club day, as a person reads it: "Wed 30 Sep 2026" — the club's one short date
+ * (F4-15). It was the READER's locale ("Sep 30, 2026" in an en-US browser), unlike every other
+ * date in the product.
+ */
 export function prettyDay(day: string): string {
-  return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+  return clubCalendarDate(day, { year: true });
 }
