@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { playersEndpoints, type MemberNotification, type MemberNotificationPage } from "@/lib/playersApi";
 import { INBOX_COPY } from "@/lib/playersCopy";
+import { useToast } from "@/components/Toast";
+import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { failureOf, knownUnchanged, markAllOrProve, markReadOrProve } from "./inboxReadBack";
 import { useRead } from "@/lib/useRead";
 import { useUnreadCount } from "./useUnreadCount";
 
@@ -81,16 +84,23 @@ export function useInbox() {
   const openedUnread = useCallback((n: MemberNotification) => {
     if (!marks.isUnread(n)) return;
     noteRead(n, true);
-    playersEndpoints.markRead(n.id).catch(() => { marks.markId(n.id, false); void refreshCount(); });
+    // Lost-reply audit (R3): a lost reply is read back; only a mark known not to have landed is undone.
+    markReadOrProve(n.id).catch((error: unknown) => { if (knownUnchanged(error)) marks.markId(n.id, false); void refreshCount(); });
   }, [marks, noteRead, refreshCount]);
 
   const before = useRef(0);
-  const markAll = useAsyncAction(() => playersEndpoints.markAllRead(), {
+  const toast = useToast();
+  // Lost-reply audit (R3): read back off the unread count; "Nothing changed" only when it is known.
+  const markAll = useAsyncAction(() => markAllOrProve(), {
     optimistic: {
       apply: () => { before.current = countRef.current; marks.markAll(true); setCount(0); },
       rollback: () => { marks.markAll(false); setCount(before.current); },
     },
-    toast: { action: INBOX_COPY.markAllAction, unchanged: true },
+    failure: (error) => {
+      const unchanged = knownUnchanged(error);
+      toast.push({ tone: "danger", text: unchanged ? describeFailure(failureOf(error), { action: INBOX_COPY.markAllAction }) : INBOX_COPY.markUnknown, unchanged });
+      void refreshCount();
+    },
   });
 
   return {

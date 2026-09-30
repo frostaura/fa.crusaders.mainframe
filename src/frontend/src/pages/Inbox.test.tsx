@@ -37,6 +37,8 @@ function setup(options: Setup = {}): FetchStub {
   const whoami = signIn({ isAdmin: false });
   const unread = options.unread ?? 2;
   return stubFetch([
+    // A test's own routes first: among equal prefixes the first declared answers.
+    ...(options.extra ?? []),
     { path: "/api/v1/whoami", body: whoami },
     { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
@@ -45,7 +47,6 @@ function setup(options: Setup = {}): FetchStub {
       path: "/api/v1/me/notifications",
       body: { items: options.items ?? FIRST, unread_count: unread, next_cursor: options.next ?? null },
     },
-    ...(options.extra ?? []),
   ]);
 }
 
@@ -184,5 +185,21 @@ describe("the inbox", () => {
     await waitFor(() => expect(document.querySelectorAll("[data-unread]")).toHaveLength(2));
     expect(await screen.findByRole("link", { name: "Notifications, 2 unread" }, SLOW)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: INBOX_COPY.markAll })).toBeInTheDocument();
+  });
+
+  it("R3 lost-reply audit: a mark-all that landed behind a 504 stays read — no rollback, no failure", async () => {
+    let unread = 2;
+    setup({ extra: [
+      { method: "POST", path: "/api/v1/me/notifications/read-all", respond: () => { unread = 0; return refuse(504, { error: "gateway_timeout" }); } },
+      { path: "/api/v1/me/notifications/unread-count", respond: () => ({ unread_count: unread }) },
+    ] });
+    renderInbox();
+    await screen.findByRole("link", { name: "Notifications, 2 unread" }, SLOW);
+    await list();
+    (await screen.findByRole("button", { name: INBOX_COPY.markAll })).click();
+    await waitFor(() => expect(unread).toBe(0));
+    await new Promise((r) => { setTimeout(r, 200); });
+    expect(document.querySelectorAll("[data-unread]")).toHaveLength(0);
+    expect(screen.queryByText(new RegExp(`Couldn't ${INBOX_COPY.markAllAction}`))).toBeNull();
   });
 });

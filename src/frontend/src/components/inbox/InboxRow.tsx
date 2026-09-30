@@ -3,9 +3,12 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Bell, CaretRight } from "@/components/ui/icons";
 import { clubInstant } from "@/lib/clubClock";
-import { playersEndpoints, type MemberNotification } from "@/lib/playersApi";
+import type { MemberNotification } from "@/lib/playersApi";
 import { INBOX_COPY as COPY } from "@/lib/playersCopy";
+import { useToast } from "@/components/Toast";
+import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { failureOf, knownUnchanged, markReadOrProve } from "./inboxReadBack";
 import { cn } from "@/lib/utils";
 import { appPath, inboxWhen, KIND_ICON, kindWord } from "./notificationKinds";
 import type { InboxFeed } from "./useInbox";
@@ -99,9 +102,14 @@ function Meta({ children }: { children: ReactNode }) {
 }
 
 function MarkReadButton({ notice, feed, describedBy }: { notice: MemberNotification; feed: InboxFeed; describedBy: string }) {
-  const action = useAsyncAction(() => playersEndpoints.markRead(notice.id), {
+  const toast = useToast();
+  // Lost-reply audit (R3): a lost reply is read back; "Nothing changed" only when it is known.
+  const action = useAsyncAction(() => markReadOrProve(notice.id), {
     optimistic: { apply: () => feed.noteRead(notice, true), rollback: () => feed.noteRead(notice, false) },
-    toast: { action: COPY.markOneAction, unchanged: true },
+    failure: (error) => {
+      const unchanged = knownUnchanged(error);
+      toast.push({ tone: "danger", text: unchanged ? describeFailure(failureOf(error), { action: COPY.markOneAction }) : COPY.markUnknown, unchanged });
+    },
   });
   return (
     <Button

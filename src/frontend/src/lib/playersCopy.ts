@@ -929,6 +929,8 @@ export const INBOX_COPY = {
   /** R2 F2-5 — a question that has been answered or withdrawn: said so, never still "to confirm". */
   resolved: "Nothing needed now",
   resolvedHint: "This no longer needs you — the booking has the latest.",
+  /** Lost-reply audit (R3): a mark whose reply was lost and whose look failed too. */
+  markUnknown: "The club didn't answer and we couldn't check either, so we can't tell whether that was marked read. Refresh to see.",
 } as const;
 
 /** The bell's accessible name: "Notifications, 3 unread" — or just "Notifications". */
