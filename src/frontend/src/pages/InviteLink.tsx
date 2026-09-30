@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { useParams } from "react-router-dom";
 import { InviteGone, InvitePanel, InvitePanelSkeleton } from "@/components/players/invites/InvitePanel";
 import { InviteSignedOut } from "@/components/players/invites/InviteSignedOut";
 import { codeOf } from "@/components/players/invites/inviteFacts";
 import { useInviteSnapshot } from "@/components/players/invites/useInviteSnapshot";
-import { useClosedGame } from "@/components/players/invites/useInviteFate";
+import { useClosedGame, type ClosedGame } from "@/components/players/invites/useInviteFate";
 import type { AcceptPort } from "@/components/players/invites/useAcceptFlow";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -54,7 +54,7 @@ function forgetting<T>(token: string, answer: () => Promise<T>): Promise<T> {
 
 function InviteLinkFor({ token, userId }: { token: string; userId: string }) {
   // Whether THIS account opened the link before (R1 F2.7) — read once, before this visit saves it.
-  const [openedBefore] = useState(() => pendingInvite(userId)?.userId === userId && pendingInvite(userId)?.token === token);
+  const [openedBefore] = useState(() => openedBy(token, userId));
   const read = useCallback(() => playersEndpoints.invite(token), [token]);
   const snapshot = useInviteSnapshot(read);
   const { reread } = snapshot;
@@ -74,6 +74,24 @@ function InviteLinkFor({ token, userId }: { token: string; userId: string }) {
     else if (opened) savePendingInvite(token, userId);
   }, [refused, opened, token, userId]);
 
+  const notOpen = notOpenPage(code, closedGame, errorBooking, openedBefore);
+  if (notOpen) return notOpen;
+  if (!snapshot.invite) {
+    return <InvitePanelSkeleton loading={snapshot.loading} error={snapshot.error} onRetry={snapshot.retry} />;
+  }
+  return <InvitePanel invite={snapshot.invite} port={port} />;
+}
+
+function openedBy(token: string, userId: string): boolean {
+  const pending = pendingInvite(userId);
+  return pending?.userId === userId && pending?.token === token;
+}
+
+/**
+ * The page for a link that is not open, or null when it is: its cancelled game still being read,
+ * that game's cancellation, or the refusal's sentence.
+ */
+function notOpenPage(code: string | null, closedGame: ClosedGame, errorBooking: string | number | null, openedBefore: boolean): ReactElement | null {
   if (code === "invite_closed" && closedGame.kind === "reading") {
     return <InvitePanelSkeleton loading error={null} onRetry={() => undefined} />;
   }
@@ -82,20 +100,14 @@ function InviteLinkFor({ token, userId }: { token: string; userId: string }) {
       ? INVITES_COPY.linkCancelledBack(formatCredits(closedGame.back)) : INVITES_COPY.linkCancelledNothing;
     return <InviteGone title={INVITES_COPY.fateCancelledTitle} sentence={sentence} bookingId={closedGame.bookingId} />;
   }
-  if (code && refused) {
-    const bookingId = errorBooking;
-    const mine = code === "invite_not_found" && openedBefore;
-    return (
-      <InviteGone
-        title={INVITES_COPY.refusedTitle}
-        sentence={mine ? INVITES_COPY.linkNoLongerOpen : OPEN_REFUSAL[code]}
-        bookingId={code === "already_in_booking" && typeof bookingId === "string" ? bookingId : null}
-        otherAccount={code === "invite_not_found" && !openedBefore}
-      />
-    );
-  }
-  if (!snapshot.invite) {
-    return <InvitePanelSkeleton loading={snapshot.loading} error={snapshot.error} onRetry={snapshot.retry} />;
-  }
-  return <InvitePanel invite={snapshot.invite} port={port} />;
+  if (!code || !(code in OPEN_REFUSAL)) return null;
+  const mine = code === "invite_not_found" && openedBefore;
+  return (
+    <InviteGone
+      title={INVITES_COPY.refusedTitle}
+      sentence={mine ? INVITES_COPY.linkNoLongerOpen : OPEN_REFUSAL[code]}
+      bookingId={code === "already_in_booking" && typeof errorBooking === "string" ? errorBooking : null}
+      otherAccount={code === "invite_not_found" && !openedBefore}
+    />
+  );
 }
