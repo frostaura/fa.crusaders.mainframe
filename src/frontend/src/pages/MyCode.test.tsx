@@ -1535,8 +1535,11 @@ describe("MyCode at a club with a door", () => {
     renderBoth(memberDoorsOnFixture());
     const code = await screen.findByLabelText("Your code");
 
-    // The grouped code wraps between groups rather than running off the glass.
-    expect(code.querySelector(":scope > span")!.className).toContain("flex-wrap");
+    // The grouped code wraps between groups rather than running off the glass — balanced
+    // (F4-16), with a break opportunity between every two groups.
+    const groups = code.querySelector(":scope > span")!;
+    expect(groups.className).toContain("text-balance");
+    expect(groups.querySelectorAll("wbr")).toHaveLength(groups.querySelectorAll("[data-code-group]").length - 1);
     expectRootInvariantCode(screen.getByRole("img", { name: /QR code/ }));
   });
 

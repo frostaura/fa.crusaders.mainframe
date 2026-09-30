@@ -121,7 +121,8 @@ export function heldFrom(frame: HeldWire): HeldFigures {
   const held = positive(frame.held_credits);
   const owedBack = positive(frame.owed_back_credits);
   const spendable = typeof frame.spendable_credits === "number" ? frame.spendable_credits : frame.balance_credits - held - owedBack;
-  return { held, owedBack, spendable, until: held > 0 ? frame.held_until ?? null : null, parts: held > 0 ? heldPartsOf(frame) : [] };
+  const parts = held > 0 ? heldPartsOf(frame) : [];
+  return { held, owedBack, spendable, until: held > 0 ? frame.held_until ?? null : null, ...(parts.length > 0 ? { parts } : {}) };
 }
 
 export type BalanceTransport = {

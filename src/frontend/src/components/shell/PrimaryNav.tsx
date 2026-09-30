@@ -67,8 +67,14 @@ const LINK = [
  * the text left no room for the words to wrap at 200 % (B12's "the page keeps 60 % of a 320×568
  * screen" and "the bars grow only by their text"); an icon is not text and needs no resize.
  */
+/** The pill's pixel box (F4-7, above); `display: contents` from `md` ignores it. */
+/** The count's left edge: right of the icon's centre, clamped inside the pill (static from `md`, so ignored). */
+const BADGE_LEFT = { left: "min(calc(50% + 0.5rem), calc(100% - 1.25rem))" } as const;
+
+const PILL_BOX = { height: 32, maxWidth: 56 } as const;
+
 const ICON_PILL = [
-  "relative flex h-[32px] w-full max-w-[56px] items-center justify-center rounded-full transition-colors duration-fast ease-standard",
+  "relative flex w-full items-center justify-center rounded-full transition-colors duration-fast ease-standard",
   "motion-reduce:transition-none md:contents",
 ].join(" ");
 
@@ -84,8 +90,8 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
     >
       {({ isActive }) => (
         <>
-          <span className={cn(ICON_PILL, isActive && "bg-accent-soft")}>
-            <Glyph weight={isActive ? "fill" : "regular"} aria-hidden="true" className="size-[24px] md:size-5" />
+          <span className={cn(ICON_PILL, isActive && "bg-accent-soft")} style={PILL_BOX}>
+            <Glyph size={24} weight={isActive ? "fill" : "regular"} aria-hidden="true" className="md:size-5" />
             {badge ? <CountBadge attention={badge} /> : null}
           </span>
           {/*
@@ -119,10 +125,11 @@ function CountBadge({ attention }: { attention: Pick<AdminAttention, "total" | "
         // the shield it counts for. Its left edge is just right of the icon's centre, but never so
         // far right that it leaves the tab (the 320 px phone at the largest text), and its foot
         // stops at 60 % of the pill's height, so at most the icon's upper corner is covered.
-        "absolute bottom-[60%] left-[min(calc(50%+0.5rem),calc(100%-1.25rem))] inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5",
+        "absolute bottom-1/2 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5",
         "bg-danger-solid text-xs font-semibold tabular-nums text-danger-ink ring-2 ring-bg-surface",
         "md:static md:order-last md:ml-0 md:ring-0",
       )}
+      style={BADGE_LEFT}
     >
       {attention.total > 99 ? "99+" : attention.total}
     </span>

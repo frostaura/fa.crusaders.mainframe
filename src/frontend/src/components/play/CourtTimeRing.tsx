@@ -28,7 +28,7 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
       // wraps at 200 % text rather than overflowing (design-system rule for labels that must wrap).
       <div data-ring="none" className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border p-4">
         <Target size={20} aria-hidden="true" className="shrink-0 text-text-muted" />
-        <p className="min-w-[12rem] flex-1 text-sm text-text-secondary">{RING_COPY.setGoalHint}</p>
+        <p className="min-w-48 flex-1 text-sm text-text-secondary">{RING_COPY.setGoalHint}</p>
         <Button
           variant="outline"
           size="sm"

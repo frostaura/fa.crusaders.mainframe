@@ -50,7 +50,7 @@ export function NotificationBell({ className }: { className?: string }) {
             aria-hidden="true"
             data-unread-badge=""
             className={cn(
-              "absolute bottom-[55%] left-[60%] inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1",
+              "absolute bottom-1/2 left-2/3 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1",
               "bg-danger-solid text-xs font-semibold tabular-nums text-danger-ink ring-2 ring-bg-surface",
             )}
           >
