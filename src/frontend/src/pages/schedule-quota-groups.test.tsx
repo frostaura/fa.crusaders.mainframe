@@ -97,7 +97,8 @@ describe("item 19 — the daily maximum, on the grid", () => {
 
   it("counts up quietly and changes tone only on arrival", async () => {
     open(dayWith({ maxSlotsPerDay: 4, bookedSlotsToday: 2, remainingToday: 2 }));
-    const pill = await screen.findByText("2 of 4 today");
+    // The grid shows a day that is not the club's today, so the pill names it (R1 F1.7).
+    const pill = await screen.findByText(/^2 of 4 on /);
     // Approaching a limit is not a warning.
     expect(pill.className).not.toMatch(/warning/);
     expect(screen.getByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
@@ -106,13 +107,13 @@ describe("item 19 — the daily maximum, on the grid", () => {
   it("shows no counter at all before the member has booked anything today", async () => {
     open(dayWith({ maxSlotsPerDay: 4, bookedSlotsToday: 0, remainingToday: 4 }));
     await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ });
-    expect(screen.queryByText(/of 4 today/)).toBeNull();
+    expect(screen.queryByText(/^\d+ of 4 /)).toBeNull();
   });
 
   it("tells an admin they have no limit rather than showing them a number that does not apply", async () => {
     open(dayWith({ adminExempt: true, remainingToday: null, maxSlotsPerDay: 4, bookedSlotsToday: 9 }), 500, true);
     expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
-    expect(screen.queryByText(/of 4 today/)).toBeNull();
+    expect(screen.queryByText(/^\d+ of 4 /)).toBeNull();
     expect(screen.queryByText(/You've booked your/)).toBeNull();
   });
 
