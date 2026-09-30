@@ -91,3 +91,46 @@ describe("times, dates and counts in the club's words (R3 A-7)", () => {
     expect(JSON.stringify({ facts, changed })).not.toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 });
+
+/** Review round 3, A-8: the overdraft row carries what the member may spend beside the balance. */
+describe("the overdraft row's two figures (R3 A-8)", () => {
+  it("labels spendable credits 'Can spend' and pairs it before → after, like the balance", () => {
+    const { changed } = presentChanges({
+      area: "booking", action: "booking.overdraft_authorised",
+      changes: [
+        { field: "balance_credits", before: "50", after: "0" },
+        { field: "spendable_credits", before: "20", after: "-30" },
+      ],
+    });
+    expect(changed).toContainEqual({ field: "spendable_credits", label: "Can spend", before: "20.00 cr", after: "−30.00 cr" });
+    expect(changed.map((c) => c.label)).toEqual(["Balance", "Can spend"]);
+  });
+});
+
+/** Review round 3, A-5: a webhook added or removed is on the record, filed under settings. */
+describe("a webhook added or removed (R3 A-5)", () => {
+  it("lists what it sends to, which events and its name as facts, in words", () => {
+    const { changed, facts } = presentChanges({
+      area: "setting", action: "webhook.created",
+      changes: [
+        { field: "destination", before: null, after: "https://hooks.example.org" },
+        { field: "event_filter", before: null, after: "*" },
+        { field: "description", before: null, after: "Court lights" },
+      ],
+    });
+    expect(changed).toEqual([]);
+    expect(facts).toEqual([
+      { field: "destination", label: "Sends to", value: "https://hooks.example.org" },
+      { field: "event_filter", label: "Events", value: "Every event" },
+      { field: "description", label: "Description", value: "Court lights" },
+    ]);
+  });
+
+  it("still labels a real settings change with the Settings page's caption", () => {
+    const { changed } = presentChanges({
+      area: "setting", action: "settings.updated",
+      changes: [{ field: "slice_minutes", before: "15", after: "30" }],
+    });
+    expect(changed[0].label).not.toBe("Slice minutes");
+  });
+});

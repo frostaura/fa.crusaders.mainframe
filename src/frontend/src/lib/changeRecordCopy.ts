@@ -66,6 +66,12 @@ type RawChange = { field: string; label?: string | null; before?: string | null;
 const FIELD_LABEL: Record<string, string> = {
   status: "Status",
   balance_credits: "Balance",
+  /** R3 A-8: what the member may spend — the balance less shares held — the figure the confirm used. */
+  spendable_credits: "Can spend",
+  /** R3 A-5: a webhook added or removed — where it sends (scheme and host only), what, and its name. */
+  destination: "Sends to",
+  event_filter: "Events",
+  description: "Description",
   amount_credits: "Amount",
   collected_credits: "Collected",
   reason_code: "Reason",
@@ -115,10 +121,19 @@ function isIdField(field: string, change: RawChange): boolean {
   return values.length > 0 && values.every((v) => UUID.test(v.trim()));
 }
 
+/**
+ * A settings change — the page's own keys. A webhook row is filed under the setting area too
+ * (R3 A-5) but carries its own facts (destination, events), which are not settings keys.
+ */
+function isSettingsDiff(row: { area?: string | null; action?: string | null }): boolean {
+  const action = row.action ?? "";
+  if (action.startsWith("webhook.")) return false;
+  return row.area === "setting" || action.startsWith("settings.");
+}
+
 /** A label for a field: the Settings caption, ours, the server's without its unit, or the key. */
 function labelFor(row: { area?: string | null; action?: string | null }, change: RawChange): string {
-  const isSetting = row.area === "setting" || (row.action ?? "").startsWith("settings.");
-  if (isSetting) return changeFieldLabel(row, change);
+  if (isSettingsDiff(row)) return changeFieldLabel(row, change);
   const known = FIELD_LABEL[change.field];
   if (known) return known;
   const server = change.label?.replace(/\s+(credits|zar)$/i, "").trim();
@@ -152,13 +167,18 @@ function whenOrCount(field: string, token: string, timezone?: string): string | 
   return null;
 }
 
+/** A webhook's event filter: "*" is every event (R3 A-5). */
+function eventsInWords(field: string, token: string): string | null {
+  return field === "event_filter" && token === "*" ? "Every event" : null;
+}
+
 /** One stored value in the words a volunteer uses. */
 export function changeValueInWords(field: string, value: string | null | undefined, timezone?: string): string | null {
   if (value === null || value === undefined) return null;
   const formatted = money(field, value);
   if (formatted) return formatted;
   const token = value.trim();
-  const when = whenOrCount(field, token, timezone);
+  const when = whenOrCount(field, token, timezone) ?? eventsInWords(field, token);
   if (when) return when;
   if (field === "reason_code" && (ADJUST_REASON_CODES as readonly string[]).includes(token)) {
     return reasonLabel(token as AdjustReasonCode);
@@ -198,7 +218,7 @@ export function presentChanges(
     const was = changeValueInWords(c.field, c.before, timezone);
     const is = changeValueInWords(c.field, c.after, timezone);
     const oneSided = (was === null) !== (is === null);
-    if (oneSided && !STATE_FIELDS.has(c.field) && !(row.area === "setting")) {
+    if (oneSided && !STATE_FIELDS.has(c.field) && !isSettingsDiff(row)) {
       facts.push({ field: c.field, label, value: (is ?? was)! });
     } else {
       changed.push({ field: c.field, label, before: was, after: is });
