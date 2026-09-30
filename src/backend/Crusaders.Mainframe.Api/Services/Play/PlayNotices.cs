@@ -24,7 +24,7 @@ public sealed record ResultContext(Booking Booking, string CourtName, TenantSett
 public static class PlayNotices
 {
     public static string Local(DateTimeOffset instant, TenantSettingsView settings) =>
-        TimeZoneInfo.ConvertTime(instant, ClubClock.ZoneOf(settings)).ToString("ddd dd MMM, HH:mm", CultureInfo.InvariantCulture);
+        TimeZoneInfo.ConvertTime(instant, ClubClock.ZoneOf(settings)).ToString(ClubDate.Format, CultureInfo.InvariantCulture);
 
     public static string BookingPath(Guid bookingId) => $"/bookings/{bookingId}";
 

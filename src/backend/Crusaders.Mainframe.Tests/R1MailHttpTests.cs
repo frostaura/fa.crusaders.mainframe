@@ -56,7 +56,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
         Assert.Contains("Held until", Body(received));
         Assert.Contains("in case a share has to go back", Body(received));
         var deadline = await PlayersClub.ReadAsync(f, db => db.Bookings.IgnoreQueryFilters().Where(b => b.Id == bookingId).Select(b => b.ShareDeadlineAt).FirstAsync());
-        Assert.Contains(deadline!.Value.ToUniversalTime().ToString("dd MMM", System.Globalization.CultureInfo.InvariantCulture), Body(received));
+        Assert.Contains(deadline!.Value.ToUniversalTime().ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture), Body(received));
 
         // The partner's side is a plain receipt: nothing of theirs is held.
         var paid = Assert.Single(To(mail, club, "sam.partner"), m => m.Subject.StartsWith("Share paid", StringComparison.Ordinal));
@@ -147,5 +147,20 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
         Assert.DoesNotContain("your PIN", Body(confirmation!));
         Assert.DoesNotContain("PIN or", Body(confirmation!));
         Assert.Contains("member code", Body(confirmation!));
+    }
+
+    /// <summary>
+    /// Lane F4: mails and new ledger comments print the club's date words — "Thu 1 Oct, 08:00" —
+    /// never "Thu 01 Oct". Both the players mails (GameText) and the play mails (PlayNotices) go
+    /// through one format.
+    /// </summary>
+    [Fact]
+    public void Mail_dates_read_the_way_the_screens_do()
+    {
+        var settings = new TenantSettingsView(15, 8m, 30m, 5, 15, 14, "UTC", 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
+        var first = new DateTimeOffset(2026, 10, 1, 8, 0, 0, TimeSpan.Zero);
+        Assert.Equal("Thu 1 Oct, 08:00", GameText.Local(first, settings));
+        Assert.Equal("Thu 1 Oct, 08:00", PlayNotices.Local(first, settings));
+        Assert.Equal("Tue 29 Sep, 08:00", GameText.Local(first.AddDays(-2), settings));
     }
 }

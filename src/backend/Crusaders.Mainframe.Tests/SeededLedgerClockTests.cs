@@ -64,9 +64,9 @@ public sealed class SeededLedgerClockTests : IClassFixture<PostgresFixture>
         {
             if (!bookings.TryGetValue(charge.RelatedBookingId!.Value, out var startsAt)) continue;
             var courtName = courts[bookingCourt[charge.RelatedBookingId!.Value]];
-            var expected = $"Booking {courtName} " + TimeZoneInfo
+            var expected = $"Booking {courtName} · " + TimeZoneInfo
                 .ConvertTimeFromUtc(startsAt.UtcDateTime, tz)
-                .ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+                .ToString(Crusaders.Mainframe.Api.Services.ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
 
             Assert.Equal(expected, charge.Reason);
             checkedAtLeastOne = true;

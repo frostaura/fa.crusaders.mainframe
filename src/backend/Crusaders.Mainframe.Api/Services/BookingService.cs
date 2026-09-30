@@ -86,7 +86,7 @@ public sealed class BookingService
     {
         var settings = await _settings.GetAsync(ct);
         return TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, ResolveTz(settings.Timezone))
-            .ToString("ddd dd MMM, HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -474,7 +474,7 @@ public sealed class BookingService
             // is the "Starts" line of a booking confirmation, and on the club's own en-ZA host
             // the day and month names came out in a different language from the receipt
             // attached to the same email.
-            .ToString("ddd dd MMM HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
 
         // The figures come off the row and the ledger rather than from a caller: this runs in
         // a different request from the purchase, so there is nothing in scope to trust.
@@ -814,7 +814,7 @@ public sealed class BookingService
                     AmountCredits: -spec.TotalCost,
                     ActorUserId: actorId,
                     RelatedBookingId: booking.Id,
-                    Reason: $"Booking {court.Name} {SlotLabel(booking, settings)}",
+                    Reason: $"Booking {court.Name} · {SlotLabel(booking, settings)}",
                     ExternalReference: spec.ExternalReference), ct);
             }
         }
@@ -896,7 +896,7 @@ public sealed class BookingService
             // is the "Starts" line of a booking confirmation, and on the club's own en-ZA host
             // the day and month names came out in a different language from the receipt
             // attached to the same email.
-            .ToString("ddd dd MMM HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
         // Build the message in the request scope; dispatch in the background so SMTP latency
         // (Mailhog/EHLO can take seconds) does not block the booking response.
         // Credits, not rand — the template printed a rand sign over both of these. The penalty
@@ -2042,7 +2042,7 @@ public sealed class BookingService
                 AmountCredits: -amount,
                 ActorUserId: Guid.Empty,
                 RelatedBookingId: booking.Id,
-                Reason: $"Lights ran {minutes} min on cancelled booking {court.Name} {await SlotLabelAsync(booking, ct)} — charged pro rata",
+                Reason: $"Lights ran {minutes} min on cancelled booking {court.Name} · {await SlotLabelAsync(booking, ct)} — charged pro rata",
                 ExternalReference: CancelledLightsReference(booking.Id)), ct);
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -2509,14 +2509,14 @@ public sealed class BookingService
                         AmountCredits: booking.AmountChargedCredits,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
-                        Reason: $"Payer changed at court — refunded, {court.Name} {slotLabel}"),
+                        Reason: $"Payer changed at court — refunded, {court.Name} · {slotLabel}"),
                     new LedgerPosting(
                         UserId: reassignTo.Value,
                         Type: LedgerEntryType.BookingCharge,
                         AmountCredits: -booking.AmountChargedCredits,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
-                        Reason: $"Paid at court on behalf of another member — {court.Name} {slotLabel}"),
+                        Reason: $"Paid at court on behalf of another member — {court.Name} · {slotLabel}"),
                 ], ct);
             }
             catch (DbUpdateConcurrencyException)
@@ -2550,7 +2550,7 @@ public sealed class BookingService
             AmountCredits: -booking.AmountChargedCredits,
             ActorUserId: actorUserId,
             RelatedBookingId: booking.Id,
-            Reason: $"Booking {court.Name} {await SlotLabelAsync(booking, ct)}"), ct);
+            Reason: $"Booking {court.Name} · {await SlotLabelAsync(booking, ct)}"), ct);
 
         booking.PaidByUserId = payerUserId;
         booking.ChargedAt = DateTimeOffset.UtcNow;
@@ -2702,7 +2702,7 @@ public sealed class BookingService
     /// </summary>
     private static string IssuedAtLocal(TenantSettingsView settings) =>
         TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.UtcNow.UtcDateTime, ResolveTz(settings.Timezone))
-            .ToString("ddd dd MMM yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            .ToString(ClubDate.WithYear, System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// A booking's slot, in the club's own wall clock, for a ledger comment.
@@ -2721,9 +2721,14 @@ public sealed class BookingService
     /// ambient separator, so one row could read "−15.00 cr" beside "penalty 30,0%".
     /// </para>
     /// </summary>
+    /// <para>
+    /// In the club's own date words since review round 1 (lane F4) — <c>Thu 1 Oct, 10:00</c>, the
+    /// format every screen and mail uses — and set off from the court by a middle dot. Rows
+    /// written before keep the ISO form they were written with; nothing rewrites history.
+    /// </para>
     private static string SlotLabel(Booking booking, TenantSettingsView settings) =>
         TimeZoneInfo.ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone))
-            .ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// <see cref="SlotLabel"/> where the caller has no settings in hand. One extra read on

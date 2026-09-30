@@ -491,5 +491,5 @@ public sealed record GameText(string CourtName, string StartsLocal)
 
     public static string Local(DateTimeOffset at, TenantSettingsView settings) =>
         TimeZoneInfo.ConvertTime(at, ClubClock.ZoneOf(settings))
-            .ToString("ddd dd MMM, HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
 }

@@ -326,7 +326,7 @@ public static class Seeder
                     // a genuine row that used club time, on the same admin Transactions
                     // screen. Demo data, but it is in every screenshot of the ledger anyone
                     // takes, and "05:00" is the sort of number that gets believed.
-                    Reason = $"Booking {court.Name} {startsAtUtc + sast:yyyy-MM-dd HH:mm}",
+                    Reason = $"Booking {court.Name} · {(startsAtUtc + sast).ToString(Services.ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture)}",
                 });
                 bookingsCreated++;
             }

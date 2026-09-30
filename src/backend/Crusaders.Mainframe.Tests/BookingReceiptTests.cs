@@ -231,5 +231,5 @@ public sealed class BookingReceiptTests
 
     /// <summary>The receipt's "Issued" rendering of an instant at a given offset.</summary>
     private static string StampIn(DateTimeOffset at, TimeSpan offset) =>
-        at.ToOffset(offset).ToString("ddd dd MMM yyyy HH:mm", CultureInfo.InvariantCulture);
+        at.ToOffset(offset).ToString(Crusaders.Mainframe.Api.Services.ClubDate.WithYear, CultureInfo.InvariantCulture);
 }

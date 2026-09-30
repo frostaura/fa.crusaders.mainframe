@@ -159,12 +159,12 @@ internal static class EmailCatalogue
             ("ShareMovedReceived", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Received, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
             ("ShareMovedRefunded", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Refunded, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
             ("ShareMovedReturned", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Returned, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
-            ("ShareMovedReceivedHeld", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Received, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl, HeldUntilLocal: "Thu 01 Oct, 19:00"))),
+            ("ShareMovedReceivedHeld", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Received, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl, HeldUntilLocal: "Thu 1 Oct, 19:00"))),
             ("ShareMovedClubCollected", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Paid, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl, ByClub: true, BalanceAfterCredits: -12m))),
             ("ClubSeat", EmailTemplates.ClubSeat(club, to, new ClubSeatNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, Accepted: false, GameUrl))),
             ("ClubSeatAccepted", EmailTemplates.ClubSeat(club, to, new ClubSeatNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, Accepted: true, GameUrl))),
-            ("ShareReminder", EmailTemplates.ShareReminder(club, to, new ShareReminderNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, "Thu 01 Oct, 18:45", false, GameUrl))),
-            ("ShareReminderNudge", EmailTemplates.ShareReminder(club, to, new ShareReminderNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, "Thu 01 Oct, 18:45", true, GameUrl))),
+            ("ShareReminder", EmailTemplates.ShareReminder(club, to, new ShareReminderNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, "Thu 1 Oct, 18:45", false, GameUrl))),
+            ("ShareReminderNudge", EmailTemplates.ShareReminder(club, to, new ShareReminderNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, "Thu 1 Oct, 18:45", true, GameUrl))),
             ("ShareLapsed", EmailTemplates.ShareLapsed(club, to, new ShareLapsedNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, false, GameUrl))),
             ("ShareLapsedOrganiser", EmailTemplates.ShareLapsed(club, to, new ShareLapsedNotice("Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, true, GameUrl))),
             ("PlayersBookingCancelled", EmailTemplates.PlayersBookingCancelled(club, to, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00")),
@@ -176,7 +176,7 @@ internal static class EmailCatalogue
             // D14's one play message.
             ("ResultToConfirm", EmailTemplates.ResultToConfirm(club, to, new ResultToConfirmNotice(
                 "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", "Jason Fourie 3–1 Thandi Mokoena (11–7, 9–11, 11–5, 11–8)",
-                "Thu 01 Oct, 18:05", GameUrl + "?result=confirm"))),
+                "Thu 1 Oct, 18:05", GameUrl + "?result=confirm"))),
         ];
     }
 

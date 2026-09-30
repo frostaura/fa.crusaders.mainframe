@@ -414,15 +414,17 @@ public class MoneySurfaceTests
         var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
         var tz = TimeZoneInfo.FindSystemTimeZoneById(settings.Timezone);
         Assert.Equal(clubTz.Id, tz.Id);
+        // In the club's own date words since review round 1 (lane F4): "Booking Court 1 · Thu 1 Oct, 10:00".
         var expected = TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, tz)
-            .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+            .ToString(ClubDate.Format, CultureInfo.InvariantCulture);
 
         Assert.Contains(expected, charge.Reason);
+        Assert.Contains(" · ", charge.Reason);
         // And the UTC rendering is gone, on any tenant whose clock is not UTC.
         if (tz.BaseUtcOffset != TimeSpan.Zero)
         {
             Assert.DoesNotContain(
-                startsAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                startsAt.UtcDateTime.ToString(ClubDate.Format, CultureInfo.InvariantCulture),
                 charge.Reason);
         }
     }

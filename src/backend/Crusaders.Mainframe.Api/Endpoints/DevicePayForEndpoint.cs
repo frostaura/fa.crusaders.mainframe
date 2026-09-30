@@ -528,7 +528,7 @@ public static class DevicePayForEndpoint
             var booker = people.FirstOrDefault(p => p.Id == refunded);
             var settings = await services.Settings.GetAsync(ct);
             var when = TimeZoneInfo.ConvertTime(j.Booking!.StartsAt, MemberCodeMath.ZoneOf(settings.Timezone))
-                .ToString("ddd dd MMM, HH:mm", CultureInfo.InvariantCulture);
+                .ToString(ClubDate.Format, CultureInfo.InvariantCulture);
             var club = await services.Club.GetAsync(ct);
 
             if (payer is not null)
