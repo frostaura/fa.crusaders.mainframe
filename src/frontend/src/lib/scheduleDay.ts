@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { endpoints, type ScheduleDay } from "./api";
-import { describeFailure } from "./errors";
 import { clubDayOf, gridNow, shiftClubDay } from "./gridClock";
 import { buildTimeSlices, groupSlotsByCourt } from "./scheduleGrid";
 import { readViewerRules, type ViewerRules } from "./gridRules";
@@ -36,7 +35,12 @@ export type ScheduleDayState = {
   day: ScheduleDay | null;
   setDay: React.Dispatch<React.SetStateAction<ScheduleDay | null>>;
   rules: ViewerRules;
-  error: string | null;
+  /**
+   * The failed read itself, not a sentence: `StateBlock` words it (R2 F4-17 — a pre-worded string
+   * was worded AGAIN as an unknown throw, so a 503 read "something went wrong" here while every
+   * other page said "down or restarting").
+   */
+  error: unknown;
   loading: boolean;
   /** Read the day the picker is on, again. What Refresh does. */
   refresh: () => void;
@@ -74,7 +78,7 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
   const [date, setDate] = useState(() => validClubDay(initialDate) ?? clubDayOf(Date.now(), undefined));
   const [day, setDay] = useState<ScheduleDay | null>(null);
   const [readAt, setReadAt] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
 
   /**
@@ -119,7 +123,7 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
     // Was a bare `catch` mapping EVERY failure to "Check your connection and press Refresh." —
     // so a missing tenant row, a 500 and an expired session all told the member their network
     // was down, and Refresh was the one thing that could not help.
-    catch (err) { if (read === latestRead.current) setError(describeFailure(err, { action: "load the schedule" })); }
+    catch (err) { if (read === latestRead.current) setError(err); }
     finally { if (read === latestRead.current) setLoading(false); }
   }, []);
 

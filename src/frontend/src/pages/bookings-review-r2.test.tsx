@@ -117,3 +117,12 @@ describe("R2 F1-1 — a finished game is reachable, and its result recordable, f
     expect(cell).toHaveAttribute("href", "/bookings/bk-old");
   });
 });
+
+describe("R2 F4-17 (F1's half) — a 503 on the schedule says the club's system is down or restarting", () => {
+  it("reads like every other page's 503, never 'something went wrong'", async () => {
+    openBookings({ routes: [{ path: "/api/v1/schedule", status: 503, body: {} }] });
+    const alert = await screen.findByText(/down or restarting/);
+    expect(alert.textContent).toContain("Couldn't load the schedule");
+    expect(screen.queryByText(/something went wrong/)).toBeNull();
+  });
+});
