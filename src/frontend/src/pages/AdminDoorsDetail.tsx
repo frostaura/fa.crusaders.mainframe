@@ -219,7 +219,7 @@ function DoorControls({ door, displayName, actions, online, shutAt, timezone }: 
               doors list, and the page it lands on moves focus itself. */}
           <ConfirmDialog
             trigger={(
-              <Button variant="danger-soft" block className="h-auto min-h-touch whitespace-normal py-2">
+              <Button variant="danger-soft" block className="!h-auto min-h-touch whitespace-normal py-2">
                 Delete this door{" "}<span className="sr-only">{`— ${displayName}`}</span>
               </Button>
             )}
