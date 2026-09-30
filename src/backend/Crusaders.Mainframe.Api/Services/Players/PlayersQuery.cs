@@ -172,7 +172,9 @@ public sealed class PlayersQuery
             unpaid += open;
             if (!s.IsLive && (s.Seat == 1 || (d.Role == "player" && s.Id != d.MySeatId))) continue;
             var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
-            players.Add(SeatView(s, d.People, paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open));
+            var money = new SeatMoney(paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open,
+                s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct) : 0m);
+            players.Add(SeatView(s, d.People, money));
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
@@ -193,8 +195,12 @@ public sealed class PlayersQuery
         return closed || !live ? 0m : s.ShareCredits;
     }
 
-    private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, decimal paid, decimal target, decimal unpaid)
+    /// <summary>One seat's money: paid (net of returns), its target, what is still open, and what came back.</summary>
+    private sealed record SeatMoney(decimal Paid, decimal Target, decimal Unpaid, decimal Returned);
+
+    private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, SeatMoney money)
     {
+        var (paid, target, unpaid) = (money.Paid, money.Target, money.Unpaid);
         var member = s.UserId is { } id && people.TryGetValue(id, out var m) ? m : null;
         return new
         {
@@ -212,6 +218,9 @@ public sealed class PlayersQuery
             paid_credits = paid,
             target_credits = target,
             unpaid_credits = unpaid,
+            // F2-4: share credits that came BACK to this seat — paid_credits nets them out, so a
+            // cancelled game read "paid 0" with no word of the refund.
+            returned_credits = money.Returned,
             needs_consent = s.IsPartner && s.Status == ParticipantStatus.Accepted && s.ShareCredits > s.ConsentedCredits,
             settled_outside = s.SettledOutsideAt is not null,
             lapsed = s.LapsedAt is not null || s.Status == ParticipantStatus.Lapsed,
@@ -241,6 +250,7 @@ public sealed class PlayersQuery
             paid_credits = 0m,
             target_credits = 0m,
             unpaid_credits = 0m,
+            returned_credits = 0m,
             needs_consent = false,
             settled_outside = false,
             lapsed = false,

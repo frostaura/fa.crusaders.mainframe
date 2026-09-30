@@ -115,6 +115,21 @@ public sealed class ShareLedger
     }
 
     /// <summary>
+    /// What has come BACK to this seat's partner (review round 2, F2-4): the sum of the return legs
+    /// on their wallet (<c>share:{seat}:*</c> rows with a positive amount). <see cref="PaidOfAsync"/>
+    /// nets these out, so a cancelled game's detail read "paid 0" and nobody could see the refund.
+    /// </summary>
+    public static async Task<decimal> ReturnedOfAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
+    {
+        if (seat.UserId is not { } partner) return 0m;
+        var prefix = Prefix(seat.Id);
+        return await db.LedgerEntries.AsNoTracking()
+            .Where(l => l.UserId == partner && l.Type == LedgerEntryType.ShareTransfer && l.AmountCredits > 0
+                        && l.ExternalReference != null && l.ExternalReference.StartsWith(prefix))
+            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
+    }
+
+    /// <summary>
     /// A seat that can no longer be collected from: it lapsed, or its share deadline has passed
     /// (the sweep stamps <c>LapsedAt</c> a minute late at worst; the clock is not).
     /// </summary>
