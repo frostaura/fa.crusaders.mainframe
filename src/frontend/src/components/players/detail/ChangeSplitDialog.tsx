@@ -3,7 +3,7 @@ import { Alert } from "@/components/Alert";
 import { SplitStep } from "@/components/bookings/SplitStep";
 import { hasPaying, updateSeat, withMode, type PlayersDraft } from "@/components/bookings/playersDraft";
 import { useSplitPreview } from "@/components/bookings/useSplitPreview";
-import type { PlayersStepState } from "@/components/bookings/usePlayersStep";
+import type { SplitEditor as StepEditor } from "@/components/bookings/usePlayersStep";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -28,8 +28,7 @@ type Props = { detail: BookingDetail; onClose: () => void; onDone: (notice: Noti
  * give it: the draft, the mode and figure setters, the live preview. There is nothing to pick
  * (the seats are the booking's own), so the rest of the BookSheet's state is not faked here.
  */
-type SplitEditor = Pick<PlayersStepState, "draft" | "bulk" | "preview" | "setMode" | "setWeight" | "setAmount" | "setOrganiserWeight">
-  & { problem: string | null };
+type SplitEditor = StepEditor & { problem: string | null };
 
 function useSplitEditor(detail: BookingDetail): SplitEditor {
   const [draft, setDraft] = useState<PlayersDraft>(() => draftOf(detail));
@@ -68,8 +67,7 @@ export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
           <DialogDescription>{CHANGE_SPLIT.description}</DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-4 pb-4">
-          {/* The step reads only the SplitEditor fields (asked of the bookings lane to narrow its prop to them). */}
-          <SplitStep players={editor as PlayersStepState} />
+          <SplitStep players={editor} />
           {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action })}</Alert> : null}
         </DialogBody>
         <DialogFooter>
