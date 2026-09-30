@@ -55,11 +55,24 @@ function lead(action: string | undefined, cause: string): string {
   return action ? `Couldn't ${action} — ${cause}` : cause.charAt(0).toUpperCase() + cause.slice(1);
 }
 
+/**
+ * B-10 — the club's rate limit: `429 { error: "rate_limited", retry_after_seconds }`. Busy, not
+ * broken and not the member's connection, so it never says "check your connection"; and it is
+ * transient (C2), so it never ends a session. The seconds are said when the club gives them.
+ */
+export function rateLimitedSentence(retryAfterSeconds?: number | null): string {
+  const s = typeof retryAfterSeconds === "number" && retryAfterSeconds > 0 ? Math.ceil(retryAfterSeconds) : null;
+  return s === null
+    ? "Too many requests right now — wait a moment and try again."
+    : `Too many requests right now — wait ${s} second${s === 1 ? "" : "s"} and try again.`;
+}
+
 /** Sentences for HTTP statuses that mean the same thing wherever they appear. */
-function describeStatus(status: number, action?: string): string | null {
-  // Deliberately has no action clause: it is about the member's rate of attempts, not about
-  // the particular thing attempted, and it is the one refusal they can definitely resolve.
-  if (status === 429) return "Too many attempts. Wait a minute, then try again.";
+function describeStatus(err: ApiError, action?: string): string | null {
+  const status = err.status;
+  // Deliberately has no action clause: it is about the rate of requests, not about the
+  // particular thing attempted, and it is the one refusal that passes by itself.
+  if (status === 429) return rateLimitedSentence(Number(err.detail("retry_after_seconds")) || null);
   if (status === 502 || status === 503 || status === 504)
     return lead(action, "the club's system is down or restarting. Give it a minute and try again — if it keeps happening, tell the club committee.");
   if (status >= 500)
@@ -111,7 +124,7 @@ export function describeFailure(err: unknown, opts: DescribeOptions = {}): strin
   if (code && opts.codes?.[code]) return opts.codes[code];
   if (code && CROSS_CUTTING[code]) return CROSS_CUTTING[code];
 
-  const byStatus = describeStatus(err.status, opts.action);
+  const byStatus = describeStatus(err, opts.action);
   if (byStatus) return byStatus;
 
   // Not "that didn't work": with an action clause in front it reads "Couldn't submit your

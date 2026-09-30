@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { api, ApiError, endpoints, NetworkError, REFRESH_PATH, REFRESH_TIMEOUT_MS, resetRefreshBackoff, setUnauthorizedHandler, tokenStore } from "./api";
 import { AuthProvider, useAuth } from "./auth";
+import { describeFailure } from "./errors";
 
 /**
  * F4.1 — the refresh cookie (review round 1, contract §1).
@@ -328,6 +329,32 @@ describe("a sign-out while an exchange is in flight (C1)", () => {
 });
 
 /**
+ * B-10 — the club's rate limit, `429 { error: "rate_limited", retry_after_seconds }`, is busy,
+ * not unreachable: said as such (with the seconds), and never an ended session.
+ */
+describe("a rate-limited club (B-10)", () => {
+  it("says too many requests, with the wait, on the request and on the next one inside the backoff", async () => {
+    tokenStore.set("stale");
+    server({ refresh: () => json(429, { error: "rate_limited", retry_after_seconds: 12 }) });
+
+    const first = await api.get("/api/v1/wallet").catch((e: unknown) => e);
+    const second = await api.get("/api/v1/me/door").catch((e: unknown) => e);
+
+    for (const err of [first, second]) {
+      expect(describeFailure(err, { action: "load your wallet" })).toBe("Too many requests right now — wait 12 seconds and try again.");
+      expect(describeFailure(err)).not.toMatch(/connection|reach/i);
+    }
+    expect(tokenStore.get()).toBe("stale");
+    expect(ended).toBe(0);
+  });
+
+  it("a rate-limited request itself reads the same way, and without seconds says a moment", () => {
+    expect(describeFailure(new ApiError(429, { error: "rate_limited", retry_after_seconds: 1 }))).toBe("Too many requests right now — wait 1 second and try again.");
+    expect(describeFailure(new ApiError(429, { error: "rate_limited" }))).toBe("Too many requests right now — wait a moment and try again.");
+  });
+});
+
+/**
  * C2 — only a 401 from /auth/refresh ends the session (round 2, IX-H). The repro: a redeploy's
  * 503 (or a 429, a dropped network, the 8 s timeout) on the refresh call signed every member out.
  */
@@ -356,7 +383,8 @@ describe("a refresh the club did not answer (C2)", () => {
       const s = server({ refresh: () => (n++ === 0 ? json(503, null) : json(200, LOGIN_BODY)) });
 
       await expect(api.get("/api/v1/wallet")).rejects.toBeInstanceOf(ApiError);
-      await expect(api.get("/api/v1/me/door")).rejects.toBeInstanceOf(NetworkError);
+      // Inside the backoff the SAME answer is repeated — a 503 stays a 503, never "unreachable".
+      await expect(api.get("/api/v1/me/door")).rejects.toMatchObject({ status: 503 });
       expect(s.refreshCalls(), "single-flight with backoff").toHaveLength(1);
 
       vi.setSystemTime(Date.now() + 1_500);

@@ -98,7 +98,7 @@ describe("describeFailure", () => {
 
     /** Rate limiting is about the rate of attempts, not about the thing attempted. */
     it("leaves the rate-limit sentence alone", () => {
-      expect(describeFailure(api(429), { action: "get a code" })).toMatch(/^Too many attempts/);
+      expect(describeFailure(api(429), { action: "get a code" })).toMatch(/^Too many requests right now/);
     });
   });
 

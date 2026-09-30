@@ -316,7 +316,7 @@ describe("Settings → Admin alerts: your email alerts", () => {
     const section = await openAlerts();
 
     // A refusal that can pass (429 — a 5xx is a deployment fault, which drops the retry by design).
-    expect(await within(section).findByText(/Too many attempts/)).toBeInTheDocument();
+    expect(await within(section).findByText(/Too many requests right now/)).toBeInTheDocument();
     expect(within(section).queryByRole("switch")).toBeNull();
     fireEvent.click(within(section).getByRole("button", { name: /Try again/ }));
     expect(await within(section).findByRole("switch", { name: "New membership applications" })).toBeInTheDocument();

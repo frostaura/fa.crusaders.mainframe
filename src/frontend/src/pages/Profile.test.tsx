@@ -109,7 +109,7 @@ describe("Profile — reading, failing and the page's shape", () => {
     ]);
     const retry = await screen.findByRole("button", { name: "Try again" }, { timeout: 3000 });
     // The shared sentence for a 429, as on every other page (F4-17).
-    expect(screen.getByText(/Too many attempts/)).toBeInTheDocument();
+    expect(screen.getByText(/Too many requests right now/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Full name")).not.toBeInTheDocument();
 
     fail = false;

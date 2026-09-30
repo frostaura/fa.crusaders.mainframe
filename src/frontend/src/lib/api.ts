@@ -211,6 +211,8 @@ export type RefreshOutcome = { kind: "ok" } | { kind: "ended" } | { kind: "trans
 /** C2 backoff after transient exchange failures: 1 s, 2 s, 4 s … 30 s; any answer resets it. */
 let transientFailures = 0;
 let retryNotBefore = 0;
+/** What the last transient exchange failed with — repeated inside the backoff (B-10: a 429 stays a 429). */
+let lastTransient: Error | null = null;
 
 /** Whether the last exchange failed transiently and nothing has answered since. */
 export function refreshIsOwed(): boolean {
@@ -221,10 +223,12 @@ export function refreshIsOwed(): boolean {
 export function resetRefreshBackoff(): void {
   transientFailures = 0;
   retryNotBefore = 0;
+  lastTransient = null;
 }
 
 function noteOutcome(outcome: RefreshOutcome): RefreshOutcome {
   if (outcome.kind === "transient") {
+    lastTransient = outcome.error;
     transientFailures += 1;
     retryNotBefore = Date.now() + Math.min(1000 * 2 ** (transientFailures - 1), 30_000);
   } else {
@@ -244,7 +248,7 @@ export function refreshSession(staleToken: string | null, options?: { now?: bool
   if (refreshInFlight) return refreshInFlight;
   if (!options?.now && transientFailures > 0 && Date.now() < retryNotBefore) {
     // Inside the backoff: a club that is restarting is not hammered by every screen at once.
-    return Promise.resolve({ kind: "transient", error: new NetworkError("unreachable") });
+    return Promise.resolve({ kind: "transient", error: lastTransient ?? new NetworkError("unreachable") });
   }
   refreshInFlight = withRefreshLock(() => exchangeCookie(staleToken))
     .then(noteOutcome)
