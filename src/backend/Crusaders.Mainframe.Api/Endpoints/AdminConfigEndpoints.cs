@@ -19,206 +19,22 @@ public static class AdminConfigEndpoints
         var settings = app.MapGroup("/api/v1/admin/settings").RequireAuthorization(p => p.RequireRole("admin"));
 
         settings.MapGet("/", async (MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
-        {
-            var row = await db.TenantSettings.AsNoTracking().FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
-            var doc = row is null ? new Dictionary<string, JsonElement>() : ParseObject(row.SettingsJson);
-
-            // Defaults come from TenantSettingsAccessor, never from literals here.
-            //
-            // They used to be written twice and had drifted: this endpoint answered 30
-            // minutes and 50 credits where the engine used 15 and 8. On a tenant with
-            // no explicit value that is not a cosmetic difference — the admin screen
-            // reads back what it was shown and PUTs it, so opening the settings page
-            // and pressing save doubled every slice and repriced every court, silently.
-            var defaults = await settingsAccessor.GetAsync(ct);
-
-            return Results.Ok(new
-            {
-                slice_minutes = GetInt(doc, "slice_minutes", defaults.SliceMinutes),
-                slice_price_credits = GetDecimal(doc, "slice_price_credits", defaults.DefaultSlicePriceCredits),   // the default for a NEW court; existing courts carry their own
-                advance_booking_days = GetInt(doc, "advance_booking_days", defaults.AdvanceBookingDays),
-                day_start_minute = GetInt(doc, "day_start_minute", defaults.DayStartMinute),
-                day_end_minute = GetInt(doc, "day_end_minute", defaults.DayEndMinute),
-
-                // The per-weekday map the engine has read since it existed, and this
-                // endpoint never served. A club could not change its opening hours: the
-                // screen offered only the flat pair above, the seeder names all seven days,
-                // so every save of "Day starts 09:00" reported success and changed nothing
-                // any member could see. Rendered from the parsed map, not echoed from the
-                // stored document, so the hours shown are the hours BookingService enforces.
-                operating_hours = defaults.OperatingHours.ToWire(),
-                penalty_pct = GetDecimal(doc, "penalty_pct", defaults.PenaltyPct),
-                grace_window_minutes = GetInt(doc, "grace_window_minutes", defaults.GraceWindowMinutes),
-                penalty_window_minutes = GetInt(doc, "penalty_window_minutes", defaults.PenaltyWindowMinutes),
-                timezone = GetString(doc, "timezone", defaults.Timezone),
-                button_map = defaults.Buttons.ToWire(),
-
-                // The nine keys the engine has always read and this endpoint never
-                // showed. They govern what a member is charged and when they may book,
-                // and until now the only way to change one was to edit a JSON column in
-                // the database by hand — on a live money system, with no audit trail and
-                // no validation.
-                credits_per_zar_regular = GetDecimal(doc, "credits_per_zar_regular", defaults.CreditsPerZarRegular),
-                // credits_per_zar_league is gone from this document: the league rate is the
-                // league GROUP's credits_per_zar now (D2), edited on the Groups screen.
-                topup_block_zar = GetDecimal(doc, "topup_block_zar", defaults.TopupBlockZar),
-                topup_max_zar_per_member = GetDecimal(doc, "topup_max_zar_per_member", defaults.TopupMaxZarPerMember),
-                member_per_day_max_minutes = GetInt(doc, "member_per_day_max_minutes", defaults.MemberPerDayMaxMinutes),
-                peak_hours = GetString(doc, "peak_hours", defaults.PeakHoursRange),
-                peak_advance_hours_for_regular = GetInt(doc, "peak_advance_hours_for_regular", defaults.PeakAdvanceHoursForRegular),
-                retention_years = GetInt(doc, "retention_years", defaults.RetentionYears),
-                no_show_lookback_days = GetInt(doc, "no_show_lookback_days", defaults.NoShowLookbackDays),
-
-                // The court-box and identification numbers (WI-2). Same rule as the
-                // economics keys: defaults come from TenantSettingsAccessor, never
-                // from literals here.
-                walk_up_max_minutes = GetInt(doc, "walk_up_max_minutes", defaults.WalkUpMaxMinutes),
-                heartbeat_seconds = GetInt(doc, "heartbeat_seconds", defaults.HeartbeatSeconds),
-                activation_forward_window_minutes = GetInt(doc, "activation_forward_window_minutes", defaults.ActivationForwardWindowMinutes),
-                activation_cue_window_minutes = GetInt(doc, "activation_cue_window_minutes", defaults.ActivationCueWindowMinutes),
-                qr_lifetime_seconds = GetInt(doc, "qr_lifetime_seconds", defaults.QrLifetimeSeconds),
-                roster_window_minutes = GetInt(doc, "roster_window_minutes", defaults.RosterWindowMinutes),
-
-                // The three door-gate numbers. The policy is rendered from the PARSED value
-                // rather than echoed from the stored document, for the same reason
-                // operating_hours is: a settings screen reads a value, shows it to a person
-                // and PUTs back whatever it was shown, so showing a stored value the engine
-                // does not honour would let the page report a policy that is not in force.
-                gate_unlock_seconds = GetInt(doc, "gate_unlock_seconds", defaults.GateUnlockSeconds),
-                gate_access_policy = defaults.GateAccessPolicy,
-                gate_early_entry_minutes = GetInt(doc, "gate_early_entry_minutes", defaults.GateEarlyEntryMinutes),
-
-                // Always present, never conditional: the console's settings type requires it
-                // and carries no client-side default, so an omitted key would be a page that
-                // cannot render rather than a page that falls back.
-                device_alert_cooldown_minutes = GetInt(
-                    doc, "device_alert_cooldown_minutes", defaults.DeviceAlertCooldownMinutes),
-
-                // The five Wave 1 door settings, always present for the same reason the
-                // cooldown above is: the console's settings type carries no client-side
-                // default, so an omitted key is a page that cannot render rather than one that
-                // falls back.
-                //
-                // Rendered from the CLAMPED values, not echoed from the stored document, on
-                // the same argument operating_hours and gate_access_policy already make here:
-                // a settings screen reads a value, shows it to a person and PUTs back whatever
-                // it was shown, so showing a number the engine does not honour would let the
-                // page report a retention the worker is not deleting against.
-                door_log_retention_days = DoorSettings.LogRetentionDays(defaults),
-                door_refusal_spike_count = DoorSettings.RefusalSpikeCount(defaults),
-                door_refusal_spike_minutes = DoorSettings.RefusalSpikeMinutes(defaults),
-                club_contact_phone = DoorSettings.ContactPhone(defaults) ?? "",
-                club_contact_email = DoorSettings.ContactEmail(defaults) ?? "",
-
-                // The box's nine, the error log's three and the streams' seven — rendered from
-                // the CLAMPED values for the reason operating_hours, gate_access_policy and the
-                // door numbers already are: a settings screen reads a value, shows it to a
-                // person and PUTs back whatever it was shown, so showing a number the engine
-                // does not honour would let the page report a timeout the box is not running
-                // and a retention the worker is not deleting against.
-                lcd_revert_seconds = BoxSettings.LcdRevertSeconds(defaults),
-                lcd_choice_seconds = BoxSettings.LcdChoiceSeconds(defaults),
-                lcd_card_seconds = BoxSettings.LcdCardSeconds(defaults),
-                lcd_hint_seconds = BoxSettings.LcdHintSeconds(defaults),
-                scan_memory_seconds = BoxSettings.ScanMemorySeconds(defaults),
-                clock_trust_minutes = BoxSettings.ClockTrustMinutes(defaults),
-                relay_restore_enabled = BoxSettings.RelayRestoreEnabled(defaults),
-                device_fault_reporting = BoxSettings.DeviceFaultReporting(defaults),
-                device_fault_max_per_hour = BoxSettings.DeviceFaultMaxPerHour(defaults),
-
-                device_error_retention_days = MonitoringSettings.RetentionDays(defaults),
-                device_error_max_open_rows = MonitoringSettings.MaxOpenRows(defaults),
-                device_error_ingest_per_minute = MonitoringSettings.IngestPerMinute(defaults),
-
-                // The admin notifier's six (R23), from the clamped readers for the same reason.
-                fault_spike_count = AdminNotificationSettings.FaultSpikeCount(defaults),
-                fault_spike_minutes = AdminNotificationSettings.FaultSpikeMinutes(defaults),
-                application_reminder_hours = AdminNotificationSettings.ApplicationReminderHours(defaults),
-                admin_notification_retention_days = AdminNotificationSettings.RetentionDays(defaults),
-                topup_failure_cooldown_minutes = AdminNotificationSettings.TopUpFailureCooldownMinutes(defaults),
-                overdraft_cooldown_minutes = AdminNotificationSettings.OverdraftCooldownMinutes(defaults),
-
-                // Players and splits (D11–D13), from the clamped readers for the same reason.
-                share_lapse_hours = PlayerSettings.ShareLapseHours(defaults),
-                share_reminder_hours = PlayerSettings.ShareReminderHours(defaults),
-                share_reminder_max = PlayerSettings.ShareReminderMax(defaults),
-                player_nudge_limit = PlayerSettings.NudgeLimit(defaults),
-                directory_searches_per_minute = PlayerSettings.DirectorySearchesPerMinute(defaults),
-                member_quiet_start_minute = PlayerSettings.QuietStartMinute(defaults),
-                member_quiet_end_minute = PlayerSettings.QuietEndMinute(defaults),
-                recent_partner_days = PlayerSettings.RecentPartnerDays(defaults),
-                member_notification_retention_days = PlayerSettings.NotificationRetentionDays(defaults),
-                player_invites_per_booking = PlayerSettings.InvitesPerBooking(defaults),
-
-                // Play (D14), from the clamped readers for the same reason.
-                result_autoconfirm_hours = PlaySettings.AutoConfirmHours(defaults),
-                result_record_days = PlaySettings.RecordDays(defaults),
-                streak_rest_every_weeks = PlaySettings.RestEveryWeeks(defaults),
-                streak_rest_cap = PlaySettings.RestCap(defaults),
-                streak_pause_weeks_per_year = PlaySettings.PauseWeeksPerYear(defaults),
-                play_early_bird_before_minute = PlaySettings.EarlyBirdBeforeMinute(defaults),
-                play_night_owl_from_minute = PlaySettings.NightOwlFromMinute(defaults),
-
-                sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
-                control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
-                control_board_stale_multiplier = RealtimeSettings.StaleMultiplier(defaults),
-                realtime_fallback_after_failures = RealtimeSettings.FallbackAfterFailures(defaults),
-                realtime_fallback_window_seconds = RealtimeSettings.FallbackWindowSeconds(defaults),
-                realtime_poll_seconds_wallet = RealtimeSettings.PollSecondsWallet(defaults),
-                realtime_poll_seconds_control_board = RealtimeSettings.PollSecondsControlBoard(defaults),
-
-                // The four BE-ADMIN keys, rendered from the CLAMPED readers rather than
-                // echoed out of the stored document — otherwise the settings page round-trips
-                // a number the engine does not honour, which is the defect
-                // AdminSettingsHttpTests.Opening_the_settings_page_and_saving_it_changes_nothing
-                // is named for.
-                admin_bulk_max_items = BulkSettings.MaxItems(defaults),
-                schedule_materialisation_days = ScheduleSettings.MaterialisationDays(defaults),
-                schedule_max_rows_per_change = ScheduleSettings.MaxRowsPerChange(defaults),
-                schedule_worker_interval_seconds = (int)ScheduleSettings.WorkerInterval(defaults).TotalSeconds,
-
-                // The two night-trace keys, from TraceSettings for the same reason.
-                member_trace_enabled = TraceSettings.Enabled(defaults),
-                member_trace_max_events = TraceSettings.MaxEvents(defaults),
-
-                // GOAL items 3 and 19. Rendered from the CLAMPED values for the same reason
-                // operating_hours, gate_access_policy and the door numbers are: the settings
-                // screen reads a value, shows it to a person and PUTs back whatever it was
-                // shown, so a number the engine does not honour would let the page report a cap
-                // that is not being enforced.
-                member_max_slots_per_day = BookingLimits.MaxSlotsPerDay(defaults),
-                same_day_cap_relaxation = defaults.SameDayCapRelaxation,
-                same_day_relaxation_window_minutes = BookingLimits.SameDayRelaxationWindowMinutes(defaults),
-                walk_up_honours_day_cap = defaults.WalkUpHonoursDayCap,
-                member_groups_enabled = defaults.MemberGroupsEnabled,
-
-                // The club's money symbol. Rendered from the RESOLVED value, like
-                // operating_hours and gate_access_policy: a settings page that showed a symbol
-                // the product will not print would report a choice that is not in force.
-                currency_symbol = CurrencySymbol.For(defaults),
-
-                // The member-code rollout (§8). The two instants are server-written and read-only.
-                member_code_phase = MemberCodeSettings.Phase(defaults),
-                member_code_cutover_at = defaults.MemberCodeCutoverAt,
-                member_code_cutoff_at = defaults.MemberCodeCutoffAt,
-                member_code_cutoff_days = MemberCodeSettings.CutoffDays(defaults),
-                member_code_manual_hold = defaults.MemberCodeManualHold,
-                member_code_manual_hold_by = defaults.MemberCodeManualHoldBy,
-                member_code_manual_hold_at = defaults.MemberCodeManualHoldAt,
-            });
-        });
+            Results.Ok(await RenderSettingsAsync(db, tenant, settingsAccessor, ct)));
 
         settings.MapPut("/", async (
             UpdateSettingsRequest req, HttpContext ctx, MainframeDbContext db,
             AdminChangeRecorder recorder, CancellationToken ct) =>
         {
             var tenant = ctx.RequestServices.GetRequiredService<ITenantContext>();
-            if (req.AdvanceBookingDays < 0 || req.AdvanceBookingDays > 365)
-                return Results.BadRequest(new { error = "advance_booking_days_out_of_range" });
-            if (req.SliceMinutes is < 5 or > 240)
-                return Results.BadRequest(new { error = "slice_minutes_out_of_range" });
-            if (req.DayStartMinute < 0 || req.DayEndMinute > 24 * 60 || req.DayStartMinute >= req.DayEndMinute)
-                return Results.BadRequest(new { error = "operating_hours_invalid" });
+
+            // The row is held from here to the commit (A4-1), so the version check, the
+            // cross-key checks against the values in force and the write all see one document.
+            await using var tx = await SettingsDocument.LockAsync(db, tenant.TenantId, ct);
+            var settingsAccessor = ctx.RequestServices.GetRequiredService<TenantSettingsAccessor>();
+            var current = await settingsAccessor.GetAsync(ct);
+
+            var baseError = ValidateBookingKeys(req, current);
+            if (baseError is not null) return Results.BadRequest(new { error = baseError });
 
             // The per-weekday map, strictly. Same posture as the button map: lenient when a
             // box or the booking engine reads a stored document later — a broken one must
@@ -233,9 +49,6 @@ public static class AdminConfigEndpoints
                     return Results.BadRequest(new { error = "operating_hours_day_invalid", day = badDay });
                 }
             }
-            if (req.PenaltyPct is < 0 or > 100)
-                return Results.BadRequest(new { error = "penalty_pct_out_of_range" });
-
             // The two settings that take money off a member were the only two on this PUT
             // with no bound at all. Both were accepted at any value and both reach the box
             // in the heartbeat config.
@@ -248,10 +61,7 @@ public static class AdminConfigEndpoints
             // cancellation is inside the window, so a member cancelling a fortnight ahead
             // paid the 30% penalty. Every other setting on this endpoint enforces exactly
             // the range its input declares; these two now do too.
-            if (req.GraceWindowMinutes is < 0 or > 60)
-                return Results.BadRequest(new { error = "grace_window_minutes_out_of_range" });
-            if (req.PenaltyWindowMinutes is < 0 or > 1440)
-                return Results.BadRequest(new { error = "penalty_window_minutes_out_of_range" });
+            // (Both bounds are in ValidateBookingKeys, with the other six booking keys.)
 
             // Timezone was readable and not writable: GET served it, UpdateSettingsRequest
             // had no member for it, so a second club in another zone saw its whole booking
@@ -296,7 +106,7 @@ public static class AdminConfigEndpoints
 
             var liveError = ValidateLiveSettings(req) ?? ValidateNotifierSettings(req) ?? ValidatePlayerSettings(req) ?? ValidatePlaySettings(req);
             if (liveError is not null) return Results.BadRequest(new { error = liveError });
-            var adminError = ValidateAdminSettings(req);
+            var adminError = ValidateAdminSettings(req, current);
             if (adminError is not null) return Results.BadRequest(new { error = adminError });
 
             var limitsError = ValidateMemberLimits(req);
@@ -323,6 +133,18 @@ public static class AdminConfigEndpoints
                 db.TenantSettings.Add(row);
             }
             var doc = ParseObject(row.SettingsJson);
+
+            // A4-1: a page opened before somebody else's save is refused, with what is in force
+            // now, rather than quietly putting that person's old values back.
+            if (req.Version is { } seen && seen != SettingsDocument.VersionOf(doc))
+            {
+                return Results.Conflict(new
+                {
+                    error = SettingsDocument.Changed,
+                    version = SettingsDocument.VersionOf(doc),
+                    settings = await RenderSettingsAsync(db, tenant, settingsAccessor, ct),
+                });
+            }
 
             // Snapshotted BEFORE anything is written into `doc`, which is mutated in place.
             var before = new Dictionary<string, JsonElement>(doc, StringComparer.Ordinal);
@@ -370,14 +192,7 @@ public static class AdminConfigEndpoints
                 }
             }
 
-            doc["slice_minutes"] = ToElement(req.SliceMinutes);
-            doc["slice_price_credits"] = ToElement(req.SlicePriceCredits);
-            doc["advance_booking_days"] = ToElement(req.AdvanceBookingDays);
-            doc["day_start_minute"] = ToElement(req.DayStartMinute);
-            doc["day_end_minute"] = ToElement(req.DayEndMinute);
-            doc["penalty_pct"] = ToElement(req.PenaltyPct);
-            doc["grace_window_minutes"] = ToElement(req.GraceWindowMinutes);
-            doc["penalty_window_minutes"] = ToElement(req.PenaltyWindowMinutes);
+            WriteOptionalBookingKeys(doc, req);
             // Omitted means unchanged, like the economics and device keys below it.
             if (req.Timezone is not null) doc["timezone"] = ToElement(req.Timezone.Trim());
             // Same rule for the weekday map, and an EMPTY map is a real instruction rather
@@ -412,6 +227,7 @@ public static class AdminConfigEndpoints
             // of who lowered it. Changed keys only, because a whole-document before/after on
             // every save makes the record unreadable and stores the same thirty keys a
             // hundred times.
+            KeepUnchangedValues(before, doc);
             var changed = ChangedKeys(before, doc);
             row.SettingsJson = JsonSerializer.Serialize(doc);
             // The column was written once, at construction, and never again — a dead audit
@@ -435,9 +251,15 @@ public static class AdminConfigEndpoints
             }
 
             await db.SaveChangesAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
 
             await ApplyCutoffToLegacyCodesAsync(db, phaseBefore, req.MemberCodePhase?.Trim(), ct);
-            return Results.Ok(new { saved = true, changed_keys = changed.After.Keys.ToList() });
+            return Results.Ok(new
+            {
+                saved = true,
+                changed_keys = changed.After.Keys.ToList(),
+                version = SettingsDocument.VersionOf(doc),
+            });
         });
 
         var courts = app.MapGroup("/api/v1/admin/courts").RequireAuthorization(p => p.RequireRole("admin"));
@@ -527,7 +349,7 @@ public static class AdminConfigEndpoints
 
     private static string? ValidateEconomics(UpdateSettingsRequest req)
     {
-        if (ValidateSlicePrice(req.SlicePriceCredits) is { } priceError) return priceError;
+        if (req.SlicePriceCredits is { } price && ValidateSlicePrice(price) is { } priceError) return priceError;
 
         if (req.CreditsPerZarRegular is <= 0 or > 1000) return "credits_per_zar_regular_out_of_range";
         // D2: the league rate moved onto the league group. Refused rather than ignored — an
@@ -969,6 +791,54 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>
+    /// Bounds on the eight booking keys, each only when sent (A4-1), and the one cross-key rule
+    /// among them — the day starts before it ends — against the value in force for the other.
+    /// </summary>
+    private static string? ValidateBookingKeys(UpdateSettingsRequest req, TenantSettingsView current)
+    {
+        if (req.AdvanceBookingDays is < 0 or > 365) return "advance_booking_days_out_of_range";
+        if (req.SliceMinutes is < 5 or > 240) return "slice_minutes_out_of_range";
+        if (req.DayStartMinute is not null || req.DayEndMinute is not null)
+        {
+            var start = req.DayStartMinute ?? current.DayStartMinute;
+            var end = req.DayEndMinute ?? current.DayEndMinute;
+            if (start < 0 || end > 24 * 60 || start >= end) return "operating_hours_invalid";
+        }
+        if (req.PenaltyPct is < 0 or > 100) return "penalty_pct_out_of_range";
+        if (req.GraceWindowMinutes is < 0 or > 60) return "grace_window_minutes_out_of_range";
+        if (req.PenaltyWindowMinutes is < 0 or > 1440) return "penalty_window_minutes_out_of_range";
+        return null;
+    }
+
+    /// <summary>The eight booking keys, written only when sent — omitted means unchanged (A4-1).</summary>
+    private static void WriteOptionalBookingKeys(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.SliceMinutes is { } slice) doc["slice_minutes"] = ToElement(slice);
+        if (req.SlicePriceCredits is { } price) doc["slice_price_credits"] = ToElement(price);
+        if (req.AdvanceBookingDays is { } advance) doc["advance_booking_days"] = ToElement(advance);
+        if (req.DayStartMinute is { } start) doc["day_start_minute"] = ToElement(start);
+        if (req.DayEndMinute is { } end) doc["day_end_minute"] = ToElement(end);
+        if (req.PenaltyPct is { } penalty) doc["penalty_pct"] = ToElement(penalty);
+        if (req.GraceWindowMinutes is { } grace) doc["grace_window_minutes"] = ToElement(grace);
+        if (req.PenaltyWindowMinutes is { } window) doc["penalty_window_minutes"] = ToElement(window);
+    }
+
+    /// <summary>
+    /// A value sent back that MEANS what is stored keeps the stored form (A4-1), so it is not
+    /// "changed" on the record and the document's version does not move. The stored
+    /// <c>operating_hours</c> is Postgres' spelling of the map, the sent one the serialiser's,
+    /// and the raw-text diff below reported it changed on every save.
+    /// </summary>
+    private static void KeepUnchangedValues(
+        IReadOnlyDictionary<string, JsonElement> before, IDictionary<string, JsonElement> doc)
+    {
+        foreach (var (key, was) in before)
+        {
+            if (doc.TryGetValue(key, out var now) && SettingsDocument.SameValue(was, now)) doc[key] = was;
+        }
+    }
+
+    /// <summary>
     /// The keys whose values differ between the stored document and the one about to replace
     /// it, as two parallel maps.
     ///
@@ -1003,7 +873,7 @@ public static class AdminConfigEndpoints
         return (wasChanged, isChanged);
     }
 
-    private static string? ValidateAdminSettings(UpdateSettingsRequest req)
+    private static string? ValidateAdminSettings(UpdateSettingsRequest req, TenantSettingsView current)
     {
         if (req.EffectiveAdminBulkMaxItems is { } items
             && (items < BulkSettings.MinMaxItems || items > BulkSettings.MaxMaxItems))
@@ -1029,7 +899,7 @@ public static class AdminConfigEndpoints
             return "member_trace_max_events_out_of_range";
         }
 
-        return ValidateScheduleHorizon(req);
+        return ValidateScheduleHorizon(req, current);
     }
 
     /// <summary>
@@ -1044,16 +914,21 @@ public static class AdminConfigEndpoints
     /// club promised to a division.
     /// </para>
     /// </summary>
-    private static string? ValidateScheduleHorizon(UpdateSettingsRequest req)
+    private static string? ValidateScheduleHorizon(UpdateSettingsRequest req, TenantSettingsView current)
     {
-        if (req.EffectiveScheduleMaterialisationDays is not { } horizon) return null;
-
-        if (horizon < ScheduleSettings.MinMaterialisationDays || horizon > ScheduleSettings.MaxMaterialisationDays)
+        var sentHorizon = req.EffectiveScheduleMaterialisationDays;
+        if (sentHorizon is { } asked
+            && (asked < ScheduleSettings.MinMaterialisationDays || asked > ScheduleSettings.MaxMaterialisationDays))
         {
             return "schedule_materialisation_days_out_of_range";
         }
+        if (sentHorizon is null && req.AdvanceBookingDays is null) return null;
 
-        return horizon < req.AdvanceBookingDays ? ScheduleSettings.AdvanceDaysExceedHorizon : null;
+        // Either key may now arrive alone (A4-1), so each is compared with the value that will
+        // be in force: the request's, else the stored one.
+        var horizon = sentHorizon ?? ScheduleSettings.MaterialisationDays(current);
+        var advance = req.AdvanceBookingDays ?? current.AdvanceBookingDays;
+        return horizon < advance ? ScheduleSettings.AdvanceDaysExceedHorizon : null;
     }
 
     private static void WriteOptionalAdminSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
@@ -1335,6 +1210,201 @@ public static class AdminConfigEndpoints
         if (req.RosterWindowMinutes is not null) doc["roster_window_minutes"] = ToElement(req.RosterWindowMinutes);
     }
 
+    /// <summary>The settings document as the console reads it — the GET, and the current values a stale save is answered with.</summary>
+    private static async Task<object> RenderSettingsAsync(
+        MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settingsAccessor, CancellationToken ct)
+    {
+        var row = await db.TenantSettings.AsNoTracking().FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
+        var doc = row is null ? new Dictionary<string, JsonElement>() : ParseObject(row.SettingsJson);
+
+        // Defaults come from TenantSettingsAccessor, never from literals here.
+        //
+        // They used to be written twice and had drifted: this endpoint answered 30
+        // minutes and 50 credits where the engine used 15 and 8. On a tenant with
+        // no explicit value that is not a cosmetic difference — the admin screen
+        // reads back what it was shown and PUTs it, so opening the settings page
+        // and pressing save doubled every slice and repriced every court, silently.
+        var defaults = await settingsAccessor.GetAsync(ct);
+
+        return new
+        {
+            // The document's version (A4-1): send it back with a save, and a save made from a
+            // page opened before somebody else's is refused 409 instead of reverting it.
+            version = SettingsDocument.VersionOf(row?.SettingsJson),
+            slice_minutes = GetInt(doc, "slice_minutes", defaults.SliceMinutes),
+            slice_price_credits = GetDecimal(doc, "slice_price_credits", defaults.DefaultSlicePriceCredits),   // the default for a NEW court; existing courts carry their own
+            advance_booking_days = GetInt(doc, "advance_booking_days", defaults.AdvanceBookingDays),
+            day_start_minute = GetInt(doc, "day_start_minute", defaults.DayStartMinute),
+            day_end_minute = GetInt(doc, "day_end_minute", defaults.DayEndMinute),
+
+            // The per-weekday map the engine has read since it existed, and this
+            // endpoint never served. A club could not change its opening hours: the
+            // screen offered only the flat pair above, the seeder names all seven days,
+            // so every save of "Day starts 09:00" reported success and changed nothing
+            // any member could see. Rendered from the parsed map, not echoed from the
+            // stored document, so the hours shown are the hours BookingService enforces.
+            operating_hours = defaults.OperatingHours.ToWire(),
+            penalty_pct = GetDecimal(doc, "penalty_pct", defaults.PenaltyPct),
+            grace_window_minutes = GetInt(doc, "grace_window_minutes", defaults.GraceWindowMinutes),
+            penalty_window_minutes = GetInt(doc, "penalty_window_minutes", defaults.PenaltyWindowMinutes),
+            timezone = GetString(doc, "timezone", defaults.Timezone),
+            button_map = defaults.Buttons.ToWire(),
+
+            // The nine keys the engine has always read and this endpoint never
+            // showed. They govern what a member is charged and when they may book,
+            // and until now the only way to change one was to edit a JSON column in
+            // the database by hand — on a live money system, with no audit trail and
+            // no validation.
+            credits_per_zar_regular = GetDecimal(doc, "credits_per_zar_regular", defaults.CreditsPerZarRegular),
+            // credits_per_zar_league is gone from this document: the league rate is the
+            // league GROUP's credits_per_zar now (D2), edited on the Groups screen.
+            topup_block_zar = GetDecimal(doc, "topup_block_zar", defaults.TopupBlockZar),
+            topup_max_zar_per_member = GetDecimal(doc, "topup_max_zar_per_member", defaults.TopupMaxZarPerMember),
+            member_per_day_max_minutes = GetInt(doc, "member_per_day_max_minutes", defaults.MemberPerDayMaxMinutes),
+            peak_hours = GetString(doc, "peak_hours", defaults.PeakHoursRange),
+            peak_advance_hours_for_regular = GetInt(doc, "peak_advance_hours_for_regular", defaults.PeakAdvanceHoursForRegular),
+            retention_years = GetInt(doc, "retention_years", defaults.RetentionYears),
+            no_show_lookback_days = GetInt(doc, "no_show_lookback_days", defaults.NoShowLookbackDays),
+
+            // The court-box and identification numbers (WI-2). Same rule as the
+            // economics keys: defaults come from TenantSettingsAccessor, never
+            // from literals here.
+            walk_up_max_minutes = GetInt(doc, "walk_up_max_minutes", defaults.WalkUpMaxMinutes),
+            heartbeat_seconds = GetInt(doc, "heartbeat_seconds", defaults.HeartbeatSeconds),
+            activation_forward_window_minutes = GetInt(doc, "activation_forward_window_minutes", defaults.ActivationForwardWindowMinutes),
+            activation_cue_window_minutes = GetInt(doc, "activation_cue_window_minutes", defaults.ActivationCueWindowMinutes),
+            qr_lifetime_seconds = GetInt(doc, "qr_lifetime_seconds", defaults.QrLifetimeSeconds),
+            roster_window_minutes = GetInt(doc, "roster_window_minutes", defaults.RosterWindowMinutes),
+
+            // The three door-gate numbers. The policy is rendered from the PARSED value
+            // rather than echoed from the stored document, for the same reason
+            // operating_hours is: a settings screen reads a value, shows it to a person
+            // and PUTs back whatever it was shown, so showing a stored value the engine
+            // does not honour would let the page report a policy that is not in force.
+            gate_unlock_seconds = GetInt(doc, "gate_unlock_seconds", defaults.GateUnlockSeconds),
+            gate_access_policy = defaults.GateAccessPolicy,
+            gate_early_entry_minutes = GetInt(doc, "gate_early_entry_minutes", defaults.GateEarlyEntryMinutes),
+
+            // Always present, never conditional: the console's settings type requires it
+            // and carries no client-side default, so an omitted key would be a page that
+            // cannot render rather than a page that falls back.
+            device_alert_cooldown_minutes = GetInt(
+                doc, "device_alert_cooldown_minutes", defaults.DeviceAlertCooldownMinutes),
+
+            // The five Wave 1 door settings, always present for the same reason the
+            // cooldown above is: the console's settings type carries no client-side
+            // default, so an omitted key is a page that cannot render rather than one that
+            // falls back.
+            //
+            // Rendered from the CLAMPED values, not echoed from the stored document, on
+            // the same argument operating_hours and gate_access_policy already make here:
+            // a settings screen reads a value, shows it to a person and PUTs back whatever
+            // it was shown, so showing a number the engine does not honour would let the
+            // page report a retention the worker is not deleting against.
+            door_log_retention_days = DoorSettings.LogRetentionDays(defaults),
+            door_refusal_spike_count = DoorSettings.RefusalSpikeCount(defaults),
+            door_refusal_spike_minutes = DoorSettings.RefusalSpikeMinutes(defaults),
+            club_contact_phone = DoorSettings.ContactPhone(defaults) ?? "",
+            club_contact_email = DoorSettings.ContactEmail(defaults) ?? "",
+
+            // The box's nine, the error log's three and the streams' seven — rendered from
+            // the CLAMPED values for the reason operating_hours, gate_access_policy and the
+            // door numbers already are: a settings screen reads a value, shows it to a
+            // person and PUTs back whatever it was shown, so showing a number the engine
+            // does not honour would let the page report a timeout the box is not running
+            // and a retention the worker is not deleting against.
+            lcd_revert_seconds = BoxSettings.LcdRevertSeconds(defaults),
+            lcd_choice_seconds = BoxSettings.LcdChoiceSeconds(defaults),
+            lcd_card_seconds = BoxSettings.LcdCardSeconds(defaults),
+            lcd_hint_seconds = BoxSettings.LcdHintSeconds(defaults),
+            scan_memory_seconds = BoxSettings.ScanMemorySeconds(defaults),
+            clock_trust_minutes = BoxSettings.ClockTrustMinutes(defaults),
+            relay_restore_enabled = BoxSettings.RelayRestoreEnabled(defaults),
+            device_fault_reporting = BoxSettings.DeviceFaultReporting(defaults),
+            device_fault_max_per_hour = BoxSettings.DeviceFaultMaxPerHour(defaults),
+
+            device_error_retention_days = MonitoringSettings.RetentionDays(defaults),
+            device_error_max_open_rows = MonitoringSettings.MaxOpenRows(defaults),
+            device_error_ingest_per_minute = MonitoringSettings.IngestPerMinute(defaults),
+
+            // The admin notifier's six (R23), from the clamped readers for the same reason.
+            fault_spike_count = AdminNotificationSettings.FaultSpikeCount(defaults),
+            fault_spike_minutes = AdminNotificationSettings.FaultSpikeMinutes(defaults),
+            application_reminder_hours = AdminNotificationSettings.ApplicationReminderHours(defaults),
+            admin_notification_retention_days = AdminNotificationSettings.RetentionDays(defaults),
+            topup_failure_cooldown_minutes = AdminNotificationSettings.TopUpFailureCooldownMinutes(defaults),
+            overdraft_cooldown_minutes = AdminNotificationSettings.OverdraftCooldownMinutes(defaults),
+
+            // Players and splits (D11–D13), from the clamped readers for the same reason.
+            share_lapse_hours = PlayerSettings.ShareLapseHours(defaults),
+            share_reminder_hours = PlayerSettings.ShareReminderHours(defaults),
+            share_reminder_max = PlayerSettings.ShareReminderMax(defaults),
+            player_nudge_limit = PlayerSettings.NudgeLimit(defaults),
+            directory_searches_per_minute = PlayerSettings.DirectorySearchesPerMinute(defaults),
+            member_quiet_start_minute = PlayerSettings.QuietStartMinute(defaults),
+            member_quiet_end_minute = PlayerSettings.QuietEndMinute(defaults),
+            recent_partner_days = PlayerSettings.RecentPartnerDays(defaults),
+            member_notification_retention_days = PlayerSettings.NotificationRetentionDays(defaults),
+            player_invites_per_booking = PlayerSettings.InvitesPerBooking(defaults),
+
+            // Play (D14), from the clamped readers for the same reason.
+            result_autoconfirm_hours = PlaySettings.AutoConfirmHours(defaults),
+            result_record_days = PlaySettings.RecordDays(defaults),
+            streak_rest_every_weeks = PlaySettings.RestEveryWeeks(defaults),
+            streak_rest_cap = PlaySettings.RestCap(defaults),
+            streak_pause_weeks_per_year = PlaySettings.PauseWeeksPerYear(defaults),
+            play_early_bird_before_minute = PlaySettings.EarlyBirdBeforeMinute(defaults),
+            play_night_owl_from_minute = PlaySettings.NightOwlFromMinute(defaults),
+
+            sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
+            control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
+            control_board_stale_multiplier = RealtimeSettings.StaleMultiplier(defaults),
+            realtime_fallback_after_failures = RealtimeSettings.FallbackAfterFailures(defaults),
+            realtime_fallback_window_seconds = RealtimeSettings.FallbackWindowSeconds(defaults),
+            realtime_poll_seconds_wallet = RealtimeSettings.PollSecondsWallet(defaults),
+            realtime_poll_seconds_control_board = RealtimeSettings.PollSecondsControlBoard(defaults),
+
+            // The four BE-ADMIN keys, rendered from the CLAMPED readers rather than
+            // echoed out of the stored document — otherwise the settings page round-trips
+            // a number the engine does not honour, which is the defect
+            // AdminSettingsHttpTests.Opening_the_settings_page_and_saving_it_changes_nothing
+            // is named for.
+            admin_bulk_max_items = BulkSettings.MaxItems(defaults),
+            schedule_materialisation_days = ScheduleSettings.MaterialisationDays(defaults),
+            schedule_max_rows_per_change = ScheduleSettings.MaxRowsPerChange(defaults),
+            schedule_worker_interval_seconds = (int)ScheduleSettings.WorkerInterval(defaults).TotalSeconds,
+
+            // The two night-trace keys, from TraceSettings for the same reason.
+            member_trace_enabled = TraceSettings.Enabled(defaults),
+            member_trace_max_events = TraceSettings.MaxEvents(defaults),
+
+            // GOAL items 3 and 19. Rendered from the CLAMPED values for the same reason
+            // operating_hours, gate_access_policy and the door numbers are: the settings
+            // screen reads a value, shows it to a person and PUTs back whatever it was
+            // shown, so a number the engine does not honour would let the page report a cap
+            // that is not being enforced.
+            member_max_slots_per_day = BookingLimits.MaxSlotsPerDay(defaults),
+            same_day_cap_relaxation = defaults.SameDayCapRelaxation,
+            same_day_relaxation_window_minutes = BookingLimits.SameDayRelaxationWindowMinutes(defaults),
+            walk_up_honours_day_cap = defaults.WalkUpHonoursDayCap,
+            member_groups_enabled = defaults.MemberGroupsEnabled,
+
+            // The club's money symbol. Rendered from the RESOLVED value, like
+            // operating_hours and gate_access_policy: a settings page that showed a symbol
+            // the product will not print would report a choice that is not in force.
+            currency_symbol = CurrencySymbol.For(defaults),
+
+            // The member-code rollout (§8). The two instants are server-written and read-only.
+            member_code_phase = MemberCodeSettings.Phase(defaults),
+            member_code_cutover_at = defaults.MemberCodeCutoverAt,
+            member_code_cutoff_at = defaults.MemberCodeCutoffAt,
+            member_code_cutoff_days = MemberCodeSettings.CutoffDays(defaults),
+            member_code_manual_hold = defaults.MemberCodeManualHold,
+            member_code_manual_hold_by = defaults.MemberCodeManualHoldBy,
+            member_code_manual_hold_at = defaults.MemberCodeManualHoldAt,
+        };
+    }
+
     private static Dictionary<string, JsonElement> ParseObject(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return new();
@@ -1374,14 +1444,17 @@ public static class AdminConfigEndpoints
 }
 
 public sealed record UpdateSettingsRequest(
-    int SliceMinutes,
-    decimal SlicePriceCredits,
-    int AdvanceBookingDays,
-    int DayStartMinute,
-    int DayEndMinute,
-    decimal PenaltyPct,
-    int GraceWindowMinutes,
-    int PenaltyWindowMinutes,
+    // The eight booking keys, optional since review round 4 (A4-1) like every key below them:
+    // omitted means unchanged. They were required, so the console had to send the whole page,
+    // and a page opened before a colleague's save put the colleague's old values back.
+    int? SliceMinutes = null,
+    decimal? SlicePriceCredits = null,
+    int? AdvanceBookingDays = null,
+    int? DayStartMinute = null,
+    int? DayEndMinute = null,
+    decimal? PenaltyPct = null,
+    int? GraceWindowMinutes = null,
+    int? PenaltyWindowMinutes = null,
     IReadOnlyList<string>? ButtonMap = null,
 
     /// <summary>
@@ -1604,7 +1677,15 @@ public sealed record UpdateSettingsRequest(
     /// Sets (true) or clears (false) the administrator's hold on the automatic rollout without
     /// moving the phase. A backward phase move sets it on its own; a forward one clears it.
     /// </summary>
-    [property: JsonPropertyName("member_code_manual_hold")] bool? MemberCodeManualHold = null)
+    [property: JsonPropertyName("member_code_manual_hold")] bool? MemberCodeManualHold = null,
+
+    /// <summary>
+    /// The <c>version</c> the GET answered, sent back with a save (A4-1). When it no longer
+    /// names the stored document the save is refused <c>409 settings_changed</c> with the
+    /// current values, and nothing is written. Absent means "no check" — an older console
+    /// still saves, now with only the keys it sends.
+    /// </summary>
+    string? Version = null)
 {
     /// <summary>The money symbol the club asked for, under either spelling.</summary>
     public string? EffectiveCurrencySymbol => CurrencySymbol ?? CurrencySymbolSnake;
