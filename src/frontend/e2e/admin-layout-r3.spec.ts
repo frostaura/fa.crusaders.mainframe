@@ -31,6 +31,12 @@ async function open(page: Page, path: string, routes: ApiRoute[], { width = 390,
   if (bigText) await page.addStyleTag({ content: "html { font-size: 32px; }" });
 }
 
+/**
+ * Every page here is a lazy chunk ("Opening the page…"); on a loaded machine the first one took
+ * longer than the 5 s default to arrive, so the first wait in each test allows for it.
+ */
+const ARRIVES = { timeout: 20_000 };
+
 /** How far the page scrolls sideways — the app shell scrolls `<main>`, not the document. */
 async function sideways(page: Page): Promise<number> {
   return page.evaluate(() => {
@@ -61,14 +67,14 @@ const LEDGER_ROW = (id: string, signed: number) => ({
 test.describe("X-4: admin pages at 200 % text on a 390 px phone", () => {
   test("Repeating bookings: the create button wraps inside itself and nothing scrolls sideways", async ({ page }) => {
     await open(page, "/admin/schedules", [{ path: "/api/v1/admin/schedules", body: { schedules: [], timezone: "Africa/Johannesburg" } }], { bigText: true });
-    await expect(page.getByRole("button", { name: /Create a repeating booking/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Create a repeating booking/ })).toBeVisible(ARRIVES);
     expect(await sideways(page)).toBeLessThanOrEqual(1);
     expect(await labelInside(page, /Create a repeating booking/), "the label runs out of its button").toBe(true);
   });
 
   test("Webhooks: New endpoint and the variable catalogue stay on the screen", async ({ page }) => {
     await open(page, "/admin/webhooks", [{ path: "/api/v1/admin/webhooks/", body: [] }], { bigText: true });
-    await expect(page.getByRole("button", { name: /New endpoint/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /New endpoint/ })).toBeVisible(ARRIVES);
     expect(await sideways(page)).toBeLessThanOrEqual(1);
     expect(await labelInside(page, /New endpoint/)).toBe(true);
   });
@@ -78,7 +84,7 @@ test.describe("X-4: admin pages at 200 % text on a 390 px phone", () => {
       id: `2222222${n}-2222-2222-2222-222222222222`, court_number: n, name: `Court ${n}`, court_type: "Squash", slice_price_credits: 50, is_active: true,
     }));
     await open(page, "/admin/courts", [{ path: "/api/v1/admin/courts/", body: courts }], { bigText: true });
-    await expect(page.getByRole("button", { name: "Edit Court 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit Court 1" })).toBeVisible(ARRIVES);
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
 
@@ -86,7 +92,7 @@ test.describe("X-4: admin pages at 200 % text on a 390 px phone", () => {
     await open(page, "/admin/ledger?from=2026-01-01&to=2026-01-31", [
       { path: "/api/v1/admin/ledger/", body: [LEDGER_ROW("1", 68473), LEDGER_ROW("2", -15556)] },
     ], { bigText: true });
-    await expect(page.locator("[data-ledger-total]").first()).toBeVisible();
+    await expect(page.locator("[data-ledger-total]").first()).toBeVisible(ARRIVES);
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
 });
@@ -137,7 +143,7 @@ test.describe("the member page", () => {
     await open(page, `/admin/members/${MEMBER_ID}/bookings`, memberRoutes(), { width: 320 });
     const card = page.locator("li[data-booking-id=b1]");
     const cancel = card.getByRole("button", { name: /^Cancel/ });
-    await expect(cancel).toBeVisible();
+    await expect(cancel).toBeVisible(ARRIVES);
     const [cardBox, cancelBox] = [await card.boundingBox(), await cancel.boundingBox()];
     expect(cancelBox!.x + cancelBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
     const charge = card.getByText("100.00 cr");
@@ -148,7 +154,7 @@ test.describe("the member page", () => {
   test("V-6: at 768 the balance is one line", async ({ page }) => {
     await open(page, `/admin/members/${MEMBER_ID}`, memberRoutes(), { width: 768 });
     const figure = page.getByTestId("member-balance");
-    await expect(figure).toHaveText("433.00 cr");
+    await expect(figure).toHaveText("433.00 cr", ARRIVES);
     const lineHeight = await figure.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     expect((await figure.boundingBox())!.height).toBeLessThanOrEqual(lineHeight + 1);
   });
@@ -157,7 +163,7 @@ test.describe("the member page", () => {
 test("V-7: at 320 the Night export note sits under its button, not squeezed beside it", async ({ page }) => {
   await open(page, `/admin/members/${MEMBER_ID}/night`, memberRoutes(), { width: 320 });
   const button = page.getByRole("button", { name: "Download CSV" });
-  await expect(button).toBeVisible();
+  await expect(button).toBeVisible(ARRIVES);
   const note = page.getByText(/The download has the member's name in it/);
   const [b, n] = [await button.boundingBox(), await note.boundingBox()];
   expect(n!.y, "the note is beside the button").toBeGreaterThanOrEqual(b!.y + b!.height - 1);
@@ -183,7 +189,7 @@ test("V-13: at 1280 the save bar does not cover the error under the field being 
   const bar = page.getByRole("region", { name: "Unsaved settings" });
   await expect(bar).toContainText(/needs? fixing/);
   const error = field.locator("xpath=ancestor::*[@data-setting][1]").locator("[data-slot=field-error]");
-  await expect(error).toBeVisible();
+  await expect(error).toBeVisible(ARRIVES);
   // Where the reviewer had it: the input just clear of the bar, its error under it. The window
   // is shortened until the bar's top sits 4px under the input — a resize, which is when the bar
   // re-measures and lifts what it covers.
@@ -203,7 +209,7 @@ test("V-5: at 1280 'Regenerate key' is on one line", async ({ page }) => {
     { path: "/api/v1/admin/devices", body: [] },
   ], { width: 1280 });
   const button = page.getByRole("button", { name: "Regenerate key" });
-  await expect(button).toBeVisible();
+  await expect(button).toBeVisible(ARRIVES);
   const lines = await button.evaluate((el) => {
     const range = document.createRange();
     range.selectNodeContents(el.querySelector("[data-slot=button-label]") ?? el);
