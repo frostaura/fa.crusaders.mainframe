@@ -133,7 +133,19 @@ describe("the streak", () => {
     expect(cells.map((c) => c.getAttribute("data-week-state"))).toEqual([
       "attended", "missed", "paused", "attended", "rest", "attended", "attended", "attended", "attended", "attended", "attended", "pending",
     ]);
-    expect(cells[4]).toHaveTextContent("Week of 2026-08-10: rest week");
+    // R2 F2-16 — the club's short date, never ISO.
+    expect(cells[4]).toHaveTextContent("Week of Mon 10 Aug: rest week");
+    expect(strip).not.toHaveTextContent(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("R2 F2-16: a week before the member joined is said as such — never 'missed'", async () => {
+    const base = myPlay();
+    const weeks = base.streak.weeks.map((w, i) => (i < 3 ? { ...w, state: "before_joining" as const } : w));
+    await render([{ path: PLAY, body: { ...base, streak: { ...base.streak, weeks } } }]);
+    const strip = await screen.findByRole("list", { name: STREAK_COPY.stripLabel });
+    const cells = within(strip).getAllByRole("listitem");
+    expect(cells[0]).toHaveTextContent("Week of Mon 13 Jul: before you joined");
+    expect(cells[0]).not.toHaveTextContent(/missed/);
   });
 
   it("turns the injury pause on, and says what is left", async () => {

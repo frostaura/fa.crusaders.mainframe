@@ -1,3 +1,4 @@
+import { clubCalendarDate } from "./clubClock";
 import { parseAmount, type AmountProblem } from "./amount";
 import { amountProblemSentence } from "./amountCopy";
 import { ApiError } from "./api";
@@ -280,7 +281,8 @@ export const STREAK_COPY = {
     ? `Play once a week to keep it going. Every ${every} weeks earns a rest week, up to ${cap}.`
     : "Play once a week to keep it going."),
   stripLabel: "The last 12 weeks, oldest first",
-  weekLabel: (weekStart: string, state: string) => `Week of ${weekStart}: ${state}`,
+  /** R2 F2-16 — "Week of Mon 13 Jul: missed", in the club's own short date, never ISO. */
+  weekLabel: (weekStart: string, state: string) => `Week of ${clubCalendarDate(weekStart)}: ${state}`,
 } as const;
 
 export const WEEK_STATE_WORD: Record<WeekState, string> = {
@@ -289,6 +291,7 @@ export const WEEK_STATE_WORD: Record<WeekState, string> = {
   paused: "paused",
   missed: "missed",
   pending: "this week, still open",
+  before_joining: "before you joined",
 };
 
 export const PAUSE_COPY = {

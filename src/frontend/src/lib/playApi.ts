@@ -115,7 +115,11 @@ export type PlaySettings = { monthly_goal_minutes: number | null; celebrations_e
 
 export type Ring = { month: string; goal_minutes: number; attended_minutes: number; sessions: number; reached: boolean };
 
-export type WeekState = "attended" | "rest" | "paused" | "missed" | "pending";
+/**
+ * `before_joining` (R2 F2-16): a week before the member was approved — never "missed". Absent from
+ * an older API, which sends those weeks as `missed`.
+ */
+export type WeekState = "attended" | "rest" | "paused" | "missed" | "pending" | "before_joining";
 
 export type Streak = {
   current_weeks: number;

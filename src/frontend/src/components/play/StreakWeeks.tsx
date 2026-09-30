@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 /**
  * The 12-week strip (§9.1.2), oldest first: played weeks filled, a rest week outlined with a
  * small moon, a paused week striped, a missed week empty, this week dashed. Each cell is named
- * in words for a screen reader ("Week of 2026-09-21: rest week") — the shapes differ as well as
+ * in words for a screen reader ("Week of Mon 21 Sep: rest week") — the shapes differ as well as
  * the colours, so the strip survives forced colours and colour blindness alike.
  */
 const CELL: Record<WeekState, string> = {
@@ -15,6 +15,7 @@ const CELL: Record<WeekState, string> = {
   paused: "border-control bg-bg-muted bg-stripes",
   missed: "border-control bg-bg-surface",
   pending: "border-dashed border-control bg-bg-surface",
+  before_joining: "border-transparent bg-bg-muted",
 };
 
 export function StreakWeeks({ weeks }: { weeks: Streak["weeks"] }) {
