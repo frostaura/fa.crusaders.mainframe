@@ -94,3 +94,35 @@ test("the charts repaint in the new theme's colours without a reload", async ({ 
   const tick = await page.locator("[data-testid=chart-frame] .recharts-cartesian-axis-tick-value").first().getAttribute("fill");
   expect(tick).toBe("#90A0B8");
 });
+
+test("the top-up amounts are a radio group: one tab stop, and every arrow key moves AND selects", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, memberRoutes());
+  await page.goto("/wallet/topup");
+  const group = page.getByRole("radiogroup", { name: "Amount" });
+  const field = page.getByRole("textbox", { name: /Or enter an amount/ });
+  const radio = (name: string) => group.getByRole("radio", { name, exact: true });
+  await expect(radio("R100")).toBeVisible();
+
+  await radio("R200").click();
+  await expect(radio("R200")).toHaveAttribute("aria-checked", "true");
+  // Roving tabindex: the checked radio is the group's one tab stop.
+  const tabStops = async () => group.getByRole("radio").evaluateAll((els) => els.filter((e) => e.getAttribute("tabindex") === "0").map((e) => e.textContent));
+  expect(await tabStops()).toEqual(["R200"]);
+
+  // Right and Down move forward and select; Left and Up move back and select.
+  for (const [key, name, value] of [
+    ["ArrowRight", "R500", "500"], ["ArrowDown", "R1000", "1000"], ["ArrowLeft", "R500", "500"], ["ArrowUp", "R200", "200"],
+  ] as const) {
+    await page.keyboard.press(key);
+    await expect(radio(name)).toBeFocused();
+    await expect(radio(name), `${key} selects ${name}`).toHaveAttribute("aria-checked", "true");
+    await expect(field).toHaveValue(value);
+    expect(await tabStops()).toEqual([name]);
+  }
+
+  // Leaving and coming back by Tab lands on the chosen amount, not the first.
+  await field.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(radio("R200")).toBeFocused();
+});
