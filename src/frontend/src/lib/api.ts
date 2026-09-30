@@ -2207,7 +2207,12 @@ export const endpoints = {
   wallet: (limit?: number, offset?: number) => readWallet(limit, offset),
   /** The same page with each share row's booking summarised (`share_bookings`) — the Wallet page's read. */
   walletWithShareBookings: (limit?: number, offset?: number) => readWallet(limit, offset, true),
-  schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),
+  /**
+   * `photos=url` (perf round, 2026-09-30): each face on the grid comes back as a public, immutable,
+   * year-cached `/api/v1/photos/{userId}/{hash}` URL instead of the same base64 image repeated per
+   * slot — 21 kB of a day became 3.7 kB gzipped, and a face is fetched once, not once per read.
+   */
+  schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}&photos=url`),
   book: (courtId: string, startsAt: string, sliceCount: number) =>
     api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
   cancelBooking: (bookingId: string) => api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/bookings/${bookingId}/cancel`),
