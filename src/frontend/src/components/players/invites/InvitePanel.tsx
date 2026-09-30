@@ -37,7 +37,7 @@ export function InvitePanel({ invite, port }: { invite: Invite; port: AcceptPort
       />
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6">
         <AcceptBody flow={flow} reasonId={reasonId} headed />
-        <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
           <AcceptActions flow={flow} reasonId={reasonId} dismiss={dismiss} />
         </div>
       </div>

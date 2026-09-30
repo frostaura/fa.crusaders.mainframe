@@ -57,7 +57,7 @@ function GoalBody(props: GoalSheetProps) {
     if (goal.ok) void save.run(goal.minutes);
   };
   return (
-    <DialogContent data-dialog="goal-sheet" closeLabel={GOAL_SHEET.cancel}>
+    <DialogContent data-dialog="goal-sheet">
       <DialogHeader>
         <DialogTitle>{GOAL_SHEET.title}</DialogTitle>
         <DialogDescription>{GOAL_SHEET.description}</DialogDescription>

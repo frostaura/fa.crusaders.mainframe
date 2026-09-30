@@ -168,3 +168,12 @@ describe("sending", () => {
     expect(put?.body).not.toHaveProperty("idempotencyKey");
   });
 });
+
+describe("the way out (R2 F2-14)", () => {
+  it("the × is 'Close …', never a second 'Cancel' beside the footer's Cancel", async () => {
+    serve();
+    const { dialog } = await openSheet();
+    expect(within(dialog).getAllByRole("button", { name: RESULT_SHEET.cancel })).toHaveLength(1);
+    expect(within(dialog).getByRole("button", { name: /^Close / })).toBeInTheDocument();
+  });
+});

@@ -184,7 +184,7 @@ describe("the accept sheet", () => {
     expect(sheet).toHaveTextContent(/held until 48 hours after each game/);
     expect(sheet).toHaveTextContent(/lapses to Sam — no debt either way/);
     expect(sheet).toHaveTextContent(INVITES_COPY.capCounts);
-    expect(within(sheet).getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: /^Close / })).toBeInTheDocument();
   });
 
   it("accepts with the share it SHOWED, applies the new balance and confirms calmly", async () => {

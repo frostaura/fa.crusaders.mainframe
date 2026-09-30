@@ -82,7 +82,7 @@ function SheetBody(props: ResultSheetProps) {
   const progress = matchProgress(draft.format, draft.rows);
   const reasonId = useId();
   return (
-    <DialogContent data-dialog="result-sheet" closeLabel={RESULT_SHEET.cancel}>
+    <DialogContent data-dialog="result-sheet">
       <DialogHeader>
         <DialogTitle>{props.editing ? RESULT_SHEET.editTitle : RESULT_SHEET.title}</DialogTitle>
         <DialogDescription>{RESULT_SHEET.description}</DialogDescription>

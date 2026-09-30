@@ -5,7 +5,7 @@ import type { AcceptFlow } from "./useAcceptFlow";
 
 /**
  * Accept · Decline · the way out — and, once Decline is pressed, its confirmation (it is final). Source order is dismiss first, primary last, so the dialog
- * footer's `flex-col-reverse` puts Accept on top on a phone and on the right on a desktop.
+ * footer (`flex-col`, F4-8) puts Accept at the foot on a phone, under the thumb, and on the right on a desktop — Tab meets them in the order they are painted.
  *
  * <p>
  * An Accept that cannot be pressed is `aria-disabled` with the reason as its description,

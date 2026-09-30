@@ -68,7 +68,7 @@ function ConfirmBody(props: ConfirmResultSheetProps) {
   const { result } = props;
   const error = flow.mode === "confirm" ? flow.confirm.error : flow.dispute.error;
   return (
-    <DialogContent data-dialog="confirm-result" closeLabel={CONFIRM_SHEET.cancel}>
+    <DialogContent data-dialog="confirm-result">
       <DialogHeader>
         <DialogTitle>{CONFIRM_SHEET.title}</DialogTitle>
         <DialogDescription>{CONFIRM_SHEET.description}</DialogDescription>
