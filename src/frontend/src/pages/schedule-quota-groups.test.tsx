@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, within } from "@testing-library/react";
 import SchedulePage from "./Schedule";
 import { forgetClubZone } from "../lib/clubZone";
+import { CELL_TEXT } from "../lib/bookingsCopy";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
@@ -61,12 +62,16 @@ describe("item 19 — the daily maximum, on the grid", () => {
   it("locks every free cell once the quota is gone, with a lock, a word and a dashed edge", async () => {
     open(dayWith({ maxSlotsPerDay: 4, bookedSlotsToday: 4, remainingToday: 0, adminExempt: false }));
 
-    const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've booked your 4 slots for today/ });
+    // R2 F1-5 — the fixture's day is not today, so the name says the day it is about.
+    const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've booked your 4 slots on Mon 9 Sep/ });
     // An ordinary enabled button, NOT `disabled` and not `aria-disabled` — it is operable, and
     // operating it is how the member finds out why. See the note on `UnavailableCell`.
     expect(cell).not.toBeDisabled();
     expect(cell).not.toHaveAttribute("aria-disabled");
-    expect(cell).toHaveTextContent("Full");
+    // R2 F1-6 — the court is free; what is used up is the member's own allowance, so the cell
+    // says "Your limit", never "Full" (which told them the court was taken).
+    expect(cell).toHaveTextContent(CELL_TEXT.limit);
+    expect(cell).not.toHaveTextContent("Full");
     // Colour is never the only carrier (SC 1.4.1): a dashed edge, a lock and a word. The fill is
     // the spec's `restricted` slot state (design-system.md: peak/group/quota) — it used to be
     // the Taken grey with a dashed `control` edge; P4 moved every rule-locked cell onto one state.
@@ -125,7 +130,7 @@ describe("item 19 — the daily maximum, on the grid", () => {
   it("offers the whole day when the payload says nothing about a cap", async () => {
     open(dayWith(undefined));
     expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
-    expect(screen.queryByText(/Full/)).toBeNull();
+    expect(screen.queryByText(CELL_TEXT.limit)).toBeNull();
   });
 
   it("offers the whole day when the rules block is present but carries no cap", async () => {

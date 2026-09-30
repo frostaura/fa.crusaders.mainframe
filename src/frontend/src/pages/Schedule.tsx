@@ -114,10 +114,10 @@ export default function BookingsPage() {
 
   const { openBook, openCancel } = sheets;
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
-    day: shown, rules, isAdmin, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
+    day: shown, rules, isAdmin, dayLabel: otherDay, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
     onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc)]),
     onOpenBooking: (slot: ScheduleSlot) => openCancel([gridBookingOf(slot, shown)]),
-  } : null), [shown, rules, isAdmin, explainer.explain, selection.api, liftHold, openBook, openCancel]);
+  } : null), [shown, rules, isAdmin, otherDay, explainer.explain, selection.api, liftHold, openBook, openCancel]);
 
   const collapsed = explainer.collapsedRows(schedule.timeSlices, schedule.pastThresholdMs, showEarlier, isAdmin, schedule.slotsByCourt);
 

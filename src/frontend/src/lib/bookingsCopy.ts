@@ -57,7 +57,8 @@ export const CELL_TEXT = {
   available: "Book",
   past: "—",
   closed: "Closed",
-  full: "Full",
+  /** The member's own daily cap is reached — the COURT is free, so never "Full" (R2 F1-6). */
+  limit: "Your limit",
   hold: "Club hold",
   mine: "Your court",
   onCourt: "On court",

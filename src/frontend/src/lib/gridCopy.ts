@@ -78,9 +78,12 @@ export function holdLiftLabel(where: string, label: string | null): string {
 
 /* ─────────────────────────── Item 19 — the daily maximum ─────────────────────────── */
 
-/** The word on a quota-locked cell's accessible name. */
-export function quotaCellLabel(where: string, maxSlots: number): string {
-  return `${where} — you've booked your ${maxSlots} ${maxSlots === 1 ? "slot" : "slots"} for today`;
+/**
+ * The word on a quota-locked cell's accessible name — "for today" only on today's grid; any
+ * other day is named ("on Thu 1 Oct"), because the count is the SHOWN day's (R2 F1-5).
+ */
+export function quotaCellLabel(where: string, maxSlots: number, dayLabel: string | null = null): string {
+  return `${where} — you've booked your ${maxSlots} ${maxSlots === 1 ? "slot" : "slots"} ${dayLabel ? `on ${dayLabel}` : "for today"}`;
 }
 
 /**
