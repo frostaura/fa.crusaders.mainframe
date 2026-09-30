@@ -1,6 +1,15 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
 import { clubCurrencySymbol } from "./currency";
+
+/**
+ * tailwind-merge only knows Tailwind's stock spacing scale, so our named steps (`touch`,
+ * `appbar`, `tabbar` — tailwind.config.ts) were never recognised as conflicting: `h-touch h-auto`
+ * kept BOTH, the earlier one won in the stylesheet, and a Button told to grow for wrapped text
+ * stayed 44px tall with its label spilling out (R3 F3 finding). Teaching it the names makes the
+ * caller's class win, as it does for every stock size.
+ */
+const twMerge = extendTailwindMerge({ extend: { theme: { spacing: ["touch", "appbar", "tabbar"] } } });
 
 /** shadcn-style className composer. */
 export function cn(...inputs: ClassValue[]) {

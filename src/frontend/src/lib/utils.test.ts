@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resetClubCurrencySymbol, setClubCurrencySymbol } from "./currency";
-import { describeTopUpRate, formatCredits, formatMinutes, formatRate, formatSignedCredits, formatMoney, MINUS } from "./utils";
+import { cn, describeTopUpRate, formatCredits, formatMinutes, formatRate, formatSignedCredits, formatMoney, MINUS } from "./utils";
 
 afterEach(resetClubCurrencySymbol);
 
@@ -200,3 +200,12 @@ describe("one minus sign", () => {
   });
 });
 
+
+describe("cn — our named spacing steps (R3)", () => {
+  it("lets a caller's size override the touch height instead of keeping both", () => {
+    expect(cn("h-touch", "h-auto")).toBe("h-auto");
+    expect(cn("min-h-touch", "min-h-0")).toBe("min-h-0");
+    expect(cn("size-touch", "size-4")).toBe("size-4");
+    expect(cn("pb-tabbar", "pb-4")).toBe("pb-4");
+  });
+});
