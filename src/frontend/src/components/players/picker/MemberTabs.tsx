@@ -5,7 +5,8 @@ import { StateBlock } from "@/components/ui/state-block";
 import { MagnifyingGlass, Star, UsersThree } from "@/components/ui/icons";
 import { ApiError } from "@/lib/api";
 import type { PublicMember, RecentPartner } from "@/lib/playersApi";
-import { PICKER, playersRefusal, playersWhen } from "@/lib/playersCopy";
+import { clubShortDate } from "@/lib/clubClock";
+import { PICKER, playersRefusal } from "@/lib/playersCopy";
 import { MemberRow, MemberRowsSkeleton } from "./MemberRow";
 import { MIN_QUERY, useDirectory, type useRecent, type Favourites } from "./usePickerReads";
 
@@ -54,7 +55,7 @@ export function FavouritesTab(props: MemberTabProps) {
 function recentDetail(p: RecentPartner): string {
   const played = PICKER.played(p.games);
   if (!p.last_played_at) return played;
-  const day = playersWhen(p.last_played_at).split(",")[0];
+  const day = clubShortDate(p.last_played_at);
   return `${played} · ${PICKER.lastPlayed(day)}`;
 }
 

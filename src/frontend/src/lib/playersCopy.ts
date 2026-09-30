@@ -1,6 +1,5 @@
 import { ApiError } from "./api";
-import { clubClock } from "./clubClock";
-import { clubZone } from "./clubZone";
+import { clubClock, clubShortDate } from "./clubClock";
 import { describeFailure } from "./errors";
 import { formatCredits } from "./utils";
 
@@ -77,16 +76,10 @@ export function listNames(names: readonly string[]): string {
 
 /**
  * "Wed 30 Sep, 18:00" in the club's zone — the one face every players screen writes an instant
- * in. Built from parts, as `bookFlow.clubDayLabel` is, because ICU's en-GB spells September
- * "Sept" and a players screen must not be the one place that disagrees with the grid.
+ * in: the club's ONE short date (`clubShortDate` — never "01 Oct", never "Sept") and its clock.
  */
 export function playersWhen(iso: string | number | Date, timezone?: string): string {
-  const at = new Date(iso);
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    weekday: "short", day: "numeric", month: "short", timeZone: timezone ?? clubZone(),
-  }).formatToParts(at);
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${part("weekday")} ${part("day")} ${part("month").slice(0, 3)}, ${clubClock(at, timezone)}`;
+  return `${clubShortDate(iso, timezone)}, ${clubClock(iso, timezone)}`;
 }
 
 /** "12.00 cr held until Sat 27 Sep, 20:00" — wherever the balance is explained (§3a). */

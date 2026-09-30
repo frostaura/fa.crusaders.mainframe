@@ -1,17 +1,14 @@
+import { clubShortDate } from "@/lib/clubClock";
 import { clubZone } from "@/lib/clubZone";
 
 /**
- * Dates as the play surfaces write them, in the club's zone — built from parts, as
- * `playersWhen` is, because ICU's en-GB spells September "Sept".
+ * Dates as the play surfaces write them, in the club's zone — through the club's one short date
+ * (`clubShortDate`), so a play screen never says "Sept" or "01 Oct" where the grid does not.
  */
 
 /** "14 Aug 2026". */
 export function playDate(iso: string, timezone?: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric", month: "short", year: "numeric", timeZone: timezone ?? clubZone(),
-  }).formatToParts(new Date(iso));
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${part("day")} ${part("month").slice(0, 3)} ${part("year")}`;
+  return clubShortDate(iso, timezone, { weekday: false, year: true });
 }
 
 const WEEKDAY_OFFSET: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };

@@ -31,8 +31,8 @@ export function kindWord(kind: string): string | null {
 
 /**
  * When, in the club's clock: "Today, 18:05" for today, "Wed 30 Sep, 18:00" before that.
- * `clubRowTime` decides whether it is the club's today; `playersWhen` writes every other day,
- * because ICU's en-GB spells September "Sept".
+ * `clubRowTime` decides whether it is the club's today; `playersWhen` (the club's one short date
+ * and its clock) writes every other day.
  */
 export function inboxWhen(iso: string, now: number, timezone?: string): string {
   const today = clubRowTime(iso, now, timezone) === clubClock(iso, timezone);
