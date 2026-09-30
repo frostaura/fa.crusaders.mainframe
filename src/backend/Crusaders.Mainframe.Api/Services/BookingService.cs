@@ -1412,7 +1412,8 @@ public sealed class BookingService
             ? new Email.ClubCancellation(waiveReasonRecorded, waived)
             : null;
         var cancellationMsg = EmailTemplates.BookingCancellation(
-            await _club.GetAsync(ct), user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
+            await _club.GetAsync(ct), user.Email, new Email.CancelledSlot(court.Name, await StartsAtLocalAsync(booking.StartsAt, ct)),
+            refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
         SendEmailInBackground(cancellationMsg, $"cancellation for {booking.Id}");
 
         await _bus.EmitAsync(new DomainEvent(

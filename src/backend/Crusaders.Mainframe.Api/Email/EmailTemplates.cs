@@ -44,6 +44,19 @@ public sealed record BookingConfirmationDetails(
 public sealed record ClubCancellation(string? Reason, bool PenaltyWaived);
 
 /// <summary>
+/// Which court time a cancellation mail is about: the court and, since review round 2 (B-7), the
+/// club-local start — "Court 1 · Thu 1 Oct, 10:15". A member with two bookings on one court
+/// could not tell which one had gone. A bare court name converts implicitly (older call sites).
+/// </summary>
+public sealed record CancelledSlot(string CourtName, string? WhenLocal = null)
+{
+    public static implicit operator CancelledSlot(string courtName) => new(courtName);
+
+    /// <summary>The court, then the time when there is one: <c>Court 1 · Thu 1 Oct, 10:15</c>.</summary>
+    public string Label => WhenLocal is { Length: > 0 } when ? $"{CourtName} · {when}" : CourtName;
+}
+
+/// <summary>
 /// What a top-up confirmation states. A record rather than six more parameters: with the club
 /// and the recipient it would be eight, past the complexity gate's six, and every one of the
 /// six is a decimal or a string that would transpose silently.
@@ -505,17 +518,19 @@ public static partial class EmailTemplates
     /// the deduction. <paramref name="byClub"/> is null when the member cancelled it themselves.
     /// </remarks>
     public static EmailMessage BookingCancellation(
-        ClubIdentity club, string to, string courtName, decimal refundedCredits, decimal? penaltyCredits,
+        ClubIdentity club, string to, CancelledSlot slot, decimal refundedCredits, decimal? penaltyCredits,
         ClubCancellation? byClub = null)
     {
-        var rows = new List<FactRow> { new("Court", courtName), new("Refunded to your balance", Cr(refundedCredits)) };
+        var rows = new List<FactRow> { new("Court", slot.CourtName) };
+        if (slot.WhenLocal is { Length: > 0 } when) rows.Add(new FactRow("When", when));
+        rows.Add(new FactRow("Refunded to your balance", Cr(refundedCredits)));
         if (penaltyCredits is > 0) rows.Add(new FactRow("Late-cancellation penalty", Cr(penaltyCredits.Value)));
 
         var blocks = new List<EmailBlock>
         {
             new Paragraph(byClub is null
-                ? $"Your booking on {courtName} has been cancelled and the slot is free again."
-                : $"The club cancelled your booking on {courtName} on your behalf. You did not do this."),
+                ? $"Your booking on {slot.Label} has been cancelled and the slot is free again."
+                : $"The club cancelled your booking on {slot.Label} on your behalf. You did not do this."),
         };
         if (byClub?.Reason?.Trim() is { Length: > 0 } reason) blocks.Add(new Callout(CalloutTone.Info, $"Reason given by the club: {reason}"));
         blocks.Add(new Facts(rows));
@@ -523,7 +538,7 @@ public static partial class EmailTemplates
         blocks.Add(new Footnote("Each of these is its own line in your wallet. The refund and any penalty are separate movements, not one figure."));
 
         return EmailChrome.Compose(club, to, new EmailContent(
-            Subject: byClub is null ? $"Booking cancelled — {courtName}" : $"The club cancelled your booking — {courtName}",
+            Subject: byClub is null ? $"Booking cancelled — {slot.Label}" : $"The club cancelled your booking — {slot.Label}",
             Preheader: $"{Cr(refundedCredits)} back on your balance.",
             Heading: byClub is null ? "Cancelled" : "Cancelled by the club",
             Blocks: blocks,
