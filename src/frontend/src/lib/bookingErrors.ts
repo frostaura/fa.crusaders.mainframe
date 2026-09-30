@@ -2,6 +2,7 @@ import { ApiError } from "./api";
 import { NotSent, UnsureOutcome } from "./bookingOutcome";
 import type { SplitCancel } from "./bookingsApi";
 import { formatCredits } from "./utils";
+import { rateLimitedSentence } from "./errors";
 
 /**
  * Booking refusals, turned into sentences a member can act on.
@@ -110,6 +111,20 @@ export const NOT_SENT_TEXT: Record<BookingAction, string> = {
   book: "You're offline, so nothing was sent — nothing was booked and no credit was taken. Try again when you're back online.",
   cancel: "You're offline, so nothing was sent — the booking is still there and no credit moved. Try again when you're back online.",
 };
+
+/**
+ * R4 I4-3 — the club's rate limit refused the write before it ran (`429 { error: "rate_limited",
+ * retry_after_seconds }`), so nothing happened — said, with the wait the club gave. It read as
+ * the generic "Couldn't make that booking", and the seconds were never used.
+ */
+export const RATE_LIMITED_TAIL: Record<BookingAction, string> = {
+  book: "Nothing was booked and no credit was taken.",
+  cancel: "The booking is still there and no credit moved.",
+};
+
+function describeRateLimited(e: ApiError, action: BookingAction): string {
+  return `${rateLimitedSentence(Number(e.detail("retry_after_seconds")) || null)} ${RATE_LIMITED_TAIL[action]}`;
+}
 
 /** The sign-out sentence. The 401 handler in `lib/api.ts` does the actual redirect. */
 export const SESSION_LOST_TEXT = "Your session has expired — sign in again to book.";
@@ -274,6 +289,7 @@ export function describeBookingError(e: unknown, fallback: string, context: Book
   // 400 `tenant_unresolved` from the tenancy middleware before authorization ever runs.
   // Both mean the same thing to the person holding the phone.
   if (e.status === 401 || e.code === "tenant_unresolved") return SESSION_LOST_TEXT;
+  if (e.status === 429) return describeRateLimited(e, action);
   if (e.status >= 500) return SERVER_DOWN_TEXT[action];
 
   const withFigures = e.code !== null ? FIGURED[e.code] : undefined;
