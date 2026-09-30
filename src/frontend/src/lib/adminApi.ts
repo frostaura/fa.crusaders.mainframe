@@ -195,6 +195,8 @@ export type ControlBoardLights = {
 
 export type ControlBoardBooking = {
   booking_id?: string | null;
+  /** The CURRENT booking's minutes left (the next one says `minutes_until` instead). */
+  minutes_remaining?: number | null;
   starts_at?: string | null;
   ends_at?: string | null;
   status?: string | null;
@@ -249,7 +251,20 @@ export type ControlBoardView = {
   slice_minutes?: number;
   club_day?: string;
   courts: ControlBoardCourt[];
+  /** The club's realtime tuning, so the wall's poll fallback uses the club's numbers. */
+  realtime?: {
+    poll_seconds?: number;
+    resync_seconds?: number;
+    fallback_after_failures?: number;
+    fallback_window_seconds?: number;
+  };
 };
+
+/**
+ * What both stream-ticket routes answer (`MintTicket` in the control-board and monitoring
+ * endpoints): the one-minute ticket and how long it lives.
+ */
+export type StreamTicket = { ticket: string; expires_in_seconds?: number };
 
 // ---------------------------------------------------------------------------------------
 // IoT errors — GOAL item 7 (D2 §7)
@@ -272,6 +287,8 @@ export type DeviceErrorRow = {
   device_code?: string | null;
   device_name?: string | null;
   device_kind?: string | null;
+  /** The MAC the caller claimed, for a fault with no live board behind it. */
+  claimed_mac?: string | null;
   /** `device` when a board reported it, `server` when the API detected it. */
   source?: string | null;
   code: string;
@@ -305,6 +322,8 @@ export type DeviceErrorPage = {
   cursor?: string | null;
   retention_days?: number;
   timezone?: string;
+  /** The instants the filter resolved to. */
+  range?: { from: string; to: string };
   counts?: DeviceErrorCounts;
 };
 
@@ -321,6 +340,9 @@ export type MonitoringSummary = {
   }>;
   last_24h?: { opened?: number; resolved?: number };
   worst_offender?: { device_code?: string | null; open?: number } | null;
+  retention_days?: number;
+  timezone?: string;
+  generated_at?: string;
 };
 
 export type DeviceErrorFilters = AdminRange & {
@@ -452,6 +474,8 @@ export type AdminChangePage = {
   total?: number;
   cursor?: string | null;
   timezone?: string;
+  /** The instants the filter resolved to. */
+  range?: { from: string; to: string };
   /** The server's own sentence about how long these are kept. Never composed here. */
   retention?: string | null;
 };
@@ -626,6 +650,9 @@ export type MemberGroup = {
     flat_slice_price_credits?: number | null;
     /** What one slice would actually cost on this club's courts, computed by the server. */
     effective_example_credits?: number | null;
+    /** The cheapest and dearest slice across the club's courts, and each court's own price. */
+    effective_range_credits?: { min: number; max: number };
+    effective_by_court?: Array<{ court_id: string; court_name: string; credits: number }>;
   };
   caps?: {
     max_slots_per_day?: number | null;
@@ -651,6 +678,12 @@ export type MemberGroup = {
    */
   peak_priority?: boolean | null;
 };
+
+/**
+ * What a group create or edit ANSWERS: the id and the name, nothing else
+ * (`MemberGroupEndpoints.CreateAsync` / `PatchAsync`). The page re-reads the list after a save.
+ */
+export type MemberGroupSaved = { id: string; name: string };
 
 /** A group's say on the peak window: grants, withholds, or none. */
 export type PeakSay = boolean | null;
@@ -715,17 +748,21 @@ export type MemberGroupPreview = {
  * </p>
  */
 export type MemberBookingRules = {
+  /** The club day the rules are for. */
+  day?: string;
   groups?: Array<{ id: string; name: string; description?: string | null }>;
   allowed_windows?: Array<{ start: string; end: string }>;
   club_hours?: { start: string; end: string } | null;
   slice_price_credits?: number | null;
+  /** The slice price across the club's courts, and per court (`slice_price_credits` is the cheapest). */
+  slice_price_range_credits?: { min: number; max: number };
+  slice_prices_by_court?: Array<{ court_id: string; court_name: string; credits: number }>;
   max_slots_per_day?: number | null;
   max_minutes_per_day?: number | null;
   advance_booking_days?: number | null;
   empty_window_reason?: { groups?: string[]; day?: string } | null;
   /** The server's spelling of the same fact: the groups whose times leave nothing, or null. */
   empty_window_groups?: string[] | null;
-  changes_from_current?: Record<string, unknown> | null;
   /** D2: the top-up rate and peak standing these groups add up to. */
   tariff?: MemberTariff;
 };
@@ -751,11 +788,24 @@ export const ADJUSTMENT_REASON_CODES = ["goodwill", "correction", "refund_outsid
 export const ADJUST_REASON_CODES = [...TOP_UP_REASON_CODES, ...ADJUSTMENT_REASON_CODES] as const;
 export type AdjustReasonCode = typeof ADJUST_REASON_CODES[number];
 
+/** `POST /admin/members/{membershipId}/code/reset` (`AdminMemberEndpoints.ResetCodeAsync`). */
+export type MemberCodeResetResult = {
+  rotated: boolean;
+  generation: number;
+  passkeys_revoked: boolean;
+  passkeys_removed: number;
+  /** Whether the member's email went; the reset stands either way. */
+  member_notified: boolean;
+};
+
 export type AdminAdjustResult = {
   entry_id: string;
   /** `AdminTopUp` or `AdminAdjustment`, decided by the reason code. */
   type?: string;
+  reason_code?: string;
   amount_credits: number;
+  /** Rand the desk said it took, on a top-up; null on an adjustment. */
+  zar_received?: number | null;
   /**
    * Where the member was BEFORE, from the server.
    *
@@ -767,7 +817,8 @@ export type AdminAdjustResult = {
    */
   balance_before_credits?: number | null;
   balance_after_credits: number;
-  member?: AdminPerson | null;
+  /** Who was moved — the id and the account's email (`WalletEndpoints.AdjustmentResult`), never a name. */
+  member?: { user_id: string; email: string } | null;
 };
 
 // ---------------------------------------------------------------------------------------
@@ -784,7 +835,7 @@ export const adminEndpoints = {
    * token in the query string — was found in nginx's `$request` log once already. A control
    * board ticket must not open a wallet stream, which is why each stream mints its own.
    */
-  controlBoardTicket: () => api.post<{ ticket: string }>("/api/v1/admin/control-board/stream-ticket", {}),
+  controlBoardTicket: () => api.post<StreamTicket>("/api/v1/admin/control-board/stream-ticket", {}),
   controlBoardStreamUrl: (ticket: string) =>
     `/api/v1/admin/control-board/stream?ticket=${encodeURIComponent(ticket)}`,
 
@@ -800,7 +851,7 @@ export const adminEndpoints = {
   /** Several. Partial by design — the answer is one row per id, and the screen shows them. */
   resolveErrors: (ids: string[], note: string) =>
     api.post<AdminBulkResult>("/api/v1/admin/monitoring/errors/resolve-bulk", { ids, note }),
-  monitoringTicket: () => api.post<{ ticket: string }>("/api/v1/admin/monitoring/stream-ticket", {}),
+  monitoringTicket: () => api.post<StreamTicket>("/api/v1/admin/monitoring/stream-ticket", {}),
   monitoringStreamUrl: (ticket: string) =>
     `/api/v1/admin/monitoring/stream?ticket=${encodeURIComponent(ticket)}`,
 
@@ -868,7 +919,7 @@ export const adminEndpoints = {
   // --- Member groups (items 3 + 19) ------------------------------------------------------
   memberGroups: () => api.get<{ groups: MemberGroup[] }>("/api/v1/admin/member-groups"),
   memberGroupCreate: (body: MemberGroupBody) =>
-    api.post<MemberGroup>("/api/v1/admin/member-groups", body),
+    api.post<MemberGroupSaved>("/api/v1/admin/member-groups", body),
   /**
    * `reason` is the admin's own words for the change record — the screen requires one to archive
    * (D2: an archive changes what every member of the group pays and may book).
@@ -876,7 +927,7 @@ export const adminEndpoints = {
   memberGroupUpdate: (
     id: string,
     body: Partial<MemberGroupBody> & { status?: "active" | "archived"; reason?: string },
-  ) => api.patch<MemberGroup>(`/api/v1/admin/member-groups/${id}`, body),
+  ) => api.patch<MemberGroupSaved>(`/api/v1/admin/member-groups/${id}`, body),
   /** Refused, never cascaded, while the group has members — archiving is the escape. */
   memberGroupDelete: (id: string) => api.del<void>(`/api/v1/admin/member-groups/${id}`),
   memberGroupMembers: (id: string, page: { cursor?: string; limit?: number } = {}) =>
@@ -922,7 +973,7 @@ export const adminEndpoints = {
    * Takes the MEMBERSHIP id.
    */
   memberCodeReset: (membershipId: string, body: { revokePasskeys: boolean; reason: string }) =>
-    api.post<{ rotated: boolean; generation: number; passkeys_revoked: boolean; passkeys_removed: number }>(
+    api.post<MemberCodeResetResult>(
       `/api/v1/admin/members/${membershipId}/code/reset`, { revoke_passkeys: body.revokePasskeys, reason: body.reason }),
   adjustCredit: (
     userId: string,

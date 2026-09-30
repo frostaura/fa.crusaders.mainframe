@@ -78,6 +78,8 @@ export type MemberDetail = {
   account_status: string;
   /** Why the application was turned down, when it was (F3.10). Absent from an API that predates it. */
   rejection_reason?: string | null;
+  /** Who approved or turned down the application, and when; null while nobody has. */
+  review?: { reviewed_at: string; reviewed_by_user_id: string | null; reviewed_by_name: string | null } | null;
   email_verified: boolean;
   created_at: string;
   last_login_at: string | null;
@@ -95,6 +97,8 @@ export type MemberDetail = {
    */
   held_credits?: number;
   held_until?: string | null;
+  /** The held credit per share deadline, soonest first, summing to `held_credits`. */
+  held_parts?: { credits: number; until: string }[];
   owed_back_credits?: number;
   passkey_count: number;
   fingerprints: { count: number; enrolments: FingerprintEnrolment[] };
