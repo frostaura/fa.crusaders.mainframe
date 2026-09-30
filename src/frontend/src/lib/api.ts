@@ -429,7 +429,50 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (!movesMoney(method, path)) return send<T>(method, path, body);
   const listener = moneyRequestListener;
   listener?.("start");
-  try { return await send<T>(method, path, body); } finally { listener?.("end"); }
+  noteWalletMoved();
+  try { return await send<T>(method, path, body); } finally { noteWalletMoved(); listener?.("end"); }
+}
+
+/* ─────────────────────────────── one wallet read, shared ─────────────────────────────── */
+
+/**
+ * Perf lane (2026-09-30) — the wallet was read twice on arrival: the credits chip's first read
+ * and the page's own (`/wallet`, and the My Code checklist's), the same ledger page over the same
+ * slow link at the same moment.
+ *
+ * <p>
+ * A first-page read now JOINS a first-page read that is still IN FLIGHT when that one asked for
+ * at least as many rows, for the same signed-in token, and nothing can have moved the money since
+ * it was sent — no money-moving request of this tab's has started or finished, and no wallet
+ * stream frame has landed (`noteWalletMoved`). Its rows are cut to the page asked for. A finished
+ * read is never reused: a Refresh, or a read after a movement, always goes to the club.
+ * </p>
+ */
+const WALLET_DEFAULT_LIMIT = 100; // the server's `limit ?? 100`
+let walletEpoch = 0;
+let walletInFlight: { token: string | null; epoch: number; limit: number; promise: Promise<WalletResponse> } | null = null;
+
+/** Something may have moved this member's money: no wallet read sent before now may be joined. */
+export function noteWalletMoved() {
+  walletEpoch += 1;
+}
+
+function readWallet(limit?: number, offset?: number): Promise<WalletResponse> {
+  const want = limit ?? WALLET_DEFAULT_LIMIT;
+  const token = tokenStore.get();
+  const firstPage = !offset;
+  const shared = walletInFlight;
+  if (firstPage && shared && shared.token === token && shared.epoch === walletEpoch && shared.limit >= want) {
+    return shared.promise.then((w) => (w.entries.length > want ? { ...w, entries: w.entries.slice(0, want), limit: want } : w));
+  }
+  const promise = api.get<WalletResponse>(`/api/v1/wallet${qs({ limit, offset })}`);
+  if (firstPage) {
+    const entry = { token, epoch: walletEpoch, limit: want, promise };
+    walletInFlight = entry;
+    const done = () => { if (walletInFlight === entry) walletInFlight = null; };
+    promise.then(done, done);
+  }
+  return promise;
 }
 
 async function send<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
@@ -2135,7 +2178,8 @@ export const endpoints = {
     api.post<{ signed_out: boolean; passkeys_revoked: boolean; passkeys_removed: number }>(
       "/api/v1/me/sessions/revoke-all", { revoke_passkeys: revokePasskeys }),
 
-  wallet: (limit?: number, offset?: number) => api.get<WalletResponse>(`/api/v1/wallet${qs({ limit, offset })}`),
+  /** The member's ledger page — joined to one already in flight when that is safe (`readWallet`). */
+  wallet: (limit?: number, offset?: number) => readWallet(limit, offset),
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),
   book: (courtId: string, startsAt: string, sliceCount: number) =>
     api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),

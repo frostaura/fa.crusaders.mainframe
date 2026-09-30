@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, endpoints, setMoneyRequestListener, STREAM_SILENCE_MS, tokenStore } from "./api";
+import { ApiError, endpoints, noteWalletMoved, setMoneyRequestListener, STREAM_SILENCE_MS, tokenStore } from "./api";
 import { heldPartsOf, type HeldPart } from "./bookingsApi";
 
 /**
@@ -232,7 +232,11 @@ export function sseTransport(): BalanceTransport {
         heardFrom();
         try {
           const msg = JSON.parse(raw) as BalanceFrame;
-          if (typeof msg.balance_credits === "number") onFrame(msg);
+          if (typeof msg.balance_credits === "number") {
+            // A read already on its way may predate this movement: never join it (api `readWallet`).
+            noteWalletMoved();
+            onFrame(msg);
+          }
         } catch { /* malformed payloads are ignored */ }
       };
 
