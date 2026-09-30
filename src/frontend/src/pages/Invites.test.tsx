@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useLocation, useNavigate } from "react-router-dom";
 import InvitesPage from "./Invites";
 import { refuse, renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../test/harness";
 import {
@@ -128,6 +129,44 @@ describe("the list", () => {
     const before = stub.calls.filter((c) => c.path === "/api/v1/me/invites").length;
     fireEvent.click(screen.getByRole("button", { name: INVITES_COPY.refresh }));
     await waitFor(() => expect(stub.calls.filter((c) => c.path === "/api/v1/me/invites").length).toBe(before + 1));
+  });
+});
+
+/** The phone's Back, and where the router is — inside the page's router. */
+function BackProbe() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  return <><button type="button" onClick={() => navigate(-1)}>Phone back</button><output data-testid="where">{pathname}</output></>;
+}
+
+describe("Back with the accept sheet open (R1, F1.19's rule)", () => {
+  function openWithBack() {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
+      { path: "/api/v1/me/invites", body: { items: [invite()], count: 1 } },
+    ]);
+    renderPage(<><InvitesPage /><BackProbe /></>, { initialEntries: ["/bookings", "/bookings/invites"], reactStrictMode: true });
+  }
+
+  it("closes the sheet and stays on Invites", async () => {
+    openWithBack();
+    await openSheet();
+    fireEvent.click(screen.getByRole("button", { name: "Phone back", hidden: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("where")).toHaveTextContent("/bookings/invites");
+    expect(await screen.findByRole("list", { name: INVITES_COPY.listLabel })).toBeInTheDocument();
+  });
+
+  it("closed with its own button, a later Back leaves Invites as it would have", async () => {
+    openWithBack();
+    const sheet = await openSheet();
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.cancel }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/bookings/invites"));
+    fireEvent.click(screen.getByRole("button", { name: "Phone back" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(/^\/bookings$/));
   });
 });
 

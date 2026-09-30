@@ -11,6 +11,7 @@ import { useMyInvites } from "@/components/players/invites/useMyInvites";
 import { usePendingLinkInvite } from "@/components/players/invites/usePendingLinkInvite";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
+import { useSheetHistory } from "@/lib/bookingSheetHistory";
 
 /**
  * Invites (`/bookings/invites`) — the games friends have asked the member into, waiting for a
@@ -82,6 +83,9 @@ function useSheet(items: Invite[] | null) {
     setSession((n) => n + 1);
     setOpen(true);
   }, []);
+  // R1 (F1.19's rule) — the phone's Back closes the sheet and stays on Invites.
+  const close = useCallback(() => setOpen(false), []);
+  useSheetHistory(open, close, "accept");
   const latest = opened ? items?.find((i) => i.participant_id === opened.participant_id) ?? opened : null;
   return { invite: latest, open, setOpen, openFor, session };
 }
