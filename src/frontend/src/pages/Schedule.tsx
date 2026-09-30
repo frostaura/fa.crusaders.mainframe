@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ActionBar, ActionBarItem } from "@/components/ui/action-bar";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,8 @@ import { useBookingFor, type BookingFor } from "../components/bookings/useBookin
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { useScheduleLiveness } from "../components/bookings/useScheduleLiveness";
 import { RecentGames } from "../components/bookings/RecentGames";
-import { CancelSheet, type CancelledOutcome } from "../components/bookings/CancelSheet";
+import type { CancelledOutcome } from "../components/bookings/CancelSheet";
+import { LazyCancelSheet, loadCancelSheet, usePrefetchWhen } from "../components/bookings/lazyParts";
 import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
@@ -94,6 +95,7 @@ export default function BookingsPage() {
   useClearOnDayChange(date, selection, explainer);
 
   const sheets = useSheets();
+  usePrefetchWhen(shown !== null, loadCancelSheet);
   const { sending, setSending } = sheets;
   const holding = useMemo(() => holdingKeys(sending, day?.sliceMinutes ?? 15), [sending, day?.sliceMinutes]);
   const liftHold = useHoldLift({ day, setDay, reconcile, toast });
@@ -209,11 +211,17 @@ export default function BookingsPage() {
         onSending={setSending} onBusyChange={sheets.onBookBusy}
         cancelTerms={day ? { penaltyPct: day.penaltyPct, windowMinutes: day.penaltyWindowMinutes } : null}
       />
-      <CancelSheet
-        open={sheets.cancelOpen} onOpenChange={sheets.setCancelOpen} bookings={sheets.cancelBookings}
-        isAdmin={isAdmin} onCancelled={onCancelled} onStale={() => void reconcile()} reread={reconcile}
-        onCloseAutoFocus={sheets.returnFocus} onBusyChange={sheets.onCancelBusy}
-      />
+      {/* Perf — lazy: mounted from its first opening (and kept, so it closes whole), fetched at
+          idle once the day is on screen. */}
+      {sheets.cancelMounted ? (
+        <Suspense fallback={null}>
+          <LazyCancelSheet
+            open={sheets.cancelOpen} onOpenChange={sheets.setCancelOpen} bookings={sheets.cancelBookings}
+            isAdmin={isAdmin} onCancelled={onCancelled} onStale={() => void reconcile()} reread={reconcile}
+            onCloseAutoFocus={sheets.returnFocus} onBusyChange={sheets.onCancelBusy}
+          />
+        </Suspense>
+      ) : null}
     </PageShell>
   );
 }
@@ -364,13 +372,16 @@ function useSheets() {
   const [bookOpen, setBookOpen] = useState(false);
   const [cancelBookings, setCancelBookings] = useState<GridBooking[]>([]);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelMounted, setCancelMounted] = useState(false);
   // From a sheet's opening until its close has finished (its focus return) — see `BoardProps.underSheet`.
   const [underSheet, setUnderSheet] = useState(false);
   // The slots a booking is being sent for — "Holding…" on the grid until the club answers.
   const [sending, setSending] = useState<SelectedSlot[] | null>(null);
   const opener = useRef<Element | null>(null);
   const openBook = useCallback((slots: SelectedSlot[]) => { opener.current = document.activeElement; setUnderSheet(true); setBookSlots(slots); setBookOpen(true); }, []);
-  const openCancel = useCallback((bookings: GridBooking[]) => { opener.current = document.activeElement; setUnderSheet(true); setCancelBookings(bookings); setCancelOpen(true); }, []);
+  const openCancel = useCallback((bookings: GridBooking[]) => {
+    opener.current = document.activeElement; setUnderSheet(true); setCancelBookings(bookings); setCancelMounted(true); setCancelOpen(true);
+  }, []);
   // R4 I4-1 — a sheet whose money write is on its way stays open, whatever asks it to close.
   const bookBusy = useRef(false);
   const cancelBusy = useRef(false);
@@ -383,7 +394,7 @@ function useSheets() {
   // cell goes back to what the day says, as it did before the mark existed.
   const returnFocus = useCallback((event: Event) => { setUnderSheet(false); setSending(null); backToGrid(event, opener.current); }, []);
   return {
-    bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel, returnFocus,
+    bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, cancelMounted, setCancelOpen, openBook, openCancel, returnFocus,
     underSheet, sending, setSending, onBookBusy, onCancelBusy,
   };
 }

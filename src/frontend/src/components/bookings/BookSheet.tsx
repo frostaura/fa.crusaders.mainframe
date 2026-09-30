@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { Suspense, useEffect, useId, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,8 @@ import { slotCount, type BookAs } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
 import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
 import { ConfirmPlayers, ResultPlayers } from "./PlayersOutcomeView";
-import { SplitStep } from "./SplitStep";
+import { LazySplitStep, loadSplitStep, usePrefetchWhen } from "./lazyParts";
+import { Skeleton } from "@/components/ui/skeleton";
 import { refusalSentence, useBookFlow, type BookFlow, type BookFlowInput } from "./useBookFlow";
 import { useSendingGuard } from "./useSendingGuard";
 
@@ -158,9 +159,20 @@ function sheetNote(flow: BookFlow): string | null {
 
 function StepView(props: StepViewProps) {
   const { flow, isAdmin, reasonId, actorUserId } = props;
+  // Perf — the split step is fetched once somebody is asked for a share (the step it opens).
+  usePrefetchWhen(flow.players.paying, loadSplitStep);
   const summary = <SlotSummary lines={flow.lines} label={BOOK_SHEET.summaryLabel} more={BOOK_SHEET.summaryMore} />;
   if (flow.step === "players") return <>{summary}<PlayersStep players={flow.players} actorUserId={actorUserId} /></>;
-  if (flow.step === "split") return <>{summary}<SplitStep players={flow.players} /></>;
+  if (flow.step === "split") {
+    return (
+      <>
+        {summary}
+        <Suspense fallback={<Skeleton aria-hidden="true" className="h-48 w-full" />}>
+          <LazySplitStep players={flow.players} />
+        </Suspense>
+      </>
+    );
+  }
   if (flow.step === "slots") {
     return (
       <>
