@@ -24,7 +24,7 @@ export function MemberOverview() {
   const { detail, userId } = useMemberDetail();
   const zone = zoneNow();
   const root = `/admin/members/${encodeURIComponent(userId)}`;
-  const people = useOthersOnCourt(detail.next_bookings.map((b) => b.booking_id), userId);
+  const people = useOthersOnCourt(detail.next_bookings.map((b) => b.booking_id), userId, detail.full_name);
   return (
     <div className="flex flex-col gap-8">
       <Section

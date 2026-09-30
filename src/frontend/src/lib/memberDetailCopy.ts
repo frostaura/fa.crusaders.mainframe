@@ -219,6 +219,9 @@ export const BOOKINGS_TAB_COPY = {
   bookedBySelf: "Booked by the member",
   bookedBy: (name: string) => `Booked by ${name}`,
   bookedByUnknown: "Booked by the club",
+  /** C6: a seat on somebody else's game — theirs to play, the organiser's to cancel. */
+  partnerOf: (name: string | null) => (name ? `Playing as ${name}'s partner` : "Playing as a partner"),
+  partnerBadge: "Partner",
   checkedIn: "Checked in",
   charged: (credits: number) => formatCredits(credits),
   unknownCourt: "A court",

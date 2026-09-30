@@ -145,6 +145,9 @@ function BookingPagesView(props: {
 
 /** A booking the desk may still cancel: booked, and nobody has switched the lights on. */
 function cancellable(row: MemberBookingRow): boolean {
+  // A partner's seat is on somebody else's booking: cancelling it here would cancel THEIR game
+  // (C6). The seat is managed from the booking itself.
+  if (row.role === "partner") return false;
   return row.status === "booked" && !row.checked_in_at && Date.parse(row.ends_at) > Date.now();
 }
 

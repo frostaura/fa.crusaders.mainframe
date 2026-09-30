@@ -56,6 +56,14 @@ export type MemberBookingRow = {
    * actor was an ADMIN is not claimed here (D2-B41), so the screen never says it either.
    */
   booked_by: { user_id: string | null; name: string | null; is_self: boolean };
+  /**
+   * C6 (review round 2, F3-8): `partner` for an accepted seat on somebody else's game — the desk's
+   * record listed only the courts a member booked, so a weekly partner read as never playing.
+   * Absent from an older API: read as `organiser`.
+   */
+  role?: "organiser" | "partner";
+  /** C6: whose booking it is. On an organiser row, the member themselves (`is_self`). */
+  organiser?: { user_id: string | null; name: string | null; is_self: boolean } | null;
 };
 
 export type FingerprintEnrolment = { template_id: string; finger_label: string | null; enrolled_at: string };

@@ -15,6 +15,7 @@ import { bookingWhen, dayParts } from "./memberTime";
  */
 
 function bookedByLine(row: MemberBookingRow): string {
+  if (row.role === "partner") return COPY.partnerOf(row.organiser?.name ?? null);
   if (row.booked_by.is_self) return COPY.bookedBySelf;
   return row.booked_by.name ? COPY.bookedBy(row.booked_by.name) : COPY.bookedByUnknown;
 }
@@ -32,6 +33,7 @@ export function BookingLine({ row, zone, action, people }: {
   const status = BOOKING_STATUS[row.status] ?? { word: row.status, tone: "neutral" as const };
   const court = row.court_name ?? COPY.unknownCourt;
   const cancelled = row.status === "cancelled";
+  const partner = row.role === "partner";
   return (
     <li
       data-booking-id={row.booking_id}
@@ -66,8 +68,10 @@ export function BookingLine({ row, zone, action, people }: {
         </div>
       </div>
       <div className="flex items-center gap-3 sm:justify-end">
+        {partner ? <Badge tone="info">{COPY.partnerBadge}</Badge> : null}
         <Badge tone={status.tone}>{status.word}</Badge>
-        <span className="text-sm tabular-nums text-text-secondary">{formatCredits(row.charged_credits)}</span>
+        {/* The charge on a partner's row is the ORGANISER's, not what this member paid — no figure. */}
+        {partner ? null : <span className="text-sm tabular-nums text-text-secondary">{formatCredits(row.charged_credits)}</span>}
         {action ? <div className="ml-auto sm:ml-0">{action}</div> : null}
       </div>
     </li>
