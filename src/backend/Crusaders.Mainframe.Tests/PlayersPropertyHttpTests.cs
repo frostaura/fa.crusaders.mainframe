@@ -420,7 +420,7 @@ public sealed class PlayersPropertyHttpTests(PostgresFixture pg) : IClassFixture
             work.AddRange(_games.Select(g => (Task)_club.InClubAsync(f, sp => sp.GetRequiredService<ShareLedger>().ReconcileAsync(g.Id, default))));
             work.Add(SweepAsync());
             var credit = Admin.PostAsJsonAsync($"/api/v1/admin/credit/{_club.Organiser}/adjust",
-                new { amountCredits = _rng.Next(1, 6) * 4m, reason = "property step", reasonCode = "top_up_cash" });
+                new { amountCredits = _rng.Next(1, 6) * 4m, reason = "property step", reasonCode = "top_up_cash", zarReceived = 10m });
             var remove = Admin.PostAsJsonAsync($"/api/v1/admin/bookings/{game.Id}/players/{seat}/remove", new { reason = "property step" });
             work.Add(credit);
             work.Add(remove);
@@ -442,7 +442,7 @@ public sealed class PlayersPropertyHttpTests(PostgresFixture pg) : IClassFixture
         private async Task<string> DeskAsync(decimal amount, Guid? booking, string code)
         {
             var response = await Admin.PostAsJsonAsync($"/api/v1/admin/credit/{_club.Organiser}/adjust",
-                new { amountCredits = amount, reason = "property step", reasonCode = code, relatedBookingId = booking });
+                new { amountCredits = amount, reason = "property step", reasonCode = code, relatedBookingId = booking, zarReceived = 10m });
             Assert.True(response.IsSuccessStatusCode, $"desk {amount}: {await response.Content.ReadAsStringAsync()}");
             if (amount < 0) _organiserFloor = Math.Min(_organiserFloor, await PlayersClub.BalanceAsync(f, _club.Organiser));
             return $"desk {code} {amount}{(booking is null ? "" : $" naming {booking}")}";

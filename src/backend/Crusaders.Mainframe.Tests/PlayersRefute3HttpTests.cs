@@ -59,7 +59,7 @@ public sealed class PlayersRefute3HttpTests(PostgresFixture pg) : IClassFixture<
 
     private static Task<HttpResponseMessage> TopUpAsync(PlayersClub club, TestWebAppFactory f, decimal credits) =>
         club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-            new { amountCredits = credits, reason = "Cash at the desk", reasonCode = "top_up_cash" });
+            new { amountCredits = credits, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
 
     // ------------------------------------------------------------------ M. a waiting return is set aside
 

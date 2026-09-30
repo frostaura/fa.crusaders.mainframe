@@ -113,7 +113,7 @@ public sealed class PlayersRefute4HttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Equal(0m, await PlayersClub.BalanceAsync(f, club.Organiser));
 
         var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-            new { amountCredits = 16m, reason = "Cash at the desk", reasonCode = "top_up_cash" });
+            new { amountCredits = 16m, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
 
         Assert.True(topUp.IsSuccessStatusCode);
         Assert.Equal(16m, await PlayersClub.BalanceAsync(f, club.Sam));

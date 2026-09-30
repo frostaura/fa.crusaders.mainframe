@@ -319,6 +319,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
             amountCredits = amount,
             reason = "R200 cash at the desk, receipt 0412",
             reasonCode,
+            zarReceived = 200m,
             idempotencyKey,
         });
     }
@@ -469,6 +470,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
             amountCredits = 200m,
             reason = "cash at the desk",
             reason_code = "top_up_cash",
+            zar_received = 200m,
         });
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);

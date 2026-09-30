@@ -44,8 +44,9 @@ public static class AdminLedgerEndpoints
             string nameFor(Guid id) => nameByUserId.TryGetValue(id, out var n) ? n
                 : emailByUserId.TryGetValue(id, out var e) ? e
                 : "(unknown)";
+            var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
 
-            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor)).ToList();
+            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains)).ToList();
             return Results.Ok(rows);
         });
 
@@ -55,10 +56,16 @@ public static class AdminLedgerEndpoints
 
 public static class LedgerRowMapper
 {
+    /// <summary>Which of these users are this club's administrators — tenant-filtered.</summary>
+    public static async Task<HashSet<Guid>> AdminsAsync(MainframeDbContext db, List<Guid> ids, CancellationToken ct)
+    {
+        return (await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id) && u.IsAdmin).Select(u => u.Id).ToListAsync(ct)).ToHashSet();
+    }
+
     public const string Treasury = "Club treasury";
     public const string PaymentGateway = "PayFast";
 
-    public static LedgerRowDto Build(LedgerEntry e, Func<Guid, string> nameFor)
+    public static LedgerRowDto Build(LedgerEntry e, Func<Guid, string> nameFor, Func<Guid, bool>? isAdmin = null)
     {
         var subject = nameFor(e.UserId);
         var actor = nameFor(e.ActorUserId);
@@ -108,7 +115,24 @@ public static class LedgerRowMapper
             SubjectName: subject,
             ActorUserId: e.ActorUserId,
             ActorName: actor,
-            RelatedBookingId: e.RelatedBookingId);
+            RelatedBookingId: e.RelatedBookingId)
+        {
+            DoneBy = DoneByOf(e, actor, isAdmin),
+        };
+    }
+
+    /// <summary>
+    /// Who moved this money when it was somebody OTHER than the wallet's owner (review round 1,
+    /// B9): the admin behind a desk adjustment or top-up, or who booked or cancelled on the
+    /// member's behalf. Null for the member's own movements and the system's (no actor), and for
+    /// a share moving between two members — the other member is already the row's From or To —
+    /// unless an administrator moved it.
+    /// </summary>
+    private static string? DoneByOf(LedgerEntry e, string actor, Func<Guid, bool>? isAdmin)
+    {
+        if (e.ActorUserId == Guid.Empty || e.ActorUserId == e.UserId) return null;
+        if (e.Type == LedgerEntryType.ShareTransfer && isAdmin?.Invoke(e.ActorUserId) != true) return null;
+        return actor;
     }
 }
 
@@ -138,4 +162,12 @@ public sealed record LedgerRowDto(
     string SubjectName,
     Guid ActorUserId,
     string ActorName,
-    Guid? RelatedBookingId);
+    Guid? RelatedBookingId)
+{
+    /// <summary>
+    /// The person who moved this money on the owner's behalf, or null (B9). Named on the wire as
+    /// the round-1 contract names it; the record's older fields are camelCase.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("actor_name")]
+    public string? DoneBy { get; init; }
+}

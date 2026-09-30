@@ -53,7 +53,8 @@ public static class WalletEndpoints
                 : emailByUserId.TryGetValue(id, out var em) ? em
                 : "(unknown)";
 
-            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor)).ToList();
+            var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
+            var rows = entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains)).ToList();
 
             return Results.Ok(new
             {
@@ -247,7 +248,7 @@ public static class WalletEndpoints
     internal static IResult? RefuseAmount(decimal amountCredits)
     {
         if (Math.Abs(amountCredits) > MaxAdjustmentCredits)
-            return Results.BadRequest(new { error = "amount_out_of_range", max_credits = MaxAdjustmentCredits });
+            return Results.BadRequest(new { error = "amount_out_of_range", max = MaxAdjustmentCredits, max_credits = MaxAdjustmentCredits });
         if (decimal.Round(amountCredits, 2, MidpointRounding.AwayFromZero) != amountCredits)
             return Results.BadRequest(new { error = "amount_not_whole_cents" });
         return null;
@@ -379,7 +380,9 @@ public static class WalletEndpoints
                 // model's I3/I4.
                 RelatedBookingId: req.RelatedBookingId,
                 Reason: req.Reason,
-                ExternalReference: work.Reference), ct);
+                ExternalReference: work.Reference,
+                // B7: the rand the desk took, on a top-up code only — what the revenue report sums.
+                ZarPaid: kind.Type == LedgerEntryType.AdminTopUp ? req.ZarReceivedEither : null), ct);
         }
         catch (DbUpdateException ex) when (work.Reference is not null)
         {
@@ -412,6 +415,7 @@ public static class WalletEndpoints
                 amount_credits = req.AmountCredits,
                 reason = req.Reason,
                 reason_code = kind.Code,
+                zar_received = entry.ZarPaid,
                 balance_before_credits = balanceBefore,
                 balance_after_credits = balanceAfter,
                 related_booking_id = req.RelatedBookingId,
@@ -441,6 +445,7 @@ public static class WalletEndpoints
                 balance_credits = balanceAfter,
                 amount_credits = req.AmountCredits,
                 reason_code = kind.Code,
+                zar_received = entry.ZarPaid,
                 entry_id = entry.Id,
                 related_booking_id = req.RelatedBookingId,
             }), ct);
@@ -487,7 +492,24 @@ public static class WalletEndpoints
             return (Results.BadRequest(new { error = "amount_must_be_positive_for_top_up" }), null);
         }
 
+        // Review round 1, B7: a top-up code is counted as the club's REVENUE, and revenue is rand
+        // (ZarPaid), never credits — so a desk top-up with no rand figure reported R0.00 in the
+        // month's income. The desk says how much money it took; nothing else can know.
+        if (kind.Type == LedgerEntryType.AdminTopUp && RefuseZar(req.ZarReceivedEither) is { } badZar) return (badZar, null);
+
         return (null, kind);
+    }
+
+    /// <summary>The largest rand figure a desk top-up may state — well past any counter, well short of a typo's reach.</summary>
+    public const decimal MaxZarReceived = 1_000_000m;
+
+    /// <summary>The rand a top-up code must carry (B7): present, not negative, whole cents, bounded.</summary>
+    private static IResult? RefuseZar(decimal? zar)
+    {
+        if (zar is not { } value) return Results.BadRequest(new { error = "zar_received_required" });
+        if (value < 0 || value > MaxZarReceived) return Results.BadRequest(new { error = "zar_received_out_of_range", max = MaxZarReceived });
+        if (decimal.Round(value, 2, MidpointRounding.AwayFromZero) != value) return Results.BadRequest(new { error = "zar_received_not_whole_cents" });
+        return null;
     }
 
     /// <summary>
@@ -513,7 +535,8 @@ public static class WalletEndpoints
     {
         var same = stored.AmountCredits == req.AmountCredits
                 && stored.Type == kind.Type
-                && stored.RelatedBookingId == req.RelatedBookingId;
+                && stored.RelatedBookingId == req.RelatedBookingId
+                && stored.ZarPaid == (kind.Type == LedgerEntryType.AdminTopUp ? req.ZarReceivedEither : null);
 
         if (!same)
         {
@@ -584,6 +607,7 @@ public static class WalletEndpoints
             type = entry.Type.ToString(),
             reason_code = kind.Code,
             amount_credits = entry.AmountCredits,
+            zar_received = entry.ZarPaid,
             // balance_before is here because the admin has to read back what they just did, and
             // because the console's confirmation ("Priya: 40.00 -> 240.00") must not be composed
             // client-side from a number it fetched separately and may have fetched before.
@@ -726,8 +750,13 @@ public sealed record AdjustRequest(
     Guid? RelatedBookingId = null,
     string? IdempotencyKey = null,
     string? ReasonCode = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("reason_code")] string? ReasonCodeSnake = null)
+    [property: System.Text.Json.Serialization.JsonPropertyName("reason_code")] string? ReasonCodeSnake = null,
+    decimal? ZarReceived = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("zar_received")] decimal? ZarReceivedSnake = null)
 {
+    /// <summary>The rand the desk took (B7), under either spelling — required on a top-up code.</summary>
+    public decimal? ZarReceivedEither => ZarReceived ?? ZarReceivedSnake;
+
     /// <summary>
     /// The code the caller sent under either spelling.
     ///

@@ -73,7 +73,7 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         });
         var toppedUp = await admin.PostAsJsonAsync(path, new
         {
-            amountCredits = 100m, reason = "Paid cash at the bar", reasonCode = "top_up_cash", idempotencyKey = "gm_top",
+            amountCredits = 100m, reason = "Paid cash at the bar", reasonCode = "top_up_cash", zarReceived = 100m, idempotencyKey = "gm_top",
         });
         Assert.Equal(HttpStatusCode.OK, adjusted.StatusCode);
         Assert.Equal(HttpStatusCode.OK, toppedUp.StatusCode);
