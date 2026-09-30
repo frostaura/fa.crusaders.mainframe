@@ -9,9 +9,9 @@ import { CaretDown, CaretRight, CaretUp, CaretUpDown } from "./ui/icons";
 import { ScrollArea } from "./ScrollArea";
 import { CELL } from "./wallet/ledgerCells";
 import type { Column } from "./wallet/ledgerColumns";
-import { groupShareRows, shareBookingIds } from "./wallet/shareGroups";
+import { groupShareRows } from "./wallet/shareGroups";
 import { ShareGroupRows } from "./wallet/ShareGroupRows";
-import { useShareBookings } from "./wallet/useShareBookings";
+import type { ShareBookings } from "./wallet/useShareBookings";
 
 type SortDir = "asc" | "desc";
 
@@ -38,6 +38,8 @@ type LedgerTableProps = {
    * Off for the club's book and an admin's view of a member: the sentences say "your share".
    */
   groupShares?: boolean;
+  /** With `groupShares`: each booking's summary, from the same wallet read as the rows (`share_bookings`). */
+  shareBookings?: ShareBookings;
   /** F3.8: when given, every row opens its detail — a "Details" button per row, and the row. */
   onOpen?: (row: LedgerRow) => void;
   /**
@@ -87,6 +89,8 @@ function sortRows(rows: LedgerRow[], sort: Sort): LedgerRow[] {
   });
 }
 
+const NO_BOOKINGS: ShareBookings = {};
+
 /** Time and money sort newest / largest first; words sort A→Z. */
 function nextSort(current: Sort, key: Column): Sort {
   if (current.key === key) return { key, dir: current.dir === "asc" ? "desc" : "asc" };
@@ -117,7 +121,7 @@ export function LedgerTable(props: LedgerTableProps) {
   const [sort, setSort] = useState<Sort>({ key: "time", dir: "desc" });
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
   const items = useMemo(() => (groupShares ? groupShareRows(sorted) : sorted.map((row) => ({ kind: "row" as const, row }))), [groupShares, sorted]);
-  const bookings = useShareBookings(groupShares ? shareBookingIds(rows) : []);
+  const bookings = props.shareBookings ?? NO_BOOKINGS;
   const headerFor = (column: Column) => (
     <SortHeader {...HEADER[column]} wideOnly={wideOnly.includes(column)} k={column} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
   );
@@ -143,7 +147,7 @@ export function LedgerTable(props: LedgerTableProps) {
         <TableBody>
           {items.map((item) => (item.kind === "row"
             ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} />
-            : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId]} />))}
+            : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId] ?? null} />))}
         </TableBody>
       </table>
     </ScrollArea>

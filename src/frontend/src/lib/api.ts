@@ -450,24 +450,36 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
  */
 const WALLET_DEFAULT_LIMIT = 100; // the server's `limit ?? 100`
 let walletEpoch = 0;
-let walletInFlight: { token: string | null; epoch: number; limit: number; promise: Promise<WalletResponse> } | null = null;
+let walletInFlight: {
+  token: string | null; epoch: number; limit: number; shareBookings: boolean; promise: Promise<WalletResponse>;
+} | null = null;
+
+/** A shared answer, cut to the page and the parts this reader asked for. */
+function cutWallet(w: WalletResponse, want: number, shareBookings: boolean): WalletResponse {
+  const cut = w.entries.length > want ? { ...w, entries: w.entries.slice(0, want), limit: want } : { ...w };
+  if (!shareBookings) delete cut.share_bookings;
+  return cut;
+}
 
 /** Something may have moved this member's money: no wallet read sent before now may be joined. */
 export function noteWalletMoved() {
   walletEpoch += 1;
 }
 
-function readWallet(limit?: number, offset?: number): Promise<WalletResponse> {
+function readWallet(limit?: number, offset?: number, shareBookings = false): Promise<WalletResponse> {
   const want = limit ?? WALLET_DEFAULT_LIMIT;
   const token = tokenStore.get();
   const firstPage = !offset;
   const shared = walletInFlight;
-  if (firstPage && shared && shared.token === token && shared.epoch === walletEpoch && shared.limit >= want) {
-    return shared.promise.then((w) => (w.entries.length > want ? { ...w, entries: w.entries.slice(0, want), limit: want } : w));
+  // A read that brings the share summaries can answer one that does not want them; never the reverse.
+  if (firstPage && shared && shared.token === token && shared.epoch === walletEpoch && shared.limit >= want
+    && (shared.shareBookings || !shareBookings)) {
+    return shared.promise.then((w) => cutWallet(w, want, shareBookings));
   }
-  const promise = api.get<WalletResponse>(`/api/v1/wallet${qs({ limit, offset })}`);
+  const include = shareBookings ? "share_bookings" : undefined;
+  const promise = api.get<WalletResponse>(`/api/v1/wallet${qs({ limit, offset, include })}`);
   if (firstPage) {
-    const entry = { token, epoch: walletEpoch, limit: want, promise };
+    const entry = { token, epoch: walletEpoch, limit: want, shareBookings, promise };
     walletInFlight = entry;
     const done = () => { if (walletInFlight === entry) walletInFlight = null; };
     promise.then(done, done);
@@ -683,6 +695,19 @@ export type WalletResponse = {
   total_entries: number;
   offset: number;
   limit: number;
+  /**
+   * Only with `include=share_bookings` (perf round, 2026-09-30): what each ShareTransfer row's
+   * booking needs for its line — the first 20 distinct booking ids on the page. `null` is a booking
+   * the member can no longer read (a declined or removed seat: the old 404).
+   */
+  share_bookings?: Record<string, ShareBookingSummary | null>;
+};
+export type ShareBookingSummary = {
+  booking_id: string;
+  court_name: string | null;
+  starts_at: string;
+  organiser: { user_id: string; name: string | null; photo_url: string | null };
+  partners: { user_id: string; name: string | null; paid_credits: number }[];
 };
 export type ScheduleSlot = {
   courtId: string; courtNumber: number;
@@ -2180,6 +2205,8 @@ export const endpoints = {
 
   /** The member's ledger page — joined to one already in flight when that is safe (`readWallet`). */
   wallet: (limit?: number, offset?: number) => readWallet(limit, offset),
+  /** The same page with each share row's booking summarised (`share_bookings`) — the Wallet page's read. */
+  walletWithShareBookings: (limit?: number, offset?: number) => readWallet(limit, offset, true),
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),
   book: (courtId: string, startsAt: string, sliceCount: number) =>
     api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),

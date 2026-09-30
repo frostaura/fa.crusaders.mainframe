@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
-import type { LedgerRow } from "@/lib/api";
+import type { LedgerRow, ShareBookingSummary } from "@/lib/api";
 import { SHARE_LEDGER_COPY, shareGroupSentence, shareRowSentence } from "@/lib/walletCopy";
 import { renderPage, stubFetch } from "@/test/harness";
 import { LedgerTable } from "../LedgerTable";
+import { shareBookingsFrom } from "./useShareBookings";
 
 /**
  * D11 — the member's own ledger: a booking's shares under one line that says what they came to,
@@ -23,24 +24,17 @@ function row(id: string, over: Partial<LedgerRow> = {}): LedgerRow {
   };
 }
 
-function detail(over: Record<string, unknown> = {}) {
-  const seat = (userId: string, name: string, paid: number, kind = "member") => ({
-    participant_id: `p-${userId}`, seat: 2, team: "A", kind, user_id: userId, name, photo_url: null, status: "accepted",
-    share_credits: 25, weight: 1, consented_credits: paid, paid_credits: paid, target_credits: paid, unpaid_credits: 0,
-    needs_consent: false, settled_outside: false, lapsed: false, checked_in_at: null, invited_at: null, responded_at: null,
-  });
+/** The club's summary of booking b1, as the wallet read carries it (`share_bookings`). */
+function summary(over: Partial<ShareBookingSummary> = {}): ShareBookingSummary {
   return {
-    booking_id: "b1", court_id: "c1", court_name: "Court 1",
-    starts_at: "2026-09-30T16:00:00Z", ends_at: "2026-09-30T16:45:00Z", sold_ends_at: "2026-09-30T16:45:00Z",
-    status: "booked", split_mode: "equal", viewer: { role: "organiser", participant_id: `p-${ME}` },
+    booking_id: "b1", court_name: "Court 1", starts_at: "2026-09-30T16:00:00Z",
     organiser: { user_id: ME, name: "Nomsa Khumalo", photo_url: null },
-    players: [seat(ME, "Nomsa Khumalo", 0, "organiser"), seat(SAM, "Sam Petersen", 25), seat(ALEX, "Alex Naidoo", 25)],
-    money: { price_credits: 100, organiser_owed_credits: 100, shares_received_credits: 50, organiser_net_credits: 50, unpaid_credits: 0, share_deadline: "2026-10-02T16:45:00Z", is_split: true },
-    attendance: { checked_in_at: null, players_checked_in: 0 },
-    permissions: { can_invite: false, can_change_split: false, can_cancel: false, can_accept: false, can_decline: false, can_withdraw: false, withdraw_closes_at: "2026-09-30T15:00:00Z" },
+    partners: [{ user_id: SAM, name: "Sam Petersen", paid_credits: 25 }, { user_id: ALEX, name: "Alex Naidoo", paid_credits: 25 }],
     ...over,
   };
 }
+const SAM_ORGANISES = { organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null }, partners: [{ user_id: ME, name: "Nomsa Khumalo", paid_credits: 25 }] };
+const known = (s: ShareBookingSummary | null) => shareBookingsFrom({ b1: s });
 
 const TOPUP = row("t1", { type: "TopUp", relatedBookingId: null, comment: "Wallet top-up", at: "2026-09-29T10:00:00Z", signedAmountCredits: 200, amountCredits: 200 });
 
@@ -48,8 +42,8 @@ afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("the wallet ledger's share lines", () => {
   it("gathers the organiser's shares under one line, with the court, the day and who paid", async () => {
-    stubFetch([{ path: "/api/v1/bookings/b1", body: detail() }]);
-    renderPage(<LedgerTable rows={[row("s1"), TOPUP, row("s2", { actorUserId: ALEX, actorName: "Alex Naidoo", at: "2026-09-30T11:00:00Z" })]} label="Wallet ledger" groupShares />);
+    const stub = stubFetch([]);
+    renderPage(<LedgerTable rows={[row("s1"), TOPUP, row("s2", { actorUserId: ALEX, actorName: "Alex Naidoo", at: "2026-09-30T11:00:00Z" })]} label="Wallet ledger" groupShares shareBookings={known(summary())} />);
 
     const expected = shareGroupSentence({ side: "organiser", net: 50, place: { courtName: "Court 1", startsAt: "2026-09-30T16:00:00Z" }, partners: 2 });
     // D10 — no amount in the sentence: the Amount column carries it.
@@ -73,11 +67,13 @@ describe("the wallet ledger's share lines", () => {
 
     const link = screen.getByRole("link", { name: new RegExp(`^${SHARE_LEDGER_COPY.viewBooking}`) });
     expect(link).toHaveAttribute("href", "/bookings/b1");
+    // Perf round: the lines come from the wallet read's own summaries — no read per booking.
+    expect(stub.calls).toHaveLength(0);
   });
 
   it("says the partner's side as their share, with what moved to whom", async () => {
-    stubFetch([{ path: "/api/v1/bookings/b1", body: detail({ organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null } }) }]);
-    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME })]} label="Wallet ledger" groupShares />);
+    stubFetch([]);
+    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME })]} label="Wallet ledger" groupShares shareBookings={known(summary(SAM_ORGANISES))} />);
 
     const toggle = await screen.findByRole("button", { name: /^Your share · Court 1 · Wed 30 Sep, / });
     // D10 — the amount is said once, in its column; the To column names the organiser.
@@ -90,8 +86,14 @@ describe("the wallet ledger's share lines", () => {
   });
 
   it("still makes sense when the booking cannot be read (a partner who pulled out reads it as a stranger)", async () => {
-    stubFetch([{ path: "/api/v1/bookings/b1", status: 404, body: { error: "booking_not_found" } }]);
-    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25 })]} label="Wallet ledger" groupShares />);
+    stubFetch([]);
+    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25 })]} label="Wallet ledger" groupShares shareBookings={known(null)} />);
+    expect(await screen.findByRole("button", { name: /^Your share of a split booking, / })).toBeInTheDocument();
+  });
+
+  it("says the same when the club summarised nothing for that booking (an older API)", async () => {
+    stubFetch([]);
+    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25 })]} label="Wallet ledger" groupShares shareBookings={shareBookingsFrom(undefined)} />);
     expect(await screen.findByRole("button", { name: /^Your share of a split booking, / })).toBeInTheDocument();
   });
 
@@ -105,11 +107,11 @@ describe("the wallet ledger's share lines", () => {
 
 describe("R1 F2.14 — a refunded share", () => {
   it("nets to zero in neutral ink, never the green of money in, and the whole line opens it", async () => {
-    stubFetch([{ path: "/api/v1/bookings/b1", body: detail({ organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null } }) }]);
+    stubFetch([]);
     renderPage(<LedgerTable rows={[
       row("s2", { signedAmountCredits: 25, at: "2026-09-30T11:00:00Z", actorUserId: SAM }),
       row("s1", { signedAmountCredits: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME }),
-    ]} label="Wallet ledger" groupShares />);
+    ]} label="Wallet ledger" groupShares shareBookings={known(summary(SAM_ORGANISES))} />);
     const toggle = await screen.findByRole("button", { name: /paid and returned/ });
     const line = toggle.closest("tr") as HTMLElement;
     const amount = within(line).getByText("0.00 cr", { exact: false });

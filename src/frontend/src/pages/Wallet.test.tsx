@@ -169,6 +169,27 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     expect(screen.getByRole("button", { name: /Show older \(239 more\)/ })).toBeInTheDocument();
   });
 
+  it("reads each share line's booking WITH the ledger, never one booking at a time (perf round)", async () => {
+    const share = ledgerRowFixture({
+      id: "77", type: "ShareTransfer", signedAmountCredits: 25, amountCredits: 25, comment: "Share of a split booking",
+      relatedBookingId: "b1", actorUserId: "55555555-5555-5555-5555-555555555555", actorName: "Sam Petersen",
+    });
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { ...page(510.01, [share], 1), share_bookings: { b1: {
+        booking_id: "b1", court_name: "Court 3", starts_at: "2026-09-30T16:00:00Z",
+        organiser: { user_id: "44444444-4444-4444-4444-444444444444", name: "Ada Lovelace", photo_url: null },
+        partners: [{ user_id: "55555555-5555-5555-5555-555555555555", name: "Sam Petersen", paid_credits: 25 }],
+      } } } },
+    ]);
+    renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
+
+    expect(await screen.findByRole("button", { name: /^Shares for Court 3 · Wed 30 Sep from 1 partner/ })).toBeInTheDocument();
+    const pageRead = stub.calls.find((c) => c.path.startsWith("/api/v1/wallet?") && c.path.includes("limit=100"))!;
+    expect(pageRead.path).toContain("include=share_bookings");
+    expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/bookings/"))).toHaveLength(0);
+  });
+
   it("says nothing about a ledger it could not load", async () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },

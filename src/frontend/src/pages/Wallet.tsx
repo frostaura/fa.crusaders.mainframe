@@ -11,6 +11,7 @@ import { Card } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import { Receipt } from "../components/ui/icons";
 import { LedgerTable } from "../components/LedgerTable";
+import { shareBookingsFrom, type ShareBookings } from "../components/wallet/useShareBookings";
 import { useToast } from "../components/Toast";
 import { useBalance, walletTone } from "../lib/balance";
 import { heldFrom, type HeldFigures } from "../lib/liveBalance";
@@ -49,6 +50,8 @@ const MONEY_TOAST_MS = 6_000;
  */
 function useWalletLedger() {
   const [rows, setRows] = useState<LedgerRow[] | null>(null);
+  /** Each share row's booking, from the same read as the rows (`share_bookings`). */
+  const [shareBookings, setShareBookings] = useState<ShareBookings>({});
   const [cardBalance, setCardBalance] = useState<number | null>(null);
   /** D11 §3a — what this page's own read said is held; the live stream's figure wins. */
   const [readHeld, setReadHeld] = useState<HeldFigures | null>(null);
@@ -97,8 +100,9 @@ function useWalletLedger() {
     setBusy(true);
     const issuedAt = Date.now();
     try {
-      const data = await endpoints.wallet(limit, 0);
+      const data = await endpoints.walletWithShareBookings(limit, 0);
       setRows(data.entries);
+      setShareBookings(shareBookingsFrom(data.share_bookings));
       setCardBalance(data.balance_credits);
       setReadHeld(heldFrom(data));
       setTotal(data.total_entries);
@@ -137,7 +141,7 @@ function useWalletLedger() {
   useMoneyAnnouncement(delta, rows, toast);
 
   const held = liveHeld ?? readHeld;
-  return { rows, cardBalance, total, busy, error, readAt, balance, painted: countUp ?? balance, load, held };
+  return { rows, shareBookings, cardBalance, total, busy, error, readAt, balance, painted: countUp ?? balance, load, held };
 }
 
 /**
@@ -254,6 +258,7 @@ function countSentence(shown: number, total: number): string {
 
 type LedgerProps = {
   rows: LedgerRow[];
+  shareBookings: ShareBookings;
   total: number;
   busy: boolean;
   error: unknown;
@@ -263,7 +268,7 @@ type LedgerProps = {
 /** The ledger: every movement, newest first, a page at a time. */
 function LedgerSection(props: LedgerProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { rows, total, busy, error, onOlder } = props;
+  const { rows, shareBookings, total, busy, error, onOlder } = props;
   const shown = rows.length;
   return (
     <Section title="Ledger" description={countSentence(shown, total)}>
@@ -278,7 +283,7 @@ function LedgerSection(props: LedgerProps) {
         />
       ) : (
         <Card className="gap-0 overflow-hidden py-0 sm:gap-0 sm:py-0">
-          <LedgerTable rows={rows} label="Wallet ledger" groupShares />
+          <LedgerTable rows={rows} label="Wallet ledger" groupShares shareBookings={shareBookings} />
           {/* Said once under the list rather than on every row: every face on a member surface
               is the CLUB's day, which is right and otherwise invisible. */}
           <p className="border-t border-border px-4 py-3 text-xs text-text-muted sm:px-6">{LEDGER_CLOCK_NOTE}</p>
@@ -294,7 +299,7 @@ function LedgerSection(props: LedgerProps) {
 }
 
 export default function WalletPage() {
-  const { rows, cardBalance, total, busy, error, readAt, balance, painted, load, held } = useWalletLedger();
+  const { rows, shareBookings, cardBalance, total, busy, error, readAt, balance, painted, load, held } = useWalletLedger();
   const loaded = rows !== null && cardBalance !== null;
   const shown = rows?.length ?? 0;
   const refresh = () => { void load(Math.max(shown, PAGE_SIZE)); };
@@ -320,7 +325,7 @@ export default function WalletPage() {
         {loaded ? (
           <>
             <BalanceCard balance={balance} painted={painted} held={held} />
-            <LedgerSection rows={rows} total={total} busy={busy} error={error} onOlder={() => void load(shown + PAGE_SIZE)} />
+            <LedgerSection rows={rows} shareBookings={shareBookings} total={total} busy={busy} error={error} onOlder={() => void load(shown + PAGE_SIZE)} />
           </>
         ) : null}
       </StateBlock>

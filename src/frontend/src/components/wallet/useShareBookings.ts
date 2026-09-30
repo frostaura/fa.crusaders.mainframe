@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { playersEndpoints, type BookingDetail } from "@/lib/playersApi";
+import type { ShareBookingSummary, WalletResponse } from "@/lib/api";
+import type { BookingDetail } from "@/lib/playersApi";
 
 /**
  * What a share line needs to know about its booking that the ledger row does not carry: the
@@ -8,9 +8,9 @@ import { playersEndpoints, type BookingDetail } from "@/lib/playersApi";
  * <p>
  * <b>A ledger row names the booking and nothing else about it</b> — its counterparty is "Club
  * treasury" and its comment "Share of a split booking" (`LedgerRowMapper`), so "Court 1 · Tue
- * 30 Sep" and "from Sam" have to come from the booking itself. Each booking is read once per
- * page view, and a read that fails (a declined or removed seat reads the booking as a stranger
- * does — 404) is remembered as `null`: the line then says "a split booking", which is true.
+ * 30 Sep" and "from Sam" have to come from the booking itself — summarised by the club on the
+ * wallet read (`share_bookings`); a booking the member can no longer read (a declined or removed
+ * seat) is `null`, and the line then says "a split booking", which is true.
  * </p>
  */
 export type ShareBooking = {
@@ -21,9 +21,6 @@ export type ShareBooking = {
   /** Members on the booking other than the organiser, with what they have paid. */
   partners: { userId: string; name: string | null; paid: number }[];
 };
-
-/** The most bookings one page will look up — a page of 100 rows rarely names more than a handful. */
-export const SHARE_LOOKUP_LIMIT = 20;
 
 export function summariseBooking(detail: BookingDetail): ShareBooking {
   return {
@@ -37,27 +34,28 @@ export function summariseBooking(detail: BookingDetail): ShareBooking {
   };
 }
 
-/** bookingId → its summary, `null` once a read failed, absent while it is being read. */
+/** bookingId → its summary; `null` when the member can no longer read it, or the club did not say. */
 export type ShareBookings = Readonly<Record<string, ShareBooking | null>>;
 
-export function useShareBookings(bookingIds: readonly string[]): ShareBookings {
-  const [known, setKnown] = useState<ShareBookings>({});
-  const wanted = bookingIds.slice(0, SHARE_LOOKUP_LIMIT).join(",");
+/** One wire summary (`share_bookings` on the wallet read) as a share line reads it. */
+export function shareBookingFromWire(wire: ShareBookingSummary): ShareBooking {
+  return {
+    courtName: wire.court_name,
+    startsAt: wire.starts_at,
+    organiserId: wire.organiser.user_id,
+    organiserName: wire.organiser.name,
+    partners: wire.partners.map((p) => ({ userId: p.user_id, name: p.name, paid: p.paid_credits })),
+  };
+}
 
-  useEffect(() => {
-    if (!wanted) return undefined;
-    let live = true;
-    for (const id of wanted.split(",")) {
-      // The effect only starts reads; state is set from each promise, never in the body.
-      playersEndpoints.detail(id)
-        .then((detail) => summariseBooking(detail))
-        .catch(() => null)
-        .then((summary) => {
-          if (live) setKnown((current) => (id in current ? current : { ...current, [id]: summary }));
-        });
-    }
-    return () => { live = false; };
-  }, [wanted]);
-
-  return known;
+/**
+ * The page's share lines, from the wallet read itself (perf round, 2026-09-30). They used to be one
+ * `GET /bookings/{id}` per booking on the page — up to 20 after the ledger, 1.7 s of Wallet on a
+ * slow phone — and are now the `share_bookings` the read carries. A booking the club did not
+ * summarise reads as `null`, so its line says "a split booking", which is true.
+ */
+export function shareBookingsFrom(wire: WalletResponse["share_bookings"]): ShareBookings {
+  const out: Record<string, ShareBooking | null> = {};
+  for (const [id, summary] of Object.entries(wire ?? {})) out[id] = summary ? shareBookingFromWire(summary) : null;
+  return out;
 }

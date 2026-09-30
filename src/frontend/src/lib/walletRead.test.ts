@@ -11,7 +11,8 @@ function serve() {
   return stubFetch([
     { path: "/api/v1/wallet", respond: (req) => {
       const limit = Number(new URL(req.path, "http://x").searchParams.get("limit") ?? 100);
-      return { balance_credits: 90, entries: rows(Math.min(limit, 120)), total_entries: 120, offset: 0, limit };
+      const shares = req.path.includes("include=share_bookings") ? { share_bookings: { b1: null } } : {};
+      return { balance_credits: 90, entries: rows(Math.min(limit, 120)), total_entries: 120, offset: 0, limit, ...shares };
     } },
     { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 40 } },
   ]);
@@ -63,5 +64,18 @@ describe("the wallet read", () => {
     const afterFrame = endpoints.wallet();
     await Promise.all([again, afterFrame]);
     expect(walletCalls(stub)).toHaveLength(4);
+  });
+
+  it("lets a plain read join one that brings the share summaries, never the other way round", async () => {
+    const stub = serve();
+    const [page, chip] = await Promise.all([endpoints.walletWithShareBookings(100, 0), endpoints.wallet()]);
+    expect(walletCalls(stub)).toHaveLength(1);
+    expect(walletCalls(stub)[0].path).toContain("include=share_bookings");
+    expect(chip).not.toHaveProperty("share_bookings");
+    expect(page.share_bookings).toEqual({ b1: null });
+    expect(page.entries).toHaveLength(100);
+
+    await Promise.all([endpoints.wallet(), endpoints.walletWithShareBookings(100, 0)]);
+    expect(walletCalls(stub)).toHaveLength(3);
   });
 });
