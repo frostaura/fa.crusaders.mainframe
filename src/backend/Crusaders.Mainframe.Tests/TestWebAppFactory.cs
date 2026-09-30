@@ -39,7 +39,8 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
 
     /// <summary>
     /// Per-minute rate-limit ceilings, keyed by the <c>RateLimits:*</c> suffix
-    /// ("AuthPerMinute", "DevicePerMinute", "GlobalPerMinute", "GlobalPerIpPerMinute", "FirmwarePerMinute").
+    /// ("AuthPerMinute", "DevicePerMinute", "GlobalPerMinute", "GlobalPerIpPerMinute", "FirmwarePerMinute",
+    /// "WritesPerMinute", "WritesBurst").
     ///
     /// <para>
     /// Defaults are raised far above production so an ordinary test suite never trips a
@@ -105,6 +106,12 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         ["GlobalPerMinute"] = 100_000,
         ["GlobalPerIpPerMinute"] = 100_000,
         ["FirmwarePerMinute"] = 100_000,
+
+        // Review round 4: the writes bucket too. It is floored at AuthPerMinute, so a suite that
+        // left it unlisted ran at the production 60/min, burst 20 — and a test that happened to
+        // make its 21st write in a second met a 429 it was not testing.
+        ["WritesPerMinute"] = 100_000,
+        ["WritesBurst"] = 100_000,
     };
 
     // Variables this factory used to SET to configure the app, and a developer shell might

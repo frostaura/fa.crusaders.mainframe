@@ -35,7 +35,7 @@ public sealed class WritesRateLimitHttpTests(PostgresFixture pg) : IClassFixture
         await using var f = new TestWebAppFactory
         {
             ConnectionString = pg.ConnectionString,
-            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 10 },
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 10, ["WritesPerMinute"] = 60, ["WritesBurst"] = 20 },
         };
         var club = await PlayersClub.SeedAsync(f, "wrlprod");
         var olive = club.Client(f, club.Organiser);
@@ -58,14 +58,11 @@ public sealed class WritesRateLimitHttpTests(PostgresFixture pg) : IClassFixture
     public async Task The_writes_bucket_refuses_past_its_burst_per_member_and_apart_from_auth()
     {
         Skip.IfNot(pg.Available, Skipped);
-        await using var factory = new TestWebAppFactory
+        await using var f = new TestWebAppFactory
         {
             ConnectionString = pg.ConnectionString,
-            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1 },
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1, ["WritesPerMinute"] = 1, ["WritesBurst"] = 3 },
         };
-        await using var f = factory.WithWebHostBuilder(b => b
-            .UseSetting("RateLimits:WritesPerMinute", "1")
-            .UseSetting("RateLimits:WritesBurst", "3"));
         var club = await PlayersClub.SeedAsync(f, "wrlburst");
         var olive = club.Client(f, club.Organiser);
 
@@ -87,5 +84,28 @@ public sealed class WritesRateLimitHttpTests(PostgresFixture pg) : IClassFixture
 
         // Another member at the same address has a whole bucket.
         Assert.NotEqual(HttpStatusCode.TooManyRequests, (await club.Client(f, club.Sam).PostAsync(CancelPath, content: null)).StatusCode);
+    }
+
+    /// <summary>
+    /// Review round 4: a test host that lowers ONLY the guessing ceiling (to test sign-in) does
+    /// not inherit the production writes bucket. The factory lists WritesPerMinute and
+    /// WritesBurst with the other ceilings; unlisted, a 21st write inside a second was a 429 the
+    /// test was not about.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_host_that_lowers_only_auth_leaves_writes_unbounded()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = new TestWebAppFactory
+        {
+            ConnectionString = pg.ConnectionString,
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1 },
+        };
+        var club = await PlayersClub.SeedAsync(f, "wrlfloor");
+        var olive = club.Client(f, club.Organiser);
+
+        var writes = new List<HttpStatusCode>();
+        for (var i = 0; i < 25; i++) writes.Add((await olive.PostAsync(CancelPath, content: null)).StatusCode);
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, writes);
     }
 }
