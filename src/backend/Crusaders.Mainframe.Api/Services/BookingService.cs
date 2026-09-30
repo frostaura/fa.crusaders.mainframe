@@ -54,11 +54,17 @@ public sealed class BookingService
         MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings,
         IEmailService email, IEventBus bus, AccessCodeService codes, Realtime.RealtimeOutbox outbox,
         BookingRules rules, ILogger<BookingService> logger, Email.ClubIdentityResolver club,
-        AdminChangeRecorder changes)
+        AdminChangeRecorder changes, IServiceScopeFactory scopes)
     {
         _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus;
         _codes = codes; _outbox = outbox; _rules = rules; _logger = logger; _club = club; _changes = changes;
+        _scopes = scopes;
     }
+
+    /// <summary>
+    /// Where a confirmation is composed: a scope of its own, after the response (perf round).
+    /// </summary>
+    private readonly IServiceScopeFactory _scopes;
 
     /// <summary>
     /// The club's undeletable change record. A booking writes to it only when an admin decision
@@ -428,16 +434,51 @@ public sealed class BookingService
     }
 
     /// <summary>
-    /// Composes one booking confirmation and hands it to the background sender. The one
-    /// place the mail is built, so the commit path and the repair path below cannot compose
-    /// it two different ways.
+    /// Hands one booking confirmation to the background: the member's address, the club's identity
+    /// and the receipt PDF are read and built there, in a scope of its own, and the request returns
+    /// without waiting for any of it. The one place the mail is queued, so the commit path and the
+    /// repair path below cannot compose it two different ways.
+    ///
+    /// <para>
+    /// <b>Perf round (2026-09-30).</b> The booking POST composed the whole message before
+    /// answering — a user read, a membership read, the club's identity and the PDF — and only the
+    /// SMTP hand-off was off the request path. The figures (<paramref name="details"/>) are still
+    /// fixed here, from the request's own post-charge reads, so the mail says what the response
+    /// said. Durability is what it was: an in-process hand-off, lost only if the process dies in
+    /// the few milliseconds before the send — the same window the SMTP hand-off always had.
+    /// </para>
     /// </summary>
-    private async Task MailConfirmationAsync(
-        Booking booking, string toEmail, Guid userId, Email.BookingConfirmationDetails details, CancellationToken ct)
+    private Task MailConfirmationAsync(Booking booking, Guid userId, Email.BookingConfirmationDetails details)
     {
+        var (tenantId, tenantSlug, bookingId) = (_tenant.TenantId, _tenant.TenantSlug, booking.Id);
+        var (scopes, logger) = (_scopes, _logger);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug);
+                await scope.ServiceProvider.GetRequiredService<BookingService>()
+                    .ComposeAndSendConfirmationAsync(bookingId, userId, details, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Background booking confirmation failed for {BookingId}", bookingId);
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Composes and sends one confirmation, in the background scope <see cref="MailConfirmationAsync"/> made.
+    /// </summary>
+    private async Task ComposeAndSendConfirmationAsync(
+        Guid bookingId, Guid userId, Email.BookingConfirmationDetails details, CancellationToken ct)
+    {
+        var toEmail = await _db.Users.Where(u => u.Id == userId).Select(u => u.Email).FirstAsync(ct);
         var message = EmailTemplates.BookingConfirmation(
-            await _club.GetAsync(ct), toEmail, details, await BuildReceiptAsync(booking, details, userId, ct));
-        SendEmailInBackground(message, $"booking confirmation for {booking.Id}");
+            await _club.GetAsync(ct), toEmail, details, await BuildReceiptAsync(bookingId, details, userId, ct));
+        await _email.SendAsync(message, ct);
     }
 
     /// <summary>
@@ -465,7 +506,6 @@ public sealed class BookingService
         var userId = booking.UserId.Value;
         var settings = await _settings.GetAsync(ct);
         var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
-        var user = await _db.Users.FirstAsync(u => u.Id == userId, ct);
 
         var minutes = (int)Math.Round((booking.EndsAt - booking.StartsAt).TotalMinutes);
         var startsAtLocal = TimeZoneInfo
@@ -484,7 +524,7 @@ public sealed class BookingService
             settings.PenaltyWindowMinutes, settings.PenaltyPct,
             IsWalkUp: true);
 
-        await MailConfirmationAsync(booking, user.Email, userId, details, ct);
+        await MailConfirmationAsync(booking, userId, details);
     }
 
     /// <summary>
@@ -889,7 +929,6 @@ public sealed class BookingService
         // booking anyway.
         await payerLock.CommitAsync(ct);
 
-        var user = await _db.Users.FirstAsync(u => u.Id == userId, ct);
         var startsAtLocal = TimeZoneInfo
             .ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone))
             // Invariant, as StartsAtLocalAsync and the PDF receipt already are: this string
@@ -897,8 +936,8 @@ public sealed class BookingService
             // the day and month names came out in a different language from the receipt
             // attached to the same email.
             .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
-        // Build the message in the request scope; dispatch in the background so SMTP latency
-        // (Mailhog/EHLO can take seconds) does not block the booking response.
+        // The figures are fixed here; the message is composed and sent in the background (see
+        // MailConfirmationAsync) so neither the receipt nor SMTP latency holds the response.
         // Credits, not rand — the template printed a rand sign over both of these. The penalty
         // policy travels with them for the same reason: it was hardcoded "15 minutes / 30%" and
         // went on saying so after an admin moved the club.
@@ -916,8 +955,7 @@ public sealed class BookingService
             // for you" is false when you made it yourself.
             MadeByClub: actorId != userId);
 
-        async Task SendConfirmationAsync(CancellationToken cancel) =>
-            await MailConfirmationAsync(booking, user.Email, userId, details, cancel);
+        Task SendConfirmationAsync(CancellationToken _) => MailConfirmationAsync(booking, userId, details);
 
         // Sent here unless the caller asked to hold it. A walk-up holds it because the court
         // is not lit yet and the mail it would send says otherwise; see
@@ -2670,7 +2708,7 @@ public sealed class BookingService
     /// </para>
     /// </remarks>
     private async Task<Email.EmailAttachment?> BuildReceiptAsync(
-        Domain.Booking booking, Email.BookingConfirmationDetails details, Guid userId, CancellationToken ct)
+        Guid bookingId, Email.BookingConfirmationDetails details, Guid userId, CancellationToken ct)
     {
         try
         {
@@ -2682,7 +2720,7 @@ public sealed class BookingService
                 // keeps against a disputed charge, and on every other club's receipts.
                 clubName: (await _club.GetAsync(ct)).Name,
                 memberName: membership?.FullName ?? "Member",
-                bookingReference: booking.Id.ToString(),
+                bookingReference: bookingId.ToString(),
                 courtName: details.CourtName,
                 startsAtLocal: details.StartsAtLocal,
                 duration: details.Duration,
@@ -2690,11 +2728,11 @@ public sealed class BookingService
                 balanceAfterCredits: details.BalanceAfterCredits,
                 issuedAtLocal: IssuedAtLocal(await _settings.GetAsync(ct)));
 
-            return new Email.EmailAttachment($"receipt-{booking.Id:N}.pdf", "application/pdf", pdf);
+            return new Email.EmailAttachment($"receipt-{bookingId:N}.pdf", "application/pdf", pdf);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Could not build the receipt for booking {BookingId}; sending the confirmation without it", booking.Id);
+            _logger.LogError(ex, "Could not build the receipt for booking {BookingId}; sending the confirmation without it", bookingId);
             return null;
         }
     }
