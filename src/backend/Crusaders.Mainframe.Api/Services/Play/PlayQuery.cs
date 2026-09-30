@@ -188,7 +188,7 @@ public sealed class PlayQuery
             timezone = DoorClock.ZoneOf(settings).Name,
             settings = SettingsView(record.Profile),
             ring = Ring(record),
-            streak = Streak(record),
+            streak = Streak(record, await JoinedWeekAsync(me, record, ct)),
             pause = PauseView(record),
             stats = new
             {
@@ -225,9 +225,24 @@ public sealed class PlayQuery
         return new { month = record.CurrentMonth, goal_minutes = goal, attended_minutes = minutes, sessions, reached = minutes >= goal };
     }
 
-    private static object Streak(PlayRecord record)
+    /// <summary>
+    /// The club week the member joined in (review round 2, F2-16): their approval (the audit
+    /// trail's <c>member.approved</c>, earliest), else the membership's creation — the application,
+    /// for a member approved before the trail recorded it. Null when there is no membership.
+    /// </summary>
+    private async Task<DateOnly?> JoinedWeekAsync(Guid me, PlayRecord record, CancellationToken ct)
     {
-        var strip = StreakMath.Strip(record.Walk, record.Coverage.Paused, record.CurrentWeek);
+        var approved = await _db.AuditLogs.AsNoTracking()
+            .Where(a => a.SubjectUserId == me && a.Action == "member.approved")
+            .OrderBy(a => a.CreatedAt).Select(a => (DateTimeOffset?)a.CreatedAt).FirstOrDefaultAsync(ct);
+        var created = await _db.Memberships.AsNoTracking().Where(m => m.UserId == me)
+            .Select(m => (DateTimeOffset?)m.CreatedAt).FirstOrDefaultAsync(ct);
+        return (approved ?? created) is { } joined ? ClubWeek.KeyOf(record.Zone, joined) : null;
+    }
+
+    private static object Streak(PlayRecord record, DateOnly? joinedWeek)
+    {
+        var strip = StreakMath.Strip(record.Walk, record.Coverage.Paused, record.CurrentWeek, joinedWeek: joinedWeek);
         return new
         {
             current_weeks = record.Walk.State.Streak,

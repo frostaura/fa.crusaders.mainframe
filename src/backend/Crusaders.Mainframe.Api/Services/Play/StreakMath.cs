@@ -14,6 +14,9 @@ public static class WeekStates
     public const string Paused = "paused";
     public const string Missed = "missed";
     public const string Pending = "pending";
+
+    /// <summary>A week before the member joined the club (review round 2, F2-16) — never "missed": there was nothing to miss.</summary>
+    public const string BeforeJoining = "before_joining";
 }
 
 /// <summary>
@@ -149,14 +152,19 @@ public static class StreakMath
     }
 
     /// <summary>The last <paramref name="count"/> weeks up to <paramref name="current"/>, oldest first, as the strip draws them.</summary>
-    public static IReadOnlyList<(DateOnly Week, string State)> Strip(StreakWalk walk, IReadOnlySet<DateOnly> paused, DateOnly current, int count = 12)
+    /// <param name="joinedWeek">The week the member joined; an unwalked week before it is <see cref="WeekStates.BeforeJoining"/> (F2-16).</param>
+    public static IReadOnlyList<(DateOnly Week, string State)> Strip(
+        StreakWalk walk, IReadOnlySet<DateOnly> paused, DateOnly current, int count = 12, DateOnly? joinedWeek = null)
     {
         var walked = walk.Weeks.ToDictionary(w => w.Week, w => w.State);
         var strip = new List<(DateOnly, string)>();
         for (var i = count - 1; i >= 0; i--)
         {
             var week = current.AddDays(-7 * i);
-            strip.Add((week, walked.TryGetValue(week, out var state) ? state : Unwalked(week, paused, current)));
+            var state = walked.TryGetValue(week, out var w) ? w
+                : joinedWeek is { } joined && week < joined ? WeekStates.BeforeJoining
+                : Unwalked(week, paused, current);
+            strip.Add((week, state));
         }
         return strip;
     }
