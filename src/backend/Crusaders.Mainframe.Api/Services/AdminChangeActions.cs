@@ -157,6 +157,15 @@ public static class AdminChangeActions
     /// </summary>
     public const string ChangesExported = "changes.exported";
 
+    /// <summary>
+    /// A club webhook added or removed (review round 3, A-5). Filed under settings: it changes
+    /// where the club's event stream goes, which is configuration, not a device. There is no
+    /// edit, enable, disable or secret-rotate route to record — the admin surface is create and
+    /// delete only.
+    /// </summary>
+    public const string WebhookCreated = "webhook.created";
+    public const string WebhookDeleted = "webhook.deleted";
+
     // ---- device ----
     public const string DeviceUpdated = "device.updated";
     public const string DeviceDeleted = "device.deleted";
@@ -188,7 +197,7 @@ public static class AdminChangeActions
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
-        SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
+        SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported, WebhookCreated, WebhookDeleted,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
         PlayResultVoided, PlayResultUpheld,
     ];
@@ -231,7 +240,7 @@ public static class AdminChangeActions
                 or MemberReactivated or MemberPasswordReset or MemberCodeReset or MemberTraceViewed
                 or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
-                or ChangesExported => AdminChangeAreas.Setting,
+                or ChangesExported or WebhookCreated or WebhookDeleted => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
                 or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
             PlayResultVoided or PlayResultUpheld => AdminChangeAreas.Play,
@@ -299,6 +308,8 @@ public static class AdminChangeActions
             CourtUpdated => $"Changed a court{of}",
             CourtDeactivated => $"Deactivated a court{of}",
             ChangesExported => "Downloaded the club's change record",
+            WebhookCreated => $"Added a webhook{of}",
+            WebhookDeleted => $"Removed a webhook{of}",
 
             DeviceUpdated => $"Changed a device{of}",
             DeviceDeleted => $"Removed a device{of}",

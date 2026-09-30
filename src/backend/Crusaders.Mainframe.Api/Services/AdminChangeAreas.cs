@@ -36,8 +36,11 @@ public static class AdminChangeSubjects
     public const string Setting = "setting";
     public const string Court = "court";
 
+    /// <summary>A club webhook endpoint (review round 3, A-5).</summary>
+    public const string Webhook = "webhook";
+
     /// <summary>D14: one recorded match (<c>match_results</c>).</summary>
     public const string MatchResult = "match_result";
 
-    public static readonly string[] All = [User, Schedule, Booking, Group, Device, Setting, Court, MatchResult];
+    public static readonly string[] All = [User, Schedule, Booking, Group, Device, Setting, Court, MatchResult, Webhook];
 }

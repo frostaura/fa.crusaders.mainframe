@@ -3,6 +3,7 @@ using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Security.Outbound;
+using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -69,7 +70,7 @@ public static class WebhookEndpoints
             return Results.Ok(rows);
         });
 
-        admin.MapPost("/", async (CreateWebhookRequest req, MainframeDbContext db, ITenantContext tenant, IOutboundAddressGuard guard, CancellationToken ct) =>
+        admin.MapPost("/", async (CreateWebhookRequest req, HttpContext ctx, MainframeDbContext db, ITenantContext tenant, IOutboundAddressGuard guard, AdminChangeRecorder recorder, CancellationToken ct) =>
         {
             var validation = ValidateUrl(req.UrlTemplate, guard);
             if (validation is not null) return Results.BadRequest(new { error = validation });
@@ -83,15 +84,17 @@ public static class WebhookEndpoints
                 Description = req.Description,
             };
             db.WebhookEndpoints.Add(endpoint);
+            await StageChangeAsync(recorder, AdminChangeActions.WebhookCreated, ctx, endpoint, ct);
             await db.SaveChangesAsync(ct);
             return Results.Ok(Project(endpoint, includeSecret: true));
         });
 
-        admin.MapDelete("/{id:guid}", async (Guid id, MainframeDbContext db, CancellationToken ct) =>
+        admin.MapDelete("/{id:guid}", async (Guid id, HttpContext ctx, MainframeDbContext db, AdminChangeRecorder recorder, CancellationToken ct) =>
         {
             var w = await db.WebhookEndpoints.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (w is null) return Results.NotFound();
             db.WebhookEndpoints.Remove(w);
+            await StageChangeAsync(recorder, AdminChangeActions.WebhookDeleted, ctx, w, ct);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
@@ -125,6 +128,37 @@ public static class WebhookEndpoints
 
         return app;
     }
+
+    /// <summary>
+    /// A club webhook added or removed, on the change record in the same save (review round 3,
+    /// A-5). What the record says about the destination is scheme, host and port only — the
+    /// path and query may carry a receiver's token, the URL may carry credentials, and the
+    /// signing secret is never written: every admin can read and export this record.
+    /// </summary>
+    private static Task StageChangeAsync(
+        AdminChangeRecorder recorder, string action, HttpContext ctx, WebhookEndpoint w, CancellationToken ct)
+    {
+        var destination = Destination(w.UrlTemplate);
+        var facts = new { destination, event_filter = w.EventFilter, description = w.Description };
+        var created = action == AdminChangeActions.WebhookCreated;
+        return recorder.StageAsync(new AdminChange(
+            Action: action,
+            ActorUserId: ctx.User.Id() ?? Guid.Empty,
+            SubjectKind: AdminChangeSubjects.Webhook,
+            SubjectId: w.Id,
+            SubjectLabel: string.IsNullOrWhiteSpace(w.Description) ? HostOf(w.UrlTemplate) : w.Description.Trim(),
+            Before: created ? null : facts,
+            After: created ? facts : null), ct);
+    }
+
+    /// <summary>Scheme, host and port — never the credentials, path or query.</summary>
+    private static string Destination(string url)
+        => TryParse(url) is { } u ? $"{u.Scheme}://{u.Authority}" : "an unreadable address";
+
+    private static string HostOf(string url) => TryParse(url)?.Host ?? "an unreadable address";
+
+    private static Uri? TryParse(string url)
+        => Uri.TryCreate(url.Replace("{", "%7B").Replace("}", "%7D"), UriKind.Absolute, out var u) ? u : null;
 
     /// <summary>Everything up to the third slash: scheme, credentials, host and port.</summary>
     private static string SchemeAndAuthority(string url)
