@@ -198,10 +198,12 @@ jobs:
     # PARALLEL since 2026-09-28: every Postgres-backed class gets its own database cloned
     # from one migrated template (PostgresFixture), so xUnit runs the classes at once — one
     # per runner core — instead of the ~90 of them queueing through one serial collection.
-    # Locally that took the suite from 30 minutes to about 6. The budget is left at 40
-    # until a few runs have measured what this runner actually takes; lower it then, not
-    # before (see memory/gotchas-ci-jobs.md on budgets moved without measurement).
-    timeout-minutes: 40
+    # Locally that took the suite from 30 minutes to about 6. MEASURED on the 4-core runner
+    # (2026-09-30): the parallel path gains little there — 38m22s with coverage on run
+    # 36666626216, then cancelled at 40 on the next run as round-1 added ~50 tests. 60 until
+    # this job is sharded (P10); a budget with no headroom reports as CANCELLED and names no
+    # test (see memory/gotchas-ci-jobs.md).
+    timeout-minutes: 60
     needs: [backend]
     services:
       postgres:
