@@ -27,6 +27,16 @@ import { ADMIN_RESULTS, CELEBRATION_COPY, CONFIRM_SHEET, MY_GAME, RESULT_CARD, R
  * through the real register form so the photo rule is the club's own, and every refusal names
  * the step that made it. Needs the Development stack with MailHog: `make up`.
  * </p>
+ *
+ * <p>
+ * <b>No wall-clock waits.</b> The booking starts {@link LEAD_MS} from now rather than on the next
+ * slice boundary — the booking API takes any start that has not passed — so the box's cue window
+ * (`StartsAt − activation_cue_window_minutes`) is already open when the box scans, and the court
+ * time has started a few seconds later. It used to wait for the next boundary and then for the cue
+ * to open: about 30 minutes per viewport. Both viewports run at once (`mobile-play` and
+ * `desktop-play`, playwright.real.config.ts), each with its own members and searching the courts
+ * from opposite ends so the two never race for the same one.
+ * </p>
  */
 
 type Member = { email: string; password: string; name: string; session: Session };
@@ -96,42 +106,60 @@ type ScheduleWire = {
  */
 const SLICES = 1;
 
-/** How many slice boundaries ahead to look for a free court before giving up. */
-const LOOKAHEAD = 4;
+/**
+ * How far ahead of now the booking starts. `BookingService` refuses a start that has passed
+ * (`past_time`) and nothing else about when it falls — there is no slice-grid rule — so a start a
+ * few seconds out is bookable, already inside the box's cue window, and started by the time the
+ * result is recorded. The margin covers the request's own latency and any skew between this
+ * machine's clock and the stack's.
+ */
+const LEAD_MS = 15_000;
 
 /**
- * A court free for the booking, and a start on the earliest slice boundary that has one — a
- * start already passed is `past_time`, even inside the current slice. The schedule's court is
- * `{ id, courtNumber }`; the booking body names it `courtId`. The first FREE court, not the
- * first court: earlier runs, the seeder's evening bookings and the other viewport hold some.
+ * A court free for the booking, and the earliest start from {@link LEAD_MS} out that has one: now,
+ * or else the moment a busy court frees up. The schedule's court is `{ id, courtNumber }`; the
+ * booking body names it `courtId`. The first FREE court, not the first court: earlier runs, the
+ * seeder's evening bookings and the other viewport hold some — and the two viewports search from
+ * opposite ends so that, running at once, they do not both pick the same one.
  */
 async function courtNow(request: APIRequestContext, member: Member): Promise<{ court: Court; startsAt: string; sliceMs: number }> {
   const today = new Date().toISOString().slice(0, 10);
   const day = await ok<ScheduleWire>(
     await request.get(`/api/v1/schedule?date=${today}`, { headers: bearer(member.session) }), "schedule");
   const slice = (day.sliceMinutes ?? 15) * 60_000;
-  const first = Math.ceil((Date.now() + 1_000) / slice) * slice;
-  for (let k = 0; k < LOOKAHEAD; k += 1) {
-    const from = first + k * slice;
+  const earliest = Date.now() + LEAD_MS;
+  const live = day.slots.filter((s) => s.status !== "cancelled");
+  const candidates = [earliest, ...live.map((s) => Date.parse(s.endsAtUtc)).filter((t) => t > earliest)].sort((a, b) => a - b);
+  const courts = day.courts.filter((c) => c.isActive !== false);
+  if (test.info().project.name.startsWith("desktop")) courts.reverse();
+  for (const from of candidates) {
     const to = from + SLICES * slice;
-    const busy = (courtId: string) => day.slots.some((s) => s.courtId === courtId && s.status !== "cancelled"
+    const busy = (courtId: string) => live.some((s) => s.courtId === courtId
       && Date.parse(s.startsAtUtc) < to && Date.parse(s.endsAtUtc) > from);
-    const free = day.courts.find((c) => c.isActive !== false && !busy(c.id));
+    const free = courts.find((c) => !busy(c.id));
     if (free) return { court: { courtId: free.id, courtNumber: free.courtNumber }, startsAt: new Date(from).toISOString(), sliceMs: slice };
   }
-  throw new Error(`no court is free in the next ${LOOKAHEAD} slices from ${new Date(first).toISOString()}`);
+  throw new Error(`no court is free today from ${new Date(earliest).toISOString()}`);
 }
 
 /** The organiser books the court for now with the partner on it; the partner says yes. */
 async function bookTogether(
   request: APIRequestContext, organiser: Member, partner: Member,
 ): Promise<{ bookingId: string; court: Court; startsAt: string; endsAt: string }> {
-  const { court, startsAt, sliceMs } = await courtNow(request, organiser);
+  // The other viewport, running at once, can take the court between the schedule read and the
+  // booking when only one is free: `slot_taken` means "look again", a few times.
+  const book = (courtId: string, at: string) => request.post("/api/v1/bookings/", {
+    headers: bearer(organiser.session),
+    data: { courtId, startsAt: at, sliceCount: SLICES, players: [{ userId: partner.session.userId }], splitMode: "equal" },
+  });
+  let { court, startsAt, sliceMs } = await courtNow(request, organiser);
+  let res = await book(court.courtId, startsAt);
+  for (let attempt = 2; attempt <= 4 && res.status() === 409 && (await res.text()).includes("slot_taken"); attempt += 1) {
+    ({ court, startsAt, sliceMs } = await courtNow(request, organiser));
+    res = await book(court.courtId, startsAt);
+  }
   const booked = await ok<{ booking_id: string; players?: { participants: { participant_id: string; user_id: string | null }[] } }>(
-    await request.post("/api/v1/bookings/", {
-      headers: bearer(organiser.session),
-      data: { courtId: court.courtId, startsAt, sliceCount: SLICES, players: [{ userId: partner.session.userId }], splitMode: "equal" },
-    }), "book with a partner");
+    res, "book with a partner");
   const seat = booked.players?.participants.find((p) => p.user_id === partner.session.userId);
   if (!seat) throw new Error("the partner's seat was not created");
   const detail = await ok<{ players: { participant_id: string; share_credits: number }[] }>(
@@ -150,7 +178,8 @@ async function bookTogether(
  * scan takes. This is what sets `bookings.CheckedInAt`; nothing else in the walk does.
  */
 // A result can be recorded only once the court time has started (`not_started` before), and the
-// box checks a booking in up to the cue window early — so wait out the rest before recording.
+// box checks a booking in up to the cue window early — so wait out the rest before recording:
+// LEAD_MS at most, unless no court was free until one freed up.
 async function untilStarted(startsAt: string) {
   const wait = Date.parse(startsAt) - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait + 2_000));
@@ -159,15 +188,15 @@ async function untilStarted(startsAt: string) {
 async function checkInThroughTheBox(
   request: APIRequestContext, court: Court, bookingId: string, startsAt: string, endsAt: string,
 ): Promise<void> {
-  const setupAdmin = await devAdminSession(request);
+  const admin = await devAdminSession(request);
   // The box lights a booking from `StartsAt − activation_cue_window_minutes`; before that a scan
-  // is `too_early`. The booking starts on the next slice boundary, so wait for its cue to open.
+  // is `too_early`. The booking starts LEAD_MS out, well inside the cue, so this waits only when
+  // the club's cue window is shorter than that or no court was free until later.
   const settings = await ok<{ activation_cue_window_minutes?: number }>(
-    await request.get("/api/v1/admin/settings", { headers: bearer(setupAdmin) }), "settings");
+    await request.get("/api/v1/admin/settings", { headers: bearer(admin) }), "settings");
   const cueOpens = Date.parse(startsAt) - (settings.activation_cue_window_minutes ?? 10) * 60_000;
   const wait = cueOpens - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait + 2_000));
-  const admin = await devAdminSession(request); // fresh after the wait
   const { api_key: key } = await ok<{ api_key: string }>(
     await request.get("/api/v1/admin/devices/api-key", { headers: bearer(admin) }), "device api key");
   const mac = `5ccf7f${Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0")}`;
@@ -221,7 +250,10 @@ async function typeGame(page: Page, game: number, a: number, b: number) {
 test.describe.configure({ mode: "serial" });
 
 test("organiser records 3–1, partner confirms from the mail, both earn their badges", async ({ browser, request, baseURL }) => {
-  test.setTimeout(2_400_000);
+  // A couple of minutes normally. The headroom is for the two slow paths the walk still has:
+  // the auth limiter's Retry-After (10 anonymous calls a minute, both viewports registering at
+  // once) and a club with no court free until one frees up.
+  test.setTimeout(1_200_000);
   const base = baseURL ?? "http://localhost:8088";
   const setup = await browser.newPage();
   const organiser = await newMember(setup, request, base, "Play Organiser");
@@ -231,7 +263,8 @@ test("organiser records 3–1, partner confirms from the mail, both earn their b
   const { bookingId, court, startsAt, endsAt } = await bookTogether(request, organiser, partner);
   await checkInThroughTheBox(request, court, bookingId, startsAt, endsAt);
   await untilStarted(startsAt);
-  // The wait for the box's cue window can outlast a session; sign both back in.
+  // Seconds normally, but a club with no free court waits for one — longer than an access token
+  // lives (15 minutes). Signing both back in costs two per-account sign-ins.
   organiser.session = await passwordSession(request, organiser.email, organiser.password);
   partner.session = await passwordSession(request, partner.email, partner.password);
 
@@ -284,7 +317,10 @@ test("organiser records 3–1, partner confirms from the mail, both earn their b
 });
 
 test("a disputed result reaches the admin, who removes it", async ({ browser, request, baseURL }) => {
-  test.setTimeout(2_400_000);
+  // A couple of minutes normally. The headroom is for the two slow paths the walk still has:
+  // the auth limiter's Retry-After (10 anonymous calls a minute, both viewports registering at
+  // once) and a club with no court free until one frees up.
+  test.setTimeout(1_200_000);
   const base = baseURL ?? "http://localhost:8088";
   const setup = await browser.newPage();
   const organiser = await newMember(setup, request, base, "Dispute Organiser");
@@ -293,7 +329,8 @@ test("a disputed result reaches the admin, who removes it", async ({ browser, re
   const { bookingId, court, startsAt, endsAt } = await bookTogether(request, organiser, partner);
   await checkInThroughTheBox(request, court, bookingId, startsAt, endsAt);
   await untilStarted(startsAt);
-  // The wait for the box's cue window can outlast a session; sign both back in.
+  // Seconds normally, but a club with no free court waits for one — longer than an access token
+  // lives (15 minutes). Signing both back in costs two per-account sign-ins.
   organiser.session = await passwordSession(request, organiser.email, organiser.password);
   partner.session = await passwordSession(request, partner.email, partner.password);
 
@@ -307,13 +344,16 @@ test("a disputed result reaches the admin, who removes it", async ({ browser, re
   });
   const result = await ok<{ version: number }>(created, "record through the API");
 
+  // The admin's desk lists every disputed result in the club — the other viewport's too, running
+  // at once, and any an interrupted walk left behind — so the note names this booking.
+  const note = `It went to a third game (${bookingId.slice(0, 8)}).`;
   const page = await browser.newPage();
   await plantSession(page, partner.session);
   await page.goto(`/bookings/${bookingId}`);
   await dismissCelebrations(page);
   await page.getByRole("button", { name: RESULT_CARD.somethingWrong }).click();
   const sheet = page.getByRole("dialog", { name: CONFIRM_SHEET.title });
-  await sheet.getByLabel(CONFIRM_SHEET.noteLabel).fill("It went to a third game.");
+  await sheet.getByLabel(CONFIRM_SHEET.noteLabel).fill(note);
   await sheet.getByRole("button", { name: CONFIRM_SHEET.send }).click();
   await expect(page.locator("[data-result-card]")).toContainText(RESULT_CARD.disputed);
   await page.close();
@@ -324,7 +364,7 @@ test("a disputed result reaches the admin, who removes it", async ({ browser, re
   await plantSession(desk, admin);
   await desk.goto("/admin/results");
   await dismissCelebrations(desk);
-  const row = desk.locator("[data-admin-result]").filter({ hasText: "It went to a third game." });
+  const row = desk.locator("[data-admin-result]").filter({ hasText: note });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: ADMIN_RESULTS.remove }).click();
   const dialog = desk.getByRole("dialog", { name: ADMIN_RESULTS.removeTitle });

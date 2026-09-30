@@ -61,7 +61,7 @@ From the repo root:
 
 | Command | What it does |
 | --- | --- |
-| `make walk` | Headed, slowed (`SLOWMO=300`), both viewports — for a person to follow. `ARGS="--project=mobile"` narrows it. |
+| `make walk` | Headed, slowed (`SLOWMO=300`), both viewports — for a person to follow. The sign-in specs run first, one at a time (projects `mobile`, `desktop`); the play walk then runs both viewports at once (`mobile-play`, `desktop-play`). `ARGS="--project=mobile-play --no-deps"` narrows it to one; without `--no-deps` a project runs the ones it depends on first. |
 | `make walk-smoke` | Headless, both viewports — the quick "is the stack walkable" check. |
 | `cd src/frontend && npm run e2e:real` | The same suite with your own flags. |
 

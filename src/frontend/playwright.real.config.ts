@@ -18,18 +18,24 @@ import { defineConfig, devices } from "@playwright/test";
  * </p>
  *
  * <p>
- * <b>One worker, in order.</b> The specs share one database and one mailbox. Parallel specs
- * would race each other's approvals and the anonymous auth rate limit (10 a minute per IP).
+ * <b>In order, except the play walk.</b> The specs share one database and one mailbox, and the
+ * sign-in specs do not retry the anonymous auth rate limit (10 a minute per IP), so `mobile` and
+ * `desktop` run them one at a time, as before. The play walk (`play.spec.ts`) retries every auth
+ * call on 429, keeps its own members and courts per viewport and no longer waits on the clock, so
+ * its two viewports — `mobile-play` and `desktop-play` — run at once, after the sign-in specs.
+ * Narrow with e.g. `--project=mobile-play --no-deps` (without `--no-deps` a project runs the
+ * projects it depends on first).
  * </p>
  */
 const headed = !!process.env.HEADED;
+const PLAY = /play\.spec\.ts$/;
 
 export default defineConfig({
   testDir: "./e2e-real",
   outputDir: "./test-results/real",
   globalSetup: "./e2e-real/support/global-setup.ts",
   fullyParallel: false,
-  workers: 1,
+  workers: 2,
   retries: 0,
   forbidOnly: !!process.env.CI,
   timeout: 90_000,
@@ -46,7 +52,9 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "mobile", use: { ...devices["Pixel 7"] } },
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile", testIgnore: PLAY, workers: 1, use: { ...devices["Pixel 7"] } },
+    { name: "desktop", testIgnore: PLAY, workers: 1, dependencies: ["mobile"], use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile-play", testMatch: PLAY, dependencies: ["desktop"], use: { ...devices["Pixel 7"] } },
+    { name: "desktop-play", testMatch: PLAY, dependencies: ["desktop"], use: { ...devices["Desktop Chrome"] } },
   ],
 });
