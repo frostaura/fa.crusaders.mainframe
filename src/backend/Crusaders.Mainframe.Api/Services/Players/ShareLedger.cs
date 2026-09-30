@@ -223,7 +223,7 @@ public sealed class ShareLedger
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var estimate = await DeltaAsync(bookingId, seatId, options, ct);
-            if (estimate is { Delta: >= 0m, Seat.ReturnPendingSince: not null }) await ClearWaitingAsync(seatId, PayerOf(estimate.Booking), ct);
+            if (estimate is { Delta: >= 0m, Seat.ReturnPendingSince: not null }) await ClearStaleWaitAsync(bookingId, seatId, PayerOf(estimate.Booking), options, ct);
             if (estimate is not { } first || first.Delta == 0m) return null;
 
             var debited = first.Delta > 0 ? first.Seat.UserId!.Value : PayerOf(first.Booking);
@@ -343,6 +343,25 @@ public sealed class ShareLedger
     {
         if (options.ClubRemoval is not { } removal || removal.SeatId != move.ParticipantId || move.Delta >= 0m) return null;
         return new ClubReceipt(false, null, removal.Reason);
+    }
+
+    /// <summary>
+    /// The unlocked estimate saw a stamp and nothing owed back: decided again under the ORGANISER's
+    /// lock before the stamp is cleared (2026-09-30). The estimate is several reads, so it could see
+    /// the seat stamped before a return posted and the ledger after — and by its clear, a NEW return
+    /// could have started waiting on the same seat. An unconditional clear there wiped that fresh
+    /// stamp: due, unpaid, out of owed-back, and past the sweep's week never retried. Stamps are only
+    /// set, and returns only posted, under this lock, so the re-read here cannot be overtaken.
+    /// </summary>
+    private async Task ClearStaleWaitAsync(Guid bookingId, Guid seatId, Guid organiser, ReconcileOptions options, CancellationToken ct)
+    {
+        await using var organiserLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, organiser, _outbox, ct);
+        if (await DeltaAsync(bookingId, seatId, options, ct) is { Delta: >= 0m, Seat.ReturnPendingSince: not null } now
+            && PayerOf(now.Booking) == organiser)
+        {
+            await ClearWaitingAsync(seatId, organiser, ct);
+        }
+        await organiserLock.CommitAsync(ct);
     }
 
     /// <summary>The seat's return has posted, or is no longer due: it is not waiting any more.</summary>
