@@ -53,7 +53,19 @@ function ms(iso: string): number {
  */
 function burstKey(event: TraceEvent): string {
   const family = (event.kind ?? "").split(".")[0];
-  return `${event.strand ?? ""}:${family}:${event.device_code ?? ""}`;
+  return `${event.strand ?? ""}:${family}:${placeOf(event)}`;
+}
+
+/**
+ * Which door or box an event happened at. The trace never sends `device_code` (R4 contract
+ * audit, it.fails): keyed on it alone, scans at two doors in one minute collapsed into ONE burst.
+ * The door's name and the board's id ride in `detail`; the court is the last resort.
+ */
+function placeOf(event: TraceEvent): string {
+  const detail = event.detail ?? {};
+  const said = [event.device_code, detail.door_name, detail.device_id, event.court?.id]
+    .find((v) => typeof v === "string" && v !== "");
+  return (said as string | undefined) ?? "";
 }
 
 /**

@@ -84,6 +84,16 @@ describe("bursts — three tries at a door are one story", () => {
     expect(rows.map((r) => r.kind)).toEqual(["event", "event", "event"]);
   });
 
+  /**
+   * R4 contract audit: the trace never sends `device_code`, so the rule above held only in this
+   * file's fixture. The server names the door in `detail.door_name`.
+   */
+  it("does not merge two doors named only in the server's detail, as the trace really sends them", () => {
+    const door = (at: number, name: string) => event({ at: AT(at), device_code: undefined, detail: { door_name: name } });
+    const rows = buildTimeline([door(0, "Side Door"), door(10, "Front Door"), door(20, "Side Door")]);
+    expect(rows.map((r) => r.kind)).toEqual(["event", "event", "event"]);
+  });
+
   it("does not merge a door scan with a wallet movement that happened beside it", () => {
     const rows = buildTimeline([
       event({ at: AT(0), strand: "door", kind: "door.opened" }),
