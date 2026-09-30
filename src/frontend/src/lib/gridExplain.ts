@@ -6,8 +6,11 @@ import { walletTone } from "./balance";
 import { adminWalletNote } from "./bookingsCopy";
 import {
   closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence, groupRateLine,
-  quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
+  memberEmptyWindowSentence, memberRestrictionSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
 } from "./gridCopy";
+
+/** The member the desk is booking for, and their rules — what a window-locked cell explains (R2 F1-3). */
+export type ForMember = { name: string; rules: ViewerRules };
 
 /**
  * Everything the grid says ABOUT itself: the standing notices above it, the sentence an
@@ -74,7 +77,9 @@ export type GridExplainer = {
 const HAIR_SPACE = String.fromCharCode(0x200A);
 
 /** @param dayLabel "Thu 1 Oct" when the grid shows a day other than today, else null (F1.7). */
-export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules, dayLabel: string | null = null): GridExplainer {
+export function useGridExplainer(
+  day: ScheduleDay | null, rules: ViewerRules, dayLabel: string | null = null, forMember: ForMember | null = null,
+): GridExplainer {
   const [live, setLive] = useState("");
   const [shown, setShown] = useState("");
 
@@ -87,10 +92,10 @@ export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules, da
   }, []);
 
   const explain = useCallback((reason: GridReason, where: string) => {
-    const sentence = sentenceFor(reason, where, day, rules);
+    const sentence = memberSentence(reason, where, day, forMember) ?? sentenceFor(reason, where, day, rules);
     announce(sentence);
     setShown(sentence);
-  }, [announce, day, rules]);
+  }, [announce, day, rules, forMember]);
   const dismiss = useCallback(() => setShown(""), []);
 
   const notices = useCallback(
@@ -151,6 +156,17 @@ const SENTENCE: Partial<Record<GridReason, (c: SentenceContext) => string>> = {
     + "Cancel one of them, or pick another day.",
   court_inactive: (c) => `${c.where} is not in use at the moment. The club can tell you when it is back.`,
 };
+
+/** A window lock while booking FOR a member is about the member's groups, never the admin's. */
+function memberSentence(reason: GridReason, where: string, day: ScheduleDay | null, forMember: ForMember | null): string | null {
+  if (!forMember) return null;
+  const { name, rules } = forMember;
+  if (reason === "no_bookable_window") {
+    return memberEmptyWindowSentence(name, rules.emptyWindow?.groups ?? rules.groups.map((g) => g.name), rules.clubDay ?? day?.date ?? "");
+  }
+  if (reason === "group_window") return memberRestrictionSentence(where, name, rules.groups, rules.allowedWindows ?? []);
+  return null;
+}
 
 function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null, rules: ViewerRules): string {
   const build = SENTENCE[reason];

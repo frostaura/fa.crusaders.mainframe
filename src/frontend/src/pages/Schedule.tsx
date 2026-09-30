@@ -17,6 +17,7 @@ import type { BoardContext } from "../components/ScheduleCells";
 import { BookingBoard, BookingGridHeading, BookingGridSkeleton, SELECTION_ROOM_PX } from "../components/bookings/BookingGrid";
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
 import { BookingForBar } from "../components/bookings/BookingForBar";
+import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { CancelSheet, type CancelledOutcome } from "../components/bookings/CancelSheet";
 import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
@@ -25,9 +26,10 @@ import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { BOOKINGS_COPY, cancelSelectionLabel, selectionCapSentence, selectionHeadline } from "../lib/bookingsCopy";
+import { firstNameOf, memberGridRules } from "../lib/bookingsApi";
 import { describePlaces, type Place } from "../lib/bookingSpan";
 import { clubClock } from "../lib/clubClock";
-import { useGridExplainer } from "../lib/gridExplain";
+import { useGridExplainer, type ForMember } from "../lib/gridExplain";
 import {
   freeCount, gridBookingOf, parseSelectionKey, pendingBookingId, toGridBookings, toSelectedSlots, useGridSelection, type Selection,
 } from "../lib/gridSelection";
@@ -72,7 +74,12 @@ export default function BookingsPage() {
 
   // F1.7 — the quota and the cap are the SHOWN day's: "today" only when it is.
   const otherDay = date === today ? null : formatClubDayLabel(date) ?? null;
-  const explainer = useGridExplainer(day, rules, otherDay);
+  // R2 F1-3 — booking FOR a member, the grid draws that member's group hours: a cell their
+  // groups would refuse is locked before Continue, not refused after it.
+  const bookingFor = useBookingFor(bookAsUserId, date);
+  const forMember = useForMember(bookingFor);
+  const gridRules = forMember?.rules ?? rules;
+  const explainer = useGridExplainer(day, rules, otherDay, forMember);
   const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay), [otherDay]);
   const selection = useGridSelection({
     cap: isAdmin || rules.adminExempt ? null : rules.remainingToday,
@@ -114,10 +121,10 @@ export default function BookingsPage() {
 
   const { openBook, openCancel } = sheets;
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
-    day: shown, rules, isAdmin, dayLabel: otherDay, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
+    day: shown, rules: gridRules, isAdmin, dayLabel: otherDay, forName: forMember?.name ?? null, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
     onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc)]),
     onOpenBooking: (slot: ScheduleSlot) => openCancel([gridBookingOf(slot, shown)]),
-  } : null), [shown, rules, isAdmin, otherDay, explainer.explain, selection.api, liftHold, openBook, openCancel]);
+  } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, liftHold, openBook, openCancel]);
 
   const collapsed = explainer.collapsedRows(schedule.timeSlices, schedule.pastThresholdMs, showEarlier, isAdmin, schedule.slotsByCourt);
 
@@ -137,7 +144,7 @@ export default function BookingsPage() {
           padding, not a spacer element, because a spacer would also take the shell's section gap. */}
       <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
         {bookAsUserId
-          ? <BookingForBar userId={bookAsUserId} day={date} sliceMinutes={day?.sliceMinutes ?? 15} />
+          ? <BookingForBar booking={bookingFor} sliceMinutes={day?.sliceMinutes ?? 15} />
           : <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />}
         <InvitesBadgeLink />
         <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} rateLine={explainer.rateLine} />
@@ -182,6 +189,15 @@ export default function BookingsPage() {
       />
     </PageShell>
   );
+}
+
+/** The member being booked for, with the grid rules their groups set — null until known (R2 F1-3). */
+function useForMember(booking: BookingFor): ForMember | null {
+  const member = booking.state.status === "ready" ? booking.state.member : null;
+  return useMemo(() => {
+    const memberRules = memberGridRules(member);
+    return member && memberRules ? { name: firstNameOf(member.name), rules: memberRules } : null;
+  }, [member]);
 }
 
 /* ─────────────────────────────── the header's toggle ─────────────────────────────── */

@@ -135,22 +135,26 @@ export function quotaPill(booked: number, maxSlots: number, dayLabel: string | n
  * arriving at it.
  * </p>
  */
-export function unavailableWhy(reason: string): string {
+export function unavailableWhy(reason: string, forName: string | null = null): string {
   switch (reason) {
     case "peak_league_only": return "reserved for league and senior members until closer to the time";
-    case "group_window": return "outside the times you can book";
-    case "no_bookable_window": return "not open to you on this day";
+    // R2 F1-3: when the desk books for a member, the window is THEIRS — said about them.
+    case "group_window": return forName ? `outside ${forName}'s booking times` : "outside the times you can book";
+    case "no_bookable_window": return forName ? `not open to ${forName} on this day` : "not open to you on this day";
     case "court_inactive": return "this court is not in use";
     default: return "not available";
   }
 }
 
 /** The short word a restricted cell wears. Never a code, never a group's internal name. */
-export function restrictionLabel(reason: string, windows: readonly { start: string; end: string }[]): string {
+export function restrictionLabel(
+  reason: string, windows: readonly { start: string; end: string }[], forMember = false,
+): string {
   if (reason === "peak_league_only") return "League only";
-  if (reason === "no_bookable_window") return "Not yours";
+  if (reason === "no_bookable_window") return forMember ? "Not theirs" : "Not yours";
   const next = windows[0];
-  return next ? `From ${next.start}` : "Not your hours";
+  if (next) return `From ${next.start}`;
+  return forMember ? "Not their hours" : "Not your hours";
 }
 
 /**
@@ -171,6 +175,32 @@ export function restrictionSentence(
   if (windows.length === 0) return `${where} isn't open to you on this day. ${who}`.trim();
   const when = windows.map((w) => `${w.start}–${w.end}`).join(" and ");
   return `${where} is outside the times you can book. You can book ${when} on this day. ${who}`.trim();
+}
+
+/**
+ * The same sentence about the member the desk is booking FOR (R2 F1-3). Booking for a member
+ * follows their group's times — god mode lifts the credit and the daily cap, never the window —
+ * so it says whose times they are and where they are changed.
+ */
+export function memberRestrictionSentence(
+  where: string,
+  name: string,
+  groups: readonly { name: string }[],
+  windows: readonly { start: string; end: string }[],
+): string {
+  const names = listNames(groups.map((g) => g.name));
+  const who = names ? ` ${name} is in ${names}.` : "";
+  const change = " Their group's times can be changed on the Groups page.";
+  if (windows.length === 0) return `${where} isn't open to ${name} on this day.${who}${change}`;
+  const when = windows.map((w) => `${w.start}–${w.end}`).join(" and ");
+  return `${where} is outside ${name}'s booking times. ${name} can book ${when} on this day.${who}${change}`;
+}
+
+/** The empty intersection, about the member the desk is booking for (R2 F1-3). */
+export function memberEmptyWindowSentence(name: string, groups: readonly string[], day: string): string {
+  const names = listNames(groups);
+  const whose = names ? `${name}'s groups (${names})` : `${name}'s groups`;
+  return `${whose} have booking times that don't overlap, so there is nothing ${name} can book on ${weekdayName(day)}. Their group's times can be changed on the Groups page.`;
 }
 
 /**

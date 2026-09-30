@@ -1,4 +1,5 @@
 import { api, type CancellationQuote, type ScheduleSlot } from "./api";
+import type { ClockWindow, ViewerRules } from "./gridRules";
 
 /**
  * The Bookings screen's own reads beyond `/schedule` (review round 1): the member's upcoming
@@ -43,6 +44,21 @@ export type BookingForMember = {
   /** Their price for one slice, from their groups; null when the rules could not say. */
   slicePrice: number | null;
   groups: string[];
+  /**
+   * Their group hours on the day being booked (R2 F1-3) — what the grid draws for the desk, so a
+   * cell the member's groups would refuse is locked before Continue rather than refused after.
+   * Null when the rules could not be read: unknown is never a refusal.
+   */
+  windows: MemberWindows | null;
+};
+
+/** The member's own window facts, as `/admin/members/{id}/booking-rules` answers them. */
+export type MemberWindows = {
+  day: string;
+  groups: { id: string; name: string }[];
+  /** `null` = the server did not say; `[]` with `emptyGroups` = the groups never overlap. */
+  allowed: ClockWindow[] | null;
+  emptyGroups: string[] | null;
 };
 
 type DetailWire = {
@@ -50,7 +66,28 @@ type DetailWire = {
   held_credits?: number; owed_back_credits?: number;
 };
 
-type RulesWire = { slice_price_credits?: number | null; groups?: Array<{ name: string }> };
+type RulesWire = {
+  slice_price_credits?: number | null;
+  groups?: Array<{ id?: string; name: string }>;
+  day?: string;
+  allowed_windows?: Array<{ start?: unknown; end?: unknown }> | null;
+  empty_window_groups?: string[] | null;
+};
+
+function windowsOf(rules: RulesWire, day: string): MemberWindows {
+  const allowed = Array.isArray(rules.allowed_windows)
+    ? rules.allowed_windows
+      .filter((w): w is ClockWindow => typeof w?.start === "string" && typeof w?.end === "string")
+      .map((w) => ({ start: w.start, end: w.end }))
+    : null;
+  const empty = Array.isArray(rules.empty_window_groups) && rules.empty_window_groups.length ? rules.empty_window_groups : null;
+  return {
+    day: typeof rules.day === "string" ? rules.day : day,
+    groups: (rules.groups ?? []).map((g) => ({ id: g.id ?? g.name, name: g.name })),
+    allowed,
+    emptyGroups: empty,
+  };
+}
 
 function positive(value: number | undefined): number {
   return typeof value === "number" && value > 0 ? value : 0;
@@ -71,7 +108,30 @@ export async function readBookingFor(userId: string, day: string): Promise<Booki
     reserved,
     slicePrice: typeof rules?.slice_price_credits === "number" ? rules.slice_price_credits : null,
     groups: (rules?.groups ?? []).map((g) => g.name),
+    windows: rules ? windowsOf(rules, day) : null,
   };
+}
+
+/**
+ * The grid's rules while the desk books FOR a member (R2 F1-3): the member's group windows —
+ * god mode lifts the credit and the daily cap, never a group's window — and nothing else. Null
+ * when their windows are unknown, and the grid stays the admin's (every cell offered).
+ */
+export function memberGridRules(member: BookingForMember | null): ViewerRules | null {
+  const w = member?.windows;
+  if (!w || (w.allowed === null && w.emptyGroups === null)) return null;
+  return {
+    known: true, adminExempt: false, groups: w.groups, allowedWindows: w.allowed, clubHours: null,
+    slicePriceCredits: member?.slicePrice ?? null, maxSlotsPerDay: null, maxMinutesPerDay: null,
+    bookedSlotsToday: null, bookedMinutesToday: null, remainingToday: null,
+    emptyWindow: w.emptyGroups ? { groups: w.emptyGroups, day: w.day } : null,
+    clubDay: w.day,
+  };
+}
+
+/** "Naledi" from "Naledi Khumalo" — how the grid names the member it is booking for. */
+export function firstNameOf(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
 }
 
 /* ─────────────────────────────── the split cancel (§3) ─────────────────────────────── */

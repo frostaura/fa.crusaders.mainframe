@@ -407,7 +407,7 @@ export const BOOKING_FOR = {
   canSpend: (credits: number) => `can spend ${signedCredits(credits)}`,
   price: (credits: number, sliceMinutes: number) => `pays ${formatCredits(credits)} / ${sliceMinutes} min`,
   held: (credits: number) => `${formatCredits(credits)} held for or owed to partners`,
-  gridNote: "The grid shows your prices; the sheet charges theirs.",
+  gridNote: "The grid shows your prices and their group's hours; the sheet charges theirs.",
   reading: "Reading this member's details…",
   failed: "Couldn't read this member's details. The sheet still books for them and shows their figures.",
   retry: "Try again",

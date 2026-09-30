@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserCircle } from "@/components/ui/icons";
 import { BOOKING_FOR } from "@/lib/bookingsCopy";
-import { bookingsApi, type BookingForMember } from "@/lib/bookingsApi";
+import type { BookingForMember } from "@/lib/bookingsApi";
+import type { BookingFor } from "./useBookingFor";
 
 /**
  * F1.6 — `/bookings?as=<member>`, the desk booking for somebody from their page.
@@ -17,29 +17,8 @@ import { bookingsApi, type BookingForMember } from "@/lib/bookingsApi";
  * what they pay per slice — and offers the way back to booking for oneself.
  * </p>
  */
-type State =
-  | { status: "loading" }
-  | { status: "ready"; member: BookingForMember }
-  | { status: "error" };
-
-function useBookingFor(userId: string, day: string) {
-  const [attempt, setAttempt] = useState(0);
-  const [answer, setAnswer] = useState<{ key: string; state: State } | null>(null);
-  const key = `${userId}|${day}|${attempt}`;
-  useEffect(() => {
-    let live = true;
-    bookingsApi.bookingFor(userId, day).then(
-      (member) => { if (live) setAnswer({ key, state: { status: "ready", member } }); },
-      () => { if (live) setAnswer({ key, state: { status: "error" } }); },
-    );
-    return () => { live = false; };
-  }, [key, userId, day]);
-  const state: State = answer?.key === key ? answer.state : { status: "loading" };
-  return { state, retry: () => setAttempt((n) => n + 1) };
-}
-
-export function BookingForBar({ userId, day, sliceMinutes }: { userId: string; day: string; sliceMinutes: number }) {
-  const { state, retry } = useBookingFor(userId, day);
+export function BookingForBar({ booking, sliceMinutes }: { booking: BookingFor; sliceMinutes: number }) {
+  const { state, retry } = booking;
   if (state.status === "error") {
     return (
       <div data-booking-for="" className="grid justify-items-start gap-2">

@@ -56,6 +56,8 @@ export type BoardContext = {
   isAdmin: boolean;
   /** The shown day in words ("Thu 1 Oct") when it is not today; null on today's grid (R2 F1-5). */
   dayLabel: string | null;
+  /** The first name of the member the desk is booking for (`?as=`), whose group hours the grid draws (R2 F1-3). */
+  forName?: string | null;
   /** The sentence a locked cell answers with (D4 §2.9) — visible and spoken. */
   explain: (reason: GridReason, where: string) => void;
   /** A single tap on a free cell outside selection mode: book that one slice. */
@@ -348,7 +350,7 @@ function UnavailableCell(props: SlotCellProps & { reason: GridReason }) {
       {/* R2 F1-6: the member's own cap wears a gauge and "Your limit" — a lock and "Full" said
           the court was taken, on a court that was free. */}
       {closed ? null : quota ? <Gauge size={14} weight="bold" aria-hidden="true" className="shrink-0" /> : <Info size={14} weight="bold" aria-hidden="true" className="shrink-0" />}
-      <span className="min-w-0 truncate">{unavailableWord(reason, ctx.rules)}</span>
+      <span className="min-w-0 truncate">{unavailableWord(reason, ctx)}</span>
     </button>
   );
 }
@@ -565,15 +567,15 @@ function isQuota(reason: GridReason): boolean {
 }
 
 /** The short word an unavailable cell wears — D4 §7.3's table. */
-function unavailableWord(reason: GridReason, rules: ViewerRules): string {
+function unavailableWord(reason: GridReason, ctx: BoardContext): string {
   if (reason === "out_of_hours") return CELL_TEXT.closed;
   if (isQuota(reason)) return CELL_TEXT.limit;
-  return restrictionLabel(reason, rules.allowedWindows ?? []);
+  return restrictionLabel(reason, ctx.rules.allowedWindows ?? [], Boolean(ctx.forName));
 }
 
 /** The control's accessible name: where, then why it is not this viewer's. */
 function unavailableLabel(reason: GridReason, where: string, ctx: BoardContext): string {
   if (reason === "out_of_hours") return closedCellLabel(where);
   if (isQuota(reason)) return quotaCellLabel(where, ctx.rules.maxSlotsPerDay ?? 0, ctx.dayLabel);
-  return `${where} — ${unavailableWhy(reason)}`;
+  return `${where} — ${unavailableWhy(reason, ctx.forName ?? null)}`;
 }
