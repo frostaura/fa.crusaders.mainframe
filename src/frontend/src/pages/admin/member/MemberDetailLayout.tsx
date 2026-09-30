@@ -46,9 +46,14 @@ import { useMemberTopUp } from "./useMemberTopUp";
 export default function MemberDetailLayout() {
   const { userId = "" } = useParams();
   const state = useMemberDetailRead(userId);
-  const { detail, patch } = state;
-  const onApplied = useCallback((balance: number) => patch({ balance_credits: balance }), [patch]);
-  const topUp = useMemberTopUp(userId, onApplied);
+  const { detail, patch, reload } = state;
+  // A balance the lost-reply lookup could not re-read is null: read the member again rather
+  // than leave the header on the figure from before the movement (review round 2, F3-2).
+  const onApplied = useCallback(
+    (balance: number | null) => (balance === null ? reload() : patch({ balance_credits: balance })),
+    [patch, reload],
+  );
+  const topUp = useMemberTopUp(userId, detail ? displayName(detail) : "this member", onApplied);
 
   const context = useMemo<MemberDetailContext | null>(
     () => (detail ? { ...state, detail, name: displayName(detail), openTopUp: topUp.show } : null),

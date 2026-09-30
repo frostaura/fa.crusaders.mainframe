@@ -2,7 +2,8 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
 import { ASSIGN_COPY } from "../lib/groupsCopy";
-import { ledgerRowFixture, memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { ledgerRowFixture, memberFixture, refuse, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { LOST_REPLY } from "../lib/topUpCopy";
 import {
   OUTCOMES, PASSWORD_DIALOG, RELATED_BOOKING, REJECT_DIALOG, RESET_DIALOG, ROW_ACTIONS, SUSPEND_DIALOG,
   TOP_UP_SHEET, UNVERIFIED,
@@ -344,8 +345,8 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
 
     await fill("7", "coaching credit");
     fireEvent.click(await armed());
-    // A 500 is NOT a refusal: the toast says the club could not be reached, not that nothing changed.
-    expect(await screen.findByText("Couldn't reach the club.")).toBeInTheDocument();
+    // A 500 is NOT a refusal, so the ledger is asked; it shows nothing, and the toast says so.
+    expect(await screen.findByText(LOST_REPLY.absent)).toBeInTheDocument();
 
     fireEvent.click(await armed());
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST").length).toBe(2));
@@ -353,6 +354,119 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     const key = (b: unknown) => (b as Record<string, unknown>).idempotencyKey;
     expect(key(first.body)).toBe(key(second.body));
     expect(typeof key(first.body)).toBe("string");
+  });
+
+  /**
+   * Review round 2 (F3-2): the credit LANDED and the reply was lost. The sheet said "That didn't
+   * go through", and an admin who then changed the amount re-sent it under the same key — a 409
+   * the sheet also called "didn't go through". The stubs below perform the movement and then
+   * fail the reply, exactly as the lost reply did.
+   */
+  describe("a reply lost after the credit landed", () => {
+    const DETAIL = `/api/v1/admin/members/${USER}`;
+    function landedThenLost(ledgerStatus = 200) {
+      const ledger: Array<ReturnType<typeof ledgerRowFixture>> = [];
+      return [
+        { path: "/api/v1/admin/members/", body: [memberFixture()] },
+        { path: "/api/v1/admin/biometric/enrollments", body: [] },
+        { path: DETAIL, respond: () => ({ ...memberFixture(), balance_credits: 120 + ledger.length * 7 }) },
+        {
+          path: "/api/v1/admin/ledger/", status: ledgerStatus,
+          respond: () => (ledgerStatus === 200 ? ledger : { error: "server_error" }),
+        },
+        {
+          method: "POST", path: ADJUST,
+          respond: (req: { body: unknown }) => {
+            const b = req.body as Record<string, unknown>;
+            ledger.push(ledgerRowFixture({
+              id: `row-${ledger.length}`, type: "AdminAdjustment", amountCredits: b.amountCredits,
+              signedAmountCredits: b.amountCredits, comment: b.reason, subjectUserId: USER,
+            }));
+            return refuse(504, { error: "gateway_timeout" });
+          },
+        },
+      ] as StubRoute[];
+    }
+
+    it("reads the ledger, finds the movement and shows the receipt — never 'didn't go through'", async () => {
+      const stub = stubFetch(landedThenLost());
+      renderPage(<AdminMembersPage />);
+
+      await fill("7", "lost reply probe");
+      fireEvent.click(await armed());
+
+      expect(await screen.findByText("Done. Ada Lovelace now has 127.00 cr.")).toBeInTheDocument();
+      expect(screen.getByText(LOST_REPLY.landed)).toBeInTheDocument();
+      expect(screen.queryByText(TOP_UP_SHEET.failed)).not.toBeInTheDocument();
+      expect(stub.calls.some((c) => c.method === "GET" && c.path.startsWith(`/api/v1/admin/ledger/?`)
+        && c.path.includes(`userId=${USER}`))).toBe(true);
+      expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    });
+
+    it("says it is not known — not that it failed — when the ledger cannot be read either", async () => {
+      stubFetch(landedThenLost(503));
+      renderPage(<AdminMembersPage />);
+
+      await fill("7", "lost reply probe");
+      fireEvent.click(await armed());
+
+      expect(await screen.findByText(LOST_REPLY.unknown("Ada Lovelace"))).toBeInTheDocument();
+    });
+
+    it("keeps the key while the outcome is unknown, so a changed amount meets the stored movement", async () => {
+      const stub = stubFetch(landedThenLost(503));
+      renderPage(<AdminMembersPage />);
+
+      await fill("7", "lost reply probe");
+      fireEvent.click(await armed());
+      await screen.findByText(LOST_REPLY.unknown("Ada Lovelace"));
+      fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+      fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+      fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: "9" } });
+      fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
+      fireEvent.click(await screen.findByRole("button", { name: TOP_UP_SHEET.next }));
+      fireEvent.click(await armed());
+
+      await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(2));
+      const [first, second] = stub.calls.filter((c) => c.method === "POST");
+      const key = (b: unknown) => (b as Record<string, unknown>).idempotencyKey;
+      expect(key(second.body)).toBe(key(first.body));
+    });
+  });
+
+  it("names what already landed when the server answers idempotency_key_reused", async () => {
+    stubFetch(routes({
+      status: 409,
+      body: { error: "idempotency_key_reused", stored: { amount_credits: 7, type: "AdminAdjustment", reason: "coaching credit", at: "2026-09-30T08:00:00Z" } },
+    }));
+    renderPage(<AdminMembersPage />);
+
+    await fill("9", "coaching credit");
+    fireEvent.click(await armed());
+
+    expect(await screen.findByText(
+      "An earlier press already went through: +7.00 cr (“coaching credit”). Nothing more was added — check the ledger before adding anything else.",
+    )).toBeInTheDocument();
+  });
+
+  it("gives a CHANGED amount its own key once the first press was refused outright", async () => {
+    const stub = stubFetch(routes({ status: [400, 200], body: { error: "amount_not_whole_cents" } }));
+    renderPage(<AdminMembersPage />);
+
+    await fill("7", "coaching credit");
+    fireEvent.click(await armed());
+    await screen.findByText(/Credits go to two decimal places/);
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+    fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
+    fireEvent.click(await screen.findByRole("button", { name: TOP_UP_SHEET.next }));
+    fireEvent.click(await armed());
+
+    await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(2));
+    const [first, second] = stub.calls.filter((c) => c.method === "POST");
+    const key = (b: unknown) => (b as Record<string, unknown>).idempotencyKey;
+    expect(key(second.body)).not.toBe(key(first.body));
   });
 
   it("gives a second, deliberate adjustment its own key", async () => {

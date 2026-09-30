@@ -15,7 +15,7 @@ import { useIsSmUp } from "@/components/ui/use-media-query";
 import { type AdjustReasonCode } from "@/lib/adminApi";
 import { TOP_UP_SHEET as COPY, signedAmount } from "@/lib/membersCopy";
 import {
-  ADD_LINK, LIVE_PUSH_NOTE, MINUS_REFUSED, TAKE_BACK_CONSEQUENCE, TAKE_BACK_LINK,
+  ADD_LINK, LIVE_PUSH_NOTE, LOST_REPLY, MINUS_REFUSED, TAKE_BACK_CONSEQUENCE, TAKE_BACK_LINK,
   ZAR_RECEIVED, balanceSentence, confirmConsequence, countsAsRevenue, doneSentence, overdraftWarning,
   parseCredits, parseZar, reasonChoicesFor, reasonLabel, receiptHeader, revenueNote, sheetTitle, validateAmount,
   validateReason, validateZar, type CreditDirection,
@@ -48,7 +48,14 @@ import { formatCredits, formatMoney } from "@/lib/utils";
  * connection granted 44 credits where 11 were typed.
  * </p>
  */
-type Applied = { balanceAfterCredits: number };
+type Applied = AppliedAdjustment;
+
+/**
+ * What a press settled on. `balanceAfterCredits` is null only where a lost reply was found on the
+ * ledger and the balance could not be re-read; `recovered` says the reply was lost and the ledger
+ * answered instead (review round 2, F3-2), so the receipt can say how it knows.
+ */
+export type AppliedAdjustment = { balanceAfterCredits: number | null; recovered?: boolean };
 
 /**
  * The receipt, frozen at the press (F3.5): the balance BEFORE and the movement as they were when
@@ -299,6 +306,7 @@ function Receipt({ name, done }: { name: string; done: Applied }) {
     <div className="flex flex-col items-center gap-3 py-4 text-center">
       <AnimatedCheck size={48} className="text-success-strong" />
       <p className="text-lg font-semibold text-success-strong" role="status">{doneSentence(name, done.balanceAfterCredits)}</p>
+      {done.recovered ? <p className="max-w-prose text-sm text-text-secondary">{LOST_REPLY.landed}</p> : null}
       <p className="max-w-prose text-sm text-text-secondary">{LIVE_PUSH_NOTE}</p>
     </div>
   );

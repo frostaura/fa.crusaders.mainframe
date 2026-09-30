@@ -165,8 +165,36 @@ export function receiptHeader(name: string, before: number | null, amount: numbe
   return `${name} had ${formatCredits(before)}. ${movement} → ${formatCredits(after)}.`;
 }
 
-export function doneSentence(name: string, balanceAfter: number): string {
+/** Null where the balance could not be re-read after a lost reply — never a made-up figure. */
+export function doneSentence(name: string, balanceAfter: number | null): string {
+  if (balanceAfter === null) return `Done. It is on ${name}'s ledger.`;
   return `Done. ${name} now has ${formatCredits(balanceAfter)}.`;
+}
+
+/**
+ * A press whose reply never came back (review round 2, F3-2). The ledger is read to find out,
+ * so each sentence says what the ledger showed — never "didn't go through" over a credit that
+ * landed.
+ */
+export const LOST_REPLY = {
+  landed: "The reply got lost on the way back, so the club's ledger was checked: this went through, once.",
+  absent: "The reply got lost, so the club's ledger was checked: nothing arrived and nothing was added. You can try again.",
+  unknown: (name: string) =>
+    `The reply got lost and the ledger couldn't be read either, so it isn't known yet whether this went through. Open ${name}'s ledger before trying again.`,
+  refused: "The club refused that adjustment. Nothing was changed.",
+} as const;
+
+/**
+ * `409 idempotency_key_reused`: an earlier press of this movement already landed with a
+ * different amount, and the server says what it stored.
+ */
+function keyReusedSentence(stored: unknown): string {
+  const row = (typeof stored === "object" && stored !== null ? stored : {}) as Record<string, unknown>;
+  const amount = typeof row.amount_credits === "number" ? row.amount_credits : null;
+  const what = amount === null ? "An earlier press of this already went through"
+    : `An earlier press already went through: ${amount < 0 ? "−" : "+"}${formatCredits(Math.abs(amount))}`;
+  const why = typeof row.reason === "string" && row.reason.trim() ? ` (“${row.reason.trim()}”)` : "";
+  return `${what}${why}. Nothing more was added — check the ledger before adding anything else.`;
 }
 
 export const LIVE_PUSH_NOTE
@@ -237,6 +265,7 @@ export function adjustRefusal(err: unknown): string | null {
       return `That is more than one movement can be — the most is ${formatCredits(max)}. Nothing was changed.`;
     }
     case "amount_not_whole_cents": return "Credits go to two decimal places. Nothing was changed.";
+    case "idempotency_key_reused": return keyReusedSentence(payload.stored);
     case "zar_received_required": return "Say how much money was received — a top-up that counts as revenue needs it. Nothing was changed.";
     case "zar_received_out_of_range": {
       const max = typeof payload.max === "number" ? ` — the most is ${formatMoney(payload.max)}` : "";

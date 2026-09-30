@@ -1,11 +1,11 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useToast } from "@/components/Toast";
-import { ApiError } from "@/lib/api";
-import { adminEndpoints, type AdjustReasonCode } from "@/lib/adminApi";
-import { isGuid, newIdempotencyKey, relatedBookingRefusal } from "@/lib/creditAdjustment";
+import { type AdjustReasonCode } from "@/lib/adminApi";
+import { isGuid } from "@/lib/creditAdjustment";
 import { RELATED_BOOKING } from "@/lib/membersCopy";
-import { adjustRefusal } from "@/lib/topUpCopy";
+import { attemptAdjustment, type AdjustmentKey } from "./adjustmentAttempt";
 import { patchRow, type MemberRow } from "./membersModel";
+import type { AppliedAdjustment } from "./TopUpSheet";
 
 /**
  * One hand movement of credit from the members list.
@@ -34,7 +34,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
   // the one input the admin has to change, and a toast that has faded says nothing.
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const key = useRef<string | null>(null);
+  const key = useRef<AdjustmentKey>(null);
   const inFlight = useRef(false);
 
   const open = useCallback((m: MemberRow) => {
@@ -60,11 +60,12 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
 
   /**
    * Returns the new balance on success and `null` on refusal, so the sheet shows its receipt
-   * rather than being closed out from under the person reading it.
+   * rather than being closed out from under the person reading it. A lost reply is looked up on
+   * the ledger before anything is said (`adjustmentAttempt`, review round 2 F3-2).
    */
   const apply = useCallback(async (
     amount: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
-  ): Promise<{ balanceAfterCredits: number } | null> => {
+  ): Promise<AppliedAdjustment | null> => {
     if (!target || inFlight.current) return null;
     const bookingId = booking.trim();
     if (bookingId && !isGuid(bookingId)) {
@@ -72,36 +73,22 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
       return null;
     }
     inFlight.current = true;
-    key.current ??= newIdempotencyKey();
     setBusy(true);
     setBookingError(null);
     try {
-      const r = await adminEndpoints.adjustCredit(target.user_id, {
-        amountCredits: amount,
-        reasonCode,
-        reason,
-        ...(bookingId ? { relatedBookingId: bookingId } : {}),
-        ...(zarReceived !== undefined ? { zarReceived } : {}),
-        idempotencyKey: key.current,
-      });
+      const outcome = await attemptAdjustment({
+        userId: target.user_id, amount, reasonCode, reason, zarReceived, name: target.full_name ?? target.email,
+        ...(bookingId ? { bookingId } : {}),
+      }, key);
+      if (outcome.kind === "booking") { setBookingError(outcome.message); return null; }
+      if (outcome.kind === "failed") {
+        toast.push({ tone: "danger", text: outcome.message, unchanged: outcome.unchanged, durationMs: 8000 });
+        return null;
+      }
       // The row follows the server's answer at once — no refetch that would re-sort the table.
-      setMembers((rows) => patchRow(rows, target.user_id, { balance_credits: r.balance_after_credits }));
-      key.current = null;
-      return { balanceAfterCredits: r.balance_after_credits };
-    } catch (err) {
-      // A refused booking id keeps the sheet open with the reason at the field. Anything else
-      // is a toast, and it may say "nothing changed" only where the server REFUSED — never
-      // where the answer was simply lost.
-      const refusal = relatedBookingRefusal(err);
-      if (refusal) { setBookingError(refusal); return null; }
-      const refused = err instanceof ApiError && err.status >= 400 && err.status < 500;
-      toast.push({
-        tone: "danger",
-        text: adjustRefusal(err) ?? (refused ? "The club refused that adjustment." : "Couldn't reach the club."),
-        unchanged: refused,
-        durationMs: 8000,
-      });
-      return null;
+      const after = outcome.balanceAfterCredits;
+      if (after !== null) setMembers((rows) => patchRow(rows, target.user_id, { balance_credits: after }));
+      return { balanceAfterCredits: after, recovered: outcome.recovered };
     } finally {
       inFlight.current = false;
       setBusy(false);
