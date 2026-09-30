@@ -71,6 +71,15 @@ public sealed class ControlBoardReader
             ["club_day"] = day.ToString("yyyy-MM-dd"),
             ["courts"] = courts,
 
+            // Review round 4, A4-5: the BOXES, once each, beside the tiles. "N boxes haven't
+            // called in" was counted over tiles, so one box driving four courts read as four;
+            // and every box is named "Court box", so the MAC and the code are what tell two
+            // apart on the wall. Out of the same device read — the query budget is unchanged.
+            ["boxes"] = data.Devices
+                .OrderBy(d => d.DeviceCode, StringComparer.Ordinal)
+                .Select(d => BoxBlock(d, now, effective, offlineAfter))
+                .ToList(),
+
             // The page's own numbers, on the same read. A page that has to make a second
             // request to learn how often to make requests is a page that gets one of them
             // wrong — and this one runs unattended for hours.
@@ -196,7 +205,30 @@ public sealed class ControlBoardReader
 
     private static object OtherBox(Device d)
     {
-        return new { device_id = d.Id, device_code = d.DeviceCode, name = d.Name, last_seen_at = d.LastSeenAt };
+        return new
+        {
+            device_id = d.Id,
+            device_code = d.DeviceCode,
+            name = d.Name,
+            mac_address = d.MacAddress,
+            last_seen_at = d.LastSeenAt,
+        };
+    }
+
+    private static object BoxBlock(Device d, DateTimeOffset now, int effective, int offlineAfter)
+    {
+        var silent = d.LastSeenAt is { } seen ? (int)Math.Max(0, (now - seen).TotalSeconds) : (int?)null;
+        return new
+        {
+            device_id = d.Id,
+            device_code = d.DeviceCode,
+            name = d.Name,
+            mac_address = d.MacAddress,
+            enabled = d.Enabled,
+            link = LinkOf(d, silent, effective, offlineAfter),
+            last_seen_at = d.LastSeenAt,
+            court_numbers = d.CourtNumbers,
+        };
     }
 
     /// <summary>
@@ -339,6 +371,7 @@ public sealed class ControlBoardReader
             device_id = device?.Id,
             device_code = device?.DeviceCode,
             name = device?.Name,
+            mac_address = device?.MacAddress,
 
             // The relay LETTER, from the position in this board's own court list. Index 0 is
             // relay A, whatever court number sits there.
