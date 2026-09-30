@@ -148,7 +148,7 @@ export function TopUpSheet(props: TopUpSheetProps) {
         <SheetBody className="flex flex-col gap-4 pb-4">
           <StepBody flow={flow} {...props} />
         </SheetBody>
-        <SheetFooter>
+        <SheetFooter className="sm:items-end">
           <StepFooter flow={flow} {...props} />
         </SheetFooter>
       </SheetContent>
@@ -331,29 +331,33 @@ function ApplyControls({ flow, name, balance, busy, onApply }: TopUpSheetProps &
   return (
     <>
       <Button variant="outline" onClick={() => flow.setStep(2)}>{COPY.back}</Button>
-      <ConfirmButton
-        idleLabel={direction === "add" ? `Add ${formatCredits(valid)}` : `Take back ${formatCredits(valid)}`}
-        cancelLabel={COPY.cancel}
-        confirmLabel={confirmConsequence(name, balance, valid, direction)}
-        // `ariaLabel` is what the ACTION is about ("Add 24.00 cr — Thandi Mokoena — choose again
-        // to confirm"); `subject` is what the way OUT names ("Cancel — Thandi Mokoena").
-        ariaLabel={name}
-        subject={name}
-        tone={direction === "add" ? "info" : "danger"}
-        // The one primary on the sheet: taking credit back keeps the danger-soft look.
-        idleClassName={direction === "add" ? buttonVariants({ variant: "primary" }) : undefined}
-        disabled={busy}
-        onConfirm={async () => {
-          const before = balance;
-          const applied = await onApply(
-            direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim(), flow.zar ?? undefined,
-          );
-          if (!applied) return COPY.failed;
-          flow.setDone({ ...applied, before, amount: valid });
-          return doneSentence(name, applied.balanceAfterCredits);
-        }}
-        className="min-h-touch"
-      />
+      {/* Its own growing column (F3.23): armed, the confirm is a sentence over two buttons, and
+          squeezed beside Back it wrapped into a cramped tower. */}
+      <div className="min-w-0 sm:flex-1">
+        <ConfirmButton
+          idleLabel={direction === "add" ? `Add ${formatCredits(valid)}` : `Take back ${formatCredits(valid)}`}
+          cancelLabel={COPY.cancel}
+          confirmLabel={confirmConsequence(name, balance, valid, direction)}
+          // `ariaLabel` is what the ACTION is about ("Add 24.00 cr — Thandi Mokoena — choose again
+          // to confirm"); `subject` is what the way OUT names ("Cancel — Thandi Mokoena").
+          ariaLabel={name}
+          subject={name}
+          tone={direction === "add" ? "info" : "danger"}
+          // The one primary on the sheet: taking credit back keeps the danger-soft look.
+          idleClassName={direction === "add" ? buttonVariants({ variant: "primary" }) : undefined}
+          disabled={busy}
+          onConfirm={async () => {
+            const before = balance;
+            const applied = await onApply(
+              direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim(), flow.zar ?? undefined,
+            );
+            if (!applied) return COPY.failed;
+            flow.setDone({ ...applied, before, amount: valid });
+            return doneSentence(name, applied.balanceAfterCredits);
+          }}
+          className="min-h-touch"
+        />
+      </div>
     </>
   );
 }

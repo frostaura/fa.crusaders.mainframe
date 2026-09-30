@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { signOut } from "@/test/harness";
 import { MEMBER_COPY, OVERVIEW_COPY } from "@/lib/memberDetailCopy";
-import { baseRoutes, detailFixture, renderMember, serve } from "./memberKit";
+import { baseRoutes, bookingRow, detailFixture, renderMember, serve } from "./memberKit";
 
 /**
  * Review round 1, F3.10: a turned-down applicant's page read "Rejected" in the header beside
@@ -20,6 +20,13 @@ describe("member detail — a turned-down application", () => {
     expect(screen.queryByText(OVERVIEW_COPY.accountStatus, { selector: "dt" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: MEMBER_COPY.topUp })).not.toBeInTheDocument();
     expect(screen.getByText(MEMBER_COPY.noTopUp.Rejected)).toBeInTheDocument();
+  });
+
+  it("puts no block element inside a paragraph on the overview (F3.23)", async () => {
+    serve(baseRoutes(detailFixture({ next_bookings: [bookingRow()] })));
+    renderMember();
+    await screen.findByTestId("member-balance");
+    expect(document.querySelectorAll("p div")).toHaveLength(0);
   });
 
   it("still offers Top up to an active member", async () => {

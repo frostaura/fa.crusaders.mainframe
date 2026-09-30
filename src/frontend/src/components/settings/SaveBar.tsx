@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { settingAnchorId } from "@/lib/tenantSettings";
@@ -68,13 +68,42 @@ function BlockerList({ id, blockers, onFocusSetting }: { id: string; blockers: B
   );
 }
 
+/**
+ * While the bar floats over the page, the page scrolls a focused field ABOVE it (F3.23: on a
+ * phone the bar covered the field being typed in). `scroll-padding-bottom` on the document is
+ * what the browser honours when it scrolls a focused control into view.
+ */
+function useKeepFieldsClearOfBar(shown: boolean, bar: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const root = document.documentElement;
+    const el = bar.current;
+    if (!shown || !el) return undefined;
+    const apply = () => {
+      const top = el.getBoundingClientRect().top;
+      root.style.scrollPaddingBottom = `${Math.max(0, window.innerHeight - top) + 16}px`;
+    };
+    apply();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(apply);
+    observer?.observe(el);
+    window.addEventListener("resize", apply);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", apply);
+      root.style.scrollPaddingBottom = "";
+    };
+  }, [shown, bar]);
+}
+
 export function SaveBar(props: SaveBarProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { changes, blockers, pending, onSave, onDiscard, onFocusSetting } = props;
   const summaryId = useId();
   const [announcement, setAnnouncement] = useState("");
   const blocked = blockers.length > 0;
-  if (changes === 0 && !blocked) return null;
+  const shown = changes > 0 || blocked;
+  const bar = useRef<HTMLDivElement>(null);
+  useKeepFieldsClearOfBar(shown, bar);
+  if (!shown) return null;
 
   const press = () => {
     if (!blocked) {
@@ -88,7 +117,7 @@ export function SaveBar(props: SaveBarProps) {
   };
 
   return (
-    <div data-save-bar="" className="pointer-events-none fixed inset-x-0 z-actionbar px-4" style={OFFSET}>
+    <div ref={bar} data-save-bar="" className="pointer-events-none fixed inset-x-0 z-actionbar px-4" style={OFFSET}>
       <section
         aria-label={SETTINGS_COPY.saveBarLabel}
         className="pointer-events-auto mx-auto flex w-full max-w-screen-sm flex-col gap-3 rounded-2xl border border-border bg-bg-raised p-3 text-text-primary shadow-lg animate-sheet-up motion-reduce:animate-none"

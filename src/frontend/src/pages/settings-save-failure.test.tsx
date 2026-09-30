@@ -85,3 +85,15 @@ describe("a session that ends during a save keeps the edits", () => {
     expect(screen.queryByText(SETTINGS_COPY.draftRestored)).toBeNull();
   });
 });
+
+describe("the save bar never covers the field being typed in (F3.23)", () => {
+  it("pads the page's scroll edge while it floats, and stops when it goes", async () => {
+    stubFetch(routes());
+    const { unmount } = renderPage(<AdminSettingsPage />);
+    expect(document.documentElement.style.scrollPaddingBottom).toBe("");
+    await changeAhead("30");
+    await waitFor(() => expect(document.documentElement.style.scrollPaddingBottom).toMatch(/px$/));
+    unmount();
+    expect(document.documentElement.style.scrollPaddingBottom).toBe("");
+  });
+});

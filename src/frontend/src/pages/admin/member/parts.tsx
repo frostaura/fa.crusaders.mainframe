@@ -52,16 +52,17 @@ export function BookingLine({ row, zone, action, people }: {
             <span aria-hidden="true">{`${clubClock(row.starts_at, zone)}–${clubClock(row.ends_at, zone)}`}</span>
             {` · ${court}`}
           </p>
-          <p className="flex flex-wrap items-center gap-x-2 text-sm text-text-secondary">
+          {/* A div, not a <p> (F3.23): the people line can hold a loading Skeleton, a <div>. */}
+          <div className="flex flex-wrap items-center gap-x-2 text-sm text-text-secondary">
             <span>{bookedByLine(row)}</span>
-            {people ? <span data-booking-people="">{people}</span> : null}
+            {people ? <div data-booking-people="">{people}</div> : null}
             {row.checked_in_at ? (
               <span className="inline-flex items-center gap-1 text-success-strong">
                 <CheckCircle size={14} weight="bold" aria-hidden="true" />
                 {`${COPY.checkedIn} ${clubClock(row.checked_in_at, zone)}`}
               </span>
             ) : null}
-          </p>
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-3 sm:justify-end">
