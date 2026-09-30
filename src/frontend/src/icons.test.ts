@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as icons from "./components/ui/icons";
+import { SHIPPED_ICON_WEIGHTS } from "./components/ui/iconWeights";
 
 /**
  * One way in to the icon set.
@@ -63,6 +64,28 @@ describe("the icon barrel", () => {
   it("keeps the thumbs out: no hand glyph stands in for an outcome", () => {
     // R8 retired the thumbs-up/down ActionGlyph. Outcomes are AnimatedCheck / AnimatedAlert.
     expect(Object.keys(icons).filter((name) => /^Thumbs/.test(name))).toEqual([]);
+  });
+
+  /**
+   * The production build keeps only `SHIPPED_ICON_WEIGHTS` of each icon (`vite.config.ts`,
+   * `phosphorWeights`). A weight drawn anywhere but not shipped renders an EMPTY svg — in
+   * production only, silently — so every weight named in the source must be on the list.
+   */
+  it("ships every icon weight the source draws", () => {
+    const named = new Set<string>([String(icons.ICON_DEFAULTS.weight)]);
+    for (const file of sources(SRC).filter((f) => !/\.test\.tsx?$/.test(f))) {
+      const text = readFileSync(file, "utf8");
+      for (const m of text.matchAll(/\bweight=(?:"(\w+)"|\{([^}]*)\})/g)) {
+        if (m[1]) named.add(m[1]);
+        for (const q of (m[2] ?? "").matchAll(/"(\w+)"/g)) named.add(q[1]);
+      }
+      for (const m of text.matchAll(/IconWeight\[\]\s*=\s*\[([^\]]*)\]/g)) {
+        for (const q of m[1].matchAll(/"(\w+)"/g)) named.add(q[1]);
+      }
+    }
+    expect(named.size).toBeGreaterThanOrEqual(3);
+    const shipped = new Set<string>(SHIPPED_ICON_WEIGHTS);
+    expect([...named].filter((w) => !shipped.has(w))).toEqual([]);
   });
 
   it("provides the product's defaults for IconContext", () => {

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import fs from "node:fs";
 import type { Plugin } from "vite";
+import { SHIPPED_ICON_WEIGHTS } from "./src/components/ui/iconWeights";
 
 /**
  * F4.3 — `precache.json`: every JS and CSS file the build emitted, for the service worker to fetch
@@ -27,8 +28,36 @@ function precacheManifest(): Plugin {
   };
 }
 
+/**
+ * Perf lane (2026-09-30) — each Phosphor icon module defines all six weights as React elements in a
+ * `Map`, and the weight is picked at render time, so tree-shaking cannot drop any. This rewrites
+ * each `dist/defs/<Icon>.es.js` at BUILD time to keep only `SHIPPED_ICON_WEIGHTS` (see that file
+ * for the guard that keeps the list honest). A module whose shape is not the expected six entries
+ * is left untouched rather than guessed at, and the build says so.
+ */
+function phosphorWeights(keep: readonly string[]): Plugin {
+  const DEFS = /@phosphor-icons\/react\/dist\/defs\/\w+\.es\.js$/;
+  const ENTRY = /\n {2}\[\n {4}"(\w+)",[\s\S]*?\n {2}\]/g;
+  return {
+    name: "crusaders-phosphor-weights",
+    apply: "build",
+    transform(code, id) {
+      if (!DEFS.test(id)) return null;
+      const entries = [...code.matchAll(ENTRY)];
+      if (entries.length !== 6) {
+        this.warn(`phosphor weights: ${id} has ${entries.length} weights, left as is`);
+        return null;
+      }
+      const first = entries[0].index;
+      const last = entries[5].index + entries[5][0].length;
+      const kept = entries.filter((m) => keep.includes(m[1])).map((m) => m[0]);
+      return { code: code.slice(0, first) + kept.join(",") + code.slice(last), map: null };
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), precacheManifest()],
+  plugins: [react(), precacheManifest(), phosphorWeights(SHIPPED_ICON_WEIGHTS)],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },
