@@ -237,9 +237,13 @@ export function emptyWalletSentence(balanceCredits: number | null, cheapestSlice
 /**
  * D4 §7.4. The past rows are not deleted — `gridWindow`'s own comment records the member who
  * was sold 03:00 on a Sunday and could see it on no screen in the product — they are collapsed
- * behind one row that says what is inside it.
+ * behind one row that says what is inside it: the club's open rows only, from the first one's
+ * start to the last one's END (R2 F1-7 — "00:00 to 06:30 (27 slots)" counted the shut night and
+ * stopped a row short).
  */
-export function earlierSummary(rows: number, mine: number, from: string, to: string): string {
+export function earlierSummary(rows: number, mine: number, from: string | null, to: string): string {
+  // Every hidden row was before the club opened: there were no slots, only a shut club.
+  if (from === null || rows === 0) return `Earlier today — closed until ${to}`;
   const slots = `${rows} ${rows === 1 ? "slot" : "slots"}`;
   const yours = mine > 0 ? `, ${mine} of them yours` : "";
   return `Earlier today — ${from} to ${to} (${slots}${yours})`;

@@ -46,7 +46,7 @@ describe("collapseEarlier", () => {
   it("collapses a real wall and says what is inside it", () => {
     const { rows: hidden, label } = collapseEarlier(all, after(5), false, false, noSlots);
     expect(hidden).toBe(6);
-    expect(label).toMatch(/^Earlier today — 06:00 to 07:15 \(6 slots\)$/);
+    expect(label).toMatch(/^Earlier today — 06:00 to 07:30 \(6 slots\)$/);
   });
 
   it("leaves a wall of one or two rows alone, because two dead rows are not a wall", () => {
@@ -93,5 +93,35 @@ describe("collapseEarlier", () => {
     const { label } = collapseEarlier(rows(8), Date.parse(rows(8)[4].utc), false, false, mine(rows(8)[1].utc));
     // One of the hidden rows is theirs, so it does not collapse at all — and that is the point.
     expect(label).toBeNull();
+  });
+
+  // R2 F1-7 — "Earlier today — 00:00 to 06:30 (27 slots)" on a club that opens at 06:00: the
+  // span ran to the START of the last hidden row (off by one), and the closed night rows were
+  // counted as slots and named as the start.
+  it("runs to the END of the last hidden row and counts only the club's open rows", () => {
+    const night = Array.from({ length: 28 }, (_, i) => {
+      const minute = i * 15;
+      return {
+        utc: new Date(Date.parse("2026-09-21T22:00:00.000Z") + minute * 60_000).toISOString(),
+        label: `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
+        minuteOfDay: minute,
+        outOfHours: minute < 6 * 60,
+      };
+    });
+    // 00:00…06:30 are past: 24 closed rows and three open ones (06:00, 06:15, 06:30).
+    const { rows: hidden, label } = collapseEarlier(night, Date.parse(night[26].utc), false, false, noSlots);
+    expect(hidden).toBe(27);
+    expect(label).toBe("Earlier today — 06:00 to 06:45 (3 slots)");
+  });
+
+  it("says the club was closed when every hidden row was a closed one", () => {
+    const night = Array.from({ length: 12 }, (_, i) => ({
+      utc: new Date(Date.parse("2026-09-21T22:00:00.000Z") + i * 15 * 60_000).toISOString(),
+      label: `00:${String(i * 5).padStart(2, "0")}`,
+      minuteOfDay: i * 15,
+      outOfHours: i < 8,
+    }));
+    const { label } = collapseEarlier(night, Date.parse(night[5].utc), false, false, noSlots);
+    expect(label).toBe(`Earlier today — closed until ${night[6].label}`);
   });
 });

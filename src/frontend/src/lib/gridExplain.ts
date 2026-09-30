@@ -267,7 +267,11 @@ export function collapseEarlier(
   const until = Date.parse(slices[past - 1].utc);
   const mine = countMine(slotsByCourt, until);
   if (expanded || isAdmin || mine > 0) return { rows: 0, label: null };
-  return { rows: past, label: earlierSummary(past, mine, slices[0].label, slices[past - 1].label) };
+  // R2 F1-7: the span runs to the END of the last hidden row (the next row's start — there is
+  // always one, since a wholly past day never collapses), and only the club's OPEN rows are
+  // slots; the closed night rows before opening are neither counted nor named as the start.
+  const open = slices.slice(0, past).filter((t) => !t.outOfHours);
+  return { rows: past, label: earlierSummary(open.length, mine, open[0]?.label ?? null, slices[past].label) };
 }
 
 function countMine(slotsByCourt: Map<string, ScheduleSlot[]>, untilMs: number): number {
