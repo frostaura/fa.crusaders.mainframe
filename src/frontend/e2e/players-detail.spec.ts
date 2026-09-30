@@ -150,6 +150,39 @@ function adminDetail(): Detail {
   };
 }
 
+test.describe("R1 F2.1 — changing the split", () => {
+  test("the organiser moves Sam to 30.00 cr on an Amount split, and it is saved by seat", async ({ page }) => {
+    let sent: unknown = null;
+    await openAs(page, { extra: [
+      {
+        method: "POST", path: "/api/v1/players/split-preview",
+        respond: ({ body }) => {
+          const req = body as { priceCredits: number; players: { seat: number; amount?: number }[] };
+          const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_credits: p.amount ?? 25, weight: 1 }));
+          const taken = partners.reduce((n, p) => n + p.share_credits, 0);
+          return { price_credits: req.priceCredits, shares: [{ seat: 1, team: "A", share_credits: req.priceCredits - taken, weight: 1 }, ...partners] };
+        },
+      },
+      {
+        method: "PUT", path: `${DETAIL}/split`,
+        respond: ({ body }) => { sent = body; return { booking_id: BOOKING, split_mode: "amount", shares: [] }; },
+      },
+    ] });
+    await page.goto(`/bookings/${BOOKING}`);
+    await page.getByRole("button", { name: "Change split" }).click();
+    const dialog = page.getByRole("dialog", { name: "Change the split" });
+    await dialog.getByRole("radio", { name: "Amount" }).click();
+    await dialog.getByRole("textbox", { name: "Amount for Sam" }).fill("30");
+    await expect(dialog.locator("[data-split-totals]")).toContainText("30.00 cr");
+    // The dialog fits a phone: nothing pushes the page sideways.
+    const scroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(scroll).toBeLessThanOrEqual(0);
+    await dialog.getByRole("button", { name: "Save the split" }).click();
+    await expect(page.getByText("The split is changed.")).toBeVisible();
+    expect(sent).toMatchObject({ mode: "amount", seats: expect.arrayContaining([{ participantId: PID.sam, amount: 30 }]) });
+  });
+});
+
 test.describe("god mode", () => {
   test("an admin collects Alex's share with the overdraft go-ahead and a reason", async ({ page }) => {
     let sent: unknown = null;
