@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resetClubCurrencySymbol, setClubCurrencySymbol } from "./currency";
-import { describeTopUpRate, formatCredits, formatMinutes, formatRate, formatSignedCredits, formatMoney } from "./utils";
+import { describeTopUpRate, formatCredits, formatMinutes, formatRate, formatSignedCredits, formatMoney, MINUS } from "./utils";
 
 afterEach(resetClubCurrencySymbol);
 
@@ -19,7 +19,7 @@ describe("money formatting", () => {
     expect(formatCredits(240)).toBe("240.00 cr");
     expect(formatCredits(0)).toBe("0.00 cr");
     expect(formatCredits(8)).toBe("8.00 cr");
-    expect(formatCredits(-2.4)).toBe("-2.40 cr");
+    expect(formatCredits(-2.4)).toBe("−2.40 cr");
 
     expect(formatCredits(240)).not.toContain("R");
   });
@@ -75,9 +75,9 @@ describe("money formatting", () => {
     // is how a negative amount of money is written; "R-50.00" reads as a symbol
     // followed by a malformed number. `net_zar` on the club revenue card goes negative
     // in any period whose refunds beat its top-ups, so this renders in production.
-    expect(formatMoney(-50)).toBe("-R50.00");
+    expect(formatMoney(-50)).toBe("−R50.00");
     setClubCurrencySymbol("R$");
-    expect(formatMoney(-50)).toBe("-R$50.00");
+    expect(formatMoney(-50)).toBe("−R$50.00");
     // Negative zero is zero, and carries no direction — as it does for credits.
     expect(formatMoney(-0)).toBe("R$0.00");
   });
@@ -181,3 +181,22 @@ describe("signed credits, rates and durations", () => {
     expect(formatMinutes(0)).toBe("0 min");
   });
 });
+
+/** R1 (F3 follow-up) — one minus sign, U+2212, in every displayed amount; never a hyphen, never "−0.00". */
+describe("one minus sign", () => {
+  it.each([
+    ["formatCredits", () => formatCredits(-5)],
+    ["formatCredits long", () => formatCredits(-5, { long: true })],
+    ["formatMoney", () => formatMoney(-5)],
+    ["formatSignedCredits", () => formatSignedCredits(-5)],
+  ])("%s uses U+2212 and no hyphen", (_name, render) => {
+    expect(render()).toContain(MINUS);
+    expect(render()).not.toContain("-");
+  });
+
+  it("gives a figure that rounds to zero no sign at all", () => {
+    expect(formatCredits(-0.001)).toBe("0.00 cr");
+    expect(formatMoney(-0.004)).not.toContain(MINUS);
+  });
+});
+

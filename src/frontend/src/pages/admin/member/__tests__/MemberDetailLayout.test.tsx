@@ -38,7 +38,7 @@ describe("member detail — header and tabs", () => {
     serve(baseRoutes(detailFixture({ balance_credits: -16 })));
     renderMember();
     const balance = await screen.findByTestId("member-balance");
-    expect(balance).toHaveTextContent("-16.00 cr");
+    expect(balance).toHaveTextContent("−16.00 cr");
     expect(balance.className).toMatch(/text-danger-strong/);
     expect(screen.getByText(MEMBER_COPY.balanceOverdrawn)).toBeInTheDocument();
   });

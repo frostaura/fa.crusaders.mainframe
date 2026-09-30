@@ -178,9 +178,9 @@ describe("the status filter and the search", () => {
 describe("what a row says about the member", () => {
   it("shows a negative balance in the danger ink, whole", async () => {
     render();
-    const balance = await screen.findByText("-30.00 cr");
+    const balance = await screen.findByText("−30.00 cr");
     expect(balance.className).toContain("text-danger-strong");
-    expect(balance).toHaveAttribute("title", "-30.00 cr");
+    expect(balance).toHaveAttribute("title", "−30.00 cr");
   });
 
   it("marks an admin, and says when the role comes from the server's configuration", async () => {

@@ -102,9 +102,9 @@ describe("Reports — net daily buckets", () => {
 
     // Both signs present, and the negative kept as a negative rather than shown as 8.00.
     expect(table.getByText("8.00 cr")).toBeInTheDocument();
-    expect(table.getByText("-8.00 cr")).toBeInTheDocument();
+    expect(table.getByText("−8.00 cr")).toBeInTheDocument();
     expect(table.getByText("2.40 cr")).toBeInTheDocument();
-    expect(table.getByText("-2.40 cr")).toBeInTheDocument();
+    expect(table.getByText("−2.40 cr")).toBeInTheDocument();
 
     // No NaN anywhere — the number went through a formatter, not a subtraction.
     expect(table.queryByText(/NaN/)).not.toBeInTheDocument();
@@ -212,7 +212,7 @@ describe("Reports — net daily buckets", () => {
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Reversals/ })).toBeInTheDocument();
-    expect(table.getByText("-160.00 cr")).toBeInTheDocument();
+    expect(table.getByText("−160.00 cr")).toBeInTheDocument();
   });
 
   it("puts the desk's adjustments in the daily table and says which clock each column is on", async () => {
@@ -240,7 +240,7 @@ describe("Reports — net daily buckets", () => {
     expect(table.getByRole("columnheader", { name: /Refunds \(net\)/ })).toBeInTheDocument();
     // A member reading their own statement is the person most likely to read a negative
     // refund as a mistake, and the one with the least context to resolve it.
-    expect(table.getByText("-8.00 cr")).toBeInTheDocument();
+    expect(table.getByText("−8.00 cr")).toBeInTheDocument();
     expect(table.getByText(/Refunds are net/)).toBeInTheDocument();
 
     // The window totals are the same arithmetic over a longer bucket, so they are
@@ -462,7 +462,7 @@ describe("Reports — the totals card on a period with no movement", () => {
 
     // U+2212 MINUS is what the card actually printed, so look for that as well as a hyphen.
     expect(card.queryByText("−0.00 cr")).not.toBeInTheDocument();
-    expect(card.queryByText("-0.00 cr")).not.toBeInTheDocument();
+    expect(card.queryByText("−0.00 cr")).not.toBeInTheDocument();
     expect(card.queryByText("+0.00 cr")).not.toBeInTheDocument();
 
     // Every bucket on the card, all of them zero, all of them unsigned.

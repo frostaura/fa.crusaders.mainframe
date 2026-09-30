@@ -100,7 +100,7 @@ test.describe("member detail", () => {
       const box = await nav.getByRole("link", { name: tab.label }).boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     }
-    await expect(page.getByTestId("member-balance")).toHaveText("-16.00 cr");
+    await expect(page.getByTestId("member-balance")).toHaveText("−16.00 cr");
   });
 
   test("a tab is a real navigation: a URL, aria-current, and Back", async ({ page }) => {

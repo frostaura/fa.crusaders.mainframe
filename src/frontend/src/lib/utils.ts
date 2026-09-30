@@ -20,8 +20,21 @@ export function cn(...inputs: ClassValue[]) {
  * "how is money shown", and `formatMoney` exists so the places that genuinely handle
  * rand can say so.
  */
+/**
+ * The one minus sign every displayed amount uses: U+2212, never the hyphen (R1, F3 follow-up).
+ * `formatMoney` printed "-R50.00" beside `formatSignedCredits`' "−50.00 cr" — two glyphs of two
+ * widths for one idea, misaligned in a tabular column and read differently by a screen reader.
+ */
+export const MINUS = "\u2212";
+
+/** "−5.00" / "5.00" — two places, the minus sign above, and no sign on a figure that rounds to zero. */
+function signedFixed(value: number): string {
+  const magnitude = Math.abs(value).toFixed(2);
+  return value < 0 && Number(magnitude) !== 0 ? `${MINUS}${magnitude}` : magnitude;
+}
+
 export function formatCredits(value: number, options?: { long?: boolean }) {
-  const amount = value.toFixed(2);
+  const amount = signedFixed(value);
   return options?.long ? `${amount} credits` : `${amount} cr`;
 }
 
@@ -42,7 +55,7 @@ export function formatMoney(value: number) {
   // `Math.abs` before `toFixed` so a negated zero cannot arrive here as "-0.00". Zero has
   // no direction, exactly as it has none in `formatSignedCredits`.
   const magnitude = Math.abs(value).toFixed(2);
-  const sign = value < 0 ? "-" : "";
+  const sign = value < 0 && Number(magnitude) !== 0 ? MINUS : "";
   return `${sign}${clubCurrencySymbol()}${magnitude}`;
 }
 
@@ -61,7 +74,7 @@ export function formatSignedCredits(value: number) {
   // penalised nothing. On the one screen whose whole job is to reconcile, a signed zero
   // reads as a movement that did not happen. Note `-0 === 0`, so a negated zero lands here.
   if (value === 0) return formatCredits(0);
-  return `${value > 0 ? "+" : "−"}${formatCredits(Math.abs(value))}`;
+  return `${value > 0 ? "+" : MINUS}${formatCredits(Math.abs(value))}`;
 }
 
 /**

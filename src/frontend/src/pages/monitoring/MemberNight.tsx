@@ -8,6 +8,7 @@ import { DatePicker } from "../../components/ui/date-picker";
 import { formatClubDayLabel } from "../../components/ui/date-picker-day";
 import { DownloadSimple } from "../../components/ui/icons";
 import { MemberCombobox } from "../../components/ui/member-combobox";
+import { MINUS } from "../../lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { StateBlock } from "../../components/ui/state-block";
@@ -398,7 +399,7 @@ function TraceCard({ event, subjectName, timezone }: {
       </div>
       {typeof event.amount_credits === "number" && (
         <p className="text-sm text-text-secondary">
-          {`${event.amount_credits < 0 ? "" : "+"}${event.amount_credits.toFixed(2)} credits`}
+          {`${event.amount_credits < 0 ? MINUS : "+"}${Math.abs(event.amount_credits).toFixed(2)} credits`}
           {typeof event.balance_after_credits === "number"
             ? ` · balance ${event.balance_after_credits.toFixed(2)}`
             : ""}

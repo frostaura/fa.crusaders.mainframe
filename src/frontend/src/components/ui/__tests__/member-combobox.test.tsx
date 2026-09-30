@@ -134,7 +134,7 @@ describe("MemberCombobox — rows and states", () => {
     expect(sam).toHaveTextContent("Sam Smith");
     expect(sam).toHaveTextContent("League");
     expect(within(sam).getByText("12.00 cr").className).toContain("text-text-secondary");
-    expect(within(alex).getByText("-16.00 cr").className).toContain("text-danger-strong");
+    expect(within(alex).getByText("−16.00 cr").className).toContain("text-danger-strong");
     expect(sam.querySelector('[data-slot="avatar"]')).toHaveAttribute("aria-hidden", "true");
   });
 
