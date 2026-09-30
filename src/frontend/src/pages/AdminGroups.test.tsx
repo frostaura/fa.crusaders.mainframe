@@ -418,6 +418,10 @@ describe("the previews, which are the answer to “most restrictive” being an 
     // a different thing with the same figures in it.
     expect(await screen.findByText(/^On a \w+day: 06:00–22:00\.$/)).toBeInTheDocument();
     expect(screen.getByText(/Ada Lovelace is in Regular\./)).toBeInTheDocument();
+    // R4: booking-rules never sends club_hours; the club's hours come from its own settings,
+    // never "were not sent".
+    expect(screen.getByText(/The club itself is open (06:00–22:00|07:00–20:00)/)).toBeInTheDocument();
+    expect(screen.queryByText(/were not sent/)).not.toBeInTheDocument();
   });
 
   /**

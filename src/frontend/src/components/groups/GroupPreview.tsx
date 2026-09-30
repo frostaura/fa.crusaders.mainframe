@@ -157,10 +157,15 @@ function wireWindows(windows: Array<{ start: string; end: string }> | undefined)
  */
 export function MemberPreview({
   rules, memberName, day, loading, error, sliceMinutes, onRetry, children,
-  groups = [], proposed = null, onPropose, proposedRules = null, consequence = [], onClose,
+  groups = [], proposed = null, onPropose, proposedRules = null, consequence = [], onClose, clubDay,
 }: {
   /** Close the panel — the × in its header. */
   onClose?: () => void;
+  /**
+   * The club's own hours that day, from its settings (R4): `booking-rules` never sends
+   * `club_hours`, and the preview said "The club's own hours for that day were not sent".
+   */
+  clubDay?: Interval[];
   rules: MemberBookingRules | null;
   memberName: string | null;
   day: Weekday;
@@ -181,7 +186,7 @@ export function MemberPreview({
 }) {
   const empty = emptyReason(rules);
   const allowed = wireWindows(rules?.allowed_windows);
-  const clubHours = rules?.club_hours ? wireWindows([rules.club_hours]) : [];
+  const clubHours = rules?.club_hours ? wireWindows([rules.club_hours]) : (clubDay ?? []);
 
   return (
     <Card data-member-preview="">

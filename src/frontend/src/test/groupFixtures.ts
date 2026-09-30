@@ -84,7 +84,8 @@ export function bookingRulesFixture(overrides: Partial<MemberBookingRules> = {})
   return {
     groups: [{ id: "g-regular", name: "Regular", description: null }],
     allowed_windows: [{ start: "06:00", end: "22:00" }],
-    club_hours: { start: "06:00", end: "22:00" },
+    // No `club_hours`: the server's booking-rules never sends it (pinned as it.fails in
+    // adminResponses.contract.test.ts). The preview takes the club's hours from its settings.
     slice_price_credits: 8,
     max_slots_per_day: 4,
     max_minutes_per_day: 60,

@@ -22,7 +22,7 @@ import {
 } from "../lib/adminApi";
 import {
   ADD_LOST, ARCHIVE_COPY, ARCHIVED_HEADING, GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, GROUP_LOST, GROUP_SHEET, MOST_RESTRICTIVE_STANDING,
-  deleteRefusalSentence, explainGroupRefusal, groupChangeConsequence,
+  deleteRefusalSentence, explainGroupRefusal, groupChangeConsequence, type PaintedWeek,
 } from "../lib/groupsCopy";
 import { UnsureOutcome, unsureSentence, writeOrReadBack } from "../lib/lostReply";
 import { LOST_REPLY } from "../lib/lostReplyCopy";
@@ -389,6 +389,7 @@ export function AdminGroupsPage() {
           groups={rows}
           sliceMinutes={context.sliceMinutes}
           onClose={() => setMemberPreview(false)}
+          club={club}
         />
       )}
     </PageShell>
@@ -635,11 +636,13 @@ function GroupMembersPanel({ group, clubMembers, timezone, onChanged, onChangeGr
 }
 
 /** The named-member preview: pick somebody, ask the club what they may actually book. */
-function MemberPreviewPanel({ clubMembers, groups, sliceMinutes, onClose }: {
+function MemberPreviewPanel({ clubMembers, groups, sliceMinutes, onClose, club }: {
   clubMembers: ClubMember[];
   groups: MemberGroup[];
   sliceMinutes: number;
   onClose: () => void;
+  /** The club's week, from its settings: the preview's "the club itself is open …" line. */
+  club: PaintedWeek;
 }) {
   const [member, setMember] = useState<ClubMember | null>(null);
   const [rules, setRules] = useState<MemberBookingRules | null>(null);
@@ -679,6 +682,7 @@ function MemberPreviewPanel({ clubMembers, groups, sliceMinutes, onClose }: {
       rules={rules}
       memberName={member?.full_name ?? null}
       day={todayInClub()}
+      clubDay={club[todayInClub()]}
       loading={loading}
       error={error}
       sliceMinutes={sliceMinutes}
