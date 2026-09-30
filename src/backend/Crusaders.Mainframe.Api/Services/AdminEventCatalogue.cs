@@ -44,9 +44,14 @@ public sealed record WebhookDisabledPayload(Guid EndpointId, string Destination,
 
 public sealed record ScheduleConflictPayload(Guid ScheduleId, string ScheduleName, string FirstDate, int Collisions, string[] Dates);
 
+/// <remarks>
+/// <see cref="HeldCredits"/> is additive (review round 3, A-8) and null on a notice queued before
+/// it: the part of the balance held for partners' shares, so the mail can state what the member
+/// may SPEND after the booking — the figure the overdraft was decided on.
+/// </remarks>
 public sealed record OverdraftPayload(
     Guid BookingId, string ActorName, string MemberName, bool Self, string CourtName, string StartsAtLocal,
-    decimal AmountCredits, decimal BalanceAfterCredits);
+    decimal AmountCredits, decimal BalanceAfterCredits, decimal? HeldCredits = null);
 
 public sealed record AdminRolePayload(string SubjectName, string ActorName, bool Granted, string? Reason);
 
@@ -257,7 +262,10 @@ public static class AdminEventCatalogue
     {
         var p = c.Payload<OverdraftPayload>();
         return EmailTemplates.AdminOverdraftAuthorised(c.Club, c.To, new OverdraftNotice(
-            p.ActorName, p.MemberName, p.Self, p.CourtName, p.StartsAtLocal, p.AmountCredits, p.BalanceAfterCredits, c.ConsoleUrl));
+            p.ActorName, p.MemberName, p.Self, p.CourtName, p.StartsAtLocal, p.AmountCredits, p.BalanceAfterCredits, c.ConsoleUrl)
+        {
+            HeldCredits = p.HeldCredits,
+        });
     }
 
     /// <summary>

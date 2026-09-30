@@ -875,7 +875,7 @@ public sealed class BookingService
             }),
         });
 
-        await StageAdminChangesAsync(spec, openingBalance, overdrawn, ct);
+        await StageAdminChangesAsync(spec, new OpeningFigures(openingBalance, openingBalance - spendable), overdrawn, ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -994,8 +994,9 @@ public sealed class BookingService
     /// </para>
     /// </summary>
     private async Task StageAdminChangesAsync(
-        NewBooking spec, decimal openingBalance, bool overdrawn, CancellationToken ct)
+        NewBooking spec, OpeningFigures opening, bool overdrawn, CancellationToken ct)
     {
+        var openingBalance = opening.Balance;
         // Nothing to record — every member self-booking and every walk-up. Returned before the
         // name lookup below, which would otherwise be a read under the payer's lock on the
         // hottest path in the product, for a row that is never written.
@@ -1034,17 +1035,22 @@ public sealed class BookingService
 
         if (overdrawn)
         {
-            await StageOverdraftNoticeAsync(spec, openingBalance, label, ct);
+            await StageOverdraftNoticeAsync(spec, opening, label, ct);
             await _changes.StageAsync(new AdminChange(
                 Action: AdminChangeActions.BookingOverdraftAuthorised,
                 ActorUserId: actorId,
                 SubjectKind: AdminChangeSubjects.User,
                 SubjectId: booking.UserId,
                 SubjectLabel: label,
-                Before: new { balance_credits = openingBalance },
+                // Both figures, before and after (review round 3, A-8): the overdraft is decided
+                // on what the member may SPEND — the balance less the shares held for partners —
+                // and that is the figure the desk's confirm step and the other admins' email
+                // state. The raw balance stays beside it so the ledger still reconciles.
+                Before: new { balance_credits = openingBalance, spendable_credits = opening.Spendable },
                 After: new
                 {
                     balance_credits = openingBalance - spec.TotalCost,
+                    spendable_credits = opening.Spendable - spec.TotalCost,
                     what.booking_id,
                     what.court,
                     what.starts_at,
@@ -1062,8 +1068,9 @@ public sealed class BookingService
     /// they are looking at the result. The figures are credits and the balance after is the one
     /// the change record states.
     /// </summary>
-    private async Task StageOverdraftNoticeAsync(NewBooking spec, decimal openingBalance, string? memberName, CancellationToken ct)
+    private async Task StageOverdraftNoticeAsync(NewBooking spec, OpeningFigures opening, string? memberName, CancellationToken ct)
     {
+        var openingBalance = opening.Balance;
         var booking = spec.Row;
         var actorId = booking.ActorUserId;
         var actorName = PersonNames.Of(actorId, await PersonNames.ForAsync(_db, [actorId], ct)) ?? "An administrator";
@@ -1075,7 +1082,8 @@ public sealed class BookingService
             CourtName: spec.Court.Name,
             StartsAtLocal: await StartsAtLocalAsync(booking.StartsAt, ct),
             AmountCredits: spec.TotalCost,
-            BalanceAfterCredits: openingBalance - spec.TotalCost);
+            BalanceAfterCredits: openingBalance - spec.TotalCost,
+            HeldCredits: opening.Held);
         AdminNotices.Stage(_db, _tenant.TenantId,
             AdminNotices.OverdraftAuthorised(booking.Id, actorId, booking.UserId ?? actorId, payload));
     }
@@ -3068,4 +3076,14 @@ public abstract record ChargeResult
     public sealed record NotChargeable : ChargeResult;
     public sealed record AlreadyCharged(decimal AmountCredits) : ChargeResult;
     public sealed record InsufficientBalance(Guid PayerUserId, decimal Current, decimal Required) : ChargeResult;
+}
+
+/// <summary>
+/// The payer's figures read under the lock before a booking's debit: the ledger balance and the
+/// part of it held for their partners' shares (D11). What they may spend is the difference, and
+/// that is the figure an overdraft is decided — and reported — on (review round 3, A-8).
+/// </summary>
+internal readonly record struct OpeningFigures(decimal Balance, decimal Held)
+{
+    public decimal Spendable => Balance - Held;
 }

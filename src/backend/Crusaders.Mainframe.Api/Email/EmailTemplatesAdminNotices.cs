@@ -24,7 +24,11 @@ public sealed record ScheduleConflictNotice(string ScheduleName, string FirstDat
 /// <summary>An admin's booking that took a balance below zero. Every figure is credits.</summary>
 public sealed record OverdraftNotice(
     string ActorName, string MemberName, bool Self, string CourtName, string StartsAtLocal,
-    decimal AmountCredits, decimal BalanceAfterCredits, string ConsoleUrl);
+    decimal AmountCredits, decimal BalanceAfterCredits, string ConsoleUrl)
+{
+    /// <summary>Credits held for partners' shares; null on a notice queued before it was carried.</summary>
+    public decimal? HeldCredits { get; init; }
+}
 
 /// <summary>A code a board accepted that the server could not have issued. Placeholder for P7.</summary>
 public sealed record ForgeryNotice(string DeviceCode, string? MemberName, string Detail, string ConsoleUrl);
@@ -181,24 +185,56 @@ public static partial class EmailTemplates
             Subject: o.Self
                 ? $"{o.ActorName} booked below zero"
                 : $"{o.ActorName} took {o.MemberName} below zero",
-            Preheader: $"{o.CourtName}, {o.StartsAtLocal}. Balance after: {Cr(o.BalanceAfterCredits)}.",
+            Preheader: $"{o.CourtName}, {o.StartsAtLocal}. {OverdraftHeadlineFigure(o)}.",
             Heading: "A booking took a balance below zero",
             Blocks:
             [
                 new Paragraph(o.Self
                     ? $"{o.ActorName} booked a court at {club.Name} for themselves that their balance did not cover."
                     : $"{o.ActorName} booked a court at {club.Name} for {o.MemberName} that the member's balance did not cover."),
-                new Facts(
-                [
-                    new FactRow("Court", o.CourtName),
-                    new FactRow("When", o.StartsAtLocal),
-                    new FactRow("Charged", Cr(o.AmountCredits)),
-                    new FactRow("Balance after", Cr(o.BalanceAfterCredits)),
-                ]),
-                new Paragraph("Administrators may do this, and every time one does, every other administrator is told. It is on the change record with both balances."),
+                new Facts(OverdraftFacts(o)),
+                new Paragraph("Administrators may do this, and every time one does, every other administrator is told. The change record shows the balance and what could be spent, before and after."),
                 new CallToAction("Open the change record", o.ConsoleUrl),
             ],
             WhyThis: WhyAdmin));
+
+    /// <summary>
+    /// The figure the overdraft was decided on (review round 3, A-8): what the member may SPEND
+    /// after the booking — the balance less the shares held for partners — which is exactly what
+    /// the desk's confirm step showed ("takes to −80.00"). The raw balance said −30.00 beside it,
+    /// with a hyphen, and the two read as a contradiction. A notice queued before the held figure
+    /// was carried keeps the old label, because its figure is the balance.
+    /// </summary>
+    private static string OverdraftHeadlineFigure(OverdraftNotice o)
+    {
+        return o.HeldCredits is { } held
+            ? $"Can spend after: {Cr(o.BalanceAfterCredits - held)}"
+            : $"Balance after: {Cr(o.BalanceAfterCredits)}";
+    }
+
+    private static IReadOnlyList<FactRow> OverdraftFacts(OverdraftNotice o)
+    {
+        var rows = new List<FactRow>
+        {
+            new("Court", o.CourtName),
+            new("When", o.StartsAtLocal),
+            new("Charged", Cr(o.AmountCredits)),
+        };
+        if (o.HeldCredits is not { } held)
+        {
+            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterCredits)));
+            return rows;
+        }
+
+        rows.Add(new FactRow("Can spend after", Cr(o.BalanceAfterCredits - held)));
+        // Only when they differ: a second figure that always equals the first is noise.
+        if (held != 0m)
+        {
+            rows.Add(new FactRow("Held for partners", Cr(held)));
+            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterCredits)));
+        }
+        return rows;
+    }
 
     /// <summary>
     /// A board accepted a code the server could not have issued. The catalogue entry exists so the

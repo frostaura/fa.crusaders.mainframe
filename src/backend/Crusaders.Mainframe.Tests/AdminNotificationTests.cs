@@ -147,7 +147,9 @@ public class AdminNotificationTests
         var mail = Assert.Single(host.EmailService.Sent);
         Assert.Equal(colleague.Email, mail.To);
         Assert.Equal("Desk Admin took Mo Member below zero", mail.Subject);
-        Assert.Contains("-16.00 credits", MailText.Unwrap(mail.PlainBody), StringComparison.Ordinal);
+        // A real minus sign, U+2212, as every screen prints it (review round 3, A-8).
+        Assert.Contains("\u221216.00 credits", MailText.Unwrap(mail.PlainBody), StringComparison.Ordinal);
+        Assert.DoesNotContain("-16.00", MailText.Unwrap(mail.PlainBody), StringComparison.Ordinal);
     }
 
     /// <summary>

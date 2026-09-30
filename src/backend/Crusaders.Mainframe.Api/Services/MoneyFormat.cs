@@ -49,7 +49,16 @@ public static class MoneyFormat
     /// <b>no</b> currency symbol, ever — see <see cref="CurrencySymbol"/> for why that is a
     /// money-correctness rule and not a copy preference.
     /// </remarks>
-    public static string Credits(decimal value) => Amount(value) + " credits";
+    public static string Credits(decimal value) => SignedAmount(value) + " credits";
+
+    /// <summary>
+    /// A credit figure below zero carries a real minus sign, U+2212, never the ASCII hyphen
+    /// (review round 3, A-8) — the sign every screen of the app prints, so an email and the
+    /// console confirm step read the same "−80.00". Credits only: <see cref="Money"/> stays as
+    /// it is, because a rand figure can end up where a machine reads it.
+    /// </summary>
+    private static string SignedAmount(decimal value) =>
+        value < 0 ? "\u2212" + Amount(-value) : Amount(value);
 
     /// <summary>
     /// Real money, in the club's own symbol — "R100.00", "-R50.00", "CHF1234567.89".
