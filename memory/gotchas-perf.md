@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-perf
 description: "Backend performance at volume: how P10 measured it, the partial index that could not answer an any-status seat probe, and JIT on a mis-estimated plan — fixed in code in P12; admin members list is next."
 type: gotcha
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Gotchas — backend performance at realistic volume
@@ -44,6 +44,11 @@ sequential requests after 5 warm-ups, as the seeded admin (the heaviest member, 
   ~89k at 506 members and 50k ledger rows; estimates are right, it is simply linear in members
   × ledger, and the ledger only grows. A grouped `sum … GROUP BY "UserId"` join would take it to
   a few thousand. Not JIT-ing yet (P12 scan of the P11/P12 reads found nothing else above ~2k).
+- **Perf round (2026-09-30), local stack at load 60-160** — latency is noise there; count
+  connection opens instead (`qcount.mjs`): book 25 → 17 (pre-handler 4 → 1), book with two
+  players 47 → 20, decline 25 → 22. Gzip: entry JS 715 → 216 KB, ledger 276 → 31 KB, members
+  110 → 24 KB. Paging (`cursor=`) cuts both to one page; the member list is still 217 rows unpaged.
+  Decisions: [`decisions-perf.md`](decisions-perf.md).
 - **EF logs "Executed DbCommand (n ms)" when the reader opens, not when it drains.** A plan whose
   correlated subplans run per streamed row shows a short command and a long silent gap before the
   next one. Attribute by timestamp (`Logging__Console__FormatterOptions__TimestampFormat`) with

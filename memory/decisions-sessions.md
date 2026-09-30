@@ -52,6 +52,8 @@ Tests: `RefreshCookieHttpTests`, `SignInRateLimitHttpTests`. Epoch rules: `decis
   **Open streams too:** stream tickets carry the minting session's `rfid`, and every stream's
   keep-alive re-check (`SessionEpochs.StillCurrentAsync`) asks the family as well as the epoch —
   a sign-out closes the wallet, control-board and monitoring streams within one keep-alive.
+- **Booking, players and play writes are NOT on `auth`** since 2026-09-30: `writes`, per member,
+  burst 20 / 60 a minute — [`decisions-perf.md`](decisions-perf.md).
 - **The global backstop is per MEMBER** (B-10): `GlobalPerMinute` (600) per signed-in user;
   anonymous requests per address at `GlobalPerIpPerMinute` (6000). 429 = `rate_limited` +
   `retry_after_seconds`. *Why:* 600 per address 429'd a whole club behind one router.
