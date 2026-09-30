@@ -1,4 +1,4 @@
-import type { Ref } from "react";
+import { Fragment, type Ref } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { CountdownRing } from "@/components/ui/countdown-ring";
@@ -29,11 +29,25 @@ import { MY_CODE, newCodeIn } from "@/lib/myCodeCopy";
  * </p>
  */
 
-/** The token, grouped for reading and whole for everything else. */
+/**
+ * The token, grouped for reading and whole for everything else.
+ *
+ * <p>
+ * F4-16 — when the groups do not fit one line they wrap BALANCED: inline groups with a `<wbr>`
+ * between them in a `text-wrap: balance` block, rather than flex-wrap, which filled the first line
+ * and left "661 592" alone on the second at 390 and 768. Each group pads both sides equally, so a
+ * centred line stays centred wherever it breaks; the text content is still the bare token.
+ * </p>
+ */
 export function CodeGroups({ token }: { token: string }) {
   return (
-    <span className="inline-flex flex-wrap justify-center gap-x-2">
-      {groupToken(token).map((group, i) => <span key={i}>{group}</span>)}
+    <span className="block text-center text-balance">
+      {groupToken(token).map((group, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <wbr /> : null}
+          <span data-code-group="" className="inline-block px-1">{group}</span>
+        </Fragment>
+      ))}
     </span>
   );
 }
