@@ -538,6 +538,18 @@ describe("Top-up status — the way back", () => {
     expect(await screen.findByRole("link", { name: "Back to your invite" })).toHaveAttribute("href", "/invites/p-1");
   });
 
+  // F4-12 — trying again must not drop the way back to the invite.
+  it("keeps the way back on Try again after a cancel, and plain /wallet/topup when there is none", async () => {
+    sessionStorage.setItem(`crusaders.topup-return:${ID}`, "/invites/p-1");
+    show("Cancelled");
+    expect(await screen.findByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/topup?returnTo=%2Finvites%2Fp-1");
+  });
+
+  it("offers a bare Try again when the top-up had no way back", async () => {
+    show("Failed");
+    expect(await screen.findByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/topup");
+  });
+
   it("ignores a returnTo that leaves the app, and says nothing while the payment is pending", async () => {
     show("Completed", "?returnTo=https%3A%2F%2Fevil.example");
     await screen.findByText("Your wallet has been credited.");

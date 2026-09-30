@@ -208,7 +208,7 @@ export default function TopUpStatusPage() {
         {loadFailed && (
           <Alert tone="danger">{UNREACHABLE_LATER}</Alert>
         )}
-        <StatusBody status={s} gaveUp={gaveUp} checking={checking} onCheck={checkAgain} />
+        <StatusBody status={s} gaveUp={gaveUp} checking={checking} onCheck={checkAgain} wayBack={wayBack} />
         {s.status === "Completed" || s.status === "Cancelled" ? <WayBack path={wayBack} /> : null}
       </Card>
     </StatusShell>
@@ -292,7 +292,16 @@ const GAVE_UP = "We've stopped checking on this page. PayFast can take a while �
 const CANCELLED = "You cancelled this payment, so nothing was charged and no credits were added.";
 const FAILED_FALLBACK = "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening.";
 
-type BodyProps = { status: TopUpStatus; gaveUp: boolean; checking: boolean; onCheck: () => void };
+type BodyProps = { status: TopUpStatus; gaveUp: boolean; checking: boolean; onCheck: () => void; wayBack: string | null };
+
+/**
+ * "Try again" keeps the way back (F4-12): a member sent to top up from an invite who cancelled at
+ * PayFast and tried again used to lose the invite — the new top-up had no `returnTo`, so its own
+ * status page, and its Cancel, only knew the wallet.
+ */
+function retryPath(wayBack: string | null): string {
+  return wayBack ? `/wallet/topup?returnTo=${encodeURIComponent(wayBack)}` : "/wallet/topup";
+}
 
 /**
  * What the member reads under the figure, and what they can do. The Pending branch carries a
@@ -300,7 +309,9 @@ type BodyProps = { status: TopUpStatus; gaveUp: boolean; checking: boolean; onCh
  * Check again, no way out — so a member whose R500 had already landed sat in front of
  * "Waiting for confirmation from PayFast…" indefinitely.
  */
-function StatusBody({ status, gaveUp, checking, onCheck }: BodyProps) {
+function StatusBody(props: BodyProps) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { status, gaveUp, checking, onCheck, wayBack } = props;
   if (status.status === "Pending") {
     return (
       <>
@@ -330,7 +341,7 @@ function StatusBody({ status, gaveUp, checking, onCheck }: BodyProps) {
     <>
       <p className={failed ? "text-sm font-medium text-danger-strong" : "text-sm text-text-secondary"}>{sentence}</p>
       <div>
-        <Button asChild variant="outline"><Link to="/wallet/topup">Try again</Link></Button>
+        <Button asChild variant="outline"><Link to={retryPath(wayBack)}>Try again</Link></Button>
       </div>
     </>
   );

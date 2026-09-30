@@ -40,7 +40,8 @@ describe("ToggleGroup", () => {
   });
 
   // Radix roving focus moves focus in a setTimeout after the keydown, hence waitFor.
-  it("arrow keys move focus (roving), clicking selects", async () => {
+  // F4-11 — a single group is a radio group: the arrow keys move the SELECTION with the focus.
+  it("single: arrow keys move focus AND select, like any radio group; clicking selects too", async () => {
     const onValueChange = vi.fn();
     render(<Days onValueChange={onValueChange} />, strict);
     const mon = screen.getByRole("radio", { name: "Mon" });
@@ -48,15 +49,35 @@ describe("ToggleGroup", () => {
     fireEvent.keyDown(mon, { key: "ArrowRight" });
     const tue = screen.getByRole("radio", { name: "Tue" });
     await waitFor(() => expect(document.activeElement).toBe(tue));
-    expect(onValueChange).not.toHaveBeenCalled();
-    fireEvent.keyDown(tue, { key: "ArrowRight" });
+    await waitFor(() => expect(tue).toHaveAttribute("aria-checked", "true"));
+    expect(onValueChange).toHaveBeenLastCalledWith("tue");
+    expect(mon).toHaveAttribute("aria-checked", "false");
+    fireEvent.keyDown(tue, { key: "End" });
     const wed = screen.getByRole("radio", { name: "Wed" });
-    await waitFor(() => expect(document.activeElement).toBe(wed));
-    fireEvent.keyDown(wed, { key: "ArrowLeft" });
-    await waitFor(() => expect(document.activeElement).toBe(tue));
-    fireEvent.click(tue);
-    expect(onValueChange).toHaveBeenCalledWith("tue");
-    expect(tue).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(wed).toHaveAttribute("aria-checked", "true"));
+    fireEvent.click(mon);
+    expect(onValueChange).toHaveBeenLastCalledWith("mon");
+  });
+
+  it("multiple: arrows only move focus — each item is an independent toggle", async () => {
+    const onValueChange = vi.fn();
+    render(
+      <ToggleGroup type="multiple" aria-label="Days" onValueChange={onValueChange}>
+        <ToggleGroupItem value="mon">Mon</ToggleGroupItem>
+        <ToggleGroupItem value="tue">Tue</ToggleGroupItem>
+      </ToggleGroup>,
+      strict,
+    );
+    const mon = screen.getByRole("button", { name: "Mon" });
+    mon.focus();
+    fireEvent.keyDown(mon, { key: "ArrowRight" });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Tue" })));
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
+  it("an 'on' item is restated in system colours for forced-colours mode (F4-5)", () => {
+    render(<Days />, strict);
+    expect(screen.getByRole("radio", { name: "Mon" }).className).toContain("forced-colors:data-[state=on]:bg-[Highlight]");
   });
 });
 
@@ -84,6 +105,8 @@ describe("Tabs", () => {
     expect(tab.className).toContain("min-h-touch");
     expect(tab.className).toContain("no-lift");
     expect(tab.className).toContain("data-[state=active]:bg-bg-surface");
+    // F4-5 — the lifted surface is discarded in forced colours; the active tab takes Highlight.
+    expect(tab.className).toContain("forced-colors:data-[state=active]:bg-[Highlight]");
     expect(screen.getByRole("tabpanel", { name: "Overview" })).toHaveTextContent("Overview body");
   });
 

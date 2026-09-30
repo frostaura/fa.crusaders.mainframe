@@ -287,8 +287,9 @@ function TopUpForm(props: FormProps) {
               page appearing, and a tick on a button the member is leaving would be a claim
               about a payment that has not happened yet. */}
           <Button type="submit" block size="lg" pending={loading} disabled={!canSubmit}>Continue to PayFast</Button>
+          {/* F4-12 — back where the member came from (an invite, usually), not always the wallet. */}
           <Button asChild variant="ghost" block>
-            <Link to="/wallet">Cancel</Link>
+            <Link to={returnTo ?? "/wallet"}>Cancel</Link>
           </Button>
         </div>
       </form>

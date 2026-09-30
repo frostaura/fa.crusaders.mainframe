@@ -192,6 +192,26 @@ describe("Top-up — what the checkout actually sends", () => {
     await waitFor(() => expect(submitted).toHaveLength(1));
   });
 
+  // F4-12 — the top-up page's Cancel goes back where the member came from.
+  it("sends Cancel back to ?returnTo= when the member came from an invite", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />, { initialEntries: ["/wallet/topup?returnTo=%2Fj%2Fabc"] });
+    expect(await screen.findByRole("link", { name: "Cancel" })).toHaveAttribute("href", "/j/abc");
+  });
+
+  // F4-11 — the amounts are a radio group: arrowing to one chooses it, as with any radio.
+  it("chooses a preset with the arrow keys, filling the field", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+    const r100 = await screen.findByRole("radio", { name: "R100" });
+    fireEvent.click(r100);
+    r100.focus();
+    fireEvent.keyDown(r100, { key: "ArrowRight" });
+    const r200 = screen.getByRole("radio", { name: "R200" });
+    await waitFor(() => expect(r200).toHaveAttribute("aria-checked", "true"));
+    expect(screen.getByRole("textbox", { name: /Or enter an amount/ })).toHaveValue("200");
+  });
+
   it("says why an amount is not accepted, rather than greying the button in silence", async () => {
     stubFetch(routes());
     renderPage(<TopUpPage />);
