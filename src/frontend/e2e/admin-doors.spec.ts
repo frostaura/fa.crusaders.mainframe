@@ -1418,6 +1418,41 @@ test.describe("The doors pages at 320 px with a 32 px root font", () => {
     await page.waitForTimeout(400);
   };
 
+  /**
+   * Review round 2 (F4 → F3): at 200% text the section bar's "COURTS & HARDWARE" broke mid-letter
+   * — `break-words` on the eyebrow, and a rem-sized icon tile that doubled to 72 px and took the
+   * width. Every word of the bar's two lines stays whole, and nothing spills past the bar.
+   */
+  for (const width of [320, 390]) {
+    test(`keeps every word of the section bar whole at ${width} px`, async ({ page }) => {
+      await openDoors(page, [door()]);
+      await page.setViewportSize({ width, height: 800 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
+      await page.waitForTimeout(400);
+
+      const bar = page.locator("[data-admin-section-bar] button").first();
+      await expect(bar).toBeVisible();
+      const split = await bar.evaluate((button) => {
+        const broken: string[] = [];
+        const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const text = node.textContent ?? "";
+          for (const m of text.matchAll(/\S+/g)) {
+            const range = document.createRange();
+            range.setStart(node, m.index ?? 0);
+            range.setEnd(node, (m.index ?? 0) + m[0].length);
+            const lines = new Set([...range.getClientRects()].map((r) => Math.round(r.top)));
+            if (lines.size > 1) broken.push(m[0]);
+          }
+        }
+        return broken;
+      });
+      expect(split, `words broken across lines: ${split.join(", ")}`).toEqual([]);
+      const spill = await bar.evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(spill).toBeLessThanOrEqual(1);
+    });
+  }
+
   test("gives the summary's link to a door the same 44 px as everything else", async ({ page }) => {
     await openDoors(page, [door({ name: "Side door", enabled: false })]);
     await large(page);

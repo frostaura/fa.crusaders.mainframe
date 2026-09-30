@@ -52,14 +52,17 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
   const eyebrow = group && group.label !== item.label ? group.label : "Admin";
   return (
     <>
-      <span aria-hidden="true" className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-strong">
+      {/* The tile is the 20px icon plus padding, not a rem box: `size-9` doubled to 72px at 200%
+          text and squeezed the words into breaking mid-letter (review round 2, F4 → F3). */}
+      <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-accent-soft p-2 text-accent-strong">
         <ItemIcon size={20} weight="fill" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col items-start text-left">
         {/* Wrapping, never truncating: at a 32px root font on a 320px phone "Courts & hardware"
-            is wider than the bar, and a clipped section name is a silent loss (e2e/admin-doors). */}
-        <span className={cn(typography({ variant: "overline" }), "w-full break-words")}>{eyebrow}</span>
-        <span className="w-full break-words text-base font-semibold text-text-primary">{item.label}</span>
+            is wider than the bar, and a clipped section name is a silent loss (e2e/admin-doors).
+            It wraps at SPACES: `break-words` broke "HARDWARE" mid-letter at 200% text. */}
+        <span className={cn(typography({ variant: "overline" }), "w-full")}>{eyebrow}</span>
+        <span className="w-full text-base font-semibold text-text-primary">{item.label}</span>
       </span>
       {attention.total > 0 ? (
         <span
