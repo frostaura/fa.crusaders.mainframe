@@ -51,8 +51,15 @@ type LedgerTableProps = {
 /** Hide a cell below `2xl` — merged over its own classes, so `sm:table-cell` does not win. */
 const WIDE_ONLY = "sm:hidden 2xl:table-cell";
 
+/**
+ * Named rather than written inline as `isValidElement<{ className?: string }>`: lizard reads an
+ * object-literal type argument as the start of a body and swallows the rest of the file into
+ * this function (it scored CCN 45 over 182 lines).
+ */
+type ClassNamed = { className?: string };
+
 function narrowed(cell: ReactNode, wide: boolean): ReactNode {
-  if (!wide || !isValidElement<{ className?: string }>(cell)) return cell;
+  if (!wide || !isValidElement<ClassNamed>(cell)) return cell;
   return cloneElement(cell, { className: cn("hidden", cell.props.className, WIDE_ONLY) });
 }
 
