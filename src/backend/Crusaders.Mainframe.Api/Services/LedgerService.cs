@@ -200,6 +200,8 @@ public sealed class LedgerService
                 owed_back_credits = held.OwedBack,
                 spendable_credits = balance - held.Reserved,
                 held_until = held.ReleasesAt,
+                // C4: one part per share deadline, soonest first, summing to held_credits; held_until is the first.
+                held_parts = held.WireParts(),
             })));
 
             // Money arrived: a return waiting on this member may be covered now (see Credits).

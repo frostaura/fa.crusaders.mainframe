@@ -124,6 +124,8 @@ public static class AdminMemberDetailEndpoints
             held_credits = held.Held,
             owed_back_credits = held.OwedBack,
             held_until = held.ReleasesAt,
+            // C4: one part per share deadline, soonest first, summing to held_credits; held_until is the first.
+            held_parts = held.WireParts(),
             passkey_count = await db.WebAuthnCredentials.AsNoTracking().CountAsync(c => c.UserId == userId, ct),
             fingerprints = await FingerprintsAsync(db, userId, ct),
             next_bookings = await NextBookingsAsync(db, userId, now, ct),

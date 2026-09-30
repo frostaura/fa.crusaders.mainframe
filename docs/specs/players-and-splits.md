@@ -428,6 +428,8 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 **Wallet and profile (§3a)**: `GET /api/v1/wallet` adds `held_credits`, `spendable_credits`,
 `held_until`; the wallet SSE stream's opening frame and named `balance` frame carry the same three;
 `GET /api/v1/me/profile` adds `held_credits`, `owed_back_credits`, `held_until`. `held_until` is null when nothing is held.
+All of them (and the admin member detail) also carry `held_parts: [{credits, until}]` — one part per share deadline,
+soonest first, summing to `held_credits` (review round 2, C4); `held_until` is the first part's `until`, kept for older clients.
 The admin booking quote and the admin bulk quote add `spendable_credits` and `held_credits`;
 their `balance_credits` is raw and their `overdraws` is on spendable.
 
