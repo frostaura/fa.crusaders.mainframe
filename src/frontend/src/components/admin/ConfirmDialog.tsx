@@ -55,6 +55,12 @@ export type ConfirmDialogProps = {
   /** The verb phrase for a failure: "delete the webhook" → "Couldn't delete the webhook — …". */
   action?: string;
   codes?: Record<string, string>;
+  /**
+   * The caller's own words for a failure, tried before `describeFailure` (review round 3): a lost
+   * reply that was read back (`lib/lostReply`'s `UnsureOutcome`) is not a failure, and the generic
+   * wording said "Couldn't …" over a write that may have landed. Return null to fall through.
+   */
+  describe?: (error: unknown) => string | null;
   /** Extra body — a reason field, a list of what is affected. */
   children?: ReactNode;
   /** The primary cannot be pressed yet (a required reason is empty). Prefer `notReady`. */
@@ -154,7 +160,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
             {notReady && props.notReady ? (
               <Alert tone="warning" live="assertive" announceKey="confirm-not-ready">{props.notReadyMessage ?? CONFIRM_NOT_READY}</Alert>
             ) : null}
-            {error ? <Alert tone="danger" live="assertive">{describeFailure(error, { action, codes })}</Alert> : null}
+            {error ? <Alert tone="danger" live="assertive">{props.describe?.(error) ?? describeFailure(error, { action, codes })}</Alert> : null}
           </DialogBody>
         ) : null}
         <DialogFooter>

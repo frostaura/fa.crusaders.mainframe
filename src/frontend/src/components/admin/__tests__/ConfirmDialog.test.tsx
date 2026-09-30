@@ -74,6 +74,37 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  /** Review round 3: a lost reply read back is not a failure, and the caller may say so itself. */
+  it("words a failure with the caller's describe first, and falls back to the shared one", async () => {
+    const lost = new Error("lost");
+    const describeIt = (e: unknown) => (e === lost ? "Not known yet whether it was deleted." : null);
+    function Described({ error }: { error: unknown }) {
+      return (
+        <ConfirmDialog
+          trigger={<Button>Delete webhook</Button>}
+          title="Delete this webhook?"
+          description="It stops receiving the club's events at once."
+          confirmLabel="Delete webhook"
+          action="delete the webhook"
+          describe={describeIt}
+          onConfirm={() => Promise.reject(error)}
+        />
+      );
+    }
+    const { unmount } = render(<Described error={lost} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete webhook" }));
+    let dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete webhook" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Not known yet whether it was deleted.");
+    unmount();
+
+    render(<Described error={new ApiError(409, { error: "in_use" })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete webhook" }));
+    dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete webhook" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/^Couldn't delete the webhook/);
+  });
+
   it("returns focus to the trigger when dismissed", async () => {
     render(<Harness onConfirm={vi.fn()} />, strict);
     const trigger = screen.getByRole("button", { name: "Delete webhook" });
