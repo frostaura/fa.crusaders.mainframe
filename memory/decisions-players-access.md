@@ -51,7 +51,7 @@ test in `PlayersReviewHttpTests`.
   `findable_in_directory` / `show_on_leaderboards` are accepted aliases; `share_results` stored only.
 - **Review round 1 (2026-09-30), pinned in `R1PlayersHttpTests` / `R1MailHttpTests`:** an ACCEPTED
   partner's game is theirs — `GET /me/bookings/upcoming` lists it and the grid marks it `isMine`
-  with `role: partner` (B2); the cancel quote/answer name each partner's refund and the organiser's
+  with `role: partner` (B2); every cancel answer (member, desk, bulk) names each partner's refund and the organiser's
   `net_credits`, from the share rule itself (B3); `unpaid_credits` counts an unclaimed link seat
   at its full share (B4); recent partners count only started, checked-in games (B11); a received
   share's mail says it is held and until when (B12); a club collect, a club add and an
