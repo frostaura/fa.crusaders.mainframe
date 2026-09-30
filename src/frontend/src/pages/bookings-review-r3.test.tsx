@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { RECENT, UPCOMING } from "../lib/bookingsCopy";
-import { signOut } from "../test/harness";
-import { openBookings, resetSheets } from "../test/bookingsKit";
+import { HOLD_LIFTED, HOLD_LIFT_OFFLINE, HOLD_LIFT_UNANSWERED, HOLD_LIFT_UNKNOWN } from "../lib/scheduleEnd";
+import { refuse, signOut } from "../test/harness";
+import { COURT_A, dayFixture, openBookings, resetSheets, sast, slotRow } from "../test/bookingsKit";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -67,5 +68,64 @@ describe("R3 V-9 — the share never trails the names behind a separator that ca
     const share = within(region).getByText(UPCOMING.share(25));
     expect(share.textContent?.startsWith("·")).toBe(false);
     expect(UPCOMING.people(["Dean"], 1)).toMatch(/Dean\u00a0· 1/);
+  });
+});
+
+describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the day back", () => {
+  const HELD = dayFixture({
+    slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(17), endsAtUtc: sast(17, 30), status: "adminblock",
+      bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedCredits: null })],
+  });
+  const LIFT = "Lift the League night hold on Court 1 at 17:00";
+
+  it("a lift that landed but lost its reply says lifted and shows the court free", async () => {
+    let lifted = false;
+    openBookings({
+      isAdmin: true,
+      routes: [
+        { path: "/api/v1/schedule", respond: () => (lifted ? dayFixture() : HELD) },
+        { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => { lifted = true; return refuse(504, {}); } },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: LIFT }));
+    expect(await screen.findByText(HOLD_LIFTED)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
+  });
+
+  it("a lift that did not land says the hold is still there, and draws it", async () => {
+    openBookings({
+      isAdmin: true,
+      routes: [
+        { path: "/api/v1/schedule", body: HELD },
+        { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => refuse(503, {}) },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: LIFT }));
+    expect(await screen.findByText(HOLD_LIFT_UNANSWERED)).toBeInTheDocument();
+    expect(await screen.findByRole("gridcell", { name: "Court 1 at 17:00 — held by the club for League night" })).toBeInTheDocument();
+  });
+
+  it("when the day cannot be read either, it says it cannot tell and keeps the hold drawn", async () => {
+    let down = false;
+    openBookings({
+      isAdmin: true,
+      routes: [
+        { path: "/api/v1/schedule", respond: () => (down ? refuse(503, {}) : HELD) },
+        { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => { down = true; return refuse(504, {}); } },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: LIFT }));
+    expect(await screen.findByText(HOLD_LIFT_UNKNOWN)).toBeInTheDocument();
+    expect(screen.getByRole("gridcell", { name: "Court 1 at 17:00 — held by the club for League night" })).toBeInTheDocument();
+  });
+
+  it("offline, nothing is sent and the hold stays", async () => {
+    const stub = openBookings({ isAdmin: true, day: HELD });
+    const lift = await screen.findByRole("button", { name: LIFT });
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    fireEvent.click(lift);
+    expect(await screen.findByText(HOLD_LIFT_OFFLINE)).toBeInTheDocument();
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "DELETE")).toBe(false));
+    vi.restoreAllMocks();
   });
 });

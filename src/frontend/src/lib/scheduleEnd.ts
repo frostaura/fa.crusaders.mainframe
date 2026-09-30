@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { endpoints, type ScheduleDay } from "./api";
 import { describeBookingError, provesStaleGrid } from "./bookingErrors";
+import { goneFrom, outcomeUnknown } from "./bookingOutcome";
 
 /**
  * Lifting a club hold from the grid — the one slot-ending action that stays on the grid itself.
@@ -18,24 +19,55 @@ type Toast = { push: (t: { tone: "success" | "danger"; text: string }) => void }
 type Args = {
   day: ScheduleDay | null;
   setDay: React.Dispatch<React.SetStateAction<ScheduleDay | null>>;
-  reconcile: () => Promise<unknown>;
+  /** Re-reads the day; null when the read failed. */
+  reconcile: () => Promise<ScheduleDay | null>;
   toast: Toast;
 };
 
 export const HOLD_LIFTED = "Hold lifted — the court is free again.";
 export const HOLD_LIFT_FAILED = "Couldn't lift that hold.";
+/** R3 I-4 — offline, nothing is sent. */
+export const HOLD_LIFT_OFFLINE = "You're offline, so nothing was sent — the hold is still there. Try again when you're back online.";
+/** R3 lost-reply audit: no answer, and the day read back still shows the hold. */
+export const HOLD_LIFT_UNANSWERED = "The club's system didn't answer, so we checked the schedule: the hold is still there. Try again in a minute.";
+/** No answer, and the day could not be read either. */
+export const HOLD_LIFT_UNKNOWN = "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether the hold was lifted. Refresh the schedule before trying again.";
+
+/**
+ * What a lift with no answer did, read off the day (R3 lost-reply audit): gone is lifted — the
+ * reply was lost, not the lift — and a hold still there, or a day that would not load, is said so.
+ * It used to put the hold back and say "Couldn't lift that hold" about a lift that had landed.
+ */
+async function readBack(blockId: string, reconcile: Args["reconcile"]): Promise<{ lifted: boolean; text: string }> {
+  const day = await reconcile();
+  if (!day) return { lifted: false, text: HOLD_LIFT_UNKNOWN };
+  if (goneFrom(day, blockId)) return { lifted: true, text: HOLD_LIFTED };
+  return { lifted: false, text: HOLD_LIFT_UNANSWERED };
+}
 
 export function useHoldLift({ day, setDay, reconcile, toast }: Args) {
   return useCallback(async (blockId: string) => {
     const removed = day?.slots.filter((s) => s.bookingId === blockId) ?? [];
+    const putBack = () => setDay((d) => (d ? { ...d, slots: [...d.slots, ...removed] } : d));
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      toast.push({ tone: "danger", text: HOLD_LIFT_OFFLINE });
+      return;
+    }
     setDay((d) => (d ? { ...d, slots: d.slots.filter((s) => s.bookingId !== blockId) } : d));
     try {
       await endpoints.adminUnblock(blockId);
       toast.push({ tone: "success", text: HOLD_LIFTED });
       void reconcile();
     } catch (err) {
+      if (outcomeUnknown(err)) {
+        // The read-back redraws the day itself; only an unreadable day needs the hold put back.
+        const seen = await readBack(blockId, reconcile);
+        if (seen.text === HOLD_LIFT_UNKNOWN) putBack();
+        toast.push({ tone: seen.lifted ? "success" : "danger", text: seen.text });
+        return;
+      }
       // Put it back before saying anything: the grid must never show a court free that is not.
-      setDay((d) => (d ? { ...d, slots: [...d.slots, ...removed] } : d));
+      putBack();
       if (provesStaleGrid(err)) await reconcile();
       toast.push({ tone: "danger", text: describeBookingError(err, HOLD_LIFT_FAILED) });
     }

@@ -40,6 +40,23 @@ export class UnsureOutcome extends Error {
   }
 }
 
+/**
+ * R3 I-4 — the phone said it was offline BEFORE the write was sent, so it never left: nothing was
+ * booked, cancelled or charged, and that is certain — not "we can't tell". Thrown instead of
+ * sending; the sentence is `NOT_SENT_TEXT` (`lib/bookingErrors`).
+ */
+export class NotSent extends Error {
+  constructor() {
+    super("Offline: the write was not sent.");
+    this.name = "NotSent";
+  }
+}
+
+/** Throws {@link NotSent} when the browser knows it has no network; a no-op otherwise. */
+export function refuseWhenOffline(): void {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new NotSent();
+}
+
 /** Re-reads the day on screen; null when that read failed too. */
 export type Reread = () => Promise<ScheduleDay | null>;
 

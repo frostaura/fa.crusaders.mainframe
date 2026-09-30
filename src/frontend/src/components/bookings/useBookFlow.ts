@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, endpoints } from "@/lib/api";
 import { describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
-import { UnsureOutcome, type Reread } from "@/lib/bookingOutcome";
+import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { BOOK_SHEET, refusalReason } from "@/lib/bookingsCopy";
@@ -173,7 +173,7 @@ export function refusalSentence(error: unknown, withPlayers = false, forName: st
   if (withPlayers && error instanceof ApiError && error.code !== null && error.code in PLAYERS_REFUSAL) {
     return playersRefusal(error);
   }
-  return error instanceof ApiError || error instanceof UnsureOutcome
+  return error instanceof ApiError || error instanceof UnsureOutcome || error instanceof NotSent
     ? describeBookingError(error, BOOK_SHEET.fallback, { action: "book", forName })
     : describeFailure(error, { action: BOOK_SHEET.failedAction });
 }
@@ -224,10 +224,14 @@ export function useBookFlow(input: BookFlowInput) {
   );
 
   const action = useAsyncAction(
-    (allowNegativeBalance: boolean) => placeBooking({
-      slots: sendable, who, isAdmin, actorUserId, idempotencyKey: key, allowNegativeBalance, face,
-      players: isAdmin ? null : players.payload,
-    }).catch((error: unknown) => recoverBooking(error, sendable, who, face, input.reread)),
+    // R3 I-4: offline, nothing is sent — and the sheet says so, rather than "can't tell".
+    async (allowNegativeBalance: boolean) => {
+      refuseWhenOffline();
+      return placeBooking({
+        slots: sendable, who, isAdmin, actorUserId, idempotencyKey: key, allowNegativeBalance, face,
+        players: isAdmin ? null : players.payload,
+      }).catch((error: unknown) => recoverBooking(error, sendable, who, face, input.reread));
+    },
     {
       success: (result) => {
         setRun(result);

@@ -1,5 +1,5 @@
 import { ApiError } from "./api";
-import { UnsureOutcome } from "./bookingOutcome";
+import { NotSent, UnsureOutcome } from "./bookingOutcome";
 import type { SplitCancel } from "./bookingsApi";
 import { formatCredits } from "./utils";
 
@@ -103,6 +103,12 @@ export const UNSURE_TEXT: Record<BookingAction, { checked: string; unchecked: st
     checked: "The club's system didn't answer, so we checked the schedule: the booking is still there — nothing was cancelled and no credit moved. Try again in a minute.",
     unchecked: "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether it was cancelled. Check the schedule and your wallet before trying again.",
   },
+};
+
+/** R3 I-4 — offline before sending: certain that nothing happened, and said so. */
+export const NOT_SENT_TEXT: Record<BookingAction, string> = {
+  book: "You're offline, so nothing was sent — nothing was booked and no credit was taken. Try again when you're back online.",
+  cancel: "You're offline, so nothing was sent — the booking is still there and no credit moved. Try again when you're back online.",
 };
 
 /** The sign-out sentence. The 401 handler in `lib/api.ts` does the actual redirect. */
@@ -259,6 +265,7 @@ export type BookingErrorContext = {
  */
 export function describeBookingError(e: unknown, fallback: string, context: BookingErrorContext = {}): string {
   const action = context.action ?? "book";
+  if (e instanceof NotSent) return NOT_SENT_TEXT[action];
   if (e instanceof UnsureOutcome) return e.checked ? UNSURE_TEXT[action].checked : UNSURE_TEXT[action].unchecked;
   if (!(e instanceof ApiError)) return fallback;
 
