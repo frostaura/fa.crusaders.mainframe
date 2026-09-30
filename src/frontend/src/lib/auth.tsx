@@ -358,6 +358,11 @@ function useSignIns(
 ) {
   const adopt = useCallback((r: LoginAnswer) => {
     tokenStore.set(r.access_token);
+    // The club has just said who this is — as surely as `whoami` does. Recorded here too (R1, F3
+    // follow-up): only the boot probe used to, so after a form sign-in the device still named
+    // whoever it last confirmed; a lapse was then filed as THAT member's, and the admin signing
+    // back in was refused their own page as "somebody else's" and sent to the landing.
+    rememberIdentity(r.user_id);
     setSessionExpired(false);
     setSessionEnding(null);
     setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
