@@ -14,7 +14,8 @@ import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
 import { worthRetrying } from "@/lib/bookingErrors";
-import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine } from "@/lib/bookingsCopy";
+import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine, heldPartsLine } from "@/lib/bookingsCopy";
+import { heldPartsOf, type HeldPart } from "@/lib/bookingsApi";
 import { useBalance } from "@/lib/balance";
 import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
@@ -60,7 +61,7 @@ export type { BookedOutcome } from "./useBookFlow";
  * item, so a partial batch is read rather than guessed.
  * </p>
  */
-type HeldNow = { held: number; owedBack: number; until: string | null };
+type HeldNow = { held: number; owedBack: number; until: string | null; parts?: HeldPart[] };
 type Spendable = { spendable: number | null; held: HeldNow | null };
 
 type StepViewProps = {
@@ -89,7 +90,7 @@ function useSpendable(given: number | null): Spendable {
   const { held } = useBalance();
   // Hoisted out of the literal: lizard's .tsx lexer reads a bare comparison inside one as a tag.
   const holding = Boolean(held && (held.held > 0 || held.owedBack > 0));
-  const shown = held && holding ? { held: held.held, owedBack: held.owedBack, until: held.until } : null;
+  const shown = held && holding ? { held: held.held, owedBack: held.owedBack, until: held.until, parts: heldPartsOf(held) } : null;
   return { spendable: held ? held.spendable : given, held: shown };
 }
 
@@ -172,7 +173,12 @@ function HeldNote({ flow }: { flow: BookFlow }) {
   if (!held) return null;
   return (
     <>
-      {held.held > 0 ? <p data-held-line="" className="-mt-2 px-1 text-xs text-text-secondary">{heldLine(held.held, held.until, flow.timezone)}</p> : null}
+      {held.held > 0 ? (
+        <p data-held-line="" className="-mt-2 px-1 text-xs text-text-secondary">
+          {/* C4 / R2 F4-18: each part with its own release — one date for the whole was wrong for all but the first. */}
+          {held.parts && held.parts.length > 1 ? heldPartsLine(held.parts, flow.timezone) : heldLine(held.held, held.until, flow.timezone)}
+        </p>
+      ) : null}
       {held.owedBack ? <p data-owed-back-line="" className="-mt-2 px-1 text-xs text-text-secondary">{owedBackLine(held.owedBack)}</p> : null}
     </>
   );

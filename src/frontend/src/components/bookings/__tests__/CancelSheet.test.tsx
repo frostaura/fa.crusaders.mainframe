@@ -65,7 +65,8 @@ describe("CancelSheet — a member's own booking", () => {
     expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.paid}50.00 cr`);
     expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}50.00 cr`);
     expect(within(dialog).getByRole("list")).toHaveTextContent("Mon 9 Sep · 18:00–18:45");
-    expect(within(dialog).getByRole("button", { name: "Close" })).toBeTruthy();
+    // F4-9: the × is "Close" + the sheet's own title, never a second bare "Close".
+    expect(within(dialog).getByRole("button", { name: `Close ${CANCEL_SHEET.title(1)}` })).toBeTruthy();
     // The way out names what it keeps; the confirm is the danger button.
     expect(within(dialog).getByRole("button", { name: CANCEL_SHEET.keep(1) })).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: CANCEL_SHEET.confirm(1) }).className).toContain("bg-danger-solid");

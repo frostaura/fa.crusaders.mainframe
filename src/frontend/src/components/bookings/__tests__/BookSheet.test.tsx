@@ -105,7 +105,8 @@ describe("BookSheet — a member, one slot", () => {
     expect(money).toHaveTextContent(`${BOOK_SHEET.total}50.00 cr`);
     expect(money).toHaveTextContent(`${BOOK_SHEET.balanceNow}500.00 cr`);
     expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}450.00 cr`);
-    expect(within(d).getByRole("button", { name: "Close" })).toBeTruthy();
+    // F4-9: the × is "Close" + the sheet's own title, never a second bare "Close".
+    expect(within(d).getByRole("button", { name: /^Close \S/ })).toBeTruthy();
     expect(within(d).getByRole("button", { name: BOOK_SHEET.back })).toBeTruthy();
     expect(within(d).getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) })).toBeTruthy();
     // Nobody else on it: no players section, nothing new in the money.
@@ -429,12 +430,13 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     expect(sent[1]).toMatchObject({ allowNegativeBalance: true, idempotencyKey: sent[0].idempotencyKey });
   });
 
-  it("shows a quote refusal in words with a retry, and offers no book button", async () => {
+  it("shows a quote refusal in words, and offers no book button — and no retry that would be refused again", async () => {
     stubFetch([{ path: "/api/v1/admin/bookings/quote", body: refuse(409, { error: "slot_taken" }) }]);
     open({ isAdmin: true, members });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/Someone just took that slot/);
-    expect(screen.getByRole("button", { name: BOOK_SHEET.retry })).toBeTruthy();
+    // R2 F1-4: a 4xx refusal is the answer; asking again gets it again.
+    expect(screen.queryByRole("button", { name: BOOK_SHEET.retry })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Book/ })).toBeNull();
   });
 

@@ -1,4 +1,5 @@
 import { formatCredits } from "./utils";
+import { playersWhen } from "./playersCopy";
 
 /**
  * Every word the Bookings screen says — the page, the grid and (below the grid section) the two
@@ -501,3 +502,12 @@ export const SPLIT_CANCEL = {
 } as const;
 
 /* ─────────────────────────────── end SHEETS ─────────────────────────────── */
+
+/**
+ * C4 — "25.00 cr until Fri 2 Oct, 06:45 · 35.00 cr until Sun 4 Oct, 10:30": held credit, one
+ * part per share deadline, each with its own release (R2 F4-18 — one date for the whole amount
+ * was right only for the first part). "held" leads, so it reads as the held line it replaces.
+ */
+export function heldPartsLine(parts: readonly { credits: number; until: string }[], timezone?: string): string {
+  return `Held: ${parts.map((p) => `${formatCredits(p.credits)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
+}

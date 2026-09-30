@@ -53,7 +53,7 @@ export type BookFlowInput = {
   onBooked?: (outcome: BookedOutcome) => void;
   onStale?: () => void;
   /** What of a member's balance is held for partners (D11 §3a), for the line under the money. */
-  held?: { held: number; owedBack?: number; until: string | null } | null;
+  held?: { held: number; owedBack?: number; until: string | null; parts?: { credits: number; until: string }[] } | null;
   /**
    * Re-reads the day behind the sheet and returns it (null when that read fails). Given, a lost
    * answer or a "taken" refusal is checked against the schedule before anything is said (F1.1).

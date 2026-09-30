@@ -194,3 +194,24 @@ export const bookingsApi = {
   recent: () => api.get<RecentGames>("/api/v1/me/bookings/recent"),
   bookingFor: readBookingFor,
 };
+
+/* ─────────────────────────────── held parts (C4) ─────────────────────────────── */
+
+/** One share deadline's held credit (contract C4): `held_parts`, soonest first, summing to held. */
+export type HeldPart = { credits: number; until: string };
+
+/**
+ * The held parts off whatever carries them — a wallet read, a stream frame or the balance
+ * context's figures (`held_parts` on the wire, `parts` once parsed). Soonest first; empty when the
+ * server predates C4, and the single `held_until` line stands.
+ */
+export function heldPartsOf(source: unknown): HeldPart[] {
+  if (!source || typeof source !== "object") return [];
+  const raw = (source as Record<string, unknown>).parts ?? (source as Record<string, unknown>).held_parts;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((p) => (p && typeof p === "object" ? p as Record<string, unknown> : {}))
+    .filter((p) => typeof p.credits === "number" && p.credits > 0 && typeof p.until === "string")
+    .map((p) => ({ credits: p.credits as number, until: p.until as string }))
+    .sort((a, b) => Date.parse(a.until) - Date.parse(b.until));
+}
