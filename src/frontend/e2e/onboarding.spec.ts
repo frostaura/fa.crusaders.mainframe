@@ -148,15 +148,15 @@ test.describe("the card that is pushed", () => {
     await page.goto("/");
 
     const card = page.locator("section, div").filter({ hasText: "You're booked. Here's what happens next." }).first();
-    await expect(page.getByText(/court 3, from 19:00 to 19:45/i)).toBeVisible();
+    await expect(page.getByText(/court 3 on \w{3} \d{1,2} \w{3}, from 19:00 to 19:45/i)).toBeVisible();
     await expect(card).toContainText(/lights come on by themselves/);
 
     await page.getByRole("button", { name: "Got it" }).click();
-    await expect(page.getByText(/court 3, from 19:00 to 19:45/i)).toHaveCount(0);
+    await expect(page.getByText(/court 3 on \w{3} \d{1,2} \w{3}, from 19:00 to 19:45/i)).toHaveCount(0);
 
     // And it stays gone across a reload, because the dismissal is that booking's own end.
     await page.reload();
-    await expect(page.getByText(/court 3, from 19:00 to 19:45/i)).toHaveCount(0);
+    await expect(page.getByText(/court 3 on \w{3} \d{1,2} \w{3}, from 19:00 to 19:45/i)).toHaveCount(0);
   });
 
   test("says nothing at all to a member with no booking", async ({ page }) => {
@@ -171,7 +171,7 @@ test.describe("the card that is pushed", () => {
     await signIn(page);
     await serveApi(page, home(door()));
     await page.goto("/");
-    await expect(page.getByText(/court 3, from 19:00/i)).toBeVisible();
+    await expect(page.getByText(/court 3 on \w{3} \d{1,2} \w{3}, from 19:00/i)).toBeVisible();
 
     // The booking toast already announces the court and the time. A second region for the
     // same event is the defect the toast viewport records having paid for twice.
