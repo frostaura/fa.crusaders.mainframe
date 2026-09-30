@@ -13,6 +13,7 @@ import {
 import { PlayerChips } from "@/components/players/detail/PlayerChips";
 import { PlayerPanel } from "@/components/players/detail/PlayerPanel";
 import { useBookingDetail, type DetailRead } from "@/components/players/detail/useBookingDetail";
+import { useDetailLiveness } from "@/components/players/detail/useDetailLiveness";
 import { useOrganiserHands, type Notice } from "@/components/players/detail/useOrganiserHands";
 import {
   adminActs, canNudge, canRemove, canShareLink, detailTitle, isCancelled, organiserName, showsResult,
@@ -25,7 +26,7 @@ import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
 import { useAuth } from "@/lib/auth";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
+import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
 
 /**
  * `/bookings/:bookingId` — the booking's own page (P11, D11–D13): the four seats and who is on
@@ -41,7 +42,13 @@ import { DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCop
 export default function BookingDetailPage() {
   const { bookingId = "" } = useParams();
   const read = useBookingDetail(bookingId);
+  // R3 M-2 / I-8 — re-read at the start and end, on coming back, on a wallet movement, and on a
+  // slow poll while the game is live and nobody is in yet.
+  useDetailLiveness(read.data, read.readAt, read.reload);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // R3 I-5 — once the page reads the booking as cancelled its own banner says so: the cancel's
+  // notice (said while the re-read was on its way) steps aside, so the page says it once.
+  const shown = notice && !(notice.text === DETAIL_CANCEL.cancelled && read.data && isCancelled(read.data)) ? notice : null;
   return (
     <PageShell width="content">
       <PageHeader
@@ -51,7 +58,7 @@ export default function BookingDetailPage() {
         actions={<RefreshButton onRefresh={read.reload} loading={read.loading} label={DETAIL_COPY.refresh} />}
         freshness={<Freshness at={read.readAt} />}
       />
-      {notice ? <Alert tone={notice.tone} live="polite" data-detail-notice="">{notice.text}</Alert> : null}
+      {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice="">{shown.text}</Alert> : null}
       <DetailBody read={read} say={setNotice} />
     </PageShell>
   );
@@ -91,12 +98,14 @@ function DetailBody({ read, say }: { read: DetailRead; say: (notice: Notice) => 
   return (
     <>
       {read.error ? <Alert tone="warning" live="polite">{DETAIL_COPY.refreshFailed}</Alert> : null}
-      <DetailView detail={read.data} reload={read.reload} say={say} />
+      <DetailView detail={read.data} readAt={read.readAt} reload={read.reload} say={say} />
     </>
   );
 }
 
-function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: () => void; say: (notice: Notice) => void }) {
+type ViewProps = { detail: BookingDetail; readAt: number | null; reload: () => void; say: (notice: Notice) => void };
+
+function DetailView({ detail, readAt, reload, say }: ViewProps) {
   const auth = useAuth();
   const isAdmin = auth.status === "authenticated" && auth.isAdmin;
   const organiser = useOrganiserHands(detail, reload, say);
@@ -133,7 +142,7 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
           {cancelled && !detail.attendance.checked_in_at ? null : <Attendance detail={detail} />}
           {/* P12 — the match result, below attendance: it can be recorded once the box saw the court.
               Asked for only by the game's own players, and never on a cancelled game (R1 F2.15). */}
-          {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} /> : null}
+          {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} freshAt={readAt} /> : null}
         </div>
       </div>
       <CancelPanel detail={detail} reload={reload} say={say} />

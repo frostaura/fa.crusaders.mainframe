@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { refuse, signOut } from "@/test/harness";
 import type { PlayerPickerDialogProps } from "@/components/players/PlayerPicker";
 import type { BookingDetail } from "@/lib/playersApi";
 import {
-  BOOK_SPLIT, CHANGE_SPLIT, DETAIL_ACTIONS, DETAIL_ADMIN, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, SHARE_LINK,
+  BOOK_SPLIT, CHANGE_SPLIT, DETAIL_ACTIONS, DETAIL_ADMIN, DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_PLAYER, PLAYERS_LOST,
+  PLAYERS_UNSURE, SHARE_LINK,
 } from "@/lib/playersCopy";
+import { CANCEL_SHEET } from "@/lib/bookingsCopy";
+import { RESULT_CARD } from "@/lib/playCopy";
 import {
   ALEX_SEAT, BOOKING, DETAIL_PATH, OPEN_SEAT, PID, SAM_SEAT, adminView, detail, playerView, renderDetail, seat, serve,
 } from "./detailKit";
@@ -255,5 +258,76 @@ describe("the admin's god mode", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: DETAIL_ADMIN.reasonLabel }), { target: { value: "Visiting coach" } });
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.addConfirm }));
     await waitFor(() => expect(notice()).toHaveTextContent(PLAYERS_LOST(DETAIL_ADMIN.added)));
+  });
+});
+
+describe("one cancelled banner (R3 I-5)", () => {
+  it("after a cancel from the page, the page says it once — the notice steps aside for the banner", async () => {
+    const quote = {
+      bookingId: BOOKING, amountChargedCredits: 100, refundCredits: 100, penaltyCredits: 0, penaltyPct: 50,
+      penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false,
+    };
+    const cancelled = detail({
+      status: "cancelled",
+      permissions: { ...detail().permissions, can_invite: false, can_change_split: false, can_cancel: false },
+    });
+    serve({
+      detail: { path: DETAIL_PATH, body: detail(), sequence: [detail(), detail(), cancelled] },
+      extra: [
+        { path: `${DETAIL_PATH}/cancellation-quote`, body: quote },
+        { method: "POST", path: `${DETAIL_PATH}/cancel`, status: 504, body: { error: "gateway_timeout" } },
+      ],
+    });
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: DETAIL_CANCEL.open }));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.click(within(sheet).getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
+    await screen.findByText(DETAIL_CANCELLED.banner);
+    await waitFor(() => expect(screen.queryByText(DETAIL_CANCEL.cancelled)).toBeNull());
+    expect(screen.getAllByText(DETAIL_CANCELLED.banner)).toHaveLength(1);
+  });
+});
+
+describe("the page keeps up with the court (R3 M-2 / I-8)", () => {
+  const RESULT = `${DETAIL_PATH}/result`;
+  const view = (canRecord: boolean) => ({
+    booking_id: BOOKING, timezone: "Africa/Johannesburg", result: null,
+    permissions: { can_record: canRecord, can_edit: false, can_confirm: false, can_dispute: false, can_withdraw: false },
+    not_recordable_reason: canRecord ? null : "not_started", record_closes_at: null,
+    candidates: [], default_sides: { a: [], b: [] }, default_format: "best_of_5",
+  });
+  const checkedIn = (at: string) => ({ ...detail().attendance, checked_in_at: at, players_checked_in: 1 });
+
+  it("reads the booking and its result again when the court time starts: Record appears with no reload", async () => {
+    const starts = new Date(Date.now() + 1500).toISOString();
+    const ends = new Date(Date.now() + 46 * 60_000).toISOString();
+    let started = false;
+    const stub = serve({
+      detail: { path: DETAIL_PATH, respond: () => detail({ starts_at: starts, ends_at: ends, sold_ends_at: ends, attendance: started ? checkedIn(starts) : detail().attendance }) },
+      extra: [{ path: RESULT, respond: () => view(started) }],
+    });
+    renderDetail();
+    await screen.findByText(RESULT_CARD.notStarted);
+    started = true;
+    expect(await screen.findByRole("button", { name: RESULT_CARD.record }, { timeout: 6000 })).toBeInTheDocument();
+    expect(stub.calls.filter((c) => c.path === DETAIL_PATH).length).toBeGreaterThanOrEqual(2);
+  }, 15_000);
+
+  it("reads again when the tab comes back into view", async () => {
+    const stub = serve();
+    renderDetail();
+    await screen.findByRole("button", { name: DETAIL_ACTIONS.removeFor("Sam") });
+    const reads = () => stub.calls.filter((c) => c.path === DETAIL_PATH).length;
+    const before = reads();
+    let state: DocumentVisibilityState = "hidden";
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    // Hidden long enough for what is on screen to be stale.
+    const spy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+    state = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    spy.mockRestore();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    delete (document as unknown as Record<string, unknown>).visibilityState;
   });
 });

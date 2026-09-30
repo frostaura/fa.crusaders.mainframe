@@ -107,6 +107,9 @@ export function serve(options: { admin?: boolean; detail?: unknown; extra?: Stub
     ? (options.detail as StubRoute)
     : { path: DETAIL_PATH, body: options.detail ?? detail() };
   return stubFetch([
+    // A test's own routes first: among equal prefixes the first declared answers (so a test may
+    // answer the result card's route itself).
+    ...(options.extra ?? []),
     { path: "/api/v1/whoami", body: session },
     { path: "/api/v1/wallet", body: { balance_credits: 100, held_credits: 0, spendable_credits: 100, held_until: null, entries: [] } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
@@ -115,7 +118,6 @@ export function serve(options: { admin?: boolean; detail?: unknown; extra?: Stub
     // P12 — the result card below attendance reads its own route. Answered with "not checked in",
     // so the detail's longer-prefix route never answers it with a booking by accident.
     { path: `${DETAIL_PATH}/result`, body: NO_RESULT },
-    ...(options.extra ?? []),
   ]);
 }
 

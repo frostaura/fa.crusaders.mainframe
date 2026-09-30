@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
@@ -42,8 +42,13 @@ type Say = (text: string, tone?: Notice["tone"]) => void;
 
 type Open = { kind: "record" } | { kind: "edit" } | { kind: "confirm"; mode: ConfirmMode } | null;
 
-export function ResultCard({ bookingId }: { bookingId: string }) {
+/**
+ * `freshAt` — when the page around the card last read the booking (R3 I-8): each new read reads
+ * the result again too, so Record appears once the court time starts without a reload.
+ */
+export function ResultCard({ bookingId, freshAt = null }: { bookingId: string; freshAt?: number | null }) {
   const read = useResult(bookingId);
+  useFollow(freshAt, read.reload);
   const [chosen, setChosen] = useState<Open>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const say: Say = (text, tone = "success") => setNotice({ text, tone });
@@ -93,6 +98,16 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
       {read.data ? <Sheets view={read.data} open={open} close={close} done={done} stale={read.reload} /> : null}
     </Section>
   );
+}
+
+/** Re-read whenever `at` moves on — never for its first value (the card's own first read covers it). */
+function useFollow(at: number | null, reload: () => void) {
+  const last = useRef(at);
+  useEffect(() => {
+    if (at === last.current) return;
+    last.current = at;
+    if (at !== null) reload();
+  }, [at, reload]);
 }
 
 function deepLinked(param: string | null, view: BookingResultView | null): Open {
