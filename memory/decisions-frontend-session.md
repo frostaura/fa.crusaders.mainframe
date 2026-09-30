@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-frontend-session
-description: "Who is signed in drives every identity-scoped read; a session's ending is held by AuthProvider, not router state; money-moving requests mark balance movements as the member's own. From the 2026-09-29 walk."
+description: "Identity keys every per-person read; a 401 trades the refresh cookie once, single-flight; a lapse keeps the member code's key (only sign-out wipes it); every chunk precached; the chip shows spendable."
 type: decision
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Live decisions — the PWA's session and balance feedback
@@ -32,3 +32,26 @@ unit tests; each was wrong in the running app.
   went to a partner.
 - **Server side of the same walk:** a token naming no user row, or a user in another club, is
   401 everywhere — see [`decisions-member-code-rotation.md`](decisions-member-code-rotation.md).
+- **A 401 trades the refresh cookie once (R1 F4.1, contract §1; server half in
+  [`decisions-sessions.md`](decisions-sessions.md)).** `lib/api` answers a 401 on a request that
+  CARRIED a token with one `POST /auth/refresh` (`credentials: "include"`, no bearer), then repeats
+  the request once. Single-flight in the tab and behind a Web Lock across tabs, and an exchange that
+  finds the stored token already replaced spends nothing. **Why:** the cookie rotates and a second
+  spend of one link revokes the family — five screens 401-ing on wake would sign the member out
+  everywhere. Never for `/auth/refresh` or `/auth/logout` (the loop), never token-less (a sign-out
+  made offline leaves a live cookie; an anonymous 401 must not resurrect it). The bootstrap
+  `whoami` gets the same one rescue. The proactive timer still uses the bearer path.
+- **A lapse is not a sign-out (F4.1, the P7 decision).** An ending nobody pressed drops the token
+  and caches but KEEPS the confirmed identity, the member code's key and the last-known door
+  facts; `/my-code` renders signed out from the key, asking the club nothing. Only the sign-out
+  buttons (and a different member signing in) wipe them. **Why:** the D3 wipe-on-expiry turned
+  "signed out after a while" into "locked out at the door"; with a 30-day cookie a lapse is rare.
+- **Every chunk is on the phone (F4.3).** The build writes `precache.json` (all JS/CSS); the
+  worker caches every `/assets/` path in it at install. A chunk that still fails gets its own
+  boundary ("You're offline — this page opens when you're back online", Retry); online it reloads
+  once per 5 min. **Why the window:** clearing the guard on any chunk success looped.
+- **The first-run wizard is offered only on a landing a sign-in delivered (F4.8)** — router state
+  `{ signedIn: true }` from Login. `/my-code` is the app's start URL and the door.
+- **The credits chip shows SPENDABLE (F1.11)**, naming the whole and the held/owed parts —
+  supersedes D11 §3a's "the figure stays the whole balance" (550 shown, a 520 booking refused).
+
