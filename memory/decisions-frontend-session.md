@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-frontend-session
-description: "Identity keys every per-person read; a 401 trades the refresh cookie once, single-flight; a lapse keeps the member code's key (only sign-out wipes it); every chunk precached; the chip shows spendable."
+description: "Identity keys every per-person read; a 401 trades the refresh cookie once, single-flight; only a refresh 401 ends a session; a lapse keeps the member code's key (only sign-out wipes it); every chunk precached; the chip shows spendable."
 type: decision
 last_verified: 2026-09-30
 ---
@@ -16,8 +16,7 @@ unit tests; each was wrong in the running app.
   state, never "no profile". **Why:** a leftover token for a user that no longer existed made
   `/me/profile` 404 once; the provider never re-read after the real sign-in, so the avatar fell
   back to "YA" ("Your account") and the first-run wizard never fired.
-- **The credits chip never shows a zero while loading** — a neutral skeleton, never the danger
-  tone. **Why:** a red "0.00 cr" right after sign-in tells a member they are broke.
+- **The credits chip never shows a zero while loading** (a skeleton). **Why:** a red "0.00 cr" says broke.
 - **How the last session ended lives in `AuthProvider`, read once by `/login`, not in router
   state.** **Why:** "Sign out everywhere" navigated to `/login` with a notice in router state;
   `RequireAuth`'s own redirect won the race and the notice never showed — its unit test (a
@@ -30,8 +29,6 @@ unit tests; each was wrong in the running app.
   1"); "the club" is said only for the club's own movements. **Why:** booking or accepting an
   invite produced "The club took 20.00 credits off your wallet" — wrong twice when the money
   went to a partner.
-- **Server side of the same walk:** a token naming no user row, or a user in another club, is
-  401 everywhere — see [`decisions-member-code-rotation.md`](decisions-member-code-rotation.md).
 - **A 401 trades the refresh cookie once (R1 F4.1, contract §1; server half in
   [`decisions-sessions.md`](decisions-sessions.md)).** `lib/api` answers a 401 on a request that
   CARRIED a token with one `POST /auth/refresh` (`credentials: "include"`, no bearer), then repeats
@@ -41,6 +38,12 @@ unit tests; each was wrong in the running app.
   everywhere. Never for `/auth/refresh` or `/auth/logout` (the loop), never token-less (a sign-out
   made offline leaves a live cookie; an anonymous 401 must not resurrect it). The bootstrap
   `whoami` gets the same one rescue. The proactive timer still uses the bearer path.
+- **Only a 401 from `/auth/refresh` ends a session (R2 C2); a late reply never resurrects one (C1).**
+  5xx/429/408/timeout/no answer = transient: token kept, the request fails as unreachable, retried
+  next request/tab-visible, 1 s→30 s backoff (501 = ended: no route). Every sign-out moves a session
+  generation (memory + `localStorage`); a reply landing after it is discarded, and an old session's
+  401 never clears a newer token. **Why:** a redeploy's 503 signed everyone out; another tab's sign-out
+  was undone by this tab's in-flight exchange. Tests needing an ended session must stub refresh 401.
 - **A lapse is not a sign-out (F4.1, the P7 decision).** An ending nobody pressed drops the token
   and caches but KEEPS the confirmed identity, the member code's key and the last-known door
   facts; `/my-code` renders signed out from the key, asking the club nothing. Only the sign-out
