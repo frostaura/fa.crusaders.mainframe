@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-change-record
-description: "Review round 1 lane B: every membership decision is on the change record in its own save; code reset and admin grant need a reason; one privacy row per view; desk top-ups carry rand; ledger rows name who acted."
+description: "Rounds 1-3 lane B: membership decisions on the change record in their own save (a rejection can be approved); reasons required and mailed; webhooks recorded without secrets; overdraft figures are spendable, with U+2212."
 type: decision
 last_verified: 2026-09-30
 ---
@@ -42,3 +42,16 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   words, `balance_before/after_credits` joined into one Balance row, one-sided values listed as
   facts rather than as a "Before" with a dash. *Why:* the writers store keys and tokens, and the
   record read `pending_approval`, `top_up_cash` and UUIDs; a new writer's key falls back to words.
+- **Review round 3 (lane B), `R3*HttpTests`:** a REJECTED applicant can be approved (A-2) —
+  the same approval (audit, change row from `rejected`, welcome mail, webhook), rejection reason
+  cleared; nothing else is approvable. *Why:* the console offered it and got a bare 404.
+  **Both admin-grant mails carry the reason** (A-3) — required since B10, dropped on the way out.
+- **Club webhooks are on the record** (A-5): `webhook.created`/`.deleted`, area `setting`, subject
+  kind `webhook`, destination as scheme+host+port only. *Why:* URL credentials, path tokens and
+  the signing secret must never reach a record every admin can read and export. No edit, enable,
+  disable or rotate route exists to record.
+- **An overdraft is reported on SPENDABLE** (A-8), the figure it is decided on and the desk's
+  confirm step shows: the notice payload carries `HeldCredits` (null on older rows), the mail
+  leads "Can spend after", naming the hold and balance when they differ, and the overdraft row
+  carries `spendable_credits` beside `balance_credits`. Every negative credit figure in server
+  prose uses U+2212 (`MoneyFormat.Credits`; rand untouched — a machine may read it).

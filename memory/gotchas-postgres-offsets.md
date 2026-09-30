@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-postgres-offsets
 description: "Npgsql refuses a non-zero DateTimeOffset on a timestamptz parameter, and timestamptz keeps only microseconds while DateTimeOffset counts ticks — so an instant can be refused outright or silently altered on the way in."
 type: gotcha
-last_verified: 2026-09-23
+last_verified: 2026-09-30
 ---
 
 # Gotchas — club-local instants and the database
@@ -14,11 +14,9 @@ the fixture traps are [`gotchas.md`](gotchas.md).
   `timestamp with time zone` column or parameter: *"only offset 0 (UTC) is supported"*. The
   value is not coerced and the query does not run — the request 500s.
 - **That makes a club-local instant in a WHERE clause a defect the whole UTC-shaped fixture
-  set cannot see.** The doors page computes the club's day boundary in
-  `tenant_settings.timezone` and then bounded a range read with it. Every test club in this
-  repo runs `"timezone":"UTC"`, where the offset is zero and the bug is invisible; the one
-  test written in `Pacific/Auckland` failed on the first run and was the only reason it was
-  found before a real club saw it. **Every real club is outside UTC.**
+  set cannot see.** The doors page bounded a range read with the club's day boundary; every test
+  club here runs `"timezone":"UTC"`, where the offset is zero, and only the one test written in
+  `Pacific/Auckland` caught it. **Every real club is outside UTC.**
 - **The same hole is open on any instant a CLIENT sends.** `?from=2026-09-19T00:00:00+02:00`
   is exactly what a console in a club's own zone produces, and `DateTimeOffset.TryParse` with
   `RoundtripKind` preserves that offset all the way to the parameter.
@@ -27,13 +25,15 @@ the fixture traps are [`gotchas.md`](gotchas.md).
   it is what lets a page say "since 00:00 club time" rather than converting and guessing — and
   the PARAMETER must not. Two call sites carry the comment: `AdminDoorsOverviewEndpoint`'s
   range floor and `DoorLogQuery.Parse`.
-- **Testing it needs a non-UTC fixture, not another assertion.** A club in a zone with a
-  non-zero offset is the whole test; asserting harder against a UTC club proves nothing. Pick a
-  zone whose offset is never zero (`Pacific/Auckland`, `Africa/Johannesburg`) rather than one
-  that is zero for half the year.
+- **Testing it needs a non-UTC fixture, not another assertion** — a zone whose offset is never
+  zero (`Pacific/Auckland`, `Africa/Johannesburg`); asserting harder against a UTC club proves
+  nothing.
 - **And a fixture's own writes have to be normalised too** — seeding at a club-local instant is
   refused the same way. **Request bodies are normalised once** (review round 2, B-9):
-  `UtcInstantConverter` reads every body instant as UTC; query-string instants still are not.
+  `UtcInstantConverter` reads every body instant as UTC; query-string instants are per route
+  (the admin quote parses to UTC since round 3). **Zone math is the other source** (A-1): a
+  `ScheduleClock.InstantAt` edge 500'd schedule edit/end — only for a FUTURE date, as the past
+  was clamped to `UtcNow` first. `CancelFutureAsync` normalises; test with a future date.
 
 ## The other half: precision, which fails silently rather than loudly
 

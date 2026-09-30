@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-member-reads
-description: "Member and desk reads from review rounds 1-2: anonymous invite preview, own seat in any state, one club date format, recent games, held parts, share counterparties, partner games on the admin record."
+description: "Member and desk reads from review rounds 1-3: anonymous invite preview, own seat in any state, one club date, recent games, held parts, what a game cost you, inbox read state for answered asks and own receipts."
 type: decision
 last_verified: 2026-09-30
 ---
@@ -24,8 +24,9 @@ Asked by the frontend lanes; built in lane B. Tests: `R1PlayersHttpTests`, `R1Ma
   (cancelled / accepted → in / anything else → off). *Why:* the inbox search missed old notices.
 - **An "Is it right?" line is retired by whatever answers or replaces it** (confirm, dispute,
   edit, withdraw, void, keep, auto-confirm): marked read in that act's save. *Why:* the inbox kept
-  actionable asks about results that no longer existed. The headline is the recorder's side in
-  first names ("Cara recorded a 2–1 win over Bongani").
+  actionable asks about results that no longer existed. Round 3 (M-5): the retired line's headline
+  says what happened — "Olive said they won 3–0 — withdrawn" (confirmed, disputed, removed by the
+  club, since changed) — never the instruction it can no longer take.
 - **`GET /bookings/{id}/result` already answers 200 `{result: null}` to a player** — the 404s the
   console saw are non-players (`booking_not_found`); unchanged.
 - **One club date format** (`Services/ClubDate`): `Thu 1 Oct, 10:00` in the club zone for every
@@ -49,3 +50,8 @@ Asked by the frontend lanes; built in lane B. Tests: `R1PlayersHttpTests`, `R1Ma
   3–0 — confirm or dispute", "… say you and Jo won …"), never naming them; streak weeks before
   the join week (earliest `member.approved` audit row, else membership creation) are
   `before_joining`; each detail seat carries `returned_credits` (a cancelled game read "paid 0").
+- **Round 3 (lane B):** upcoming/recent items carry `my_paid_credits` (the caller's own wallet on
+  the game, net; settled-outside counts as paid) and `my_owing_credits` (a partner's unpaid open
+  share); the organiser's `my_share_credits` counts ACCEPTED partners only (M-3 — an unanswered
+  invite had it say "your share 25" of a court they had paid 50 for). Answering an invite marks its
+  invite/reminder lines read+resolved; a receipt of your own move is born read (I-9).
