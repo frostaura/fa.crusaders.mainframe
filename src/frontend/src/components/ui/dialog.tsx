@@ -122,10 +122,23 @@ function useOpener() {
   return opener;
 }
 
-/** Where focus goes on close: the opener while it is still in the page, else `<main>`. */
-function returnFocusTarget(opener: Element | null): HTMLElement | null {
-  if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) return opener;
-  return document.getElementById("main-content") ?? document.querySelector<HTMLElement>("main");
+/** The opener, while it is still in the page and is not `<body>`; otherwise null. */
+function usableOpener(opener: Element | null): HTMLElement | null {
+  return opener instanceof HTMLElement && opener !== document.body && opener.isConnected ? opener : null;
+}
+
+/**
+ * No opener to go back to — it left the page, or nothing had focus when the dialog opened (Safari
+ * does not focus a button on click, so a mouse-opened dialog there records `<body>`). Radix's own
+ * default runs first (it knows a `DialogTrigger` when there is one); if that leaves focus on
+ * `<body>`, the page's `<main>` takes it.
+ */
+function rescueFromBody(): void {
+  window.setTimeout(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    (document.getElementById("main-content") ?? document.querySelector<HTMLElement>("main"))?.focus({ preventScroll: true });
+  }, 0);
 }
 
 type SurfaceProps = React.ComponentProps<typeof DialogPrimitive.Content> & {
@@ -164,8 +177,8 @@ function DialogSurface(props: SurfaceProps) {
   const opener = useOpener();
   const returnFocus = (event: Event) => {
     if (event.defaultPrevented) return; // the call site placed focus itself
-    const target = returnFocusTarget(opener.current);
-    if (!target) return;
+    const target = usableOpener(opener.current);
+    if (!target) { rescueFromBody(); return; }
     event.preventDefault();
     target.focus({ preventScroll: true });
   };
