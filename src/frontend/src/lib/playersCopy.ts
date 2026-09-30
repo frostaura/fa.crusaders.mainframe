@@ -552,9 +552,17 @@ export const DETAIL_CANCELLED = {
   moneyNote: "The booking was cancelled — this is where the money went.",
   refunded: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
   kept: (who: string | null) => (who ? `${who} paid in the end` : "You paid in the end"),
-  nothingToPay: "Nothing to pay",
+  nothingToPay: "Nothing owed · any share paid went back",
+  /**
+   * R2 F2-4 — on a SPLIT booking the gross refund to the organiser is not what they kept: the
+   * partners' shares went back to the partners out of it. Never "Refunded to you 50.00" beside a
+   * cancel sheet that said "You keep 15.00".
+   */
+  splitRefundNote: (who: string | null) => who
+    ? `${who} got back what they paid for the court, less the shares partners had paid them — those went straight back to the partners.`
+    : "You got back what you paid for the court, less the shares your partners had paid you — those went straight back to them.",
   paidRow: (paid: string) => `Paid ${paid}`,
-  partnerNothing: "The game was cancelled, so there's nothing for you to pay.",
+  partnerNothing: "The game was cancelled, so there's nothing for you to pay — any share you'd paid went back to you.",
   partnerPaid: (paid: string) => `The game was cancelled after check-in, so the ${paid} you paid stands.`,
 } as const;
 

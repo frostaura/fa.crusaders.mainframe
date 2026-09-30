@@ -36,7 +36,11 @@ type TeamProps = {
   label: string; seats: SeatPosition[]; mine: string | null; actions?: SeatActions; cancelled: boolean; players: readonly DetailPlayer[];
 };
 
-function Team({ label, seats, mine, actions, cancelled, players }: TeamProps) {
+function Team(props: TeamProps) {
+  const { label, mine, actions, cancelled, players } = props;
+  // R2 F2-9 — a cancelled game has no seat left to fill: no dashed "Free seat" placeholders.
+  const seats = cancelled ? props.seats.filter((s) => s.player) : props.seats;
+  if (seats.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</h3>

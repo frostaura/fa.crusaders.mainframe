@@ -127,11 +127,13 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
     <Section title={DETAIL_MONEY.title} description={DETAIL_CANCELLED.moneyNote}>
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <Row term={DETAIL_MONEY.price} value={money.price_credits} />
-        {refunded > 0 ? <Row term={DETAIL_CANCELLED.refunded(who)} value={refunded} /> : null}
+        {/* A split's gross refund is not what the organiser kept (R2 F2-4): said in words below. */}
+        {refunded > 0 && !money.is_split ? <Row term={DETAIL_CANCELLED.refunded(who)} value={refunded} /> : null}
         {money.organiser_owed_credits > 0 ? <Row term={DETAIL_CANCELLED.kept(who)} value={money.organiser_owed_credits} /> : null}
         {money.shares_received_credits > 0 ? <Row term={DETAIL_MONEY.received} value={money.shares_received_credits} /> : null}
         <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_credits} total />
       </dl>
+      {refunded > 0 && money.is_split ? <p className="text-sm text-text-secondary" data-split-refund="">{DETAIL_CANCELLED.splitRefundNote(who)}</p> : null}
       {live.length > 0 ? (
         <ul className="grid gap-2 text-sm">
           {live.map((p) => (
