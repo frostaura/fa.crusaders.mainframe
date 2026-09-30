@@ -404,8 +404,7 @@ export const GET_STARTED = {
       title: "You choose who finds you",
       body: [
         "Partners can always add you with an invite link, or because you've played together before.",
-        "Being findable by name and appearing on leaderboards are up to you. Both start off, and you can change them "
-          + "any time on your profile.",
+        "Being findable by name is up to you. It starts off, and you can change it any time on your profile.",
       ],
     },
   },

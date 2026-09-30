@@ -4,8 +4,9 @@ import { GET_STARTED } from "../src/lib/onboardingCopy";
 import { PRIVACY_COPY } from "../src/lib/playersCopy";
 
 /**
- * P11 / D13 — the social switches: the welcome wizard ends on them, both off; flipping one is
- * a PUT of that one field; Profile shows the same two switches.
+ * P11 / D13 — the social switch: the welcome wizard ends on it, off; flipping it is a PUT of that
+ * one field; Profile shows the same switch. "Show me on leaderboards" is hidden until leaderboards
+ * exist, and its stored value is never sent.
  */
 
 type Recorder = { puts: unknown[] };
@@ -38,9 +39,8 @@ test.describe("P11: privacy, off until the member says otherwise", () => {
     await expect(page.getByText(GET_STARTED.stepOf(8, 8))).toBeVisible();
 
     const findable = page.getByRole("switch", { name: PRIVACY_COPY.findableLabel });
-    const boards = page.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel });
     await expect(findable).toHaveAttribute("aria-checked", "false");
-    await expect(boards).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel })).toHaveCount(0);
 
     await findable.click();
     await expect(findable).toHaveAttribute("aria-checked", "true");
@@ -55,24 +55,24 @@ test.describe("P11: privacy, off until the member says otherwise", () => {
       ...privacyRoutes({ puts: [] }),
     ]);
     await page.goto("/get-started?step=privacy");
-    const boards = page.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel });
-    await boards.click();
-    await expect(page.getByRole("alert").filter({ hasText: PRIVACY_COPY.saveFailed(PRIVACY_COPY.leaderboardsLabel) })).toBeVisible();
-    await expect(boards).toHaveAttribute("aria-checked", "false");
+    const findable = page.getByRole("switch", { name: PRIVACY_COPY.findableLabel });
+    await findable.click();
+    await expect(page.getByRole("alert").filter({ hasText: PRIVACY_COPY.saveFailed(PRIVACY_COPY.findableLabel) })).toBeVisible();
+    await expect(findable).toHaveAttribute("aria-checked", "false");
   });
 
-  test("Profile shows the same two switches, reading what the server holds", async ({ page }) => {
+  test("Profile shows the same switch, reading what the server holds, and never sends leaderboards", async ({ page }) => {
     const recorder: Recorder = { puts: [] };
     await signIn(page);
-    await serveApi(page, privacyRoutes(recorder, { findable: true }));
+    await serveApi(page, privacyRoutes(recorder, { findable: true, show_in_leaderboards: true }));
     await page.goto("/profile");
 
     const card = page.getByRole("region", { name: PRIVACY_COPY.title });
     await expect(card).toBeVisible();
-    await expect(card.getByRole("switch", { name: PRIVACY_COPY.findableLabel })).toHaveAttribute("aria-checked", "true");
-    const boards = card.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel });
-    await expect(boards).toHaveAttribute("aria-checked", "false");
-    await boards.click();
-    await expect.poll(() => recorder.puts).toEqual([{ show_in_leaderboards: true }]);
+    const findable = card.getByRole("switch", { name: PRIVACY_COPY.findableLabel });
+    await expect(findable).toHaveAttribute("aria-checked", "true");
+    await expect(card.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel })).toHaveCount(0);
+    await findable.click();
+    await expect.poll(() => recorder.puts).toEqual([{ findable: false }]);
   });
 });

@@ -400,7 +400,8 @@ describe("the welcome wizard's privacy step (P11, D13)", () => {
 
     const findable = await screen.findByRole("switch", { name: PRIVACY_COPY.findableLabel });
     expect(findable).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel })).toHaveAttribute("aria-checked", "false");
+    // Leaderboards do not exist yet, so neither does their switch.
+    expect(screen.queryByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel })).toBeNull();
     fireEvent.click(findable);
     await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT" && c.path === "/api/v1/me/preferences")?.body)
       .toEqual({ findable: true }));

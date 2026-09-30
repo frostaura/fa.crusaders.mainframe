@@ -22,15 +22,22 @@ const switchNamed = (label: string) => screen.findByRole("switch", { name: label
 afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
 describe("the privacy switches", () => {
-  it("are both off by default, labelled and described", async () => {
+  it("is off by default, labelled and described — and the leaderboards switch waits for leaderboards", async () => {
     stubFetch(routes({ theme: "system" }, () => ({})));
     renderPage(<PrivacySwitches />, { reactStrictMode: true });
     const findable = await switchNamed(COPY.findableLabel);
-    const boards = await switchNamed(COPY.leaderboardsLabel);
     expect(findable).toHaveAttribute("aria-checked", "false");
-    expect(boards).toHaveAttribute("aria-checked", "false");
     expect(findable).toHaveAccessibleDescription(COPY.findableHint);
-    expect(boards).toHaveAccessibleDescription(COPY.leaderboardsHint);
+    expect(screen.queryByRole("switch", { name: COPY.leaderboardsLabel })).toBeNull();
+    expect(screen.getAllByRole("switch")).toHaveLength(1);
+  });
+
+  it("never sends the hidden leaderboards preference — what is stored stays as it is", async () => {
+    const stub = stubFetch(routes({ findable: false, show_in_leaderboards: true }, () => ({ findable: true })));
+    renderPage(<PrivacySwitches />);
+    fireEvent.click(await switchNamed(COPY.findableLabel));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(true));
+    expect(stub.calls.filter((c) => c.method === "PUT").map((c) => c.body)).toEqual([{ findable: true }]);
   });
 
   it("shows what the server holds", async () => {
@@ -64,12 +71,12 @@ describe("the privacy switches", () => {
   it("puts the switch back on a refusal, and says so beside it", async () => {
     stubFetch(routes({ findable: false, show_in_leaderboards: false }, () => refuse(500, { error: "server_error" })));
     renderPage(<PrivacySwitches />);
-    const boards = await switchNamed(COPY.leaderboardsLabel);
-    fireEvent.click(boards);
+    const findable = await switchNamed(COPY.findableLabel);
+    fireEvent.click(findable);
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(COPY.saveFailed(COPY.leaderboardsLabel));
-    expect(boards).toHaveAttribute("aria-checked", "false");
-    expect(within(boards.closest("li")!).getByRole("alert")).toBe(alert);
+    expect(alert).toHaveTextContent(COPY.saveFailed(COPY.findableLabel));
+    expect(findable).toHaveAttribute("aria-checked", "false");
+    expect(within(findable.closest("li")!).getByRole("alert")).toBe(alert);
   });
 
   it("says a failed read failed rather than showing two switches that are guessing", async () => {

@@ -3,9 +3,14 @@ import { playersEndpoints, type SocialPrefs } from "@/lib/playersApi";
 import { PRIVACY_COPY as COPY } from "@/lib/playersCopy";
 import { useRead, type Read } from "@/lib/useRead";
 
-/** The two D13 switches, in the order they are shown. */
+/**
+ * The D13 switches shown, in order. "Show me on leaderboards" is HIDDEN until leaderboards exist
+ * (R1, F4): a switch for something the club does not have yet reads as a broken promise. Its
+ * stored value is left exactly as it is — never shown, never sent — so a member's earlier choice
+ * survives until the switch returns (add it back here).
+ */
 export type PrivacyKey = keyof SocialPrefs;
-export const PRIVACY_KEYS: readonly PrivacyKey[] = ["findable", "show_in_leaderboards"];
+export const PRIVACY_KEYS: readonly PrivacyKey[] = ["findable"];
 
 export const PRIVACY_LABEL: Record<PrivacyKey, { label: string; hint: string }> = {
   findable: { label: COPY.findableLabel, hint: COPY.findableHint },

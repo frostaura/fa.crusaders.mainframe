@@ -895,7 +895,7 @@ export const REPORT_SHARES_COPY = {
  */
 export const PRIVACY_COPY = {
   title: "Privacy",
-  description: "Who can find you, and where your name appears. Both are off until you turn them on.",
+  description: "Who can find you by name when adding players. It's off until you turn it on.",
   findableLabel: "Let other members find me",
   findableHint: "Club members can find you by name when adding players. Invite links and people you've played with work either way.",
   leaderboardsLabel: "Show me on leaderboards",

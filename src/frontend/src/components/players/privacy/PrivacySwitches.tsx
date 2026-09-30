@@ -8,7 +8,8 @@ import { PRIVACY_COPY as COPY } from "@/lib/playersCopy";
 import { PRIVACY_KEYS, PRIVACY_LABEL, usePrivacyPrefs, type PrivacyKey, type PrivacyPrefs } from "./usePrivacyPrefs";
 
 /**
- * D13 — "Let other members find me" and "Show me on leaderboards", both off by default.
+ * D13 — "Let other members find me", off by default. ("Show me on leaderboards" returns with
+ * leaderboards; `PRIVACY_KEYS` holds which switches show.)
  *
  * <p>
  * <b>One component, two doors</b>: the welcome wizard's privacy step and Profile's Privacy card
@@ -70,7 +71,7 @@ function PrivacyRow({ which, prefs }: { which: PrivacyKey; prefs: PrivacyPrefs }
 function SwitchesSkeleton() {
   return (
     <div className="flex flex-col gap-3" aria-hidden="true">
-      {[0, 1].map((row) => (
+      {PRIVACY_KEYS.map((row) => (
         <div key={row} className="flex items-center gap-4">
           <div className="flex flex-1 flex-col gap-1.5">
             <Skeleton className="h-4 w-48" />

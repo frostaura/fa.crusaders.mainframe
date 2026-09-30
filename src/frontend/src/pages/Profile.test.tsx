@@ -321,22 +321,21 @@ describe("Profile — an admin's email alerts (R23)", () => {
 describe("Profile — privacy (P11, D13)", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
-  it("gives every member the same two switches the welcome wizard shows, off by default", async () => {
+  it("gives every member the same switch the welcome wizard shows, off by default — no leaderboards switch yet", async () => {
     const stub = renderProfile([
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/me/webauthn/credentials", body: [] },
-      { method: "PUT", path: "/api/v1/me/preferences", body: { show_in_leaderboards: true } },
+      { method: "PUT", path: "/api/v1/me/preferences", body: { findable: true } },
     ]);
     const card = await screen.findByRole("region", { name: PRIVACY_COPY.title });
     expect(within(card).getByText(PRIVACY_COPY.description)).toBeInTheDocument();
     const findable = await within(card).findByRole("switch", { name: PRIVACY_COPY.findableLabel });
-    const boards = within(card).getByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel });
     expect(findable).not.toBeChecked();
-    expect(boards).not.toBeChecked();
+    expect(within(card).queryByRole("switch", { name: PRIVACY_COPY.leaderboardsLabel })).toBeNull();
 
-    fireEvent.click(boards);
+    fireEvent.click(findable);
     await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT" && c.path === "/api/v1/me/preferences")?.body)
-      .toEqual({ show_in_leaderboards: true }));
-    expect(boards).toBeChecked();
+      .toEqual({ findable: true }));
+    expect(findable).toBeChecked();
   });
 });
