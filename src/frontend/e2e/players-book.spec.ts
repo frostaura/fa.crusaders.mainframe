@@ -157,7 +157,7 @@ test.describe("booking with players", () => {
 
     await expect(sheet.getByText("You pay 100.00 cr now; Sam and whoever takes your link are asked for 33.00 cr each.")).toBeVisible();
     // Spendable, not raw: 100 of the 120 cr balance, with the 20 cr held said under it.
-    await expect(sheet.locator("dl")).toContainText(`${BOOK_SHEET.balanceNow}100.00 cr`);
+    await expect(sheet.locator("dl")).toContainText(`${BOOK_SHEET.availableNow}100.00 cr`);
     await expect(sheet.locator("[data-held-line]")).toContainText("20.00 cr held until");
 
     await page.evaluate(() => {
