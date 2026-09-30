@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { refuse, signOut, type StubCall } from "@/test/harness";
 import type { PlayerPickerDialogProps } from "@/components/players/PlayerPicker";
 import { AMOUNT_COPY } from "@/lib/amountCopy";
-import { BOOK_SPLIT, CHANGE_SPLIT, DETAIL_ACTIONS, PLAYERS_REFUSAL, SHARE_ASK } from "@/lib/playersCopy";
+import { BOOK_SPLIT, CHANGE_SPLIT, DETAIL_ACTIONS, DETAIL_MONEY, PLAYERS_REFUSAL, SHARE_ASK } from "@/lib/playersCopy";
 import { ALEX_SEAT, DETAIL_PATH, PID, SAM_SEAT, detail, playerView, renderDetail, seat, serve } from "./detailKit";
 
 vi.mock("@/components/players/PlayerPicker", () => ({
@@ -177,5 +177,41 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
     await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_ACTIONS.invited("Jo")));
     expect(stub.calls.find((c) => c.method === "POST" && c.path === `${DETAIL_PATH}/players`)?.body).toEqual({ players: [{ userId: "u-jo" }] });
+  });
+});
+
+describe("after the booking stands (R2 F2-3)", () => {
+  it("the change sheet says what saving moves — asked for more, what goes back, what you cover", async () => {
+    // Sam paid 25; Alex (invited) is asked 25.
+    serve({ extra: [{ method: "POST", path: PREVIEW, respond: previewOf }] });
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: CHANGE_SPLIT.open }));
+    const dialog = await screen.findByRole("dialog", { name: CHANGE_SPLIT.title });
+    fireEvent.click(within(dialog).getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") }), { target: { value: "37" } });
+    const effects = await within(dialog).findByRole("region", { name: CHANGE_SPLIT.effectsTitle });
+    expect(effects).toHaveTextContent(CHANGE_SPLIT.askedMore("Sam", "12.00 cr", true));
+    expect(effects).toHaveTextContent(CHANGE_SPLIT.youCover("13.00 cr"));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") }), { target: { value: "20" } });
+    await waitFor(() => expect(within(dialog).getByRole("region", { name: CHANGE_SPLIT.effectsTitle }))
+      .toHaveTextContent(CHANGE_SPLIT.goesBack("Sam", "5.00 cr")));
+  });
+
+  it("the money box says a part-paid partner is asked for more — never 'hasn't paid yet'", async () => {
+    const bob = { ...SAM_SEAT, share_credits: 37, target_credits: 37, paid_credits: 25, unpaid_credits: 12, consented_credits: 37 };
+    serve({ detail: detail({ players: [seat(), bob] }) });
+    renderDetail();
+    const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
+    expect(money).toHaveTextContent(DETAIL_MONEY.askedMoreRow("25.00 cr", "12.00 cr"));
+    expect(money).toHaveTextContent(/Sam has paid 25\.00 cr and is asked for 12\.00 cr more/);
+    expect(money).not.toHaveTextContent(/hasn't paid yet/);
+  });
+
+  it("a share lowered below what was paid says what goes back", async () => {
+    const eve = { ...SAM_SEAT, share_credits: 20, target_credits: 20, paid_credits: 25, unpaid_credits: 0, consented_credits: 20 };
+    serve({ detail: detail({ players: [seat(), eve] }) });
+    renderDetail();
+    const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
+    expect(money).toHaveTextContent(DETAIL_MONEY.goingBackRow("25.00 cr", "5.00 cr"));
   });
 });

@@ -4,9 +4,10 @@ import { parseAmount, parseWeight, type DraftSeat, type PlayersDraft } from "@/c
 // typed into the share ask goes through the shared money parser instead.
 import { parseAmount as parseTypedAmount } from "@/lib/amount";
 import { amountProblemSentence } from "@/lib/amountCopy";
-import type { BookingDetail, DetailPlayer, PlayerSpec, SplitChange } from "@/lib/playersApi";
-import { PLAYERS_REFUSAL } from "@/lib/playersCopy";
-import { isLive } from "./detailModel";
+import type { BookingDetail, DetailPlayer, PlayerSpec, SplitChange, SplitPreviewShare } from "@/lib/playersApi";
+import { CHANGE_SPLIT, PLAYERS_REFUSAL } from "@/lib/playersCopy";
+import { formatCredits } from "@/lib/utils";
+import { isLive, seatName } from "./detailModel";
 
 /**
  * R1 F2.1 — changing the split of a booking that already stands, and asking a share of a player
@@ -64,6 +65,35 @@ export function splitChangeOf(d: BookingDetail, draft: PlayersDraft): SplitChang
     }
   }
   return { mode: draft.mode, seats };
+}
+
+/**
+ * R2 F2-3 — what saving a new split does to a booking that already stands, seat by seat: who is
+ * asked for (more), what goes back to whom, and what the organiser covers in the end. The
+ * booking-time "you pay now · you get back as they accept" is wrong here: the court is paid for
+ * and some partners have paid their part.
+ */
+export function splitEffects(d: BookingDetail, shares: readonly SplitPreviewShare[]): string[] {
+  const lines: string[] = [];
+  for (const p of partnerSeats(d)) {
+    if (p.kind === "guest") continue;
+    const next = shares.find((s) => s.seat === p.seat)?.share_credits;
+    if (next === undefined) continue;
+    const name = seatName(p, d.players);
+    if (p.status !== "accepted") {
+      if (next !== p.share_credits) lines.push(CHANGE_SPLIT.askedFor(name, formatCredits(next)));
+    } else if (next > p.paid_credits) {
+      if (next !== p.share_credits || p.unpaid_credits > 0) {
+        lines.push(CHANGE_SPLIT.askedMore(name, formatCredits(next - p.paid_credits), next > p.consented_credits));
+      }
+    } else if (next < p.paid_credits) {
+      lines.push(CHANGE_SPLIT.goesBack(name, formatCredits(p.paid_credits - next)));
+    }
+  }
+  if (lines.length === 0) return [CHANGE_SPLIT.noChange];
+  const organiser = shares.find((s) => s.seat === 1);
+  if (organiser) lines.push(CHANGE_SPLIT.youCover(formatCredits(organiser.share_credits)));
+  return lines;
 }
 
 /* ─────────────────────────────── a share for a player added later ─────────────────────────────── */

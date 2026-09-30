@@ -49,7 +49,12 @@ function Row({ term, value, total = false }: { term: string; value: number; tota
 /** One line per seat: what it was asked, what it paid, and what is still to come. */
 function lineFor(p: DetailPlayer): string {
   const share = formatCredits(p.share_credits);
-  switch (statusKey(p)) {
+  const key = statusKey(p);
+  // R2 F2-3 — a share changed after money moved: say the difference, not the booking-time words.
+  // ("Asked again" already names the new share beside what they said yes to.)
+  const moved = key === "accepted" || key === "paid" ? movedLine(p) : null;
+  if (moved) return moved;
+  switch (key) {
     case "organiser": return DETAIL_MONEY.coversRow;
     case "guest": return DETAIL_MONEY.guestRow;
     case "settled_outside": return DETAIL_MONEY.settledRow;
@@ -59,6 +64,25 @@ function lineFor(p: DetailPlayer): string {
     case "not_agreed": return DETAIL_MONEY.notAgreedRow(share);
     default: return p.unpaid_credits > 0 ? DETAIL_MONEY.unpaidRow(share) : DETAIL_MONEY.paidRow(formatCredits(p.paid_credits), share);
   }
+}
+
+/** Part-paid and asked for more, or paid more than the share now asks — null otherwise. */
+function movedLine(p: DetailPlayer): string | null {
+  if (p.paid_credits <= 0) return null;
+  const paid = formatCredits(p.paid_credits);
+  if (p.share_credits < p.paid_credits) {
+    return DETAIL_MONEY.goingBackRow(paid, formatCredits(p.paid_credits - p.share_credits));
+  }
+  if (p.unpaid_credits > 0) return DETAIL_MONEY.askedMoreRow(paid, formatCredits(p.unpaid_credits));
+  return null;
+}
+
+/** The sentence under the list for a seat still owing: nothing paid yet, or asked for more. */
+function unpaidSentence(p: DetailPlayer, name: string, deadline: string, toWhom: string): string {
+  if (p.paid_credits > 0) {
+    return DETAIL_MONEY.askedMoreSentence(name, formatCredits(p.paid_credits), formatCredits(p.unpaid_credits), deadline, toWhom);
+  }
+  return DETAIL_MONEY.unpaidSentence(name, deadline, toWhom);
 }
 
 function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: string }) {
@@ -83,7 +107,7 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
       </ul>
       {unpaid.map((p) => (
         <p key={`unpaid-${p.participant_id}`} className="text-sm text-text-secondary">
-          {DETAIL_MONEY.unpaidSentence(seatName(p, detail.players), deadline, toWhom)}
+          {unpaidSentence(p, seatName(p, detail.players), deadline, toWhom)}
         </p>
       ))}
     </div>

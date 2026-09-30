@@ -12,7 +12,7 @@ import { useBalance } from "@/lib/balance";
 import { playersEndpoints, type BookingDetail, type SplitMode } from "@/lib/playersApi";
 import { CHANGE_SPLIT, playersRefusal } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { draftOf, splitChangeOf } from "./splitEditor";
+import { draftOf, splitChangeOf, splitEffects } from "./splitEditor";
 import type { Notice } from "./useOrganiserHands";
 
 /**
@@ -68,6 +68,7 @@ export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
         </DialogHeader>
         <DialogBody className="flex flex-col gap-4 pb-4">
           <SplitStep players={editor} />
+          <SplitEffects detail={detail} editor={editor} />
           {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action })}</Alert> : null}
         </DialogBody>
         <DialogFooter>
@@ -78,5 +79,20 @@ export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** R2 F2-3 — the money saving moves on a booking that stands, once the server has split it. */
+function SplitEffects({ detail, editor }: { detail: BookingDetail; editor: SplitEditor }) {
+  const state = editor.preview.state;
+  if (state.status !== "ready" || state.previews.length === 0) return null;
+  const lines = splitEffects(detail, state.previews[0].shares);
+  return (
+    <section aria-label={CHANGE_SPLIT.effectsTitle} data-split-effects="" className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
+      <h3 className="font-semibold text-text-primary">{CHANGE_SPLIT.effectsTitle}</h3>
+      <ul className="grid gap-1 text-text-secondary">
+        {lines.map((line) => <li key={line}>{line}</li>)}
+      </ul>
+    </section>
   );
 }

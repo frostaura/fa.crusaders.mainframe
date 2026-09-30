@@ -466,6 +466,14 @@ export const CHANGE_SPLIT = {
   done: "The split is changed.",
   doneAskedAgain: "The split is changed. Anyone whose share went up has been asked again.",
   action: "change the split",
+  /** R2 F2-3 — what saving does to a booking that already stands: money that moves, not booking-time words. */
+  effectsTitle: "What saving does",
+  askedFor: (name: string, amount: string) => `${name} is asked for ${amount}.`,
+  askedMore: (name: string, amount: string, consent: boolean) =>
+    consent ? `${name} is asked for ${amount} more — once they say yes to it.` : `${name} is asked for ${amount} more.`,
+  goesBack: (name: string, amount: string) => `${amount} goes back to ${name}.`,
+  youCover: (amount: string) => `You cover ${amount} in the end.`,
+  noChange: "Nobody's share changes.",
 } as const;
 
 /** R1 F2.1 — a player added to an amount or ratio split is asked for a share the organiser names. */
@@ -525,6 +533,11 @@ export const DETAIL_MONEY = {
   lapsedRow: "Share lapsed",
   unpaidSentence: (name: string, when: string, toWhom: string) =>
     `${name} hasn't paid yet — their share lapses to ${toWhom} if unpaid by ${when}.`,
+  /** R2 F2-3 — a share raised after they paid part of it: never "hasn't paid yet". */
+  askedMoreRow: (paid: string, more: string) => `Paid ${paid} · asked for ${more} more`,
+  askedMoreSentence: (name: string, paid: string, more: string, when: string, toWhom: string) =>
+    `${name} has paid ${paid} and is asked for ${more} more — if it isn't paid by ${when}, that part lapses to ${toWhom}.`,
+  goingBackRow: (paid: string, back: string) => `Paid ${paid} · ${back} going back`,
   toYou: "you",
   notSplit: "This court isn't split — the organiser covers it all.",
 } as const;
