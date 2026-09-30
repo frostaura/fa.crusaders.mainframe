@@ -324,7 +324,7 @@ describe("Admin ledger — done by, category, and a detail per row", () => {
   function open() {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
-      { path: "/api/v1/admin/ledger", body: [DESK, { ...OWN, actorUserId: OWN.subjectUserId, actor_name: null }] },
+      { path: "/api/v1/admin/ledger", body: [DESK, { ...OWN, actorUserId: OWN.subjectUserId, actor_name: null, subjectName: "Olivia Own" }] },
     ]);
     renderPage(<AdminLedgerPage />);
   }
@@ -335,7 +335,9 @@ describe("Admin ledger — done by, category, and a detail per row", () => {
     expect(screen.getByRole("columnheader", { name: /Done by/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /Category/ })).toBeInTheDocument();
     expect(screen.getAllByText("Review Admin").length).toBeGreaterThan(0);
-    expect(screen.getByText(LEDGER_COPY.themselves)).toBeInTheDocument();
+    // R3 A-13: the member by name, never "The member".
+    expect(screen.queryByText(LEDGER_COPY.themselves)).toBeNull();
+    expect(screen.getAllByText("Olivia Own").length).toBeGreaterThan(0);
     expect(screen.getAllByText(LEDGER_TYPE_LABEL.AdminAdjustment).length).toBeGreaterThan(0);
   });
 

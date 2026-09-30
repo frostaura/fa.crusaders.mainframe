@@ -38,7 +38,11 @@ export const LEDGER_COPY = {
   close: "Done",
 } as const;
 
-/** Who did it: the admin's name, "The member", or "The club's system". */
+/**
+ * Who did it: the admin's name, the member's own name for their own movement, or "The club's
+ * system". Review round 3, A-13: a member's own charge or share read "The member" beside a
+ * twin row naming the person — on a club-wide list "the member" is nobody in particular.
+ */
 export function ledgerDoneBy(row: LedgerRowWithActor): string {
   // C5 (review round 2, F3-6): a share is moved by one of the two members. The organiser's row
   // said "The club's system" because its actor — the partner who paid — is not its owner.
@@ -47,10 +51,14 @@ export function ledgerDoneBy(row: LedgerRowWithActor): string {
   }
   if ("actor_name" in row) {
     if (row.actor_name) return row.actor_name;
-    return row.actorUserId && row.actorUserId === row.subjectUserId ? LEDGER_COPY.themselves : LEDGER_COPY.system;
+    return row.actorUserId && row.actorUserId === row.subjectUserId ? ownName(row) : LEDGER_COPY.system;
   }
-  if (row.actorUserId && row.actorUserId === row.subjectUserId) return LEDGER_COPY.themselves;
+  if (row.actorUserId && row.actorUserId === row.subjectUserId) return ownName(row);
   return row.actorName?.trim() || LEDGER_COPY.system;
+}
+
+function ownName(row: LedgerRowWithActor): string {
+  return row.subjectName?.trim() || LEDGER_COPY.themselves;
 }
 
 /** What kind of movement it was, in the Transactions filter's own words. */
