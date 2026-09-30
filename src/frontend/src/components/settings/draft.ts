@@ -178,6 +178,46 @@ export function describeSaveFailure(err: unknown, currency: string): string {
   return said;
 }
 
+/** A failed save, as the page's banner says it (F3.15): the sentence, and the field to go to. */
+export type SaveFailure = { text: string; fieldKey: string | null; sessionEnded: boolean };
+
+/** snake_case of a ProblemDetails `errors` key ("SliceMinutes" / "sliceMinutes" → "slice_minutes"). */
+function snake(key: string): string {
+  return key.replace(/^\$\.?/, "").replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+}
+
+/** Which setting a refusal is about, when it names one. */
+function fieldOf(err: ApiError): string | null {
+  const code = err.code ?? "";
+  if (code === "operating_hours_day_invalid") {
+    const day = err.detail("day");
+    return typeof day === "string" ? `operating_hours_${day}` : null;
+  }
+  const named = /^(.+)_(?:out_of_range|invalid|not_whole_cents)$/.exec(code)?.[1];
+  if (named && settingDef(named)) return named;
+  const errors = typeof err.payload === "object" && err.payload !== null
+    ? (err.payload as { errors?: Record<string, unknown> }).errors : undefined;
+  const first = errors ? Object.keys(errors).map(snake).find((key) => settingDef(key)) : undefined;
+  return first ?? null;
+}
+
+/**
+ * The banner's words for a failed save. A 401 is a session that ended — the edits are kept for
+ * the sign-in (see `settingsDraftStore`); a refusal that names no field says so instead of
+ * printing "validation failed"; one that names a field offers a way to it.
+ */
+export function saveFailureOf(err: unknown, currency: string): SaveFailure {
+  if (err instanceof ApiError && err.status === 401) {
+    return { text: SETTINGS_COPY.saveFailed, fieldKey: null, sessionEnded: true };
+  }
+  const fieldKey = err instanceof ApiError ? fieldOf(err) : null;
+  const said = describeSaveFailure(err, currency);
+  const code = err instanceof ApiError ? err.code : null;
+  const raw = code !== null && said === code.replace(/_/g, " ");
+  const unnamed = err instanceof ApiError && err.status === 400 && fieldKey === null && (raw || code === null);
+  return { text: unnamed ? SETTINGS_COPY.saveRefusedUnnamed : said, fieldKey, sessionEnded: false };
+}
+
 /** Club times are chosen, never typed. Quarter-hours, or 5 minutes where a stored time is not one. */
 export function clockStep(values: readonly (string | undefined)[]): number {
   return values.every((value) => !value || Number(value.split(":")[1]) % 15 === 0) ? 15 : 5;

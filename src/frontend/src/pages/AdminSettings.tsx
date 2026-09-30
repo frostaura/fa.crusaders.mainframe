@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Accordion } from "../components/ui/accordion";
+import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Skeleton } from "../components/ui/skeleton";
@@ -12,7 +13,7 @@ import { describeDoorBookingHorizon } from "../lib/gateCopy";
 import { doorBookingHorizonMinutes } from "../lib/tenantSettings";
 import {
   SETTINGS_SECTIONS, isServed, normaliseQuery, sectionDef, sectionMatches,
-  sectionOfKey, settingDef, settingMatches, settingsFor, type SettingContext, type SettingsSectionId,
+  sectionOfKey, settingDef, settingLabel, settingMatches, settingsFor, type SettingContext, type SettingsSectionId,
 } from "../lib/settingsSchema";
 import { sectionSummary } from "../lib/settingsSummaries";
 import { SETTINGS_COPY } from "../lib/settingsCopy";
@@ -176,7 +177,10 @@ function SettingsEditor({ doc }: { doc: Doc }) {
   const form: SettingsForm = {
     settings: draft,
     update: doc.update,
-    errors: Object.fromEntries(blockers.map((blocker) => [blocker.key, blocker.message])),
+    errors: {
+      ...(doc.failure?.fieldKey ? { [doc.failure.fieldKey]: doc.failure.text } : {}),
+      ...Object.fromEntries(blockers.map((blocker) => [blocker.key, blocker.message])),
+    },
     highlighted,
     query,
     visible: (key) => !search || search.keys.has(key),
@@ -194,6 +198,12 @@ function SettingsEditor({ doc }: { doc: Doc }) {
     <SettingsFormProvider value={form}>
       <PageShell className={barShown ? (blockers.length > 0 ? "pb-80" : "pb-40") : undefined}>
         <PageHeader title={SETTINGS_COPY.title} description={SETTINGS_COPY.description} />
+        {doc.restored && changed.length > 0 ? (
+          <Alert tone="info" live="polite" announceKey="settings-restored">{SETTINGS_COPY.draftRestored}</Alert>
+        ) : null}
+        {doc.failure && !doc.failure.sessionEnded ? (
+          <SaveFailureBanner failure={doc.failure} currency={currency} onGoTo={focusSetting} />
+        ) : null}
         <SettingsIntro />
         <SettingsToolbar
           query={rawQuery}
@@ -239,6 +249,29 @@ function SettingsEditor({ doc }: { doc: Doc }) {
       />
       <LeaveGuard changes={changed.length} />
     </SettingsFormProvider>
+  );
+}
+
+/**
+ * F3.15: a failed save stays on the page — what the club's system said, the field it is about
+ * with a way to it, and what to do next. It was a toast, gone in eight seconds, reading
+ * "validation failed".
+ */
+function SaveFailureBanner({ failure, currency, onGoTo }: {
+  failure: NonNullable<Doc["failure"]>; currency: string; onGoTo: (key: string) => void;
+}) {
+  return (
+    <Alert tone="danger" live="assertive" announceKey={`settings-save-${failure.text}`}>
+      <span className="flex flex-col items-start gap-2">
+        <span>{failure.text}</span>
+        <span>{SETTINGS_COPY.saveNotSaved}</span>
+        {failure.fieldKey ? (
+          <Button variant="outline" size="sm" onClick={() => onGoTo(failure.fieldKey!)}>
+            {SETTINGS_COPY.saveGoTo(settingLabel(failure.fieldKey, currency))}
+          </Button>
+        ) : null}
+      </span>
+    </Alert>
   );
 }
 

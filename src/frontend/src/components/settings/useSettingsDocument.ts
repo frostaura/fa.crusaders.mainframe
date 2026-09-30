@@ -4,7 +4,9 @@ import { api, endpoints, type AdminSettings } from "@/lib/api";
 import { readCurrencySymbol } from "@/lib/currency";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { describeSaveFailure, savePayload, wireBody } from "./draft";
+import { useAuth } from "@/lib/auth";
+import { forgetSettingsDraft, keepSettingsDraft, keptSettingsDraft } from "@/lib/settingsDraftStore";
+import { changedKeys, saveFailureOf, savePayload, wireBody, type SaveFailure } from "./draft";
 
 /**
  * The settings document: the copy last saved, the copy being edited, and the two calls.
@@ -33,6 +35,11 @@ export function useSettingsDocument() {
   const [draft, setDraft] = useState<AdminSettings | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState<SaveFailure | null>(null);
+  const [restored, setRestored] = useState(false);
+  const auth = useAuth();
+  const userId = auth.status === "authenticated" ? auth.userId : null;
+  const [lookedFor, setLookedFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,14 +66,14 @@ export function useSettingsDocument() {
     {
       success: (sent) => {
         setSaved(sent);
+        setFailure(null);
+        setRestored(false);
         toast.push({ tone: "success", text: SETTINGS_COPY.saved });
       },
-      // Through the shared device-error dictionary: a code that HAS a sentence gets it ("Unlock
-      // time has to be between 1 and 30 seconds…"); a `<key>_out_of_range` names the field by
-      // its caption; every other token keeps the old underscores-to-spaces fallback.
-      failure: (err, sent) => toast.push({
-        tone: "danger", text: describeSaveFailure(err, readCurrencySymbol(sent.currency_symbol)), durationMs: 8000,
-      }),
+      // F3.15: on the PAGE, not in a toast that fades — the sentence, the field it is about and
+      // the next step. Through the shared device-error dictionary, so a code that HAS a sentence
+      // gets it and a `<key>_out_of_range` names the field by its caption.
+      failure: (err, sent) => setFailure(saveFailureOf(err, readCurrencySymbol(sent.currency_symbol))),
     },
   );
 
@@ -74,7 +81,32 @@ export function useSettingsDocument() {
     setDraft((current) => (current ? { ...current, ...patch } : current));
   }, []);
 
-  const discard = useCallback(() => setDraft(saved), [saved]);
+  // F3.15: edits kept across a sign-in come back — once per admin, before any edit, and only over
+  // the very settings they were edited from (`changedKeys`, not a byte compare: the read
+  // normalises what it serves). Adjusted during render, React's pattern for state derived from a
+  // change, so the mirror below never sees — and erases — the kept draft first.
+  if (userId && saved && draft === saved && lookedFor !== userId) {
+    setLookedFor(userId);
+    const kept = keptSettingsDraft(userId);
+    if (kept && changedKeys(kept.basis, saved).length === 0) {
+      setDraft({ ...saved, ...kept.draft });
+      setRestored(true);
+    }
+  }
 
-  return { saved, draft, error, loading, load, update, discard, save };
+  // Every edit is mirrored for this tab, so a session that ends mid-save does not take it along.
+  // Runs only once the read has answered, so it never erases a kept draft before `load` reads it.
+  useEffect(() => {
+    if (!userId || !saved || !draft) return;
+    if (draft === saved) forgetSettingsDraft(userId);
+    else keepSettingsDraft(userId, saved, draft);
+  }, [userId, saved, draft]);
+
+  const discard = useCallback(() => {
+    setDraft(saved);
+    setFailure(null);
+    setRestored(false);
+  }, [saved]);
+
+  return { saved, draft, error, loading, load, update, discard, save, failure, restored };
 }

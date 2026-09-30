@@ -41,6 +41,11 @@ export const SETTINGS_COPY = {
   discard: "Discard",
   saved: "Settings saved.",
   saveFailed: "Save failed.",
+  /** F3.15: the save banner — what went wrong, and what to do next. */
+  saveNotSaved: "Nothing was saved. Your changes are still here — fix what is named and press Save again.",
+  saveRefusedUnnamed: "The club’s system refused these settings without naming the field. Nothing was saved — check the fields you changed, or discard and start again.",
+  saveGoTo: (label: string) => `Go to ${label}`,
+  draftRestored: "Your unsaved changes were kept while you signed in again. They are not saved yet.",
   movedTo: (label: string) => `Settings cannot be saved yet. Moved to ${label}.`,
   saveBarLabel: "Unsaved settings",
 
