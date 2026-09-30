@@ -166,3 +166,46 @@ describe("useAsyncAction", () => {
     expect(result.current.status).toBe("success");
   });
 });
+
+describe("useAsyncAction — a press that lands before passive effects run", () => {
+  it("still shows pending: the mounted flag is set at commit, not after paint", async () => {
+    // A tap can land between React's commit and its passive-effect flush — on a loaded phone, or
+    // a screen that appears under a waiting finger (the outage screen's "Try again now"). The
+    // mounted flag was set in a passive effect, so that press's pending state was silently
+    // dropped and the button read idle while the retry ran.
+    const { createRoot } = await import("react-dom/client");
+    const never = new Promise<void>(() => {});
+    let run: (() => Promise<unknown>) | null = null;
+    const seen: boolean[] = [];
+    function Probe() {
+      const action = useAsyncAction(() => never);
+      run = action.run;
+      seen.push(action.pending);
+      return <span>{action.pending ? "busy" : "idle"}</span>;
+    }
+    const host = document.createElement("div");
+    const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const was = actEnv.IS_REACT_ACT_ENVIRONMENT;
+    actEnv.IS_REACT_ACT_ENVIRONMENT = false;
+    const root = createRoot(host);
+    try {
+      // The press lands in the microtask right after the commit wrote the DOM — before the
+      // scheduler's next task runs passive effects.
+      const pressed = new Promise<void>((resolve) => {
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          void run!();
+          resolve();
+        });
+        observer.observe(host, { childList: true, subtree: true });
+      });
+      root.render(<Probe />);
+      await pressed;
+      await new Promise((r) => setTimeout(r, 50));
+      expect(host.textContent).toBe("busy");
+    } finally {
+      root.unmount();
+      actEnv.IS_REACT_ACT_ENVIRONMENT = was;
+    }
+  });
+});

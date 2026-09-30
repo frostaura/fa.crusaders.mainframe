@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { describeFailure } from "./errors";
 import { motion } from "./tokens";
@@ -123,7 +123,11 @@ export function useAsyncAction<A extends unknown[], T>(
     latest.current = { fn, options, push };
   });
 
-  useEffect(() => {
+  // Layout, not passive: a press can land between the commit and the passive-effect flush (a
+  // loaded phone, a screen appearing under a waiting finger), and `settle` read the flag as
+  // still unmounted and dropped that press's pending state — the outage screen's "Try again
+  // now" then read idle while its retry ran (R1 integration, a flake in outage-ux.test).
+  useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
