@@ -158,6 +158,13 @@ export default defineConfig({
           if (/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom)\//.test(id)) return "react";
           return undefined;
         },
+        // Perf lane (2026-09-30): a chunk under ~2.5 kB is merged into a chunk that is always
+        // loaded with it (Rollup only merges where that changes nothing about what runs when).
+        // Opening Bookings fetched ~22 files, five of them single icons of 1–3 kB, over HTTP/1.1's
+        // six connections, and the page's own reads queued behind them (perf report Frontend 3).
+        // Measured: 110 → 92 files, 43 → 24 under 3 kB, +1.2 kB gzip on the first load. Larger
+        // thresholds merged real lazy code into the entry (+12 kB gzip at 8 kB) — not worth it.
+        experimentalMinChunkSize: 2_500,
       },
     },
   },

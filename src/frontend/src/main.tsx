@@ -5,7 +5,13 @@ import { ICON_DEFAULTS, IconContext } from "./components/ui/icons";
 import { registerServiceWorker } from "./lib/pwa";
 import { installChunkReload } from "./lib/chunkLoad";
 import { ThemeProvider } from "./lib/theme";
+import { tokenStore } from "./lib/api";
+import { preloadRouteChunk } from "./routeChunks";
 import "./index.css";
+
+// Perf: with a session on this device, the opened page's code is fetched BESIDE the session check
+// rather than after it (`routeChunks`). No session: the page is sign-in, which is in the entry.
+if (tokenStore.get()) preloadRouteChunk(window.location.pathname);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

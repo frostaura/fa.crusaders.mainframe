@@ -21,6 +21,8 @@ import { RouteAnnouncer } from "./components/RouteAnnouncer";
 import { RouteSkeleton } from "./components/shell/SessionScreens";
 import { RequireAuth } from "./components/shell/RequireAuth";
 import { loadChunk } from "./lib/chunkLoad";
+import { routeChunks } from "./routeChunks";
+import { NavPrefetch } from "./components/shell/NavPrefetch";
 
 /**
  * `React.lazy`, with the chunk's fetch going through `loadChunk` (F4.3): a stale deploy reloads
@@ -69,19 +71,19 @@ const ForgotPasswordPage = lazy(() => import("./pages/ForgotPassword"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPassword"));
 const WelcomePage = lazy(() => import("./pages/Welcome"));
 const ChangePasswordPage = lazy(() => import("./pages/ChangePassword"));
-const SchedulePage = lazy(() => import("./pages/Schedule"));
-const WalletPage = lazy(() => import("./pages/Wallet"));
+const SchedulePage = lazy(routeChunks.schedule);
+const WalletPage = lazy(routeChunks.wallet);
 const TopUpPage = lazy(() => import("./pages/TopUp"));
 const TopUpStatusPage = lazy(() => import("./pages/TopUpStatus"));
-const ProfilePage = lazy(() => import("./pages/Profile"));
+const ProfilePage = lazy(routeChunks.profile);
 const ProfileResultsPage = lazy(() => import("./pages/ProfileResults"));
 const HowItWorksPage = lazy(() => import("./pages/HowItWorks"));
 const GetStartedPage = lazy(() => import("./pages/GetStarted"));
-const BookingDetailPage = lazy(() => import("./pages/BookingDetail"));
-const InvitesPage = lazy(() => import("./pages/Invites"));
+const BookingDetailPage = lazy(routeChunks.bookingDetail);
+const InvitesPage = lazy(routeChunks.invites);
 const InviteLinkPage = lazy(() => import("./pages/InviteLink"));
 const InviteDeepLinkPage = lazy(() => import("./pages/InviteDeepLink"));
-const InboxPage = lazy(() => import("./pages/Inbox"));
+const InboxPage = lazy(routeChunks.inbox);
 
 const AdminMembersPage = lazy(() => import("./pages/AdminMembers"));
 const MemberDetailLayout = lazy(() => import("./pages/admin/member"));
@@ -145,6 +147,7 @@ export default function App() {
         <BalanceProvider>
         <ToastProvider>
           <FirstRunGate />
+          <NavPrefetch />
           <AppRoutes />
         </ToastProvider>
         </BalanceProvider>
