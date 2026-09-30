@@ -413,12 +413,13 @@ describe("a refresh the club did not answer (C2)", () => {
       whoami: (auth) => json(200, { tenant_slug: "c", tenant_id: "t", user_id: "u-1", is_authenticated: true, is_admin: false, auth }),
     });
     render(<MemoryRouter><AuthProvider><Status /></AuthProvider></MemoryRouter>);
-    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"), { timeout: 5_000 });
     await expect(api.get("/api/v1/wallet")).rejects.toBeInstanceOf(ApiError);
 
     act(() => { document.dispatchEvent(new Event("visibilitychange")); });
 
-    await waitFor(() => expect(tokenStore.get()).toBe("fresh"));
+    // Generous: the full suite runs this under heavy load (it failed once at the 1 s default).
+    await waitFor(() => expect(tokenStore.get()).toBe("fresh"), { timeout: 5_000 });
     expect(s.refreshCalls()).toHaveLength(2);
   });
 });
