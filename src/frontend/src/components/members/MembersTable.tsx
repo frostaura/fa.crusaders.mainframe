@@ -144,7 +144,7 @@ export function MembersTable(props: MembersTableProps) {
     <div className="[container-type:inline-size]">
       <div className={FRAME}>
       <ScrollArea label={MEMBERS_PAGE.tableLabel}>
-        <Table className={TABLE} containerClassName="overflow-visible">
+        <Table className={TABLE} containerClassName="overflow-visible" aria-label="Members">
           <TableHeader className={HEAD}>
             <tr>
               <SortHead label={COLUMNS.member} k="full_name" sort={sort} onSort={onSort} className={TH.identity} />

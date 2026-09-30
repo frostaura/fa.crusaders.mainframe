@@ -38,6 +38,11 @@ type DataTableProps<T> = {
   loading?: boolean;
   /** When set, caps the scroll-area height (e.g. "60vh", 480). The header stays sticky inside. */
   maxHeight?: string | number;
+  /**
+   * The table's name (F3.21/F3.22): names the table, and makes its scroller a focusable region
+   * so a table wider than a phone can be scrolled from the keyboard.
+   */
+  label?: string;
 };
 
 const ALIGN = { left: "text-left", right: "text-right", center: "text-center" } as const;
@@ -106,10 +111,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
       ) : (
         <div
           data-slot="table-container"
-          className="relative w-full overflow-auto rounded-xl border border-border bg-bg-surface shadow-xs"
+          {...(props.label ? { role: "region", "aria-label": props.label, tabIndex: 0 } : {})}
+          className="relative w-full overflow-auto rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong"
           style={maxHeight !== undefined ? { maxHeight: typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight } : undefined}
         >
-          <table data-slot="table" className="w-full border-collapse text-sm">
+          <table data-slot="table" aria-label={props.label} className="w-full border-collapse text-sm">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 {columns.map((c) => <HeaderCell key={c.key} column={c} sort={sort} onSort={onSort} />)}

@@ -249,6 +249,8 @@ export default function AdminWebhooksPage() {
   const [filterTokens, setFilterTokens] = useState<string[]>(["booking.lights_on"]);
   const [description, setDescription] = useState("");
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+  // F3.16: why the last create failed, IN the dialog — a toast faded and always said "Check the URL".
+  const [createError, setCreateError] = useState<string | null>(null);
   const [openDeliveriesId, setOpenDeliveriesId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDeliveryDto[]>([]);
   /**
@@ -282,7 +284,8 @@ export default function AdminWebhooksPage() {
   useEffect(() => { load().catch(() => {}); }, []);
 
   const create = async () => {
-    if (!url.trim()) { toast.push({ tone: "warning", text: "URL template is required." }); return; }
+    if (!url.trim()) { setCreateError(CREATE_REFUSAL.url_required); return; }
+    setCreateError(null);
     try {
       const created = await endpoints.adminWebhooksCreate({
         urlTemplate: url.trim(),
@@ -298,7 +301,7 @@ export default function AdminWebhooksPage() {
       await load();
       toast.push({ tone: "success", text: "Endpoint created." });
     } catch (err) {
-      toast.push({ tone: "danger", text: createRefusal(err) });
+      setCreateError(createRefusal(err));
     }
   };
 
@@ -383,9 +386,10 @@ export default function AdminWebhooksPage() {
 
       <NewEndpointDialog
         open={creating}
-        onOpenChange={setCreating}
+        onOpenChange={(next) => { setCreating(next); if (!next) setCreateError(null); }}
         form={{ url, setUrl, filterTokens, setFilterTokens, description, setDescription }}
         pending={createAction.pending}
+        error={createError}
         onCreate={() => void createAction.run()}
       />
 
@@ -488,6 +492,7 @@ function NewEndpointDialog(props: {
   onOpenChange: (open: boolean) => void;
   form: EndpointForm;
   pending: boolean;
+  error: string | null;
   onCreate: () => void;
 }) {
   const { open, onOpenChange, form, pending, onCreate } = props;
@@ -526,6 +531,7 @@ function NewEndpointDialog(props: {
             <Input value={form.description} onChange={(e) => form.setDescription(e.target.value)} placeholder="Scoreboard — court lit" />
             <FieldDescription>What the endpoint is for, so the list says it in words.</FieldDescription>
           </Field>
+          {props.error ? <Alert tone="danger" live="assertive" announceKey={`webhook-create-${props.error}`}>{props.error}</Alert> : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -788,12 +794,23 @@ const CREATE_REFUSAL: Record<string, string> = {
     "That address is on a private or link-local network, which is blocked by default. No admin screen can open one up \u2014 the allow-list is a server setting, Webhooks:PrivateNetworkAllowList, shared by every club on this deployment. If it's a device on the club's LAN, send that address to whoever runs the deployment and ask for it to be allow-listed; otherwise use a public address.",
 };
 
+/**
+ * What a failed create says (F3.16). "Check the URL" only where the URL IS the problem: a
+ * refusal code has its own sentence, a 429 says wait, a server failure says it is not the URL and
+ * to look at the list before trying again (the endpoint may exist), and an unreachable server says
+ * so. Anything else goes through the house `describeFailure`.
+ */
 function createRefusal(err: unknown): string {
-  const fallback = "Couldn't create endpoint. Check the URL and try again.";
-  if (!(err instanceof ApiError)) return fallback;
-  const payload = typeof err.payload === "object" && err.payload !== null ? (err.payload as Record<string, unknown>) : {};
-  const code = typeof payload.error === "string" ? payload.error : "";
-  return CREATE_REFUSAL[code] ?? fallback;
+  if (!(err instanceof ApiError)) {
+    return "Couldn't reach the club's system, so nothing was created. Check your connection and try again.";
+  }
+  const code = err.code ?? "";
+  if (code in CREATE_REFUSAL) return CREATE_REFUSAL[code];
+  if (err.status === 429) return "Too many attempts in a short time. Wait a minute, then try again — nothing was created.";
+  if (err.status >= 500) {
+    return "The club's system failed while creating it — it isn't the URL. Refresh the list to see whether it was created before trying again.";
+  }
+  return describeFailure(err, { action: "create the endpoint" });
 }
 
 /* ============================================================================
@@ -823,6 +840,7 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
   return (
     <section aria-label="Recent deliveries" className="mt-3">
       <DataTable
+        label="Delivery attempts"
         rows={rows}
         columns={cols}
         rowKey={(r) => r.id}
@@ -856,7 +874,7 @@ function VariableCatalogCard() {
           </div>
         </div>
         <div className="rounded-lg border border-border">
-          <Table>
+          <Table label="Events and the variables each carries">
             <TableHeader>
               <TableRow>
                 <TableHead>Event</TableHead>

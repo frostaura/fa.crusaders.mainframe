@@ -303,7 +303,8 @@ describe("AdminWebhooks", () => {
     fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
     fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
 
-    expect(await screen.findByText(/URL template is required/)).toBeInTheDocument();
+    // In the dialog (F3.16), not a toast that fades.
+    expect(await within(screen.getByRole("dialog")).findByText("Enter a URL for this endpoint.")).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
   });
 
@@ -398,6 +399,15 @@ describe("AdminWebhooks", () => {
     expect(Object.keys(appsettings.Webhooks!)).toContain("PrivateNetworkAllowList");
   });
 
+  /** F3.21 (axe scrollable-region-focusable at 390): a table wider than a phone is reachable. */
+  it("makes the event table's scroller a named region the keyboard can reach", async () => {
+    stubFetch(routes());
+    renderPage(<AdminWebhooksPage />);
+    const region = await screen.findByRole("region", { name: "Events and the variables each carries" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(within(region).getByRole("table", { name: "Events and the variables each carries" })).toBeInTheDocument();
+  });
+
   it("still says something useful for a refusal it has no sentence for", async () => {
     stubFetch(routes([{ method: "POST", path: LIST, status: 400, body: { error: "some_future_reason" } }]));
     renderPage(<AdminWebhooksPage />);
@@ -406,7 +416,22 @@ describe("AdminWebhooks", () => {
     typeUrl();
     fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
 
-    expect(await screen.findByText(/Check the URL and try again/)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByText(/^Couldn't create the endpoint/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Check the URL/)).toBeNull();
+  });
+
+  /** F3.16: every failure said "Check the URL" in a toast — a 500 and a 429 are not the URL. */
+  it.each([
+    [500, { error: "server_error" }, /it isn't the URL\. Refresh the list/],
+    [429, { error: "rate_limited" }, /Too many attempts in a short time/],
+  ])("says what a %s means, in the dialog", async (status, body, said) => {
+    stubFetch(routes([{ method: "POST", path: LIST, status, body }]));
+    renderPage(<AdminWebhooksPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    typeUrl();
+    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
+    expect(await within(screen.getByRole("dialog")).findByText(said)).toBeInTheDocument();
   });
 
   it("creates an endpoint and shows the signing secret once", async () => {

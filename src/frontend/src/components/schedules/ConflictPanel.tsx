@@ -130,7 +130,7 @@ export function ConflictPanel({
       </Alert>
 
       <div className="rounded-lg border border-border">
-        <Table className="min-w-max">
+        <Table className="min-w-max" label="Bookings in the way">
           <TableCaption className="sr-only">
             {`The ${conflicts.length} bookings that stand in the way of this hold`}
           </TableCaption>

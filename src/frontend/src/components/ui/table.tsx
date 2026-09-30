@@ -17,16 +17,33 @@ type TableProps = ComponentProps<"table"> & {
   stickyHeader?: boolean;
   /** Classes for the scrolling wrapper (a max height for a sticky header, a border, a radius). */
   containerClassName?: string;
+  /**
+   * The table's name. Given one, the scroller becomes a named, focusable region (review round 1,
+   * F3.21 — axe `scrollable-region-focusable`): a table wider than a phone is scrolled sideways,
+   * and a scroller the keyboard cannot reach leaves its right-hand columns unreachable. The table
+   * carries the same name, so it is no longer an unnamed data table either.
+   */
+  label?: string;
 };
 
-export function Table({ className, stickyHeader = false, containerClassName, ...props }: TableProps) {
+export function Table({ className, stickyHeader = false, containerClassName, label, ...props }: TableProps) {
   return (
     <TableContext.Provider value={{ stickyHeader }}>
       <div
         data-slot="table-container"
-        className={cn("relative w-full overflow-x-auto", stickyHeader && "overflow-y-auto", containerClassName)}
+        {...(label ? { role: "region", "aria-label": label, tabIndex: 0 } : {})}
+        className={cn(
+          "relative w-full overflow-x-auto", stickyHeader && "overflow-y-auto",
+          label && "rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong",
+          containerClassName,
+        )}
       >
-        <table data-slot="table" className={cn("w-full caption-bottom border-collapse text-sm", className)} {...props} />
+        <table
+          data-slot="table"
+          aria-label={label}
+          className={cn("w-full caption-bottom border-collapse text-sm", className)}
+          {...props}
+        />
       </div>
     </TableContext.Provider>
   );

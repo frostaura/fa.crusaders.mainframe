@@ -191,6 +191,7 @@ function Utilisation({ rows }: { rows: UtilisationRow[] }) {
   return (
     <Section title="Utilisation by court" description={`${rows.length} court${rows.length === 1 ? "" : "s"}`}>
       <DataTable
+        label="Utilisation by court"
         rows={rows}
         rowKey={(r) => r.court_id}
         search={{ placeholder: "Filter by court name…", fields: (r) => r.court_name }}
@@ -245,6 +246,7 @@ function DailyBreakdown({ days }: { days: DailyAdminPoint[] }) {
   return (
     <Section title="Daily breakdown" description={`${days.length} day${days.length === 1 ? "" : "s"}`}>
       <DataTable
+        label="Daily breakdown"
         rows={days}
         rowKey={(r) => r.date}
         defaultSort={{ key: "date", dir: "desc" }}
