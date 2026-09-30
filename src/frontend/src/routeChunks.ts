@@ -66,19 +66,22 @@ function hint(name: ChunkName) {
  * app on My Code and tapping Bookings as soon as the code showed waited 2.1 s, 1.4 s of it for
  * Bookings' ~30 files, because the tab bar's prefetch waited for sign-in, then 0.5 s, then an idle
  * callback — which on a busy phone came after the tap. Bookings is the next tap from every page,
- * so its code is asked for straight after the opened page's own; Wallet and Profile stay behind
- * the open page's reads (`prefetchNavChunks`). Returns whether anything was asked for.
+ * so its code is asked for as soon as the opened page's own code and reads have settled — not
+ * beside them; Wallet and Profile follow (`prefetchNavChunks`). Returns whether anything was
+ * asked for.
  * </p>
  */
-export function preloadAtSessionCheck(pathname: string): boolean {
+export function preloadAtSessionCheck(pathname: string, quiet: () => Promise<void> = whenApiQuiet): boolean {
   if (!worthFetching()) return false;
   // The desk's console is its own chunk; a desk page is not where Bookings is the next tap.
   if (/^\/admin(\/|$)/.test(pathname)) return preloadRouteChunk(pathname);
   const current = BY_PATH.find(([pattern]) => pattern.test(pathname))?.[1];
-  const next = () => hint("schedule");
-  // After the opened page's code where there is one — it is what the member is waiting for.
-  if (current && current !== "schedule") routeChunks[current]().then(next, next);
-  else next();
+  if (current) preloadRouteChunk(pathname);
+  if (current === "schedule") return true;
+  // Not beside the opened page's code and reads, but once they have settled: measured, asking for
+  // Bookings' ~30 files beside the session check made a cold My Code — the page a member opens at
+  // a locked door — 0.9 s slower (see `whenApiQuiet`).
+  void quiet().then(() => { if (worthFetching()) hint("schedule"); });
   return true;
 }
 

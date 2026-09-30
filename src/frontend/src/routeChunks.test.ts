@@ -47,7 +47,8 @@ describe("prefetchNavChunks — the tab bar's pages, once idle", () => {
     for (const name of ["schedule", "wallet", "profile"] as const) {
       vi.spyOn(routeChunks, name).mockImplementation(async () => { order.push(name); return { default: () => null }; });
     }
-    prefetchNavChunks(10);
+    // With nothing of the club's in flight (R4: Wallet and Profile wait for the open page's reads).
+    prefetchNavChunks(10, false, async () => undefined);
     await vi.advanceTimersByTimeAsync(20);
     expect(order).toEqual(["schedule", "wallet", "profile"]);
   });
@@ -77,32 +78,42 @@ describe("prefetchNavChunks — the tab bar's pages, once idle", () => {
  * R4 — the first-Bookings regression: the tab bar's prefetch came after the tap, and Wallet's and
  * Profile's code could queue in front of the open page's own reads.
  */
-describe("preloadAtSessionCheck — the opened page, then Bookings", () => {
-  it("asks for Bookings' code straight away from a page in the entry (My Code)", () => {
+describe("preloadAtSessionCheck — the opened page, then Bookings once the page has settled", () => {
+  /** A quiet signal the test releases by hand. */
+  function held() {
+    let release: () => void = () => undefined;
+    const quiet = vi.fn(() => new Promise<void>((r) => { release = r; }));
+    return { quiet, release: async () => { release(); await new Promise((r) => setTimeout(r, 0)); } };
+  }
+
+  it("asks for Bookings' code from My Code only once My Code's reads have settled", async () => {
     const spies = watch();
-    expect(preloadAtSessionCheck("/my-code")).toBe(true);
+    const q = held();
+    expect(preloadAtSessionCheck("/my-code", q.quiet)).toBe(true);
+    expect(spies.schedule, "not beside the door page's own reads").not.toHaveBeenCalled();
+    await q.release();
     expect(spies.schedule).toHaveBeenCalledTimes(1);
     expect(spies.wallet).not.toHaveBeenCalled();
   });
 
-  it("asks for the opened page's code first, and Bookings' once that has arrived", async () => {
-    let arrive: (v: { default: () => null }) => void = () => undefined;
-    const wallet = vi.spyOn(routeChunks, "wallet").mockImplementation(() => new Promise((r) => { arrive = r; }));
-    const schedule = vi.spyOn(routeChunks, "schedule").mockImplementation(never);
-    expect(preloadAtSessionCheck("/wallet")).toBe(true);
-    expect(wallet).toHaveBeenCalledTimes(1);
-    expect(schedule).not.toHaveBeenCalled();
-    arrive({ default: () => null });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(schedule).toHaveBeenCalledTimes(1);
+  it("asks for the opened page's code at once, and Bookings' after", async () => {
+    const spies = watch();
+    const q = held();
+    expect(preloadAtSessionCheck("/wallet", q.quiet)).toBe(true);
+    expect(spies.wallet).toHaveBeenCalledTimes(1);
+    expect(spies.schedule).not.toHaveBeenCalled();
+    await q.release();
+    expect(spies.schedule).toHaveBeenCalledTimes(1);
   });
 
-  it("asks once on Bookings itself, and nothing offline", () => {
+  it("asks once on Bookings itself, and nothing offline", async () => {
     const spies = watch();
-    expect(preloadAtSessionCheck("/bookings")).toBe(true);
+    const q = held();
+    expect(preloadAtSessionCheck("/bookings", q.quiet)).toBe(true);
+    await q.release();
     expect(spies.schedule).toHaveBeenCalledTimes(1);
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
-    expect(preloadAtSessionCheck("/my-code")).toBe(false);
+    expect(preloadAtSessionCheck("/my-code", q.quiet)).toBe(false);
     expect(spies.schedule).toHaveBeenCalledTimes(1);
   });
 });

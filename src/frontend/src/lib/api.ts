@@ -118,6 +118,7 @@ export async function fetchWithTimeout(
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   apiInFlight += 1;
+  apiStarted += 1;
   try {
     return await fetch(path, { ...init, signal: controller.signal });
   } catch (cause) {
@@ -136,10 +137,27 @@ export async function fetchWithTimeout(
  * connections. Streams (EventSource) are not counted; they never finish.
  */
 let apiInFlight = 0;
+/** Moves on every request, so a settle window that saw one start and finish is not "quiet". */
+let apiStarted = 0;
 const quietWaiters: (() => void)[] = [];
-export function whenApiQuiet(): Promise<void> {
+function nextQuiet(): Promise<void> {
   if (apiInFlight === 0) return Promise.resolve();
   return new Promise((resolve) => { quietWaiters.push(resolve); });
+}
+/**
+ * Resolves once nothing has been in flight for `settleMs` — a page answers one read with the next
+ * (the session check, then the page's own reads a render later), so "nothing right now" is not
+ * "done". Measured (R4, :8088, slow 4G + 4x CPU): Bookings' code asked for beside the session
+ * check made a cold My Code 0.9 s slower (2.65 → 3.55 s); asked for once My Code had settled, it
+ * costs My Code nothing.
+ */
+export async function whenApiQuiet(settleMs = 300): Promise<void> {
+  for (;;) {
+    await nextQuiet();
+    const before = apiStarted;
+    await new Promise((resolve) => setTimeout(resolve, settleMs));
+    if (apiInFlight === 0 && apiStarted === before) return;
+  }
 }
 
 // Paths that should not trigger session-expired handling on 401. Login itself returns 401 on bad
