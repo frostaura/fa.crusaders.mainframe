@@ -132,12 +132,18 @@ const SIGNED_IN = {
   is_admin: false,
 };
 
+/**
+ * The refresh cookie refuses too (C2): only a 401 from /auth/refresh ends a session — an exchange
+ * with no answer is an outage, not an ending — so a session that is truly over says so here.
+ */
+const NO_COOKIE = { method: "POST", path: "/api/v1/auth/refresh", status: 401, body: { error: "session_ended" } };
+
 describe("every way a session ends drops the caches, not just the sign-out button", () => {
   it("clears them when the club refuses the stored token at bootstrap", async () => {
     // An expiry, a revocation, an admin password reset: the token is present and no longer
     // valid. This is `endSession`, and it used to clear nothing.
     const caches = fakeCaches(["crusaders-shell-v2", "crusaders-api-v1"]);
-    stubFetch([{ method: "GET", path: "/api/v1/whoami", status: 401, body: { error: "unauthorized" } }]);
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", status: 401, body: { error: "unauthorized" } }, NO_COOKIE]);
     tokenStore.set("expired.token.value");
 
     renderSession();
@@ -149,7 +155,7 @@ describe("every way a session ends drops the caches, not just the sign-out butto
   it("clears them when the server says the token is no longer recognised", async () => {
     // The other endSession path: a 200 that answers is_authenticated: false.
     const caches = fakeCaches(["crusaders-assets-v2", "crusaders-api-v1"]);
-    stubFetch([{ method: "GET", path: "/api/v1/whoami", body: { is_authenticated: false } }]);
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", body: { is_authenticated: false } }, NO_COOKIE]);
     tokenStore.set("stale.token.value");
 
     renderSession();
@@ -187,6 +193,7 @@ describe("every way a session ends drops the caches, not just the sign-out butto
     stubFetch([
       { method: "GET", path: "/api/v1/whoami", body: SIGNED_IN },
       { method: "GET", path: "/api/v1/wallet", status: 401, body: { error: "unauthorized" } },
+      NO_COOKIE,
     ]);
     tokenStore.set("revoked.token.value");
 
