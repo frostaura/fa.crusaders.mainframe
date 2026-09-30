@@ -155,6 +155,13 @@ const NO_REFRESH = [REFRESH_PATH, "/api/v1/auth/logout"];
 let refreshInFlight: Promise<boolean> | null = null;
 
 /**
+ * An exchange stands between a member and every screen (it runs at boot, behind `whoami`), so it
+ * gets a shorter budget than an ordinary call: a refresh endpoint that is absent answers at once,
+ * and one that hangs must not hold the boot splash for the full twenty seconds.
+ */
+export const REFRESH_TIMEOUT_MS = 8_000;
+
+/**
  * Trade the refresh cookie for a new access token. Resolves `true` when a usable token is now
  * stored; `false` when the session is over. Never throws.
  *
@@ -194,7 +201,9 @@ async function postRefreshCookie(): Promise<"ok" | "superseded" | "ended"> {
   try {
     // No bearer on purpose (contract §1): the cookie is the credential, and an expired bearer
     // beside it is noise the server would have to reason about.
-    res = await fetchWithTimeout(REFRESH_PATH, { method: "POST", credentials: "include", headers: { "content-type": "application/json" } });
+    res = await fetchWithTimeout(
+      REFRESH_PATH, { method: "POST", credentials: "include", headers: { "content-type": "application/json" } }, REFRESH_TIMEOUT_MS,
+    );
   } catch {
     return "ended";
   }

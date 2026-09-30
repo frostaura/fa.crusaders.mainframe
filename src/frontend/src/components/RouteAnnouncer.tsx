@@ -131,7 +131,7 @@ export function RouteAnnouncer() {
  * renders its heading, so at the moment the route changes there is frequently no
  * <code>&lt;h1&gt;</code> in the document at all — a one-shot query would land on
  * <code>&lt;body&gt;</code> on precisely the screens that take longest to arrive, which is
- * the failure it is meant to fix. It gives up after a second rather than polling for ever.
+ * the failure it is meant to fix. It gives up after five seconds rather than polling for ever.
  * </p>
  *
  * <p>
@@ -167,7 +167,9 @@ function takeFocus(hash: string, onHeading: (heading: HTMLElement) => void): () 
         return;
       }
     }
-    if (attempts < 10) timer.id = window.setTimeout(attempt, 100);
+    // F4.6 — five seconds, not one: a lazy route's chunk and its first read routinely take longer
+    // than a second on a phone, and giving up left focus wherever the old page dropped it.
+    if (attempts < 50) timer.id = window.setTimeout(attempt, 100);
   };
 
   attempt();

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { api, endpoints, REFRESH_PATH, setUnauthorizedHandler, tokenStore } from "./api";
+import { api, endpoints, REFRESH_PATH, REFRESH_TIMEOUT_MS, setUnauthorizedHandler, tokenStore } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 
 /**
@@ -195,5 +195,36 @@ describe("the bootstrap probe and the refresh cookie", () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(s.refreshCalls()).toHaveLength(1);
     expect(s.calls.filter((c) => c.path === "/api/v1/whoami")).toHaveLength(1);
+  });
+});
+
+describe("a refresh endpoint that is absent or hangs", () => {
+  it("ends quickly and cleanly when the endpoint is not there (501/404), so boot falls through", async () => {
+    tokenStore.set("stale");
+    const s = server({ refresh: () => json(501, { error: "no route for POST /api/v1/auth/refresh" }), whoami: () => json(401, { error: "invalid_token" }) });
+    render(<MemoryRouter><AuthProvider><Status /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"), { timeout: 1_000 });
+    expect(s.refreshCalls()).toHaveLength(1);
+  });
+
+  it("never lets a hanging exchange hold the request past its own budget", async () => {
+    vi.useFakeTimers();
+    try {
+      tokenStore.set("stale");
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === REFRESH_PATH) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+          });
+        }
+        return Promise.resolve(json(401, { error: "invalid_token" }));
+      }));
+      const pending = api.get("/api/v1/wallet").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(REFRESH_TIMEOUT_MS + 10);
+      await expect(pending).resolves.toMatchObject({ status: 401 });
+      expect(ended).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
