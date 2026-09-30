@@ -1,5 +1,6 @@
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { ADMIN_ROLE_COPY, DOORS_TAB_COPY, MEMBER_COPY, MEMBER_TABS } from "../src/lib/memberDetailCopy";
+import { CONFIRM_NOT_READY } from "../src/lib/confirmDialogCopy";
+import { ACTIONS_COPY, ADMIN_ROLE_COPY, DOORS_TAB_COPY, MEMBER_COPY, MEMBER_TABS } from "../src/lib/memberDetailCopy";
 
 /**
  * The member page (P5, R17/R20/D9), driven in Chromium at both project widths.
@@ -140,5 +141,45 @@ test.describe("member detail", () => {
     await dialog.getByRole("button", { name: ADMIN_ROLE_COPY.grantConfirm }).click();
     await expect(dialog).toBeHidden();
     expect(posted).toEqual([{ grant: true, reason: "Joined the committee" }]);
+  });
+  test("reset member code: a missing reason is named, and the passkey row is a 44px target", async ({ page }) => {
+    const NAME = "Naledi Khumalo-Van der Merwe";
+    const posted: unknown[] = [];
+    await serveApi(page, routes([
+      {
+        method: "POST", path: "/api/v1/admin/members/cccccccc-0000-4000-8000-00000000000c/code/reset",
+        respond: ({ body }) => { posted.push(body); return { rotated: true, generation: 2, passkeys_revoked: true, passkeys_removed: 1 }; },
+      },
+    ]));
+    await page.goto(`/admin/members/${MEMBER_ID}`);
+    await page.getByRole("button", { name: MEMBER_COPY.moreActions(NAME) }).click();
+    await page.getByRole("menuitem", { name: ACTIONS_COPY.resetCode }).click();
+    const dialog = page.getByRole("dialog", { name: ACTIONS_COPY.resetCodeTitle(NAME) });
+    await expect(dialog).toBeVisible();
+
+    // Not ready: the primary stays enabled, and pressing it says what is missing.
+    const reason = dialog.getByRole("textbox", { name: ACTIONS_COPY.resetCodeReason });
+    await expect(reason).toHaveAttribute("aria-required", "true");
+    await expect(dialog.getByText("(required)")).toBeVisible();
+    await dialog.getByRole("button", { name: ACTIONS_COPY.resetCodeConfirm }).click();
+    await expect(dialog.getByText(CONFIRM_NOT_READY)).toBeVisible();
+    await expect(reason).toBeFocused();
+    expect(posted).toHaveLength(0);
+
+    // The 44×26 switch's hit target is its whole row: at least 44px tall, and the hint flips it.
+    const toggle = dialog.getByRole("switch", { name: ACTIONS_COPY.revokePasskeys });
+    const row = dialog.locator("label[data-revoke-passkeys]");
+    const box = await row.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await dialog.getByText(ACTIONS_COPY.revokePasskeysHint).click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await dialog.getByText(ACTIONS_COPY.revokePasskeys, { exact: true }).click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await reason.fill("Lost phone");
+    await dialog.getByRole("button", { name: ACTIONS_COPY.resetCodeConfirm }).click();
+    await expect(dialog).toBeHidden();
+    expect(posted).toEqual([{ revoke_passkeys: true, reason: "Lost phone" }]);
   });
 });
