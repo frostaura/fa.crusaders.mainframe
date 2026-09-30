@@ -129,3 +129,25 @@ describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the
     vi.restoreAllMocks();
   });
 });
+
+describe("R3 M-3 — the card says what the game has cost, not the share it would be", () => {
+  it("an organiser whose partner never accepted has paid the whole price", async () => {
+    openBookings({ routes: [upcoming([game({ players: [{ name: "Dean Martin", photo_url: null, status: "accepted" }, INVITED_SAM], my_share_credits: 25, my_paid_credits: 50, my_owing_credits: 0 })])] });
+    const region = await screen.findByRole("region", { name: UPCOMING.title });
+    const card = within(region).getByRole("link", { name: /^Court 1/ });
+    expect(card).toHaveTextContent(UPCOMING.paid(50));
+    expect(card).not.toHaveTextContent(UPCOMING.share(25));
+  });
+
+  it("a partner who has not paid yet is told what they owe", async () => {
+    openBookings({ routes: [upcoming([game({ role: "partner", my_share_credits: 25, my_paid_credits: 0, my_owing_credits: 25, needs_action: true })])] });
+    const region = await screen.findByRole("region", { name: UPCOMING.title });
+    expect(within(region).getByRole("link", { name: /^Court 1/ })).toHaveTextContent(UPCOMING.owe(25));
+  });
+
+  it("a server without the figures still gets the share line", async () => {
+    openBookings({ routes: [upcoming([game({ my_share_credits: 40 })])] });
+    const region = await screen.findByRole("region", { name: UPCOMING.title });
+    expect(within(region).getByRole("link", { name: /^Court 1/ })).toHaveTextContent(UPCOMING.share(40));
+  });
+});

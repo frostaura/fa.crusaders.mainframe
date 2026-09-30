@@ -32,6 +32,13 @@ export type UpcomingGame = {
   my_share_credits: number | null;
   /** Something is waiting on the caller: an answer, a payment. */
   needs_action: boolean;
+  /**
+   * R3 M-3 — what the game has cost the caller so far, off their own wallet, net (an organiser's
+   * charge less the shares partners have paid back). Absent from an older server.
+   */
+  my_paid_credits?: number;
+  /** R3 M-3 — what a partner still owes on their seat; 0 for the organiser. Absent from an older server. */
+  my_owing_credits?: number;
 };
 
 export type UpcomingGames = { timezone?: string; items: UpcomingGame[] };

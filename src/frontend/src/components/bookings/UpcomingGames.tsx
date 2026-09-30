@@ -77,16 +77,29 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
           </span>
           <span className="text-sm tabular-nums text-text-secondary">{time}</span>
           <GamePeople players={game.players} />
-          {game.my_share_credits !== null ? (
-            // R3 V-9: its own line, never "· your share" trailing the names — at 320 the share
-            // wrapped and the separator dangled at the start of the line. The amount never breaks.
-            <span className="text-xs tabular-nums text-text-secondary">{UPCOMING.share(game.my_share_credits)}</span>
-          ) : null}
+          {/* R3 V-9: its own line, never "· your share" trailing the names — at 320 the share
+              wrapped and the separator dangled at the start of the line. */}
+          <MoneyLine game={game} />
         </span>
         <CaretRight size={16} aria-hidden="true" className="shrink-0 text-text-muted" />
       </Link>
     </Interactable>
   );
+}
+
+/**
+ * R3 M-3 — what the game has cost the member: owed on their seat, else paid off their wallet.
+ * "Your share 25.00" was said to an organiser who had paid 50 while the partner never accepted.
+ * A server without the figures (or a game that has cost nothing yet) keeps the share line.
+ */
+function MoneyLine({ game }: { game: UpcomingGame }) {
+  const owing = game.my_owing_credits ?? 0;
+  const paid = game.my_paid_credits ?? 0;
+  let text: string | null = null;
+  if (owing > 0) text = UPCOMING.owe(owing);
+  else if (paid > 0) text = UPCOMING.paid(paid);
+  else if (game.my_share_credits !== null) text = UPCOMING.share(game.my_share_credits);
+  return text ? <span className="text-xs tabular-nums text-text-secondary">{text}</span> : null;
 }
 
 /**

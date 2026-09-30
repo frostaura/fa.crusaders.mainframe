@@ -445,6 +445,10 @@ export const UPCOMING = {
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",
   share: (credits: number) => `Your share ${formatCredits(credits)}`,
+  /** R3 M-3 — what the game has actually cost the member so far, not the share they would carry. */
+  paid: (credits: number) => `You've paid ${formatCredits(credits)}`,
+  /** R3 M-3 — a partner's share not yet paid. */
+  owe: (credits: number) => `You owe ${formatCredits(credits)}`,
   /**
    * R3 M-3 — "Dean, Sam · 1 still to answer": the accepted players by first name, then the seats
    * asked but not taken (an invite, an open link), counted and never named as players. The space
