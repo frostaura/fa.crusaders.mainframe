@@ -165,17 +165,14 @@ async function precacheBuild() {
     // Every /assets/ path the document names, in a `src`, an `href` or a modulepreload — and
     // (F4.3) every chunk the build emitted, so a page never opened with signal still opens
     // without it.
-    const named = [...(html.match(/\/assets\/[A-Za-z0-9._-]+/g) || []), ...(await buildChunks())];
-    await Promise.all([...new Set(named)].map(async (url) => {
-      try {
-        const asset = await fetch(url);
-        // Through `cachePut`, not `cache.add`: one chokepoint decides what may be stored, and
-        // a second path into the cache is how the rule above gets quietly broken.
-        await cachePut(ASSET_CACHE, new Request(url), asset);
-      } catch {
-        // One asset that will not fetch must not cost the others their place.
-      }
-    }));
+    const listed = await buildChunks();
+    const firstUrls = [...new Set([...(html.match(/\/assets\/[A-Za-z0-9._-]+/g) || []), ...listed.first])];
+    const restUrls = listed.all.filter((url) => !firstUrls.includes(url));
+    // PERF (2026-09-30): the document's own files and every chunk a MEMBER's page needs first, a
+    // few at a time; the desk's pages after, two at a time. All ~110 at once queued the page's
+    // own reads behind them on a phone's six connections, on the very visit that installs this.
+    await fetchInto(firstUrls, 4);
+    await fetchInto(restUrls, 2);
   } catch {
     // Installed with no network, or behind a captive portal. There is nothing to precache and
     // nothing to be done about it; first use will fill the cache instead.
@@ -194,15 +191,39 @@ async function precacheBuild() {
  * back online" rather than crashing.
  */
 async function buildChunks() {
+  const assetsOnly = (list) => (Array.isArray(list) ? list : [])
+    .filter((url) => typeof url === "string" && /^\/assets\/[A-Za-z0-9._-]+$/.test(url));
   try {
     const response = await fetch("/precache.json", { cache: "no-cache" });
-    if (!response.ok) return [];
+    if (!response.ok) return { all: [], first: [] };
     const body = await response.json();
-    const assets = body && Array.isArray(body.assets) ? body.assets : [];
-    return assets.filter((url) => typeof url === "string" && /^\/assets\/[A-Za-z0-9._-]+$/.test(url));
+    const all = assetsOnly(body && body.assets);
+    // `first` (perf, 2026-09-30): what a member's pages need. A list from before it existed puts
+    // everything first, as before.
+    const first = body && Array.isArray(body.first) ? assetsOnly(body.first).filter((url) => all.includes(url)) : all;
+    return { all, first };
   } catch {
-    return [];
+    return { all: [], first: [] };
   }
+}
+
+/** Fetches and stores `urls`, `lanes` at a time. One asset that will not fetch costs only itself. */
+async function fetchInto(urls, lanes) {
+  const queue = [...urls];
+  const lane = async () => {
+    while (queue.length > 0) {
+      const url = queue.shift();
+      try {
+        const asset = await fetch(url);
+        // Through `cachePut`, not `cache.add`: one chokepoint decides what may be stored, and
+        // a second path into the cache is how the rule above gets quietly broken.
+        await cachePut(ASSET_CACHE, new Request(url), asset);
+      } catch {
+        // One asset that will not fetch must not cost the others their place.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: lanes }, lane));
 }
 
 self.addEventListener("install", (event) => {

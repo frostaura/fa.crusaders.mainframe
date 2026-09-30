@@ -23,9 +23,42 @@ function precacheManifest(): Plugin {
         .filter((file) => file.startsWith("assets/") && /\.(?:js|css)$/.test(file))
         .sort()
         .map((file) => `/${file}`);
-      this.emitFile({ type: "asset", fileName: "precache.json", source: JSON.stringify({ assets }) });
+      const first = memberFirst(bundle).filter((file) => assets.includes(file));
+      this.emitFile({ type: "asset", fileName: "precache.json", source: JSON.stringify({ assets, first }) });
     },
   };
+}
+
+/** Pages only the club's desk opens — precached last. Everything else a member can reach. */
+const DESK_PAGES = /\/src\/pages\/(?:admin\/|monitoring\/|Admin[A-Z]|DevPrimitives|dev\/)/;
+
+type BundleEntry = {
+  type: string; fileName: string; isEntry?: boolean; facadeModuleId?: string | null;
+  imports?: string[]; dynamicImports?: string[]; viteMetadata?: { importedCss?: Set<string> };
+};
+
+/**
+ * Perf lane (2026-09-30) — `precache.json`'s `first`: the entry and every chunk a MEMBER's page
+ * needs (what it imports, statically or lazily, and its CSS). The worker caches these first and the
+ * desk's pages after, a couple at a time, instead of all ~110 files at once on the member's first
+ * visit — which queued the page's own reads behind them on a phone (perf report Frontend 6).
+ * `assets` still lists everything: every chunk still ends up on the phone (F4.3).
+ */
+function memberFirst(bundle: Record<string, unknown>): string[] {
+  const chunks = Object.values(bundle) as BundleEntry[];
+  const byName = new Map(chunks.map((c) => [c.fileName, c]));
+  const seen = new Set<string>();
+  // Static imports always; lazy ones too (a member page's calendar, the celebration), unless the
+  // lazy chunk IS a desk page — the entry names every route lazily, the desk's included.
+  const visit = (file: string) => {
+    const chunk = byName.get(file);
+    if (!chunk || seen.has(file) || DESK_PAGES.test(chunk.facadeModuleId ?? "")) return;
+    seen.add(file);
+    for (const css of chunk.viteMetadata?.importedCss ?? []) seen.add(css);
+    for (const dep of [...(chunk.imports ?? []), ...(chunk.dynamicImports ?? [])]) visit(dep);
+  };
+  for (const chunk of chunks) if (chunk.type === "chunk" && chunk.isEntry) visit(chunk.fileName);
+  return [...seen].sort().map((file) => `/${file}`);
 }
 
 /**

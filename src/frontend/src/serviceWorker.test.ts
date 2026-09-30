@@ -219,6 +219,25 @@ describe("install precaches every chunk the build lists", () => {
     expect(stored.some((u) => u.includes("elsewhere") || u.endsWith("/sw.js"))).toBe(false);
   });
 
+  it("fetches what a member's pages need first, and the desk's pages after (perf round)", async () => {
+    const sw = loadServiceWorker({
+      "/index.html": () => new Response(INDEX, { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({
+        assets: ["/assets/AdminLedger-FFFF.js", "/assets/Schedule-DDDD.js", "/assets/Wallet-CCCC.js", "/assets/AdminMembers-GGGG.js"],
+        first: ["/assets/Schedule-DDDD.js", "/assets/Wallet-CCCC.js"],
+      }), { status: 200 }),
+    });
+    await sw.install();
+    const order = sw.networkCalls.map((r) => new URL(r.url, ORIGIN).pathname).filter((p) => p.startsWith("/assets/"));
+    const lastMember = Math.max(...["/assets/index-AAAA.js", "/assets/Schedule-DDDD.js", "/assets/Wallet-CCCC.js"].map((p) => order.indexOf(p)));
+    const firstDesk = Math.min(...["/assets/AdminLedger-FFFF.js", "/assets/AdminMembers-GGGG.js"].map((p) => order.indexOf(p)));
+    expect(lastMember).toBeGreaterThanOrEqual(0);
+    expect(firstDesk).toBeGreaterThan(lastMember);
+    // Still every chunk on the phone by the end of install (F4.3).
+    expect(sw.caches.storedUrls()).toEqual(expect.arrayContaining(
+      ["/assets/AdminLedger-FFFF.js", "/assets/AdminMembers-GGGG.js", "/assets/Schedule-DDDD.js"].map((p) => `${ORIGIN}${p}`)));
+  });
+
   it("still installs, with the entry, when the list is missing", async () => {
     const sw = loadServiceWorker({
       "/index.html": () => new Response(INDEX, { status: 200 }),
