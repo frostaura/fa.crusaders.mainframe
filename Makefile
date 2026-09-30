@@ -1,6 +1,6 @@
 .PHONY: install install-iot lint lint-backend lint-frontend lint-iot format-iot build build-iot \
         sweep-icloud \
-        test test-iot test-iot-asan test-integration test-e2e test-e2e-device complexity corpus-check \
+        test test-iot test-iot-asan test-integration test-integration-sharded test-classes test-e2e test-e2e-device complexity corpus-check \
         arduino-export arduino-check flash-mega flash-bridge monitor-bridge \
         virt-up virt-down ci-status up down down-reset clean
 
@@ -238,6 +238,69 @@ test-integration:
 	@test -n "$$API_BOUNDARY_TEST_CONNECTION_STRING" \
 	  || (echo "API_BOUNDARY_TEST_CONNECTION_STRING is not set — this target needs a Postgres server." && exit 1)
 	cd src/backend && REQUIRE_BOUNDARY_TESTS=true dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q \
+	  -- xUnit.MaxParallelThreads=$(TEST_PARALLEL)
+
+# Every dotnet command below runs with the workload resolver off: this Mac's SDK workload set is
+# broken and a build without it dies on MSB4242. The project uses no workloads, so it is inert
+# anywhere else.
+TEST_DOTNET = MSBuildEnableWorkloadResolver=false dotnet
+TEST_DLL = Crusaders.Mainframe.Tests/bin/Debug/net10.0/Crusaders.Mainframe.Tests.dll
+TEST_OUT = TestResults/sharded
+
+# Tests — the whole backend suite as SHARDS test processes at once, the local twin of CI's
+# backend-integration-shard matrix: the same class split (src/backend/tools/test_shards.py over
+# tools/test-timings.json), the same union proof at the end, one trx per shard under
+# src/backend/TestResults/sharded/. Each shard is its own process with its own template
+# database and its own TEST_DB_PREFIX (<prefix>_s<i>), so nothing is shared but the server.
+#
+# Measured 2026-09-30, 3032 tests: `make test-integration` 6m19s at load 13-26 (it was 17.5 min
+# before one host per class, the split giant classes and the quiet console); this target at load
+# ~130 finished three of four shards in 2m49s-3m26s and the fourth at 13m, held by ONE test —
+# PlayersPropertyHttpTests, a property test that is the whole suite's floor. Each shard migrates
+# its own template and warms its own JIT; 4 is a default, not a measured optimum.
+#
+#   API_BOUNDARY_TEST_CONNECTION_STRING="Host=localhost;Port=5440;Database=postgres;Username=crusaders;Password=testpw" \
+#     TEST_DB_PREFIX=mine make test-integration-sharded SHARDS=4
+#
+# The test Postgres is the `crusaders-test-pg` container; `docker start crusaders-test-pg` if
+# it is down.
+SHARDS ?= 4
+test-integration-sharded:
+	@test -n "$$API_BOUNDARY_TEST_CONNECTION_STRING" \
+	  || (echo "API_BOUNDARY_TEST_CONNECTION_STRING is not set — this target needs a Postgres server." && exit 1)
+	cd src/backend && $(TEST_DOTNET) build Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
+	@cd src/backend && rm -rf $(TEST_OUT) && mkdir -p $(TEST_OUT) \
+	  && python3 tools/test_shards.py list --dll $(TEST_DLL) > $(TEST_OUT)/classes.txt \
+	  && python3 tools/test_shards.py plan --classes $(TEST_OUT)/classes.txt --shards $(SHARDS) --format table
+	@cd src/backend && prefix="$${TEST_DB_PREFIX:-boundary}"; start=$$(date +%s); pids=""; \
+	for i in $$(seq 1 $(SHARDS)); do \
+	  filter="$$(python3 tools/test_shards.py plan --classes $(TEST_OUT)/classes.txt --shards $(SHARDS) --index $$i)"; \
+	  REQUIRE_BOUNDARY_TESTS=true TEST_DB_PREFIX="$${prefix}_s$$i" $(TEST_DOTNET) test $(TEST_DLL) --nologo \
+	    --logger "trx;LogFileName=shard-$$i.trx" --results-directory $(TEST_OUT) --filter "$$filter" \
+	    -- xUnit.MaxParallelThreads=$(TEST_PARALLEL) > $(TEST_OUT)/shard-$$i.log 2>&1 & pids="$$pids $$!"; \
+	done; \
+	failed=0; i=0; for pid in $$pids; do i=$$((i+1)); \
+	  if wait $$pid; then echo "shard $$i/$(SHARDS): $$(grep -E 'Passed!|Failed!' $(TEST_OUT)/shard-$$i.log | tail -1)"; \
+	  else failed=1; echo "shard $$i/$(SHARDS) FAILED — $(TEST_OUT)/shard-$$i.log:"; grep -E '^\s+Failed |Failed!|error' $(TEST_OUT)/shard-$$i.log | head -40; fi; \
+	done; \
+	echo "wall clock: $$(( $$(date +%s) - start ))s for $(SHARDS) shards"; \
+	python3 tools/test_shards.py verify --classes $(TEST_OUT)/classes.txt --shards $(SHARDS) $(TEST_OUT)/shard-*.trx || failed=1; \
+	exit $$failed
+
+# Tests — only the named classes, e.g.
+#
+#   make test-classes CLASSES="AdminSettingsHttpTests DeviceGateHttpTests+DoorScans"
+#
+# A name matches that class AND the classes nested in it, so a split class (AdminSettingsHttpTests
+# is six: AdminSettingsHttpTests+RoundTrip, …) runs whole under its old name. Needs the same
+# API_BOUNDARY_TEST_CONNECTION_STRING as test-integration for the Postgres-backed ones; without
+# it they skip, and REQUIRE_BOUNDARY_TESTS is deliberately NOT set so an in-memory class runs
+# anywhere.
+CLASSES ?=
+test-classes:
+	@test -n "$(CLASSES)" || (echo 'Name the classes: make test-classes CLASSES="FooTests BarTests"' && exit 1)
+	cd src/backend && $(TEST_DOTNET) test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo \
+	  --filter "$$(for c in $(CLASSES); do printf 'FullyQualifiedName~.%s.|FullyQualifiedName~.%s+|' "$$c" "$$c"; done | sed 's/|$$//')" \
 	  -- xUnit.MaxParallelThreads=$(TEST_PARALLEL)
 
 # Regenerate everything generated from the wire contract and fail if a committed
@@ -479,7 +542,7 @@ down-reset:
 .PHONY: walk walk-smoke walk-reset
 WALK_CHROMIUM ?= $(or $(PLAYWRIGHT_CHROMIUM_PATH),$(shell ls -d "$(HOME)"/Library/Caches/ms-playwright/chromium-*/chrome-mac-arm64/"Google Chrome for Testing.app"/Contents/MacOS/"Google Chrome for Testing" 2>/dev/null | sort -V | tail -1))
 
-# Headed and slowed so a person can follow it. Pass ARGS to narrow, e.g. ARGS="--project=mobile".
+# Headed and slowed so a person can follow it. Pass ARGS to narrow, e.g. ARGS="--project=mobile-play --no-deps".
 walk:
 	cd src/frontend && HEADED=1 SLOWMO=$${SLOWMO:-300} PLAYWRIGHT_CHROMIUM_PATH="$(WALK_CHROMIUM)" npm run e2e:real -- $(ARGS)
 
