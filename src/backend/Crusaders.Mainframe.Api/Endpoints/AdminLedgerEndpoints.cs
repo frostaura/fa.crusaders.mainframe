@@ -24,7 +24,8 @@ public static class AdminLedgerEndpoints
     /// The query string. <c>cursor</c> is the perf round's (2026-09-30) additive paging switch:
     /// ABSENT, the answer is the bare array it always was (newest first, <c>limit</c> default 500,
     /// max 5000); PRESENT — even empty, for the first page — it is <c>{ items, next_cursor }</c>,
-    /// keyset-paged newest first by (at, id), <c>limit</c> default 100, max 500.
+    /// keyset-paged newest first by (at, id), <c>limit</c> default 100, max 500, and the first
+    /// page carries the whole range's <c>totals</c> (null on later pages).
     /// </summary>
     public sealed record LedgerQuery(DateTimeOffset? From, DateTimeOffset? To, Guid? UserId, string? Type, int? Limit, string? Cursor);
 
@@ -48,7 +49,21 @@ public static class AdminLedgerEndpoints
         {
             items = rows,
             next_cursor = more ? new AdminChangeCursor(entries[^1].CreatedAt, entries[^1].Id).Encode() : null,
+            // Review round 4 (A4 carry-over): the WHOLE range's totals, on the first page only.
+            // The console summed what it had read, and a range past its cap read "1000
+            // movements" with sums over a truncated set.
+            totals = after is null ? await TotalsAsync(db, query, ct) : null,
         });
+    }
+
+    /// <summary>Count, money in, money out (a magnitude) and net over the filtered range, in credits.</summary>
+    private static async Task<object> TotalsAsync(MainframeDbContext db, LedgerQuery query, CancellationToken ct)
+    {
+        var range = Filtered(db, query, null);
+        var count = await range.CountAsync(ct);
+        var credits = await range.Where(l => l.AmountCredits > 0).SumAsync(l => l.AmountCredits, ct);
+        var debits = await range.Where(l => l.AmountCredits < 0).SumAsync(l => -l.AmountCredits, ct);
+        return new { count, credits, debits, net = credits - debits };
     }
 
     /// <summary>The window, the filters and the keyset, newest first with the id as tie-break.</summary>
