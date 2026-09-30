@@ -157,6 +157,7 @@ public sealed class TestHost : IAsyncDisposable
         // Mirrors Program.cs: the role cache is a singleton so an eviction reaches the reader.
         services.AddSingleton<LiveAdminRole>();
         services.AddSingleton<SessionEpochs>();
+        services.AddSingleton<RefreshFamilies>();
         // Mirrors Program.cs: the refresh-cookie chain (B1) every epoch raise revokes. Its clock
         // and environment are the application's; this host has neither registered otherwise.
         services.AddSingleton(TimeProvider.System);

@@ -154,6 +154,17 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     return;
                 }
 
+                // C1 (review round 2): a bearer from a refresh family that has been ended — sign-out,
+                // a replay, sign out everywhere — is refused on every route, cached and evicted like
+                // the epoch. A token naming no family (minted before C1) is untouched. See RefreshFamilies.
+                if (ctx.Principal is { } bound
+                    && await ctx.HttpContext.RequestServices.GetRequiredService<RefreshFamilies>()
+                        .IsEndedAsync(bound, ctx.HttpContext.RequestServices, ctx.HttpContext.RequestAborted))
+                {
+                    ctx.Fail("This session has been signed out.");
+                    return;
+                }
+
                 // The admin role in a token is what was true when it was minted. A demoted admin's
                 // token would otherwise keep every admin route open for the rest of its fifteen
                 // minutes, so the role is checked against the account here — cached, and only for
@@ -381,6 +392,7 @@ builder.Services.AddSingleton<AccessTokenRevocationList>();
 // check nearly free, and the admin-role endpoint evicts from the same instance it reads.
 builder.Services.AddSingleton<LiveAdminRole>();
 builder.Services.AddSingleton<SessionEpochs>();
+builder.Services.AddSingleton<RefreshFamilies>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingRules>();

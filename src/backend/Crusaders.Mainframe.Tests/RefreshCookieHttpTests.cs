@@ -382,7 +382,10 @@ public sealed class RefreshCookieHttpTests(PostgresFixture pg) : IClassFixture<P
             var late = await RefreshAsync(h, jar, tabB);
             Assert.Equal(HttpStatusCode.Unauthorized, late.StatusCode);
             Assert.Equal("session_ended", await ErrorOf(late));
-            Assert.Null(SetCookieLine(late));
+            // Never a NEW cookie. (With the ended family's own cookie in the jar, the refused
+            // bearer is anonymous since the route-wide check, the dead cookie is presented, and
+            // clearing it is right.)
+            Assert.True(CookieValue(late) is null or "", $"a cookie was set: {SetCookieLine(late)}");
         }
         Assert.Equal(families, await h.Club.ReadAsync(h.App, db => db.RefreshTokens.IgnoreQueryFilters().CountAsync(t => t.UserId == h.Club.Olga)));
     }
@@ -476,5 +479,41 @@ public sealed class RefreshCookieHttpTests(PostgresFixture pg) : IClassFixture<P
         var refreshed = await RefreshAsync(h, null, bearer);
         Assert.Equal(HttpStatusCode.Unauthorized, refreshed.StatusCode);
         Assert.Null(SetCookieLine(refreshed));
+    }
+
+    /// <summary>
+    /// C1 tightened: sign-out ends the session on EVERY route at once, not only at refresh. Tab B's
+    /// bearer — and the token a refresh racing the sign-out minted — was good on /wallet for up to
+    /// fifteen minutes. The answer is cached per family, so the bearer is read once BEFORE the
+    /// sign-out (the cache holds "live") and must still be refused right after: the revoke evicts.
+    /// </summary>
+    [SkippableFact]
+    public async Task Sign_out_ends_every_bearer_of_its_family_on_every_route_at_once()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var h = await StartAsync("r2rfidall3");
+        var (login, cookie) = await LoginAsync(h, "olga");
+        var tabA = await AccessTokenOf(login);
+        var raced = await RefreshAsync(h, cookie, tabA);          // minted beside the sign-out, from the same family
+        Assert.Equal(HttpStatusCode.OK, raced.StatusCode);
+        var late = await AccessTokenOf(raced);
+        var (_, otherDevice) = await LoginAsync(h, "olga");
+        var other = await AccessTokenOf(await RefreshAsync(h, otherDevice));
+
+        foreach (var token in new[] { tabA, late, other })
+        {
+            Assert.Equal(HttpStatusCode.OK, (await h.Club.Bearer(h.App, token).GetAsync("/api/v1/wallet")).StatusCode);
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent, (await LogoutAsync(h, cookie, bearer: null)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await h.Club.Bearer(h.App, tabA).GetAsync("/api/v1/wallet")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await h.Club.Bearer(h.App, late).GetAsync("/api/v1/wallet")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await h.Club.Bearer(h.App, late).GetAsync("/api/v1/me/profile")).StatusCode);
+        // The other device's family is untouched, and a token from before C1 (no family) is too.
+        Assert.Equal(HttpStatusCode.OK, (await h.Club.Bearer(h.App, other).GetAsync("/api/v1/wallet")).StatusCode);
+        var legacy = new DoorClub(h.Club.TenantId, h.Club.Slug, h.Club.DeviceKey, h.Club.AdminId, h.Club.Olga, h.Club.Courts[0])
+            .TokenFor(h.Club.Olga, null);
+        Assert.Equal(HttpStatusCode.OK, (await h.Club.Bearer(h.App, legacy).GetAsync("/api/v1/wallet")).StatusCode);
     }
 }

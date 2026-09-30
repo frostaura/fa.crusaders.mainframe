@@ -64,12 +64,14 @@ public sealed class RefreshSessions
     private readonly MainframeDbContext _db;
     private readonly TimeProvider _clock;
     private readonly IHostEnvironment _env;
+    private readonly RefreshFamilies _families;
 
-    public RefreshSessions(MainframeDbContext db, TimeProvider clock, IConfiguration config, IHostEnvironment env)
+    public RefreshSessions(MainframeDbContext db, TimeProvider clock, IConfiguration config, IHostEnvironment env, RefreshFamilies families)
     {
         _db = db;
         _clock = clock;
         _env = env;
+        _families = families;
         Lifetime = TimeSpan.FromDays(Math.Clamp(config.GetValue("Jwt:RefreshTokenLifetimeDays", 30), 1, 90));
     }
 
@@ -155,14 +157,19 @@ public sealed class RefreshSessions
         var now = _clock.GetUtcNow();
         await RevokeWhereAsync(_db.RefreshTokens.IgnoreQueryFilters()
             .Where(t => t.TenantId == tenantId && t.FamilyId == familyId && t.RevokedAt == null), now, ct);
+        _families.Invalidate(tenantId, familyId);   // after the commit: every route refuses its bearers at once
     }
 
     /// <summary>Revokes every live link the account holds — called on every session-epoch raise.</summary>
     public async Task RevokeUserAsync(Guid tenantId, Guid userId, CancellationToken ct)
     {
         var now = _clock.GetUtcNow();
+        var families = await _db.RefreshTokens.IgnoreQueryFilters().AsNoTracking()
+            .Where(t => t.TenantId == tenantId && t.UserId == userId && t.RevokedAt == null)
+            .Select(t => t.FamilyId).Distinct().ToListAsync(ct);
         await RevokeWhereAsync(_db.RefreshTokens.IgnoreQueryFilters()
             .Where(t => t.TenantId == tenantId && t.UserId == userId && t.RevokedAt == null), now, ct);
+        foreach (var family in families) _families.Invalidate(tenantId, family);
     }
 
     /// <summary>The refresh family the bearer behind <paramref name="principal"/> was minted from; null for a token that names none.</summary>

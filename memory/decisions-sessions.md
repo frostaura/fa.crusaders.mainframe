@@ -45,6 +45,10 @@ Tests: `RefreshCookieHttpTests`, `SignInRateLimitHttpTests`. Epoch rules: `decis
   cookie and STARTED a family — the session came back. Live = no link revoked AND one unexpired —
   never "an unspent link exists", which is false for a moment mid-rotation. Sign-out revokes the
   cookie's family and the bearer's. Mutation-checked (7 mutants, `RefreshCookieHttpTests`).
+  **And refused on EVERY route** (`RefreshFamilies`, in `OnTokenValidated` beside the epoch):
+  ended = any link revoked or no such family; cached 15 s per family, evicted by every revoke
+  after it commits. *Why:* tab B's bearer, and the token a refresh racing the sign-out minted,
+  kept /wallet open 15 minutes. No `rfid` (pre-C1 token) = untouched. 4 more mutants killed.
 - **The global backstop is per MEMBER** (B-10): `GlobalPerMinute` (600) per signed-in user;
   anonymous requests per address at `GlobalPerIpPerMinute` (6000). 429 = `rate_limited` +
   `retry_after_seconds`. *Why:* 600 per address 429'd a whole club behind one router.
