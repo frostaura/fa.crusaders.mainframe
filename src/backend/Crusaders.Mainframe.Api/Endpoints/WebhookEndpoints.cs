@@ -153,12 +153,21 @@ public static class WebhookEndpoints
 
     /// <summary>Scheme, host and port — never the credentials, path or query.</summary>
     private static string Destination(string url)
-        => TryParse(url) is { } u ? $"{u.Scheme}://{u.Authority}" : "an unreadable address";
+    {
+        // Block bodies: lizard mis-scopes an expression body containing braces (memory/gotchas-gates.md).
+        var u = TryParse(url);
+        return u is null ? "an unreadable address" : $"{u.Scheme}://{u.Authority}";
+    }
 
-    private static string HostOf(string url) => TryParse(url)?.Host ?? "an unreadable address";
+    private static string HostOf(string url)
+    {
+        return TryParse(url)?.Host ?? "an unreadable address";
+    }
 
     private static Uri? TryParse(string url)
-        => Uri.TryCreate(url.Replace("{", "%7B").Replace("}", "%7D"), UriKind.Absolute, out var u) ? u : null;
+    {
+        return Uri.TryCreate(url.Replace("{", "%7B").Replace("}", "%7D"), UriKind.Absolute, out var u) ? u : null;
+    }
 
     /// <summary>Everything up to the third slash: scheme, credentials, host and port.</summary>
     private static string SchemeAndAuthority(string url)
@@ -170,19 +179,24 @@ public static class WebhookEndpoints
         return pathStart < 0 ? url : url[..pathStart];
     }
 
-    private static object Project(WebhookEndpoint w, bool includeSecret = false) => new
+    private static object Project(WebhookEndpoint w, bool includeSecret = false)
     {
-        id = w.Id,
-        owner_kind = w.OwnerKind.ToString(),
-        url_template = w.UrlTemplate,
-        event_filter = w.EventFilter,
-        enabled = w.Enabled,
-        description = w.Description,
-        failure_count = w.FailureCount,
-        last_success_at = w.LastSuccessAt,
-        last_failure_at = w.LastFailureAt,
-        secret = includeSecret ? w.Secret : null,
-    };
+        // A block body, not `=> new { … }`: lizard mis-scoped that into a file-long *global*,
+        // which tripped the 200-line gate once the file passed 200 lines (memory/gotchas-gates.md).
+        return new
+        {
+            id = w.Id,
+            owner_kind = w.OwnerKind.ToString(),
+            url_template = w.UrlTemplate,
+            event_filter = w.EventFilter,
+            enabled = w.Enabled,
+            description = w.Description,
+            failure_count = w.FailureCount,
+            last_success_at = w.LastSuccessAt,
+            last_failure_at = w.LastFailureAt,
+            secret = includeSecret ? w.Secret : null,
+        };
+    }
 
     /// <summary>
     /// A courtesy check, not the security boundary.

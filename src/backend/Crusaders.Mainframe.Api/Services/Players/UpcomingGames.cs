@@ -109,15 +109,23 @@ public sealed class UpcomingGames
             .GroupBy(l => l.BookingId)
             .ToDictionary(g => g.Key, g => g.Sum(l => l.AmountCredits));
 
-        var context = new ItemContext(courts, people, mine);
+        var context = new ItemContext { Courts = courts, People = people, MyNet = mine };
         var items = new List<GameItem>(bookings.Count);
         foreach (var b in bookings) items.Add(await ItemAsync(b, [.. seats[b.Id]], me, context, ct));
         return items;
     }
 
-    /// <summary>What every item on one list reads from: court names, people, and the caller's net ledger per game.</summary>
-    private sealed record ItemContext(
-        Dictionary<Guid, string> Courts, Dictionary<Guid, PublicMember> People, Dictionary<Guid, decimal> MyNet);
+    /// <summary>
+    /// What every item on one list reads from: court names, people, and the caller's net ledger per
+    /// game. A class with init properties rather than a positional record: lizard reads a positional
+    /// record's generic parameters as extra parameters and trips the 6-parameter gate.
+    /// </summary>
+    private sealed class ItemContext
+    {
+        public required Dictionary<Guid, string> Courts { get; init; }
+        public required Dictionary<Guid, PublicMember> People { get; init; }
+        public required Dictionary<Guid, decimal> MyNet { get; init; }
+    }
 
     private async Task<GameItem> ItemAsync(
         Booking b, List<BookingParticipant> seats, Guid me, ItemContext context, CancellationToken ct)
