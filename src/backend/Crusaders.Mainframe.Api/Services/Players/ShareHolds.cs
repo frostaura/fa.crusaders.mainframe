@@ -27,7 +27,10 @@ public sealed record HeldCredits(decimal Held, DateTimeOffset? ReleasesAt, decim
     public IReadOnlyList<HeldPart> Parts { get; init; } = [];
 
     /// <summary>The parts as the wire carries them: <c>[{credits, until}]</c>.</summary>
-    public IEnumerable<object> WireParts() => Parts.Select(p => new { credits = p.Credits, until = p.Until });
+    public IEnumerable<object> WireParts()
+    {
+        return Parts.Select(p => new { credits = p.Credits, until = p.Until });
+    }
 }
 
 /// <summary>Credits held until one share deadline.</summary>
@@ -142,7 +145,8 @@ public static class ShareHolds
         }
         return new HoldSnapshot(held, releases, await WaitingAsync(db, userId, settings, now, ct))
         {
-            NotEarmarked = afterCheckIn, Deadlines = deadlines,
+            NotEarmarked = afterCheckIn,
+            Deadlines = deadlines,
         };
     }
 
