@@ -90,12 +90,12 @@ export const OTHER_BOOKING = "other";
 export type RecentBooking = { id: string; label: string };
 
 /**
- * Every ledger type the backend writes. `LedgerEntryType` in `lib/api.ts` lacks `AdminTopUp`
- * (the desk's cash / EFT / card-offline top-up, review round 1 B7), so desk top-ups showed the
- * raw enum and the Type filter could not select them (review round 2, F3-5). The admin side
- * carries the whole set here, and `ledgerTypes.contract.test.ts` pins it against the C# enum.
+ * Every ledger type the backend writes. Desk top-ups (`AdminTopUp`, review round 1 B7) once showed
+ * the raw enum and the Type filter could not select them (review round 2, F3-5), because the wire
+ * union lacked them; it carries them now, and `ledgerTypes.contract.test.ts` pins both the union
+ * and this admin list against the C# enum.
  */
-export type AdminLedgerType = LedgerEntryType | "AdminTopUp";
+export type AdminLedgerType = LedgerEntryType;
 
 /**
  * What each ledger type is called in the picker — the wording LedgerRowMapper uses for

@@ -583,6 +583,8 @@ export type LedgerEntryType =
   | "AdminAdjustment"
   | "PaymentReversal"
   | "LightsPurchase"
+  /** The desk's cash / EFT / card-offline top-up (review round 1 B7): revenue, never an adjustment. */
+  | "AdminTopUp"
   /**
    * D11 — a partner's share moving to the organiser: always a pair (one debit, one credit, both
    * naming the booking) that nets to zero club-wide. The trace word is `wallet.share_moved`.
@@ -592,6 +594,7 @@ export type LedgerEntryType =
 /** The filter list, derived from the union so the two cannot disagree. */
 export const LEDGER_ENTRY_TYPES: readonly LedgerEntryType[] = [
   "AdminAdjustment",
+  "AdminTopUp",
   "BookingCharge",
   "CancellationRefund",
   "LateCancellationPenalty",

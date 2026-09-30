@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { serverEnumMembers } from "../test/serverContract";
+import { LEDGER_ENTRY_TYPES, type LedgerEntryType } from "./api";
 import { ADMIN_LEDGER_TYPES, LEDGER_TYPE_LABEL, ledgerTypeLabel } from "./creditAdjustment";
 
 /**
@@ -19,5 +20,12 @@ describe("the admin's ledger types are the server's", () => {
     expect(Object.keys(LEDGER_TYPE_LABEL).sort()).toEqual([...server].sort());
     for (const type of server) expect(ledgerTypeLabel(type)).not.toBe(type);
     expect(ledgerTypeLabel("AdminTopUp")).toBe("Desk top-up");
+  });
+
+  it("is the wire union too — `LedgerEntryType` and its filter list carry every server member", () => {
+    // R2 leftovers: the union in lib/api.ts lacked AdminTopUp, so a row typed by it lied.
+    const deskTopUp: LedgerEntryType = "AdminTopUp";
+    expect(LEDGER_ENTRY_TYPES).toContain(deskTopUp);
+    expect([...LEDGER_ENTRY_TYPES].sort()).toEqual([...server].sort());
   });
 });
