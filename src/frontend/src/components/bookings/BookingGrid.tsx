@@ -352,12 +352,17 @@ function useBoardScroll(firstLive: number, key: string, courts: number) {
   return { scroller, gridRef, chips: { overflow, active, jump } };
 }
 
+/** Forced colours keep system colours only: the pressed chip in Highlight, opted out of the override. */
+const FORCED_PRESSED = "forced-colors:aria-pressed:bg-[Highlight] forced-colors:aria-pressed:text-[HighlightText] forced-colors:aria-pressed:[forced-color-adjust:none]";
+
 function CourtChips({ courts, active, onPick }: { courts: ScheduleCourt[]; active: number; onPick: (i: number) => void }) {
   return (
     <div role="group" aria-label={BOOKINGS_COPY.courtChips} className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
       {courts.map((c, i) => (
-        <Button key={c.id} size="sm" variant={i === active ? "secondary" : "outline"} aria-pressed={i === active}
-          aria-label={courtChipLabel(c.name)} onClick={() => onPick(i)} className="shrink-0 rounded-full">
+        // R2 F1-12: 44px targets (`md`), not 36. R2 F1-11: under forced colours the current chip
+        // is drawn in the system highlight — the secondary fill was thrown away with the rest.
+        <Button key={c.id} size="md" variant={i === active ? "secondary" : "outline"} aria-pressed={i === active}
+          aria-label={courtChipLabel(c.name)} onClick={() => onPick(i)} className={cn("shrink-0 rounded-full", FORCED_PRESSED)}>
           {c.name}
         </Button>
       ))}

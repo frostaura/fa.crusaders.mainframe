@@ -104,9 +104,13 @@ function GameCard({ game, zone }: { game: UpcomingGame; zone: string | undefined
           </span>
           <span className="text-sm tabular-nums text-text-secondary">{time}</span>
           {others.length || game.my_share_credits !== null ? (
-            <span className="flex min-w-0 items-center gap-2 text-xs text-text-secondary">
+            // R2 F1-10: wraps rather than truncating — at twice the text size the share, the one
+            // figure on the card, was cut off. The amount itself never breaks.
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
               {others.length ? (
-                <span aria-hidden="true" className="flex -space-x-1.5">
+                // R2 F1-8: two pixels of overlap, which the ring covers — "VV" read "V\" when the
+                // next face sat six pixels over it.
+                <span aria-hidden="true" className="flex -space-x-0.5">
                   {others.map((p) => (
                     <Avatar key={`${p.name}-${p.status}`} size={24} className="ring-2 ring-bg-surface">
                       {p.photo_url ? <AvatarImage src={p.photo_url} alt="" /> : null}
@@ -115,10 +119,10 @@ function GameCard({ game, zone }: { game: UpcomingGame; zone: string | undefined
                   ))}
                 </span>
               ) : null}
-              <span className="min-w-0 truncate">
-                {[others.map((p) => p.name.split(/\s+/)[0]).join(", "), game.my_share_credits !== null ? UPCOMING.share(game.my_share_credits) : ""]
-                  .filter(Boolean).join(" · ")}
-              </span>
+              {others.length ? <span className="min-w-0 break-words">{others.map((p) => p.name.split(/\s+/)[0]).join(", ")}</span> : null}
+              {game.my_share_credits !== null ? (
+                <span className="whitespace-nowrap">{others.length ? "· " : ""}{UPCOMING.share(game.my_share_credits)}</span>
+              ) : null}
             </span>
           ) : null}
         </span>

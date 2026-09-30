@@ -83,15 +83,22 @@ const format = (options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-GB", { ...options, timeZone: "UTC" });
 const WEEKDAY_SHORT = format({ weekday: "short" });
 const DAY_NAME = format({ weekday: "long", day: "numeric", month: "long" });
-const MONTH = format({ month: "long" });
-const MONTH_YEAR = format({ month: "long", year: "numeric" });
+const MONTHS = {
+  long: { month: format({ month: "long" }), monthYear: format({ month: "long", year: "numeric" }) },
+  short: { month: format({ month: "short" }), monthYear: format({ month: "short", year: "numeric" }) },
+};
 
-/** "September 2026", or "September – October 2026" for a week that spans two. */
-function monthLabel(first: string, last: string): string {
+/**
+ * "September 2026", or "September – October 2026" for a week that spans two; "Sep – Oct 2026"
+ * in the short form a phone gets (R2 F1-10: at twice the text size "September" did not fit
+ * beside the week arrows and broke mid-word).
+ */
+function monthLabel(first: string, last: string, form: keyof typeof MONTHS = "long"): string {
+  const { month, monthYear } = MONTHS[form];
   const [a, b] = [new Date(toUtc(first)), new Date(toUtc(last))];
-  if (a.getUTCMonth() === b.getUTCMonth()) return MONTH_YEAR.format(a);
-  const lead = a.getUTCFullYear() === b.getUTCFullYear() ? MONTH.format(a) : MONTH_YEAR.format(a);
-  return `${lead} – ${MONTH_YEAR.format(b)}`;
+  if (a.getUTCMonth() === b.getUTCMonth()) return monthYear.format(a);
+  const lead = a.getUTCFullYear() === b.getUTCFullYear() ? month.format(a) : monthYear.format(a);
+  return `${lead} – ${monthYear.format(b)}`;
 }
 
 type Day = { date: string; disabled: boolean; past: boolean; today: boolean; marked: boolean };
@@ -118,11 +125,26 @@ function chipName(day: Day, markedLabel: string): string {
   return parts.join(", ");
 }
 
+/**
+ * R2 F1-11 — forced colours (Windows High Contrast). The mode throws the fills away, so the
+ * selected day read like every other and the disabled past, drawn in the system's GrayText,
+ * read as highlighted. The chip opts out of the override and draws in system colours only:
+ * the selected day in Highlight, every other day in ButtonText with a border, the past with
+ * none, and today's ring in CanvasText.
+ */
+const FORCED = cn(
+  "forced-colors:[forced-color-adjust:none] forced-colors:border-[ButtonText] forced-colors:bg-[ButtonFace] forced-colors:text-[ButtonText]",
+  "forced-colors:data-[state=on]:border-[Highlight] forced-colors:data-[state=on]:bg-[Highlight] forced-colors:data-[state=on]:text-[HighlightText]",
+  "forced-colors:disabled:border-transparent forced-colors:disabled:text-[GrayText]",
+  "forced-colors:ring-[CanvasText]",
+);
+
 const CHIP = cn(
   "group no-lift relative flex h-14 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg",
   "border border-transparent text-text-primary transition-colors duration-fast ease-standard",
   "hover:bg-bg-muted disabled:hover:bg-transparent",
   "data-[state=on]:bg-primary data-[state=on]:text-primary-ink data-[state=on]:hover:bg-primary-hover",
+  FORCED,
 );
 
 function DayChip({ day, markedLabel, mutePast }: { day: Day; markedLabel: string; mutePast: boolean }) {
@@ -194,7 +216,12 @@ export function WeekStrip(props: WeekStripProps) {
       <div className="flex items-center gap-1">
         {/* Wraps rather than truncating (F1.16): at twice the text size "September – October
             2026" was cut to "Septem…", the one line saying which month the chips are in. */}
-        <p data-month="" className="min-w-0 flex-1 break-words text-sm font-semibold text-text-primary">{monthLabel(start, end)}</p>
+        {/* R2 F1-10: words wrap whole, never mid-letter ("Septemb/er"); a phone gets the short
+            months so each word fits beside the arrows. The long form from `sm` up. */}
+        <p data-month="" className="min-w-0 flex-1 text-sm font-semibold text-text-primary">
+          <span className="sm:hidden">{monthLabel(start, end, "short")}</span>
+          <span className="hidden sm:inline">{monthLabel(start, end)}</span>
+        </p>
         <WeekNav direction="prev" blocked={start <= floor} onGo={() => go(-1)} />
         <WeekNav direction="next" blocked={end >= max} onGo={() => go(1)} />
         {trailing}
