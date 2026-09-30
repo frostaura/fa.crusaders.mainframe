@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { endpoints, type BiometricEnrollmentRow } from "@/lib/api";
 import { adminEndpoints } from "@/lib/adminApi";
+import { membersPage } from "@/lib/adminPaging";
 import { notifyPendingApplicationsChanged } from "@/lib/pendingApplications";
 import type { GroupChip, MemberRow } from "./membersModel";
 
@@ -25,13 +26,30 @@ export function useMembersList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [readAt, setReadAt] = useState<number | null>(null);
+  /** While the club is still being read page by page: how many so far, of how many. Null once whole. */
+  const [reading, setReading] = useState<{ read: number; total: number | null } | null>(null);
+  const seq = useRef(0);
 
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     setLoading(true);
     setError(null);
     try {
-      const rows = await endpoints.adminMembers();
-      setMembers(rows as MemberRow[]);
+      // Page by page (R4 carry-over, perf): the first 200 show at once and the rest follow, each
+      // photo a link. The whole club is still read — the chips count every status — just not in
+      // one reply that held every member's picture.
+      const rows: MemberRow[] = [];
+      let cursor = "";
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const answer = await membersPage(cursor);
+        if (mine !== seq.current) return;
+        rows.push(...(answer.items as MemberRow[]));
+        setMembers(rows.slice());
+        if (!answer.next_cursor) break;
+        setReading({ read: rows.length, total: answer.total ?? null });
+        cursor = answer.next_cursor;
+      }
+      setReading(null);
       setReadAt(Date.now());
       // The one place the pending set is known to have moved, because this is the one place it
       // is re-read. Notifying from the loader rather than from Approve/Reject is what keeps the
@@ -39,18 +57,23 @@ export function useMembersList() {
       // an approval the server committed was reported as failed (see lib/pendingApplications).
       notifyPendingApplicationsChanged();
     } catch (err) {
+      if (mine !== seq.current) return;
       // State only, no toast: the panel says it for as long as the screen is wrong.
+      setReading(null);
       setError(err);
     } finally {
-      setLoading(false);
+      if (mine === seq.current) setLoading(false);
     }
   }, []);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; its sync loading flag is the house idiom
   useEffect(() => { void load(); }, [load]);
 
-  return { members, setMembers, loading, error, readAt, load };
+  return { members, setMembers, loading, error, readAt, reading, load };
 }
+
+/** A bound on the page loop: 200 × 100 members is past any club, and a cursor that never ends is a fault. */
+const MAX_PAGES = 100;
 
 export type GroupsState =
   | { status: "loading" }

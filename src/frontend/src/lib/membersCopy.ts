@@ -43,6 +43,11 @@ export const MEMBERS_PAGE = {
   noMatchTitle: "No members match.",
   noMatchHint: "Try another name, or show every status.",
   clearFilters: "Show everyone",
+  /** R4: the club read a page at a time — counts and filters cover what has arrived so far. */
+  readingRest: (read: number, total: number | null) =>
+    total === null
+      ? `Reading the rest of the club's members — ${read} so far. Counts cover those.`
+      : `Reading the rest of the club's members — ${read} of ${total} so far. Counts cover those.`,
 } as const;
 
 /** "142 members in total" / "12 shown · 142 in total" — the only place the word "total" appears. */

@@ -237,3 +237,31 @@ describe("the application queue", () => {
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/admin/members/")).length).toBe(2));
   });
 });
+
+/** R4 carry-over (perf): the club is read a page at a time, each photo a link. */
+describe("the members list, page by page", () => {
+  it("reads every page, asks for photos as links, and counts the whole club", async () => {
+    const stub = stubFetch([
+      {
+        path: "/api/v1/admin/members/",
+        respond: (req) => (req.path.includes("cursor=p2")
+          ? { items: [ALAN], next_cursor: null, total: 3 }
+          : { items: [ADA, GRACE], next_cursor: "p2", total: 3 }),
+      },
+      { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    ]);
+    renderPage(<AdminMembersPage />, { initialEntries: ["/admin/members"] });
+
+    expect(await screen.findByRole("link", { name: ALAN.full_name })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ada Lovelace" })).toBeInTheDocument();
+    const calls = stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/members/"));
+    expect(calls[0].path).toContain("photos=url");
+    expect(calls[0].path).toContain("cursor=");
+    expect(calls.some((c) => c.path.includes("cursor=p2"))).toBe(true);
+    await waitFor(() => expect(screen.queryByText(/Reading the rest/)).not.toBeInTheDocument());
+  });
+
+  it("says the rest is still being read while it is", () => {
+    expect(MEMBERS_PAGE.readingRest(200, 612)).toBe("Reading the rest of the club's members — 200 of 612 so far. Counts cover those.");
+  });
+});

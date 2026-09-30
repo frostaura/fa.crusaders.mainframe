@@ -183,6 +183,7 @@ function MembersBody(props: BodyProps) {
   return (
     <>
       {read ? <p className="-mt-1 text-sm text-text-secondary" aria-live="polite">{membersCount(rows.length, state.total)}</p> : null}
+      {list.reading ? <p className="text-sm text-text-muted" role="status">{COPY.readingRest(list.reading.read, list.reading.total)}</p> : null}
       {read && groups.state.status === "failed" ? <GroupsFailed onRetry={() => void groups.retry()} /> : null}
       <StateBlock
         action={COPY.loadAction}

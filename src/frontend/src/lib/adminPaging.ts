@@ -1,4 +1,4 @@
-import { api, type LedgerRow } from "./api";
+import { api, type AdminMember, type LedgerRow } from "./api";
 
 /**
  * The admin reads that page (the perf round's additive paging, switched by the PRESENCE of
@@ -58,4 +58,14 @@ export async function readLedgerStart(
     next = page.next_cursor;
   }
   return { rows, next, totals: next ? null : totalsOver(rows) };
+}
+
+/**
+ * One page of the club's members, oldest first, with each photo as a link rather than a data URI
+ * (`photos=url`) — the list read every member's picture inline, the heaviest admin read there was.
+ * A bare array (an API from before paging) is taken as the whole club.
+ */
+export async function membersPage(cursor = "", limit = 200): Promise<Page<AdminMember>> {
+  const answer = await api.get<Page<AdminMember> | AdminMember[]>(`/api/v1/admin/members/${query({ cursor, limit, photos: "url" })}`);
+  return Array.isArray(answer) ? { items: answer, next_cursor: null, total: answer.length } : answer;
 }
