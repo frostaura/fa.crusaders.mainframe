@@ -76,13 +76,17 @@ describe("Calendar", () => {
     expect(dayIn(picked, ZONE)).toBe("2026-09-23");
   });
 
-  it("starts the week on Monday and marks day buttons as no-lift calendar days of 44px", () => {
+  it("starts the week on Monday and marks day buttons as no-lift calendar days that fill their column", () => {
     const { container } = renderCalendar();
     expect(container.querySelector("th")).toHaveAttribute("aria-label", "Monday");
     const day = dayButton(container, "2026-09-23");
     expect(day).toHaveAttribute("data-slot", "calendar-day");
     expect(day.className).toContain("no-lift");
-    expect(day.className).toContain("size-11");
+    // R4 X4-3: a square that takes its column's width (up to 56px), never a fixed rem size — seven
+    // fixed 44px cells did not fit a 320 phone, nor a 390 phone at 200% text.
+    expect(day.className).toContain("aspect-square");
+    expect(day.className).toContain("w-full");
+    expect(day.className).not.toContain("size-11");
     expect(day.className).not.toMatch(/outline-none|focus-visible:ring/);
   });
 
