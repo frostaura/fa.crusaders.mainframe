@@ -43,6 +43,10 @@ export default function DateCalendar({ value, min, max, zone, onPick }: PanelPro
       endMonth={last}
       disabled={disabled}
       onSelect={(date: Date) => onPick(toClubDay(date))}
+      // R3 X-7 — opens with focus on the chosen day (today when none), not on the ×: the arrow
+      // keys then move through the month at once. It focuses on mount, so a calendar that
+      // arrives after the sheet has opened (the lazy chunk) still takes focus from the ×.
+      autoFocus
       className="mx-auto"
     />
   );
