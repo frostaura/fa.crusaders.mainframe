@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Wallet } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBalance, walletHref, walletLabel, walletTone } from "@/lib/balance";
-import type { HeldFigures, LiveState } from "@/lib/liveBalance";
+import type { BalanceDelta, HeldFigures, LiveState } from "@/lib/liveBalance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn, formatCredits } from "@/lib/utils";
@@ -66,10 +66,16 @@ function useClubMovementToast() {
         say(plain);
       }
     }
-    // The flyout lives 900 ms; clearing after it keeps a re-render from replaying it.
+  }, [delta, toast, me]);
+
+  // The flyout lives 900 ms; clearing after it keeps a re-render from replaying it. Its own effect
+  // (M-1): inside the toast's, a re-run for a new `toast` identity cancelled the timer and then
+  // returned early as "already announced", so the movement was never cleared.
+  useEffect(() => {
+    if (!delta) return;
     const t = window.setTimeout(clearDelta, 1_000);
     return () => window.clearTimeout(t);
-  }, [delta, toast, clearDelta, me]);
+  }, [delta, clearDelta]);
 }
 
 /**
@@ -123,6 +129,42 @@ function chipTitle(state: string, loading: boolean, balance: number | null, f: C
 }
 
 /**
+ * M-1 (review round 3) — frames closer together than this are ONE movement to the eye: the flyout
+ * lives 900 ms, and a split booking's cancel lands as a burst (the organiser's refund, then each
+ * partner's share back to them) inside a few milliseconds.
+ */
+const BURST_MS = 1_000;
+
+type Burst = { from: number | null; last: number | null; at: number; startedAt: number };
+
+/**
+ * What the flyout says: the NET change of the figure the chip shows, across the current burst —
+ * not the last frame's `delta_credits`. That read "−33.00" while the chip counted 235 → 335. Null
+ * when there is no movement to show, or the burst nets to nothing the chip shows (a partner's paid
+ * share that is only HELD moves the balance but not the spendable figure on the chip).
+ *
+ * <p>
+ * Derived during render from the previous render's figure (React's "information from previous
+ * renders" pattern), because the figure and the movement arrive in the same update.
+ * </p>
+ */
+function useFlyoutAmount(shown: number | null, delta: BalanceDelta | null): { amount: number; key: number } | null {
+  const [burst, setBurst] = useState<Burst>({ from: shown, last: shown, at: 0, startedAt: 0 });
+  if (delta && delta.at !== burst.at) {
+    const fresh = burst.from === null || delta.at - burst.at > BURST_MS;
+    setBurst(fresh
+      ? { from: burst.last, last: shown, at: delta.at, startedAt: delta.at }
+      : { ...burst, last: shown, at: delta.at });
+  } else if (shown !== burst.last) {
+    setBurst({ ...burst, last: shown });
+  }
+  if (!delta || shown === null || burst.from === null) return null;
+  const net = shown - burst.from;
+  // Keyed by the burst, so a new movement replays the rise and one burst's frames do not restart it.
+  return Math.abs(net) >= 0.005 ? { amount: net, key: burst.startedAt } : null;
+}
+
+/**
  * The figure — or, while it is loading, a neutral placeholder the width of one (D1). Never a
  * zero: a loading chip once painted a red "0.00 cr" that belonged to nobody signed in.
  * aria-hidden: the label says the number in words; "cr" is not a word. Never truncated.
@@ -149,7 +191,8 @@ export function CreditsChip() {
     if (location.pathname.startsWith("/wallet")) entice.stop("arrived");
   }, [location.pathname, entice]);
 
-  const showFlyout = !reduceMotion && delta !== null && Math.abs(delta.amount) >= 0.01;
+  const flyout = useFlyoutAmount(figures.shown, delta);
+  const showFlyout = !reduceMotion && flyout !== null;
 
   return (
     <div className="relative shrink-0">
@@ -182,15 +225,16 @@ export function CreditsChip() {
         // Up is success; down is secondary, deliberately not red — spending your own credit on a
         // court you chose is not an error.
         <span
+          key={flyout!.key}
           aria-hidden="true"
           data-balance-flyout=""
           className={cn(
             "pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 text-xs font-semibold tabular-nums",
             "animate-flyout-rise motion-reduce:animate-none",
-            delta!.amount > 0 ? "text-success-strong" : "text-text-secondary",
+            flyout!.amount > 0 ? "text-success-strong" : "text-text-secondary",
           )}
         >
-          {delta!.amount > 0 ? "+" : "−"}{Math.abs(delta!.amount).toFixed(2)}
+          {flyout!.amount > 0 ? "+" : "−"}{Math.abs(flyout!.amount).toFixed(2)}
         </span>
       ) : null}
     </div>
