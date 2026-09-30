@@ -91,24 +91,44 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
    */
   const loadedDate = useRef<string | null>(null);
 
+  /**
+   * The day the member is looking at NOW, and the one read allowed to answer for it.
+   *
+   * <p>
+   * <b>R2 F1-2: a reply for a day the member has left is dropped.</b> Tuesday's slow answer used
+   * to land after Wednesday's, replace the day, and the page — which draws only the day it was
+   * asked for — drew nothing at all. Only the latest read may touch the day, the error or the
+   * spinner; an older one finishing (or failing) says nothing about the day on screen.
+   * </p>
+   */
+  const wanted = useRef(date);
+  const latestRead = useRef(0);
+
   const load = useCallback(async (which: string) => {
+    const read = ++latestRead.current;
     setLoading(true);
     setError(null);
     try {
       const fresh = await endpoints.schedule(which);
+      if (read !== latestRead.current || wanted.current !== which) return;
       loadedDate.current = fresh.date;
       setDay(fresh);
       setReadAt(Date.now());
-      if (fresh.date !== which) setDate(fresh.date);
+      if (fresh.date !== which) { wanted.current = fresh.date; setDate(fresh.date); }
     }
     // Was a bare `catch` mapping EVERY failure to "Check your connection and press Refresh." —
     // so a missing tenant row, a 500 and an expired session all told the member their network
     // was down, and Refresh was the one thing that could not help.
-    catch (err) { setError(describeFailure(err, { action: "load the schedule" })); }
-    finally { setLoading(false); }
+    catch (err) { if (read === latestRead.current) setError(describeFailure(err, { action: "load the schedule" })); }
+    finally { if (read === latestRead.current) setLoading(false); }
   }, []);
 
-  useEffect(() => { if (loadedDate.current !== date) void load(date); }, [date, load]);
+  useEffect(() => {
+    wanted.current = date;
+    // The day on screen is this one already (the server's own club day adopted, or a return to
+    // a day whose read is still the last one to land): nothing to read. Anything else reads.
+    if (loadedDate.current !== date) void load(date);
+  }, [date, load]);
 
   // Reconcile in the BACKGROUND after a write.
   //
@@ -121,8 +141,14 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
   // Silent on failure, deliberately, and this is the one place that is right: the write
   // SUCCEEDED. Telling a member who has just booked and been charged that the schedule could
   // not be loaded would be alarming and untrue.
+  //
+  // A member who has moved to another day by the time it lands keeps that day on screen (F1-2);
+  // the sheet that asked still gets the answer, because it is about the day it wrote to.
   const reconcile = useCallback(() => endpoints.schedule(date)
-    .then((fresh): ScheduleDay => { loadedDate.current = fresh.date; setDay(fresh); setReadAt(Date.now()); return fresh; })
+    .then((fresh): ScheduleDay => {
+      if (wanted.current === date) { loadedDate.current = fresh.date; setDay(fresh); setReadAt(Date.now()); }
+      return fresh;
+    })
     .catch(() => null /* the optimistic view stands until something asks for the day again */),
   [date]);
 
