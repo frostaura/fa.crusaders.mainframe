@@ -38,9 +38,10 @@ export function AdminDialogs({ hands }: { hands: AdminHands }) {
           act={hands.acting.act}
           onClose={hands.closeAct}
           onDone={hands.actDone}
+          onStale={hands.reload}
         />
       ) : null}
-      {hands.adding ? <AdminAddDialog detail={detail} onClose={hands.closeAdd} onAdded={hands.added} /> : null}
+      {hands.adding ? <AdminAddDialog detail={detail} onClose={hands.closeAdd} onAdded={hands.added} onStale={hands.reload} /> : null}
       {hands.sharing ? (
         <ShareLinkDialog
           bookingId={detail.booking_id}

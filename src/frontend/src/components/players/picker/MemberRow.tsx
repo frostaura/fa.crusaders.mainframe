@@ -4,7 +4,9 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Plus, Star } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { playersEndpoints, type PublicMember } from "@/lib/playersApi";
-import { PICKER } from "@/lib/playersCopy";
+import { useToast } from "@/components/Toast";
+import { UnsureOutcome, writeOrReadBack } from "@/lib/lostReply";
+import { PICKER, PLAYERS_UNSURE } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
 import type { Favourites } from "./usePickerReads";
@@ -60,14 +62,25 @@ export function MemberRow(props: MemberRowProps) {
  */
 function StarButton({ member, favourites }: { member: PublicMember; favourites: Favourites }) {
   const starred = favourites.isStarred(member.user_id);
+  const toast = useToast();
+  // Lost-reply audit (R3): a lost reply is read back off the favourites; a star that did change stays.
   const action = useAsyncAction(
-    (next: boolean) => (next ? playersEndpoints.star(member.user_id) : playersEndpoints.unstar(member.user_id)),
+    (next: boolean) => writeOrReadBack(
+      () => (next ? playersEndpoints.star(member.user_id) : playersEndpoints.unstar(member.user_id)),
+      async () => {
+        const has = (await playersEndpoints.favourites()).items.some((m) => m.user_id === member.user_id);
+        return has === next ? { user_id: member.user_id, favourite: next } : null;
+      },
+    ),
     {
       optimistic: {
         apply: (next) => favourites.show(member, next),
         rollback: (next) => favourites.show(member, !next),
       },
-      toast: { failure: PICKER.starFailed(member.name), unchanged: true },
+      failure: (error) => {
+        const unknown = error instanceof UnsureOutcome && !error.checked;
+        toast.push({ tone: "danger", text: unknown ? PLAYERS_UNSURE.star(member.name) : PICKER.starFailed(member.name), unchanged: !unknown });
+      },
     },
   );
   return (

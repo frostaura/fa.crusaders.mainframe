@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { playersEndpoints, type SocialPrefs } from "@/lib/playersApi";
-import { PRIVACY_COPY as COPY } from "@/lib/playersCopy";
+import { UnsureOutcome, writeOrReadBack } from "@/lib/lostReply";
+import { PLAYERS_UNSURE, PRIVACY_COPY as COPY } from "@/lib/playersCopy";
 import { useRead, type Read } from "@/lib/useRead";
 
 /**
@@ -67,10 +68,16 @@ export function usePrivacyPrefs(): PrivacyPrefs {
     setErrors((current) => ({ ...current, [key]: undefined }));
     mark(key, true);
     try {
-      await playersEndpoints.saveSocialPrefs({ [key]: on });
-    } catch {
+      // Lost-reply audit (R3): a lost reply is read back — a switch that did save stays on.
+      await writeOrReadBack(
+        () => playersEndpoints.saveSocialPrefs({ [key]: on }),
+        async () => ((await playersEndpoints.socialPrefs())[key] === on ? { [key]: on } : null),
+      );
+    } catch (error) {
       setWanted((current) => ({ ...current, [key]: before }));
-      setErrors((current) => ({ ...current, [key]: COPY.saveFailed(PRIVACY_LABEL[key].label) }));
+      const label = PRIVACY_LABEL[key].label;
+      const unknown = error instanceof UnsureOutcome && !error.checked;
+      setErrors((current) => ({ ...current, [key]: unknown ? PLAYERS_UNSURE.privacy(label) : COPY.saveFailed(label) }));
     } finally {
       mark(key, false);
     }

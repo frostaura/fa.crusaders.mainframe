@@ -24,6 +24,11 @@ export type ActSpec = {
   call: (req: ActRequest) => Promise<unknown>;
   /** The sentence after. `organiser` is the organiser's first name, for a return that waits on them. */
   done: (name: string, answer: unknown, organiser: string) => string;
+  /**
+   * R3 lost-reply audit — did this act land, judged off the seat read back (undefined: gone)?
+   * Returns the answer to word it with, or null when the seat shows it did not.
+   */
+  landed: (was: DetailPlayer, now: DetailPlayer | undefined) => unknown;
 };
 
 /**
@@ -46,6 +51,7 @@ export const ACTS: Record<AdminAct, ActSpec> = {
     label: DETAIL_ADMIN.remove, title: DETAIL_ADMIN.removeTitle, body: DETAIL_ADMIN.removeBody, confirm: DETAIL_ADMIN.removeConfirm,
     alwaysOverdraft: false, mayOverdraft: true, tone: "danger",
     call: (r) => playersEndpoints.adminRemove(r.bookingId, r.participantId, r.reason, r.allowNegativeBalance),
+    landed: (_was, now) => (!now || now.status === "removed" ? {} : null),
     done: (name, answer, organiser) => {
       const waiting = waitingReturn(answer);
       return waiting ? DETAIL_ADMIN.removedWaiting(name, waiting.amount, organiser) : DETAIL_ADMIN.removed(name);
@@ -55,12 +61,14 @@ export const ACTS: Record<AdminAct, ActSpec> = {
     label: DETAIL_ADMIN.accept, title: DETAIL_ADMIN.acceptTitle, body: DETAIL_ADMIN.acceptBody, confirm: DETAIL_ADMIN.acceptConfirm,
     alwaysOverdraft: false, mayOverdraft: false, tone: "primary",
     call: (r) => playersEndpoints.adminAccept(r.bookingId, r.participantId, r.reason),
+    landed: (_was, now) => (now?.status === "accepted" ? {} : null),
     done: (name) => DETAIL_ADMIN.accepted(name),
   },
   settle: {
     label: DETAIL_ADMIN.settle, title: DETAIL_ADMIN.settleTitle, body: DETAIL_ADMIN.settleBody, confirm: DETAIL_ADMIN.settleConfirm,
     alwaysOverdraft: false, mayOverdraft: true, tone: "primary",
     call: (r) => playersEndpoints.adminSettleOutside(r.bookingId, r.participantId, r.reason, r.allowNegativeBalance),
+    landed: (_was, now) => (now?.settled_outside ? {} : null),
     done: (name, answer, organiser) => {
       const waiting = waitingReturn(answer);
       return waiting ? DETAIL_ADMIN.settledWaiting(name, waiting.amount, organiser) : DETAIL_ADMIN.settled(name);
@@ -70,6 +78,7 @@ export const ACTS: Record<AdminAct, ActSpec> = {
     label: DETAIL_ADMIN.collect, title: DETAIL_ADMIN.collectTitle, body: DETAIL_ADMIN.collectBody, confirm: DETAIL_ADMIN.collectConfirm,
     alwaysOverdraft: true, mayOverdraft: true, tone: "primary",
     call: (r) => playersEndpoints.adminCollect(r.bookingId, r.participantId, r.reason),
+    landed: (was, now) => (now && now.paid_credits > was.paid_credits ? { collected_credits: now.paid_credits - was.paid_credits } : null),
     done: (name, answer) => DETAIL_ADMIN.collected(name, formatCredits(collectedOf(answer))),
   },
 };

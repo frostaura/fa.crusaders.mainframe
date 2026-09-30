@@ -12,9 +12,11 @@ import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { endpoints } from "@/lib/api";
 import { playersEndpoints, type AddPlayersAnswer, type AdminAddPlayer, type BookingDetail } from "@/lib/playersApi";
-import { DETAIL_ADMIN, playersRefusal } from "@/lib/playersCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { DETAIL_ADMIN, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useRead } from "@/lib/useRead";
+import { addOrProve } from "../detail/detailReadBack";
 
 /**
  * The admin adding a player as the club: a member — invited, or placed as in without their
@@ -26,8 +28,18 @@ type Kind = "member" | "guest" | "link";
 type Props = {
   detail: BookingDetail;
   onClose: () => void;
-  onAdded: (answer: AddPlayersAnswer, kind: Kind) => void;
+  /** `proven` — the reply was lost and the new seat was found on the booking (R3). */
+  onAdded: (answer: AddPlayersAnswer, kind: Kind, proven: boolean) => void;
+  /** Read the booking again — a lost reply that did not land, or could not be checked (R3). */
+  onStale?: () => void;
 };
+
+/** The seat this add would make, as the read-back looks for it. */
+function pickOf(kind: Kind, form: Form) {
+  if (kind === "member") return { kind: "member" as const, userId: form.userId ?? "" };
+  if (kind === "guest") return { kind: "guest" as const, name: form.guest.trim() };
+  return { kind: "link" as const };
+}
 
 function bodyOf(kind: Kind, form: Form): AdminAddPlayer {
   const reason = form.reason.trim();
@@ -44,7 +56,7 @@ function problemOf(kind: Kind, form: Form): "member" | "guest" | "reason" | null
   return form.reason.trim() === "" ? "reason" : null;
 }
 
-function useAddFlow({ detail, onAdded }: Props) {
+function useAddFlow({ detail, onAdded, onStale }: Props) {
   const [kind, setKind] = useState<Kind>("member");
   const [form, setForm] = useState<Form>({ userId: null, guest: "", accepted: false, reason: "" });
   const [tried, setTried] = useState(false);
@@ -54,9 +66,13 @@ function useAddFlow({ detail, onAdded }: Props) {
   const list = (members.data ?? [])
     .filter((m) => !onBooking.has(m.user_id))
     .map((m) => ({ id: m.user_id, name: m.full_name, photoUrl: m.photo_url }));
+  // R3 lost-reply audit — a lost reply is looked for on the booking: a new seat for this pick.
   const add = useAsyncAction(
-    () => playersEndpoints.adminAdd(detail.booking_id, bodyOf(kind, form)),
-    { success: (answer) => onAdded(answer, kind) },
+    () => addOrProve(detail, pickOf(kind, form), () => playersEndpoints.adminAdd(detail.booking_id, bodyOf(kind, form))),
+    {
+      success: ({ value, proven }) => onAdded(value, kind, proven),
+      failure: (error) => { if (error instanceof UnsureOutcome) onStale?.(); },
+    },
   );
   const problem = tried ? problemOf(kind, form) : null;
   const confirm = () => {
@@ -88,7 +104,7 @@ export function AdminAddDialog(props: Props) {
           </RadioGroup>
           <KindDetail flow={flow} />
           <AddReason flow={flow} />
-          {flow.add.error ? <Alert tone="danger">{playersRefusal(flow.add.error, { action: DETAIL_ADMIN.addAction })}</Alert> : null}
+          {flow.add.error ? <Alert tone="danger">{playersRefusal(flow.add.error, { action: DETAIL_ADMIN.addAction, unsure: PLAYERS_UNSURE.adminAdd })}</Alert> : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={props.onClose}>{DETAIL_ADMIN.cancel}</Button>

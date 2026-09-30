@@ -7,8 +7,9 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { playEndpoints, type PlaySettings } from "@/lib/playApi";
-import { GOAL_SHEET, playRefusal, readGoal } from "@/lib/playCopy";
+import { GOAL_SHEET, PLAY_SETTINGS_UNSURE, playRefusal, readGoal } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { myPlayWrite } from "./resultReadBack";
 
 /**
  * Setting the monthly goal (§9.1.1): hours, in quarter hours, 0.5–100 — the server's 30–6000
@@ -44,12 +45,13 @@ function GoalBody(props: GoalSheetProps) {
   const [text, setText] = useState(hoursText(goalMinutes));
   const [tried, setTried] = useState(false);
   const goal = readGoal(text);
-  const save = useAsyncAction((goal: number) => playEndpoints.saveSettings({ monthlyGoalMinutes: goal }), {
-    success: (settings) => onSaved(settings, false),
-  });
-  const remove = useAsyncAction(() => playEndpoints.saveSettings({ monthlyGoalMinutes: null }), {
-    success: (settings) => onSaved(settings, true),
-  });
+  // Lost-reply audit (R3): a lost reply is read back off My game before anything is said.
+  const saveGoal = (minutes: number | null) => myPlayWrite(
+    () => playEndpoints.saveSettings({ monthlyGoalMinutes: minutes }),
+    (p) => (p.settings.monthly_goal_minutes === minutes ? p.settings : null),
+  );
+  const save = useAsyncAction((goal: number) => saveGoal(goal), { success: ({ value }) => onSaved(value, false) });
+  const remove = useAsyncAction(() => saveGoal(null), { success: ({ value }) => onSaved(value, true) });
   const error = save.error ?? remove.error;
   const invalid = tried && !goal.ok;
   const submit = () => {
@@ -76,7 +78,7 @@ function GoalBody(props: GoalSheetProps) {
             {!goal.ok && invalid ? <FieldError>{goal.sentence}</FieldError> : <FieldDescription>{GOAL_SHEET.hint}</FieldDescription>}
           </Field>
         </form>
-        {error ? <Alert tone="danger" live="assertive">{playRefusal(error, GOAL_SHEET.action)}</Alert> : null}
+        {error ? <Alert tone="danger" live="assertive">{playRefusal(error, GOAL_SHEET.action, PLAY_SETTINGS_UNSURE.goal)}</Alert> : null}
       </DialogBody>
       <DialogFooter>
         {goalMinutes !== null ? (

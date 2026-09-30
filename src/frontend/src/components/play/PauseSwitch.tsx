@@ -3,8 +3,9 @@ import { Pause as PauseIcon, WarningCircle } from "@/components/ui/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { playEndpoints, type Pause } from "@/lib/playApi";
-import { PAUSE_COPY, playRefusal } from "@/lib/playCopy";
+import { PAUSE_COPY, PLAY_SETTINGS_UNSURE, playRefusal } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { myPlayWrite } from "./resultReadBack";
 
 /**
  * The injury pause (§5.3, §9.1.2): on from the current club week, never backwards, within a
@@ -18,9 +19,11 @@ import { useAsyncAction } from "@/lib/useAsyncAction";
  * </p>
  */
 export function PauseSwitch({ pause, year, onChanged }: { pause: Pause; year: number; onChanged: (pause: Pause) => void }) {
-  const toggle = useAsyncAction((on: boolean) => (on ? playEndpoints.startPause() : playEndpoints.endPause()), {
-    success: (answer) => onChanged(answer),
-  });
+  // Lost-reply audit (R3): a lost reply is read back off My game before anything is said.
+  const toggle = useAsyncAction(
+    (on: boolean) => myPlayWrite(() => (on ? playEndpoints.startPause() : playEndpoints.endPause()), (p) => (p.pause.active === on ? p.pause : null)),
+    { success: ({ value }) => onChanged(value) },
+  );
   const left = Math.max(0, pause.weeks_per_year - pause.weeks_used_this_year);
   const off = pause.weeks_per_year === 0;
   const usedUp = left === 0 && !off;
@@ -48,7 +51,7 @@ export function PauseSwitch({ pause, year, onChanged }: { pause: Pause; year: nu
       {toggle.error ? (
         <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-danger-strong">
           <WarningCircle size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
-          <span className="min-w-0 break-words">{playRefusal(toggle.error, PAUSE_COPY.action)}</span>
+          <span className="min-w-0 break-words">{playRefusal(toggle.error, PAUSE_COPY.action, PLAY_SETTINGS_UNSURE.pause)}</span>
         </p>
       ) : null}
     </div>

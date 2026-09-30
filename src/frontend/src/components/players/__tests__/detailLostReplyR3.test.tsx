@@ -4,9 +4,11 @@ import { refuse, signOut } from "@/test/harness";
 import type { PlayerPickerDialogProps } from "@/components/players/PlayerPicker";
 import type { BookingDetail } from "@/lib/playersApi";
 import {
-  BOOK_SPLIT, CHANGE_SPLIT, DETAIL_ACTIONS, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, SHARE_LINK,
+  BOOK_SPLIT, CHANGE_SPLIT, DETAIL_ACTIONS, DETAIL_ADMIN, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, SHARE_LINK,
 } from "@/lib/playersCopy";
-import { ALEX_SEAT, DETAIL_PATH, OPEN_SEAT, PID, SAM_SEAT, detail, playerView, renderDetail, seat, serve } from "./detailKit";
+import {
+  ALEX_SEAT, BOOKING, DETAIL_PATH, OPEN_SEAT, PID, SAM_SEAT, adminView, detail, playerView, renderDetail, seat, serve,
+} from "./detailKit";
 
 vi.mock("@/components/players/PlayerPicker", () => ({
   PlayerPicker: () => null,
@@ -205,5 +207,53 @@ describe("a partner leaving", () => {
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_PLAYER.withdrawConfirm }));
     expect(await within(dialog).findByText(PLAYERS_UNSURE.withdraw.checked)).toBeInTheDocument();
+  });
+});
+
+describe("the admin's god mode", () => {
+  const ADMIN_SEAT = `/api/v1/admin/bookings/${BOOKING}/players/${PID.alex}`;
+  const invited = () => adminView({ players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), { ...ALEX_SEAT, seat: 2, team: "A" }] });
+
+  async function openAct(label: string) {
+    renderDetail();
+    const trigger = await screen.findByRole("button", { name: DETAIL_ADMIN.menu("Alex") });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: DETAIL_ADMIN.reasonLabel }), { target: { value: "Asked at the desk" } });
+    return dialog;
+  }
+
+  it("an accept on their behalf that landed behind a 504 says it went through", async () => {
+    const b = booking(invited());
+    const accepted = adminView({ players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), { ...ALEX_SEAT, seat: 2, team: "A", status: "accepted" }] });
+    serve({ admin: true, detail: b.route, extra: [{ method: "POST", path: `${ADMIN_SEAT}/accept`, respond: b.lands(accepted) }] });
+    const dialog = await openAct(DETAIL_ADMIN.accept);
+    fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.acceptConfirm }));
+    await waitFor(() => expect(notice()).toHaveTextContent(PLAYERS_LOST(DETAIL_ADMIN.accepted("Alex"))));
+  });
+
+  it("an accept that did not land says the seat is as it was", async () => {
+    serve({ admin: true, detail: invited(), extra: [{ method: "POST", path: `${ADMIN_SEAT}/accept`, respond: lost }] });
+    const dialog = await openAct(DETAIL_ADMIN.accept);
+    fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.acceptConfirm }));
+    expect(await within(dialog).findByText(PLAYERS_UNSURE.admin("Alex").checked)).toBeInTheDocument();
+  });
+
+  it("an add that landed behind a 504 says the player was added", async () => {
+    const guest = seat({ participant_id: "p-g", seat: 3, team: "B", kind: "guest", user_id: null, name: "Themba" });
+    const b = booking(adminView());
+    serve({ admin: true, detail: b.route, extra: [
+      { method: "POST", path: `/api/v1/admin/bookings/${BOOKING}/players`, respond: b.lands(adminView({ players: [...adminView().players, guest] })) },
+      { path: "/api/v1/admin/members", body: [] },
+    ] });
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: DETAIL_ADMIN.add }));
+    const dialog = await screen.findByRole("dialog", { name: DETAIL_ADMIN.addTitle });
+    fireEvent.click(within(dialog).getByRole("radio", { name: DETAIL_ADMIN.addGuest }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: DETAIL_ADMIN.guestLabel }), { target: { value: "Themba" } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: DETAIL_ADMIN.reasonLabel }), { target: { value: "Visiting coach" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.addConfirm }));
+    await waitFor(() => expect(notice()).toHaveTextContent(PLAYERS_LOST(DETAIL_ADMIN.added)));
   });
 });

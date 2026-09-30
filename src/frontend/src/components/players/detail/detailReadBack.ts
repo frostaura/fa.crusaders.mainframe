@@ -24,8 +24,27 @@ export function removeOrProve(bookingId: string, participantId: string): Promise
   );
 }
 
+type Seat = BookingDetail["players"][number];
+
+/**
+ * One seat's write (the admin's remove, accept, settle, collect): read the booking back and
+ * let `landed` judge the seat as it now stands (undefined when it is gone) against the seat
+ * as it was. Returns what `landed` returns, as the write's answer.
+ */
+export function seatWriteOrProve<T>(
+  bookingId: string,
+  before: Seat,
+  write: () => Promise<T>,
+  landed: (was: Seat, now: Seat | undefined) => T | null,
+): Promise<Landed<T>> {
+  return writeOrReadBack(write, async () => {
+    const now = (await detailOf(bookingId)).players.find((p) => p.participant_id === before.participant_id);
+    return landed(before, now);
+  });
+}
+
 /** Is `p` the seat this add would have made — a new seat for this member, guest or open link? */
-function madeBy(pick: PickedPlayer, before: ReadonlySet<string>) {
+function madeBy(pick: PickedPlayer | { kind: "member"; userId: string }, before: ReadonlySet<string>) {
   return (p: BookingDetail["players"][number]) => {
     if (!p.participant_id || before.has(p.participant_id) || p.status === "removed") return false;
     if (pick.kind === "member") return p.user_id === pick.userId;
@@ -39,7 +58,7 @@ function madeBy(pick: PickedPlayer, before: ReadonlySet<string>) {
  * no link to show — its token was in the lost reply — so the answer carries no `invite_path`
  * and the page offers to make one.
  */
-export function addOrProve(detail: BookingDetail, pick: PickedPlayer, add: () => Promise<AddPlayersAnswer>): Promise<Landed<AddPlayersAnswer>> {
+export function addOrProve(detail: BookingDetail, pick: PickedPlayer | { kind: "member"; userId: string }, add: () => Promise<AddPlayersAnswer>): Promise<Landed<AddPlayersAnswer>> {
   const before = new Set(detail.players.map((p) => p.participant_id).filter((id): id is string => Boolean(id)));
   return writeOrReadBack(add, async () => {
     const now = await detailOf(detail.booking_id);

@@ -1,5 +1,5 @@
 import { writeOrReadBack, type Landed } from "@/lib/lostReply";
-import { playEndpoints, type GameScore, type MatchResult } from "@/lib/playApi";
+import { playEndpoints, type GameScore, type MatchResult, type MyPlay } from "@/lib/playApi";
 
 /**
  * R3 I-1 — every result write (record, edit, confirm, dispute, withdraw) whose reply was lost
@@ -42,3 +42,12 @@ export const landedAs = {
     return when(r.status === "withdrawn", r);
   },
 };
+
+/**
+ * The member's own play settings (the pause, the celebrations switch, the monthly goal): a lost
+ * reply is read back off `GET /me/play` — `pick` returns the answer when the setting now stands
+ * as this press asked, or null when it does not.
+ */
+export function myPlayWrite<T>(write: () => Promise<T>, pick: (play: MyPlay) => T | null): Promise<Landed<T>> {
+  return writeOrReadBack(write, async () => pick(await playEndpoints.myPlay()));
+}

@@ -291,6 +291,11 @@ export const PICKER = {
   guest: "Guest",
   added: "Added",
   add: (name: string) => `Add ${name}`,
+  /** The admin's god-mode act on a seat, and the admin's add. */
+  admin: (name: string) => unsureWords(`${name}'s seat is as it was`, "that went through", "the booking"),
+  adminAdd: unsureWords("no new player is on the booking", "the player was added", "the booking"),
+  /** A privacy switch whose reply was lost and whose read-back failed too. */
+  privacy: (label: string) => `The club didn't answer and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page to see.`,
   star: (name: string) => `Star ${name}`,
   unstar: (name: string) => `Unstar ${name}`,
   starFailed: (name: string) => `Couldn't change the star on ${name}. Try again.`,
@@ -533,6 +538,11 @@ export const PLAYERS_UNSURE = {
   nudge: (name: string) =>
     `The club didn't answer, so we can't tell whether the reminder reached ${name}. Give it a few minutes before reminding them again — they may already have it.`,
   link: "The club didn't answer, so we can't tell whether a new link was made — if it was, the old link has stopped working. Make a new link to get one you can share.",
+  /** The admin's god-mode act on a seat, and the admin's add. */
+  admin: (name: string) => unsureWords(`${name}'s seat is as it was`, "that went through", "the booking"),
+  adminAdd: unsureWords("no new player is on the booking", "the player was added", "the booking"),
+  /** A privacy switch whose reply was lost and whose read-back failed too. */
+  privacy: (label: string) => `The club didn't answer and we couldn't check either, so we can't tell whether "${label}" changed. Refresh the page to see.`,
   star: (name: string) =>
     `The club didn't answer, so we can't tell whether the star on ${name} changed. Close this and open it again to see.`,
 } as const;

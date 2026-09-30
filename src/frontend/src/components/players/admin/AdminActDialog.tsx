@@ -9,9 +9,11 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Warning } from "@/components/ui/icons";
 import { Textarea } from "@/components/ui/textarea";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_ADMIN, firstName, playersRefusal, refusalCode } from "@/lib/playersCopy";
+import { UnsureOutcome } from "@/lib/lostReply";
+import { DETAIL_ADMIN, firstName, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal, refusalCode } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { seatName, type AdminAct } from "../detail/detailModel";
+import { seatWriteOrProve } from "../detail/detailReadBack";
 import type { Notice } from "../detail/useOrganiserHands";
 import { ACTS, overdraftSentence } from "./adminActs";
 
@@ -33,10 +35,12 @@ type Props = {
   act: AdminAct;
   onClose: () => void;
   onDone: (notice: Notice) => void;
+  /** Read the booking again — a lost reply that did not land, or could not be checked (R3). */
+  onStale?: () => void;
 };
 
 function useActFlow(props: Props) {
-  const { detail, player, act, onDone } = props;
+  const { detail, player, act, onDone, onStale } = props;
   const spec = ACTS[act];
   const [reason, setReason] = useState("");
   const [authorised, setAuthorised] = useState(false);
@@ -45,13 +49,18 @@ function useActFlow(props: Props) {
   /** The server's `overdraft_not_authorised`, kept: its figures name the shortfall while the resend runs. */
   const [lastRefusal, setLastRefusal] = useState<unknown>(null);
   const name = seatName(player, detail.players);
+  // R3 lost-reply audit — a lost reply is read back off the seat before anything is said.
   const run = useAsyncAction(
-    () => spec.call({
+    () => seatWriteOrProve(detail.booking_id, player, () => spec.call({
       bookingId: detail.booking_id, participantId: player.participant_id ?? "", reason: reason.trim(), allowNegativeBalance: authorised,
-    }),
+    }), spec.landed),
     {
-      success: (answer) => onDone({ tone: "success", text: spec.done(name, answer, firstName(detail.organiser.name)) }),
+      success: ({ value, proven }) => {
+        const text = spec.done(name, value, firstName(detail.organiser.name));
+        onDone({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
+      },
       failure: (error) => {
+        if (error instanceof UnsureOutcome) onStale?.();
         if (!spec.mayOverdraft || refusalCode(error) !== "overdraft_not_authorised") return;
         setAsked(true);
         setLastRefusal(error);
@@ -84,7 +93,9 @@ export function AdminActDialog(props: Props) {
         <DialogBody className="flex flex-col gap-4">
           <ReasonField flow={flow} />
           {flow.asked ? <Overdraft flow={flow} {...props} /> : null}
-          {run.error && !overdraftAsk ? <Alert tone="danger">{playersRefusal(run.error, { action: DETAIL_ADMIN.action })}</Alert> : null}
+          {run.error && !overdraftAsk ? (
+            <Alert tone="danger">{playersRefusal(run.error, { action: DETAIL_ADMIN.action, unsure: PLAYERS_UNSURE.admin(name) })}</Alert>
+          ) : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={props.onClose}>{DETAIL_ADMIN.cancel}</Button>

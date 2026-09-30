@@ -9,10 +9,11 @@ import { StateBlock } from "@/components/ui/state-block";
 import { Switch } from "@/components/ui/switch";
 import { playEndpoints, type MyPlay } from "@/lib/playApi";
 import {
-  BADGES_COPY, CELEBRATIONS_SWITCH, GOAL_SHEET, MY_GAME, PLAY_REFUSAL, playRefusal, STATS_COPY, STREAK_COPY,
+  BADGES_COPY, CELEBRATIONS_SWITCH, PLAY_SETTINGS_UNSURE, GOAL_SHEET, MY_GAME, PLAY_REFUSAL, playRefusal, STATS_COPY, STREAK_COPY,
 } from "@/lib/playCopy";
 import { useToast } from "@/components/Toast";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { myPlayWrite } from "./resultReadBack";
 import { BadgeGrid } from "./BadgeGrid";
 import { CourtTimeRing } from "./CourtTimeRing";
 import { FormAndPeople } from "./FormAndPeople";
@@ -151,12 +152,16 @@ function MyGameBody({ game, read }: { game: MyPlay; read: MyGameRead }) {
 
 function CelebrationsSwitch({ game, read }: { game: MyPlay; read: MyGameRead }) {
   const on = game.settings.celebrations_enabled;
-  const flip = useAsyncAction((next: boolean) => playEndpoints.saveSettings({ celebrationsEnabled: next }), {
+  // Lost-reply audit (R3): read back off My game, so a switch that did save is not flipped back.
+  const flip = useAsyncAction((next: boolean) => myPlayWrite(
+    () => playEndpoints.saveSettings({ celebrationsEnabled: next }),
+    (p) => (p.settings.celebrations_enabled === next ? p.settings : null),
+  ), {
     optimistic: {
       apply: (next) => read.patch((g) => ({ ...g, settings: { ...g.settings, celebrations_enabled: next } })),
       rollback: (next) => read.patch((g) => ({ ...g, settings: { ...g.settings, celebrations_enabled: !next } })),
     },
-    success: (settings) => read.patch((g) => ({ ...g, settings })),
+    success: ({ value }) => read.patch((g) => ({ ...g, settings: value })),
   });
   return (
     <div className="flex flex-col gap-2">
@@ -176,7 +181,7 @@ function CelebrationsSwitch({ game, read }: { game: MyPlay; read: MyGameRead }) 
       {flip.error ? (
         <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-danger-strong">
           <WarningCircle size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
-          <span className="min-w-0 break-words">{playRefusal(flip.error, CELEBRATIONS_SWITCH.action)}</span>
+          <span className="min-w-0 break-words">{playRefusal(flip.error, CELEBRATIONS_SWITCH.action, PLAY_SETTINGS_UNSURE.celebrations)}</span>
         </p>
       ) : null}
     </div>

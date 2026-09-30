@@ -214,6 +214,19 @@ export const RESULT_UNSURE = {
   withdraw: unsureWords("the result is still on the booking", "the result was withdrawn"),
 } as const;
 
+/** The lost-reply audit — the member's own play settings, read back off My game. */
+export const PLAY_SETTINGS_UNSURE = {
+  pause: unsureWords("the pause is as it was", "the pause changed"),
+  celebrations: unsureWords("celebrations are as they were", "the setting changed"),
+  goal: unsureWords("your goal is as it was", "your goal changed"),
+} as const;
+
+/** The lost-reply audit — the admin's decision on a result, read back off Match results. */
+export const ADMIN_RESULT_UNSURE = {
+  void: unsureWords("the result is still on the list", "the result was removed", "Match results"),
+  uphold: unsureWords("the result is still waiting on a decision", "the result was kept", "Match results"),
+} as const;
+
 /** A result write that landed although its reply was lost: its own sentence, and that we checked. */
 export const RESULT_LOST = LOST_REPLY.proven;
 
