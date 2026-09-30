@@ -90,12 +90,25 @@ const FIELD_LABEL: Record<string, string> = {
   end_date: "Last date",
   interval_weeks: "Repeats",
   occurrence_date: "Date",
+  /** R4 A4-3: a "from this date on" change says from when. */
+  effective_from: "Takes effect from",
   occurrences_cancelled: "Dates cancelled",
   courts: "Courts",
   name: "Name",
   label: "Label on the grid",
   part_of_batch: "Part of a batch",
   self: "Their own booking",
+  // R4 A4-6: group snapshots and the privacy-view rows, in a volunteer's words.
+  pricing_mode: "Price",
+  multiplier_bps: "Price multiplier",
+  windows: "Booking times",
+  added: "Added",
+  removed: "Removed",
+  range: "Period looked at",
+  strands_returned: "What was shown",
+  event_count: "Events shown",
+  games: "Games",
+  format: "Format",
 };
 
 /** Membership and result states as the Members page says them. */
@@ -109,6 +122,34 @@ const STATE_WORDS: Record<string, string> = {
   confirmed: "Confirmed",
   disputed: "Disputed",
   withdrawn: "Withdrawn",
+  // R4 A4-6: bookings, seats and groups.
+  booked: "Booked",
+  cancelled: "Cancelled",
+  invited: "Invited",
+  accepted: "Playing",
+  declined: "Turned it down",
+  removed: "Taken off the booking",
+  archived: "Archived",
+  voided: "Voided",
+};
+
+/** Group pricing, as the Groups screen says it (R4 A4-6: the record read "InheritCourt"). */
+const PRICING_WORDS: Record<string, string> = {
+  inheritcourt: "The court’s own price",
+  inherit_court: "The court’s own price",
+  multiplier: "A multiple of the court’s price",
+  flatperslice: "A flat price per slot",
+  flat_per_slice: "A flat price per slot",
+};
+
+/** A trace's strands (R4 A4-6: "Strands returned: other"). */
+const STRAND_WORDS: Record<string, string> = {
+  booking: "Bookings", bookings: "Bookings", door: "Door scans", doors: "Door scans",
+  wallet: "Money", ledger: "Money", court: "Courts", account: "Account", other: "Other activity",
+};
+
+const DAY_WORD: Record<string, string> = {
+  mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun",
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -136,6 +177,8 @@ function labelFor(row: { area?: string | null; action?: string | null }, change:
   if (isSettingsDiff(row)) return changeFieldLabel(row, change);
   const known = FIELD_LABEL[change.field];
   if (known) return known;
+  // A group's top-up rate: the server's "Credits per zar" lost its unit to the strip below (R4 A4-6).
+  if (change.field === "credits_per_zar") return `Credits per ${clubCurrencySymbol()}1`;
   const server = change.label?.replace(/\s+(credits|zar)$/i, "").trim();
   return server || inWords(change.field);
 }
@@ -172,59 +215,153 @@ function eventsInWords(field: string, token: string): string | null {
   return field === "event_filter" && token === "*" ? "Every event" : null;
 }
 
+/**
+ * The server renders a stored object or list as its JSON text (R4 A4-6): a member list read
+ * `{"name": "Thandi", "user_id": "…"}`, a trace's period `{"to": "2026-09-29T22:00:00+00:00", …}`
+ * and a result's games `{"a": 11, "b": 9}, …`. Parsed and said: names, a period, scores.
+ */
+function jsonInWords(token: string, timezone?: string): string | null {
+  if (!token.startsWith("{") && !token.startsWith("[")) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(token.startsWith("[") ? token : `[${token}]`);
+  } catch {
+    return null;
+  }
+  const items = (Array.isArray(parsed) ? parsed : [parsed]).filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null);
+  if (items.length === 0) return null;
+  const said = items.map((item) => objectInWords(item, timezone)).filter((x): x is string => x !== null);
+  return said.length > 0 ? said.join(", ") : null;
+}
+
+function objectInWords(item: Record<string, unknown>, timezone?: string): string | null {
+  if (typeof item.name === "string") return item.name;
+  if (typeof item.from === "string" || typeof item.to === "string") {
+    const end = (v: unknown) => (typeof v === "string" && Number.isFinite(Date.parse(v)) ? clubDayAndClock(v, timezone) : null);
+    const from = end(item.from);
+    const to = end(item.to);
+    if (from && to) return `${from} to ${to}`;
+    return from ? `From ${from}` : to ? `Until ${to}` : null;
+  }
+  if (typeof item.a === "number" && typeof item.b === "number") return `${item.a}–${item.b}`;
+  return null;
+}
+
+/** "tue 18:00-21:00, thu 18:00-21:00" → "Tue 18:00–21:00, Thu 18:00–21:00"; none → "No set times". */
+function windowsInWords(token: string): string {
+  if (token === "") return "No set times";
+  return token.replace(/\b(mon|tue|wed|thu|fri|sat|sun)\b/g, (d) => DAY_WORD[d]).replace(/(\d{2}:\d{2})-(\d{2}:\d{2})/g, "$1–$2");
+}
+
+/** One basis point: 10000 bps is ×1.00. */
+const BPS = 0.0001;
+
+/** "10000" → "×1.00 the court’s price" (R4 A4-6: the record read "Multiplier bps 10000"). */
+function multiplierInWords(token: string): string | null {
+  const n = Number(token);
+  if (token === "" || !Number.isFinite(n)) return null;
+  return "×" + (n * BPS).toFixed(2) + " the court’s price";
+}
+
+/** The fields whose values have their own words (R4 A4-6); undefined for every other field. */
+function fieldInWords(field: string, token: string): string | null | undefined {
+  switch (field) {
+    case "windows": return windowsInWords(token);
+    case "pricing_mode": return PRICING_WORDS[token.toLowerCase()] ?? inWords(token);
+    case "multiplier_bps": return multiplierInWords(token);
+    case "strands_returned":
+      return token.split(",").map((t) => t.trim()).filter(Boolean)
+        .map((t) => STRAND_WORDS[t.toLowerCase()] ?? inWords(t)).join(", ") || null;
+    case "event_filter":
+      return token.split(",").map((t) => t.trim()).filter(Boolean)
+        .map((t) => (t === "*" ? "Every event" : inWords(t))).join(", ") || null;
+    default: return undefined;
+  }
+}
+
 /** One stored value in the words a volunteer uses. */
 export function changeValueInWords(field: string, value: string | null | undefined, timezone?: string): string | null {
   if (value === null || value === undefined) return null;
-  const formatted = money(field, value);
-  if (formatted) return formatted;
   const token = value.trim();
-  const when = whenOrCount(field, token, timezone) ?? eventsInWords(field, token);
-  if (when) return when;
+  // An emptied list or text is no value — except where "none" is itself the fact (times).
+  if (token === "" && field !== "windows") return null;
+  const own = fieldInWords(field, token);
+  if (own !== undefined) return own;
+  // The first reading that recognises the value, in this order; the value itself when none does.
+  const readings = [
+    jsonInWords(token, timezone), money(field, value), whenOrCount(field, token, timezone),
+    eventsInWords(field, token), codeInWords(field, token),
+  ];
+  return readings.find((said) => said !== null) ?? value;
+}
+
+/** A reason code, a state token or a bare snake_case code, in words; null for anything else. */
+function codeInWords(field: string, token: string): string | null {
   if (field === "reason_code" && (ADJUST_REASON_CODES as readonly string[]).includes(token)) {
     return reasonLabel(token as AdjustReasonCode);
   }
   const state = STATE_WORDS[token.toLowerCase()];
   if (state && (field === "status" || field.endsWith("_status"))) return state;
-  // A bare snake_case token is a code, not a sentence: say it in words.
-  if (/^[a-z]+(_[a-z]+)+$/.test(token)) return inWords(token);
-  return value;
+  // A bare snake_case token is a code, not a sentence: say it in words ("best_of_5" too).
+  if (/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(token)) return inWords(token);
+  return null;
+}
+
+type Row = { area?: string | null; action?: string | null; changes?: RawChange[] | null };
+
+/** A collection or adjustment stores its balance as two AFTER fields; they are one change. */
+function balancePair(byField: Map<string, RawChange>): ChangeLine | null {
+  const before = byField.get("balance_before_credits");
+  const after = byField.get("balance_after_credits");
+  if (!before && !after) return null;
+  return {
+    field: "balance_credits",
+    label: FIELD_LABEL.balance_credits,
+    before: changeValueInWords("balance_credits", before?.after ?? before?.before),
+    after: changeValueInWords("balance_credits", after?.after ?? after?.before),
+  };
+}
+
+const BALANCE_HALVES = new Set(["balance_before_credits", "balance_after_credits"]);
+
+/** One stored change as a line, a fact, or nothing (an id, a balance half, an emptied value, a repeated total). */
+function presentOne(
+  row: Row, c: RawChange, byField: Map<string, RawChange>, timezone?: string,
+): { line: ChangeLine } | { fact: ChangeFact } | null {
+  if (BALANCE_HALVES.has(c.field)) return null;
+  if (c.field === "total" && repeatsACount(c, byField)) return null;
+  const label = labelFor(row, c);
+  const was = changeValueInWords(c.field, c.before, timezone);
+  const is = changeValueInWords(c.field, c.after, timezone);
+  if (was === null && is === null) return null;
+  const oneSided = (was === null) !== (is === null);
+  if (oneSided && !STATE_FIELDS.has(c.field) && !isSettingsDiff(row)) return { fact: { field: c.field, label, value: (is ?? was)! } };
+  return { line: { field: c.field, label, before: was, after: is } };
 }
 
 /** The server's diff, as the page shows it: what changed, then the facts around it. */
-export function presentChanges(
-  row: { area?: string | null; action?: string | null; changes?: RawChange[] | null },
-  timezone?: string,
-): PresentedChanges {
+export function presentChanges(row: Row, timezone?: string): PresentedChanges {
   const raw = (row.changes ?? []).filter((c) => !isIdField(c.field, c));
   const byField = new Map(raw.map((c) => [c.field, c]));
-  const changed: ChangeLine[] = [];
+  const balance = balancePair(byField);
+  const changed: ChangeLine[] = balance ? [balance] : [];
   const facts: ChangeFact[] = [];
-
-  // A collection or adjustment stores its balance as two AFTER fields; they are one change.
-  const before = byField.get("balance_before_credits");
-  const after = byField.get("balance_after_credits");
-  if (before || after) {
-    changed.push({
-      field: "balance_credits",
-      label: FIELD_LABEL.balance_credits,
-      before: changeValueInWords("balance_credits", before?.after ?? before?.before),
-      after: changeValueInWords("balance_credits", after?.after ?? after?.before),
-    });
-  }
-
   for (const c of raw) {
-    if (c.field === "balance_before_credits" || c.field === "balance_after_credits") continue;
-    const label = labelFor(row, c);
-    const was = changeValueInWords(c.field, c.before, timezone);
-    const is = changeValueInWords(c.field, c.after, timezone);
-    const oneSided = (was === null) !== (is === null);
-    if (oneSided && !STATE_FIELDS.has(c.field) && !isSettingsDiff(row)) {
-      facts.push({ field: c.field, label, value: (is ?? was)! });
-    } else {
-      changed.push({ field: c.field, label, before: was, after: is });
-    }
+    const shown = presentOne(row, c, byField, timezone);
+    if (shown && "line" in shown) changed.push(shown.line);
+    else if (shown) facts.push(shown.fact);
   }
   return { changed, facts };
+}
+
+/**
+ * A privacy row's `total` beside the count it shows (R4 A4-6: "Total" repeated "Events"): the
+ * same figure twice reads as two different facts. Said once when they agree.
+ */
+function repeatsACount(total: RawChange, byField: Map<string, RawChange>): boolean {
+  const value = (c: RawChange | undefined) => (c ? (c.after ?? c.before ?? null) : null);
+  const shown = value(byField.get("event_count")) ?? value(byField.get("rows"));
+  return shown !== null && shown === value(total);
 }
 
 /** Whether a row has anything to show once ids are hidden. */
