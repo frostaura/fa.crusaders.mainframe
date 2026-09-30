@@ -252,6 +252,15 @@ export function refreshAttentionCounts(): Promise<void> {
   return current;
 }
 
+/** How old the counts may be before a move between admin sections re-reads them (R4 perf). */
+export const ATTENTION_FRESH_MS = 30_000;
+
+/** Whether the last completed read is older than `ms` (or there has been none). */
+function isStale(ms: number): boolean {
+  const reads = [state.pending.readAt, state.faults.readAt].filter((at): at is number => at !== null);
+  return reads.length === 0 || Date.now() - Math.min(...reads) > ms;
+}
+
 /** How often the counts re-read on their own while somebody is looking. The doors store polls at 30s. */
 export const ATTENTION_INTERVAL_MS = 60_000;
 
@@ -259,9 +268,16 @@ function useCountsStore(enabled: boolean, routeKey: string): CountsState {
   const counts = useSyncExternalStore(subscribe, snapshot, snapshot);
   const changeVersion = useSyncExternalStore(subscribePendingApplications, pendingApplicationsVersion, pendingApplicationsVersion);
 
+  // On arrival and on every application change; NOT on every admin route change (R4 perf): the
+  // console re-read all three counts on each click between sections. A route change re-reads
+  // only counts older than the fresh window; the minute poll and a return to the tab do the rest.
   useEffect(() => {
     if (enabled) void refreshAttentionCounts();
-  }, [enabled, routeKey, changeVersion]);
+  }, [enabled, changeVersion]);
+
+  useEffect(() => {
+    if (enabled && isStale(ATTENTION_FRESH_MS)) void refreshAttentionCounts();
+  }, [enabled, routeKey]);
 
   useEffect(() => {
     if (!enabled) return;
