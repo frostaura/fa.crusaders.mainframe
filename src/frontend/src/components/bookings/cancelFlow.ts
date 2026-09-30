@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { endpoints, type BulkCancelResponse, type CancellationQuote } from "@/lib/api";
+import { adminEndpoints } from "@/lib/adminApi";
 import { formatMinutes } from "@/lib/utils";
 import { clubClock } from "@/lib/clubClock";
 import { UnsureOutcome, goneFrom, outcomeUnknown, type Reread } from "@/lib/bookingOutcome";
@@ -173,7 +174,7 @@ async function cancelOne(b: GridBooking, req: CancelRequest) {
   // An admin cancelling somebody else's booking goes through the admin route (waiver + reason);
   // one's own booking — an admin's included — through the member route, as a member would.
   return !b.mine && req.isAdmin
-    ? endpoints.adminCancelBooking(b.bookingId, req.waive, req.waive ? req.reason.trim() : "")
+    ? adminEndpoints.adminCancelBooking(b.bookingId, { waivePenalty: req.waive, reason: req.reason.trim() })
     : endpoints.cancelBooking(b.bookingId);
 }
 

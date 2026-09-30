@@ -409,10 +409,10 @@ export const CANCEL_SHEET = {
   waiveMany: "Waive the late-cancellation penalties",
   waiveHint: "Recorded against your name, with your reason.",
   reasonLabel: "Reason",
-  reasonHint: "Kept with the waiver in the club's records.",
+  reasonHint: "Required — the member is told why, and it goes on the club's change record.",
   reasonHintMany: "Required for a batch — it goes in the email each member gets.",
   reasonPlaceholder: "Court double-booked, injury, club decision…",
-  reasonMissing: "Say why — the club's records need the reason, not just the tick.",
+  reasonMissing: "Say why — the member is told the reason, and the club's records keep it.",
 
   cancelledTitle: (done: number, total: number) => {
     if (done === total) return total === 1 ? "Booking cancelled" : `All ${total} cancelled`;

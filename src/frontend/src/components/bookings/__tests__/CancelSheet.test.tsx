@@ -128,6 +128,26 @@ describe("CancelSheet — a member's own booking", () => {
 });
 
 describe("CancelSheet — an admin, for a member", () => {
+  /** R4 A4-4: a plain admin cancel (no waiver) needs a reason too — the API refuses it without. */
+  it("asks why for a plain cancel of a member's booking, and sends it", async () => {
+    const stub = stubFetch([
+      { path: "/api/v1/bookings/bk-2/cancellation-quote", body: late },
+      { method: "POST", path: "/api/v1/admin/bookings/bk-2/cancel", body: { refunded_credits: 35, penalty_credits: 15 } },
+    ]);
+    const { onCancelled } = open({ isAdmin: true, bookings: [THANDI] });
+    expect(await screen.findByText(CANCEL_SHEET.late(30))).toBeTruthy();
+    expect(screen.getByLabelText(CANCEL_SHEET.reasonLabel)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
+    expect(screen.getByText(CANCEL_SHEET.reasonMissing)).toBeTruthy();
+    expect(posts(stub.calls, "/api/v1/admin/bookings/")).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Member asked by phone" } });
+    fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
+    await waitFor(() => expect(onCancelled).toHaveBeenCalled());
+    expect(posts(stub.calls, "/api/v1/admin/bookings/bk-2/cancel")[0].body)
+      .toEqual({ waivePenalty: false, reason: "Member asked by phone" });
+  });
+
   it("names the member, and waives the penalty only with a reason", async () => {
     const stub = stubFetch([
       { path: "/api/v1/bookings/bk-2/cancellation-quote", body: late },
@@ -147,7 +167,8 @@ describe("CancelSheet — an admin, for a member", () => {
     fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Court double-booked" } });
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
     await waitFor(() => expect(onCancelled).toHaveBeenCalled());
-    expect(posts(stub.calls, "/api/v1/admin/bookings/bk-2/cancel")[0].body).toEqual({ waivePenalty: true, waiveReason: "Court double-booked" });
+    expect(posts(stub.calls, "/api/v1/admin/bookings/bk-2/cancel")[0].body)
+      .toEqual({ waivePenalty: true, reason: "Court double-booked", waiveReason: "Court double-booked" });
     expect(onCancelled).toHaveBeenCalledWith({ cancelledIds: ["bk-2"], ownMoneyMoved: false });
     expect(screen.getByText(cancellationOutcome(50, 0, "Thandi"))).toBeTruthy();
   });

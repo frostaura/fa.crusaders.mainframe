@@ -110,7 +110,9 @@ function useCancelFlow(props: FlowProps) {
 
   const single = bookings.length === 1;
   const forOthers = isAdmin && bookings.some((b) => !b.mine);
-  const reasonNeeded = forOthers && (!single || waive);
+  // R4 A4-4: an admin cancelling somebody else's booking always says why — the member is told,
+  // and it goes on the club's change record (the API refuses it without, 400 reason_required).
+  const reasonNeeded = forOthers;
 
   const action = useAsyncAction(
     // R3 I-4: offline, nothing is sent — and the sheet says so.

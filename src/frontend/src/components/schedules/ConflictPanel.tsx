@@ -11,8 +11,7 @@ import {
   NOTHING_CHANGED_YET, clearAllLabel, conflictRefundPhrase, conflictsHeadline,
 } from "../../lib/scheduleCopy";
 import { describeFailure } from "../../lib/errors";
-import { endpoints } from "../../lib/api";
-import type { ScheduleConflict } from "../../lib/adminApi";
+import { adminEndpoints, type ScheduleConflict } from "../../lib/adminApi";
 
 /**
  * What is in the way, and the only path D2 gives an admin through it.
@@ -95,7 +94,7 @@ export function ConflictPanel({
       const label = conflictLabel(conflict, timezone);
       try {
         // Full refund, penalty waived: the club moved the goalposts, not the member.
-        const result = await endpoints.adminCancelBooking(conflict.booking_id as string, true, reason.trim());
+        const result = await adminEndpoints.adminCancelBooking(conflict.booking_id as string, { waivePenalty: true, reason: reason.trim() });
         rows.push({
           id: conflict.booking_id as string,
           label,

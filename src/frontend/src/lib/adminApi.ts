@@ -936,6 +936,17 @@ export const adminEndpoints = {
       total?: number;
       cursor?: string | null;
     }>(`/api/v1/admin/member-groups/${id}/members${qs({ ...page })}`),
+  /**
+   * An admin cancelling a member's booking (R4 A4-4): the reason is REQUIRED — mailed to the
+   * member and written on the change record (400 `reason_required` without it). A waiver's
+   * reason is the same words, sent as `waiveReason` too for the waiver's own record.
+   */
+  adminCancelBooking: (bookingId: string, body: { waivePenalty: boolean; reason: string }) =>
+    api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/admin/bookings/${bookingId}/cancel`, {
+      waivePenalty: body.waivePenalty,
+      reason: body.reason,
+      ...(body.waivePenalty ? { waiveReason: body.reason } : {}),
+    }),
   memberGroupAddMembers: (id: string, userIds: string[]) =>
     api.post<GroupAddResult>(`/api/v1/admin/member-groups/${id}/members`, { userIds }),
   memberGroupRemoveMember: (id: string, userId: string) =>
