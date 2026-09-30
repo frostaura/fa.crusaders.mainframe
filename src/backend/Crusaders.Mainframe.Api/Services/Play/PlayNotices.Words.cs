@@ -44,6 +44,47 @@ public static partial class PlayNotices
         return $"{speakers} {says} {winners} won {high}–{low} — confirm or dispute";
     }
 
+    /// <summary>The instruction an open ask ends with, which a settled one must not keep.</summary>
+    private const string AskSuffix = " — confirm or dispute";
+
+    /// <summary>
+    /// What became of the result an ask was about, in the words its retired line uses. A result
+    /// still pending was edited or re-recorded — the new version asks again on its own line.
+    /// </summary>
+    public static string SettledWord(string status)
+    {
+        switch (status)
+        {
+            case MatchResultStatus.Withdrawn: return "withdrawn";
+            case MatchResultStatus.Confirmed: return "confirmed";
+            case MatchResultStatus.Disputed: return "disputed";
+            case MatchResultStatus.Voided: return "removed by the club";
+            default: return "since changed";
+        }
+    }
+
+    /// <summary>
+    /// A settled ask's headline (review round 3, M-5): the speaker in the past tense and the outcome
+    /// where the instruction was — "Olive said they won 3–0 — withdrawn (Tue 29 Sep, 18:00)". A
+    /// headline that never carried the instruction is left as it is.
+    /// </summary>
+    public static string SettledHeadline(string headline, string outcome)
+    {
+        var at = headline.IndexOf(AskSuffix, StringComparison.Ordinal);
+        if (at < 0) return headline;
+        var ask = headline[..at];
+        var rest = headline[(at + AskSuffix.Length)..];
+        foreach (var verb in new[] { " says ", " say " })
+        {
+            var v = ask.IndexOf(verb, StringComparison.Ordinal);
+            if (v < 0) continue;
+            ask = $"{ask[..v]} said {ask[(v + verb.Length)..]}";
+            break;
+        }
+        var settled = $"{ask} — {outcome}{rest}";
+        return settled.Length <= MemberNotification.HeadlineMaxLength ? settled : settled[..MemberNotification.HeadlineMaxLength];
+    }
+
     private static string FirstNames(IEnumerable<MatchResultPlayer> players, ResultContext c) =>
         string.Join(" and ", players.Select(p => p.UserId is { } u ? FirstName(c.NameOf(u)) : p.GuestName ?? "Guest"));
 

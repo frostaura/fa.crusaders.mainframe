@@ -67,17 +67,23 @@ public static partial class PlayNotices
     /// result it asked about was confirmed, disputed, edited (the new version asks again),
     /// withdrawn, voided or kept — it asks nothing any more (review round 1, F2). It is marked
     /// read AND stamped <c>ResolvedAt</c> (review round 2, F2-5), so the inbox draws it as settled
-    /// even when the member had already read it without answering.
+    /// even when the member had already read it without answering. And its headline stops giving
+    /// the instruction (review round 3, M-5): "Olive says they won 3–0 — confirm or dispute" becomes
+    /// "Olive said they won 3–0 — withdrawn", the outcome read off <paramref name="r"/> as it now
+    /// stands.
     /// </summary>
-    public static async Task RetireToConfirmAsync(MainframeDbContext db, Guid bookingId, DateTimeOffset now, CancellationToken ct)
+    public static async Task RetireToConfirmAsync(MainframeDbContext db, MatchResult r, DateTimeOffset now, CancellationToken ct)
     {
+        var bookingId = r.BookingId;
         var open = await db.MemberNotifications
             .Where(n => n.BookingId == bookingId && n.Kind == MemberEventCatalogue.ResultToConfirm && n.ResolvedAt == null)
             .ToListAsync(ct);
+        var outcome = SettledWord(r.Status);
         foreach (var n in open)
         {
             n.ReadAt ??= now.Storable();
             n.ResolvedAt = now.Storable();
+            n.Headline = SettledHeadline(n.Headline, outcome);
         }
     }
 
