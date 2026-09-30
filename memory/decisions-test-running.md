@@ -11,9 +11,9 @@ last_verified: 2026-09-30
 parallel classes 6-9 min. 2026-09-30, before this round (r3 trx, normal load): **17.5 min wall,
 160 min summed test time, 3032 tests, 243 MB of console output in the trx.** After, same suite:
 **6m19s wall at load 13-26, 33 min summed, 12.7 CPU-minutes, trx 20 MB**; 12m15s at load 20-48
-when `PlayersPropertyHttpTests` (ONE property test, another lane's stress work) alone took 734 s —
-it is the floor now, nothing else is over 90 s. The three split classes: 295 tests in 15-22 s
-(were 654 + 442 + 258 s summed). CI not yet measured on the sharded path.
+when `PlayersPropertyHttpTests` (then ONE fact looping 150 seeds) alone took 734 s. R4 (lane B2)
+dealt its seeds round-robin to five nested classes `+Shard0..4`, one theory row per seed: 150 rows
+in 83 s wall. Nothing else is over 90 s. CI not yet measured on the sharded path.
 
 **Why a test cost ~5 s: host boots and logging, not the database.** The test process sat at
 ~1.2 cores of 10. Each test booted its own `WebApplicationFactory` host — ~0.8 s CPU (DI, 200
@@ -51,7 +51,7 @@ shard, merges Cobertura (`tools/merge_coverage.py`, equal to coverlet on a combi
 
 **Rules for a new Postgres-backed test class:**
 1. `public sealed class FooTests(PostgresFixture pg) : IClassFixture<PostgresFixture>`; no `[Collection]`.
-2. `pg.SharedHost` for a plain host; never `Environment.SetEnvironmentVariable` to configure one.
+2. `pg.SharedHost` for a plain host; never env vars to configure one; ceilings via `RateLimits` (all listed, writes too).
 3. Never `NpgsqlConnection.ClearAllPools()` — `ClearPool` your own connection string.
 4. Nothing process-global: no mutable statics, Console redirection or culture changes.
 5. A test that creates its own database uses `CreateEmptyAsync()`/`CloneTemplateAsync()` and disposes it.

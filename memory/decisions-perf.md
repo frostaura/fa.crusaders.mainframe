@@ -37,6 +37,7 @@ Measured numbers and method: [`gotchas-perf.md`](gotchas-perf.md). Sign-in limit
   `/admin/ledger/` answer the bare array exactly as before without it; with `cursor=` (empty for
   page one) they answer `{ items, next_cursor }` (+ `total` on members), keyset by (at, id).
   *Why a presence switch:* the ledger already took `limit`, so `limit` could not change the shape.
+  R4: the paged ledger's first page also carries the whole range's `totals` (null on later pages).
 - **`photos=url` hands a data-URI photo out as `/api/v1/photos/{userId:N}/{hash16}`** on
   `/schedule` and `/admin/members/`. Anonymous (an `<img>` sends no token), tenantless, and the
   SHA-256 prefix of the stored value is the check — the same exposure model as `/uploads/`.

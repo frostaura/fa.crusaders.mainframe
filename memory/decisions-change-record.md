@@ -57,3 +57,4 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   leads "Can spend after", naming the hold and balance when they differ, and the overdraft row
   carries `spendable_credits` beside `balance_credits`. Every negative credit figure in server
   prose uses U+2212 (`MoneyFormat.Credits`; rand untouched — a machine may read it).
+- **Desk cancellations** (R4): reason required, `booking.cancelled_by_admin` in the cancel's own save — [`decisions-admin-writes.md`](decisions-admin-writes.md).

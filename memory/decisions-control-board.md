@@ -23,3 +23,6 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
 - **The console's tile says it** (lane F3, `duplicateBoxesWarning` in `lib/monitoringCopy.ts`): how
   many boxes are set to the court, which one the tile follows and why, the others with when each
   was last heard, and to take the extras out of service on Boards. Nothing for one box.
+- **Round 4 (A4-5):** the payload also lists every court box once (`boxes`: code, name, MAC, link,
+  courts), so "boxes not calling in" counts boxes, not tiles; tiles and `other_boxes` carry
+  `mac_address`, because every auto-registered box is named "Court box". Same six queries.
