@@ -280,6 +280,17 @@ describe("the old night route — a picker onto the member's own page (R17)", ()
   });
 });
 
+describe("a night's money signs (review round 2, F3-14)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+
+  it("writes a negative balance with the same minus as every other figure", async () => {
+    stubFetch(nightRoutes(traceView([traceEvent({ amount_credits: -50, balance_after_credits: -100 })])));
+    renderNight();
+    expect(await screen.findByText(/balance −100\.00/)).toBeInTheDocument();
+    expect(screen.queryByText(/balance -100/)).toBeNull();
+  });
+});
+
 describe("the night's window, in words (review round 2, F3-10)", () => {
   it("says a whole club day as that day, never 'From 00:00 to 00:00'", () => {
     const hint = nightWindowHint({ from: "2026-09-22T00:00:00+02:00", to: "2026-09-23T00:00:00+02:00" }, "Africa/Johannesburg");

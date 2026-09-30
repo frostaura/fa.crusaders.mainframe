@@ -8,7 +8,7 @@ import { DatePicker } from "../../components/ui/date-picker";
 import { formatClubDayLabel } from "../../components/ui/date-picker-day";
 import { DownloadSimple } from "../../components/ui/icons";
 import { MemberCombobox } from "../../components/ui/member-combobox";
-import { MINUS } from "../../lib/utils";
+import { MINUS, formatCredits } from "../../lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { StateBlock } from "../../components/ui/state-block";
@@ -407,7 +407,8 @@ function TraceCard({ event, subjectName, timezone }: {
         <p className="text-sm text-text-secondary">
           {`${event.amount_credits < 0 ? MINUS : "+"}${Math.abs(event.amount_credits).toFixed(2)} credits`}
           {typeof event.balance_after_credits === "number"
-            ? ` · balance ${event.balance_after_credits.toFixed(2)}`
+            // U+2212 like every other figure on the admin (F3-14: "-100.00" sat beside "−200.00").
+            ? ` · balance ${formatCredits(event.balance_after_credits, { long: true }).replace(/ credits$/, "")}`
             : ""}
         </p>
       )}
