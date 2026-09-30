@@ -889,7 +889,7 @@ describe("the club door log", () => {
       ["/admin/monitoring/doors/log?range=7d"]);
 
     const row = (await screen.findAllByRole("listitem"))[0];
-    // "Fri 18 Sept, 11:18" — B20: a weekday always carries its date, because the log ranges
+    // "Fri 18 Sep, 11:18" — B20: a weekday always carries its date, because the log ranges
     // over thirty days and four Fridays are in it.
     expect(row.textContent).toMatch(/\w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}/);
     expect(row).toHaveTextContent("3d ago");

@@ -63,11 +63,9 @@ describe.each(RUNNER_ZONES)("with the reader's own browser in %s", (runnerZone) 
     // clock half. In Auckland the instant above is the 20th; in Los Angeles it is the 19th but
     // at lunchtime. Only the club's own calendar day gives the 19th.
     //
-    // "Sept", not "Sep": CLDR 42 changed the en-GB abbreviation for September, and this is
-    // what the engine the app runs in actually writes. Asserted literally rather than derived
-    // from `Intl`, which would be the implementation testing itself — if a runtime upgrade
-    // changes it, that is a visible change to every doors row and worth one red test.
-    expect(clubDayAndClock(EVENING, CLUB)).toBe("Sat 19 Sept, 21:25");
+    // "Sep", not ICU's "Sept" (F4.10 / F3.23): the product's one short date, built from parts
+    // so a CLDR release cannot respell it. Asserted literally, not derived from `Intl`.
+    expect(clubDayAndClock(EVENING, CLUB)).toBe("Sat 19 Sep, 21:25");
     expect(clubInstant(EVENING, CLUB)).toBe("19 September 2026, 21:25");
     expect(clubDate(EVENING, CLUB)).toBe("19 September 2026");
   });
@@ -84,12 +82,12 @@ describe.each(RUNNER_ZONES)("with the reader's own browser in %s", (runnerZone) 
     // the date comes with it. In Auckland both instants fall on the 20th — a browser-zone
     // comparison would drop the date exactly when an admin most needs it.
     const nowNextClubDay = Date.parse("2026-09-19T22:30:00.000Z");
-    expect(clubRowTime(EVENING, nowNextClubDay, CLUB)).toBe("Sat 19 Sept, 21:25");
+    expect(clubRowTime(EVENING, nowNextClubDay, CLUB)).toBe("Sat 19 Sep, 21:25");
   });
 
   it("writes the resolved range in the club's day, and says so", () => {
     expect(clubRangeInWords({ from: SMALL_HOURS, to: EVENING }, CLUB))
-      .toBe("Scans from Sat 19 Sept, 01:30 to Sat 19 Sept, 21:25, club time.");
+      .toBe("Scans from Sat 19 Sep, 01:30 to Sat 19 Sep, 21:25, club time.");
   });
 
   it("falls back to the club's remembered zone when the payload did not carry one", () => {
@@ -98,8 +96,8 @@ describe.each(RUNNER_ZONES)("with the reader's own browser in %s", (runnerZone) 
     // clock under a heading reading "club time".
     rememberClubZone(CLUB);
     expect(clubClock(EVENING, undefined)).toBe("21:25");
-    expect(clubDayAndClock(EVENING, undefined)).toBe("Sat 19 Sept, 21:25");
-    expect(clubRowTime(EVENING, Date.parse("2026-09-19T22:30:00.000Z"), undefined)).toBe("Sat 19 Sept, 21:25");
+    expect(clubDayAndClock(EVENING, undefined)).toBe("Sat 19 Sep, 21:25");
+    expect(clubRowTime(EVENING, Date.parse("2026-09-19T22:30:00.000Z"), undefined)).toBe("Sat 19 Sep, 21:25");
   });
 
   it("a caller that DOES pass the zone teaches it to the ones that do not", () => {

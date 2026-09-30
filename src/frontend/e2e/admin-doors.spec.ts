@@ -1061,7 +1061,7 @@ test.describe("The log a committee reads", () => {
     // club's zone, so a `…Z` midnight prints as 00:00 on the 19th rather than 22:00 on the
     // 18th. Getting this wrong puts a committee's "yesterday" on the wrong day.
     const line = page.getByText(/^Scans from .* to .*, club time\.$/);
-    await expect(line).toContainText("19 Sept");
+    await expect(line).toContainText("19 Sep");
     await expect(line).toContainText("00:00");
     await expect(line).not.toContainText("22:00");
   });

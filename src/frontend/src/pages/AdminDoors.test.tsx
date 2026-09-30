@@ -1228,7 +1228,7 @@ describe("the doors surface", () => {
      * <b>C11, one screen along from the banner it was written about.</b>
      *
      * <p>
-     * "Side door is shut. … Shut by Priya Naidoo on Mon 21 Sept, 18:34." is a STANDING fact,
+     * "Side door is shut. … Shut by Priya Naidoo on Mon 21 Sep, 18:34." is a STANDING fact,
      * and it sat in an assertive region on a page that re-reads itself every fifteen
      * seconds. The ruling is the same one the club-wide banner got: what is standing is
      * polite, and only a change somebody else caused earns an interruption. A shut door is

@@ -81,7 +81,7 @@ describe("the fault list", () => {
   it("shows the three numbers that separate a one-off from a fire", async () => {
     stubFetch(routes([deviceErrorFixture({ count: 47 })]));
     renderPage(<MonitoringFaultsPage />);
-    expect(await screen.findByText(/47 times · first Sun 20 Sept, 18:02 · last/)).toBeInTheDocument();
+    expect(await screen.findByText(/47 times · first Sun 20 Sep, 18:02 · last/)).toBeInTheDocument();
   });
 
   /**
@@ -229,7 +229,7 @@ describe("the fault list", () => {
     })]));
     renderPage(<MonitoringFaultsPage />);
 
-    expect(await screen.findByText(/Marked resolved by Priya Naidoo at Tue 22 Sept, 07:15\. "replaced the scanner"/))
+    expect(await screen.findByText(/Marked resolved by Priya Naidoo at Tue 22 Sep, 07:15\. "replaced the scanner"/))
       .toBeInTheDocument();
     // Nothing to resolve twice.
     expect(screen.queryByRole("button", { name: /Mark resolved/ })).not.toBeInTheDocument();

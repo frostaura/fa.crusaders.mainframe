@@ -1,5 +1,6 @@
 import { ApiError, type LedgerEntryType, type LedgerRow } from "./api";
 import { formatCredits } from "./utils";
+import { clubShortDate } from "./clubClock";
 
 /**
  * The pure logic behind the admin console's "adjust credit" form.
@@ -122,7 +123,8 @@ export function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
     const id = row.relatedBookingId;
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const when = new Date(row.at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+    // The one short club date, in the club's calendar ("Thu 1 Oct 2026", never "01 Oct").
+    const when = clubShortDate(row.at, undefined, { year: true });
     out.push({ id, label: `${when} · ${LEDGER_TYPE_LABEL[row.type] ?? row.type} ${formatCredits(row.amountCredits)} · ${id.slice(0, 8)}` });
   }
   return out;

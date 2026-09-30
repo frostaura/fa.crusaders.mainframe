@@ -202,7 +202,7 @@ describe("doorStateNotice", () => {
     expect(doorStateNotice(door({ last_seen_at: "2026-09-19T04:12:00Z" }), false, TZ)).toBe(
       "Nothing can reach it. A change you make now arrives only when it calls in again. Until then"
       + " it opens for members with a booking, from the list it last downloaded, and that list goes"
-      + " stale on Sat 19 Sept, 10:12.",
+      + " stale on Sat 19 Sep, 10:12.",
     );
   });
 
@@ -212,7 +212,7 @@ describe("doorStateNotice", () => {
     // whole point: "goes stale at 01:00", read at nine in the morning, cannot be told from
     // one that expired eight hours ago.
     const notice = doorStateNotice(door({ last_seen_at: "2026-09-19T19:00:00Z" }), false, TZ);
-    expect(notice).toContain("goes stale on Sun 20 Sept, 01:00");
+    expect(notice).toContain("goes stale on Sun 20 Sep, 01:00");
   });
 
   /** A row that has never called in holds no list, so there is no time to print. */
@@ -255,7 +255,7 @@ describe("doorStateNotice", () => {
       enabled: false, shut_by_name: "Priya Naidoo",
       out_of_service_since: "2026-09-20T19:40:00Z",
     });
-    expect(doorStateNotice(shut, true, TZ)).toContain("Shut by Priya Naidoo at Sun 20 Sept, 19:40.");
+    expect(doorStateNotice(shut, true, TZ)).toContain("Shut by Priya Naidoo at Sun 20 Sep, 19:40.");
     for (const variant of [shut, door({ enabled: false }), door({ enabled: false, shut_by_name: "Priya Naidoo" })]) {
       expect((doorStateNotice(variant, true, TZ) ?? "").toLowerCase()).not.toContain("you shut");
     }
@@ -267,7 +267,7 @@ describe("doorStateNotice", () => {
     expect(doorShutAttribution(door({ enabled: false, shut_by_name: "Priya Naidoo" }), TZ))
       .toBe("Shut by Priya Naidoo.");
     expect(doorShutAttribution(door({ enabled: false, out_of_service_since: "2026-09-20T19:40:00Z" }), TZ))
-      .toBe("This door was shut on Sun 20 Sept, 19:40.");
+      .toBe("This door was shut on Sun 20 Sep, 19:40.");
     for (const notice of [
       doorShutAttribution(door({ enabled: false }), TZ),
       doorShutAttribution(door({ enabled: false, shut_by_name: "Priya Naidoo" }), TZ),
@@ -333,7 +333,7 @@ describe("doorQuietNotice", () => {
   it("names the day, the date and the gap when the newest scan is on an earlier club day", () => {
     const notice = doorQuietNotice("2026-09-16T18:40:00Z", "2026-09-19T00:00:00Z", NOW, TZ);
     expect(notice).toContain("No scans at this door since");
-    expect(notice).toContain("Wed 16 Sept, 18:40");
+    expect(notice).toContain("Wed 16 Sep, 18:40");
     expect(notice).toContain("3 days");
     // A13: day before month and a 24-hour clock, never "9/16/26, 6:40 PM".
     expect(notice).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2}/);
@@ -567,17 +567,17 @@ describe("the log's states", () => {
    * than guessing either way.
    */
   it("derives the one-door empty case from that door's real liveness", () => {
-    const reporting = doorLogEmptyOneDoor("Side door", "Mon 14 Sept, 00:00", true);
-    expect(reporting).toContain("No scans at Side door between Mon 14 Sept, 00:00 and now");
+    const reporting = doorLogEmptyOneDoor("Side door", "Mon 14 Sep, 00:00", true);
+    expect(reporting).toContain("No scans at Side door between Mon 14 Sep, 00:00 and now");
     expect(reporting).toContain("It is reporting, so the club is hearing from it");
     expect(reporting).not.toContain("may not be reaching the club");
     expect(reporting).not.toContain("would not know");
 
-    const silent = doorLogEmptyOneDoor("Side door", "Mon 14 Sept, 00:00", false);
+    const silent = doorLogEmptyOneDoor("Side door", "Mon 14 Sep, 00:00", false);
     expect(silent).toContain("Nothing can reach it");
     expect(silent).toContain("the club would not know");
 
-    const unknown = doorLogEmptyOneDoor("Side door", "Mon 14 Sept, 00:00", null);
+    const unknown = doorLogEmptyOneDoor("Side door", "Mon 14 Sep, 00:00", null);
     expect(unknown).toContain("cannot say whether that board is reaching the club");
   });
 

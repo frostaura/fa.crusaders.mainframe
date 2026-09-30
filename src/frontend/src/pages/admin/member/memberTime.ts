@@ -1,4 +1,4 @@
-import { clubClock } from "@/lib/clubClock";
+import { clubClock, clubShortDate } from "@/lib/clubClock";
 import { clubZone } from "@/lib/clubZone";
 import type { MemberBookingRow } from "@/lib/memberDetailApi";
 
@@ -20,7 +20,6 @@ export function dayParts(iso: string, zone: string) {
 
 /** "Tue 23 Sep, 18:00–18:45" — the whole face, for an accessible name. */
 export function bookingWhen(row: Pick<MemberBookingRow, "starts_at" | "ends_at">, zone: string): string {
-  const d = dayParts(row.starts_at, zone);
-  return `${d.weekday} ${d.day} ${d.month}, ${clubClock(row.starts_at, zone)}–${clubClock(row.ends_at, zone)}`;
+  return `${clubShortDate(row.starts_at, zone)}, ${clubClock(row.starts_at, zone)}–${clubClock(row.ends_at, zone)}`;
 }
 

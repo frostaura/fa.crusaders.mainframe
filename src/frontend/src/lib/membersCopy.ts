@@ -1,6 +1,7 @@
 import { clubInstant } from "./clubClock";
 import { clubZone } from "./clubZone";
 import { formatCredits } from "./utils";
+import { clubShortDate } from "./clubClock";
 
 /**
  * Every sentence the Members list says (P5, R10, R12), in one place — so a test can ask for the
@@ -152,11 +153,9 @@ export const GROUPS_COPY = {
   retry: "Read groups again",
 } as const;
 
-const SHORT_DATE = { day: "numeric", month: "short", year: "numeric" } as const;
-
-/** "5 Sep 2026", in the CLUB's calendar — never the reader's own zone. */
+/** "5 Sep 2026", in the CLUB's calendar — never the reader's own zone. The one short club date. */
 export function joinedOn(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", { ...SHORT_DATE, timeZone: clubZone() });
+  return clubShortDate(iso, clubZone(), { weekday: false, year: true });
 }
 
 const DAY_MS = 86_400_000;
