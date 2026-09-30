@@ -127,12 +127,25 @@ export function cancelSelectionLabel(bookings: number): string {
 /**
  * A member at their daily cap trying to take one more. States the rule, not the person, and
  * says what is still possible — the same three rules `lib/gridCopy` keeps for the banner.
+ * R4 M4-7: said when a pick is REFUSED, so it names what is already chosen — "You can book 4
+ * more slots" beside four ticked slots read as an invitation to tick a fifth.
  */
 export function selectionCapSentence(cap: number, dayLabel: string | null = null): string {
   // F1.7 — the cap is the SHOWN day's; "today" is only true when that is today.
   const when = dayLabel ? `on ${dayLabel}` : "today";
   if (cap <= 0) return `You've booked your slots for ${dayLabel ?? "today"}, so there's nothing more to choose.`;
-  return `You can book ${cap} more ${cap === 1 ? "slot" : "slots"} ${when} — that's the club's daily limit.`;
+  const what = cap === 1 ? "That's 1 slot" : `That's ${cap} slots`;
+  return `${what} — the most you can book ${when}, the club's daily limit. Untick one to choose a different time.`;
+}
+
+/**
+ * R4 M4-7 — the same refusal, short enough for the selection bar's two-line detail on a phone
+ * (the full sentence is what a screen reader hears).
+ */
+export function selectionCapShort(cap: number, dayLabel: string | null = null): string {
+  const when = dayLabel ? `on ${dayLabel}` : "today";
+  if (cap <= 0) return `Limit reached: nothing more ${when}.`;
+  return `Limit reached: ${cap} ${cap === 1 ? "slot" : "slots"} ${when}.`;
 }
 
 /** The mobile court chip's name — it scrolls the grid to that court. */

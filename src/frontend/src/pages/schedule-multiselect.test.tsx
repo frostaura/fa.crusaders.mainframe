@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
-import { BOOKINGS_COPY, selectionCapSentence } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, selectionCapSentence, selectionCapShort } from "../lib/bookingsCopy";
 import { LONG_PRESS_MS } from "../lib/gridSelection";
 import { signOut } from "../test/harness";
 import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, sheets, slotRow } from "../test/bookingsKit";
@@ -163,6 +163,21 @@ describe("a member's limits — D8", () => {
     expect(names()).toEqual(["Court 1 at 16:00", "Court 1 at 16:15"]);
     // The shown day is not the club's today: the sentence names it (review round 1, F1.7).
     expect(document.body.textContent).toContain(selectionCapSentence(2, "Mon 9 Sep"));
+  });
+
+  it("says a refused pick where the member is looking, and forgets it on the next change (R4 M4-7)", async () => {
+    openBookings({ day: CAPPED });
+    await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/, /^Book Court 1 at 16:30/]);
+    // Visible in the selection bar, not only to a screen reader — the fifth tap used to do nothing.
+    const refusal = bar().querySelector("[data-cap-refusal]");
+    expect(refusal?.textContent).toBe(selectionCapShort(2, "Mon 9 Sep"));
+    expect(refusal?.textContent).toBe("Limit reached: 2 slots on Mon 9 Sep.");
+    // …and a screen reader hears the whole rule, which no longer invites a fifth pick.
+    expect(selectionCapSentence(2, "Mon 9 Sep")).toMatch(/^That's 2 slots — the most you can book/);
+    // Unticking one is a change: the bar goes back to naming the selection.
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Court 1 at 16:15/ })); });
+    expect(names()).toEqual(["Court 1 at 16:00"]);
+    expect(bar().querySelector("[data-cap-refusal]")).toBeNull();
   });
 
   it("caps a drag the same way", async () => {

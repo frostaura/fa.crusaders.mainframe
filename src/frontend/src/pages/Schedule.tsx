@@ -27,7 +27,7 @@ import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
-import { BOOKINGS_COPY, cancelSelectionLabel, selectionCapSentence, selectionHeadline } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, cancelSelectionLabel, selectionCapSentence, selectionCapShort, selectionHeadline } from "../lib/bookingsCopy";
 import { firstNameOf, memberGridRules } from "../lib/bookingsApi";
 import { describePlaces, type Place } from "../lib/bookingSpan";
 import { clubClock } from "../lib/clubClock";
@@ -85,9 +85,10 @@ export default function BookingsPage() {
   const gridRules = forMember?.rules ?? rules;
   const explainer = useGridExplainer(day, rules, otherDay, forMember);
   const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay), [otherDay]);
+  const capShort = useCallback((cap: number) => selectionCapShort(cap, otherDay), [otherDay]);
   const selection = useGridSelection({
     cap: isAdmin || rules.adminExempt ? null : rules.remainingToday,
-    announce: explainer.announce, capSentence,
+    announce: explainer.announce, capSentence, capShort,
     onSentence: BOOKINGS_COPY.selectionOn, offSentence: BOOKINGS_COPY.selectionOff,
   });
   useClearOnDayChange(date, selection, explainer);
@@ -308,7 +309,9 @@ function SelectionBar(props: {
   const headline = selection.keys.length ? selectionHeadline(free, total, bookings.length) : BOOKINGS_COPY.chooseSlots;
   return (
     <ActionBar
-      count={selection.keys.length} countLabel={headline} detail={describeSpan(selection.keys, day)}
+      count={selection.keys.length} countLabel={headline}
+      // R4 M4-7 — a pick the daily cap refused is said HERE, where the member is looking.
+      detail={selection.refusal ? <span data-cap-refusal="" className="text-warning-strong">{selection.refusal}</span> : describeSpan(selection.keys, day)}
       onClose={selection.api.leave} closeLabel={BOOKINGS_COPY.clearSelection} label={BOOKINGS_COPY.actionBarLabel}
     >
       {bookings.length > 0 ? (

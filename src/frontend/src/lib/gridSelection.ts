@@ -129,6 +129,11 @@ export type Selection = {
   toggleMode(): void;
   /** Keep the mode, drop the choices — a date change, and a finished booking. */
   clear(): void;
+  /**
+   * R4 M4-7 — why the last pick was refused (the member's daily cap), until the next change. It
+   * was said only to a screen reader; a sighted member's fifth tap did nothing at all.
+   */
+  refusal: string | null;
 };
 
 type Options = {
@@ -138,6 +143,8 @@ type Options = {
   announce: (text: string) => void;
   /** What to say when the cap refuses a choice. */
   capSentence: (cap: number) => string;
+  /** The same, short, for the selection bar (`refusal`); the full sentence when absent. */
+  capShort?: (cap: number) => string;
   onSentence: string;
   offSentence: string;
 };
@@ -162,7 +169,7 @@ function hapticTick() {
 }
 
 export function useGridSelection(options: Options): Selection {
-  const { cap, announce, capSentence, onSentence, offSentence } = options;
+  const { cap, announce, capSentence, capShort, onSentence, offSentence } = options;
   const [active, setActive] = useState(false);
   const [keys, setKeys] = useState<SelectionKey[]>([]);
   const [anchor, setAnchor] = useState<GridCoord | null>(null);
@@ -170,7 +177,11 @@ export function useGridSelection(options: Options): Selection {
   const base = useRef<SelectionKey[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const refuse = useCallback(() => announce(capSentence(cap ?? 0)), [announce, capSentence, cap]);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const refuse = useCallback(() => {
+    announce(capSentence(cap ?? 0));
+    setRefusal((capShort ?? capSentence)(cap ?? 0));
+  }, [announce, capSentence, capShort, cap]);
 
   const toggle = useCallback((key: SelectionKey, at?: GridCoord) => {
     if (at) setAnchor(at);
@@ -178,9 +189,11 @@ export function useGridSelection(options: Options): Selection {
       const next = keys.filter((k) => k !== key);
       base.current = next;
       setKeys(next);
+      setRefusal(null);
       return;
     }
     if (cap !== null && key.startsWith("free:") && freeCount(keys) >= cap) { refuse(); return; }
+    setRefusal(null);
     const next = [...keys, key];
     base.current = next;
     setKeys(next);
@@ -190,6 +203,7 @@ export function useGridSelection(options: Options): Selection {
     setActive(true);
     announce(onSentence);
     if (cap !== null && cap <= 0 && key.startsWith("free:")) { refuse(); return; }
+    setRefusal(null);
     base.current = [key];
     if (at) setAnchor(at);
     setKeys([key]);
@@ -206,6 +220,7 @@ export function useGridSelection(options: Options): Selection {
     for (const k of range) if (!out.includes(k)) out.push(k);
     const kept = capped(out, cap);
     if (kept.length < out.length) refuse();
+    else setRefusal(null);
     setKeys(kept);
   }, [cap, refuse]);
 
@@ -238,8 +253,9 @@ export function useGridSelection(options: Options): Selection {
     }, LONG_PRESS_MS);
   }, [enterWith]);
 
-  const clearAll = useCallback(() => { base.current = []; setAnchor(null); setKeys([]); }, []);
+  const clearAll = useCallback(() => { base.current = []; setAnchor(null); setKeys([]); setRefusal(null); }, []);
   const leave = useCallback(() => {
+    setRefusal(null);
     base.current = [];
     setAnchor(null);
     setKeys([]);
@@ -261,7 +277,8 @@ export function useGridSelection(options: Options): Selection {
       announce(onSentence);
     },
     clear: clearAll,
-  }), [api, keys, active, leave, announce, onSentence, clearAll]);
+    refusal,
+  }), [api, keys, active, leave, announce, onSentence, clearAll, refusal]);
 }
 
 /**
