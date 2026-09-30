@@ -52,7 +52,7 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
 }
 
 const LINK = [
-  "no-lift group relative flex min-h-tabbar flex-col items-center justify-center gap-1 px-1 text-xs font-medium",
+  "no-lift group relative flex min-h-tabbar flex-col items-center justify-center gap-1 px-0.5 text-xs font-medium",
   "transition-colors duration-fast ease-standard motion-reduce:transition-none",
   "md:min-h-touch md:flex-row md:gap-2 md:rounded-lg md:px-3 md:text-sm",
 ].join(" ");
@@ -62,8 +62,13 @@ const LINK = [
  * `display: contents` — the icon and the badge become the link's own flex items, so the badge can
  * take `order-last` and sit AFTER the label instead of on top of it.
  */
+/*
+ * F4-7: the pill and the glyph are PIXEL-sized on the phone bar. A tab bar whose icons doubled with
+ * the text left no room for the words to wrap at 200 % (B12's "the page keeps 60 % of a 320×568
+ * screen" and "the bars grow only by their text"); an icon is not text and needs no resize.
+ */
 const ICON_PILL = [
-  "relative flex h-8 w-14 max-w-full items-center justify-center rounded-full transition-colors duration-fast ease-standard",
+  "relative flex h-[32px] w-full max-w-[56px] items-center justify-center rounded-full transition-colors duration-fast ease-standard",
   "motion-reduce:transition-none md:contents",
 ].join(" ");
 
@@ -80,10 +85,17 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
       {({ isActive }) => (
         <>
           <span className={cn(ICON_PILL, isActive && "bg-accent-soft")}>
-            <Glyph weight={isActive ? "fill" : "regular"} aria-hidden="true" className="size-6 md:size-5" />
+            <Glyph weight={isActive ? "fill" : "regular"} aria-hidden="true" className="size-[24px] md:size-5" />
             {badge ? <CountBadge attention={badge} /> : null}
           </span>
-          <span className="max-w-full truncate">{label}</span>
+          {/*
+            F4-7 — at 200 % text the four-tab bar cut "My Code" to "My C…" and "Bookings" to
+            "Booki…". The label is never cut: it wraps by word, and a single word wider than its
+            quarter of the screen overflows its tab evenly on both sides (the tab is centred and
+            its neighbours' words are shorter) rather than losing letters. The bar grows by the
+            label's lines and publishes its new height, so nothing sits under it.
+          */}
+          <span data-tab-label="" className="whitespace-normal break-normal text-center leading-tight md:whitespace-nowrap">{label}</span>
         </>
       )}
     </NavLink>
@@ -103,9 +115,13 @@ function CountBadge({ attention }: { attention: Pick<AdminAttention, "total" | "
       aria-label={attention.label}
       title={attention.label}
       className={cn(
-        "absolute -top-1 right-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5",
+        // F4-7 — on the icon's top-right CORNER, not across it: at 200 % text the old badge sat on
+        // the shield it counts for. Its left edge is just right of the icon's centre, but never so
+        // far right that it leaves the tab (the 320 px phone at the largest text), and its foot
+        // stops at 60 % of the pill's height, so at most the icon's upper corner is covered.
+        "absolute bottom-[60%] left-[min(calc(50%+0.5rem),calc(100%-1.25rem))] inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5",
         "bg-danger-solid text-xs font-semibold tabular-nums text-danger-ink ring-2 ring-bg-surface",
-        "md:static md:order-last md:ring-0",
+        "md:static md:order-last md:ml-0 md:ring-0",
       )}
     >
       {attention.total > 99 ? "99+" : attention.total}

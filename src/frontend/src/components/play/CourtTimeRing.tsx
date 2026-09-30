@@ -22,10 +22,21 @@ const CIRCUMFERENCE = 2 * Math.PI * R;
 export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditGoal: () => void }) {
   if (!ring) {
     return (
+      // F4-14 — the hint keeps a readable measure (12rem) before the button gives way: with
+      // `flex-1 min-w-0` alone it was the TEXT that shrank, squeezed into 5–6 lines beside the
+      // button at 375/390. Now the button drops under the text there, full width. F4-7: its label
+      // wraps at 200 % text rather than overflowing (design-system rule for labels that must wrap).
       <div data-ring="none" className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border p-4">
         <Target size={20} aria-hidden="true" className="shrink-0 text-text-muted" />
-        <p className="min-w-0 flex-1 text-sm text-text-secondary">{RING_COPY.setGoalHint}</p>
-        <Button variant="outline" size="sm" onClick={onEditGoal}>{RING_COPY.setGoal}</Button>
+        <p className="min-w-[12rem] flex-1 text-sm text-text-secondary">{RING_COPY.setGoalHint}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onEditGoal}
+          className="h-auto min-h-touch w-full whitespace-normal py-2 sm:w-auto"
+        >
+          {RING_COPY.setGoal}
+        </Button>
       </div>
     );
   }

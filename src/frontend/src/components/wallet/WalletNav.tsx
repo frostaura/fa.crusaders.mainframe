@@ -12,8 +12,10 @@ import { cn } from "@/lib/utils";
  * `aria-current="page"` (from `NavLink`) is what a screen reader hears as the selected one.
  * </p>
  */
+// F4-7: `h-auto min-h-touch whitespace-normal py-2` (the design system's rule for labels that must
+// wrap) and a gutter that gives way — at 200 % text "Overview | Activity" overflowed the screen.
 const SEGMENT = cn(
-  "no-lift inline-flex min-h-touch items-center justify-center rounded-md border border-transparent px-4",
+  "no-lift inline-flex min-h-touch min-w-0 items-center justify-center rounded-md border border-transparent px-3 py-2 text-center whitespace-normal sm:px-4",
   "text-sm font-semibold text-text-secondary transition-colors duration-fast ease-standard motion-reduce:transition-none",
   "hover:text-text-primary focus-visible:-outline-offset-2",
 );

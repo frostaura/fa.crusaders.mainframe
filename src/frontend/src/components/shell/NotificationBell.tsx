@@ -38,19 +38,26 @@ export function NotificationBell({ className }: { className?: string }) {
         className,
       )}
     >
-      <Bell size={20} weight={here ? "fill" : "regular"} aria-hidden="true" />
-      {badge ? (
-        <span
-          aria-hidden="true"
-          data-unread-badge=""
-          className={cn(
-            "absolute right-0.5 top-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1",
-            "bg-danger-solid text-xs font-semibold tabular-nums text-danger-ink ring-2 ring-bg-surface",
-          )}
-        >
-          {badge}
-        </span>
-      ) : null}
+      {/*
+        F4-7 — the glyph scales with the text (rem, not a fixed 20px) and the badge hangs off the
+        glyph's top-right corner rather than the link's: at 200 % text the 20px bell stayed 20px
+        while the badge doubled, and the badge sat squarely on top of the bell.
+      */}
+      <span className="relative inline-flex">
+        <Bell weight={here ? "fill" : "regular"} aria-hidden="true" data-bell-glyph="" className="size-5" />
+        {badge ? (
+          <span
+            aria-hidden="true"
+            data-unread-badge=""
+            className={cn(
+              "absolute bottom-[55%] left-[60%] inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1",
+              "bg-danger-solid text-xs font-semibold tabular-nums text-danger-ink ring-2 ring-bg-surface",
+            )}
+          >
+            {badge}
+          </span>
+        ) : null}
+      </span>
     </Link>
   );
 }

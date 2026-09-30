@@ -32,7 +32,7 @@ const ADMIN_ROUTES: Array<[string, string]> = [
 
 const MEMBER_ROUTES: Array<[string, string]> = [
   ["/schedule", "Bookings"],
-  ["/my-code", "Your code"],
+  ["/my-code", "My Code"],
 ];
 
 /** Everything either screen asks for, answered thinly — this spec is about geometry. */
