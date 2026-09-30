@@ -20,13 +20,14 @@ import { useBalance } from "@/lib/balance";
 import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
-import { MoneyRows, SlotList, SlotSummary, Stepper } from "./SheetParts";
+import { MoneyRows, SendingNote, SlotList, SlotSummary, Stepper, WaitingButton } from "./SheetParts";
 import { slotCount, type BookAs } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
 import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
 import { ConfirmPlayers, ResultPlayers } from "./PlayersOutcomeView";
 import { SplitStep } from "./SplitStep";
 import { refusalSentence, useBookFlow, type BookFlow, type BookFlowInput } from "./useBookFlow";
+import { useSendingGuard } from "./useSendingGuard";
 
 export type { BookedOutcome } from "./useBookFlow";
 
@@ -73,15 +74,23 @@ export type BookSheetProps = BookFlowInput & {
   onOpenChange: (open: boolean) => void;
   /** Where focus goes on close when the control that opened it has gone (R3 X-6). */
   onCloseAutoFocus?: (event: Event) => void;
+  /** R4 I4-1 — told while a write is in flight, so the page's own ways out (system Back) wait too. */
+  onBusyChange?: (busy: boolean) => void;
 };
 
+type ViewProps = BookSheetProps & { onClose: () => void; refused: number };
+
 export function BookSheet(props: BookSheetProps) {
-  const { open, onOpenChange, onCloseAutoFocus } = props;
+  const { open, onOpenChange, onCloseAutoFocus, onBusyChange } = props;
+  // R4 I4-1 — the ×, Escape, the scrim and the footer's way out all ask the guard first.
+  const guard = useSendingGuard(onOpenChange, onBusyChange);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={guard.onOpenChange}>
       {/* D12 — top-anchored on desktop: steps and picker tabs change its height. */}
       <DialogContent data-sheet="book" className={TOP_ANCHORED_SHEET} onCloseAutoFocus={onCloseAutoFocus}>
-        {props.slots.length > 0 ? <BookFlowView {...props} onClose={() => onOpenChange(false)} /> : null}
+        {props.slots.length > 0 ? (
+          <BookFlowView {...props} sheetOpen={open} onBusy={guard.setSending} refused={guard.refused} onClose={() => guard.onOpenChange(false)} />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -96,7 +105,7 @@ function useSpendable(given: number | null): Spendable {
   return { spendable: held ? held.spendable : given, held: shown };
 }
 
-function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
+function BookFlowView(props: ViewProps) {
   const wallet = useSpendable(props.balanceCredits);
   const flow = useBookFlow({
     ...props, balanceCredits: props.isAdmin ? props.balanceCredits : wallet.spendable, held: wallet.held,
@@ -104,6 +113,7 @@ function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
   const body = useRef<HTMLDivElement>(null);
   /** The sentence an unavailable Book button is described by. */
   const reasonId = useId();
+  const sendingId = useId();
 
   // A new step is a new screen: take a screen reader to its top rather than leaving it on a
   // button that has just changed meaning under it.
@@ -132,9 +142,16 @@ function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
             : <StepView flow={flow} isAdmin={props.isAdmin} reasonId={reasonId} actorUserId={props.actorUserId} terms={props.cancelTerms} />}
         </div>
       </DialogBody>
-      <BookFooter flow={flow} onClose={props.onClose} reasonId={reasonId} />
+      <SendingNote text={sheetNote(flow)} refused={props.refused + flow.ignoredTaps} id={sendingId} />
+      <BookFooter flow={flow} onClose={props.onClose} reasonId={reasonId} sendingId={sendingId} />
     </>
   );
+}
+
+/** The line above the footer: waiting for the club, or why a double tap's second half did nothing. */
+function sheetNote(flow: BookFlow): string | null {
+  if (flow.busy) return BOOK_SHEET.sending;
+  return flow.ignoredTaps > 0 && flow.confirming && !flow.run ? BOOK_SHEET.doubleTapIgnored : null;
 }
 
 /* ─────────────────────────────── steps ─────────────────────────────── */
@@ -375,8 +392,8 @@ function isAdminRun(flow: BookFlow): boolean {
 
 /* ─────────────────────────────── the footer ─────────────────────────────── */
 
-function BookFooter({ flow, onClose, reasonId }: { flow: BookFlow; onClose: () => void; reasonId: string }) {
-  if (flow.run) return <ResultFooter flow={flow} onClose={onClose} />;
+function BookFooter({ flow, onClose, reasonId, sendingId }: { flow: BookFlow; onClose: () => void; reasonId: string; sendingId: string }) {
+  if (flow.run) return <ResultFooter flow={flow} onClose={onClose} sendingId={sendingId} />;
   if (flow.players.picking !== null) {
     // The picker is a panel inside the Players step: its way out is Back, to the seats.
     return (
@@ -386,11 +403,12 @@ function BookFooter({ flow, onClose, reasonId }: { flow: BookFlow; onClose: () =
     );
   }
   const first = flow.stepIndex === 0;
+  const way = first ? BOOK_SHEET.cancel : BOOK_SHEET.back;
   return (
     <DialogFooter>
-      <Button variant="outline" onClick={first ? onClose : flow.back}>
-        {first ? BOOK_SHEET.cancel : BOOK_SHEET.back}
-      </Button>
+      {flow.busy
+        ? <WaitingButton label={way} describedBy={sendingId} />
+        : <Button variant="outline" onClick={first ? onClose : flow.back}>{way}</Button>}
       {flow.confirming ? <PrimaryButton flow={flow} reasonId={reasonId} /> : <Button onClick={flow.next}>{BOOK_SHEET.next}</Button>}
     </DialogFooter>
   );
@@ -411,23 +429,16 @@ function PrimaryButton({ flow, reasonId }: { flow: BookFlow; reasonId: string })
   if (primary.kind === "reading") {
     return <Button pending data-reading="">{primary.label}</Button>;
   }
-  if (flow.settling) {
-    // Just arrived on Confirm: a press now is a double tap's second half and is ignored — so the
-    // button says it is not ready rather than looking ready and doing nothing (perf report 1).
-    return (
-      <Button aria-disabled="true" data-settling="" className="cursor-default opacity-60 hover:bg-primary">
-        {primary.label}
-      </Button>
-    );
-  }
+  // R4 I4-2 — ready the moment it appears: only a double tap's second half is ignored (its click
+  // count says so), never a deliberate first tap.
   return (
-    <Button pending={flow.action.pending} onClick={() => flow.submit(primary.allowNegativeBalance)}>
+    <Button pending={flow.busy} onClick={(e) => flow.submit(primary.allowNegativeBalance, e.detail)}>
       {primary.label}
     </Button>
   );
 }
 
-function ResultFooter({ flow, onClose }: { flow: BookFlow; onClose: () => void }) {
+function ResultFooter({ flow, onClose, sendingId }: { flow: BookFlow; onClose: () => void; sendingId: string }) {
   const halted = flow.run?.halted === "insufficient_balance";
   const admin = isAdminRun(flow);
   return (
@@ -438,11 +449,11 @@ function ResultFooter({ flow, onClose }: { flow: BookFlow; onClose: () => void }
         </Button>
       ) : null}
       {halted ? (
-        <Button variant="outline" pending={flow.action.pending} onClick={() => flow.submit(admin)}>
+        <Button variant="outline" pending={flow.busy} onClick={(e) => flow.submit(admin, e.detail)}>
           {admin ? BOOK_SHEET.bookRestAnyway : BOOK_SHEET.retry}
         </Button>
       ) : null}
-      <Button onClick={onClose}>{BOOK_SHEET.done}</Button>
+      {flow.busy ? <WaitingButton label={BOOK_SHEET.done} describedBy={sendingId} /> : <Button onClick={onClose}>{BOOK_SHEET.done}</Button>}
     </DialogFooter>
   );
 }

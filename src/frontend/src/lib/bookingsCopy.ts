@@ -288,6 +288,20 @@ export const BOOK_SHEET = {
   bookRestAnyway: "Book the rest anyway",
   failedAction: "make that booking",
   fallback: "Couldn't make that booking. Try again in a moment.",
+  /**
+   * R4 I4-1 — while the club is answering, nothing leaves the sheet: a member who backed out of
+   * a slow booking was charged with nothing on screen. Said beside the unavailable way out, and
+   * said again when somebody tries the ×, Escape or Back.
+   */
+  sending: "Booking… this stays open until the club answers, so you'll see what happened.",
+  /**
+   * R4 I4-2 — a double tap on Continue whose second half landed on Book: ignored, and said, so a
+   * press never does nothing in silence.
+   */
+  doubleTapIgnored: "That was a double tap, so nothing was booked yet. Check the details, then tap Book.",
+  /** An answer that arrived after the sheet had gone (a sign-out, a forced route) — a toast. */
+  landedLate: (what: readonly string[]) =>
+    `The booking went through: ${what.length === 1 ? what[0] : `${what.length} slots`}. It's on the schedule.`,
 } as const;
 
 /** R19's notice: who, where it leaves them, and that it is on the record. */
@@ -348,6 +362,11 @@ export const CANCEL_SHEET = {
   description: (count: number) =>
     (count === 1 ? "Here's what goes back if you cancel now." : "Here's what goes back if you cancel them now."),
   keep: (count: number) => (count === 1 ? "Keep booking" : "Keep bookings"),
+  /** R4 I4-1 — the cancel sheet's waiting line; see BOOK_SHEET.sending. */
+  sending: "Cancelling… this stays open until the club answers, so you'll see what happened.",
+  /** A cancellation that finished after its sheet had gone. */
+  landedLate: (count: number) =>
+    (count === 1 ? "The booking was cancelled." : `${count} bookings were cancelled.`) + " The wallet shows what came back.",
   confirm: (count: number) => (count === 1 ? "Cancel booking" : `Cancel ${count} bookings`),
   done: "Done",
   retry: "Try again",

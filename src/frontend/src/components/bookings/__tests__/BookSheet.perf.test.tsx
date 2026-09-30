@@ -39,18 +39,16 @@ function open() {
 const bookButton = () => within(screen.getByRole("dialog")).getByRole("button", { name: /^Book · / });
 
 describe("BookSheet — the guard after Continue", () => {
-  it("shows Book unavailable for its few hundred ms, ignores a press then, and is ready after", async () => {
+  it("ignores only a double tap's second half; Book is ready the moment it appears (R4 I4-2)", async () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 450 } }]);
     open();
-    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
-    // A double tap's second half lands here: visibly not ready, and nothing is sent.
-    expect(bookButton()).toHaveAttribute("aria-disabled", "true");
-    expect(bookButton()).toHaveAttribute("data-settling");
-    fireEvent.click(bookButton());
-    expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
-    await waitFor(() => expect(bookButton()).not.toHaveAttribute("data-settling"));
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }), { detail: 1 });
+    // A double tap's second half lands here (its click count is 2): nothing is sent.
     expect(bookButton()).not.toHaveAttribute("aria-disabled");
-    fireEvent.click(bookButton());
+    fireEvent.click(bookButton(), { detail: 2 });
+    expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    // A single tap at once is a booking — it used to be dropped silently inside the window.
+    fireEvent.click(bookButton(), { detail: 1 });
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1));
   });
 });
@@ -60,7 +58,6 @@ describe("BookSheet — what the grid is told", () => {
     stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 450 } }]);
     const { onBooked, onSending } = open();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
-    await waitFor(() => expect(bookButton()).not.toHaveAttribute("data-settling"));
     fireEvent.click(bookButton());
     expect(onSending).toHaveBeenCalledWith([C1]);
     await waitFor(() => expect(onBooked).toHaveBeenCalledTimes(1));
@@ -74,7 +71,6 @@ describe("BookSheet — what the grid is told", () => {
       { path: "/api/v1/schedule", respond: () => refuse(503, { error: "unavailable" }) }]);
     const { onBooked, onSending } = open();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
-    await waitFor(() => expect(bookButton()).not.toHaveAttribute("data-settling"));
     fireEvent.click(bookButton());
     expect(onSending).toHaveBeenCalledWith([C1]);
     await waitFor(() => expect(onSending).toHaveBeenLastCalledWith(null));

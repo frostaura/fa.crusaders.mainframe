@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Racquet } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatCredits } from "@/lib/utils";
@@ -191,5 +192,28 @@ export function MoneyRows({ rows, label }: { rows: readonly MoneyRow[]; label: s
         );
       })}
     </dl>
+  );
+}
+
+/**
+ * R4 I4-1 — the sheet's waiting line while the club answers: visible, the description of the
+ * unavailable way out, and a polite live region re-keyed on every refused close so a screen
+ * reader hears it again when the ×, Escape or Back is tried. Also carries the Book sheet's
+ * "check, then tap Book" after an ignored double tap (I4-2). Null text: nothing to say.
+ */
+export function SendingNote({ text, refused, id }: { text: string | null; refused: number; id: string }) {
+  return (
+    <p id={id} data-sending-note="" aria-live="polite" className={text ? "px-4 pt-2 text-sm text-text-secondary sm:px-6" : "sr-only"}>
+      {text ? <span key={refused}>{text}</span> : null}
+    </p>
+  );
+}
+
+/** A way out while a write is in flight: in its place, unavailable, and saying why (R4 I4-1). */
+export function WaitingButton({ label, describedBy }: { label: string; describedBy: string }) {
+  return (
+    <Button variant="outline" aria-disabled="true" aria-describedby={describedBy} data-waiting="" className="cursor-not-allowed opacity-50 hover:bg-transparent">
+      {label}
+    </Button>
   );
 }

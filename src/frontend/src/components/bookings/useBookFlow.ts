@@ -15,6 +15,7 @@ import {
 } from "./bookFlow";
 import { usePlayersStep } from "./usePlayersStep";
 import { recoverBooking, worthRereading } from "./bookRecovery";
+import { useLateLanding } from "./useSendingGuard";
 
 /**
  * BookSheet's state machine, as one hook: which step, who pays, what the admin quote said, what
@@ -67,6 +68,12 @@ export type BookFlowInput = {
    * lands reports through `onBooked`, and the page clears the mark there (with the cells it paints).
    */
   onSending?: (slots: SelectedSlot[] | null) => void;
+  /**
+   * R4 I4-1 — whether the sheet is open, and a way to tell it a write is in flight: while one is,
+   * the sheet refuses every way out, and an answer landing after it has gone is said in a toast.
+   */
+  sheetOpen?: boolean;
+  onBusy?: (busy: boolean) => void;
 };
 
 export type Primary =
@@ -83,24 +90,18 @@ export type Primary =
 const STEP_SETTLE_MS = 300;
 
 /**
- * The step-change guard, and whether it is up (perf report Frontend 1). A press inside the window
- * is ignored — that is the double tap's second half — but it used to be ignored SILENTLY on a Book
- * button that looked ready: a quick first tap simply did nothing. While the guard is up the button
- * now says so (`settling`: shown unavailable, then ready), so a dropped press is never invisible.
+ * The step-change guard (perf report Frontend 1, R4 I4-2). Book replaces Continue under the same
+ * finger, so the second half of a double tap on Continue lands on Book — that press, and only
+ * that one, is ignored. It is told apart by the click's own count (`event.detail` ≥ 2, the
+ * browser's double-click/double-tap counter), never by time alone: a deliberate first tap on Book
+ * inside the window used to be dropped silently, and a member who tapped quickly got nothing.
+ * A keyboard press (detail 0) and a single tap (detail 1) are always accepted.
  */
 function useStepSettle() {
   const settledAt = useRef(0);
-  const [settling, setSettling] = useState(false);
-  const timer = useRef<number | null>(null);
-  useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current); }, []);
-  const arm = () => {
-    settledAt.current = Date.now();
-    setSettling(true);
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => { timer.current = null; setSettling(false); }, STEP_SETTLE_MS);
-  };
-  const tooSoon = () => Date.now() - settledAt.current < STEP_SETTLE_MS;
-  return { settling, arm, tooSoon };
+  const arm = () => { settledAt.current = Date.now(); };
+  const isDoubleTapTail = (clicks: number) => clicks >= 2 && Date.now() - settledAt.current < STEP_SETTLE_MS;
+  return { arm, isDoubleTapTail };
 }
 
 /* ─────────────────────────────── members (admin) ─────────────────────────────── */
@@ -221,9 +222,18 @@ export function useBookFlow(input: BookFlowInput) {
   const [showProblem, setShowProblem] = useState(false);
   const [run, setRun] = useState<BookRun | null>(null);
   const settle = useStepSettle();
+  // R4 I4-1 — true from Book until the club answers. Its own flag, not `action.pending`, which a
+  // reset (a step change, a payer change) would clear while the write was still on its way.
+  const [busy, setBusy] = useState(false);
+  // I4-2 — a double tap's second half, ignored: counted, so the sheet says why nothing happened.
+  const [ignoredTaps, setIgnoredTaps] = useState(0);
+  const busyNow = useRef(false);
+  const late = useLateLanding(input.sheetOpen ?? true);
+
   const members = useSheetMembers(isAdmin, input.members, actorUserId);
 
   const onEdit = () => {
+    if (busyNow.current) return;
     // A different game is a different request: never let a retry of the last one reuse its key.
     setKey(newIdempotencyKey("mb"));
     action.reset();
@@ -263,6 +273,7 @@ export function useBookFlow(input: BookFlowInput) {
     {
       success: (result) => {
         setRun(result);
+        if (!late.live()) late.say("success", BOOK_SHEET.landedLate(result.booked.map(face)));
         const viewerPaid = !isAdmin || who.kind === "self";
         input.onBooked?.({
           booked: result.booked,
@@ -275,6 +286,7 @@ export function useBookFlow(input: BookFlowInput) {
       // A re-read already happened on the way here when there was one to make.
       failure: (error) => {
         input.onSending?.(null);
+        if (!late.live()) late.say("danger", refusalSentence(error, Boolean(players.payload)));
         const reread = Boolean(input.reread) && worthRereading(error);
         if (!reread && provesStaleGrid(error)) input.onStale?.();
       },
@@ -282,6 +294,7 @@ export function useBookFlow(input: BookFlowInput) {
   );
 
   const setWho = (next: BookAs) => {
+    if (busyNow.current) return;
     setWhoState(next);
     setShowProblem(false);
     // A different payer is a different request: never let a retry of the last one reuse its key.
@@ -290,7 +303,9 @@ export function useBookFlow(input: BookFlowInput) {
   };
 
   const moveTo = (id: StepId) => {
+    if (busyNow.current) return;
     settle.arm();
+    setIgnoredTaps(0);
     action.reset();
     setStepId(id);
   };
@@ -310,9 +325,23 @@ export function useBookFlow(input: BookFlowInput) {
     else moveTo(neighbour(steps, step, -1));
   };
 
-  const submit = (allowNegativeBalance: boolean) => {
-    if (settle.tooSoon()) return;
-    void action.run(allowNegativeBalance);
+  /** @param clicks the press's `event.detail` — see `useStepSettle`. */
+  const submit = (allowNegativeBalance: boolean, clicks = 0) => {
+    if (busyNow.current) return;
+    if (settle.isDoubleTapTail(clicks)) {
+      setIgnoredTaps((n) => n + 1);
+      return;
+    }
+    setIgnoredTaps(0);
+    // Told to the sheet at once, not in an effect: a press on the × a frame later is refused too.
+    busyNow.current = true;
+    setBusy(true);
+    input.onBusy?.(true);
+    void action.run(allowNegativeBalance).finally(() => {
+      busyNow.current = false;
+      setBusy(false);
+      input.onBusy?.(false);
+    });
   };
 
   /** In grid slots, the unit the action bar counted in — see `slotCount`. */
@@ -357,8 +386,9 @@ export function useBookFlow(input: BookFlowInput) {
     godMode: ready?.overdraws ? { name: memberName, balanceAfter: ready.after, owedBack: ready.owedBack } : null,
     action, run,
     next, back, submit, face, timezone,
-    /** The step-change guard is up: Book is shown unavailable for its few hundred ms. */
-    settling: settle.settling,
+    /** A write is on its way: nothing may leave the sheet or change what it sends (R4 I4-1). */
+    busy,
+    ignoredTaps,
     held: memberHeld,
     /**
      * What of the payer's balance cannot be spent — the member's held + owed back, or the

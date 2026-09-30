@@ -18,9 +18,14 @@ import { useLocation, useNavigate } from "react-router-dom";
  * entry, and an entry it did not write is one it cannot navigate back across.
  * </p>
  *
+ * <p>
+ * <b>A sheet may refuse</b> (R4 I4-1): `close` returning `false` — a money write still on its way —
+ * keeps the sheet open, and its entry is put straight back so the next Back is asked again.
+ * </p>
+ *
  * @param tag names this sheet's entry, so two sheets on one page never take each other's.
  */
-export function useSheetHistory(open: boolean, close: () => void, tag: string) {
+export function useSheetHistory(open: boolean, close: () => boolean | void, tag: string) {
   const location = useLocation();
   const navigate = useNavigate();
   const marked = (location.state as { sheet?: string } | null)?.sheet === tag;
@@ -40,10 +45,14 @@ export function useSheetHistory(open: boolean, close: () => void, tag: string) {
       return;
     }
     if (open && pushed.current && seen.current && !marked) {
-      // Back (or anything else) took the sheet's entry away: the sheet goes with it.
+      // Back (or anything else) took the sheet's entry away: the sheet goes with it — unless it
+      // refuses, and then the entry goes back on.
+      if (latestClose.current() === false) {
+        navigate(`${location.pathname}${location.search}`, { state: { ...(location.state as object | null), sheet: tag } });
+        return;
+      }
       pushed.current = false;
       seen.current = false;
-      latestClose.current();
       return;
     }
     if (!open && pushed.current) {

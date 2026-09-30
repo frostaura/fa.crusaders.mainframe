@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Alert } from "@/components/Alert";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -15,12 +15,13 @@ import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL } from "@/lib/bookingsCopy";
 import { BulkResults } from "./BulkResults";
-import { MoneyRows, SlotList, type MoneyRow, type SlotLine } from "./SheetParts";
+import { MoneyRows, SendingNote, SlotList, WaitingButton, type MoneyRow, type SlotLine } from "./SheetParts";
 import {
   bookingFace, cancelBookings, netOf, newCancelKey, quoteNote, totalsOf, useCancelQuotes,
   type CancelRun, type QuoteMap,
 } from "./cancelFlow";
 import type { GridBooking } from "./types";
+import { useLateLanding, useSendingGuard } from "./useSendingGuard";
 
 /**
  * Cancelling one booking or several (R7) — the money stated in figures BEFORE the member commits,
@@ -59,14 +60,22 @@ export type CancelSheetProps = {
   reread?: Reread;
   /** Where focus goes on close when the control that opened it has gone (R3 X-6). */
   onCloseAutoFocus?: (event: Event) => void;
+  /** R4 I4-1 — told while the cancel is in flight, so the page's own ways out (system Back) wait too. */
+  onBusyChange?: (busy: boolean) => void;
 };
 
+type FlowProps = CancelSheetProps & { onClose: () => void; onBusy: (busy: boolean) => void; refused: number };
+
 export function CancelSheet(props: CancelSheetProps) {
-  const { open, onOpenChange, onCloseAutoFocus } = props;
+  const { open, onOpenChange, onCloseAutoFocus, onBusyChange } = props;
+  // R4 I4-1 — Keep, the ×, Escape and the scrim all wait while the cancel is on its way.
+  const guard = useSendingGuard(onOpenChange, onBusyChange);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={guard.onOpenChange}>
       <DialogContent data-sheet="cancel" onCloseAutoFocus={onCloseAutoFocus}>
-        {props.bookings.length > 0 ? <CancelFlowView {...props} onClose={() => onOpenChange(false)} /> : null}
+        {props.bookings.length > 0 ? (
+          <CancelFlowView {...props} onBusy={guard.setSending} refused={guard.refused} onClose={() => guard.onOpenChange(false)} />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -88,8 +97,9 @@ function failureSentence(error: unknown): string {
     : describeFailure(error, { action: CANCEL_SHEET.failedAction });
 }
 
-function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
-  const { bookings, isAdmin, onClose } = props;
+function useCancelFlow(props: FlowProps) {
+  const { bookings, isAdmin, onClose, onBusy } = props;
+  const late = useLateLanding(props.open);
   const quotes = useCancelQuotes(bookings);
   const [waive, setWaive] = useState(false);
   const [reason, setReason] = useState("");
@@ -113,8 +123,11 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
     },
     {
       success: (result) => {
+        onBusy(false); // answered: the Done / close that follows is not a way out mid-flight
         const own = bookings.every((b) => b.mine);
         props.onCancelled?.({ cancelledIds: result.cancelledIds, ownMoneyMoved: own });
+        // Gone before the answer came (a forced route): the batch's rows have nowhere to show.
+        if (!result.single && !late.live()) late.say("success", CANCEL_SHEET.landedLate(result.cancelledIds.length));
         if (!result.single) {
           setRun(result);
           return;
@@ -124,7 +137,10 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
         push?.({ tone: "success", text: cancellationOutcome(result.single.refunded, result.single.penalty, who, result.single.split) });
         onClose();
       },
-      failure: (error) => { if (provesStaleGrid(error)) props.onStale?.(); },
+      failure: (error) => {
+        if (provesStaleGrid(error)) props.onStale?.();
+        if (!late.live()) late.say("danger", failureSentence(error));
+      },
     },
   );
 
@@ -133,7 +149,9 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
       setReasonShown(true);
       return;
     }
-    void action.run();
+    // Told at once, not in an effect: a press on the × a frame later is refused too.
+    onBusy(true);
+    void action.run().finally(() => onBusy(false));
   };
 
   return {
@@ -145,9 +163,11 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
 
 type CancelFlow = ReturnType<typeof useCancelFlow>;
 
-function CancelFlowView(props: CancelSheetProps & { onClose: () => void }) {
+function CancelFlowView(props: FlowProps) {
   const flow = useCancelFlow(props);
   const count = props.bookings.length;
+  const sendingId = useId();
+  const busy = flow.action.pending;
   return (
     <>
       <DialogHeader>
@@ -159,12 +179,15 @@ function CancelFlowView(props: CancelSheetProps & { onClose: () => void }) {
           {flow.run ? <CancelResult run={flow.run} count={count} /> : <CancelBody flow={flow} bookings={props.bookings} />}
         </div>
       </DialogBody>
+      <SendingNote text={busy ? CANCEL_SHEET.sending : null} refused={props.refused} id={sendingId} />
       <DialogFooter>
         {flow.run ? (
           <Button onClick={props.onClose}>{CANCEL_SHEET.done}</Button>
         ) : (
           <>
-            <Button variant="outline" onClick={props.onClose}>{CANCEL_SHEET.keep(count)}</Button>
+            {busy
+              ? <WaitingButton label={CANCEL_SHEET.keep(count)} describedBy={sendingId} />
+              : <Button variant="outline" onClick={props.onClose}>{CANCEL_SHEET.keep(count)}</Button>}
             <Button variant="danger" pending={flow.action.pending} onClick={flow.confirm}>
               {CANCEL_SHEET.confirm(count)}
             </Button>

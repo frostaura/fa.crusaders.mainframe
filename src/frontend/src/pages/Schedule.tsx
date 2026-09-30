@@ -197,13 +197,13 @@ export default function BookingsPage() {
         isAdmin={isAdmin} actorUserId={actorUserId} balanceCredits={balance}
         bookAsUserId={bookAsUserId}
         onBooked={onBooked} onStale={() => void reconcile()} reread={reconcile} onCloseAutoFocus={sheets.returnFocus}
-        onSending={setSending}
+        onSending={setSending} onBusyChange={sheets.onBookBusy}
         cancelTerms={day ? { penaltyPct: day.penaltyPct, windowMinutes: day.penaltyWindowMinutes } : null}
       />
       <CancelSheet
         open={sheets.cancelOpen} onOpenChange={sheets.setCancelOpen} bookings={sheets.cancelBookings}
         isAdmin={isAdmin} onCancelled={onCancelled} onStale={() => void reconcile()} reread={reconcile}
-        onCloseAutoFocus={sheets.returnFocus}
+        onCloseAutoFocus={sheets.returnFocus} onBusyChange={sheets.onCancelBusy}
       />
     </PageShell>
   );
@@ -360,15 +360,20 @@ function useSheets() {
   const opener = useRef<Element | null>(null);
   const openBook = useCallback((slots: SelectedSlot[]) => { opener.current = document.activeElement; setUnderSheet(true); setBookSlots(slots); setBookOpen(true); }, []);
   const openCancel = useCallback((bookings: GridBooking[]) => { opener.current = document.activeElement; setUnderSheet(true); setCancelBookings(bookings); setCancelOpen(true); }, []);
+  // R4 I4-1 — a sheet whose money write is on its way stays open, whatever asks it to close.
+  const bookBusy = useRef(false);
+  const cancelBusy = useRef(false);
+  const onBookBusy = useCallback((busy: boolean) => { bookBusy.current = busy; }, []);
+  const onCancelBusy = useCallback((busy: boolean) => { cancelBusy.current = busy; }, []);
   // F1.19 — the system Back closes an open sheet instead of leaving Bookings.
-  useSheetHistory(bookOpen, () => setBookOpen(false), "book");
-  useSheetHistory(cancelOpen, () => setCancelOpen(false), "cancel");
+  useSheetHistory(bookOpen, () => (bookBusy.current ? false : setBookOpen(false)), "book");
+  useSheetHistory(cancelOpen, () => (cancelBusy.current ? false : setCancelOpen(false)), "cancel");
   // A sheet closed while its booking was on its way leaves no answer to clear the mark with: the
   // cell goes back to what the day says, as it did before the mark existed.
   const returnFocus = useCallback((event: Event) => { setUnderSheet(false); setSending(null); backToGrid(event, opener.current); }, []);
   return {
     bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel, returnFocus,
-    underSheet, sending, setSending,
+    underSheet, sending, setSending, onBookBusy, onCancelBusy,
   };
 }
 
