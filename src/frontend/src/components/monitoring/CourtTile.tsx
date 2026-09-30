@@ -3,6 +3,7 @@ import { cn } from "../../lib/utils";
 import {
   EXPECTATION_WORD, courtAnnouncement, courtExpectation, expectationMeaning, healthLine,
   lightsLine, nextLine, startedLine, type CourtExpectation,
+  duplicateBoxesWarning,
 } from "../../lib/monitoringCopy";
 import { type ControlBoardCourt } from "../../lib/adminApi";
 
@@ -90,6 +91,7 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
   const boxLine = healthLine(court.device, now, "Box");
   const doorLine = healthLine(court.door, now, "Door");
   const bookedBy = court.current?.booked_by?.name ?? court.current?.label ?? null;
+  const duplicate = duplicateBoxesWarning(court, now);
 
   return (
     <article
@@ -162,6 +164,13 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
           qualification rendered as a badge reads as a state. */}
       {lights && (
         <p className="text-[calc(0.75rem*var(--board-scale,1))] text-text-muted">{lights}</p>
+      )}
+
+      {/* R3 A-11: more than one box set to this court — said, never silently resolved. */}
+      {duplicate && (
+        <p data-duplicate-boxes="" className="rounded-lg border border-warning-strong bg-warning-soft px-[calc(0.75rem*var(--board-scale,1))] py-[calc(0.5rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] font-medium text-warning-strong">
+          {duplicate}
+        </p>
       )}
 
       {(boxLine || doorLine) && (

@@ -270,6 +270,25 @@ export function healthLine(
   return link ? `${name} · ${link} · ${heard}` : `${name} · ${heard}`;
 }
 
+/**
+ * Several enabled boxes claim one court (review round 3, A-11): two relay banks answering for
+ * one set of lights is a commissioning or wiring mistake. The tile reports the box heard from
+ * most recently and says so, naming the others and when each was last heard — it used to take
+ * whichever came first and contradict its own light state. Null for one box, or an older API.
+ */
+export function duplicateBoxesWarning(court: ControlBoardCourt, now: number): string | null {
+  const count = court.boxes_on_court ?? 0;
+  if (count <= 1) return null;
+  const main = court.device?.name ?? court.device?.device_code ?? "one box";
+  const others = (court.other_boxes ?? []).map((box) => {
+    const name = box.name ?? box.device_code ?? "an unnamed box";
+    return `${name} (${box.last_seen_at ? `heard ${relative(box.last_seen_at, now)}` : "never heard from"})`;
+  });
+  const also = others.length > 0 ? ` Also claiming it: ${others.join(", ")}.` : "";
+  return `${count} boxes are set to this court. This tile follows ${main}, the one heard from most recently.${also}`
+    + " Only one box should switch a court's lights — take the others out of service on Boards.";
+}
+
 // ---------------------------------------------------------------------------------------
 // The board's own honesty, and how fresh it is
 // ---------------------------------------------------------------------------------------

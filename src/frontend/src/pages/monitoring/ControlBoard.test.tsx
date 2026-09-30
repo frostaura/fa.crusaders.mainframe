@@ -144,6 +144,35 @@ describe("the control board", () => {
     expect((await screen.findAllByText(/Court 2's box hasn't called in/)).length).toBeGreaterThan(0);
   });
 
+  /**
+   * Review round 3, A-11: two boxes on one court. The tile took whichever came first and read
+   * "last reported 16:50" beside "not reporting · 22h ago". The server now reports the freshest
+   * enabled box and counts the rest; the tile names the duplicate instead of hiding it.
+   */
+  it("warns when several boxes are set to one court, naming the others", async () => {
+    const court = boardCourtFixture();
+    stubFetch(routes(boardFixture({
+      courts: [{
+        ...court,
+        device: { ...court.device!, name: "Court 2 box (new)" },
+        boxes_on_court: 2,
+        other_boxes: [{ device_id: "d-old", device_code: "box-a1b2c3", name: "Court 2 box (old)", last_seen_at: null }],
+      }],
+    })));
+    renderPage(<ControlBoardPage />);
+
+    const warning = await screen.findByText(/2 boxes are set to this court/);
+    expect(warning).toHaveTextContent("This tile follows Court 2 box (new), the one heard from most recently.");
+    expect(warning).toHaveTextContent("Also claiming it: Court 2 box (old) (never heard from).");
+  });
+
+  it("says nothing about duplicates for a court with one box", async () => {
+    stubFetch(routes(boardFixture({ courts: [{ ...boardCourtFixture(), boxes_on_court: 1, other_boxes: [] }] })));
+    renderPage(<ControlBoardPage />);
+    await screen.findByText("Court 2");
+    expect(screen.queryByText(/boxes are set to this court/)).not.toBeInTheDocument();
+  });
+
   it("offers no way to switch a light, and says why in words", async () => {
     stubFetch(routes(boardFixture()));
     renderPage(<ControlBoardPage />);

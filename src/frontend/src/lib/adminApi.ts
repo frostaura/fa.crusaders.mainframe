@@ -220,6 +220,13 @@ export type ControlBoardCourt = {
   device?: ControlBoardDevice | null;
   /** The court's door, where one is mapped. Absent on a club that maps none. */
   door?: ControlBoardDevice | null;
+  /**
+   * Review round 3, A-11: how many ENABLED boxes claim this court. `device` is the freshest of
+   * them; more than one is a set-up mistake the tile must show, not resolve. Absent on an older API.
+   */
+  boxes_on_court?: number;
+  /** The enabled boxes claiming this court that `device` is not. */
+  other_boxes?: Array<{ device_id: string; device_code?: string | null; name?: string | null; last_seen_at?: string | null }>;
 };
 
 export type ControlBoardView = {
