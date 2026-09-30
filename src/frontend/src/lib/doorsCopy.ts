@@ -1324,7 +1324,7 @@ export const DOORS_READ_FAILED = "The doors could not be read, so this page cann
 export const DOORS_EMPTY_NOTICE = "No doors have called in yet.";
 
 export const DOORS_EMPTY_HINT = "A door registers itself the first time it is powered on with the"
-  + " club's device key. The key is on the Devices page.";
+  + " club's device key. The key is on the Boards page.";
 
 /** The log's failed read. Same rule, same reason: a request failed, not a door. */
 export const LOG_READ_FAILED = "These scans could not be read, so this page cannot say what happened"

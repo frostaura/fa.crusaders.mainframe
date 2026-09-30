@@ -354,7 +354,7 @@ describe("the admin tour", () => {
     tourAt("/admin");
     const first = await screen.findByRole("dialog", { name: ADMIN_TOUR.stops[0].title });
     expect(first).toHaveTextContent(ADMIN_TOUR.stepOf(1, 6));
-    expect(ADMIN_TOUR.stops.map((s) => s.title)).toEqual(["Overview", "Members", "Groups", "Transactions", "Monitoring", "Settings"]);
+    expect(ADMIN_TOUR.stops.map((s) => s.title)).toEqual(["Overview", "Members", "Groups", "Transactions", "Control board", "Settings"]);
   });
 
   it("is recorded as finished when skipped, and does not come back", async () => {

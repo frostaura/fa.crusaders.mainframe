@@ -450,7 +450,8 @@ export const ADMIN_TOUR = {
     { navId: "members", title: "Members", body: "Approve new applications, top up wallets and open anybody's bookings, wallet or door history." },
     { navId: "groups", title: "Groups", body: "Who may book when, at what top-up rate, and the limits each group plays under." },
     { navId: "transactions", title: "Transactions", body: "Every credit movement in the club's ledger, with who did it and why." },
-    { navId: "control-board", title: "Monitoring", body: "Every court's lights and bookings live, plus doors, boards and faults." },
-    { navId: "settings", title: "Settings", body: "Prices, opening hours, booking rules and the club's details." },
+    { navId: "control-board", title: "Control board", body: "Every court's lights and bookings live, plus doors, boards and faults." },
+    // Court prices live on Courts now (F3.23), so Settings does not claim them.
+    { navId: "settings", title: "Settings", body: "Opening hours, booking rules, alerts and the club's details." },
   ],
 } as const;

@@ -14,7 +14,7 @@ import { GROUP_PRICING_MODES, type GroupPricingMode } from "../../lib/adminApi";
 import { rateProblem } from "../../lib/groupRules";
 import {
   GROUP_SECTIONS, GROUP_SHEET, PEAK_COMBINE, PEAK_OPTIONS, RATE_COPY, capResolutionSentence,
-  explainGroupRefusal, peakWindowLine, ratePerBlockSentence, ratePreviewLine, slicePriceLine,
+  explainGroupRefusal, membersOf, peakWindowLine, ratePerBlockSentence, ratePreviewLine, slicePriceLine,
   type PeakChoice,
 } from "../../lib/groupsCopy";
 
@@ -293,12 +293,12 @@ function inheritanceLine(
   if (clubValue === null) {
     return groupValue === null
       ? `The club's system hasn't said a limit on ${noun}, and ${groupName} doesn't set one either.`
-      : `${groupName} members get ${groupValue} ${noun}. The club's system hasn't said what everybody else gets.`;
+      : `${membersOf(groupName)} get ${groupValue} ${noun}. The club's system hasn't said what everybody else gets.`;
   }
-  if (groupValue === null) return `${groupName} members get the club's ${clubValue} ${noun}.`;
+  if (groupValue === null) return `${membersOf(groupName)} get the club's ${clubValue} ${noun}.`;
   if (clubValue > 0 && groupValue >= clubValue) {
-    return `${groupName} members get ${clubValue} ${noun} — the club's own limit. A group can `
+    return `${membersOf(groupName)} get ${clubValue} ${noun} — the club's own limit. A group can `
       + `lower that and never raise it, so ${groupValue} would change nothing.`;
   }
-  return `${groupName} members get ${groupValue} ${noun}. Everyone else gets the club's ${clubValue}.`;
+  return `${membersOf(groupName)} get ${groupValue} ${noun}. Everyone else gets the club's ${clubValue}.`;
 }

@@ -265,7 +265,7 @@ export function capResolutionSentence(
         + `one either — so nothing on this screen limits how many slots a day they book. `
         + `${ADMINS_EXEMPT}`;
     }
-    return `${groupName} members may book ${slotsWord(groupCap)} a day. The club's system hasn't `
+    return `${membersOf(groupName)} may book ${slotsWord(groupCap)} a day. The club's system hasn't `
       + `said what everybody else gets. ${ADMINS_EXEMPT}`;
   }
   const others = clubCap > 0
@@ -273,19 +273,19 @@ export function capResolutionSentence(
     : "Everybody else has no limit, because the club has not set one.";
   if (groupCap === null || groupCap === undefined) {
     return clubCap > 0
-      ? `${groupName} members get the club's limit of ${slotsWord(clubCap)} a day. ${ADMINS_EXEMPT}`
-      : `${groupName} members have no limit on how many slots they book in a day, because the `
+      ? `${membersOf(groupName)} get the club's limit of ${slotsWord(clubCap)} a day. ${ADMINS_EXEMPT}`
+      : `${membersOf(groupName)} have no limit on how many slots they book in a day, because the `
         + `club has not set one. ${ADMINS_EXEMPT}`;
   }
   if (capOverrideIsInert(groupCap, clubCap)) {
     const asked = groupCap > 0 ? String(groupCap) : "no limit";
-    return `${groupName} members may book ${slotsWord(clubCap)} a day — the club's own limit. `
+    return `${membersOf(groupName)} may book ${slotsWord(clubCap)} a day — the club's own limit. `
       + `A group can lower that and never raise it, so ${asked} would change nothing. ${ADMINS_EXEMPT}`;
   }
   if (groupCap === UNLIMITED) {
-    return `${groupName} members have no limit on how many slots they book in a day. ${ADMINS_EXEMPT}`;
+    return `${membersOf(groupName)} have no limit on how many slots they book in a day. ${ADMINS_EXEMPT}`;
   }
-  return `${groupName} members may book ${slotsWord(groupCap)} a day. ${others} ${ADMINS_EXEMPT}`;
+  return `${membersOf(groupName)} may book ${slotsWord(groupCap)} a day. ${others} ${ADMINS_EXEMPT}`;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1011,4 +1011,12 @@ export function rulesChangeLines(before: RulesForLines, after: RulesForLines): s
     if (a !== null && b !== null && a !== b) lines.push(`${label}: ${b} instead of ${a}.`);
   }
   return lines;
+}
+
+/**
+ * "Juniors members" — or just "League members" when the group is already named for its members
+ * (F3.23: the page read "League members members get the club's limit").
+ */
+export function membersOf(groupName: string): string {
+  return /\bmembers$/i.test(groupName.trim()) ? groupName.trim() : `${groupName} members`;
 }

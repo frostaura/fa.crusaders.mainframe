@@ -3,7 +3,7 @@ import {
   GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultLine,
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
-  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine, COURTS_UNREAD, rulesChangeLines,
+  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine, COURTS_UNREAD, rulesChangeLines, membersOf,
   ASSIGN_COPY, capsSummary, explainAssignRefusal, peakChangeLine, peakChip, peakChoiceOf, peakSayOf,
   rateChangeLine, rateChip, ratePreviewLine, rateProblemSentence, tariffLine, yourRateLine,
 } from "./groupsCopy";
@@ -544,5 +544,12 @@ describe("rulesChangeLines — the times and limits a change of groups changes (
 
   it("compares nothing the server did not send on both sides", () => {
     expect(rulesChangeLines({}, { max_slots_per_day: 2, allowed_windows: [] })).toEqual([]);
+  });
+});
+
+describe("membersOf (F3.23)", () => {
+  it("never says \"League members members\"", () => {
+    expect(membersOf("League members")).toBe("League members");
+    expect(membersOf("Juniors")).toBe("Juniors members");
   });
 });
