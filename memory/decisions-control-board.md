@@ -20,3 +20,6 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
   banks answering for one set of lights — and the board is a mirror: it must show the duplicate
   for the console to warn about, not choose between them and hide it.
 - The query budget is unchanged (still six); the choice is made in memory from the device list.
+- **The console's tile says it** (lane F3, `duplicateBoxesWarning` in `lib/monitoringCopy.ts`): how
+  many boxes are set to the court, which one the tile follows and why, the others with when each
+  was last heard, and to take the extras out of service on Boards. Nothing for one box.

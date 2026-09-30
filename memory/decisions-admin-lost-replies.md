@@ -1,14 +1,13 @@
 ---
 name: crusaders-mainframe-decisions-admin-lost-replies
-description: "Review round 2 lane F3: an admin write whose reply is lost is looked up before anything is said; schedule and ledger response shapes are pinned against the C# source; Settings keeps saved+draft as one state."
+description: "Admin writes whose reply is lost are read back before anything is said (R2 desk/approve/settings, R3 every other write via lostReply); dialogs word it via describe; Settings draft honesty."
 type: decision
 last_verified: 2026-09-30
 ---
 
-# Live decisions — the admin console after a lost reply (review round 2, lane F3)
+# Live decisions — the admin console after a lost reply (review rounds 2–3, lane F3)
 
-A 5xx, a timeout or a dropped connection is an UNKNOWN outcome, never "didn't go through". The
-reviewer found four admin writes that landed while the screen said they had failed.
+A 5xx, a timeout or a dropped connection is an UNKNOWN outcome, never "didn't go through".
 
 - **Desk credit movement** (`components/members/adjustmentAttempt.ts`, both hooks): reads
   `/admin/ledger?userId&from=press−2 min` for a row of type AdminAdjustment/AdminTopUp with this
@@ -27,6 +26,16 @@ reviewer found four admin writes that landed while the screen said they had fail
   this press's); its secret was in the lost reply, so the copy says recreate it to get one.
 - **Tests perform the write, then fail the reply** (`respond` that mutates, then `refuse(504)` or
   throws `TypeError`). A stub that only fails proves nothing about a lost reply.
+- **Round 3 put the rest on `lib/lostReply`'s `writeOrReadBack`** (F2's helper; words from
+  `lostReplyCopy`'s `unsureWords`): device-key regeneration (key differs), admin grant/revoke
+  (member's `is_admin`), schedule skip/restore/end/hours (`lib/scheduleReadBack.ts`), webhook
+  delete (id gone), group archive/restore/delete (list), court add/edit (list). Still direct: the
+  group sheet's save and member-group assignment, device edit/delete.
+- **`ConfirmDialog` takes `describe(error)`** before `describeFailure`: how a dialog says an `UnsureOutcome`.
+- **The desk top-up's live region speaks the caller's line** (`{ said }` from `onApply`): not
+  known / nothing arrived / an earlier press landed — never "didn't go through" over an unknown.
+  A 409 `idempotency_key_reused` re-reads the balance (row AND sheet target). *Why:* the sheet
+  showed the pre-landing balance and an "after" summed onto it (R3 I-6).
 
 ## Contracts pinned from the C# source
 
@@ -45,6 +54,7 @@ reviewer found four admin writes that landed while the screen said they had fail
   after the restore and erased the kept draft; one unrelated key saved elsewhere dropped it whole.
 - After a save the save bar stays as a visible, focusable status until the next edit (no toast).
 - `ConfirmDialog` `notReady`: the primary stays enabled and a press names the missing reason and
-  focuses the field, beside a visible "(required)" and `aria-required`. Suspend, reject, reset
-  member code and match-result remove/keep use it; `AdminRoleSwitch` and `GroupCard` still use
-  `confirmDisabled`.
+  focuses the field, beside a visible "(required)" and `aria-required`. Every admin reason dialog
+  uses it since R3 (AdminRoleSwitch's own-rights box has its own `notReadyMessage`).
+- A kept Settings draft says "while you signed in again" only when a save met a 401 (the kept
+  copy carries `afterSessionEnd`); a 429 on save is transient and names no field (R3 A-9, A-12).

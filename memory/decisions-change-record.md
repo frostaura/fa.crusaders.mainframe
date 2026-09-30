@@ -42,6 +42,8 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   words, `balance_before/after_credits` joined into one Balance row, one-sided values listed as
   facts rather than as a "Before" with a dash. *Why:* the writers store keys and tokens, and the
   record read `pending_approval`, `top_up_cash` and UUIDs; a new writer's key falls back to words.
+  R3: instants in club day+clock, ISO dates as the club's short date, lengths and repeats in words
+  (A-7); `spendable_credits` pairs as "Can spend"; a webhook row's facts are facts, not settings.
 - **Review round 3 (lane B), `R3*HttpTests`:** a REJECTED applicant can be approved (A-2) —
   the same approval (audit, change row from `rejected`, welcome mail, webhook), rejection reason
   cleared; nothing else is approvable. *Why:* the console offered it and got a bare 404.
