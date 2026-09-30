@@ -259,3 +259,21 @@ export const SHARE_LEDGER_COPY = {
   /** The disclosure's state, spoken after the line itself. */
   movements: (n: number) => `${n} movement${n === 1 ? "" : "s"}`,
 } as const;
+
+/**
+ * R4 M4-2 — the member's running top-up limit. The club caps what one member may put in
+ * (`TopupMaxZarPerMember`), and `/credit/topup/options` says how much of it is left; the page
+ * offered R500 and R1000 and "Max R1000" to a member with R100 left, and only the POST refused.
+ */
+export const TOP_UP_LIMIT = {
+  /** The limits line when the member has used part of the ceiling. */
+  limits: (min: string, remaining: string, already: string, max: string, block: string) =>
+    `Min ${min} · Up to ${remaining} more (${already} of your ${max} used) · Multiples of ${block} only`,
+  /** An amount above what is left. */
+  overRemaining: (remaining: string, max: string) =>
+    `You can top up ${remaining} more — the club's limit is ${max} per member.`,
+  /** Nothing left at all: the form is not offered. */
+  reachedTitle: "You've reached the club's top-up limit",
+  reached: (max: string) =>
+    `You've topped up ${max}, the most the club takes from one member by card. Speak to the club if you need more credit.`,
+} as const;

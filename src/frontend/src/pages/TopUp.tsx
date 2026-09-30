@@ -5,7 +5,8 @@ import { yourRateLine } from "../lib/groupsCopy";
 import { cn, formatCredits, describeTopUpRate, formatMoney } from "../lib/utils";
 import { clubCurrencySymbol } from "../lib/currency";
 import { useBalance, walletTone } from "../lib/balance";
-import { BALANCE_SENTENCE } from "../lib/walletCopy";
+import { BALANCE_SENTENCE, TOP_UP_LIMIT } from "../lib/walletCopy";
+import { useAuth } from "../lib/auth";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { StateBlock } from "../components/ui/state-block";
 import { Button } from "../components/ui/button";
@@ -51,12 +52,31 @@ function randValue(text: string): number | null {
   return parsed.problem.kind === "negative" ? -1 : null;
 }
 
-function amountProblem(text: string, o: TopUpOptions | null): string | null {
+/**
+ * The options, with the member's running total (M4-2): `already_zar` put in so far and
+ * `remaining_zar` of the club's per-member ceiling left. Absent from an older API.
+ */
+type Options = TopUpOptions & { already_zar?: number; remaining_zar?: number };
+
+/**
+ * The most this member may put in now: the ceiling less what is already in (M4-2). An admin is
+ * exempt from the running limit on the server (blueprint A.3), so only the per-payment max applies.
+ */
+type Cap = { cap: number; limited: boolean };
+
+function capOf(o: Options, isAdmin: boolean): Cap {
+  const remaining = o.remaining_zar;
+  if (isAdmin || typeof remaining !== "number" || remaining >= o.max_zar) return { cap: o.max_zar, limited: false };
+  return { cap: Math.max(remaining, 0), limited: true };
+}
+
+function amountProblem(text: string, o: Options | null, limit: Cap | null): string | null {
   if (text.trim() === "") return "Enter an amount in rand.";
   const value = randValue(text);
   if (value === null) return "That isn't a number — enter an amount in rand.";
   if (!o) return null;
   if (value <= 0) return "Enter an amount greater than zero.";
+  if (limit?.limited && value > limit.cap) return TOP_UP_LIMIT.overRemaining(formatMoney(limit.cap), formatMoney(o.max_zar));
   if (value > o.max_zar) return `The most you can top up at once is ${formatMoney(o.max_zar)}.`;
   if (value < o.min_zar) return `The smallest top-up is ${formatMoney(o.min_zar)}.`;
   // Money in cents, so compare on cents rather than on floats: 150 % 50 is exact, but
@@ -107,7 +127,7 @@ type RestatedQuote = { rate: number; credits: number };
 
 function reQuote(
   payload: Record<string, unknown>,
-  setOptions: React.Dispatch<React.SetStateAction<TopUpOptions | null>>,
+  setOptions: React.Dispatch<React.SetStateAction<Options | null>>,
   setRestated: React.Dispatch<React.SetStateAction<RestatedQuote | null>>,
 ): void {
   const rate = Number(payload.conversion_rate);
@@ -133,9 +153,22 @@ function rateGroupFrom(raw: unknown): RateGroup | null | undefined {
   return undefined;
 }
 
+/**
+ * The amount the form starts on: the first preset the member can still take (M4-2) — never R500
+ * to somebody with R100 left — or nothing when nothing is left. Admins are exempt from the
+ * running limit, but the page cannot know that before whoami, and the first preset is always
+ * within a limit that is not reached.
+ */
+function firstAmount(o: Options): string {
+  const left = typeof o.remaining_zar === "number" ? o.remaining_zar : o.max_zar;
+  const preset = o.presets_zar.find((p) => p <= left);
+  if (preset !== undefined) return String(preset);
+  return left >= o.min_zar ? String(left) : "";
+}
+
 /** The club's top-up rules, read on mount and again whenever the tab regains focus. */
 function useTopUpOptions(setAmount: (update: (current: string) => string) => void) {
-  const [options, setOptions] = useState<TopUpOptions | null>(null);
+  const [options, setOptions] = useState<Options | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
 
   const loadOptions = useCallback(() => {
@@ -143,7 +176,7 @@ function useTopUpOptions(setAmount: (update: (current: string) => string) => voi
       .then((o) => {
         setOptions(o);
         setLoadError(null);
-        setAmount((current) => (current === "" ? String(o.presets_zar[0] ?? o.min_zar) : current));
+        setAmount((current) => (current === "" ? firstAmount(o) : current));
       })
       .catch((err: unknown) => setLoadError(err ?? new Error("options read failed")));
   }, [setAmount]);
@@ -216,8 +249,8 @@ function TopUpSkeleton() {
 }
 
 type FormProps = {
-  options: TopUpOptions;
-  setOptions: React.Dispatch<React.SetStateAction<TopUpOptions | null>>;
+  options: Options;
+  setOptions: React.Dispatch<React.SetStateAction<Options | null>>;
   amount: string;
   setAmount: (value: string) => void;
 };
@@ -228,6 +261,8 @@ function TopUpForm(props: FormProps) {
   const returnTo = safeReturnTo(search.get("returnTo"));
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { options, setOptions, amount, setAmount } = props;
+  const auth = useAuth();
+  const limit = capOf(options, auth.status === "authenticated" && auth.isAdmin);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   /** Submit was pressed on an amount the club will not take: say why even if the field is empty. */
@@ -239,7 +274,7 @@ function TopUpForm(props: FormProps) {
    */
   const [restated, setRestated] = useState<RestatedQuote | null>(null);
 
-  const problem = amountProblem(amount, options);
+  const problem = amountProblem(amount, options, limit);
   const value = randValue(amount) ?? Number.NaN;
   const canSubmit = problem === null;
   const creditsPreview = canSubmit ? value * options.conversion_rate : null;
@@ -267,6 +302,13 @@ function TopUpForm(props: FormProps) {
       if (code === "topup_rate_changed" && payload) {
         // Not an error: nothing went wrong and nothing was charged, the price simply moved.
         reQuote(payload, setOptions, setRestated);
+      } else if (code === "amount_exceeds_member_cap" && payload && typeof payload.remaining_zar === "number") {
+        // M4-2 — the refusal carries what is left: the screen takes it (presets, the limits line,
+        // the field's sentence) instead of the bare "more than the club's limit".
+        const remaining = payload.remaining_zar;
+        const already = typeof payload.already_zar === "number" ? payload.already_zar : undefined;
+        setOptions((o) => (o ? { ...o, remaining_zar: remaining, ...(already === undefined ? {} : { already_zar: already }) } : o));
+        setTried(true);
       } else {
         setError(START_ERRORS[code] ?? (err instanceof ApiError ? NOT_STARTED : UNREACHABLE));
       }
@@ -275,10 +317,11 @@ function TopUpForm(props: FormProps) {
   };
 
   const shownProblem = amount.trim() !== "" || tried ? problem : null;
+  if (limit.limited && limit.cap < options.min_zar) return <LimitReached options={options} back={returnTo ?? "/wallet"} />;
   return (
     <Card className="px-4 sm:px-6">
       <form onSubmit={submit} className="flex flex-col gap-6" noValidate>
-        <AmountFields options={options} amount={amount} onChoose={choose} problem={shownProblem} />
+        <AmountFields options={options} limit={limit} amount={amount} onChoose={choose} problem={shownProblem} />
         <Summary options={options} pay={canSubmit ? value : null} receive={creditsPreview} />
         {restated && <RestatedNotice value={value} restated={restated} />}
         {error && <Alert tone="danger">{error}</Alert>}
@@ -297,16 +340,41 @@ function TopUpForm(props: FormProps) {
   );
 }
 
-type AmountProps = { options: TopUpOptions; amount: string; onChoose: (value: string) => void; problem: string | null };
+/** M4-2 — nothing left of the member's limit: no form to fill in, and the reason in its place. */
+function LimitReached({ options, back }: { options: Options; back: string }) {
+  return (
+    <Card className="px-4 sm:px-6">
+      <Alert tone="warning" live="standing">
+        <span className="block font-semibold">{TOP_UP_LIMIT.reachedTitle}</span>
+        {TOP_UP_LIMIT.reached(formatMoney(options.max_zar))}
+      </Alert>
+      <Button asChild variant="outline" block>
+        <Link to={back}>Back</Link>
+      </Button>
+    </Card>
+  );
+}
+
+type AmountProps = { options: Options; limit: Cap; amount: string; onChoose: (value: string) => void; problem: string | null };
+
+/** "Min R100 · Max R1000 · …", or with part of the member's limit used, how much is left (M4-2). */
+function limitsLine(options: Options, limit: Cap): string {
+  const block = formatMoney(options.block_zar);
+  if (!limit.limited) return `Min ${formatMoney(options.min_zar)} · Max ${formatMoney(options.max_zar)} · Multiples of ${block} only`;
+  const already = options.already_zar ?? options.max_zar - limit.cap;
+  return TOP_UP_LIMIT.limits(formatMoney(options.min_zar), formatMoney(limit.cap), formatMoney(already), formatMoney(options.max_zar), block);
+}
 
 /**
  * The preset amounts are a single choice — a radio group (ToggleGroup) — and the field below
  * is the same value typed by hand. Choosing a preset fills the field; typing a preset's figure
  * selects it.
  */
-function AmountFields({ options, amount, onChoose, problem }: AmountProps) {
-  const selected = options.presets_zar.some((p) => String(p) === amount.trim()) ? amount.trim() : "";
-  const limits = `Min ${formatMoney(options.min_zar)} · Max ${formatMoney(options.max_zar)} · Multiples of ${formatMoney(options.block_zar)} only`;
+function AmountFields({ options, limit, amount, onChoose, problem }: AmountProps) {
+  // M4-2 — only the amounts the member can still take are offered.
+  const presets = options.presets_zar.filter((p) => p <= limit.cap);
+  const selected = presets.some((p) => String(p) === amount.trim()) ? amount.trim() : "";
+  const limits = limitsLine(options, limit);
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
@@ -320,7 +388,7 @@ function AmountFields({ options, amount, onChoose, problem }: AmountProps) {
           size="lg"
           className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4"
         >
-          {options.presets_zar.map((p) => (
+          {presets.map((p) => (
             <ToggleGroupItem key={p} value={String(p)} className="text-base tabular-nums">{`R${p}`}</ToggleGroupItem>
           ))}
         </ToggleGroup>
