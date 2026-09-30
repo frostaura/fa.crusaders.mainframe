@@ -19,6 +19,7 @@ import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet"
 import { BookingForBar } from "../components/bookings/BookingForBar";
 import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
+import { useScheduleLiveness } from "../components/bookings/useScheduleLiveness";
 import { RecentGames } from "../components/bookings/RecentGames";
 import { CancelSheet, type CancelledOutcome } from "../components/bookings/CancelSheet";
 import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
@@ -101,8 +102,14 @@ export default function BookingsPage() {
 
   // Bumped by every booking and cancellation, so the upcoming list re-reads (F1.12).
   const [changes, setChanges] = useState(0);
+  // R4 M4-3 — what OTHER people do to this member's games (an organiser cancelling, a partner
+  // answering) reaches the page too: on a wallet-stream move and on coming back into view.
+  const rereadAll = useCallback(() => { startTransition(() => setChanges((n) => n + 1)); void reconcile(); }, [reconcile]);
+  const liveness = useScheduleLiveness(schedule.readAt, rereadAll);
+  const { wrote } = liveness;
 
   const onBooked = useCallback((outcome: BookedOutcome) => {
+    wrote();
     // Perf: the sheet's confirmation is drawn from the booking's own answer, and it goes up
     // FIRST. Re-drawing ~250 cells and the games lists rode in the same commit and held the
     // "Court booked" back ~70–130 ms on a phone; as a transition they follow a frame later.
@@ -119,15 +126,16 @@ export default function BookingsPage() {
     startTransition(() => { setSending(null); setDay((d) => withBooked(d, outcome)); });
     if (outcome.ownBalanceAfter !== null) applyBalance(outcome.ownBalanceAfter);
     void reconcile();
-  }, [setDay, applyBalance, refreshBalance, selection.api, reconcile, setSending]);
+  }, [setDay, applyBalance, refreshBalance, selection.api, reconcile, setSending, wrote]);
 
   const onCancelled = useCallback((outcome: CancelledOutcome) => {
+    wrote();
     setChanges((n) => n + 1);
     setDay((d) => (d ? { ...d, slots: d.slots.filter((s) => !s.bookingId || !outcome.cancelledIds.includes(s.bookingId)) } : d));
     if (outcome.ownMoneyMoved) void refreshBalance({ expectSelf: true });
     if (selection.api.active) selection.api.leave();
     void reconcile();
-  }, [setDay, refreshBalance, selection.api, reconcile]);
+  }, [setDay, refreshBalance, selection.api, reconcile, wrote]);
 
   const { openBook, openCancel } = sheets;
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
