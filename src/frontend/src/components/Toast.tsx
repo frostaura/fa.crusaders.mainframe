@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { CheckCircle, Info, Warning, WarningCircle, type Icon } from "./ui/icons";
+import { toastReadingMs } from "./toastTiming";
 
 export type ToastTone = "info" | "success" | "danger" | "warning";
 
@@ -66,12 +67,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const push = useCallback<ToastContextValue["push"]>((input) => {
     const id = ++idRef.current;
+    const unchanged = input.unchanged ?? false;
+    const asked = input.durationMs ?? 4000;
     const item: ToastItem = {
       id,
       tone: input.tone ?? "info",
       text: input.text,
-      durationMs: input.durationMs ?? 4000,
-      unchanged: input.unchanged ?? false,
+      // X4-8: never less than the words take to read ("Nothing changed." included); 0 still means
+      // "until dismissed".
+      durationMs: asked === 0 ? 0 : Math.max(asked, toastReadingMs(unchanged ? `${input.text} ${NOTHING_CHANGED}` : input.text)),
+      unchanged,
     };
     setToasts((t) => [...t, item]);
   }, []);
@@ -159,26 +164,55 @@ function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: 
   );
 }
 
-function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: number) => void }) {
+/**
+ * The toast's clock (R4, X4-8 — WCAG 2.2.1): it runs only while nobody is reading it. A pointer
+ * resting on the toast or keyboard focus on it stops the clock; leaving starts it again with
+ * what was left, never from zero and never from nothing.
+ */
+function useToastClock(toast: ToastItem, onDismiss: (id: number) => void) {
   const [visible, setVisible] = useState(false);
+  const clock = useRef({ left: toast.durationMs, startedAt: 0, timer: 0, hovered: false, focused: false });
+
+  const leave = useCallback(() => {
+    setVisible(false);
+    window.setTimeout(() => onDismiss(toast.id), 250);
+  }, [onDismiss, toast.id]);
+
+  const stop = useCallback(() => {
+    const c = clock.current;
+    if (!c.timer) return;
+    window.clearTimeout(c.timer);
+    c.timer = 0;
+    c.left = Math.max(0, c.left - (Date.now() - c.startedAt));
+  }, []);
+
+  const start = useCallback(() => {
+    const c = clock.current;
+    if (c.timer || toast.durationMs <= 0 || c.hovered || c.focused) return;
+    c.startedAt = Date.now();
+    c.timer = window.setTimeout(() => { c.timer = 0; leave(); }, c.left);
+  }, [leave, toast.durationMs]);
 
   useEffect(() => {
     // Mount → animate in next frame.
     const enter = window.requestAnimationFrame(() => setVisible(true));
-    let exitTimer: number | undefined;
-    let removeTimer: number | undefined;
-    if (toast.durationMs > 0) {
-      exitTimer = window.setTimeout(() => setVisible(false), toast.durationMs);
-      removeTimer = window.setTimeout(() => onDismiss(toast.id), toast.durationMs + 250);
-    }
+    start();
     return () => {
       window.cancelAnimationFrame(enter);
-      if (exitTimer) window.clearTimeout(exitTimer);
-      if (removeTimer) window.clearTimeout(removeTimer);
+      stop();
     };
-  }, [toast.id, toast.durationMs, onDismiss]);
+  }, [start, stop]);
 
-  const dismiss = () => { setVisible(false); window.setTimeout(() => onDismiss(toast.id), 250); };
+  const hold = (why: "hovered" | "focused", on: boolean) => {
+    clock.current[why] = on;
+    if (on) stop();
+    else start();
+  };
+  return { visible, leave, hold };
+}
+
+function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: number) => void }) {
+  const { visible, leave: dismiss, hold } = useToastClock(toast, onDismiss);
   const Mark = TONE_ICON[toast.tone];
 
   // Dismissed by tapping it, so it is pressable without a mouse too: `tabIndex={0}`, Enter and
@@ -193,6 +227,10 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
       aria-label={`${toast.text} — dismiss`}
       onClick={dismiss}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dismiss(); } }}
+      onMouseEnter={() => hold("hovered", true)}
+      onMouseLeave={() => hold("hovered", false)}
+      onFocus={() => hold("focused", true)}
+      onBlur={() => hold("focused", false)}
       className={cn(
         "pointer-events-auto relative flex w-full select-none items-start gap-3 overflow-hidden",
         "rounded-xl border border-border bg-bg-raised py-3 pl-5 pr-4 text-sm text-text-primary shadow-lg",
