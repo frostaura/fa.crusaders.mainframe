@@ -331,9 +331,15 @@ function TopUpForm(props: FormProps) {
               about a payment that has not happened yet. */}
           <Button type="submit" block size="lg" pending={loading} disabled={!canSubmit}>Continue to PayFast</Button>
           {/* F4-12 — back where the member came from (an invite, usually), not always the wallet. */}
-          <Button asChild variant="ghost" block>
-            <Link to={returnTo ?? "/wallet"}>Cancel</Link>
-          </Button>
+          {/* R4 I4-1 audit — while the club registers the payment, Cancel waits: leaving then let
+              the answer arrive on a page that was gone and still send the member to PayFast. */}
+          {loading ? (
+            <Button variant="ghost" block aria-disabled="true" data-waiting="" className="cursor-not-allowed opacity-50 hover:bg-transparent">Cancel</Button>
+          ) : (
+            <Button asChild variant="ghost" block>
+              <Link to={returnTo ?? "/wallet"}>Cancel</Link>
+            </Button>
+          )}
         </div>
       </form>
     </Card>

@@ -66,3 +66,23 @@ describe("Top-up — what is left of the member's limit (M4-2)", () => {
     await waitFor(() => expect(radios()).toEqual(["R100", "R200", "R500", "R1000"]));
   });
 });
+
+describe("Top-up — Cancel waits while the club registers the payment (R4 I4-1 audit)", () => {
+  it("is unavailable, in its place, until the club answers", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    render({ already_zar: 0, remaining_zar: 1000 }, [
+      { method: "POST", path: "/api/v1/credit/topup", respond: () => refuse(400, { error: "payments_not_configured" }) },
+    ]);
+    const inner = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      ((init?.method ?? "GET").toUpperCase() === "POST" ? gate.then(() => inner(input, init)) : inner(input, init)));
+    fireEvent.click(await screen.findByRole("radio", { name: "R100" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+    const cancel = await screen.findByRole("button", { name: "Cancel" });
+    expect(cancel).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("link", { name: "Cancel" })).not.toBeInTheDocument();
+    release();
+    expect(await screen.findByRole("link", { name: "Cancel" })).toBeInTheDocument();
+  });
+});
