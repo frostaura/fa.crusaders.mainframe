@@ -34,6 +34,9 @@
     <!-- Parallelism across test classes: every Postgres-backed class has its own database
          (PostgresFixture), so classes are independent collections. See xunit.runner.json. -->
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Measured class durations: LongestClassFirst starts the longest classes first by them, and
+         CI's shards are balanced by the same file (src/backend/tools/test_shards.py). -->
+    <Content Include="../tools/test-timings.json" Link="test-timings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

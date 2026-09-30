@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using Xunit.Abstractions;
 using Xunit.Sdk;
 
@@ -19,21 +20,29 @@ namespace Crusaders.Mainframe.Tests;
 /// </para>
 ///
 /// <para>
-/// The cost of a class is estimated, not measured: its number of test cases, times ten when it is
-/// Postgres-backed (<see cref="PostgresFixture"/>), because almost every such test boots a whole
-/// host and an in-memory one does not. Order changes nothing about what runs or what it asserts —
-/// a test that depends on running before or after another class is broken whatever this does.
+/// The cost of a class is its MEASURED duration from <c>src/backend/tools/test-timings.json</c>
+/// (the same file CI's shards are balanced by, copied beside the test assembly). A class that file
+/// does not know is estimated: its number of test cases, times ten when it is Postgres-backed
+/// (<see cref="PostgresFixture"/>), in the same unit as a measured tenth of a second per case.
+/// The estimate alone put a one-test, three-minute class (<c>PlayersPropertyHttpTests</c>) near
+/// the end of the queue, where it became the run's tail — measured 2026-09-30. Order changes
+/// nothing about what runs or what it asserts — a test that depends on running before or after
+/// another class is broken whatever this does.
 /// </para>
 /// </summary>
 public sealed class LongestClassFirst : ITestCollectionOrderer
 {
     private const int PostgresWeight = 10;
 
+    // An estimated case costs this many seconds, so estimates and measurements share one scale.
+    private const double SecondsPerEstimatedCase = 0.1;
+
     public IEnumerable<ITestCollection> OrderTestCollections(IEnumerable<ITestCollection> testCollections)
     {
         var assembly = typeof(LongestClassFirst).Assembly;
+        var measured = MeasuredSeconds();
         return testCollections
-            .Select((collection, index) => (collection, index, cost: Cost(assembly, collection)))
+            .Select((collection, index) => (collection, index, cost: Cost(assembly, collection, measured)))
             .OrderByDescending(c => c.cost)
             .ThenBy(c => c.index)
             .Select(c => c.collection)
@@ -42,7 +51,24 @@ public sealed class LongestClassFirst : ITestCollectionOrderer
 
     // A class's collection is named "Test collection for <full type name>", optionally followed by
     // " (id: …)". Anything that does not resolve to a type costs nothing and keeps its place.
-    private static int Cost(Assembly assembly, ITestCollection collection)
+    // Missing or unreadable is not an error: ordering is an optimisation, and every class runs
+    // whatever it costs.
+    private static Dictionary<string, double> MeasuredSeconds()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "test-timings.json");
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.GetProperty("classes").EnumerateObject()
+                .ToDictionary(p => p.Name, p => p.Value.GetDouble(), StringComparer.Ordinal);
+        }
+        catch (Exception e) when (e is IOException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return [];
+        }
+    }
+
+    private static double Cost(Assembly assembly, ITestCollection collection, Dictionary<string, double> measured)
     {
         const string prefix = "Test collection for ";
         var name = collection.DisplayName;
@@ -58,6 +84,11 @@ public sealed class LongestClassFirst : ITestCollectionOrderer
             name = name[..paren];
         }
 
+        if (measured.TryGetValue(name, out var seconds))
+        {
+            return seconds;
+        }
+
         var type = assembly.GetType(name);
         if (type is null)
         {
@@ -68,7 +99,7 @@ public sealed class LongestClassFirst : ITestCollectionOrderer
             .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
             .Sum(CasesOf);
         var postgres = typeof(IClassFixture<PostgresFixture>).IsAssignableFrom(type);
-        return cases * (postgres ? PostgresWeight : 1);
+        return cases * (postgres ? PostgresWeight : 1) * SecondsPerEstimatedCase;
     }
 
     private static int CasesOf(MethodInfo method)

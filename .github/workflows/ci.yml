@@ -180,31 +180,32 @@ jobs:
   # ============================================================================
   # Backend Integration — real Postgres boundary checks (no EF in-memory)
   # ============================================================================
-  backend-integration:
-    name: Backend Integration (Postgres)
+  # The Postgres-backed tier, SHARDED since 2026-09-30. As one job it took 38-47 minutes on
+  # the 4-core runner (with coverage) and outgrew every budget it was given; a job killed by
+  # its own timeout reports as CANCELLED and names no test (memory/gotchas-ci-jobs.md).
+  #
+  # Each shard is its own runner with its own Postgres service and runs a disjoint set of
+  # test CLASSES — a class is the unit xUnit runs serially on one cloned database, so moving a
+  # class between processes changes nothing any test sees. The split is balanced by measured
+  # class durations (src/backend/tools/test-timings.json) and computed by
+  # src/backend/tools/test_shards.py from the classes the BUILT assembly lists, so a class that
+  # is not in the timing file still runs — on the lightest shard. `backend-integration` below
+  # then proves from the shards' trx files that every class ran in exactly one shard.
+  #
+  # BACKEND_SHARDS must equal the length of the matrix; the plan and the proof both read it.
+  backend-integration-shard:
+    name: Backend Integration (Postgres) ${{ matrix.shard }}/5
     runs-on: ubuntu-latest
-    # 40, not 25: the suite re-runs every in-memory test beside the Postgres ones and took
-    # 7 of its 10 minutes before the doors console added 146 tests; at 10 it was cancelled
-    # mid-run, which reads as a failure and names no test.
-    #
-    # 25 stopped being enough when the coverage gate moved here, because collecting coverage
-    # instruments every line: the same 2210 tests take 12m34s without it and 17m with, a 35%
-    # overhead measured on a developer machine and worse on a shared runner. At 25 this job
-    # was killed a few minutes from the end, and a job killed by its own timeout reports as
-    # CANCELLED rather than failed — so it names no test, points at nothing, and reads like a
-    # hang. That is the most expensive kind of red there is, and it is worth paying for
-    # headroom to never see it again.
-    #
-    # PARALLEL since 2026-09-28: every Postgres-backed class gets its own database cloned
-    # from one migrated template (PostgresFixture), so xUnit runs the classes at once — one
-    # per runner core — instead of the ~90 of them queueing through one serial collection.
-    # Locally that took the suite from 30 minutes to about 6. MEASURED on the 4-core runner
-    # (2026-09-30): the parallel path gains little there — 38m22s with coverage on run
-    # 36666626216, then cancelled at 40 on the next run as round-1 added ~50 tests. 60 until
-    # this job is sharded (P10); a budget with no headroom reports as CANCELLED and names no
-    # test (see memory/gotchas-ci-jobs.md).
-    timeout-minutes: 60
+    # Measured per shard with coverage: see memory/decisions-test-running.md. 25 leaves
+    # headroom over the slowest shard; a cancelled shard names no test.
+    timeout-minutes: 25
     needs: [backend]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    env:
+      BACKEND_SHARDS: 5
     services:
       postgres:
         image: postgres:16-alpine
@@ -234,27 +235,40 @@ jobs:
       - name: Restore
         run: dotnet restore Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj
 
-      - name: Run integration tests against Postgres
+      - name: Build
+        run: dotnet build Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --no-restore --nologo -v q
+
+      # The class list comes from the assembly this job just built, never from a committed
+      # list: a committed list rots the day a class is added, which is how the postgres-http
+      # tier once silently ran nowhere.
+      - name: Plan this shard
+        run: |
+          mkdir -p TestResults
+          python3 tools/test_shards.py list --dll Crusaders.Mainframe.Tests/bin/Debug/net10.0/Crusaders.Mainframe.Tests.dll > TestResults/classes.txt
+          python3 tools/test_shards.py plan --classes TestResults/classes.txt --shards "$BACKEND_SHARDS" --format table
+          python3 tools/test_shards.py plan --classes TestResults/classes.txt --shards "$BACKEND_SHARDS" --index ${{ matrix.shard }} > TestResults/filter.txt
+
+      - name: Run this shard's integration tests against Postgres
         env:
           API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
           # Asserts the boundary tests actually run here rather than skipping quietly.
           REQUIRE_BOUNDARY_TESTS: "true"
-        # No --filter: a class-name list rots the day a new Postgres-backed class is
-        # added — which is exactly how the postgres-http tier once silently ran in CI
-        # never. The in-memory tests re-run here; the `backend` job stays the fast gate.
-        #
-        # The database named above is never used: each class creates and drops its own
-        # clone on this server (xunit.runner.json and PostgresFixture carry the rest).
-        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --settings coverlet.runsettings --results-directory ./TestResults --logger "trx;LogFileName=integration.trx"
+        # The in-memory tests re-run here too, spread across the shards like every other
+        # class; the `backend` job stays the fast gate. The database named above is never
+        # used: each class creates and drops its own clone on this server.
+        run: >-
+          dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --no-build --nologo -v q
+          --settings coverlet.runsettings --results-directory ./TestResults
+          --logger "trx;LogFileName=integration-${{ matrix.shard }}.trx"
+          --filter "$(cat TestResults/filter.txt)"
 
       # `-v q` keeps a 3,000-test log readable and, on a failure, prints only the test's NAME —
       # the message and the seed of a property test were lost with the runner. The trx keeps
-      # them: printed here, and kept as an artifact for a week.
+      # them: printed here, per shard, and kept as an artifact for a week.
       - name: Show failed tests
         if: failure()
-        working-directory: src/backend
         run: |
-          TRX=$(find ./TestResults -name "integration.trx" | head -1)
+          TRX=$(find ./TestResults -name "integration-*.trx" | head -1)
           [ -n "$TRX" ] || { echo "No trx written."; exit 0; }
           python3 - "$TRX" <<'PY'
           import sys, xml.etree.ElementTree as ET
@@ -266,35 +280,88 @@ jobs:
               msg = r.find(".//t:Message", ns)
               print((msg.text or "")[:60000] if msg is not None else "(no message)")
           PY
-      - name: Keep the test results
-        if: failure()
+
+      # Always, not only on failure: the aggregate job below reads every shard's trx (to prove
+      # the union) and coverage (to gate the merged number).
+      - name: Keep this shard's results
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: backend-integration-trx
-          path: src/backend/TestResults/**/*.trx
+          name: backend-integration-shard-${{ matrix.shard }}
+          path: |
+            src/backend/TestResults/classes.txt
+            src/backend/TestResults/**/*.trx
+            src/backend/TestResults/**/coverage.cobertura.xml
           retention-days: 7
 
-      # THE COVERAGE GATE LIVES HERE, not on the fast `backend` job, because this is the only
-      # tier that runs the whole suite. Measured on a run where every Postgres-backed test
-      # skipped, the same rule reported 63.2% and failed a release whose real coverage nobody
-      # had measured — the gate was reading how much of the product is reachable without a
-      # database, which is not a property anybody intends to hold a line on.
-      - name: Enforce coverage threshold
+  # The gate the rest of the pipeline `needs:`. It keeps the old single job's name so every
+  # downstream `needs: [backend-integration]` still means "the whole Postgres tier passed".
+  backend-integration:
+    name: Backend Integration (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend-integration-shard]
+    # Runs after a failed shard too, so the union and the coverage are still reported; the
+    # last step fails the job unless every shard succeeded.
+    if: ${{ !cancelled() }}
+    env:
+      BACKEND_SHARDS: 5
+    defaults:
+      run:
+        working-directory: ./src/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Collect every shard's results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: backend-integration-shard-*
+          path: src/backend/shards
+
+      # The union of the shards must be the whole assembly: every class the build lists ran in
+      # exactly one shard. Every shard derived its class list from its own build of the same
+      # commit, so the lists must also agree.
+      - name: Assert the shards together ran every test class exactly once
+        run: |
+          set -e
+          lists=$(find shards -name classes.txt | sort)
+          [ "$(echo "$lists" | wc -l)" -eq "$BACKEND_SHARDS" ] || { echo "expected $BACKEND_SHARDS class lists, found:"; echo "$lists"; exit 1; }
+          first=$(echo "$lists" | head -1)
+          for l in $lists; do cmp -s "$first" "$l" || { echo "class lists differ: $first vs $l"; exit 1; }; done
+          trx=$(find shards -name "integration-*.trx" | sort)
+          [ "$(echo "$trx" | wc -l)" -eq "$BACKEND_SHARDS" ] || { echo "expected $BACKEND_SHARDS trx files, found:"; echo "$trx"; exit 1; }
+          python3 tools/test_shards.py verify --classes "$first" --shards "$BACKEND_SHARDS" $trx
+
+      # THE COVERAGE GATE LIVES HERE, on the merged report of every shard, because this is the
+      # only place the whole suite's coverage exists. Measured on a run where every
+      # Postgres-backed test skipped, the same rule reported 63.2% and failed a release whose
+      # real coverage nobody had measured — the gate was reading how much of the product is
+      # reachable without a database, which is not a property anybody intends to hold a line on.
+      #
+      # A line is covered when ANY shard hit it; the merged rate is covered / coverable over
+      # the union of every shard's (file, line) pairs — what coverlet computes for one run.
+      - name: Enforce coverage threshold on the merged report
         run: |
           THRESHOLD=70
-          REPORT=$(find ./TestResults -name "coverage.cobertura.xml" | head -1)
-          if [ -z "$REPORT" ]; then
-            echo "No coverage report produced — the collector did not run."
-            echo "This used to exit 0, which meant the gate passed whenever it broke."
+          reports=$(find shards -name "coverage.cobertura.xml" | sort)
+          if [ "$(echo "$reports" | grep -c .)" -ne "$BACKEND_SHARDS" ]; then
+            echo "Expected $BACKEND_SHARDS coverage reports, found:"; echo "$reports"
+            echo "A missing report used to pass this gate; it fails it now."
             exit 1
           fi
-          line_rate=$(grep -oP 'line-rate="\K[^"]+' "$REPORT" | head -1)
-          coverage=$(awk "BEGIN {printf \"%.1f\", $line_rate * 100}")
-          echo "Line coverage: ${coverage}% (threshold: ${THRESHOLD}%)"
+          coverage=$(python3 tools/merge_coverage.py $reports)
+          echo "Line coverage (merged over $BACKEND_SHARDS shards): ${coverage}% (threshold: ${THRESHOLD}%)"
           if [ "$(awk "BEGIN {print ($coverage < $THRESHOLD)}")" -eq 1 ]; then
             echo "Coverage ${coverage}% is below the ${THRESHOLD}% threshold"
             exit 1
           fi
+
+      - name: Every shard passed
+        if: ${{ needs.backend-integration-shard.result != 'success' }}
+        run: |
+          echo "backend-integration-shard finished '${{ needs.backend-integration-shard.result }}' — see the failed shard's 'Show failed tests' step."
+          exit 1
 
   # ============================================================================
   # IoT firmware — host-compiled unit tests, no hardware required.
