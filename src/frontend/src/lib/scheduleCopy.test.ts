@@ -4,7 +4,7 @@ import {
   LIST_EMPTY_TITLE, NOTHING_CHANGED_YET, checkLabel, checkingLabel, clampedNotice,
   clearAllLabel, clubDateLong, clubDateShort, conflictRefundPhrase, conflictsHeadline,
   consequenceLine, courtsPhrase, daysPhrase, editScopeOptions, editScopeQuestion,
-  endConsequence, nextOccurrenceLine, nothingInTheWay, occurrenceStatusWord, occurrencesNoun,
+  endConsequence, nextHeldOccurrence, nextOccurrenceLine, nothingInTheWay, occurrenceStatusWord, occurrencesNoun,
   partialMaterialisation, pastNeverChanges, ruleSentence, scheduleCodes, skipChipLabel,
   skipConsequence, weekdayName, weekdayPlural,
 } from "./scheduleCopy";
@@ -349,8 +349,26 @@ describe("skipping and ending", () => {
 });
 
 describe("the list and the detail page", () => {
+  it("keeps the server's next date until the dates are read, then skips past a skipped one (R3 A-6)", () => {
+    const next = "2026-10-13T16:00:00.000Z";
+    expect(nextHeldOccurrence(next, null)).toBe(next);
+    expect(nextHeldOccurrence(next, [
+      { status: "past", starts_at: "2026-10-06T16:00:00.000Z" },
+      { status: "skipped", starts_at: next },
+      { status: "overridden", starts_at: "2026-10-20T15:00:00.000Z" },
+    ])).toBe("2026-10-20T15:00:00.000Z");
+    expect(nextHeldOccurrence(next, [])).toBe(next);
+  });
+
+  it("says a schedule ended before its first date instead of a backwards range (R3 A-6)", () => {
+    const words = { courtNames: ["Court 4"], days: ["sun"] as const, start: "06:00", end: "06:30", label: "" };
+    expect(ruleSentence({ ...words, days: [...words.days], startDate: "2026-09-30", endDate: "2026-09-29" }))
+      .toBe("Holds Court 4 on Sundays from 06:00 to 06:30, from Wed 30 Sep — it ended before that first date.");
+  });
+
   it("teaches the feature in its empty state", () => {
-    expect(LIST_EMPTY_TITLE).toBe("No repeating bookings yet.");
+    // "Running now" is empty — not the club (R3 A-6: it said "yet" over an ended schedule).
+    expect(LIST_EMPTY_TITLE).toBe("No repeating bookings running.");
     expect(LIST_EMPTY_HINT).toBe(
       "A repeating booking is how you hold Tuesday nights for the league "
       + "without booking 360 slots by hand.",

@@ -11,6 +11,7 @@ import {
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
 import { serverRecordFields } from "../test/serverContract";
+import { DATES_EMPTY } from "../lib/scheduleCopy";
 
 /**
  * A longer per-test timeout than the 5-second default, for this file only. Each case drives
@@ -368,5 +369,38 @@ describe("the change record", () => {
     const record = await screen.findByRole("region", { name: "What has been changed here" });
     expect(within(record).getByText(/That does not mean nothing has been changed\./)).toBeInTheDocument();
     expect(within(record).queryByText(/Nothing has been changed here yet/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Review round 3, A-6: an ended schedule said "from Wed 30 Sep until Tue 29 Sep" and "No dates
+ * yet…"; after a skip the header still said "Next on <the skipped date>".
+ */
+describe("an ended schedule, and the next date after a skip (R3 A-6)", () => {
+  it("says it ended before its first date and that an ended one holds no dates", async () => {
+    stubFetch(detailRoutes({
+      schedule: scheduleRowFixture({ status: "ended", start_date: "2026-09-30", end_date: "2026-09-29", next_occurrence: null }),
+      occurrences: scheduleOccurrencesResponse([]),
+    }));
+    renderDetail();
+
+    expect(await screen.findByText(/from Wed 30 Sep — it ended before that first date\./)).toBeInTheDocument();
+    expect(screen.queryByText(/until Tue 29 Sep/)).not.toBeInTheDocument();
+    expect(await screen.findByText(DATES_EMPTY.endedTitle)).toBeInTheDocument();
+    expect(screen.queryByText(DATES_EMPTY.title)).not.toBeInTheDocument();
+  });
+
+  it("names the first date still held, not the skipped one the server still reports", async () => {
+    stubFetch(detailRoutes({
+      schedule: scheduleRowFixture({ next_occurrence: "2026-10-13T16:00:00.000Z" }),
+      occurrences: scheduleOccurrencesResponse([
+        occurrenceFixture("2026-10-13", { status: "skipped", courts: [] }),
+        occurrenceFixture("2026-10-20"),
+      ]),
+    }));
+    renderDetail();
+
+    expect(await screen.findByText("Next on Tue 20 Oct, 18:00.")).toBeInTheDocument();
+    expect(screen.queryByText(/Next on Tue 13 Oct/)).not.toBeInTheDocument();
   });
 });

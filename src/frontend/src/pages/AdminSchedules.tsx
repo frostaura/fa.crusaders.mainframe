@@ -11,7 +11,7 @@ import { CardListSkeleton } from "../components/monitoring/parts";
 import { ScheduleEditor } from "../components/schedules/ScheduleEditor";
 import { adminEndpoints, type ScheduleRow } from "../lib/adminApi";
 import {
-  LIST_EMPTY_HINT, LIST_EMPTY_TITLE, LIST_FAILED_CAVEAT, nextOccurrenceLine, ruleSentence,
+  LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_HINT, LIST_EMPTY_TITLE, LIST_FAILED_CAVEAT, nextOccurrenceLine, ruleSentence,
   scheduleCodes,
 } from "../lib/scheduleCopy";
 
@@ -45,7 +45,7 @@ const STATUSES = [
 type Status = typeof STATUSES[number]["value"];
 
 /** One row: the sentence, what it holds next, and the way into it. */
-function ScheduleListRow({ row }: { row: ScheduleRow }) {
+function ScheduleListRow({ row, timezone }: { row: ScheduleRow; timezone?: string }) {
   const sentence = ruleSentence({
     courtNames: (row.courts ?? []).map((c) => c.name),
     days: row.days ?? [],
@@ -66,7 +66,7 @@ function ScheduleListRow({ row }: { row: ScheduleRow }) {
             {row.status === "ended" && <Badge tone="neutral">Ended</Badge>}
           </div>
           <p className="text-sm text-text-secondary">{sentence}</p>
-          <p className="text-sm text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status)}</p>
+          <p className="text-sm text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status, timezone)}</p>
         </div>
         {/* Named by the thing it opens, because a column of links all reading "Open" says
             nothing to anybody tabbing down it. */}
@@ -96,7 +96,7 @@ export function AdminSchedulesPage() {
    * more honest sentence: rows from the previous filter are not this filter's answer.
    */
   const key = `${status}:${nonce}`;
-  const [read, setRead] = useState<{ key: string; rows: ScheduleRow[] | null; error: unknown }>(
+  const [read, setRead] = useState<{ key: string; rows: ScheduleRow[] | null; error: unknown; timezone?: string }>(
     { key: "", rows: null, error: null },
   );
   const load = useCallback(() => setNonce((n) => n + 1), []);
@@ -105,7 +105,7 @@ export function AdminSchedulesPage() {
     let live = true;
     const asked = `${status}:${nonce}`;
     adminEndpoints.schedules(status)
-      .then((page) => { if (live) setRead({ key: asked, rows: page.schedules ?? [], error: null }); })
+      .then((page) => { if (live) setRead({ key: asked, rows: page.schedules ?? [], error: null, timezone: page.timezone }); })
       .catch((err) => { if (live) setRead({ key: asked, rows: null, error: err }); });
     return () => { live = false; };
   }, [status, nonce]);
@@ -181,11 +181,11 @@ export function AdminSchedulesPage() {
           empty={rows !== null && rows.length === 0}
           emptyIcon={CalendarDots}
           emptyTitle={status === "active" ? LIST_EMPTY_TITLE : "None in that list."}
-          emptyHint={status === "active" ? LIST_EMPTY_HINT : "Try “All of them”."}
+          emptyHint={status === "active" ? `${LIST_EMPTY_HINT} ${LIST_EMPTY_ENDED_POINTER}` : "Try “All of them”."}
           skeleton={<CardListSkeleton rows={3} />}
         >
           <ul className="divide-y divide-border rounded-xl border border-border bg-bg-surface shadow-xs">
-            {(rows ?? []).map((row) => <ScheduleListRow key={row.id} row={row} />)}
+            {(rows ?? []).map((row) => <ScheduleListRow key={row.id} row={row} timezone={read.timezone} />)}
           </ul>
         </StateBlock>
       </div>

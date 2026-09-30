@@ -142,9 +142,13 @@ export function ruleSentence(rule: RuleWords): string {
     ? `every ${interval} weeks on ${daysPhrase(rule.days)}`
     : `on ${daysPhrase(rule.days)}`;
   const named = rule.label ? `, called “${rule.label}”` : "";
-  const until = rule.endDate
-    ? `from ${clubDateShort(rule.startDate)} until ${clubDateShort(rule.endDate)}`
-    : `from ${clubDateShort(rule.startDate)} with no end date`;
+  // Ended before its first date (review round 3, A-6): "from Wed 30 Sep until Tue 29 Sep" read
+  // as a range running backwards. An ISO date compares as text.
+  const until = !rule.endDate
+    ? `from ${clubDateShort(rule.startDate)} with no end date`
+    : rule.endDate < rule.startDate
+      ? `from ${clubDateShort(rule.startDate)} — it ended before that first date`
+      : `from ${clubDateShort(rule.startDate)} until ${clubDateShort(rule.endDate)}`;
   return `Holds ${courtsPhrase(rule.courtNames)} ${when} from ${rule.start} to ${rule.end}${named}, ${until}.`;
 }
 
@@ -402,7 +406,35 @@ export function endConsequence({ remaining, days, slots, refundCredits }: EndWor
 // The list, and the detail page
 // ---------------------------------------------------------------------------------------
 
-export const LIST_EMPTY_TITLE = "No repeating bookings yet.";
+export const LIST_EMPTY_TITLE = "No repeating bookings running.";
+
+/**
+ * The "Running now" list is empty — which says nothing about ended ones (review round 3, A-6:
+ * it said "No repeating bookings yet." over a club whose only schedule had just been ended).
+ */
+export const LIST_EMPTY_ENDED_POINTER = "Ones that have ended are under “Ended”.";
+
+/** The dates card with no rows: a new schedule is still being written; an ended one holds none. */
+export const DATES_EMPTY = {
+  title: "No dates yet.",
+  hint: "They are written a few weeks ahead, so a new one can take a minute to appear.",
+  endedTitle: "No dates — this has ended.",
+  endedHint: "An ended repeating booking holds nothing from its last date on.",
+} as const;
+
+/**
+ * The next date that is really held (review round 3, A-6): after a skip, `next_occurrence` still
+ * named the skipped date. Once the dates are read, the first held or moved one is the answer;
+ * until then (or where none is listed) the server's figure stands.
+ */
+export function nextHeldOccurrence(
+  next: string | null | undefined,
+  occurrences: ReadonlyArray<{ status?: string; starts_at?: string }> | null,
+): string | null | undefined {
+  if (occurrences === null) return next;
+  const held = occurrences.find((o) => (o.status === "scheduled" || o.status === "overridden") && o.starts_at);
+  return held?.starts_at ?? next;
+}
 
 /** The empty state teaches the feature rather than restating the heading. */
 export const LIST_EMPTY_HINT =

@@ -20,7 +20,7 @@ import {
 } from "../lib/adminApi";
 import { describeFailure } from "../lib/errors";
 import {
-  clampedNotice, clubDateShort, endConsequence, nextOccurrenceLine, occurrenceStatusWord,
+  DATES_EMPTY, clampedNotice, clubDateShort, endConsequence, nextHeldOccurrence, nextOccurrenceLine, occurrenceStatusWord,
   partialMaterialisation, ruleSentence, scheduleCodes, skipChipLabel, skipConsequence,
 } from "../lib/scheduleCopy";
 import { slotsPerOccurrence } from "../lib/scheduleRules";
@@ -195,10 +195,13 @@ function EndScheduleCard({ row, busy, endReason, onEndReason, consequence, focus
  * "we could not read the dates" must not be rendered as "it holds none".
  * </p>
  */
-function ScheduleHeadline({ row, days, partial }: {
+function ScheduleHeadline({ row, days, partial, next, timezone }: {
   row: ScheduleRow;
   days: NonNullable<ScheduleRow["days"]>;
   partial: string | null;
+  /** The next date really held — past any skipped one (R3 A-6). */
+  next: string | null | undefined;
+  timezone?: string;
 }) {
   return (
     <>
@@ -221,7 +224,7 @@ function ScheduleHeadline({ row, days, partial }: {
                 intervalWeeks: row.interval_weeks,
               })}
             </span>
-            <span className="mt-1 block text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status)}</span>
+            <span className="mt-1 block text-text-muted">{nextOccurrenceLine(next, row.status, timezone)}</span>
           </>
         )}
       />
@@ -394,6 +397,8 @@ export function AdminScheduleDetailPage() {
       <ScheduleHeadline
         row={row}
         days={days}
+        next={nextHeldOccurrence(row.next_occurrence, occurrences)}
+        timezone={scheduleRead.data?.timezone}
         partial={occurrences === null ? null : partialMaterialisation(
           occurrences.filter((o) => (o.courts?.length ?? 0) > 0).length,
           occurrences.filter((o) => o.status !== "skipped").length,
@@ -429,8 +434,8 @@ export function AdminScheduleDetailPage() {
           onRetry={reloadOccurrences}
           empty={occurrences !== null && occurrences.length === 0}
           emptyIcon={CalendarDots}
-          emptyTitle="No dates yet."
-          emptyHint="They are written a few weeks ahead, so a new one can take a minute to appear."
+          emptyTitle={row.status === "ended" ? DATES_EMPTY.endedTitle : DATES_EMPTY.title}
+          emptyHint={row.status === "ended" ? DATES_EMPTY.endedHint : DATES_EMPTY.hint}
           skeleton={<RowsSkeleton />}
         >
           <ul className="divide-y divide-border">

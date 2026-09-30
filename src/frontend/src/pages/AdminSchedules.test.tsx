@@ -8,6 +8,7 @@ import {
   scheduleCreateResponse, scheduleRowFixture, sessionRoutes,
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
+import { LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_TITLE } from "../lib/scheduleCopy";
 import { serverRecordFields } from "../test/serverContract";
 // The date picker's calendar is a lazy chunk (P10). Loaded here, once, so opening a picker in a
 // test resolves from the module cache instead of racing a cold transform under a loaded runner.
@@ -81,8 +82,10 @@ describe("the list", () => {
     stubFetch([...sessionRoutes(), { path: SCHEDULES, body: { schedules: [] } }]);
     renderPage(<AdminSchedulesPage />);
 
-    expect(await screen.findByText("No repeating bookings yet.")).toBeInTheDocument();
+    expect(await screen.findByText(LIST_EMPTY_TITLE)).toBeInTheDocument();
     expect(screen.getByText(/without booking 360 slots by hand/)).toBeInTheDocument();
+    // R3 A-6: "Running now" being empty says nothing about ended ones, and points at them.
+    expect(screen.getByText(new RegExp(LIST_EMPTY_ENDED_POINTER))).toBeInTheDocument();
   });
 
   it("never says the club has none when what failed was the reading", async () => {
@@ -93,7 +96,7 @@ describe("the list", () => {
     renderPage(<AdminSchedulesPage />);
 
     await screen.findByText(/That does not mean the club has none\./);
-    expect(screen.queryByText("No repeating bookings yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText(LIST_EMPTY_TITLE)).not.toBeInTheDocument();
     // A plain 500 is transient (review round 1, F4.4): the sentence says "try again shortly",
     // so the button to do it is there. And the sentence has its verb (F3.19).
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
@@ -184,7 +187,7 @@ describe("creating one", () => {
       ...editorPrerequisiteRoutes(),
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
 
@@ -206,7 +209,7 @@ describe("creating one", () => {
       ...editorPrerequisiteRoutes({ slice_minutes: 30 }),
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -222,7 +225,7 @@ describe("creating one", () => {
       { method: "POST", path: `${SCHEDULES}/preview`, body: previewFixture() },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -249,7 +252,7 @@ describe("creating one", () => {
       { method: "POST", path: SCHEDULES, body: scheduleCreateResponse(scheduleRowFixture()) },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -272,7 +275,7 @@ describe("creating one", () => {
       { method: "POST", path: `${SCHEDULES}/preview`, body: previewFixture() },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -295,7 +298,7 @@ describe("creating one", () => {
       { method: "POST", path: `${SCHEDULES}/preview`, body: previewFixture() },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -321,7 +324,7 @@ describe("creating one", () => {
       { method: "POST", path: `${SCHEDULES}/preview`, status: 500, body: { error: "server_error" } },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -352,7 +355,7 @@ describe("creating one", () => {
       },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -385,7 +388,7 @@ describe("creating one", () => {
       },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -411,7 +414,7 @@ describe("creating one", () => {
       },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -458,7 +461,7 @@ describe("creating one", () => {
       },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -482,7 +485,7 @@ describe("creating one", () => {
       ...editorPrerequisiteRoutes(),
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
@@ -500,7 +503,7 @@ describe("creating one", () => {
       ...editorPrerequisiteRoutes({ slice_minutes: 30 }),
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
 
@@ -519,7 +522,7 @@ describe("creating one", () => {
       ...editorPrerequisiteRoutes(),
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await userEvent.click(screen.getByRole("button", { name: /^Courts: / }));
@@ -535,7 +538,7 @@ describe("creating one", () => {
       ...editorPrerequisiteRoutes(),
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
     await screen.findByRole("heading", { name: "A new repeating booking" });
 
@@ -583,7 +586,7 @@ describe("creating one", () => {
       { path: "/api/v1/admin/settings/", status: 500, body: { error: "server_error" } },
     ]);
     renderPage(<AdminSchedulesPage />);
-    await screen.findByText("No repeating bookings yet.");
+    await screen.findByText(LIST_EMPTY_TITLE);
     await openEditor();
 
     expect(await screen.findByText(/Nothing can be held until they can be read\./)).toBeInTheDocument();
