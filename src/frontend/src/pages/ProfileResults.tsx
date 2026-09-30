@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StateBlock } from "@/components/ui/state-block";
 import { TextLink } from "@/components/ui/text-link";
 import { Alert } from "@/components/Alert";
+import { RecentToRecord } from "@/components/play/RecentToRecord";
 import { ResultScore } from "@/components/play/ResultScore";
 import { outcomeLine, STATUS_TONE } from "@/components/play/resultFacts";
 import { useAuth } from "@/lib/auth";
@@ -56,6 +57,7 @@ export default function ProfileResultsPage() {
         actions={<RefreshButton onRefresh={reload} loading={held.loading} label={RESULTS_PAGE.refresh} />}
         freshness={<Freshness at={held.at} />}
       />
+      <RecentToRecord />
       <StateBlock
         loading={rows === null && held.loading}
         error={rows === null ? held.error : null}

@@ -48,3 +48,43 @@ describe("my results", () => {
     expect(screen.queryByText(RESULTS_PAGE.emptyTitle)).toBeNull();
   });
 });
+
+/** R2 F2-17 — the recent games (C3) that wait for a result, above the history. */
+describe("games waiting for a result", () => {
+  const RECENT = "/api/v1/me/bookings/recent";
+  const game = (id: string, overrides = {}) => ({
+    booking_id: id, court_name: "Court 1", starts_at: STARTS, ends_at: "2026-09-30T16:45:00Z", role: "organiser", status: "completed",
+    players: [], my_share_credits: 50, needs_action: false, result_status: "none", can_record: true, ...overrides,
+  });
+  const empty = { path: LIST, body: { timezone: "Africa/Johannesburg", items: [], next_cursor: null } };
+
+  it("lists each recent game to record or confirm, opening its booking with the sheet up — and nothing else", async () => {
+    serve([empty, { path: RECENT, body: { timezone: "Africa/Johannesburg", items: [
+      game("b-rec"),
+      game("b-conf", { result_status: "pending", needs_action: true, can_record: false }),
+      game("b-done", { result_status: "confirmed", can_record: false }),
+    ] } }]);
+    renderPage(<ProfileResultsPage />);
+    const list = await screen.findByRole("list", { name: RESULTS_PAGE.toRecordLabel });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByRole("link", { name: RESULTS_PAGE.recordFor("Court 1 · Wed 30 Sep, 18:00") }))
+      .toHaveAttribute("href", "/bookings/b-rec?result=record");
+    expect(within(rows[1]).getByRole("link", { name: RESULTS_PAGE.confirmFor("Court 1 · Wed 30 Sep, 18:00") }))
+      .toHaveAttribute("href", "/bookings/b-conf?result=confirm");
+  });
+
+  it("shows no section when nothing waits", async () => {
+    serve([empty]);
+    renderPage(<ProfileResultsPage />);
+    expect(await screen.findByText(RESULTS_PAGE.emptyTitle)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: RESULTS_PAGE.toRecordTitle })).toBeNull();
+  });
+
+  it("a failed read of the recent games is a failure with its own retry — never 'nothing waiting'", async () => {
+    serve([empty, { path: RECENT, status: 503, body: { error: "unavailable" } }]);
+    renderPage(<ProfileResultsPage />);
+    const section = await screen.findByRole("region", { name: RESULTS_PAGE.toRecordTitle });
+    expect(await within(section).findByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+});

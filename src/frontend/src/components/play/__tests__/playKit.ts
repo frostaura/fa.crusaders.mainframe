@@ -131,5 +131,8 @@ export function serve(routes: StubRoute[] = [], options: { admin?: boolean } = {
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
     ...routes,
+    // C3 — the recent games My results offers to record (R2 F2-17). Declared after the caller's
+    // routes, so a test's own answer for this path wins.
+    { path: "/api/v1/me/bookings/recent", body: { timezone: "Africa/Johannesburg", items: [] } },
   ]);
 }

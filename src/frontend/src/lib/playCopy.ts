@@ -380,6 +380,16 @@ export const RESULTS_PAGE = {
   moreAction: "load more results",
   refresh: "Refresh",
   row: (court: string | null, when: string) => (court ? `${court} · ${when}` : when),
+  /** R2 F2-17 — the recent games (C3) with a result to record or confirm, above the history. */
+  toRecordTitle: "Games waiting for a result",
+  toRecordDescription: "Played in the last 7 days. Record the score, or confirm the one recorded.",
+  toRecordLabel: "Games waiting for a result",
+  record: "Record the result",
+  confirm: "Confirm the result",
+  recordFor: (game: string) => `Record the result for ${game}`,
+  confirmFor: (game: string) => `Confirm the result for ${game}`,
+  toRecordAction: "read your recent games",
+  toRecordReading: "Reading your recent games…",
 } as const;
 
 /* ═══════════════════════════════════ ADMIN ═══════════════════════════════════ */
