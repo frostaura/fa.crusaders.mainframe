@@ -260,7 +260,9 @@ public sealed class AdminRoleService
             SubjectName: string.IsNullOrWhiteSpace(label) ? target.Email : label,
             ActorName: actorName,
             Granted: request.Grant,
-            Reason: request.Grant ? null : request.Reason?.Trim());
+            // Both directions carry the reason (review round 3, A-3): granting has required one
+            // since round 1 (B10), and the mail then dropped it on the way out.
+            Reason: request.Reason?.Trim());
         AdminNotices.Stage(_db, target.TenantId,
             AdminNotices.AdminRoleChanged(target.Id, request.ActorUserId, payload, StorableTime.UtcNow));
     }

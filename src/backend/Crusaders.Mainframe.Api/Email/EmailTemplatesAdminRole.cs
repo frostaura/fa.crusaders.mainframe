@@ -42,6 +42,7 @@ public static partial class EmailTemplates
             Blocks:
             [
                 new Paragraph($"Hello {change.SubjectName}. {change.ActorName} has made you an administrator at {club.Name}."),
+                .. GrantReason(change),
                 new Paragraph("You can now approve members, adjust credits, manage courts and devices, and see the club's change record. Everything you do there is recorded against your name."),
                 new Callout(CalloutTone.Warning, "If the app is already open, sign out and back in — or wait a few minutes — before the admin console appears."),
                 new CallToAction("Open the admin console", change.ConsoleUrl),
@@ -78,6 +79,13 @@ public static partial class EmailTemplates
             Blocks: AdminRoleNoticeBlocks(club, change),
             WhyThis: WhyAdmin));
 
+    /// <summary>The reason the grant was given, when there is one (review round 3, A-3).</summary>
+    private static IReadOnlyList<EmailBlock> GrantReason(AdminRoleChange change)
+    {
+        if (string.IsNullOrWhiteSpace(change.Reason)) return [];
+        return [new Facts([new FactRow("Reason", change.Reason)])];
+    }
+
     private static IReadOnlyList<EmailBlock> AdminRoleNoticeBlocks(ClubIdentity club, AdminRoleChange change)
     {
         var what = change.Granted
@@ -89,7 +97,10 @@ public static partial class EmailTemplates
             new("Member", change.SubjectName),
             new("Changed by", change.ActorName),
         };
+        // A grant has needed a reason since review round 1 (B10); an older queued notice may
+        // still carry none, and a grant without one says nothing rather than "No reason".
         if (!change.Granted) facts.Add(new FactRow("Reason", change.Reason ?? "No reason was given."));
+        else if (!string.IsNullOrWhiteSpace(change.Reason)) facts.Add(new FactRow("Reason", change.Reason));
 
         return
         [

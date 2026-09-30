@@ -272,7 +272,7 @@ public static class AdminEventCatalogue
             SubjectName = p.SubjectName,
             ActorName = p.ActorName,
             Granted = p.Granted,
-            Reason = p.Granted ? null : p.Reason,
+            Reason = p.Reason,
             ConsoleUrl = c.ToSubject ? $"{c.BaseUrl}/admin/members" : c.ConsoleUrl,
         };
 

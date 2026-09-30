@@ -101,8 +101,13 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
 
         var memberEmail = $"mandla.member@{club.Slug}.test";
         var colleagueEmail = $"colin.colleague@{club.Slug}.test";
-        Assert.Single(mail.Sent, m => m.To == memberEmail && m.Subject == "You're now an administrator");
-        Assert.Single(mail.Sent, m => m.To == colleagueEmail && m.Subject == "New administrator — Mandla Member");
+        var granted = Assert.Single(mail.Sent, m => m.To == memberEmail && m.Subject == "You're now an administrator");
+        var notice = Assert.Single(mail.Sent, m => m.To == colleagueEmail && m.Subject == "New administrator — Mandla Member");
+        // Review round 3, A-3: the reason is required to grant (B10), so both mails carry it.
+        Assert.Contains("runs the desk on Tuesdays", granted.PlainBody ?? granted.HtmlBody);
+        Assert.Contains("runs the desk on Tuesdays", granted.HtmlBody);
+        Assert.Contains("runs the desk on Tuesdays", notice.PlainBody ?? notice.HtmlBody);
+        Assert.Contains("runs the desk on Tuesdays", notice.HtmlBody);
         // The actor is not told about what they just did, and the new admin gets their own
         // message rather than the colleagues' notice as well.
         Assert.DoesNotContain(mail.Sent, m => m.To == $"anna.actor@{club.Slug}.test");
