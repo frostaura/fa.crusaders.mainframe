@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import { memo, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { IconButton } from "@/components/ui/icon-button";
@@ -211,7 +211,28 @@ function CellCheck({ checked, hoverOnly }: { checked: boolean; hoverOnly: boolea
   );
 }
 
-export function SlotCell(props: SlotCellProps) {
+/**
+ * One cell, re-rendered only when something it draws changed (perf lane, 2026-09-30).
+ *
+ * <p>
+ * The board re-renders its rows whenever the roving tab stop moves — which every tap does — and
+ * each cell was handed fresh `at` and `facts` objects, so all ~250 cells re-rendered to move
+ * `tabIndex` on two of them (a third of a tap's script time at 4x CPU). Compared by VALUE here:
+ * the board context, the court and the slot by identity (they change exactly when the day, the
+ * rules or the selection do), everything else field by field.
+ * </p>
+ */
+export const SlotCell = memo(SlotCellView, sameCellProps);
+
+const CELL_IDENTITY_KEYS = ["ctx", "court", "slot", "where", "startsAtUtc", "line", "roving", "isHead", "rowsLeft"] as const;
+
+function sameCellProps(a: SlotCellProps, b: SlotCellProps): boolean {
+  return CELL_IDENTITY_KEYS.every((key) => a[key] === b[key])
+    && a.at.row === b.at.row && a.at.col === b.at.col
+    && (Object.keys(a.facts) as (keyof CellFacts)[]).every((key) => a.facts[key] === b.facts[key]);
+}
+
+function SlotCellView(props: SlotCellProps) {
   const { slot, isHead } = props;
   if (!slot) return <EmptyCell {...props} />;
   // Only the booking's first cell carries its name and control; the rest continue it, so a
