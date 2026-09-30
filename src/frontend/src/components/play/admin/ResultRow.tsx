@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
+import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 import { playEndpoints, type AdminResult } from "@/lib/playApi";
 import { ADMIN_RESULTS, FORMAT_LABEL, PLAY_REFUSAL, playWhen, STATUS_WORD } from "@/lib/playCopy";
 import { ResultScore } from "../ResultScore";
@@ -85,13 +86,18 @@ function Decision({ row, kind, onDecided }: DecisionProps) {
       action={voiding ? ADMIN_RESULTS.removeAction : ADMIN_RESULTS.keepAction}
       codes={PLAY_REFUSAL}
       onConfirm={act}
-      confirmDisabled={reason.trim() === ""}
+      notReady={reason.trim() === ""}
     >
       <Field controlId={`reason-${kind}-${row.result_id}`}>
-        <FieldLabel>{ADMIN_RESULTS.reasonLabel}</FieldLabel>
+        {/* Required, and said so (A11Y F3-18): pressing the primary without one names what is missing. */}
+        <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <FieldLabel>{ADMIN_RESULTS.reasonLabel}</FieldLabel>
+          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+        </span>
         <Textarea
           rows={2}
           required
+          aria-required="true"
           maxLength={ADMIN_RESULTS.reasonMax}
           value={reason}
           placeholder={ADMIN_RESULTS.reasonPlaceholder}

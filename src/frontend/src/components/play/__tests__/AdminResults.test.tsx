@@ -6,6 +6,7 @@ import { MemberPlayCard } from "@/components/play/admin/MemberPlayCard";
 import { ADMIN_RESULTS, MEMBER_PLAY_CARD, PLAY_KIND_WORD } from "@/lib/playCopy";
 import { KIND_ICON, kindWord } from "@/components/inbox/notificationKinds";
 import { ADMIN_CHANGE_AREAS } from "@/lib/adminApi";
+import { CONFIRM_NOT_READY, REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 import { adminResult, result, serve, RESULT_ID, SAM } from "./playKit";
 
 /**
@@ -80,8 +81,16 @@ describe("the decisions", () => {
     const dialog = screen.getByRole("dialog", { name: ADMIN_RESULTS.removeTitle });
     expect(within(dialog).getByRole("button", { name: ADMIN_RESULTS.removeKeep })).toBeInTheDocument();
     const confirm = within(dialog).getByRole("button", { name: ADMIN_RESULTS.remove });
-    expect(confirm).toBeDisabled();
-    fireEvent.change(within(dialog).getByLabelText(ADMIN_RESULTS.reasonLabel), { target: { value: "  Both agreed it was 3–2  " } });
+    // F3-18 notReady: the primary stays enabled; pressing it without a reason names what is missing.
+    const reason = within(dialog).getByLabelText(ADMIN_RESULTS.reasonLabel);
+    expect(reason).toHaveAttribute("aria-required", "true");
+    expect(within(dialog).getByText(REQUIRED_MARK)).toBeVisible();
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
+    expect(reason).toHaveFocus();
+    expect(stub.calls.some((c) => c.path.endsWith("/void"))).toBe(false);
+    fireEvent.change(reason, { target: { value: "  Both agreed it was 3–2  " } });
     fireEvent.click(confirm);
     await waitFor(() => expect(document.querySelector(`[data-admin-result="${RESULT_ID}"]`)).toBeNull());
     expect(stub.calls.find((c) => c.path.endsWith("/void"))?.body).toEqual({ reason: "Both agreed it was 3–2" });

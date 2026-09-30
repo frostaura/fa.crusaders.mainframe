@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
+import { CONFIRM_NOT_READY } from "../src/lib/confirmDialogCopy";
 import { resultFixture, RESULT_ID } from "./playKit";
 
 /**
@@ -64,7 +65,11 @@ test("the rail badges disputes under People; removing one needs a reason", async
   await row.getByRole("button", { name: "Remove result" }).click();
   const dialog = page.getByRole("dialog", { name: "Remove this result?" });
   await expect(dialog.getByRole("button", { name: "Keep it" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Remove result" })).toBeDisabled();
+  // Not ready without a reason: the primary stays enabled and pressing it says what is missing.
+  await dialog.getByRole("button", { name: "Remove result" }).click();
+  await expect(dialog.getByText(CONFIRM_NOT_READY)).toBeVisible();
+  await expect(dialog.getByLabel("Reason")).toBeFocused();
+  expect(state.voided).toEqual([]);
   await dialog.getByLabel("Reason").fill("Both players agreed it was 3–2");
   await dialog.getByRole("button", { name: "Remove result" }).click();
   await expect(dialog).toBeHidden();
