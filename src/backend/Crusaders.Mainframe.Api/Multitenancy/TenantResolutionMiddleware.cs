@@ -69,6 +69,7 @@ public sealed class TenantResolutionMiddleware
     {
         "/api/v1/auth/",                  // login, register, magic-link callback
         "/api/v1/uploads/",               // anonymous registration upload
+        "/api/v1/invites/",               // the anonymous invite preview (a signed-in caller's JWT still wins)
     };
 
     public TenantResolutionMiddleware(RequestDelegate next, ILogger<TenantResolutionMiddleware> logger)

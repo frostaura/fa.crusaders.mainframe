@@ -155,6 +155,7 @@ public sealed class ResultService
         r.ConfirmedByUserId = null;
         r.UpdatedAt = now.Storable();
         PlayNotices.Confirmed(_db, r, await ContextAsync(r, ct));
+        await PlayNotices.RetireToConfirmAsync(_db, r.BookingId, now, ct);
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -400,6 +401,7 @@ public sealed class ResultService
 
             var decision = await decide(r, booking);
             if (decision.Outcome is { } answer) return answer with { Changed = settled, Affected = before };
+            await PlayNotices.RetireToConfirmAsync(_db, r.BookingId, act.Now, ct);
             var saved = decision.ReplaceLineup ? await TrySaveReplacingLineupAsync(r.Id, ct) : await TrySaveAsync(ct);
             if (saved) return new ResultOutcome(200, Result: r, Changed: true, Affected: before.Union(PlayNotices.MembersOf(r, null)).ToList());
             if (attempt > 0) return Stale(await CurrentAsync(act.BookingId, ct) ?? r);
@@ -420,6 +422,7 @@ public sealed class ResultService
 
             var decision = await decide(r, reason);
             if (decision.Outcome is { } answer) return answer with { Changed = settled, Affected = members };
+            await PlayNotices.RetireToConfirmAsync(_db, r.BookingId, act.Now, ct);
             if (await TrySaveAsync(ct)) return new ResultOutcome(200, Result: r, Changed: true, Affected: members);
             if (attempt > 0) return ResultOutcome.Refuse(409, PlayerErrors.Conflict);
         }

@@ -654,6 +654,12 @@ mailed. Kinds are added to `MemberEventCatalogue`; only the mailed one joins `Al
 | `play.result_voided` | every member in the lineup | inbox only | — | `play.voided:{result}:{user}` |
 | `play.badge_earned` | the member | inbox only | — | `play.badge:{user}:{key}` |
 
+The `play.result_to_confirm` line reads from the recorder's side in first names — "Cara recorded a
+2–1 win over Bongani (…). Is it right?", a doubles partner as "with Jo" — and every unread one on a
+booking is marked read in the save of any act that answers or replaces it (confirm, dispute, edit,
+withdraw, void, keep, auto-confirm), so the inbox never keeps an "Is it right?" that asks nothing
+(review round 1, F2).
+
 - **Why only one kind is mailed.** It is the one that asks the member to do something, with a
   deadline. The invariant "every player-affecting event sends an email" is about money, access and
   bookings; a result moves none of them, and P11 set the precedent with `players.response`

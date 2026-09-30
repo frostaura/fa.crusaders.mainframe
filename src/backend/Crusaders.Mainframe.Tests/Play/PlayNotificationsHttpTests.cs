@@ -31,7 +31,8 @@ public sealed class PlayNotificationsHttpTests(PostgresFixture pg) : IClassFixtu
         foreach (var member in new[] { club.Alex, club.Jo })
         {
             var line = Assert.Single(await InboxAsync(f, member, MemberEventCatalogue.ResultToConfirm));
-            Assert.StartsWith("Olive Organiser recorded Olive Organiser & Sam Partner 3–1 Alex Partner & Jo Partner (", line.Headline);
+            // First names, nobody named twice, from the recorder's side (review round 1, F2).
+            Assert.StartsWith("Olive recorded a 3–1 win with Sam over Alex & Jo (", line.Headline);
             Assert.EndsWith("). Is it right?", line.Headline);
             Assert.Equal($"/bookings/{booking}?result=confirm", line.Link);
             Assert.Single(await OutboxAsync(f, member, MemberEventCatalogue.ResultToConfirm));
@@ -69,8 +70,19 @@ public sealed class PlayNotificationsHttpTests(PostgresFixture pg) : IClassFixtu
         await ActAsync(olive, booking, "withdraw", v + 1);
         Assert.True((await RecordAsync(olive, booking, [U(club.Organiser)], [U(club.Sam)])).IsSuccessStatusCode);
 
-        Assert.Equal(3, (await InboxAsync(f, club.Sam, MemberEventCatalogue.ResultToConfirm)).Count);
+        var lines = await InboxAsync(f, club.Sam, MemberEventCatalogue.ResultToConfirm);
+        Assert.Equal(3, lines.Count);
         Assert.Single(await OutboxAsync(f, club.Sam, MemberEventCatalogue.ResultToConfirm));
+
+        // Review round 1 (F2): only the live result still asks. The edited and the withdrawn
+        // versions' lines are marked read — the inbox keeps no "Is it right?" that asks nothing.
+        Assert.Single(lines, l => l.ReadAt is null);
+
+        // Confirming answers the last one.
+        var current = await ReadResultAsync(club.Client(f, club.Sam), booking);
+        var version = current.GetProperty("result").GetProperty("version").GetInt32();
+        Assert.True((await ActAsync(club.Client(f, club.Sam), booking, "confirm", version)).IsSuccessStatusCode);
+        Assert.All(await InboxAsync(f, club.Sam, MemberEventCatalogue.ResultToConfirm), l => Assert.NotNull(l.ReadAt));
     }
 
     [SkippableFact]

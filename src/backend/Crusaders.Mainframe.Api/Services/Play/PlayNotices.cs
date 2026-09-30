@@ -60,18 +60,58 @@ public static class PlayNotices
 
         var submitter = c.NameOf(r.SubmittedByUserId);
         var line = $"{SideNames(r, MatchSide.A, c)} {r.GamesWonA}–{r.GamesWonB} {SideNames(r, MatchSide.B, c)}";
+        var headline = $"{ToConfirmHeadline(r, c)} ({c.When}). Is it right?";
         var payload = new ResultToConfirmPayload(
             r.BookingId, submitter, c.CourtName, c.When, $"{line} ({GamesText(r)})", Local(r.ConfirmDueAt ?? r.SubmittedAt, c.Settings));
         foreach (var user in confirming)
         {
             MemberNotices.Stage(db, r.TenantId, new MemberNotice(
                 user, MemberEventCatalogue.ResultToConfirm, $"{MailKey(r.BookingId, user)}:{r.Id}:{version ?? r.Version}", payload,
-                $"{submitter} recorded {line} ({c.When}). Is it right?", $"{BookingPath(r.BookingId)}?result=confirm", r.BookingId)
+                headline, $"{BookingPath(r.BookingId)}?result=confirm", r.BookingId)
             {
                 Email = !mailed.Contains(user),
                 MailDedupeKey = MailKey(r.BookingId, user),
             }, c.Settings);
         }
+    }
+
+    /// <summary>
+    /// "Cara recorded a 2–1 win over Bongani" — from the recorder's side, first names, nobody named
+    /// twice (review round 1, F2: the line read "Cara Naidoo recorded Cara Naidoo 2–1 Bongani").
+    /// A doubles partner rides along: "Cara recorded a 3–1 win with Jo over Sam &amp; Lee".
+    /// </summary>
+    public static string ToConfirmHeadline(MatchResult r, ResultContext c)
+    {
+        var mine = SubmittingSide(r);
+        var (won, lost) = mine == MatchSide.A ? (r.GamesWonA, r.GamesWonB) : (r.GamesWonB, r.GamesWonA);
+        var partners = FirstNames(r.Players.Where(p => p.Side == mine && p.UserId != r.SubmittedByUserId), c);
+        var opponents = FirstNames(r.Players.Where(p => p.Side != mine), c);
+        var with = partners.Length > 0 ? $" with {partners}" : "";
+        var outcome = won > lost ? $"a {won}–{lost} win{with} over" : $"a {won}–{lost} loss{with} to";
+        return $"{FirstName(c.NameOf(r.SubmittedByUserId))} recorded {outcome} {opponents}";
+    }
+
+    private static string FirstNames(IEnumerable<MatchResultPlayer> players, ResultContext c) =>
+        string.Join(" & ", players.OrderBy(p => p.Position).Select(p => p.UserId is { } u ? FirstName(c.NameOf(u)) : p.GuestName ?? "Guest"));
+
+    private static string FirstName(string fullName)
+    {
+        var trimmed = fullName.Trim();
+        var space = trimmed.IndexOf(' ');
+        return space < 0 ? trimmed : trimmed[..space];
+    }
+
+    /// <summary>
+    /// Marks every unread "Is it right?" line on this booking read, in the caller's save: the result
+    /// it asked about was confirmed, disputed, edited (the new version asks again), withdrawn,
+    /// voided or kept — it asks nothing any more (review round 1, F2).
+    /// </summary>
+    public static async Task RetireToConfirmAsync(MainframeDbContext db, Guid bookingId, DateTimeOffset now, CancellationToken ct)
+    {
+        var open = await db.MemberNotifications
+            .Where(n => n.BookingId == bookingId && n.Kind == MemberEventCatalogue.ResultToConfirm && n.ReadAt == null)
+            .ToListAsync(ct);
+        foreach (var n in open) n.ReadAt = now.Storable();
     }
 
     /// <summary>The one-mail-per-(booking, member) key of <see cref="MemberEventCatalogue.ResultToConfirm"/>.</summary>

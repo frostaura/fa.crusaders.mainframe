@@ -154,4 +154,86 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var cancelled = await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}"));
         Assert.Equal(0m, cancelled.GetProperty("money").GetProperty("unpaid_credits").GetDecimal());
     }
+
+    // ------------------------------------------------------------------ F2's asks: the invite reads
+
+    private static HttpClient Anonymous(TestWebAppFactory f, PlayersClub club)
+    {
+        var client = f.CreateClient();
+        client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+        return client;
+    }
+
+    [SkippableFact]
+    public async Task A_link_preview_shows_a_stranger_six_facts_and_nothing_once_the_seat_is_answered()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await PlayersClub.SeedAsync(f, "r1preview");
+        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Sam, 100m);
+        var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { link = true }]);
+        var token = PlayersClub.TokenOf(body, 2)!;
+        var anon = Anonymous(f, club);
+
+        var preview = await anon.GetAsync($"/api/v1/invites/{token}/preview");
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var view = await JsonAsync(preview);
+        Assert.Equal(["court_name", "ends_at", "organiser_first_name", "share_credits", "starts_at", "timezone"],
+            view.EnumerateObject().Select(p => p.Name).Order());
+        Assert.Equal("Olive", view.GetProperty("organiser_first_name").GetString());
+        Assert.Equal(16m, view.GetProperty("share_credits").GetDecimal());
+        Assert.Equal("UTC", view.GetProperty("timezone").GetString());
+
+        // Unknown, and another club's host: the same 404.
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/v1/invites/{new string('a', 43)}/preview")).StatusCode);
+        var other = await PlayersClub.SeedAsync(f, "r1previewb");
+        Assert.Equal(HttpStatusCode.NotFound, (await Anonymous(f, other).GetAsync($"/api/v1/invites/{token}/preview")).StatusCode);
+
+        // Answered (Sam claims the link): nothing to preview any more.
+        var claimed = await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/invites/{token}/accept", new { expectedShareCredits = 16m });
+        Assert.True(claimed.IsSuccessStatusCode, await claimed.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/v1/invites/{token}/preview")).StatusCode);
+        _ = bookingId;
+    }
+
+    [SkippableFact]
+    public async Task A_link_preview_is_gone_when_the_game_is_off()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await PlayersClub.SeedAsync(f, "r1prevoff");
+        await club.CreditAsync(f, club.Organiser, 100m);
+        var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { link = true }]);
+        var token = PlayersClub.TokenOf(body, 2)!;
+        Assert.Equal(HttpStatusCode.OK, (await club.Client(f, club.Organiser).PostAsync($"/api/v1/bookings/{bookingId}/cancel", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Anonymous(f, club).GetAsync($"/api/v1/invites/{token}/preview")).StatusCode);
+    }
+
+    [SkippableFact]
+    public async Task A_member_reads_their_own_seat_in_any_state_and_nobody_elses()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await PlayersClub.SeedAsync(f, "r1myseat");
+        await club.CreditAsync(f, club.Organiser, 100m);
+        var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
+        var seat = PlayersClub.SeatOf(body, 2);
+        var sam = club.Client(f, club.Sam);
+
+        var invited = await JsonAsync(await sam.GetAsync($"/api/v1/me/invites/{seat}"));
+        Assert.Equal("invited", invited.GetProperty("status").GetString());
+        Assert.Equal("booked", invited.GetProperty("booking_status").GetString());
+        Assert.Equal(bookingId, invited.GetProperty("booking_id").GetGuid());
+
+        Assert.Equal(HttpStatusCode.OK, (await sam.PostAsync($"/api/v1/bookings/{bookingId}/players/{seat}/decline", null)).StatusCode);
+        Assert.Equal("declined", (await JsonAsync(await sam.GetAsync($"/api/v1/me/invites/{seat}"))).GetProperty("status").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, (await club.Client(f, club.Organiser).PostAsync($"/api/v1/bookings/{bookingId}/cancel", null)).StatusCode);
+        Assert.Equal("cancelled", (await JsonAsync(await sam.GetAsync($"/api/v1/me/invites/{seat}"))).GetProperty("booking_status").GetString());
+
+        // Anybody else — the organiser included — reads a 404: a participant id proves nothing.
+        Assert.Equal(HttpStatusCode.NotFound, (await club.Client(f, club.Bystander).GetAsync($"/api/v1/me/invites/{seat}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await club.Client(f, club.Organiser).GetAsync($"/api/v1/me/invites/{seat}")).StatusCode);
+    }
 }

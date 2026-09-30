@@ -27,6 +27,9 @@ public static class PlayersEndpoints
         var reads = app.MapGroup("/api/v1").RequireAuthorization();
         reads.MapGet("/bookings/{bookingId:guid}", DetailAsync);
         reads.MapGet("/me/invites", InvitesAsync);
+        reads.MapGet("/me/invites/{participantId:guid}", InviteLookups.MineAsync);
+        // Anonymous: the link token is the credential (review round 1, F2). See InviteLookups.
+        app.MapGet("/api/v1/invites/{token}/preview", InviteLookups.PreviewAsync).AllowAnonymous();
         reads.MapGet("/invites/{token}", InviteAsync);
         reads.MapGet("/me/partners/recent", RecentAsync);
         reads.MapGet("/me/bookings/upcoming", UpcomingAsync);
