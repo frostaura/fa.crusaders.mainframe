@@ -40,7 +40,10 @@ import { focusHeading } from "./routeAnnouncer";
  * measured it, at about 3 s added to one settings file.
  * </p>
  */
-const BACKOFF_MS = [0, 32, 64, 128, 256, 512];
+// The last two steps are for a closing dialog: Radix keeps focus inside a sheet until its exit
+// has finished, which on a slow phone (and a loaded CI runner) outlasts the first second, and a
+// search that had already given up then left focus on <body>. About 4 s in all — still bounded.
+const BACKOFF_MS = [0, 32, 64, 128, 256, 512, 1024, 2048];
 
 /**
  * The latest run wins, and every earlier one stands down.
@@ -94,7 +97,7 @@ export function focusAfterAction(find: () => HTMLElement | null | undefined): vo
     // THE SAME GUARD AS THE ONE ON THE WAY IN, AND IT BELONGS AT BOTH ENDS.
     //
     // `focusAfterAction` refuses to start without a document, which was right and was not
-    // enough: what it schedules is a backoff chain of up to six timers, and nothing can
+    // enough: what it schedules is a backoff chain of up to eight timers, and nothing can
     // cancel them. The document can therefore go away BETWEEN the schedule and the attempt,
     // and the check that ran on the way in has long since passed.
     //
@@ -134,7 +137,7 @@ export function focusAfterAction(find: () => HTMLElement | null | undefined): vo
      *
      * <p>
      * Nothing about the rule it enforces changes: it still only ever fills a vacuum, and it
-     * still gives up after the documented six steps, so a screen where focus never goes
+     * still gives up after the documented eight steps, so a screen where focus never goes
      * adrift does not leave a loop waiting to pounce on whatever the admin does next. What
      * changes is that "is there a vacuum" is a question it re-asks, rather than one it
      * answers once at the only instant it is guaranteed to be wrong.

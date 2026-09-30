@@ -312,6 +312,6 @@ describe("focus after recording (R2 F2-12)", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: RESULT_SHEET.submit }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await waitFor(() => expect(screen.getByRole("heading", { name: RESULT_CARD.title })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("heading", { name: RESULT_CARD.title })).toHaveFocus(), { timeout: 5000 });
   });
 });
