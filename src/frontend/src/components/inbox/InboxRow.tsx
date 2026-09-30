@@ -29,9 +29,9 @@ export function InboxRow({ notice, now, feed }: { notice: MemberNotification; no
   const metaId = useId();
   const action = !to && unread ? <MarkReadButton notice={notice} feed={feed} describedBy={headlineId} /> : null;
   const body = <RowBody notice={notice} now={now} unread={unread} ids={{ headlineId, metaId }} trailing={Boolean(to)} action={action} />;
-  const row = "flex min-h-touch w-full items-start gap-3 px-4 py-3 text-left";
+  const row = cn(ROW, to ? "grid-cols-[auto_minmax(0,1fr)_auto]" : "grid-cols-[auto_minmax(0,1fr)]");
   return (
-    <li data-notification={notice.kind} data-unread={unread || undefined} className={cn(unread && "bg-accent-soft/40")}>
+    <li data-notification={notice.kind} data-unread={unread || undefined} className={cn("[container-type:inline-size]", unread && "bg-accent-soft/40")}>
       {to ? (
         <Link
           to={to}
@@ -48,6 +48,24 @@ export function InboxRow({ notice, now, feed }: { notice: MemberNotification; no
     </li>
   );
 }
+
+/**
+ * R4 V4-4 — the row is a grid measured against its OWN width (a container query, in rem, so it
+ * follows the text size). Wide enough: icon · words · caret on one line. At 200 % text on a phone
+ * the 80 px icon tile left the headline ~110 px. There the icon is its bare glyph beside the kind
+ * and time, the caret goes (the whole row is the link), and the headline takes the row's whole
+ * width under them.
+ */
+const ROW = "grid min-h-touch w-full items-start gap-x-3 gap-y-1 px-4 py-3 text-left";
+// Whole class names, never built from parts: Tailwind finds classes by reading the source text.
+const ICON = "relative col-start-1 row-start-1 inline-flex shrink-0 items-center justify-center gap-1.5 self-center rounded-full text-text-secondary [@container(min-width:17rem)]:row-span-3 [@container(min-width:17rem)]:size-10 [@container(min-width:17rem)]:self-start [@container(min-width:17rem)]:bg-bg-muted";
+// Beside the bare glyph, not over it: a rem dot on a 20 px glyph hid it at large text.
+const DOT = "size-3 shrink-0 rounded-full bg-accent-strong ring-2 ring-bg-surface [@container(min-width:17rem)]:absolute [@container(min-width:17rem)]:-right-0.5 [@container(min-width:17rem)]:-top-0.5";
+const HEAD = "col-span-full row-start-2 flex min-w-0 flex-col gap-1 pt-1 [@container(min-width:17rem)]:col-span-1 [@container(min-width:17rem)]:col-start-2 [@container(min-width:17rem)]:row-start-1 [@container(min-width:17rem)]:pt-0";
+const META = "row-start-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 self-center text-sm text-text-secondary [grid-column:2/-1] [@container(min-width:17rem)]:row-start-2 [@container(min-width:17rem)]:self-start [@container(min-width:17rem)]:[grid-column:2/3]";
+const ACTION = "col-span-full row-start-3 flex pt-1 [@container(min-width:17rem)]:col-span-1 [@container(min-width:17rem)]:col-start-2";
+const CARET = "col-start-3 row-start-1 mt-3 hidden shrink-0 justify-self-end text-text-muted [@container(min-width:17rem)]:block";
+const WHEN = "[@container(min-width:17rem)]:whitespace-nowrap";
 
 type BodyProps = {
   notice: MemberNotification;
@@ -67,26 +85,26 @@ function RowBody(props: BodyProps) {
   const word = resolved ? COPY.resolved : kindWord(notice.kind);
   return (
     <>
-      <span aria-hidden="true" className="relative inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-bg-muted text-text-secondary">
+      <span aria-hidden="true" className={ICON}>
         <KindIcon size={20} />
-        {unread ? <span data-unread-dot="" className="absolute -right-0.5 -top-0.5 size-3 rounded-full bg-accent-strong ring-2 ring-bg-surface" /> : null}
+        {unread ? <span data-unread-dot="" className={DOT} /> : null}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className={HEAD}>
         <span id={ids.headlineId} className={cn("break-words", resolved ? "text-text-secondary" : "text-text-primary", unread ? "font-bold" : "font-medium")}>
           {notice.headline}
         </span>
         {resolved ? <span data-resolved="" className="text-sm text-text-secondary">{COPY.resolvedHint}</span> : null}
-        <span id={ids.metaId} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
-          {unread ? <span className="sr-only">{`${COPY.unread}. `}</span> : null}
-          {word ? <Meta>{word}</Meta> : null}
-          {word ? <span aria-hidden="true">·</span> : null}
-          <time dateTime={notice.created_at} title={clubInstant(notice.created_at)} className="whitespace-nowrap">
-            {inboxWhen(notice.created_at, now)}
-          </time>
-        </span>
-        {action ? <span className="flex pt-1">{action}</span> : null}
       </span>
-      {trailing ? <CaretRight size={16} weight="bold" aria-hidden="true" className="mt-3 shrink-0 text-text-muted" /> : null}
+      <span id={ids.metaId} className={META}>
+        {unread ? <span className="sr-only">{`${COPY.unread}. `}</span> : null}
+        {word ? <Meta>{word}</Meta> : null}
+        {word ? <span aria-hidden="true">·</span> : null}
+        <time dateTime={notice.created_at} title={clubInstant(notice.created_at)} className={WHEN}>
+          {inboxWhen(notice.created_at, now)}
+        </time>
+      </span>
+      {action ? <span className={ACTION}>{action}</span> : null}
+      {trailing ? <CaretRight size={16} weight="bold" aria-hidden="true" className={CARET} /> : null}
     </>
   );
 }

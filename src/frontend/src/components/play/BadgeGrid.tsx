@@ -41,11 +41,14 @@ export function BadgeMark({ badgeKey, size, earned }: { badgeKey: string; size: 
 export function BadgeGrid({ badges, timezone }: { badges: BadgeView[]; timezone?: string }) {
   return (
     // `auto-rows-fr`: every row as tall as the tallest, so a two-line name does not leave one row
-    // of tiles taller than the rest (P10 walk). The name clamps at two lines; the full name is in
-    // the tile's accessible name and its popover.
-    <ul data-badges="" className="grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3">
-      {badges.map((badge) => <BadgeTile key={badge.key} badge={badge} timezone={timezone} />)}
-    </ul>
+    // of tiles taller than the rest (P10 walk). R4 X4-6 — the name is never clamped ("Twel/ve-…"
+    // at 200 % text); the columns follow the grid's own width in rem, so large text on a phone
+    // gets one tile per row and whole words.
+    <div className="[container-type:inline-size]">
+      <ul data-badges="" className="grid auto-rows-fr grid-cols-1 gap-2 [@container(min-width:14rem)]:grid-cols-2 [@container(min-width:30rem)]:grid-cols-3">
+        {badges.map((badge) => <BadgeTile key={badge.key} badge={badge} timezone={timezone} />)}
+      </ul>
+    </div>
   );
 }
 
@@ -82,7 +85,7 @@ function BadgeTile({ badge, timezone }: { badge: BadgeView; timezone?: string })
           {/* R3 X-3 — at 200 % text a tile is narrower than icon + words: the words drop under the icon
               (flex-wrap on a basis) rather than collapsing to nothing beside it. */}
           <span className="flex min-w-0 grow basis-16 flex-col" aria-hidden="true">
-            <span className={cn("line-clamp-2 break-words text-sm font-semibold", badge.earned ? "text-text-primary" : "text-text-secondary")}>
+            <span data-badge-name="" className={cn("break-words text-sm font-semibold", badge.earned ? "text-text-primary" : "text-text-secondary")}>
               {badge.name}
             </span>
             <span className="break-words text-xs tabular-nums text-text-secondary">{status}</span>

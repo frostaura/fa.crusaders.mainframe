@@ -19,7 +19,7 @@ import { CourtTimeRing } from "./CourtTimeRing";
 import { FormAndPeople } from "./FormAndPeople";
 import { GoalSheet } from "./GoalSheet";
 import { clubYear } from "./playDates";
-import { STATS_GRID, StatsGrid, statSpan } from "./StatsGrid";
+import { STATS_FRAME, STATS_GRID, StatsGrid, statSpan } from "./StatsGrid";
 import { cn } from "@/lib/utils";
 import { StreakCard } from "./StreakCard";
 import { useMyGame, type MyGameRead } from "./useMyGame";
@@ -88,8 +88,10 @@ function MyGameSkeleton() {
         </div>
       </div>
       <Skeleton className="h-6" />
-      <div className={STATS_GRID}>
-        {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className={cn("h-16 rounded-xl", statSpan(i, 5))} />)}
+      <div className={STATS_FRAME}>
+        <div className={STATS_GRID}>
+          {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className={cn("h-16 rounded-xl", statSpan(i, 5))} />)}
+        </div>
       </div>
     </div>
   );
@@ -164,13 +166,15 @@ function CelebrationsSwitch({ game, read }: { game: MyPlay; read: MyGameRead }) 
     success: ({ value }) => read.patch((g) => ({ ...g, settings: value })),
   });
   return (
-    <div className="flex flex-col gap-2">
-      <Field controlId="celebrations-switch" className="grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4">
-        <div className="flex min-w-0 flex-col gap-0.5 break-words">
+    <div className="flex flex-col gap-2" data-celebrations="">
+      {/* R4 X4-6 — the words and the switch share a row while they fit; at 200 % text on a phone
+          the switch wraps under the words (a real basis), where "Celebratio/ns" broke beside it. */}
+      <Field controlId="celebrations-switch" className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 grow basis-40 flex-col gap-0.5 break-words">
           <FieldLabel>{CELEBRATIONS_SWITCH.label}</FieldLabel>
           <FieldDescription className="break-words">{CELEBRATIONS_SWITCH.hint}</FieldDescription>
         </div>
-        <div className="col-start-2 row-span-full flex min-h-touch items-center">
+        <div className="flex min-h-touch shrink-0 items-center">
           <Switch
             checked={on}
             aria-busy={flip.pending || undefined}

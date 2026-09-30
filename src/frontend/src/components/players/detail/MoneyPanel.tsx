@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Section } from "@/components/ui/page-shell";
-import { formatCredits } from "@/lib/utils";
+import { cn, formatCredits } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_MONEY, playersWhen } from "@/lib/playersCopy";
 import { isCancelled, isLive, organiserName, seatName, statusKey } from "./detailModel";
@@ -21,7 +21,7 @@ export function MoneyPanel({ detail, actions }: { detail: BookingDetail; actions
   const who = organiserName(detail);
   const deadline = playersWhen(money.share_deadline);
   return (
-    <Section title={DETAIL_MONEY.title} description={money.is_split ? DETAIL_MONEY.deadline(deadline) : DETAIL_MONEY.notSplit} actions={actions}>
+    <Section title={DETAIL_MONEY.title} description={money.is_split ? DETAIL_MONEY.deadline(deadline) : DETAIL_MONEY.notSplit} actions={actions} data-money-panel="">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <Row term={DETAIL_MONEY.price} value={money.price_credits} />
         <Row term={DETAIL_MONEY.organiserPaid(who)} value={money.organiser_owed_credits} />
@@ -37,11 +37,19 @@ export function MoneyPanel({ detail, actions }: { detail: BookingDetail; actions
   );
 }
 
+/**
+ * R4 V4-3 — a term and its figure, or a name and its line, share a row while they fit and the
+ * right-hand part WRAPS under the left one when they do not (200 % text on a phone). Beside a
+ * `shrink-0` figure the words were squeezed until names broke mid-word ("Bon/gani").
+ */
+const PAIR = "flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5";
+const PAIR_RIGHT = "ml-auto min-w-0 text-right tabular-nums";
+
 function Row({ term, value, total = false }: { term: string; value: number; total?: boolean }) {
   return (
-    <div className={total ? "flex items-baseline justify-between gap-4 border-t border-border pt-2 font-semibold text-text-primary" : "flex items-baseline justify-between gap-4 text-text-secondary"}>
+    <div className={cn(PAIR, total ? "border-t border-border pt-2 font-semibold text-text-primary" : "text-text-secondary")}>
       <dt className="min-w-0 break-words">{term}</dt>
-      <dd className="shrink-0 tabular-nums">{formatCredits(value)}</dd>
+      <dd className={PAIR_RIGHT}>{formatCredits(value)}</dd>
     </div>
   );
 }
@@ -96,12 +104,12 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
       <h3 className="text-sm font-semibold text-text-primary">{DETAIL_MONEY.perPlayerTitle}</h3>
       <ul className="grid gap-2 text-sm">
         {live.map((p) => (
-          <li key={p.participant_id ?? `seat-${p.seat}`} className="flex items-baseline justify-between gap-4">
+          <li key={p.participant_id ?? `seat-${p.seat}`} className={PAIR}>
             <span className="min-w-0 break-words font-medium text-text-primary">
               {p.participant_id !== null && p.participant_id === detail.viewer.participant_id
                 ? DETAIL_COPY.you(seatName(p, detail.players)) : seatName(p, detail.players)}
             </span>
-            <span className="text-right tabular-nums text-text-secondary">{lineFor(p)}</span>
+            <span className={cn(PAIR_RIGHT, "text-text-secondary")}>{lineFor(p)}</span>
           </li>
         ))}
       </ul>
@@ -131,7 +139,7 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
   const refunded = Math.max(0, money.price_credits - money.organiser_owed_credits);
   const live = detail.players.filter((p) => isLive(p) && p.kind !== "organiser");
   return (
-    <Section title={DETAIL_MONEY.title} description={DETAIL_CANCELLED.moneyNote}>
+    <Section title={DETAIL_MONEY.title} description={DETAIL_CANCELLED.moneyNote} data-money-panel="">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <Row term={DETAIL_MONEY.price} value={money.price_credits} />
         {/* A split's gross refund is not what the organiser kept (R2 F2-4): said in words below. */}
@@ -144,9 +152,9 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
       {live.length > 0 ? (
         <ul className="grid gap-2 text-sm">
           {live.map((p) => (
-            <li key={p.participant_id ?? `seat-${p.seat}`} className="flex items-baseline justify-between gap-4">
+            <li key={p.participant_id ?? `seat-${p.seat}`} className={PAIR}>
               <span className="min-w-0 break-words font-medium text-text-primary">{seatName(p, detail.players)}</span>
-              <span className="text-right tabular-nums text-text-secondary">
+              <span className={cn(PAIR_RIGHT, "text-text-secondary")}>
                 {cancelledSeatWords(p)}
               </span>
             </li>
