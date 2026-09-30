@@ -13,6 +13,19 @@
 @tailwind utilities;
 
 /*
+ * PERF (2026-09-30): opening any modal (every sheet and dialog) makes react-remove-scroll-bar set
+ * `--removed-body-scroll-bar-size` on <body>. A custom property inherits by default, so that one
+ * declaration restyled EVERY element on the page — 56 ms at 4x CPU on the Bookings grid, on
+ * opening and again on closing. Nothing here reads the variable (its only readers are the
+ * library's own opt-in `right-scroll-bar-position` / `width-before-scroll-bar` classes, which
+ * set the gap literally), so it is registered as NOT inherited and the change stays on <body>.
+ */
+@property --removed-body-scroll-bar-size {
+  syntax: "*";
+  inherits: false;
+}
+
+/*
  * NO COLOUR IS WRITTEN IN THIS FILE.
  *
  * Every role is an RGB-channel custom property (`--color-<role>`) that the Tailwind plugin in

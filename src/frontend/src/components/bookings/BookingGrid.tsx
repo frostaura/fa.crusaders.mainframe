@@ -39,6 +39,15 @@ export type BoardProps = {
   onExpandEarlier: () => void;
   /** Draw the now-line: the grid is showing the club's today. */
   showNow: boolean;
+  /**
+   * A book or cancel sheet is open (or still closing) over the grid. Perf lane, 2026-09-30: a
+   * modal Radix layer sets `pointer-events: none` on `<body>`, and that inherited change restyled
+   * every one of the grid's ~2 000 nodes — 56 ms at 4x CPU on opening a sheet and again on
+   * closing it, most of a cell tap. The grid states its own `pointer-events: auto` for that
+   * window, so the change stops at its edge. Nothing becomes pressable: the sheet's overlay covers
+   * the whole viewport until the sheet has gone.
+   */
+  underSheet?: boolean;
 };
 
 export const GRID_HEADING_ID = "bookings-grid-heading";
@@ -61,8 +70,7 @@ export function BookingBoard(props: BoardProps) {
   const lineOf = useCallback((rowIndex: number) => bodyStart + rowIndex - collapsedRows, [bodyStart, collapsedRows]);
   const bodyRows = Math.max(0, timeSlices.length - collapsedRows);
 
-
-  const style = { "--courts": day.courts.length } as CSSProperties;
+  const style = { "--courts": day.courts.length, pointerEvents: props.underSheet ? "auto" : undefined } as CSSProperties;
   return (
     <div className="flex flex-col gap-3">
       {chips.overflow ? <CourtChips courts={day.courts} active={chips.active} onPick={chips.jump} /> : null}

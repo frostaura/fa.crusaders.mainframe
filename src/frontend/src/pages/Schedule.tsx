@@ -178,7 +178,7 @@ export default function BookingsPage() {
               ctx={ctx} slotsByCourt={schedule.slotsByCourt} timeSlices={schedule.timeSlices}
               pastThresholdMs={schedule.pastThresholdMs} peakNowMs={schedule.peakNowMs}
               collapsedRows={collapsed.rows} earlierLabel={collapsed.label} onExpandEarlier={() => setEarlierShownFor(date)}
-              showNow={date === today}
+              showNow={date === today} underSheet={sheets.underSheet}
             />
           ) : null}
         </StateBlock>
@@ -345,14 +345,16 @@ function useSheets() {
   const [bookOpen, setBookOpen] = useState(false);
   const [cancelBookings, setCancelBookings] = useState<GridBooking[]>([]);
   const [cancelOpen, setCancelOpen] = useState(false);
+  // From a sheet's opening until its close has finished (its focus return) — see `BoardProps.underSheet`.
+  const [underSheet, setUnderSheet] = useState(false);
   const opener = useRef<Element | null>(null);
-  const openBook = useCallback((slots: SelectedSlot[]) => { opener.current = document.activeElement; setBookSlots(slots); setBookOpen(true); }, []);
-  const openCancel = useCallback((bookings: GridBooking[]) => { opener.current = document.activeElement; setCancelBookings(bookings); setCancelOpen(true); }, []);
+  const openBook = useCallback((slots: SelectedSlot[]) => { opener.current = document.activeElement; setUnderSheet(true); setBookSlots(slots); setBookOpen(true); }, []);
+  const openCancel = useCallback((bookings: GridBooking[]) => { opener.current = document.activeElement; setUnderSheet(true); setCancelBookings(bookings); setCancelOpen(true); }, []);
   // F1.19 — the system Back closes an open sheet instead of leaving Bookings.
   useSheetHistory(bookOpen, () => setBookOpen(false), "book");
   useSheetHistory(cancelOpen, () => setCancelOpen(false), "cancel");
-  const returnFocus = useCallback((event: Event) => backToGrid(event, opener.current), []);
-  return { bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel, returnFocus };
+  const returnFocus = useCallback((event: Event) => { setUnderSheet(false); backToGrid(event, opener.current); }, []);
+  return { bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel, returnFocus, underSheet };
 }
 
 /**
