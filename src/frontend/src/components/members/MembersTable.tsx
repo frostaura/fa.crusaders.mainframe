@@ -33,9 +33,9 @@ import { RowActions, type RowActionHandlers } from "./RowActions";
  * </p>
  *
  * <p>
- * <b>Why the arithmetic works.</b> Status 8 + Balance 9 + Actions 18 + a 13rem floor for Member is
- * 48rem, where the table starts; Groups (12) arrives at 59rem, leaving Member 12; the date (6) at
- * 65rem. Below 48rem a name column narrower than 13rem truncated most real names at 768px, and
+ * <b>Why the arithmetic works.</b> Status 8 + Balance 9 + Actions 16 + a 13rem floor for Member is
+ * 46rem, inside the 48rem where the table starts; Groups (9) arrives at 59rem, leaving Member 17;
+ * the date (6) at 65rem (R4 V-14 narrowed Actions from 18 and Groups from 12). Below 48rem a name column narrower than 13rem truncated most real names at 768px, and
  * two cards side by side read better there than a table of initials. Actions is 18rem
  * because a pending row holds Approve, Reject and ⋯, and every `Button` is as wide as its label
  * WITH the spinner it shows while working (width-locked, so it never jumps). Change a width and
@@ -45,7 +45,7 @@ import { RowActions, type RowActionHandlers } from "./RowActions";
  *
  * <p>
  * <b>Balance and Actions are pinned, and the two numbers are one decision.</b> Balance sits at
- * `right-72` and Actions is `w-72` — a pin whose offset no longer equals the width it clears puts
+ * `right-64` and Actions is `w-64` — a pin whose offset no longer equals the width it clears puts
  * the balance straight back under the actions, and a balance partly covered once read
  * `123456.78 cr` as `12345`. Fixed layout means there is no overflow for the pins to hide
  * anything in; they stay as the belt to that brace.
@@ -98,30 +98,40 @@ const COL = {
     "[@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:left-0 [@container(min-width:48rem)]:z-raised",
   ),
   status: cn(CELL, "col-start-1 row-start-2 self-center [@container(min-width:48rem)]:w-32"),
-  groups: cn(CELL, CARD_LABEL, "col-span-2 [@container(min-width:48rem)]:hidden [@container(min-width:59rem)]:!table-cell [@container(min-width:48rem)]:w-48"),
+  groups: cn(CELL, CARD_LABEL, "col-span-2 [@container(min-width:48rem)]:hidden [@container(min-width:59rem)]:!table-cell [@container(min-width:48rem)]:w-36"),
   date: cn(CELL, "col-span-2 [@container(min-width:48rem)]:hidden [@container(min-width:65rem)]:!table-cell [@container(min-width:48rem)]:w-24"),
   balance: cn(
     CELL, CARD_LABEL,
     "col-start-2 row-start-2 text-right",
-    "[@container(min-width:48rem)]:w-36 [@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:right-72",
+    "[@container(min-width:48rem)]:w-36 [@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:right-64",
     "[@container(min-width:48rem)]:z-raised [@container(min-width:48rem)]:border-l",
   ),
   actions: cn(
     CELL,
     "col-span-2 border-t border-border pt-3",
-    "[@container(min-width:48rem)]:w-72 [@container(min-width:48rem)]:min-w-72 [@container(min-width:48rem)]:sticky",
+    "[@container(min-width:48rem)]:w-64 [@container(min-width:48rem)]:min-w-64 [@container(min-width:48rem)]:sticky",
     "[@container(min-width:48rem)]:right-0 [@container(min-width:48rem)]:z-raised",
   ),
 } as const;
 
-/** The header cells carry the same widths, pins and thresholds as their columns. */
+/**
+ * The header cells carry the same widths, pins and thresholds as their columns.
+ *
+ * <p>
+ * R4 V-14: at 1280 the actions column (18rem) held Top up and ⋯ in half its width and the balance
+ * (9rem) a figure a third of it, while member emails wrapped over two lines. Actions are 16rem —
+ * Approve, Reject and ⋯ side by side — and groups 9rem; the balance keeps 9rem, which is what "98765432.19 cr"
+ * needs whole (admin-members-layout.spec); the member column takes the rest — 64px more than
+ * before, at the same column thresholds (which now leave it more than its 13rem floor).
+ * </p>
+ */
 const TH = {
   identity: "sticky left-0 z-sticky",
   status: "w-32",
-  groups: "hidden w-48 [@container(min-width:59rem)]:!table-cell",
+  groups: "hidden w-36 [@container(min-width:59rem)]:!table-cell",
   date: "hidden w-24 [@container(min-width:65rem)]:!table-cell",
-  balance: "w-36 sticky right-72 z-sticky border-l border-border text-right",
-  actions: "w-72 min-w-72 sticky right-0 z-sticky text-right",
+  balance: "w-36 sticky right-64 z-sticky border-l border-border text-right",
+  actions: "w-64 min-w-64 sticky right-0 z-sticky text-right",
 } as const;
 
 export type MembersTableProps = {

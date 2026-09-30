@@ -155,3 +155,30 @@ test.describe("R4 X4-6 — the Overview's quick links at 200 % text", () => {
     expect((await overflow(page)).scroll).toBeLessThanOrEqual(1);
   });
 });
+
+test.describe("R4 V-14 — the members table at 1280", () => {
+  test("gives the member column the room the fixed columns left empty", async ({ page }) => {
+    const member = {
+      user_id: "dddddddd-0000-4000-8000-00000000000d", membership_id: "eeeeeeee-0000-4000-8000-00000000000e",
+      full_name: "Evie Okafor", email: "eve+muo@member-r4.review.test", membership_number: "MR4-MUOIEQJH-EVE",
+      status: "PendingApproval", email_verified: true, balance_credits: 0, created_at: "2026-09-30T08:00:00Z",
+      photo_url: null, is_admin: false, admin_source: null, groups: [],
+    };
+    await open(page, "/admin/members", 1280, false, [{ path: "/api/v1/admin/members/", body: [member] }]);
+    const address = page.locator("tbody p", { hasText: "member-r4.review.test" }).first();
+    await expect(address).toBeVisible({ timeout: 30_000 });
+    // Was 222px beside an 18rem actions column holding Top up and ⋯ (reviewer, 1280).
+    const memberColumn = await page.locator("thead th").first().evaluate((th) => th.getBoundingClientRect().width);
+    expect(memberColumn).toBeGreaterThanOrEqual(280);
+    const lines = await address.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+    });
+    expect(lines, "a review-length address on one line").toBe(1);
+    const approve = page.getByRole("button", { name: /^Approve/ }).first();
+    const reject = page.getByRole("button", { name: /^Reject/ }).first();
+    const [a, r] = [await approve.boundingBox(), await reject.boundingBox()];
+    expect(Math.abs(a!.y - r!.y), "Approve and Reject side by side").toBeLessThan(2);
+  });
+});
