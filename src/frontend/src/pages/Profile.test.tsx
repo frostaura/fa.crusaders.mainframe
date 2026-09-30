@@ -108,12 +108,25 @@ describe("Profile — reading, failing and the page's shape", () => {
       { path: "/api/v1/me/webauthn/credentials", body: [] },
     ]);
     const retry = await screen.findByRole("button", { name: "Try again" }, { timeout: 3000 });
-    expect(screen.getByText(/Couldn't load your profile/)).toBeInTheDocument();
+    // The shared sentence for a 429, as on every other page (F4-17).
+    expect(screen.getByText(/Too many attempts/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Full name")).not.toBeInTheDocument();
 
     fail = false;
     fireEvent.click(retry);
     expect(await screen.findByLabelText("Full name")).toHaveValue("Ada Lovelace");
+  });
+
+  // F4-17 — under a 503 Profile said "something went wrong" while every other page said the club
+  // was down or restarting: it passed the state block a made-up Error instead of the read's own.
+  it("says the club is down or restarting under a 503, in the same words as every other page", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", respond: () => refuse(503, { error: "unavailable" }) },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+    ]);
+    await screen.findByRole("button", { name: "Try again" }, { timeout: 3000 });
+    expect(screen.getByText(/Couldn't load your profile — the club's system is down or restarting/)).toBeInTheDocument();
+    expect(screen.queryByText(/something went wrong/)).not.toBeInTheDocument();
   });
 
   it("never answers a failed passkey read with 'No passkeys yet'", async () => {

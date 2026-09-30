@@ -12,6 +12,12 @@ type ProfileState = {
    * something untrue about who they were signed in as (D2).
    */
   failed: boolean;
+  /**
+   * What the failed read threw, so a screen can say WHY in the same words as every other screen
+   * (F4-17: under a 503 Profile said "something went wrong" where the rest said "down or
+   * restarting", because it only knew THAT the read failed). Null unless `failed`.
+   */
+  error: unknown;
   refresh: () => Promise<void>;
   setLocal: (next: MyProfile | null) => void;
 };
@@ -29,6 +35,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   /**
    * The session is authenticated but holds an admin-issued temporary password, so the API
@@ -68,9 +75,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       if (current.current !== identity) return;
       setProfile(read);
       setFailed(false);
-    } catch {
+      setError(null);
+    } catch (err) {
       // Keep what was on screen for THIS member, but say the read failed.
-      if (current.current === identity) setFailed(true);
+      if (current.current === identity) { setFailed(true); setError(err); }
     } finally {
       if (current.current === identity) setLoading(false);
     }
@@ -81,12 +89,13 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs profile state with the signed-in identity
     setProfile(null);
     setFailed(false);
+    setError(null);
     if (identity !== null) void refresh();
     else setLoading(false);
   }, [identity, refresh]);
 
   return (
-    <ProfileContext.Provider value={{ profile, loading, failed, refresh, setLocal: setProfile }}>
+    <ProfileContext.Provider value={{ profile, loading, failed, error, refresh, setLocal: setProfile }}>
       {children}
     </ProfileContext.Provider>
   );

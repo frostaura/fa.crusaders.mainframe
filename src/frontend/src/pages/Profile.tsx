@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type ComponentProps, type DragEvent, type ReactNode } from "react";
-import { endpoints, type WebAuthnCredentialRow, type MyProfile } from "../lib/api";
+import { endpoints, NetworkError, type WebAuthnCredentialRow, type MyProfile } from "../lib/api";
 import { useProfile } from "../lib/profile";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { useToast } from "../components/Toast";
@@ -65,7 +65,7 @@ function useStalled(missing: boolean): [boolean, () => void] {
 }
 
 export default function ProfilePage() {
-  const { profile, loading, failed: readFailed, refresh } = useProfile();
+  const { profile, loading, failed: readFailed, error: readError, refresh } = useProfile();
   const [stalled, clearFailed] = useStalled(!profile && !loading);
   // The provider says so when the read failed (D2); the stall is kept for a read never asked.
   const failed = stalled || (readFailed && !profile && !loading);
@@ -75,7 +75,9 @@ export default function ProfilePage() {
       <PageHeader title={PROFILE_TITLE} description={PROFILE_DESCRIPTION} />
       <StateBlock
         loading={!profile && !failed}
-        error={!profile && failed ? new Error("profile read failed") : null}
+        // The read's own error when there is one (F4-17: a 503 reads "down or restarting", as on
+        // every other page); a stall that never got an answer is the club not answering.
+        error={!profile && failed ? (readError ?? new NetworkError("timeout")) : null}
         action="load your profile"
         onRetry={() => { clearFailed(); void refresh(); }}
         skeleton={<ProfileSkeleton />}
