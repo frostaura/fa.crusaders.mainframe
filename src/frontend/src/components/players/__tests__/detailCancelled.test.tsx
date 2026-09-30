@@ -69,6 +69,17 @@ describe("a cancelled booking (R1 F2.10)", () => {
     expect(money).not.toHaveTextContent(/Shares close|Not paid yet|Paid 0\.00|lapses|Asked for/);
   });
 
+  it("R2 F2-4: each partner's row says what came back to them — '25.00 cr back', not 'nothing owed'", async () => {
+    serve({ detail: cancelled({ players: [seat(), { ...SAM_SEAT, paid_credits: 0, target_credits: 0, returned_credits: 25 }, ALEX_SEAT] }) });
+    renderDetail();
+    const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
+    const sam = within(money).getByText("Sam").closest("li")!;
+    expect(sam).toHaveTextContent(DETAIL_CANCELLED.returnedRow("25.00 cr"));
+    expect(sam).not.toHaveTextContent(DETAIL_CANCELLED.nothingToPay);
+    // Alex never paid: nothing came back, and the row says so.
+    expect(within(money).getByText("Alex").closest("li")!).toHaveTextContent(DETAIL_CANCELLED.nothingToPay);
+  });
+
   it("a partner reads no 'all paid up' and no share still to pay", async () => {
     serve({ detail: cancelled({
       viewer: { role: "player", participant_id: PID.sam },

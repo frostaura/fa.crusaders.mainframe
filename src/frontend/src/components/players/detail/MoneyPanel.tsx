@@ -114,6 +114,13 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
   );
 }
 
+/** What one partner's row says on a cancelled game: paid and standing, came back (R2 F2-4), or nothing owed. */
+function cancelledSeatWords(p: BookingDetail["players"][number]): string {
+  if (p.paid_credits > 0) return DETAIL_CANCELLED.paidRow(formatCredits(p.paid_credits));
+  if ((p.returned_credits ?? 0) > 0) return DETAIL_CANCELLED.returnedRow(formatCredits(p.returned_credits ?? 0));
+  return DETAIL_CANCELLED.nothingToPay;
+}
+
 /**
  * R1 F2.10 — the money on a cancelled game: what came back and what was paid in the end. No
  * deadline, no "not paid yet", no "Paid 0.00 of 40.00": nothing on it is still being asked.
@@ -140,7 +147,7 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
             <li key={p.participant_id ?? `seat-${p.seat}`} className="flex items-baseline justify-between gap-4">
               <span className="min-w-0 break-words font-medium text-text-primary">{seatName(p, detail.players)}</span>
               <span className="text-right tabular-nums text-text-secondary">
-                {p.paid_credits > 0 ? DETAIL_CANCELLED.paidRow(formatCredits(p.paid_credits)) : DETAIL_CANCELLED.nothingToPay}
+                {cancelledSeatWords(p)}
               </span>
             </li>
           ))}

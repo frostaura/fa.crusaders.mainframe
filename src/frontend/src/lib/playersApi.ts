@@ -123,6 +123,11 @@ export type DetailPlayer = {
   paid_credits: number;
   target_credits: number;
   unpaid_credits: number;
+  /**
+   * R2 F2-4 — share credits that came BACK to this seat (paid_credits nets them out, so a
+   * cancelled game read "paid 0"). Optional: an older server does not send it.
+   */
+  returned_credits?: number;
   needs_consent: boolean;
   settled_outside: boolean;
   lapsed: boolean;

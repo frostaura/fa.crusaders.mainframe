@@ -562,6 +562,8 @@ export const DETAIL_CANCELLED = {
     ? `${who} got back what they paid for the court, less the shares partners had paid them — those went straight back to the partners.`
     : "You got back what you paid for the court, less the shares your partners had paid you — those went straight back to them.",
   paidRow: (paid: string) => `Paid ${paid}`,
+  /** R2 F2-4 — a partner's share that went back when the game was cancelled: "25.00 cr back". */
+  returnedRow: (returned: string) => `${returned} back`,
   partnerNothing: "The game was cancelled, so there's nothing for you to pay — any share you'd paid went back to you.",
   partnerPaid: (paid: string) => `The game was cancelled after check-in, so the ${paid} you paid stands.`,
 } as const;
