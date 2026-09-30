@@ -79,7 +79,8 @@ export const RESULT_CARD = {
   notCheckedIn: "A result can be recorded once the court has been checked in at the box.",
   notStarted: "A result can be recorded once your court time has started.",
   windowClosed: "It's too late to record a result for this game.",
-  notEnoughPlayers: "A result needs two players or more on the booking.",
+  /** R2 F2-8 — invited players are listed on the booking but do not count until they say yes. */
+  notEnoughPlayers: "A result needs at least one other player to have said yes to this game.",
   recordUntil: (when: string) => `You can record it until ${when}.`,
   waitingFor: (names: string, when: string | null) => (when
     ? `Waiting for ${names} to confirm · confirms itself ${when}`

@@ -286,3 +286,12 @@ describe("the card speaks to its viewer (R2 F2-5)", () => {
     expect(card()).not.toHaveTextContent(/Nomsa Khumalo said/);
   });
 });
+
+describe("not enough players (R2 F2-8)", () => {
+  it("says an invited player counts once they have said yes — not 'two players on the booking'", async () => {
+    serve([{ path: RESULT_PATH, body: view({ permissions: { ...view().permissions, can_record: false }, not_recordable_reason: "not_enough_players" }) }]);
+    renderCard();
+    expect(await screen.findByText(/at least one other player to have said yes/)).toBeInTheDocument();
+    expect(card()).not.toHaveTextContent(/two players or more on the booking/);
+  });
+});
