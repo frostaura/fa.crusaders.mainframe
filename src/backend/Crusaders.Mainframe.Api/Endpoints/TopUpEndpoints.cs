@@ -65,6 +65,7 @@ public static partial class TopUpEndpoints
             TenantSettingsAccessor settings,
             IConfiguration config,
             Crusaders.Mainframe.Api.Multitenancy.ITenantContext tenant,
+            Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox outbox,
             CancellationToken ct) =>
         {
             var s = await settings.GetAsync(ct);
@@ -79,6 +80,11 @@ public static partial class TopUpEndpoints
             if (creds is null) return Results.Json(new { error = "payments_not_configured" }, statusCode: 503);
 
             var userId = ctx.User.Id() ?? Guid.Empty;
+
+            // M4-1: the ceiling is read and the new row written under the member's lock, so two
+            // registrations sent together cannot both fit in the same remaining rand. Released
+            // before the gateway is called.
+            await using var capLock = await PayerLock.BeginAsync(db, tenant.TenantId, userId, outbox, ct);
 
             // D2-B05. The per-transaction half of the cap is above; this is the half the key's
             // own name promises and nothing implemented. See RefuseCumulativeAsync.
@@ -113,6 +119,7 @@ public static partial class TopUpEndpoints
             };
             db.PendingTopups.Add(pending);
             await db.SaveChangesAsync(ct);
+            await capLock.CommitAsync(ct);
 
             var publicBase = config["App:PublicBaseUrl"] ?? "http://localhost:8089";
             var register = await provider.RegisterCheckoutAsync(new RegisterCheckoutRequest(
@@ -161,18 +168,11 @@ public static partial class TopUpEndpoints
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
             var p = await db.PendingTopups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == topupId && x.UserId == userId, ct);
-            return p is null
-                ? Results.NotFound()
-                : Results.Ok(new
-                {
-                    id = p.Id,
-                    status = p.Status.ToString(),
-                    amount_zar = p.AmountZar,
-                    conversion_rate = p.ConversionRate,
-                    // A stable code the client maps to a sentence, never an internal string.
-                    failure_code = p.FailureReason,
-                });
+            return p is null ? Results.NotFound() : Results.Ok(StatusWire(p));
         });
+
+        // M4-1: the member came back through the cancel URL (TopUpEndpoints.Abandoned.cs).
+        MapCancelReturn(g);
 
         // Callback — PayFast ITN. Anonymous and signed; identifies the tenant via querystring.
         app.MapPost("/api/v1/credit/topup/callback", async (
@@ -230,7 +230,8 @@ public static partial class TopUpEndpoints
             // PayFast retries an ITN until it is acknowledged and the short-circuit below only
             // covers Completed, so a row that has already failed is re-judged on every retry.
             // The member must be told once, not once per retry.
-            var wasPending = pending.Status == TopUpStatus.Pending;
+            // M4-1: a row closed on our word (cancel return, expiry) is still open to the gateway.
+            var wasPending = pending.Status == TopUpStatus.Pending || IsReopenable(pending);
 
             // Idempotent: PayFast retries an ITN until it is acknowledged, so a repeat is
             // the normal case rather than an attack. Answering 200 stops the retries.
@@ -250,7 +251,7 @@ public static partial class TopUpEndpoints
             // 200 rather than a 4xx, for the reason above it: PayFast retries until it is
             // acknowledged, and a club that answers 4xx for ever gets retried for ever. The
             // body says plainly which way the row settled.
-            if (pending.Status is TopUpStatus.Failed or TopUpStatus.Cancelled)
+            if (pending.Status is TopUpStatus.Failed or TopUpStatus.Cancelled && !IsReopenable(pending))
             {
                 logger.LogInformation(
                     "topup {Key} is already settled as {Status}; a later notification does not re-open it",
@@ -425,6 +426,10 @@ public static partial class TopUpEndpoints
         pending.Status = TopUpStatus.Completed;
         pending.ExternalReference = interp.PaymentId;
         pending.CompletedAt = DateTimeOffset.UtcNow;
+        // M4-1: a completion wins over a cancel return or an expiry, including one written by a
+        // concurrent request after this row was read — so the reason is written unconditionally.
+        pending.FailureReason = null;
+        c.Db.Entry(pending).Property(p => p.FailureReason).IsModified = true;
 
         var settings = await c.Settings.GetAsync(ct);
 
@@ -663,12 +668,22 @@ public static partial class TopUpEndpoints
     /// declined card is not money the member topped up, and charging their ceiling for it would
     /// lock them out of their own account.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Only a FRESH <c>Pending</c> counts</b> (M4-1): PayFast never reports a checkout the
+    /// member abandoned, so an old Pending row is not money in flight and counting it locked the
+    /// member out for good. See <see cref="PendingLifetime"/>.
+    /// </para>
     /// </summary>
     private static async Task<decimal> ToppedUpZarAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
-        => await db.PendingTopups
+    {
+        var cutoff = PendingCutoff(DateTimeOffset.UtcNow);
+        return await db.PendingTopups
             .Where(p => p.UserId == userId
-                     && (p.Status == TopUpStatus.Completed || p.Status == TopUpStatus.Pending))
+                     && (p.Status == TopUpStatus.Completed
+                         || (p.Status == TopUpStatus.Pending && p.CreatedAt >= cutoff)))
             .SumAsync(p => (decimal?)p.AmountZar, ct) ?? 0m;
+    }
 
     /// <summary>
     /// The refusal for a member who has reached their ceiling, or null when they have not.
@@ -885,6 +900,18 @@ public static partial class TopUpEndpoints
 
         /// <summary>The checkout could not be registered at all — usually missing merchant credentials.</summary>
         public const string ProviderRegisterFailed = "provider_register_failed";
+
+        /// <summary>
+        /// The member came back through the cancel URL (M4-1). Our word, not the gateway's, so a
+        /// later signed COMPLETE still settles the row.
+        /// </summary>
+        public const string CancelledAtReturn = "cancelled_at_return";
+
+        /// <summary>
+        /// Nothing was heard for <see cref="PendingLifetime"/> (M4-1): an abandoned checkout.
+        /// Reopenable like the cancel return.
+        /// </summary>
+        public const string Expired = "expired";
     }
 
 }

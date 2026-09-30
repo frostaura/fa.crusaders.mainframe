@@ -83,6 +83,26 @@ There is no status polling. `GetStatusAsync` returns an explicit "not supported"
 throwing, so a caller that reaches it gets a decision instead of a 500. PayFast's query API
 needs a separate signed request and the ITN already retries until acknowledged.
 
+### A checkout PayFast never reports on
+
+**PayFast sends no ITN when a member cancels on its page or closes it.** The row would stay
+`Pending` for ever, and `Pending` counts against `topup_max_zar_per_member` (the cap is
+cumulative per member, over completed top-ups plus checkouts in flight). So (review round 4, M4-1):
+
+- **The cancel return** — the member landing on `cancel_url` — calls
+  `POST /api/v1/credit/topup/{id}/cancel`: own row only (404 otherwise), idempotent, and a
+  conditional update that never overwrites a completion. The row becomes `Cancelled` with
+  `failure_code: "cancelled_at_return"`; nobody is mailed. The answer is the status read's shape.
+- **A `Pending` row older than one hour stops counting** against the cap at once
+  (`TopUpEndpoints.PendingLifetime` — a property of the gateway's checkout, not a club policy).
+- **A sweep closes it** (`TopUpExpiryWorker`, on start and every 5 minutes) as `Cancelled` with
+  `failure_code: "expired"`, mailing nobody. The pass on start is also the one-off fix for rows
+  already stranded.
+- **Both are reopenable:** they are our word, not the gateway's, so a signed `COMPLETE` arriving
+  later still credits the member — money moved. A gateway `CANCELLED` or `FAILED` stays terminal.
+- **Registrations are serialised per member**: the cap is read and the row written under the
+  member's advisory lock (`PayerLock`), so checkouts sent together cannot all fit in one remainder.
+
 ## Credits, not rand
 
 The member pays rand; the ledger records **credits**. Conversion happens at the member's

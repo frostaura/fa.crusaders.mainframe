@@ -506,6 +506,9 @@ builder.Services.AddHostedService<PeripheralHealthWorker>();
 
 // Phase 8.8 — retention worker (nightly anonymisation of records older than retention_years)
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.RetentionWorker>();
+// M4-1: closes top-up checkouts PayFast never reported on; its pass on start is the one-off fix.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Workers.TopUpExpiryWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Crusaders.Mainframe.Api.Workers.TopUpExpiryWorker>());
 // Tops each club's schedule horizon up. The create and edit paths materialise
 // synchronously as well, so an admin sees their own click land.
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.ScheduleMaterialisationWorker>();
