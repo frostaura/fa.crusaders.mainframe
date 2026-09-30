@@ -140,6 +140,8 @@ const PRESS_WINDOW_MS = 2_000;
 function useOpener() {
   const opener = React.useRef<{ focused: Element | null; pressed: HTMLElement | null }>({ focused: null, pressed: null });
   React.useLayoutEffect(() => {
+    // A dialog opening now owns focus; a rescue queued by the last one closing must not move it.
+    cancelRescue();
     const pressed = lastPressed && Date.now() - lastPressed.at <= PRESS_WINDOW_MS ? lastPressed.element : null;
     opener.current = { focused: document.activeElement, pressed };
   }, []);
@@ -162,9 +164,27 @@ function usableOpener(opener: { focused: Element | null; pressed: HTMLElement | 
   return usable(opener.focused) ?? usable(opener.pressed);
 }
 
+/**
+ * The one pending rescue. It has to outlive the dialog that scheduled it — the surface is
+ * unmounting when it runs, which is the point — so it is not tied to a component; it is cancelled
+ * when the next dialog opens or the next rescue is scheduled instead. CI caught the leak: a timer
+ * left by a closed dialog fired after the test environment was torn down ("document is not
+ * defined", dialog.tsx in AdminMembers.test.tsx), which in a browser is a stray focus move after
+ * whatever came next had already placed focus.
+ */
+let pendingRescue: ReturnType<typeof setTimeout> | null = null;
+
+function cancelRescue(): void {
+  if (pendingRescue !== null) clearTimeout(pendingRescue);
+  pendingRescue = null;
+}
+
 /** Radix's default left focus on `<body>`: the page's `<main>` takes it. */
 function rescueFromBody(): void {
-  window.setTimeout(() => {
+  cancelRescue();
+  pendingRescue = setTimeout(() => {
+    pendingRescue = null;
+    if (typeof document === "undefined") return; // the page (or a test environment) is gone
     const active = document.activeElement;
     if (active && active !== document.body) return;
     (document.getElementById("main-content") ?? document.querySelector<HTMLElement>("main"))?.focus({ preventScroll: true });
