@@ -54,7 +54,8 @@ namespace Crusaders.Mainframe.Tests;
 /// <b>Cost.</b> 150 seeds by default (the three regression seeds included); set
 /// <c>PLAYERS_PROPERTY_SEEDS</c> to run more, <c>PLAYERS_PROPERTY_FIRST_SEED</c> to move the window.
 /// A failure names the seed and the steps that led to it; <c>PLAYERS_PROPERTY_TRACE</c>=a file path
-/// appends every seed's steps and answers there.
+/// appends every seed's steps and answers there. <c>PLAYERS_PROPERTY_CONCURRENT_WEIGHT</c>=n (the
+/// default weight is 1) leans every seed to the concurrent step, to hunt races under load.
 /// </para>
 /// </summary>
 public sealed class PlayersPropertyHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
@@ -256,6 +257,11 @@ public sealed class PlayersPropertyHttpTests(PostgresFixture pg) : IClassFixture
             // top-up, debit, deadline, reconcile, spend, S4, lower, concurrent, late withdraw.
             int[] weights = _debt ? [3, 1, 2, 1, 1, 1, 5, 3, 1, 1, 1, 1, 1, 1, 5]
                                   : [2, 2, 2, 2, 1, 2, 2, 2, 1, 1, 2, 1, 2, 1, 1];
+            // Opt-in, for hunting races (2026-09-30): lean every seed to the CONCURRENT step.
+            if (int.TryParse(Environment.GetEnvironmentVariable("PLAYERS_PROPERTY_CONCURRENT_WEIGHT"), out var concurrent) && concurrent > 0)
+            {
+                weights[13] = concurrent;
+            }
             var pick = _rng.Next(weights.Sum());
             var step = 0;
             while (pick >= weights[step]) pick -= weights[step++];

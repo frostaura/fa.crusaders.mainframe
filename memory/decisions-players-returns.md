@@ -2,13 +2,12 @@
 name: crusaders-mainframe-decisions-players-returns
 description: "An uncovered return waits: stamped, set aside from spendable, told once, retried on credit, sweep and start-up; a failed reconcile leaves a marker; nothing strands after an outage."
 type: decision
-last_verified: 2026-09-29
+last_verified: 2026-09-30
 ---
 
 # Live decisions — players: a return that waits, and how it is never stranded
 
-Spec: `docs/specs/players-and-splits.md` §3, §3a. When a return may post at all (coverage):
-`decisions-players-deadline.md`. From the refuter rounds, 2026-09-28.
+Spec: `docs/specs/players-and-splits.md` §3, §3a. Coverage: `decisions-players-deadline.md`. Refuter rounds, 2026-09-28.
 
 - **An uncovered return WAITS rather than overdraw** — chosen over refusing so no settlement hook
   or sweep fails with nobody to answer. It is stamped `ReturnPendingSince` (indexed); both sides
@@ -56,4 +55,6 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a. When a return may post at al
   it. Hooks run on `CancellationToken.None`. *Why:* a desk credit on a game past the sweep window
   whose hook never ran (dropped connection, restart) stranded the return for good; one save-level
   rule covers every settlement site, present and future, instead of each call site remembering.
-- **Stamping or clearing a wait publishes a wallet frame** (reason `share_set_aside`, delta 0).
+- **A stamp is set and cleared only under the organiser's lock**; either publishes a wallet frame
+  (`share_set_aside`, delta 0). *Why* (2026-09-30, the property test's CI flake): an unlocked clear read
+  the old stamp, then wiped a NEW one set in between — due, unpaid, unstamped; `…WaitingStampRace…`.
