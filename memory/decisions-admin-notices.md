@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-admin-notices
 description: "Every admin mail goes through one outbox staged in the event's own save, to active confirmed admins minus the actor and opt-outs; three kinds are non-optional, and tests must drive the outbox themselves."
 type: decision
-last_verified: 2026-09-23
+last_verified: 2026-10-01
 ---
 
 # Live decisions — how the club's administrators are told things (R23)
@@ -32,6 +32,10 @@ shown on the feed: `decisions-admin-notices-delivery.md`.
   failed, missing payment id, unsigned ITN (**one per club per UTC day**: the route is anonymous,
   and hourly let anyone mail every admin 24× a day). The admin mail's closing line is per reason:
   a missing payment id is a member who HAS PAID, is still `Pending` and has not been told.
+  **P13: the kind KEEPS its code `topup.failed`** — admins' opt-outs and the outbox dedupe keys
+  name it and survive the money reset — while its words are a package purchase ("Package
+  purchases that need looking at"); the payload gains `package_name`/`minutes`, filled by the
+  `AdminNotices.TopUpFailed(reason, identity, name, pending)` overload from the purchase row.
 - **Webhook disable reaches admins for CLUB endpoints only**; the destination is scheme+host.
 - **Settings**: `fault_spike_count` (5, 2–100), `fault_spike_minutes` (15, 5–240),
   `application_reminder_hours` (24, 1–168), `admin_notification_retention_days` (90, 7–730),

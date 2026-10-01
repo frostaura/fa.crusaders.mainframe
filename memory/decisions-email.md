@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-email
 description: "Every message is sent by a CLUB, not by the platform: one identity resolver, both bodies derived from one block list so they cannot drift, the registration mail merged to match what the screen promises, and no image anywhere."
 type: decision
-last_verified: 2026-09-22
+last_verified: 2026-10-01
 ---
 
 # Live decisions — what the club's mail is, and what it may claim
@@ -36,19 +36,18 @@ The voice these are written in is the product's own, held in
   the tin (`#CF2E30`) as a rule beneath it — the same lockup `AuthShell` puts over the sign-in
   screen. Images are blocked by default in most clients; a masthead that has to load is one a
   member does not see.
-- **Dark mode is defended against, not supported.** The product has one light palette:
-  `monitoring-posture.test.ts` asserts no `dark:` utility appears, and `pwa-posture.test.ts`
-  asserts the `color-scheme: light` meta that stops a dark browser painting its own chrome
-  underneath. There is nothing to mirror, and clients invert instead — so every cell carrying
-  text paints its own ground as a `bgcolor` attribute **and** an inline `background-color`,
-  because the clients that honour one ignore the other.
-- **An applicant gets ONE email at registration.** `registrationCopy.ts` promises a link now and a
-  second mail once the club approves; registration sent a "pending review" notice beside the
-  verification link in the same second, so the approval mail was the third and the screen's count
-  was wrong the moment they opened their inbox. The pending notice also carried no link, so whoever
-  opened it first was told to wait by the message whose job was to tell them to press something.
-  **The screen was right and the mail was wrong**; `MembershipPending` is deleted, and
-  `docs/specs/feature-spec.md` §11 records the merge.
+- **Dark mode is defended against, not supported** (one light palette; clients invert): every
+  cell carrying text paints its own ground as a `bgcolor` attribute **and** an inline
+  `background-color`, because the clients that honour one ignore the other.
+- **P13: every figure is whole minutes in words** (`EmailTemplates.Min` = `MoneyFormat.Minutes`);
+  rand only where a member paid rand (purchase, desk sale), never on a minutes row. No mail says
+  "credit"/"cr"/"top up" — `No_message_speaks_of_credits_or_topping_up` sweeps the catalogue.
+  Templates with >6 inputs take a record (`PackagePurchaseReceipt`, `PackagePurchaseAttempt`,
+  `DeskPackageSale`): the lizard gate, not taste. The receipt PDF maps U+2212 to `-` (WinAnsi
+  dropped it, turning a debt into a balance); the penalty sentence quotes the floored minutes.
+- **An applicant gets ONE email at registration** — the verification link — because
+  `registrationCopy.ts` promises a link now and one more mail on approval; the old "pending review"
+  notice made the count wrong and carried no link. `MembershipPending` is deleted (`feature-spec.md` §11).
 - **The sender name is the club's.** `SMTP_FROM_NAME` is one value for the whole process, so on a
   two-club deployment every message from both arrived from the same sender — and that sender was
   the software's name. `EmailMessage.FromName` carries the club's; config stays the fallback for
@@ -57,7 +56,5 @@ The voice these are written in is the product's own, held in
   and `club_contact_email` both default to empty, and the footer omits the line entirely — the same
   rule the sign-in refusal already keeps by staying quiet rather than printing "Call the club on
   null".
-- **Every message says why the reader has it.** There is no unsubscribe and there must not be one:
-  a club cannot stop telling a member their money moved. A transactional mail that explains nothing
-  about itself is indistinguishable from a phishing attempt, which is the failure that matters on
-  the three carrying a sign-in link or a password.
+- **Every message says why the reader has it**, and there is no unsubscribe: a club cannot stop
+  telling a member their money moved, and an unexplained mail reads as phishing.
