@@ -159,10 +159,10 @@ export default function BookingsPage() {
   const { offlineGrid, openBook } = useOnlineOnly(schedule, sheets.openBook, toast);
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
     day: shown, rules: gridRules, isAdmin, dayLabel: otherDay, forName: forMember?.name ?? null, explain: explainer.explain, selection: selection.api, onLiftHold: lift.ask,
-    priceOf,
+    priceOf, offline: offlineGrid,
     onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc, priceOf)]),
     onOpenBooking: (slot: ScheduleSlot) => openCancel([gridBookingOf(slot, shown)]),
-  } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, lift.ask, openBook, openCancel, priceOf]);
+  } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, lift.ask, openBook, openCancel, priceOf, offlineGrid]);
 
   const collapsed = explainer.collapsedRows(schedule.timeSlices, schedule.pastThresholdMs, showEarlier, isAdmin, schedule.slotsByCourt);
 

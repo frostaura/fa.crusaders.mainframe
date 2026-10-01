@@ -4,7 +4,8 @@ import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
 import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, slotRow } from "../test/bookingsKit";
 import { liftWithReason } from "../test/liftHold";
-import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET, bookCellLabel } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET, OFFLINE_CELL, bookCellLabel } from "../lib/bookingsCopy";
+import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { HOLD_LIFTED } from "../lib/scheduleEnd";
 import { notYetOpenSentence } from "../lib/gridCopy";
 
@@ -144,5 +145,27 @@ describe("P5 — a slot past the club's rolling booking window is drawn not yet 
   it("offers the slots inside the window", async () => {
     openBookings({ day: dayFixture({ advanceBookingDays: 3650 }) });
     expect(await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ })).toBeInTheDocument();
+  });
+});
+
+describe("V5-8 — offline, the grid's free cells are muted, not green Book cells", () => {
+  it("draws them Free with no price, and a press says booking needs a connection", async () => {
+    openBookings();
+    await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 50) });
+    // The signal goes: the refresh fails to reach the club, and the phone says it is offline.
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    const answered = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      (String(input).startsWith("/api/v1/schedule") ? Promise.reject(new TypeError("Failed to fetch")) : answered(input, init)));
+    fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.refresh }));
+
+    const cell = await screen.findByRole("button", { name: OFFLINE_CELL.label("Court 1 at 16:00") });
+    expect(cell).toHaveTextContent(OFFLINE_CELL.word);
+    expect(cell).not.toHaveTextContent("50.00");
+    expect(cell.className).not.toMatch(/slot-available/);
+    expect(screen.queryAllByRole("button", { name: /^Book Court/ })).toHaveLength(0);
+    fireEvent.click(cell);
+    expect(await screen.findByText(OFFLINE_COPY.bookNeedsConnection)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Book sheet" })).toBeNull();
   });
 });

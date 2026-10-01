@@ -78,6 +78,15 @@ export const CELL_TEXT = {
   reserved: "Reserved",
 } as const;
 
+/**
+ * R5 V5-8 — offline, the grid is the phone's copy and books nothing: a free cell is drawn muted,
+ * "Free", never the green "Book 50.00 cr" under "Booking needs a connection". Pressing it says why.
+ */
+export const OFFLINE_CELL = {
+  word: "Free",
+  label: (where: string) => `${where} — free when last read; booking needs a connection`,
+} as const;
+
 /** "Book Court 1 at 18:00 for 50.00 cr" — which court, which time, what it costs. */
 export function bookCellLabel(where: string, priceCredits: number): string {
   return `Book ${where} for ${formatCredits(priceCredits)}`;

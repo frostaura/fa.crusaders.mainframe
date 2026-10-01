@@ -10,7 +10,7 @@ import { cn, formatCredits } from "../lib/utils";
 import { cellVerdict, type CellFacts, type GridReason, type ViewerRules } from "../lib/gridRules";
 import { closedCellLabel, holdCellLabel, holdLiftLabel, pastCellLabel, quotaCellLabel, restrictionLabel, unavailableWhy } from "../lib/gridCopy";
 import {
-  CELL_TEXT, HOLDING_CELL, PARTNER_CELL_WORD, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
+  CELL_TEXT, HOLDING_CELL, OFFLINE_CELL, PARTNER_CELL_WORD, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
   mineCellLabel, minePastCellLabel, minePastOpenLabel, otherCellAdminLabel, partnerCellLabel,
 } from "../lib/bookingsCopy";
 import { isPartnerSlot } from "../lib/bookingsApi";
@@ -61,6 +61,8 @@ export type BoardContext = {
   dayLabel: string | null;
   /** The first name of the member the desk is booking for (`?as=`), whose group hours the grid draws (R2 F1-3). */
   forName?: string | null;
+  /** R5 V5-8 — the grid is the phone's copy (no connection): free cells are drawn muted and book nothing. */
+  offline?: boolean;
   /** What THIS viewer pays per slice on a court — their group's price, not the court's own (R5 I5-1). */
   priceOf: PriceOf;
   /** The sentence a locked cell answers with (D4 §2.9) — visible and spoken. */
@@ -336,6 +338,7 @@ function EmptyCell(props: SlotCellProps) {
 function AvailableCell(props: SlotCellProps) {
   const { ctx, court, where, startsAtUtc, at } = props;
   if (props.holding) return <HoldingCell {...props} />;
+  if (ctx.offline) return <OfflineFreeCell {...props} />;
   const key = selectionKey(court.id, startsAtUtc);
   const pick = choosable(ctx, key, at, () => ctx.onBook(court, startsAtUtc));
   const price = ctx.priceOf(court);
@@ -354,6 +357,28 @@ function AvailableCell(props: SlotCellProps) {
           <span className="hidden font-medium md:inline">{formatCredits(price)}</span>
         </button>
       </Interactable>
+    </Cell>
+  );
+}
+
+/**
+ * R5 V5-8 — a slot the phone's copy shows free while there is no connection. Muted, no price, no
+ * watermark (it books nothing); a press says booking needs a connection (the page's toast).
+ */
+function OfflineFreeCell(props: SlotCellProps) {
+  const { ctx, court, where, startsAtUtc } = props;
+  return (
+    <Cell label={where} selfFocus={false} at={props.at} line={props.line} roving={props.roving} selecting={ctx.selection.active}>
+      <button
+        type="button"
+        tabIndex={props.roving ? 0 : -1}
+        aria-label={OFFLINE_CELL.label(where)}
+        data-offline-cell=""
+        onClick={() => ctx.onBook(court, startsAtUtc)}
+        className={cn(SURFACE, PRESSABLE, TONE.idle)}
+      >
+        <span className="min-w-0 truncate">{OFFLINE_CELL.word}</span>
+      </button>
     </Cell>
   );
 }
