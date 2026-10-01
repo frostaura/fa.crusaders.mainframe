@@ -38,13 +38,21 @@ public static partial class TopUpEndpoints
             // left" instead of offering an amount the POST is about to refuse. The cap is per
             // MEMBER (D2-B05) and a screen that cannot see the running total can only ever
             // show the per-transaction half of it.
-            var already = await ToppedUpZarAsync(db, userId, ct);
+            // M5-2: paid and waiting apart, and the checkouts still waiting, so the screen can say
+            // "R0 paid, R1000 waiting on payments you started" and offer each one's Cancel.
+            var open = await OpenCheckoutsAsync(db, userId, ct);
+            var paid = await PaidZarAsync(db, userId, ct);
+            var waiting = open.Sum(o => o.AmountZar);
+            var already = paid + waiting;
             return Results.Ok(new
             {
                 block_zar = s.TopupBlockZar,
                 min_zar = s.TopupBlockZar,
                 max_zar = s.TopupMaxZarPerMember,
                 already_zar = already,
+                paid_zar = paid,
+                waiting_zar = waiting,
+                open_checkouts = open.Select(OpenWire).ToList(),
                 remaining_zar = Math.Max(s.TopupMaxZarPerMember - already, 0m),
                 presets_zar = Presets(s.TopupBlockZar, s.TopupMaxZarPerMember),
                 conversion_rate = tariff.TopUpRate,
@@ -653,7 +661,9 @@ public static partial class TopUpEndpoints
     }
 
     /// <summary>
-    /// How much rand this member has put into their account — settled, plus what is in flight.
+    /// How much rand this member has PAID — settled top-ups only. The ceiling counts this plus what
+    /// is in flight (<see cref="OpenCheckoutsAsync"/>); the two are kept apart since M5-2 so the
+    /// screen never calls a checkout nobody paid "used".
     ///
     /// <para>
     /// <b>D2-B05.</b> <c>topup_max_zar_per_member</c> compared one <c>amountZar</c> against the
@@ -675,13 +685,12 @@ public static partial class TopUpEndpoints
     /// member out for good. See <see cref="PendingLifetime"/>.
     /// </para>
     /// </summary>
-    private static async Task<decimal> ToppedUpZarAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
+    private static async Task<decimal> PaidZarAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
     {
-        var cutoff = PendingCutoff(DateTimeOffset.UtcNow);
+        // Settled money only (M5-2). What is still in flight is OpenCheckoutsAsync's, and the
+        // ceiling counts the two together — but a screen must never call unpaid money "used".
         return await db.PendingTopups
-            .Where(p => p.UserId == userId
-                     && (p.Status == TopUpStatus.Completed
-                         || (p.Status == TopUpStatus.Pending && p.CreatedAt >= cutoff)))
+            .Where(p => p.UserId == userId && p.Status == TopUpStatus.Completed)
             .SumAsync(p => (decimal?)p.AmountZar, ct) ?? 0m;
     }
 
@@ -700,7 +709,9 @@ public static partial class TopUpEndpoints
     {
         if (isAdmin) return null;
 
-        var already = await ToppedUpZarAsync(db, userId, ct);
+        var paid = await PaidZarAsync(db, userId, ct);
+        var waiting = (await OpenCheckoutsAsync(db, userId, ct)).Sum(o => o.AmountZar);
+        var already = paid + waiting;
         var remaining = Math.Max(s.TopupMaxZarPerMember - already, 0m);
         if (amountZar <= remaining) return null;
 
@@ -709,6 +720,8 @@ public static partial class TopUpEndpoints
             error = "amount_exceeds_member_cap",
             max_zar = s.TopupMaxZarPerMember,
             already_zar = already,
+            paid_zar = paid,
+            waiting_zar = waiting,
             remaining_zar = remaining,
         });
     }

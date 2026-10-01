@@ -198,6 +198,59 @@ public sealed class TopUpAbandonedTests(PostgresFixture pg) : IClassFixture<Post
         await RegisterAsync(member);
     }
 
+    /// <summary>
+    /// Review round 5, M5-2 (HIGH): back from PayFast twice and the member read "You've topped up
+    /// R1000.00" with R0 paid, for up to an hour, with nothing to cancel. The options read now keeps
+    /// paid and waiting apart and lists the member's own open checkouts (newest first, with when
+    /// each started and until when it holds the limit); cancelling one frees its rand at once, and
+    /// the cap refusal says the same split.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_options_list_open_checkouts_and_keep_paid_apart_from_waiting()
+    {
+        Skip.IfNot(pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        var factory = pg.SharedHost;
+        var seeded = await SeedAsync(factory, maxZar: 300m);
+        var member = Client(factory, seeded, seeded.MemberUserId);
+
+        var paid = await RegisterAsync(member);
+        var itn = await factory.CreateClient().PostAsync($"{CallbackPath}?tenant={seeded.Slug}", Itn(paid.CheckoutId, "7340101"));
+        Assert.Equal(HttpStatusCode.OK, itn.StatusCode);
+        var older = await RegisterAsync(member);
+        await BackdateAsync(factory, older.TopUpId, TimeSpan.FromMinutes(5));
+        var newer = await RegisterAsync(member);
+        await RegisterAsync(Client(factory, seeded, seeded.OtherUserId));
+
+        var options = await member.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
+        Assert.Equal(100m, options.GetProperty("paid_zar").GetDecimal());
+        Assert.Equal(200m, options.GetProperty("waiting_zar").GetDecimal());
+        Assert.Equal(300m, options.GetProperty("already_zar").GetDecimal());
+        Assert.Equal(0m, options.GetProperty("remaining_zar").GetDecimal());
+        var open = options.GetProperty("open_checkouts").EnumerateArray().ToList();
+        Assert.Equal([newer.TopUpId, older.TopUpId], open.Select(o => o.GetProperty("id").GetGuid()).ToList());
+        var started = open[1].GetProperty("created_at").GetDateTimeOffset();
+        Assert.Equal((await RowAsync(factory, older.TopUpId)).CreatedAt, started, TimeSpan.FromMilliseconds(1));
+        Assert.Equal(started.AddMinutes(60), open[1].GetProperty("counts_until").GetDateTimeOffset());
+        Assert.Equal(100m, open[1].GetProperty("amount_zar").GetDecimal());
+
+        var status = await member.GetFromJsonAsync<JsonElement>($"/api/v1/credit/topup/{older.TopUpId}");
+        Assert.Equal(started, status.GetProperty("created_at").GetDateTimeOffset());
+
+        // Cancelling one frees its rand at once.
+        await CancelReturnAsync(member, older.TopUpId);
+        options = await member.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
+        Assert.Equal(100m, options.GetProperty("waiting_zar").GetDecimal());
+        Assert.Equal(100m, options.GetProperty("remaining_zar").GetDecimal());
+        Assert.Equal([newer.TopUpId], options.GetProperty("open_checkouts").EnumerateArray().Select(o => o.GetProperty("id").GetGuid()).ToList());
+
+        var refused = await member.PostAsJsonAsync("/api/v1/credit/topup", new { amountZar = 200m });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("amount_exceeds_member_cap", body.GetProperty("error").GetString());
+        Assert.Equal(100m, body.GetProperty("paid_zar").GetDecimal());
+        Assert.Equal(100m, body.GetProperty("waiting_zar").GetDecimal());
+    }
+
     [SkippableFact]
     public async Task A_complete_arriving_after_the_cancel_return_still_credits_the_member()
     {

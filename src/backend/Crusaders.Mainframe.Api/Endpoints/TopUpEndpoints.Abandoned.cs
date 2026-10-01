@@ -90,6 +90,42 @@ public static partial class TopUpEndpoints
             conversion_rate = p.ConversionRate,
             // A stable code the client maps to a sentence, never an internal string.
             failure_code = p.FailureReason,
+            // M5-2: "a payment you started at 14:05", and until when it holds the member's limit.
+            created_at = p.CreatedAt,
+            counts_until = p.CreatedAt + PendingLifetime,
+        };
+    }
+
+    /// <summary>
+    /// The member's checkouts still waiting on PayFast — <c>Pending</c> and fresh, so exactly the
+    /// rows the ceiling counts as in flight — newest first (review round 5, M5-2).
+    ///
+    /// <para>
+    /// <b>Why the screen lists them.</b> Back from PayFast twice (R200, R800) and the member read
+    /// "You've topped up R1000.00, the most the club takes" with R0 paid, for up to an hour, with no
+    /// way to free it: the cancel return only fires when PayFast's own Cancel is pressed. Each row
+    /// carries its own Cancel (<c>POST /topup/{id}/cancel</c>, which frees the limit at once and,
+    /// like the return, is reopened by a signed COMPLETE if the money did move).
+    /// </para>
+    /// </summary>
+    internal static async Task<List<PendingTopup>> OpenCheckoutsAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
+    {
+        var cutoff = PendingCutoff(DateTimeOffset.UtcNow);
+        return await db.PendingTopups.AsNoTracking()
+            .Where(p => p.UserId == userId && p.Status == TopUpStatus.Pending && p.CreatedAt >= cutoff)
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>One open checkout on the options read.</summary>
+    private static object OpenWire(PendingTopup p)
+    {
+        return new
+        {
+            id = p.Id,
+            amount_zar = p.AmountZar,
+            created_at = p.CreatedAt,
+            counts_until = p.CreatedAt + PendingLifetime,
         };
     }
 
