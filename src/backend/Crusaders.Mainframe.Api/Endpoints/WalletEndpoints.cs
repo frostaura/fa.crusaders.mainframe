@@ -620,37 +620,35 @@ public static partial class WalletEndpoints
         => await db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
 
-    // Block body, not an expression body: lizard's C# parser reads the `{` of an object
-    // initialiser as the end of the function and dumps the whole rest of the file into a
-    // *global* pseudo-function whose reported length trips `-L 200`. See memory/gotchas.md.
+    /// <summary>The answer to a desk movement: the sale's shape for a sale, the adjustment's otherwise.</summary>
     private static IResult MovementResult(
         LedgerEntry entry, DeskMovement m, int balanceBefore, int balanceAfter, Domain.User user)
     {
-        var body = new Dictionary<string, object?>
+        // Block body: a property pattern in an expression body is the lizard trap (gotchas-gates).
+        if (m.Package is null) return AdjustmentResult(entry, m.Kind, balanceBefore, balanceAfter, user);
+        return SaleResult(entry, m.Kind, m.Package, (balanceBefore, balanceAfter), user);
+    }
+
+    // Block body, not an expression body: lizard's C# parser reads the `{` of an object
+    // initialiser as the end of the function and dumps the whole rest of the file into a
+    // *global* pseudo-function whose reported length trips `-L 200`. See memory/gotchas.md.
+    private static IResult AdjustmentResult(
+        LedgerEntry entry, AdminCreditReasons.Kind kind, int balanceBefore, int balanceAfter, Domain.User user)
+    {
+        return Results.Ok(new
         {
-            ["entry_id"] = entry.Id,
-            ["type"] = entry.Type.ToString(),
-            ["reason_code"] = m.Kind.Code,
-            ["amount_minutes"] = entry.AmountMinutes,
-            ["zar_received"] = entry.ZarPaid,
+            entry_id = entry.Id,
+            type = entry.Type.ToString(),
+            reason_code = kind.Code,
+            amount_minutes = entry.AmountMinutes,
+            zar_received = entry.ZarPaid,
             // balance_before is here because the admin has to read back what they just did, and
             // the console's confirmation must not be composed client-side from a number it
             // fetched separately and may have fetched before.
-            ["balance_before_minutes"] = balanceBefore,
-            ["balance_after_minutes"] = balanceAfter,
-            ["member"] = new { user_id = user.Id, email = user.Email },
-        };
-        if (m.Package is { } item)
-        {
-            body["package"] = new
-            {
-                id = item.Package.Id,
-                name = item.Package.Name,
-                minutes = item.Package.Minutes,
-                price_zar = item.PriceZar,
-            };
-        }
-        return Results.Ok(body);
+            balance_before_minutes = balanceBefore,
+            balance_after_minutes = balanceAfter,
+            member = new { user_id = user.Id, email = user.Email },
+        });
     }
 
     /// <summary>

@@ -62,6 +62,27 @@ public static partial class WalletEndpoints
         return await MoveAsync(movement, ctx, services, ct);
     }
 
+    /// <summary>
+    /// A sale's answer (P13 §3.7): the adjustment's shape, plus the package sold at the member's
+    /// shelf price. Block body for the lizard reason <see cref="AdjustmentResult"/> gives.
+    /// </summary>
+    private static IResult SaleResult(
+        LedgerEntry entry, AdminCreditReasons.Kind kind, ShelfItem item, (int Before, int After) balance, User user)
+    {
+        return Results.Ok(new
+        {
+            entry_id = entry.Id,
+            type = entry.Type.ToString(),
+            reason_code = kind.Code,
+            amount_minutes = entry.AmountMinutes,
+            zar_received = entry.ZarPaid,
+            balance_before_minutes = balance.Before,
+            balance_after_minutes = balance.After,
+            member = new { user_id = user.Id, email = user.Email },
+            package = new { id = item.Package.Id, name = item.Package.Name, minutes = item.Package.Minutes, price_zar = item.PriceZar },
+        });
+    }
+
     /// <summary>Everything that refuses a sale before the database is read.</summary>
     private static IResult? RefuseSale(SellRequest req)
     {
