@@ -1,9 +1,9 @@
 using System.Data.Common;
-using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,7 +54,9 @@ public sealed class BookingConfirmationOffPathHttpTests(PostgresFixture pg) : IC
         var text = Encoding.Latin1.GetString(receipt.Content);
         Assert.Contains("Olive Organiser", text, StringComparison.Ordinal);
         var balance = await PlayersClub.BalanceAsync(f, club.Organiser);
-        Assert.Contains($"{balance.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
+        // Minutes in prose (contract §6): "Balance after: 1 hour 44 minutes", never "104.00 cr".
+        Assert.Contains(MoneyFormat.Minutes(balance), text, StringComparison.Ordinal);
+        Assert.DoesNotContain(" cr", text, StringComparison.Ordinal);
         Assert.Contains($"Club {club.Slug}", text, StringComparison.Ordinal);
     }
 

@@ -1,4 +1,3 @@
-using System.Globalization;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Persistence;
