@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { memberShellRoutes } from "./playersKit";
+import { CONSOLE_COPY } from "../src/lib/notificationsCopy";
 
 // A cold dev server compiles the admin frame on first ask, and the machine is shared: room to do so.
 test.describe.configure({ timeout: 90_000 });
@@ -148,6 +149,8 @@ test.describe("R4 V4-9 — a member's header at 200 % text", () => {
 test.describe("R4 X4-6 — the Overview's quick links at 200 % text", () => {
   test("keep every label word whole on a 390 phone", async ({ page }) => {
     await open(page, "/admin", 390, true);
+    // R5 A5-6: on a phone the Console is folded behind one toggle (it repeats the section switcher).
+    await page.getByRole("button", { name: CONSOLE_COPY.show }).click();
     await expect(page.locator("[data-quick-link]").first()).toBeVisible({ timeout: 30_000 });
     for (const w of await wordLines(page, "[data-quick-link] .font-semibold")) {
       expect(w.lines, `"${w.word}" is broken across lines`).toBe(1);

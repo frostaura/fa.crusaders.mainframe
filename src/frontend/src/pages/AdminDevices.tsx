@@ -553,7 +553,12 @@ function ActivityBody({ entries, loading, error, gate, now }: {
  * screen-reader user has to re-find after every press.
  * </p>
  */
-function DeviceActivityPanel({ device, now }: { device: AdminDevice; now: number }) {
+/**
+ * A board's own trail, opened on demand: the toggle and the panel are drawn apart (R5 §3.16) — the
+ * toggle joins the row's action strip and the panel opens under it, which took a 56px line off
+ * every board on a phone (234 → ~180px; 17,031px for the review club's boards at 390).
+ */
+function useDeviceActivity(device: AdminDevice, now: number) {
   const gate = isGate(device);
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<DeviceActivityEntry[] | null>(null);
@@ -575,25 +580,24 @@ function DeviceActivityPanel({ device, now }: { device: AdminDevice; now: number
     }
   }
 
-  return (
-    <div className="flex flex-col gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        className={`-ml-2 self-start ${WRAPS}`}
-        aria-expanded={open}
-        onClick={() => void toggle()}
-        icon={<CaretDown aria-hidden="true" className={open ? "rotate-180" : undefined} />}
-      >
-        {activityPanelTitle(gate)}
-      </Button>
-      {open && (
-        <div className="rounded-lg border border-border bg-bg-muted p-3">
-          <ActivityBody entries={entries} loading={loading} error={error} gate={gate} now={now} />
-        </div>
-      )}
-    </div>
+  const toggleButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      className={WRAPS}
+      aria-expanded={open}
+      onClick={() => void toggle()}
+      icon={<CaretDown aria-hidden="true" className={open ? "rotate-180" : undefined} />}
+    >
+      {activityPanelTitle(gate)}
+    </Button>
   );
+  const panel = open ? (
+    <div className="rounded-lg border border-border bg-bg-muted p-3">
+      <ActivityBody entries={entries} loading={loading} error={error} gate={gate} now={now} />
+    </div>
+  ) : null;
+  return { toggleButton, panel };
 }
 
 /**
@@ -652,9 +656,10 @@ function DeviceRow({
   const [editing, setEditing] = useState<"details" | "buttons" | null>(null);
   // Presence-gated: an API that does not send the field gets no editor for it.
   const hasOwnMapField = device.button_map !== undefined;
+  const activity = useDeviceActivity(device, now);
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
+    <div data-board-card="" className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1"><DeviceRowHeader device={device} online={online} now={now} /></div>
         {/* Deleting is not a revocation and locks nothing out — the box still holds the
@@ -736,10 +741,13 @@ function DeviceRow({
             Put back in service
           </Button>
         )}
+
+        {/* Last in the strip: the one control on this row that reads rather than writes. Its panel
+            opens under the strip. */}
+        {activity.toggleButton}
       </div>
 
-      {/* Below the strip: the one control on this row that reads rather than writes. */}
-      <DeviceActivityPanel device={device} now={now} />
+      {activity.panel}
     </div>
   );
 }
