@@ -42,9 +42,8 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   facts rather than a "Before" with a dash. *Why:* writers store keys and tokens (`pending_approval`,
   `top_up_cash`, UUIDs); a new writer's key falls back to words. R3 (A-7): instants in club day+clock,
   ISO dates short, lengths and repeats in words; `spendable_credits` pairs as "Can spend".
-- **Review round 3 (lane B), `R3*HttpTests`:** a REJECTED applicant can be approved (A-2) —
-  the same approval (audit, change row from `rejected`, welcome mail, webhook), rejection reason
-  cleared; nothing else is approvable. *Why:* the console offered it and got a bare 404.
+- **R3 (lane B):** a REJECTED applicant can be approved (A-2) — the same approval, reason cleared;
+  nothing else is approvable. *Why:* the console offered it and got a bare 404.
   **Both admin-grant mails carry the reason** (A-3) — required since B10, dropped on the way out.
 - **Club webhooks are on the record** (A-5): `webhook.created`/`.deleted`, area `setting`, subject
   kind `webhook`, destination as scheme+host+port only — URL credentials, path tokens and the
@@ -58,8 +57,6 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   fault resolves (note = reason), each in its action's own save, changed fields only; a no-op or
   refused action records nothing, and a failed save detaches its staged rows. Play-result rows carry
   `status` on both sides. Desk cancels: [`decisions-admin-writes.md`](decisions-admin-writes.md).
-- **Round 5 (lane F):** lifting a hold needs a reason (`DELETE /admin/blocks/{id}?reason=`, 400
-  `reason_required`; `booking.block_lifted` is reason-required). A bulk cancel ALSO writes the
-  per-booking `booking.cancelled_by_admin` row (`after.part_of_batch`), reversing "one row per batch
-  only" — a member's record never showed a court taken from a list. Both bulk rows carry a label
-  ("3 bookings — Olga Smith, Ben Ng and 1 more" / the payer) and `after.bookings` per item.
+- **R5 (lane F):** a hold lift needs `?reason=` (reason-required). A bulk cancel ALSO writes each
+  booking's `booking.cancelled_by_admin` (`part_of_batch`) — a member's record lacked courts taken
+  from a list; both bulk rows are labelled and list `after.bookings`.
