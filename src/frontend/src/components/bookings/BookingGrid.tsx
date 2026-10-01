@@ -80,7 +80,9 @@ export function BookingBoard(props: BoardProps) {
     <div className="flex flex-col gap-3">
       {chips.overflow ? <CourtChips courts={day.courts} active={chips.active} onPick={chips.jump} /> : null}
       {/* 3xl: the frame hugs the capped grid (R4 form factor — never four 300px courts). */}
-      <div className="overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs 3xl:w-fit 3xl:max-w-full">
+      {/* `relative z-base`: its own stacking context, so the grid's sticky court header never
+          paints over the phone's sticky week strip (R5 §4.2) as the page scrolls it under. */}
+      <div className="relative z-base overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs 3xl:w-fit 3xl:max-w-full">
         <div
           ref={scroller}
           data-grid-scroller=""
@@ -155,7 +157,8 @@ export const SELECTION_ROOM_PX = 64;
  * — the page and the grid now reserve the same pixels, once.
  */
 function scrollerMaxHeight(): string {
-  return `max(280px, calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - ${PAGE_BOTTOM_PX}px))`;
+  // R5 §4.2 — less the phone's sticky week strip (`--day-strip-height`, 0 when it does not stick).
+  return `max(280px, calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - var(--day-strip-height, 0px) - ${PAGE_BOTTOM_PX}px))`;
 }
 
 /**

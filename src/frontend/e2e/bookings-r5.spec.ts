@@ -104,3 +104,37 @@ test.describe("one project sweeps the widths", () => {
     expect(first.bottom + 3 * 52, "four slot rows on the first screen").toBeLessThanOrEqual(844 - tabBar);
   });
 });
+
+test.describe("§4.2 — the phone's week strip sticks", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("stays under the app bar while the grid is worked, and the grid's header is never behind it", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, { invites: 3, games: 3, recent: 2 });
+    await expect(page.locator("[data-day-strip][data-sticks]")).toHaveCount(1);
+    const chrome = await page.evaluate(() => document.querySelector("main")!.getBoundingClientRect().top);
+    // Scroll the page to its end: the games go, the week stays, the court header sits under it.
+    await page.evaluate(() => { const m = document.querySelector("main")!; m.scrollTop = m.scrollHeight; });
+    await page.waitForTimeout(100);
+    const strip = await box(page, "[data-day-strip]");
+    expect(Math.abs(strip.top - chrome)).toBeLessThanOrEqual(1);
+    const header = await box(page, '[role="columnheader"][data-court-col="0"]');
+    expect(header.top, "the court header is below the strip, not under it").toBeGreaterThanOrEqual(strip.bottom - 1);
+    const tabBar = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height")) || 0);
+    const frame = await box(page, FRAME);
+    expect(frame.bottom, "the grid's frame ends above the tab bar").toBeLessThanOrEqual(844 - tabBar + 1);
+  });
+
+  test("does not stick where it would take too much of a short phone at 200 % text", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await open(page, { bigText: true });
+    await expect(page.locator("[data-day-strip]")).toHaveCount(1);
+    await expect(page.locator("[data-day-strip][data-sticks]")).toHaveCount(0);
+  });
+
+  test("is not sticky beside a desktop grid", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page);
+    await expect(page.locator("[data-day-strip][data-sticks]")).toHaveCount(0);
+  });
+});

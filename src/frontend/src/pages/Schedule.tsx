@@ -27,6 +27,8 @@ import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { DaySummary } from "../components/bookings/DaySummary";
 import { WithAside } from "@/components/ui/with-aside";
 import { useScheduleLiveness } from "../components/bookings/useScheduleLiveness";
+import { useStickyDayStrip } from "../components/bookings/useStickyDayStrip";
+import { cn } from "../lib/utils";
 import { RecentGames } from "../components/bookings/RecentGames";
 import type { CancelledOutcome } from "../components/bookings/CancelSheet";
 import { LazyCancelSheet, loadCancelSheet, usePrefetchWhen } from "../components/bookings/lazyParts";
@@ -349,6 +351,9 @@ function SelectToggle({ selection }: { selection: Selection }) {
 
 type ScheduleState = ReturnType<typeof useScheduleDay>;
 
+/** The phone's sticky week: the page's own background, edge to edge, a hairline under it. */
+const STICKY_STRIP = "sticky top-0 z-sticky -mx-4 border-b border-border bg-bg-app px-4 pb-2 pt-1 sm:-mx-6 sm:px-6";
+
 /**
  * On a phone the jump-to-date trigger is a 44px calendar button — the strip under it already
  * says which day it is, and the month beside the arrows needs the room. Its name still carries
@@ -369,8 +374,13 @@ function DayPicker(props: {
 }) {
   const { schedule, isAdmin, quota, rateLine } = props;
   const { date, setDate, bounds, today } = schedule;
+  const strip = useRef<HTMLDivElement>(null);
+  const sticks = useStickyDayStrip(strip);
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
+    // R5 §4.2 — on a phone the week sticks under the app bar while the grid is worked. The whole
+    // picker sticks: its parent is the column the grid is in, which is what a sticky box needs.
+    <div ref={strip} data-day-strip="" data-sticks={sticks || undefined}
+      className={cn("flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-8", sticks && STICKY_STRIP)}>
       <WeekStrip
         value={date} onChange={setDate} min={bounds.min} max={bounds.max} today={today}
         disablePast={!isAdmin} label={BOOKINGS_COPY.dayStripLabel} className="w-full lg:min-w-0 lg:flex-1"
