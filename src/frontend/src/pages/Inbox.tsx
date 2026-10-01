@@ -36,7 +36,7 @@ export default function InboxPage() {
         actions={<RefreshButton onRefresh={feed.retry} loading={feed.refreshing} label={COPY.refresh} />}
       />
       <div className="flex flex-col gap-4">
-        <StaleNotice stale={feed.stale} readAt={feed.readAt} />
+        <StaleNotice stale={feed.stale} readAt={feed.readAt} offline={feed.offline} />
         {feed.answered && feed.count > 0 ? <UnreadBar feed={feed} onMarkAll={markAll} /> : null}
         <p role="status" className="sr-only" data-inbox-said="">{said}</p>
         <InboxList feed={feed} listRef={list} />

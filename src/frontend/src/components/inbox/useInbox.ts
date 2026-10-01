@@ -113,6 +113,7 @@ export function useInbox() {
     error: base === null ? read.error : null,
     refreshing: read.loading,
     stale: read.stale,
+    offline: read.offline,
     readAt: read.readAt,
     answered: base !== null,
     items: base ? [...(base.items ?? []), ...older.items] : [],

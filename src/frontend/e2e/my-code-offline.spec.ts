@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { memberCodeSecretB64, MEMBER_CODE } from "./fixtures";
 import { tokensAroundNow } from "./memberCodeOracle";
+import { OFFLINE_COPY } from "../src/lib/offline/offlineCopy";
 
 /**
  * D3 — the member at the door with no signal, on a PRODUCTION build.
@@ -154,18 +155,54 @@ const DOOR = {
 /** What the page must never hold as text. */
 const memberSecretB64ForPage = memberCodeSecretB64();
 
+/*
+  R4 wave B — the member's own pages, for the warm visits that fill the per-member store
+  (`lib/offline`, IndexedDB). Real wire shapes, so the pages draw what a member would see.
+*/
+const COURTS = ["a", "b"].map((x, i) => ({
+  id: `aaaaaaaa-0000-4000-8000-00000000000${x}`, courtNumber: i + 1, name: `Court ${i + 1}`, slicePriceCredits: 50,
+}));
+const scheduleDay = (date: string) => ({
+  date, timezone: "UTC", sliceMinutes: 15, dayStartMinute: 0, dayEndMinute: 24 * 60,
+  advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15, courts: COURTS, slots: [],
+});
+const NOTICE_HEADLINE = "Your share for Friday is still open";
+const NOTICES = {
+  items: [{ id: "n1", kind: "players.reminder", headline: NOTICE_HEADLINE, link: null, booking_id: null, created_at: new Date().toISOString(), read_at: null }],
+  unread_count: 1, next_cursor: null,
+};
+const LEDGER_ROW = {
+  id: "l1", at: new Date().toISOString(), from: "PayFast", to: "Member", amountCredits: 200, signedAmountCredits: 200,
+  type: "TopUp", comment: "Top-up", subjectUserId: SESSION_MEMBER.user_id, subjectName: "Dean", actorUserId: SESSION_MEMBER.user_id,
+  actorName: "Dean", relatedBookingId: null,
+};
+const WALLET = { balance_credits: 412.5, entries: [LEDGER_ROW], total_entries: 1, offset: 0, limit: 100 };
+const PROFILE = {
+  user_id: SESSION_MEMBER.user_id, email: "dean@example.test", is_admin: false, tenant_slug: "crusaders",
+  full_name: "Dean Martin", membership_number: "C-0009", photo_url: null, status: "Active",
+};
+
 /** The API, for the warm visit only. Removed before anything is asserted offline. */
-async function warmApi(page: import("@playwright/test").Page) {
+async function warmApi(page: import("@playwright/test").Page, whoami: Record<string, unknown> = SESSION_MEMBER) {
   await page.route("**/api/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    const body = path.endsWith("/whoami") ? SESSION_MEMBER
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    if (route.request().method() === "POST" && path.endsWith("/auth/logout")) return route.fulfill({ status: 204, body: "" });
+    const member = path.endsWith("/schedule") ? scheduleDay(url.searchParams.get("date") ?? "2030-01-01")
+      : path.endsWith("/me/bookings/upcoming") || path.endsWith("/me/bookings/recent") ? { timezone: "UTC", items: [] }
+        : path.endsWith("/me/notifications/unread-count") ? { unread_count: 1 }
+          : path.endsWith("/me/notifications") ? NOTICES
+            : path.endsWith("/me/profile") ? PROFILE
+              : null;
+    if (member !== null) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(member) });
+    const body = path.endsWith("/whoami") ? whoami
       : path.endsWith("/me/code/enrol") ? ENROL()
         : path.endsWith("/me/code") ? STATUS()
         : path.endsWith("/me/door") ? DOOR
           : path.endsWith("/me/door/history")
             ? { items: [], next_cursor: null, retention_days: 90, timezone: "Africa/Johannesburg" }
             : path.endsWith("/wallet")
-              ? { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 }
+              ? WALLET
               : null;
     if (body === null) return route.fulfill({ status: 501, contentType: "application/json", body: "{}" });
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
@@ -364,4 +401,98 @@ test("a cold offline start also says what the club's doors need", async ({ page,
   // under it from the last-known store.
   await expect(page.getByText("Offline — your code still works")).toBeVisible();
   await expect(page.getByText("What opens the door for you right now")).toBeVisible();
+});
+
+/* ─────────────── R4 wave B: the member's own pages, kept on the phone ─────────────── */
+
+/** Every read the per-member store holds, with whose it is. */
+async function storedReads(page: import("@playwright/test").Page): Promise<{ owner: string; key: string }[] | null> {
+  return await page.evaluate(() => new Promise((resolve) => {
+    const open = indexedDB.open("crusaders-member-data");
+    open.onupgradeneeded = () => { open.transaction?.abort(); resolve(null); };
+    open.onsuccess = () => {
+      const db = open.result;
+      if (!db.objectStoreNames.contains("reads")) { db.close(); resolve(null); return; }
+      const all = db.transaction("reads", "readonly").objectStore("reads").getAll();
+      all.onsuccess = () => { db.close(); resolve((all.result as { owner: string; key: string }[]).map(({ owner, key }) => ({ owner, key }))); };
+      all.onerror = () => { db.close(); resolve(null); };
+    };
+    open.onerror = () => resolve(null);
+  }));
+}
+
+/** Warm the member's pages online, wait until the phone holds each read, then go offline. */
+async function warmMemberPages(page: import("@playwright/test").Page, context: import("@playwright/test").BrowserContext, offline = true) {
+  await page.addInitScript(() => { window.localStorage.setItem("crusaders.mainframe.token", "e2e-token"); });
+  await warmApi(page);
+  await page.goto(`${origin}/my-code`);
+  await takeControl(page);
+  await page.reload();
+  await page.goto(`${origin}/bookings`);
+  await expect(page.locator('[role="grid"]')).toBeVisible({ timeout: 15_000 });
+  await page.goto(`${origin}/wallet`);
+  await expect(page.getByText("412.50", { exact: false }).first()).toBeVisible();
+  await page.goto(`${origin}/inbox`);
+  await expect(page.getByText(NOTICE_HEADLINE)).toBeVisible();
+  await expect.poll(async () => (await storedReads(page))?.map((r) => r.key.split(":")[0]).sort().join(",") ?? "", { timeout: 15_000 })
+    .toMatch(/games.*inbox.*schedule.*wallet/);
+  if (!offline) return;
+  await page.unroute("**/api/**");
+  await context.setOffline(true);
+}
+
+test("offline: Bookings, Wallet and Inbox open from the phone, said as offline; booking needs a connection", async ({ page, context }) => {
+  await warmMemberPages(page, context);
+
+  await page.goto(`${origin}/wallet`);
+  await expect(page.getByRole("heading", { name: /Can't reach the club/i })).toHaveCount(0);
+  await expect(page.getByText("412.50", { exact: false }).first()).toBeVisible();
+  await expect(page.locator("[data-stale-notice]")).toContainText(OFFLINE_COPY.staleTitle);
+
+  await page.goto(`${origin}/inbox`);
+  await expect(page.getByText(NOTICE_HEADLINE)).toBeVisible();
+  await expect(page.locator("[data-stale-notice]")).toContainText(OFFLINE_COPY.staleTitle);
+
+  await page.goto(`${origin}/bookings`);
+  await expect(page.locator('[role="grid"]')).toBeVisible();
+  await expect(page.locator("[data-stale-notice]")).toContainText(OFFLINE_COPY.gridStale);
+  await page.getByRole("button", { name: /^Book Court 1 at/ }).last().click();
+  await expect(page.getByText(OFFLINE_COPY.bookNeedsConnection)).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("offline: My Code keeps the tab bar, and it leads to the kept pages", async ({ page, context }) => {
+  await warmMemberPages(page, context);
+  await page.goto(`${origin}/my-code`);
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await expect(nav.getByRole("link", { name: "Bookings" })).toBeVisible();
+  await nav.getByRole("link", { name: "Wallet" }).click();
+  await expect(page.getByText("412.50", { exact: false }).first()).toBeVisible();
+});
+
+test("the phone's copy is the member's alone: signing out deletes it", async ({ page, context }) => {
+  await warmMemberPages(page, context, false);
+  const before = await storedReads(page);
+  expect(before?.length ?? 0).toBeGreaterThan(0);
+  expect(new Set(before?.map((r) => r.owner))).toEqual(new Set([SESSION_MEMBER.user_id]));
+
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await expect.poll(async () => (await storedReads(page))?.length ?? 0).toBe(0);
+  const names = await page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
+  expect(names).not.toContain("crusaders-member-data");
+  // (Offline after this the app itself is gone too: the sign-out purges the worker's caches —
+  // `offline-shell.spec`'s business.)
+});
+
+test("a different member confirmed on the phone wipes the last member's copy", async ({ page, context }) => {
+  await warmMemberPages(page, context, false);
+  expect((await storedReads(page))?.length ?? 0).toBeGreaterThan(0);
+  await page.unroute("**/api/**");
+  const other = { ...SESSION_MEMBER, user_id: "00000000-0000-0000-0000-000000000010" };
+  await warmApi(page, other);
+  await page.goto(`${origin}/inbox`);
+  await expect(page.getByText(NOTICE_HEADLINE)).toBeVisible();
+  await expect.poll(async () => (await storedReads(page))?.filter((r) => r.owner === SESSION_MEMBER.user_id).length ?? 0).toBe(0);
+  await expect.poll(async () => (await storedReads(page))?.every((r) => r.owner === other.user_id) ?? true).toBe(true);
 });

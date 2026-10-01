@@ -7,15 +7,18 @@ import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
  * kept reads (`lib/offline`) because the club could not be reached. Nothing when the page is live.
  *
  * <p>
- * Offline is said as offline ("You're offline") only when the phone itself says it has no network;
- * a club that did not answer is "Couldn't refresh". Either way the time is the club's last answer,
+ * Offline is said as offline ("You're offline") when the read never reached the club (no network,
+ * a dropped connection) or the phone says it has none; a club that answered with a failure (a 5xx,
+ * a 429) is "Couldn't refresh". Either way the time is the club's last answer,
  * and the page under it still works for reading. `extra` is the page's own consequence (the grid's
  * "Booking needs a connection").
  * </p>
  */
-export function StaleNotice({ stale, readAt, extra }: { stale: boolean; readAt: number | null; extra?: string }) {
+export function StaleNotice(props: { stale: boolean; readAt: number | null; offline?: boolean; extra?: string }) {
+  const { stale, readAt, extra } = props;
   if (!stale || readAt === null) return null;
-  const offline = phoneIsOffline();
+  // The read could not reach the club at all, or the phone says it has no network.
+  const offline = props.offline === true || phoneIsOffline();
   return (
     <Alert tone="warning" live="polite" data-stale-notice="">
       <strong className="font-semibold">{offline ? OFFLINE_COPY.staleTitle : OFFLINE_COPY.refreshFailedTitle}</strong>

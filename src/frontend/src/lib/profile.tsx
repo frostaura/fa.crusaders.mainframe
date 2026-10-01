@@ -3,7 +3,7 @@ import type { MyProfile } from "./api";
 import { useAuth } from "./auth";
 import { memberReads } from "./offline/memberReads";
 import { fetchQuery, peekQuery, primeQuery } from "./offline/queryCache";
-import { useCachedRead, useDataOwner } from "./offline/useCachedRead";
+import { isConnectionFailure, useCachedRead, useDataOwner } from "./offline/useCachedRead";
 
 type ProfileState = {
   /** The signed-in member's profile — never an earlier member's. Null until read. */
@@ -26,6 +26,7 @@ type ProfileState = {
   /** R4 wave B — when `profile` was true at the club, and whether the club has since failed to confirm it. */
   readAt?: number | null;
   stale?: boolean;
+  offline?: boolean;
 };
 
 const ProfileContext = createContext<ProfileState | null>(null);
@@ -100,6 +101,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     <ProfileContext.Provider value={{
       profile, loading: read.loading, failed: Boolean(error), error: error ?? null, refresh, setLocal,
       readAt: profile ? read.readAt : null, stale: profile !== null && (read.stale || Boolean(manualError)),
+      offline: read.offline || isConnectionFailure(manualError),
     }}
     >
       {children}

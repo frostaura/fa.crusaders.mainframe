@@ -4,7 +4,7 @@ import { useBalance } from "@/lib/balance";
 import { heldFrom, type HeldFigures } from "@/lib/liveBalance";
 import { memberReads, WALLET_PAGE_SIZE } from "@/lib/offline/memberReads";
 import { fetchQuery, peekQuery, subscribeQuery } from "@/lib/offline/queryCache";
-import { useDataOwner } from "@/lib/offline/useCachedRead";
+import { isConnectionFailure, useDataOwner } from "@/lib/offline/useCachedRead";
 import { creditArrivedSentence, creditLeftSentence } from "@/lib/walletCopy";
 import { useToast } from "../Toast";
 import { shareBookingsFrom, type ShareBookings } from "./useShareBookings";
@@ -87,6 +87,7 @@ export function useWalletLedger() {
   const peekKept = useCallback(() => peekQuery(who, memberReads.wallet.key), [who]);
   const kept = useSyncExternalStore(subscribeKept, peekKept, peekKept);
   const [stale, setStale] = useState(false);
+  const [unreachable, setUnreachable] = useState(false);
 
   const load = useCallback(async (limit: number) => {
     setBusy(true);
@@ -96,6 +97,7 @@ export function useWalletLedger() {
         ? await fetchQuery(who, memberReads.wallet.key, memberReads.wallet.load)
         : await endpoints.walletWithShareBookings(limit, 0);
       setStale(false);
+      setUnreachable(false);
       setRows(data.entries);
       setShareBookings(shareBookingsFrom(data.share_bookings));
       setCardBalance(data.balance_credits);
@@ -112,6 +114,7 @@ export function useWalletLedger() {
       setError(err ?? new Error("wallet read failed"));
       // Whatever is on screen stays, said as the last-known figures (offline, a 5xx, a 429 alike).
       setStale(true);
+      setUnreachable(isConnectionFailure(err));
       return null;
     } finally {
       setBusy(false);
@@ -144,11 +147,11 @@ export function useWalletLedger() {
     const keptBalance = live.balance ?? page.balance_credits;
     return {
       rows: page.entries, shareBookings: shareBookingsFrom(page.share_bookings), cardBalance: page.balance_credits,
-      total: page.total_entries, busy, error, readAt: kept.at, stale, balance: keptBalance,
+      total: page.total_entries, busy, error, readAt: kept.at, stale, offline: unreachable, balance: keptBalance,
       painted: countUp ?? keptBalance, load, held: liveHeld ?? heldFrom(page),
     };
   }
-  return { rows, shareBookings, cardBalance, total, busy, error, readAt, stale: stale && rows !== null, balance, painted: countUp ?? balance, load, held };
+  return { rows, shareBookings, cardBalance, total, busy, error, readAt, stale: stale && rows !== null, offline: unreachable, balance, painted: countUp ?? balance, load, held };
 }
 
 /**

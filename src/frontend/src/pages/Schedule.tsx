@@ -172,7 +172,7 @@ export default function BookingsPage() {
       {/* Room under the grid while the floating bar is up, so it never covers the last row —
           padding, not a spacer element, because a spacer would also take the shell's section gap. */}
       <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
-        <StaleNotice stale={schedule.stale} readAt={schedule.readAt} extra={offlineGrid ? OFFLINE_COPY.gridStale : undefined} />
+        <StaleNotice stale={schedule.stale} readAt={schedule.readAt} offline={offlineGrid} extra={offlineGrid ? OFFLINE_COPY.gridStale : undefined} />
         {bookAsUserId
           ? <BookingForBar booking={bookingFor} sliceMinutes={day?.sliceMinutes ?? 15} />
           : (

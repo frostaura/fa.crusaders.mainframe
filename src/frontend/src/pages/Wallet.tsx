@@ -135,7 +135,7 @@ function LedgerSection(props: LedgerProps) {
 }
 
 export default function WalletPage() {
-  const { rows, shareBookings, cardBalance, total, busy, error, readAt, stale, balance, painted, load, held } = useWalletLedger();
+  const { rows, shareBookings, cardBalance, total, busy, error, readAt, stale, offline, balance, painted, load, held } = useWalletLedger();
   const loaded = rows !== null && cardBalance !== null;
   const shown = rows?.length ?? 0;
   const refresh = () => { void load(Math.max(shown, PAGE_SIZE)); };
@@ -149,7 +149,7 @@ export default function WalletPage() {
         freshness={<Freshness at={readAt} />}
       />
       <WalletNav />
-      <StaleNotice stale={stale} readAt={readAt} />
+      <StaleNotice stale={stale} readAt={readAt} offline={offline} />
       {/* A failed read is never "no movements yet" — that tells a member their history is gone. */}
       <StateBlock
         loading={!loaded}

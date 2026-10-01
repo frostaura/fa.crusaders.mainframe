@@ -33,6 +33,8 @@ export type DetailRead = {
   readAt: number | null;
   /** `data` is what the phone last had, shown because the club could not be reached. */
   stale: boolean;
+  /** ...and the club could not be reached at all (as opposed to answering with a failure). */
+  offline?: boolean;
   reload: () => void;
 };
 
@@ -50,6 +52,7 @@ export function useBookingDetail(bookingId: string): DetailRead {
     notFound,
     readAt: notFound ? null : cached.readAt,
     stale: cached.stale,
+    offline: cached.offline,
     reload: cached.reload,
   };
 }

@@ -66,6 +66,8 @@ export type CachedRead<T> = {
    * (`StaleNotice`); never blank what is on screen for it.
    */
   stale: boolean;
+  /** The club could not be reached at all (no network, or the session check could not ask) — as opposed to answering with a failure. */
+  offline: boolean;
   reload: () => void;
   /** A write's answer applied to what is held, at once (a re-read follows if the caller wants one). */
   patch: (update: (current: T) => T) => void;
@@ -166,6 +168,7 @@ export function useCachedRead<T>(key: string | null, load: () => Promise<T>, opt
     readAt: data === null ? null : at,
     stored: entry?.source === "stored",
     stale: data !== null && (offline || failure !== null),
+    offline: offline || isConnectionFailure(failure),
     reload,
     patch,
   };

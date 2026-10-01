@@ -66,7 +66,7 @@ function useStalled(missing: boolean): [boolean, () => void] {
 }
 
 export default function ProfilePage() {
-  const { profile, loading, failed: readFailed, error: readError, refresh, stale = false, readAt = null } = useProfile();
+  const { profile, loading, failed: readFailed, error: readError, refresh, stale = false, readAt = null, offline = false } = useProfile();
   const [stalled, clearFailed] = useStalled(!profile && !loading);
   // The provider says so when the read failed (D2); the stall is kept for a read never asked.
   const failed = stalled || (readFailed && !profile && !loading);
@@ -74,7 +74,7 @@ export default function ProfilePage() {
   return (
     <PageShell width="narrow">
       <PageHeader title={PROFILE_TITLE} description={PROFILE_DESCRIPTION} />
-      <StaleNotice stale={stale} readAt={readAt} />
+      <StaleNotice stale={stale} readAt={readAt} offline={offline} />
       <StateBlock
         loading={!profile && !failed}
         // The read's own error when there is one (F4-17: a 503 reads "down or restarting", as on

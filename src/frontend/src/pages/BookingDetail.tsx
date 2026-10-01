@@ -140,7 +140,7 @@ function DetailBody({ read, say, earlyResult }: { read: DetailRead; say: (notice
   return (
     <>
       {/* R4 wave B — the phone's copy, drawn because the club could not be asked: said with its time. */}
-      {read.error ? <Alert tone="warning" live="polite">{DETAIL_COPY.refreshFailed}</Alert> : <StaleNotice stale={read.stale} readAt={read.readAt} />}
+      {read.error ? <Alert tone="warning" live="polite">{DETAIL_COPY.refreshFailed}</Alert> : <StaleNotice stale={read.stale} readAt={read.readAt} offline={read.offline} />}
       <DetailView detail={read.data} readAt={read.readAt} reload={read.reload} say={say} earlyResult={earlyResult} />
     </>
   );
