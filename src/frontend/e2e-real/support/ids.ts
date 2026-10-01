@@ -7,7 +7,10 @@
  * Nothing in this suite may use any other domain.
  * </p>
  */
-const RUN = Date.now().toString(36);
+// The time alone is not unique once projects run in parallel (desktop-play and mobile-play start
+// their workers in the same millisecond and registered the same address); the worker's process
+// id makes the run id per process.
+const RUN = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 let counter = 0;
 
 export const REVIEW_DOMAIN = "signup.review.test";
