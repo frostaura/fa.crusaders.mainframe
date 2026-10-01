@@ -271,30 +271,32 @@ export function healthLine(
 }
 
 /**
- * Several enabled boxes claim one court (review round 3, A-11): two relay banks answering for
- * one set of lights is a commissioning or wiring mistake. The tile reports the box heard from
- * most recently and says so, naming the others and when each was last heard — it used to take
- * whichever came first and contradict its own light state. Null for one box, or an older API.
+ * The same facts in parts, for a tile that folds them (R4 form factor, SPEC §3.11): at 18 boxes
+ * on one court the sentence above was 30 lines on a phone and buried the court's state. The tile
+ * says `summary` on one line and opens `follows`, the `others` as a list, and `advice` on request.
  */
-export function duplicateBoxesWarning(court: ControlBoardCourt, now: number): string | null {
+export function duplicateBoxesParts(court: ControlBoardCourt, now: number): {
+  summary: string; follows: string; others: string[]; advice: string;
+} | null {
   const count = court.boxes_on_court ?? 0;
   if (count <= 1) return null;
   const main = court.device ?? null;
   const rest = court.other_boxes ?? [];
-  // Review round 4, A4-5: every box was called "Court box", so "follows Court box … Also
-  // claiming it: Court box" could not be acted on. Where names clash, each box carries the code
-  // it reports (and its MAC when the club's system sends one) — what Boards lists it by.
   const names = [main, ...rest].map((box) => box?.name ?? box?.device_code ?? null);
   const clash = (name: string | null) => name !== null && names.filter((n) => n === name).length > 1;
   const mainName = main ? boxLabel(main, clash(names[0])) : "one box";
-  const others = rest.map((box, i) => {
-    const name = boxLabel(box, clash(names[i + 1]));
-    return `${name} (${box.last_seen_at ? `heard ${relative(box.last_seen_at, now)}` : "never heard from"})`;
-  });
-  const also = others.length > 0 ? ` Also claiming it: ${others.join(", ")}.` : "";
-  return `${count} boxes are set to this court. This tile follows ${mainName}, the one heard from most recently.${also}`
-    + " Only one box should switch a court's lights — take the others out of service on Boards.";
+  return {
+    summary: `${count} boxes claim this court`,
+    follows: `This tile follows ${mainName}, the one heard from most recently.`,
+    others: rest.map((box, i) => `${boxLabel(box, clash(names[i + 1]))} — ${box.last_seen_at ? `heard ${relative(box.last_seen_at, now)}` : "never heard from"}`),
+    advice: "Only one box should switch a court's lights — take the others out of service on Boards.",
+  };
 }
+
+export const DUPLICATE_BOXES_REVIEW = "Review";
+export const DUPLICATE_BOXES_HIDE = "Hide";
+export const DUPLICATE_BOXES_OTHERS = "Also claiming it";
+export const DUPLICATE_BOXES_BOARDS = "Open Boards";
 
 /** A box's name, with its reported code (and MAC, when sent) where another box shares the name. */
 function boxLabel(

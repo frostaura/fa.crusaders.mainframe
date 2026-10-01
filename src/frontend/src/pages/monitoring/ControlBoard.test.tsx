@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ControlBoardPage } from "./ControlBoard";
 import { renderPage, SETTINGS_FIXTURE, signIn, stubFetch, type StubRoute } from "../../test/harness";
 import { boardCourtFixture, boardFixture, EVENING } from "../../test/monitoringFixtures";
@@ -47,14 +47,17 @@ describe("the control board", () => {
     const four = [1, 2, 3, 4].map((n) => boardCourtFixture({ court_id: `c${n}`, court_number: n, name: `Court ${n}` }));
     stubFetch(routes(boardFixture({ courts: four })));
     const { unmount } = renderPage(<ControlBoardPage />);
+    // R4 form factor: by the grid's own box — 1, 2, then all four on one row; never 3 + 1.
     const grid = (await screen.findByRole("heading", { name: "Court 4", level: 2 })).closest(".grid")!;
-    expect(grid.className).not.toContain("xl:grid-cols-3");
+    expect(grid.className).not.toContain("grid-cols-3");
+    expect(grid.className).toContain("@[75rem]/tiles:grid-cols-4");
     unmount();
 
     stubFetch(routes(boardFixture({ courts: four.slice(0, 3) })));
     renderPage(<ControlBoardPage />);
     const three = (await screen.findByRole("heading", { name: "Court 3", level: 2 })).closest(".grid")!;
-    expect(three.className).toContain("xl:grid-cols-3");
+    expect(three.className).toContain("@[56.25rem]/tiles:grid-cols-3");
+    expect(three.className).not.toContain("grid-cols-4");
   });
 
   it("shows each court's state as a WORD, not as a colour", async () => {
@@ -161,9 +164,11 @@ describe("the control board", () => {
     })));
     renderPage(<ControlBoardPage />);
 
-    const warning = await screen.findByText(/2 boxes are set to this court/);
+    // R4 form factor: ONE line that opens the rest — at 18 boxes the sentence was 30 lines.
+    const warning = await openDuplicates("2 boxes claim this court");
     expect(warning).toHaveTextContent("This tile follows Court 2 box (new), the one heard from most recently.");
-    expect(warning).toHaveTextContent("Also claiming it: Court 2 box (old) (never heard from).");
+    expect(within(warning).getByRole("listitem")).toHaveTextContent("Court 2 box (old) — never heard from");
+    expect(warning).toHaveTextContent("take the others out of service on Boards");
   });
 
   /** R4 A4-5: every box is called "Court box" out of the factory — the code tells them apart. */
@@ -179,16 +184,16 @@ describe("the control board", () => {
     })));
     renderPage(<ControlBoardPage />);
 
-    const warning = await screen.findByText(/2 boxes are set to this court/);
+    const warning = await openDuplicates("2 boxes claim this court");
     expect(warning).toHaveTextContent("This tile follows Court box (box-ffee01), the one heard from most recently.");
-    expect(warning).toHaveTextContent("Also claiming it: Court box (box-a1b2c3, MAC 5c:cf:7f:aa:bb:cc) (never heard from).");
+    expect(within(warning).getByRole("listitem")).toHaveTextContent("Court box (box-a1b2c3, MAC 5c:cf:7f:aa:bb:cc) — never heard from");
   });
 
   it("says nothing about duplicates for a court with one box", async () => {
     stubFetch(routes(boardFixture({ courts: [{ ...boardCourtFixture(), boxes_on_court: 1, other_boxes: [] }] })));
     renderPage(<ControlBoardPage />);
     await screen.findByText("Court 2");
-    expect(screen.queryByText(/boxes are set to this court/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/boxes claim this court/)).not.toBeInTheDocument();
   });
 
   it("offers no way to switch a light, and says why in words", async () => {
@@ -309,3 +314,14 @@ describe("the control board", () => {
     expect(screen.getByText("SHOULD BE LIT")).toHaveAttribute("aria-hidden");
   });
 });
+
+/** The tile's duplicate-box line, opened: the folded part follows the one-line summary. */
+async function openDuplicates(summary: string): Promise<HTMLElement> {
+  const line = await screen.findByText(summary);
+  const box = line.closest("[data-duplicate-boxes]") as HTMLElement;
+  const review = within(box).getByRole("button", { name: /Review/ });
+  expect(review).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(review);
+  expect(within(box).getByRole("button", { name: /Hide/ })).toHaveAttribute("aria-expanded", "true");
+  return box;
+}

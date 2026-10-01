@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Alert } from "../../components/Alert";
 import { Button } from "../../components/ui/button";
+import { AutoGrid } from "../../components/ui/auto-grid";
 import { InfoPopover } from "../../components/ui/info-popover";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { RefreshButton } from "../../components/ui/refresh-button";
@@ -139,15 +140,19 @@ export function ControlBoardPage() {
         re-renders itself every few seconds: a polite region announces on every remount, which
         over an evening on a wall is the same forty-word paragraph several hundred times.
       */}
-      <Alert tone="info" live="standing" announceKey="control-board-what-this-is">
-        {BOARD_STANDING_NOTICE}
-      </Alert>
-
-      {partial && (
-        <Alert tone="warning" live="standing" announceKey={`control-board-silent:${silent.join(",")}`}>
-          {partial}
+      {/* Side by side where the page has the room (R4 form factor): two standing paragraphs
+          stacked cost the tiles ~200px of a 1920 screen. Never collapsed — see the notice. */}
+      <AutoGrid min="wide" max={2} gap="lg" className="-mt-2">
+        <Alert tone="info" live="standing" announceKey="control-board-what-this-is">
+          {BOARD_STANDING_NOTICE}
         </Alert>
-      )}
+
+        {partial && (
+          <Alert tone="warning" live="standing" announceKey={`control-board-silent:${silent.join(",")}`}>
+            {partial}
+          </Alert>
+        )}
+      </AutoGrid>
 
       {/*
         <b>The failed read keeps the tiles.</b> This is the one place in the product where the
@@ -180,8 +185,11 @@ export function ControlBoardPage() {
         skeleton={<TileGridSkeleton tiles={4} />}
       >
         {/* Whole rows (VIS F3-15): four courts in three columns left one alone on a second row.
-            Two or four courts stay two across; three, five or six go three across from `xl`. */}
-        <div className={cn("grid gap-4 sm:grid-cols-2", courts.length % 2 === 0 && courts.length <= 4 ? undefined : "xl:grid-cols-3")}>
+            R4 form factor: decided by the BOX (`@container/tiles`), never the viewport, which lies
+            beside the rail — one across on a phone, then two, then every court on one row once
+            each tile has 18rem (four at 1920 beside the rail); odd counts go three across. */}
+        <div className="@container/tiles">
+          <div data-court-tiles={courts.length} className={cn("grid gap-4", tileColumns(courts.length))}>
           {courts.map((court) => (
             <CourtTile
               key={court.court_id}
@@ -191,6 +199,7 @@ export function ControlBoardPage() {
               graceMinutes={settings?.grace_window_minutes ?? null}
             />
           ))}
+          </div>
         </div>
       </StateBlock>
 
@@ -200,6 +209,17 @@ export function ControlBoardPage() {
       </p>
     </PageShell>
   );
+}
+
+/**
+ * The tile grid's columns for a number of courts, by the grid's own box: 18rem a tile at the
+ * least, and a count that never leaves one court alone on a row. Written whole for the scanner.
+ */
+function tileColumns(count: number): string {
+  if (count <= 1) return "grid-cols-1";
+  if (count === 2) return "grid-cols-1 @[37.5rem]/tiles:grid-cols-2";
+  if (count === 4) return "grid-cols-1 @[37.5rem]/tiles:grid-cols-2 @[75rem]/tiles:grid-cols-4";
+  return "grid-cols-1 @[37.5rem]/tiles:grid-cols-2 @[56.25rem]/tiles:grid-cols-3";
 }
 
 /** The mode dot: a word first, colour second — a wall read by a colour-blind admin still says it. */

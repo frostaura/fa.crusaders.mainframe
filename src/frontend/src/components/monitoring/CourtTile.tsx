@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { Button } from "../ui/button";
+import { CaretDown, CaretUp, Warning } from "../ui/icons";
 import { cn } from "../../lib/utils";
 import {
   EXPECTATION_WORD, courtAnnouncement, courtExpectation, expectationMeaning, healthLine,
   lightsLine, nextLine, startedLine, type CourtExpectation,
-  duplicateBoxesWarning,
+  DUPLICATE_BOXES_BOARDS, DUPLICATE_BOXES_HIDE, DUPLICATE_BOXES_OTHERS, DUPLICATE_BOXES_REVIEW, duplicateBoxesParts,
 } from "../../lib/monitoringCopy";
 import { type ControlBoardCourt } from "../../lib/adminApi";
 
@@ -89,9 +92,10 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
   const lights = lightsLine(court.lights, timezone);
   const started = startedLine(court.current, court.lights, timezone);
   const boxLine = healthLine(court.device, now, "Box");
-  const doorLine = healthLine(court.door, now, "Door");
+  // No door line (R4 wave B): nothing maps a door to a court, and the server always sends
+  // `door: null` — a line that can never appear is a line nobody can test.
   const bookedBy = court.current?.booked_by?.name ?? court.current?.label ?? null;
-  const duplicate = duplicateBoxesWarning(court, now);
+  const duplicate = duplicateBoxesParts(court, now);
 
   return (
     <article
@@ -166,20 +170,61 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
         <p className="text-[calc(0.75rem*var(--board-scale,1))] text-text-muted">{lights}</p>
       )}
 
-      {/* R3 A-11: more than one box set to this court — said, never silently resolved. */}
-      {duplicate && (
-        <p data-duplicate-boxes="" className="rounded-lg border border-warning-strong bg-warning-soft px-[calc(0.75rem*var(--board-scale,1))] py-[calc(0.5rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] font-medium text-warning-strong">
-          {duplicate}
+      {/* R3 A-11: more than one box set to this court — said, never silently resolved; folded to
+          one line (R4 form factor, SPEC §3.11), because at 18 boxes the sentence was 30 lines. */}
+      {duplicate && <DuplicateBoxes parts={duplicate} />}
+
+      {boxLine && (
+        <p className="border-t border-border pt-[calc(0.5rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] text-text-muted min-w-0 break-words">
+          {boxLine}
         </p>
       )}
-
-      {(boxLine || doorLine) && (
-        <ul className="border-t border-border pt-[calc(0.5rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] text-text-muted">
-          {boxLine && <li className="min-w-0 break-words">{boxLine}</li>}
-          {doorLine && <li className="min-w-0 break-words">{doorLine}</li>}
-        </ul>
-      )}
     </article>
+  );
+}
+
+/**
+ * Several boxes set to one court, as ONE line — "18 boxes claim this court · Review" — that opens
+ * which box the tile follows, every other box with when it was last heard, and what to do. A
+ * disclosure, not a dialog: it opens in the tile, beside the court it is about.
+ */
+function DuplicateBoxes({ parts }: { parts: NonNullable<ReturnType<typeof duplicateBoxesParts>> }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div data-duplicate-boxes="" className="flex flex-col gap-2 rounded-lg border border-warning-strong bg-warning-soft px-[calc(0.75rem*var(--board-scale,1))] py-[calc(0.25rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] text-warning-strong">
+      <div className="flex flex-wrap items-center gap-x-2">
+        <Warning size={16} weight="bold" aria-hidden="true" className="shrink-0" />
+        <span className="min-w-0 flex-1 basis-32 font-semibold">{parts.summary}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={open}
+          aria-controls={id}
+          onClick={() => setOpen((v) => !v)}
+          className="ml-auto text-warning-strong"
+        >
+          {open ? DUPLICATE_BOXES_HIDE : DUPLICATE_BOXES_REVIEW}
+          {open ? <CaretUp size={14} weight="bold" aria-hidden="true" /> : <CaretDown size={14} weight="bold" aria-hidden="true" />}
+        </Button>
+      </div>
+      {/* `hidden` as a class, not the attribute: a utility's `display` beats the attribute's. */}
+      <div id={id} className={open ? "flex flex-col gap-2 pb-2 text-text-primary" : "hidden"}>
+        <p>{parts.follows}</p>
+        {parts.others.length > 0 ? (
+          <>
+            <p className="font-semibold">{DUPLICATE_BOXES_OTHERS}</p>
+            <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+              {parts.others.map((line) => <li key={line} className="min-w-0 break-words">{line}</li>)}
+            </ul>
+          </>
+        ) : null}
+        <p>{parts.advice}</p>
+        <Link to="/admin/monitoring/devices" className="self-start font-semibold text-accent-strong underline underline-offset-2">
+          {DUPLICATE_BOXES_BOARDS}
+        </Link>
+      </div>
+    </div>
   );
 }
 
