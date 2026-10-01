@@ -149,8 +149,7 @@ export default function BookingsPage() {
   const { openCancel } = sheets;
   // R4 wave B — a grid drawn from the phone because the club could not be reached books nothing:
   // a slot it shows free may have gone. The press says why instead of opening the sheet.
-  const offlineGrid = schedule.stale && (isConnectionFailure(schedule.error) || phoneIsOffline());
-  const openBook = useOnlineOnly(offlineGrid, sheets.openBook, toast);
+  const { offlineGrid, openBook } = useOnlineOnly(schedule, sheets.openBook, toast);
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
     day: shown, rules: gridRules, isAdmin, dayLabel: otherDay, forName: forMember?.name ?? null, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
     onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc)]),
@@ -254,12 +253,19 @@ export default function BookingsPage() {
   );
 }
 
-/** `open`, unless the grid on screen is the phone's copy — then the reason, as a toast. */
-function useOnlineOnly<A extends unknown[]>(stale: boolean, open: (...args: A) => void, toast: ReturnType<typeof useToast>) {
-  return useCallback((...args: A) => {
-    if (stale) { toast.push({ tone: "warning", text: OFFLINE_COPY.bookNeedsConnection }); return; }
+/**
+ * `open`, unless the grid on screen is the phone's copy because the club could not be reached —
+ * then the reason, as a toast. A grid kept through a 429 or a 5xx still books (the club answers).
+ */
+function useOnlineOnly<A extends unknown[]>(
+  schedule: Pick<ScheduleState, "stale" | "error">, open: (...args: A) => void, toast: ReturnType<typeof useToast>,
+) {
+  const offlineGrid = schedule.stale && (isConnectionFailure(schedule.error) || phoneIsOffline());
+  const openBook = useCallback((...args: A) => {
+    if (offlineGrid) { toast.push({ tone: "warning", text: OFFLINE_COPY.bookNeedsConnection }); return; }
     open(...args);
-  }, [stale, open, toast]);
+  }, [offlineGrid, open, toast]);
+  return { offlineGrid, openBook };
 }
 
 /** The member being booked for, with the grid rules their groups set — null until known (R2 F1-3). */
