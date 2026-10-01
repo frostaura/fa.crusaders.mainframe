@@ -36,6 +36,11 @@ export const LEDGER_COPY = {
   /** The footer's way out. Not "Close": the sheet's own × is named that, and two controls with
    *  one name are two guesses for a screen-reader user (A11Y F3-20). */
   close: "Done",
+  /** R4 form factor: the movement beside the club's book, not over it. */
+  panelLabel: "The movement",
+  closePanel: "Close the movement",
+  panelEmptyTitle: "Pick a movement",
+  panelEmptyHint: "Its details open here — who made it, what it was for, and the booking it belongs to. ↑ and ↓ walk the rows.",
 } as const;
 
 /**

@@ -5,21 +5,27 @@ import { describeFailure } from "../lib/errors";
 import { ledgerPage, readLedgerStart, totalsOver, type LedgerFilters, type LedgerTotals as Totals } from "../lib/adminPaging";
 import { clubDayRange, clubToday } from "../lib/clubDay";
 import { clubZoneIsKnown } from "../lib/clubZone";
-import { formatSignedCredits } from "../lib/utils";
+import { cn, formatSignedCredits } from "../lib/utils";
 import { LedgerTable } from "../components/LedgerTable";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Card, CardContent } from "../components/ui/card";
+import { Card } from "../components/ui/card";
+import { AutoGrid } from "../components/ui/auto-grid";
+import { ContextBar } from "../components/ui/context-bar";
+import { WithAside } from "../components/ui/with-aside";
+import { formatClubDayLabel } from "../components/ui/date-picker-day";
 import { Field, FieldLabel } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { Skeleton } from "../components/ui/skeleton";
 import { StateBlock } from "../components/ui/state-block";
-import { MagnifyingGlass } from "../components/ui/icons";
+import { CaretDown, CaretUp, Funnel, MagnifyingGlass } from "../components/ui/icons";
 import { FilterBar, FilterDate, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
 import { ADMIN_LEDGER_TYPES, ledgerTypeLabel } from "../lib/creditAdjustment";
-import { LedgerDetailSheet } from "../components/admin/LedgerDetailSheet";
+import { LedgerDetailPanel, LedgerDetailSheet } from "../components/admin/LedgerDetailSheet";
+import { useBoxAtLeast } from "../components/admin/useBoxAtLeast";
+import { LEDGER_COPY } from "../lib/ledgerCopy";
 import type { Column } from "../components/wallet/ledgerColumns";
 
 /** F3.8: the admin reads who made each movement and what kind it was, and opens any row. */
@@ -60,6 +66,8 @@ const DEFAULT_FROM_DAYS = 30;
 export default function AdminLedgerPage() {
   const [params, setParams] = useSearchParams();
   const [opened, setOpened] = useState<LedgerRow | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [boxRef, roomy] = useBoxAtLeast(72);
 
   const { from, to, type, userQuery, userId } = filtersOf(params);
   const setFilter = (key: string, value: string) => setParams((prev) => withFilter(prev, key, value), { replace: true });
@@ -72,7 +80,7 @@ export default function AdminLedgerPage() {
   const filtered = useMemo(() => byName(rows, userQuery), [rows, userQuery]);
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title="Transactions"
         description="Every credit movement across the club — top-ups, charges, refunds, penalties and manual adjustments."
@@ -80,49 +88,92 @@ export default function AdminLedgerPage() {
         freshness={<Freshness at={readAt} />}
       />
 
-      <div className="flex flex-col gap-3">
-        <LedgerFilterBar from={from} to={to} type={type} query={userQuery} onChange={setFilter} />
+      {/* R4 form factor (SPEC §3.9): the filters and the range's totals are ONE bar that stays in
+          view while the book scrolls under it (from lg); on a phone the filters fold behind one
+          button that says what they are set to, and the bar scrolls away with the page. */}
+      <ContextBar position="top" label="Filters and totals" className="max-lg:static">
+        <div className="flex min-w-0 flex-[3_1_36rem] flex-col gap-2">
+          <FiltersToggle open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} from={from} to={to} type={type} />
+          <LedgerFilterBar from={from} to={to} type={type} query={userQuery} onChange={setFilter} className={filtersOpen ? "flex" : "hidden lg:flex"} />
+        </div>
+        {/* As many columns as fit a 9rem figure (R3 X-4): two fixed columns at 200% text on a
+            phone were narrower than "+68473.00", and the page scrolled sideways. */}
+        <AutoGrid min="stat" max={4} gap="md" aria-busy={loading || undefined} className="min-w-0 flex-[2_1_30rem] text-sm">
+          <LedgerTotals totals={shownTotals(read.totals, filtered, userQuery, read.next)} loading={loading} searching={userQuery.trim() !== ""} />
+        </AutoGrid>
+      </ContextBar>
 
-        {userId && (
-          // ?userId= is answered by the API and had no way in from the screen, so a link to
-          // one member's movements silently showed the whole club's. It is honoured now, and
-          // said out loud — an unexplained short list is the same defect wearing a filter.
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="info">Showing one member’s movements</Badge>
-            <Button variant="ghost" size="sm" type="button" onClick={() => setFilter("userId", "")}>
-              Show everyone
-            </Button>
-          </div>
-        )}
+      {userId && (
+        // ?userId= is answered by the API and had no way in from the screen, so a link to
+        // one member's movements silently showed the whole club's. It is honoured now, and
+        // said out loud — an unexplained short list is the same defect wearing a filter.
+        <div className="-mt-4 flex flex-wrap items-center gap-2">
+          <Badge tone="info">Showing one member’s movements</Badge>
+          <Button variant="ghost" size="sm" type="button" onClick={() => setFilter("userId", "")}>
+            Show everyone
+          </Button>
+        </div>
+      )}
+
+      {/* The movement opens BESIDE the book where the box is 72rem (WithAside, placement sheet):
+          ↑/↓ walk the rows and the panel follows. Narrower, it opens as the sheet it always was. */}
+      <div ref={boxRef} className="min-w-0">
+        <WithAside
+          aside={<LedgerDetailPanel row={opened} onClose={() => setOpened(null)} />}
+          asideLabel={LEDGER_COPY.panelLabel}
+          placement="sheet"
+          at="72rem"
+          // 22rem at 1920 (3xl): every column of the book, the comment too, fits beside it.
+          asideWidth="18rem"
+        >
+          <StateBlock
+            loading={loading && rows === null}
+            error={loadError}
+            action="read those movements"
+            failedCaveat="Check the dates and try again."
+            onRetry={() => void load()}
+            skeleton={<TableSkeleton rows={6} />}
+          >
+            <Card className="gap-0 py-0 sm:gap-0 sm:py-0" aria-busy={loading || undefined}>
+              <LedgerTable
+                rows={filtered}
+                columns={ADMIN_COLUMNS}
+                onOpen={setOpened}
+                selectedId={roomy ? opened?.id ?? null : null}
+                emptyText="No movements match these filters."
+                label="Club ledger"
+                wideOnly={["comment"]}
+              />
+              <ShowMore read={read} />
+            </Card>
+          </StateBlock>
+        </WithAside>
       </div>
-
-      <StateBlock
-        loading={loading && rows === null}
-        error={loadError}
-        action="read those movements"
-        failedCaveat="Check the dates and try again."
-        onRetry={() => void load()}
-        skeleton={<TableSkeleton rows={6} />}
-      >
-        <Card className="gap-0 pb-0 sm:gap-0 sm:pb-0" aria-busy={loading || undefined}>
-          {/* As many columns as fit a 9rem figure (R3 X-4): two fixed columns at 200% text on a
-              phone were narrower than "+68473.00", and the page scrolled sideways. */}
-          <CardContent className="grid shrink-0 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-3 pb-4 text-sm">
-            <LedgerTotals totals={shownTotals(read.totals, filtered, userQuery, read.next)} loading={loading} searching={userQuery.trim() !== ""} />
-          </CardContent>
-          <LedgerTable
-            rows={filtered}
-            columns={ADMIN_COLUMNS}
-            onOpen={setOpened}
-            emptyText="No movements match these filters."
-            label="Club ledger"
-            wideOnly={["comment"]}
-          />
-          <ShowMore read={read} />
-        </Card>
-      </StateBlock>
-      <LedgerDetailSheet row={opened} onClose={() => setOpened(null)} />
+      <LedgerDetailSheet row={roomy ? null : opened} onClose={() => setOpened(null)} />
     </PageShell>
+  );
+}
+
+/**
+ * The phone's way into the filters: one button that says what they are set to — "Filters ·
+ * Tue 1 Sep – Thu 1 Oct · All types" — instead of four controls and 330px before the first row.
+ * From lg the filters are always out and this is not drawn.
+ */
+function FiltersToggle({ open, onToggle, from, to, type }: { open: boolean; onToggle: () => void; from: string; to: string; type: string }) {
+  const range = `${formatClubDayLabel(from) ?? "Any date"} – ${formatClubDayLabel(to) ?? "any date"}`;
+  const kind = TYPE_OPTIONS.find((o) => o.value === type)?.label ?? "All types";
+  return (
+    <Button
+      variant="outline"
+      aria-expanded={open}
+      aria-controls="ledger-filters"
+      onClick={onToggle}
+      icon={<Funnel aria-hidden="true" />}
+      className="!h-auto min-h-touch w-full justify-start whitespace-normal py-2 text-left lg:hidden"
+    >
+      <span className="min-w-0 flex-1">{`Filters · ${range} · ${kind}`}</span>
+      {open ? <CaretUp size={16} aria-hidden="true" /> : <CaretDown size={16} aria-hidden="true" />}
+    </Button>
   );
 }
 
@@ -230,11 +281,12 @@ function tilesOf(totals: Totals | null): Array<{ label: string; value: string | 
 }
 
 /** From, To, Type and the name search — each writing the URL. */
-function LedgerFilterBar({ from, to, type, query, onChange }: {
-  from: string; to: string; type: string; query: string; onChange: (key: string, value: string) => void;
+function LedgerFilterBar({ from, to, type, query, onChange, className }: {
+  from: string; to: string; type: string; query: string; onChange: (key: string, value: string) => void; className?: string;
 }) {
   return (
-    <FilterBar>
+    // Inside the bar, not a card of its own: the bar is the surface.
+    <FilterBar id="ledger-filters" className={cn("border-0 bg-transparent p-0 shadow-none", className)}>
       <FilterDate label="From" value={from} onChange={(next) => onChange("from", next)} />
       <FilterDate label="To" value={to} onChange={(next) => onChange("to", next)} />
       <FilterSelect

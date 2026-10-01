@@ -41,13 +41,16 @@ export function DownloadCsvLink({ href, label = "Download CSV", className }: {
  * the first control, wrapping at 360px, bottom-aligned so the export lines up with the controls
  * rather than with their labels.
  */
-export function FilterBar({ label = "Filters", children, className }: {
+export function FilterBar({ label = "Filters", children, className, id }: {
   label?: string;
   children: ReactNode;
   className?: string;
+  /** For a toggle that `aria-controls` it (the Transactions filters on a phone). */
+  id?: string;
 }) {
   return (
     <div
+      id={id}
       role="group"
       aria-label={label}
       className={cn(

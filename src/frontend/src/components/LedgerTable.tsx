@@ -1,4 +1,4 @@
-import { Fragment, cloneElement, isValidElement, useMemo, useState, type ReactNode } from "react";
+import { Fragment, cloneElement, isValidElement, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { LedgerRow } from "../lib/api";
 import { cn } from "../lib/utils";
 import { clubDayAndClock } from "../lib/clubClock";
@@ -43,7 +43,12 @@ type LedgerTableProps = {
   /** F3.8: when given, every row opens its detail — a "Details" button per row, and the row. */
   onOpen?: (row: LedgerRow) => void;
   /**
-   * Columns folded from `sm` until the TABLE'S box is 72rem (review round 2, F3-9; R4 form factor).
+   * The row whose detail stands beside the table (R4 form factor): marked `aria-current`, and
+   * ↑/↓ from inside the table open the row above or below it, so an admin walks the book.
+   */
+  selectedId?: string | null;
+  /**
+   * Columns folded from `sm` until the TABLE'S box is 64rem (review round 2, F3-9; R4 form factor).
    * The club's book has seven columns and a Details button; at 1280 beside the admin rail the
    * Amount and Details were off the right edge. The comment is the column that can go — every
    * row's Details sheet carries it whole. On a phone it stays: there it is the movement + time.
@@ -52,7 +57,7 @@ type LedgerTableProps = {
 };
 
 /**
- * Fold a cell from `sm` until the table's own box (`@container/ledger`) is 72rem — appended after
+ * Fold a cell from `sm` until the table's own box (`@container/ledger`) is 64rem — appended after
  * its own classes, and `!` on the way back, so a cell's `sm:table-cell` cannot win either way.
  *
  * <p>
@@ -63,7 +68,7 @@ type LedgerTableProps = {
  * admin rail `2xl` lied about the room, and at 1920 a full-width book has the room for it.
  * </p>
  */
-const WIDE_ONLY = "sm:hidden @[72rem]/ledger:!table-cell";
+const WIDE_ONLY = "sm:hidden @[64rem]/ledger:!table-cell";
 
 /**
  * Named rather than written inline as `isValidElement<{ className?: string }>`: lizard reads an
@@ -79,10 +84,15 @@ type ClassNamed = { className?: string };
  * three lines beside empty space (R4 form factor).
  */
 const PHONE_LEAD = "w-full sm:w-auto";
+/**
+ * The counterparty under a phone's amount may wrap: the cell is `nowrap` for the figure, and the
+ * longest name in a 1,700-row book set the whole column's width (186px of a 356px row).
+ */
+const PHONE_MONEY = "[&>span]:whitespace-normal [&>span]:break-words";
 
 function narrowed(cell: ReactNode, column: Column, wide: boolean): ReactNode {
   if (!isValidElement<ClassNamed>(cell)) return cell;
-  const lead = column === "comment" ? PHONE_LEAD : null;
+  const lead = column === "comment" ? PHONE_LEAD : column === "amount" ? PHONE_MONEY : null;
   if (!wide && !lead) return cell;
   return cloneElement(cell, { className: cn(cell.props.className, lead, wide && WIDE_ONLY) });
 }
@@ -139,7 +149,7 @@ function nextSort(current: Sort, key: Column): Sort {
 export function LedgerTable(props: LedgerTableProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { rows, columns = DEFAULT_COLUMNS, emptyText = "No movements yet.", fill = false, label, groupShares = false } = props;
-  const { onOpen, wideOnly = [] } = props;
+  const { onOpen, wideOnly = [], selectedId = null } = props;
   const [sort, setSort] = useState<Sort>({ key: "time", dir: "desc" });
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
   const items = useMemo(() => (groupShares ? groupShareRows(sorted) : sorted.map((row) => ({ kind: "row" as const, row }))), [groupShares, sorted]);
@@ -157,7 +167,11 @@ export function LedgerTable(props: LedgerTableProps) {
     // container that silently cuts off the Amount column reads as a missing column rather
     // than as one swipe away. It also makes the region keyboard-reachable.
     // The box the wide-only columns ask about (`@container/ledger`).
-    <div data-ledger-box="" className={cn("@container/ledger min-w-0", fill && "flex min-h-0 flex-1 flex-col")}>
+    <div
+      data-ledger-box=""
+      className={cn("@container/ledger min-w-0", fill && "flex min-h-0 flex-1 flex-col")}
+      onKeyDown={onOpen && selectedId ? (event) => walkRows(event, items, selectedId, onOpen) : undefined}
+    >
       <ScrollArea label={label} className={cn(fill && "min-h-0 flex-1")}>
         {/* Named as well as its scroller (A11Y F3.22): a table reached by a screen reader's table
             navigation announces its own name, not the region's. */}
@@ -170,7 +184,7 @@ export function LedgerTable(props: LedgerTableProps) {
           </TableHeader>
           <TableBody>
             {items.map((item) => (item.kind === "row"
-              ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} />
+              ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} selected={item.row.id === selectedId} />
               : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId] ?? null} />))}
           </TableBody>
         </table>
@@ -179,16 +193,39 @@ export function LedgerTable(props: LedgerTableProps) {
   );
 }
 
-function LedgerLine({ row, columns, onOpen, wideOnly }: {
-  row: LedgerRow; columns: Column[]; onOpen?: (row: LedgerRow) => void; wideOnly: Column[];
+/**
+ * ↑/↓ while a row's detail is open beside the table: open the next row in the order the table
+ * shows (its sort), and move focus to that row's Details button so the keys keep walking.
+ */
+function walkRows(event: KeyboardEvent<HTMLElement>, items: ReadonlyArray<{ kind: string; row?: LedgerRow }>, selectedId: string, onOpen: (row: LedgerRow) => void) {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  if ((event.target as HTMLElement).closest("input, textarea, select, [role=combobox]")) return;
+  const rows = items.flatMap((item) => (item.kind === "row" && item.row ? [item.row] : []));
+  const at = rows.findIndex((row) => row.id === selectedId);
+  if (at < 0) return;
+  const next = rows[event.key === "ArrowDown" ? Math.min(rows.length - 1, at + 1) : Math.max(0, at - 1)];
+  event.preventDefault();
+  onOpen(next);
+  const box = event.currentTarget;
+  requestAnimationFrame(() => {
+    const button = box.querySelector<HTMLElement>(`[data-ledger-row="${CSS.escape(next.id)}"] button`);
+    button?.focus();
+    button?.scrollIntoView?.({ block: "nearest" });
+  });
+}
+
+function LedgerLine({ row, columns, onOpen, wideOnly, selected = false }: {
+  row: LedgerRow; columns: Column[]; onOpen?: (row: LedgerRow) => void; wideOnly: Column[]; selected?: boolean;
 }) {
   return (
     <TableRow
+      data-ledger-row={row.id}
+      aria-current={selected || undefined}
       // The whole row is a pointer target; the button in the last cell is the keyboard's and
       // the screen reader's way in, so the row itself needs no role or tab stop.
       data-interactive={onOpen ? "" : undefined}
       onClick={onOpen ? () => onOpen(row) : undefined}
-      className={onOpen ? "cursor-pointer" : undefined}
+      className={cn(onOpen && "cursor-pointer", selected && "bg-accent-soft hover:bg-accent-soft")}
     >
       {columns.map((column) => <Fragment key={column}>{narrowed(CELL[column](row), column, wideOnly.includes(column))}</Fragment>)}
       {onOpen ? (

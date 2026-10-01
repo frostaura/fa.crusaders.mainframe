@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { LedgerTable } from "./LedgerTable";
 import type { LedgerRow } from "../lib/api";
 
@@ -170,11 +170,26 @@ describe("LedgerTable — what survives a 375px screen", () => {
     for (const cell of cellsOf("Comment")) {
       expect(cell.classList.contains("hidden")).toBe(false);
       expect(cell.className).toContain("sm:hidden");
-      // Back once the TABLE'S box is 72rem — beside the admin rail a viewport breakpoint lies.
-      expect(cell.className).toContain("@[72rem]/ledger:!table-cell");
+      // Back once the TABLE'S box is 64rem — beside the admin rail a viewport breakpoint lies.
+      expect(cell.className).toContain("@[64rem]/ledger:!table-cell");
       expect(cell.querySelector("time")).not.toBeNull();
     }
-    expect(header.className).toContain("@[72rem]/ledger:!table-cell");
+    expect(header.className).toContain("@[64rem]/ledger:!table-cell");
     expect(document.querySelector("[data-ledger-box]")!.className).toContain("@container/ledger");
+  });
+  /**
+   * R4 form factor (SPEC §3.9): with a movement open BESIDE the book, ↑/↓ inside the table open
+   * the row below or above it, in the order the table shows — newest first — and mark it.
+   */
+  it("walks the open movement with the arrow keys, in the table's order", () => {
+    const opened: string[] = [];
+    const { rerender } = render(<LedgerTable rows={rows} label="Club book" onOpen={(row) => opened.push(row.id)} selectedId="r2" />);
+    expect(document.querySelector('tr[data-ledger-row="r2"]')).toHaveAttribute("aria-current", "true");
+    const first = document.querySelector('tr[data-ledger-row="r2"] button') as HTMLElement;
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(opened).toEqual(["r1"]);
+    rerender(<LedgerTable rows={rows} label="Club book" onOpen={(row) => opened.push(row.id)} selectedId="r1" />);
+    fireEvent.keyDown(document.querySelector('tr[data-ledger-row="r1"] button') as HTMLElement, { key: "ArrowUp" });
+    expect(opened).toEqual(["r1", "r2"]);
   });
 });
