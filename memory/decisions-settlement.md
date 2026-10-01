@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-settlement
 description: "How the ledger settles: a no-show releases its tail by truncating EndsAt, late box evidence reverses it with two NEW rows (never an edit, balance may go negative), the resold tail is displaced, offline scans judged at scan time."
 type: decision
-last_verified: 2026-09-11
+last_verified: 2026-10-01
 ---
 
 # Live decisions — settlement and the ledger
@@ -48,10 +48,12 @@ charge-at-booking premise are in [`decisions.md`](decisions.md).
   roster window bounds fetch-to-scan, the event age bounds scan-to-upload — the length of the
   outage, which is the very thing the queue exists to survive. The six-hour clamp re-created the
   exact refund-and-penalise outcome it was meant to end.
-- **A cancelled booking lit offline is charged pro rata for the minutes the relay actually ran.**
-  Cancelling never expired the roster code, so a box in a WiFi drop lit a fully-refunded court and
-  nothing recovered the money. Same standing invariant, applied to a refund already paid out.
+- **A cancelled booking lit offline is charged the whole minutes the relay actually ran, rounded
+  DOWN** (`LitWindow.ChargeMinutes`); the board, trace and audit show the same interval rounded up
+  (`LitWindow.Minutes`). Cancelling never expired the roster code, so a box in a WiFi drop lit a
+  refunded court and nothing recovered the money. *Why two counts (P13, contract §12.6):* every
+  money remainder stays with the payer, but a court lit 61 s WAS lit into its second minute.
 - **Booking-activation codes never identify a buyer or a payer.** A roster code travels in clear on
   the LAN and sits in box RAM for hours; accepted as an identity it let anyone who read one buy
-  court time on that member's credits. `IdentificationResolver` returns a user only for
+  court time on that member's minutes. `IdentificationResolver` returns a user only for
   `MemberIdent` codes.
