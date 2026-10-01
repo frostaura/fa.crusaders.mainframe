@@ -1,6 +1,6 @@
 import { clubCalendarDate } from "./clubClock";
 import { parseAmount, type AmountProblem } from "./amount";
-import { amountProblemSentence } from "./amountCopy";
+import { AMOUNT_COPY } from "./amountCopy";
 import { ApiError } from "./api";
 import { describeFailure } from "./errors";
 import type { GameReason, MatchProgress } from "./playScore";
@@ -262,7 +262,7 @@ export const GOAL_SHEET = {
   label: "Hours a month",
   hint: "From half an hour to 100 hours, in quarter hours.",
   outOfRange: "Choose from 0.5 to 100 hours, in quarter hours (0.25, 0.5, 0.75…).",
-  /** The shared parser's refusals, said in hours (`amountCopy` speaks of credits and rand). */
+  /** The shared parser's refusals, said in hours (`amountCopy` speaks of minutes and rand). */
   empty: "Enter a number of hours.",
   notANumber: "That isn't a number — enter hours, like 8 or 7,5.",
   save: "Save goal",
@@ -279,7 +279,10 @@ export type GoalRead = { ok: true; minutes: number } | { ok: false; sentence: st
 function goalProblemSentence(problem: AmountProblem): string {
   if (problem.kind === "empty") return GOAL_SHEET.empty;
   if (problem.kind === "not_a_number") return GOAL_SHEET.notANumber;
-  if (problem.kind === "negative" || problem.kind === "ambiguous") return amountProblemSentence(problem, "credits");
+  // Unit-free sentences: the two refusals here name no unit, so none is passed (P13 — the goal
+  // is hours, and the parser's money units are not this field's).
+  if (problem.kind === "negative") return AMOUNT_COPY.negative;
+  if (problem.kind === "ambiguous") return AMOUNT_COPY.ambiguous;
   return GOAL_SHEET.outOfRange;
 }
 

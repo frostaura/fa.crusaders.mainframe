@@ -16,8 +16,8 @@ const TONES: readonly AlertTone[] = ["info", "success", "warning", "danger"];
 
 const ALERT_TEXT: Record<AlertTone, string> = {
   info: "Courts 3 and 4 close at 20:00 on Friday for league night.",
-  success: "Your top-up of 100 cr has landed.",
-  warning: "Your balance is below one session. Top up before you book.",
+  success: "Your 5 hours have landed in your wallet.",
+  warning: "Your balance is below one session. Buy minutes before you book.",
   danger: "That slot was taken a moment ago. Nothing was charged.",
 };
 

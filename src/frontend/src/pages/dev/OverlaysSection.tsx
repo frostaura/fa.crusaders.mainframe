@@ -30,7 +30,7 @@ function DialogDemo() {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Adjust credit</DialogTitle>
+          <DialogTitle>Adjust minutes</DialogTitle>
           <DialogDescription>Type a reason, then tap the scrim: the dialog stays open and says why.</DialogDescription>
         </DialogHeader>
         <DialogBody>
@@ -45,7 +45,7 @@ function DialogDemo() {
             <Button variant="outline">Cancel</Button>
           </DialogClose>
           <DialogClose asChild>
-            <Button>Adjust credit</Button>
+            <Button>Adjust minutes</Button>
           </DialogClose>
         </DialogFooter>
       </DialogContent>

@@ -75,7 +75,7 @@ function Aside() {
       <WithAside asideLabel="Day summary" aside={
         <div className={cn(TILE, "gap-2")} data-demo="aside-card">
           <h4 className="text-sm font-semibold">Today</h4>
-          <p className="text-sm text-text-secondary">2 bookings · 16 cr · 1 more slot today</p>
+          <p className="text-sm text-text-secondary">2 bookings · 1 h 30 min · 1 more slot today</p>
           <Button size="sm">Book</Button>
         </div>
       }>
@@ -144,7 +144,7 @@ function DockDemo() {
         <Button variant="outline" onClick={() => setOpen((was) => !was)}>{open ? "Hide the docked bar" : "Show the docked bar"}</Button>
       </div>
       {open ? (
-        <ContextBar position="bottom" label="Wallet actions" summary={<span className="font-semibold tabular-nums">124.00 cr</span>} primary={<Button>Top up</Button>} />
+        <ContextBar position="bottom" label="Wallet actions" summary={<span className="font-semibold tabular-nums">2 h 15 min</span>} primary={<Button>Buy minutes</Button>} />
       ) : null}
     </Demo>
   );

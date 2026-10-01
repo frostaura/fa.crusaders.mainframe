@@ -27,7 +27,7 @@ function notice(overrides: Partial<MemberNotification> = {}): MemberNotification
 
 const FIRST = [
   notice(),
-  notice({ id: "n2", kind: "players.share_moved", headline: "Alex paid their 25.00 cr share", link: "/bookings/b1", read_at: NOW }),
+  notice({ id: "n2", kind: "players.share_moved", headline: "Alex paid their 25 min share", link: "/bookings/b1", read_at: NOW }),
   notice({ id: "n3", kind: "players.reminder", headline: "Your share for Friday is still open", link: null }),
 ];
 

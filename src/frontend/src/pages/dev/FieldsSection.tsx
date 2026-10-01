@@ -45,7 +45,7 @@ function TextFields() {
       </Field>
       <Field>
         <FieldLabel>Reason</FieldLabel>
-        <Textarea placeholder="Why is this credit being adjusted?" />
+        <Textarea placeholder="Why are these minutes being adjusted?" />
       </Field>
     </div>
   );
@@ -125,7 +125,7 @@ function RadioFields() {
         </RadioGroup>
       </div>
       <RadioGroup value={who} onValueChange={setWho} aria-label="Book as">
-        <RadioCard value="me" title="Book for myself" description="Charged to your wallet: 8 cr." />
+        <RadioCard value="me" title="Book for myself" description="Takes 45 min from your wallet." />
         <RadioCard value="member" title="Book for a member" description="Charged to their wallet." />
         <RadioCard value="hold" title="Club hold" description="Admins only." disabled />
       </RadioGroup>

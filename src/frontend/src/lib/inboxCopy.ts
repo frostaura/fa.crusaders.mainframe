@@ -8,7 +8,7 @@ export const SPLIT_PANE_COPY = {
   /** Stacked (large text), a notice open: back to the list it was picked from. */
   backToNotifications: "Back to notifications",
   backToInvites: "Back to invites",
-  /** Said politely when a pick opens beside the list: "Showing: Sam paid you 25.00 credits". */
+  /** Said politely when a pick opens beside the list: "Showing: Sam paid you 25 min". */
   showing: (what: string) => `Showing: ${what}`,
   /** §3.5 — the answer on an invite card at phone width (the sheet still states the money first). */
   cardAccept: "Accept",

@@ -12,7 +12,7 @@ const VARIANTS: readonly Variant[] = ["primary", "secondary", "outline", "ghost"
 
 const VARIANT_LABEL: Record<Variant, string> = {
   primary: "Book",
-  secondary: "Top up",
+  secondary: "Buy minutes",
   outline: "Export",
   ghost: "Skip",
   danger: "Delete board",

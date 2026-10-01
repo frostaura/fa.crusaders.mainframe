@@ -134,7 +134,7 @@ describe("a person's night", () => {
       traceEvent({
         at: "2026-09-22T19:14:00.000Z",
         strand: "wallet", kind: "wallet.adjusted_by_admin",
-        headline: "Credit adjusted by the club",
+        headline: "Minutes adjusted by the club",
         actor: { user_id: "a1", name: "Review Admin", kind: "admin", is_self: false },
       }),
     ])));
@@ -286,8 +286,30 @@ describe("a night's money signs (review round 2, F3-14)", () => {
   it("writes a negative balance with the same minus as every other figure", async () => {
     stubFetch(nightRoutes(traceView([traceEvent({ amount_minutes: -50, balance_after_minutes: -100 })])));
     renderNight();
-    expect(await screen.findByText(/balance −100\.00/)).toBeInTheDocument();
-    expect(screen.queryByText(/balance -100/)).toBeNull();
+    const money = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-night-money]");
+      if (!el) throw new Error("no money line yet");
+      return el;
+    });
+    // P13: whole minutes in the app's one format — one U+2212 on the whole value, no decimals,
+    // no "credits" — and a screen reader hears the words, not "h" and "min".
+    expect(money).toHaveTextContent("−50 min");
+    expect(money).toHaveTextContent("balance −1 h 40 min");
+    expect(money.textContent).not.toMatch(/-\d|\d\.\d|credit|\bcr\b/);
+    expect(money.querySelectorAll(".sr-only")[0]).toHaveTextContent("minus 50 minutes");
+    expect(money.querySelectorAll(".sr-only")[1]).toHaveTextContent("minus 1 hour 40 minutes");
+  });
+
+  it("signs a movement in, and leaves a positive balance unsigned", async () => {
+    stubFetch(nightRoutes(traceView([traceEvent({ amount_minutes: 60, balance_after_minutes: 135 })])));
+    renderNight();
+    const money = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-night-money]");
+      if (!el) throw new Error("no money line yet");
+      return el;
+    });
+    expect(money).toHaveTextContent("+1 h");
+    expect(money).toHaveTextContent("balance 2 h 15 min");
   });
 });
 
@@ -326,7 +348,8 @@ describe("the admin change record", () => {
     reason: "Court 1 lights faulty",
     changes: [
       { field: "booking_status", before: "Confirmed", after: "Cancelled" },
-      { field: "balance_minutes", before: "270.00 cr", after: "370.00 cr" },
+      // P13: the server words a `*_minutes` field ("370 minutes"); the page shows it compact.
+      { field: "balance_minutes", before: "270 minutes", after: "370 minutes" },
     ],
   };
 
@@ -376,7 +399,7 @@ describe("the admin change record", () => {
 
     fireEvent.click(await screen.findByText("Show what changed"));
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
-    expect(screen.getByText("370.00 cr")).toBeInTheDocument();
+    expect(screen.getByText("6 h 10 min")).toBeInTheDocument();
     // Rendered by the SERVER: a volunteer reading their own audit trail cannot be handed
     // minutes past midnight, and the browser is not where the club's clock lives.
     expect(screen.queryByText("1080")).not.toBeInTheDocument();
@@ -387,9 +410,9 @@ describe("the admin change record", () => {
     stubFetch(changeRoutes([{
       ...change, area: "booking", action: "players.share_collected", headline: "Collected a member's share of a booking — Sam Okafor",
       changes: [
-        { field: "collected_minutes", label: "Collected credits", before: null, after: "100.00" },
-        { field: "balance_after_minutes", label: "Balance after credits", before: null, after: "-100.00" },
-        { field: "balance_before_minutes", label: "Balance before credits", before: null, after: "0.00" },
+        { field: "collected_minutes", label: "Collected minutes", before: null, after: "100 minutes" },
+        { field: "balance_after_minutes", label: "Balance after minutes", before: null, after: "-100 minutes" },
+        { field: "balance_before_minutes", label: "Balance before minutes", before: null, after: "0 minutes" },
         { field: "seat", label: "Seat", before: "2", after: null },
         { field: "booking_id", label: "Booking id", before: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", after: null },
       ],
@@ -398,11 +421,11 @@ describe("the admin change record", () => {
     fireEvent.click(await screen.findByText("Show what changed"));
 
     expect(screen.getByText("Balance")).toBeInTheDocument();
-    expect(screen.getByText("0.00 cr")).toBeInTheDocument();
-    expect(screen.getByText("−100.00 cr")).toBeInTheDocument();
+    expect(screen.getByText("0 min")).toBeInTheDocument();
+    expect(screen.getByText("−1 h 40 min")).toBeInTheDocument();
     expect(screen.getByText("Collected")).toBeInTheDocument();
     expect(screen.queryByText(/a5604dd3/)).toBeNull();
-    expect(screen.queryByText("-100.00")).toBeNull();
+    expect(screen.queryByText(/-100/)).toBeNull();
   });
 
   it("says the club's retention once, not in the subtitle beside the banner (F3-14)", async () => {

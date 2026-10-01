@@ -73,7 +73,7 @@ function ActionBarDemo() {
             <Button variant="ghost" size="sm">Details</Button>
           </ActionBarItem>
           <ActionBarItem asChild>
-            <Button size="sm">Book · 24 cr</Button>
+            <Button size="sm">Book · 1 h 30 min</Button>
           </ActionBarItem>
         </ActionBar>
       ) : null}

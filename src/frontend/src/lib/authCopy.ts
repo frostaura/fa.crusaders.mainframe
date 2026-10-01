@@ -16,7 +16,7 @@ import { PENDING_APPROVAL } from "./registrationCopy";
 
 /** What the auth band says under the club's name — one line on what the account is FOR. */
 export const AUTH_SUBLINE = {
-  signIn: "Court bookings, credits and your club account.",
+  signIn: "Court bookings, your minutes and your club account.",
   password: "Set a new password for your club account.",
   welcome: "Welcome to the club.",
 } as const;

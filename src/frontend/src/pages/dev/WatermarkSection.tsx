@@ -63,7 +63,7 @@ function CtaHost({ phase }: { phase: Phase }) {
   const { "aria-busy": busy, ...attributes } = phaseAttributes(phase);
   return (
     <Interactable asChild surface="cta" watermark>
-      <Button size="lg" pending={busy} {...attributes}>Book · 8 cr</Button>
+      <Button size="lg" pending={busy} {...attributes}>Book · 45 min</Button>
     </Interactable>
   );
 }

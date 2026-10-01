@@ -14,7 +14,7 @@ type Code = "booking" | "member";
 type Long = "one" | "two" | "three";
 
 const LONG_SEGMENTS: { value: Long; label: string }[] = [
-  { value: "one", label: "Top-ups over time" },
+  { value: "one", label: "Minutes sold over time" },
   { value: "two", label: "Daily money flow" },
   { value: "three", label: "Bookings and no-shows" },
 ];

@@ -9,7 +9,7 @@ import { Specimen } from "./parts";
  */
 
 const TYPE_SAMPLES: ReadonlyArray<[TypographyVariant, string]> = [
-  ["display", "1 250 cr"],
+  ["display", "20 h 50 min"],
   ["h1", "Book a court"],
   ["h2", "Section title"],
   ["h3", "Card title"],

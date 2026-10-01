@@ -111,7 +111,7 @@ test.describe("on a phone", () => {
     const before = await page.locator("#main-content").evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom));
     await page.getByRole("button", { name: "Show the docked bar" }).click();
     const bar = page.getByRole("region", { name: "Wallet actions" });
-    await expect(bar.getByRole("button", { name: "Top up" })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "Buy minutes" })).toBeVisible();
     const after = await page.locator("#main-content").evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom));
     const panel = (await bar.locator("> div").boundingBox())!;
     expect(after - before).toBeGreaterThanOrEqual(panel.height);
@@ -119,7 +119,7 @@ test.describe("on a phone", () => {
     const tabBar = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height")) || 0);
     expect(panel.y + panel.height).toBeLessThanOrEqual(844 - tabBar);
     expect(panel.y + panel.height).toBeGreaterThan(844 * 0.8);
-    const target = (await bar.getByRole("button", { name: "Top up" }).boundingBox())!;
+    const target = (await bar.getByRole("button", { name: "Buy minutes" }).boundingBox())!;
     expect(target.height).toBeGreaterThanOrEqual(44);
     await page.getByRole("button", { name: "Hide the docked bar" }).click();
     await expect(bar).toHaveCount(0);

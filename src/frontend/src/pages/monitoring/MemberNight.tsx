@@ -8,7 +8,6 @@ import { DatePicker } from "../../components/ui/date-picker";
 import { formatClubDayLabel } from "../../components/ui/date-picker-day";
 import { DownloadSimple } from "../../components/ui/icons";
 import { MemberCombobox } from "../../components/ui/member-combobox";
-import { MINUS, formatCredits } from "../../lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { StateBlock } from "../../components/ui/state-block";
@@ -22,11 +21,12 @@ import { memberDetailEndpoints, saveFile } from "../../lib/memberDetailApi";
 import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
 import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes, readableEvents } from "../../lib/nightTimeline";
 import {
-  APPROXIMATE_EXPLANATION, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
+  APPROXIMATE_EXPLANATION, NIGHT_BALANCE_AFTER, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
   NIGHT_PRIVACY_NOTICE, actorClause, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
   retentionCaveat,
 } from "../../lib/nightCopy";
 import { useAsyncAction } from "../../lib/useAsyncAction";
+import { Minutes } from "../../components/Minutes";
 import { validClubDay } from "../../lib/scheduleDay";
 import { useRead } from "../../lib/useRead";
 import { useTicker } from "../../lib/useTicker";
@@ -449,12 +449,13 @@ function TraceCard({ event, subjectName, timezone }: {
         )}
       </div>
       {typeof event.amount_minutes === "number" && (
-        <p className="text-sm text-text-secondary">
-          {`${event.amount_minutes < 0 ? MINUS : "+"}${Math.abs(event.amount_minutes).toFixed(2)} credits`}
+        <p className="text-sm text-text-secondary" data-night-money="">
+          {/* P13: whole minutes in the app's one format ("+1 h", "−45 min"), heard in words. A
+              charge is the body ink, not the danger ink: a booking is not an error. */}
+          <Minutes value={event.amount_minutes} signed className="text-text-secondary" />
           {typeof event.balance_after_minutes === "number"
-            // U+2212 like every other figure on the admin (F3-14: "-100.00" sat beside "−200.00").
-            ? ` · balance ${formatCredits(event.balance_after_minutes, { long: true }).replace(/ credits$/, "")}`
-            : ""}
+            ? <> · {NIGHT_BALANCE_AFTER} <Minutes value={event.balance_after_minutes} /></>
+            : null}
         </p>
       )}
       {event.court?.name && <p className="text-sm text-text-muted">{event.court.name}</p>}

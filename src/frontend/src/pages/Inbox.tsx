@@ -119,7 +119,7 @@ function InviteTarget({ seat, notice }: { seat: string; notice: MemberNotificati
   const fromList = invites.items?.find((i) => i.participant_id === seat) ?? null;
   // R5 M5-4 — the invite answered here is held while its answer lands: an accepted seat leaves the
   // open-invites list on the re-read, and the pane collapsed to the bare notice, losing "You're in —
-  // 16.00 cr paid to Olga". As the Invites page does, the last invite shown stays until another is
+  // 16 min paid to Olga". As the Invites page does, the last invite shown stays until another is
   // picked (this component is keyed by the notice).
   const [held, setHeld] = useState<Invite | null>(null);
   if (fromList && fromList !== held) setHeld(fromList);

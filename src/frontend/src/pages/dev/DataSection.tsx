@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, Lock, Warning, WifiSlash } from "@/components/ui/icons";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatCredits } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
 import { Demo, Specimen, ThemePair } from "./parts";
 
 /** Table, badges, avatars and card parts. */
@@ -12,21 +12,21 @@ import { Demo, Specimen, ThemePair } from "./parts";
 type Row = { name: string; group: string; balance: number; status: "Active" | "Pending" | "Suspended" };
 
 const ROWS: readonly Row[] = [
-  { name: "Nomsa Khumalo", group: "League", balance: 274.25, status: "Active" },
-  { name: "Sam Smith", group: "Social", balance: 48, status: "Pending" },
-  { name: "Pieter van der Merwe", group: "Junior", balance: -16, status: "Suspended" },
+  { name: "Nomsa Khumalo", group: "League", balance: 275, status: "Active" },
+  { name: "Sam Smith", group: "Social", balance: 45, status: "Pending" },
+  { name: "Pieter van der Merwe", group: "Junior", balance: -30, status: "Suspended" },
 ];
 
 const STATUS_TONE = { Active: "success", Pending: "warning", Suspended: "danger" } as const;
 
 function MemberRow({ row }: { row: Row }) {
-  const negative = row.balance < 0;
   return (
     <TableRow>
       <TableCell className="font-medium">{row.name}</TableCell>
       <TableCell>{row.group}</TableCell>
-      <TableCell className={negative ? "text-right tabular-nums text-danger-strong" : "text-right tabular-nums"}>
-        {formatCredits(row.balance)}
+      <TableCell className="text-right">
+        {/* Minutes, the club's unit (P13): <Minutes> wears the negative tone itself. */}
+        <Minutes value={row.balance} />
       </TableCell>
       <TableCell><Badge tone={STATUS_TONE[row.status]}>{row.status}</Badge></TableCell>
     </TableRow>

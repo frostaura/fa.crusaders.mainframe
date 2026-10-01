@@ -211,3 +211,6 @@ export const ACCOUNT_EVENT_WORDS: Readonly<Record<string, string | null>> = {
 
 /** Said for an account event the dictionaries above do not know — never the raw code. */
 export const UNKNOWN_ACCOUNT_EVENT = "Something changed on their account";
+
+/** Before the balance a money card left the member on: "+1 h · balance 2 h 15 min" (P13). */
+export const NIGHT_BALANCE_AFTER = "balance";
