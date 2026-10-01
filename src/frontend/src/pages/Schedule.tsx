@@ -196,7 +196,7 @@ export default function BookingsPage() {
           gap="md"
           aside={(
             <>
-              <DaySummary className="hidden @[72rem]/aside:flex" />
+              <DaySummary className="hidden @[72rem]/aside:flex" bookingFor={bookAsUserId ? bookingFor : null} />
               {bookAsUserId ? null : (
                 <>
                   <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />

@@ -27,6 +27,9 @@ export const BOOKINGS_COPY = {
   railLabel: "Your day and your games",
   summaryTitle: "Your wallet",
   summarySpendable: "You can spend",
+  /** R5 A5-9 — booking FOR a member, the rail's wallet is theirs, never the desk's. */
+  summaryTheirTitle: (name: string) => `${name}'s wallet`,
+  summaryTheirSpendable: (name: string) => `${name} can spend`,
   /** The sr-only h2 the grid is named by — the court names are already the visible headers. */
   gridHeading: "Courts and times",
   dayStripLabel: "Choose a day",
