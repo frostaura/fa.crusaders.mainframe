@@ -49,7 +49,7 @@ export function boardCourtFixture(overrides: Partial<ControlBoardCourt> = {}): C
       label: null,
       booked_by: { user_id: "u1", name: "Thandi Mokoena" },
       checked_in_at: EVENING,
-      amount_credits: 36,
+      amount_minutes: 36,
     },
     next: {
       booking_id: "b2",

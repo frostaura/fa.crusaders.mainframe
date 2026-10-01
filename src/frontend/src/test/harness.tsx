@@ -303,7 +303,6 @@ export function renderPage(
 /** The settings document the API returns, with every field the screens read. */
 export const SETTINGS_FIXTURE = {
   slice_minutes: 15,
-  slice_price_credits: 8,
   advance_booking_days: 14,
   day_start_minute: 360,
   day_end_minute: 1320,
@@ -317,9 +316,7 @@ export const SETTINGS_FIXTURE = {
   // cannot override. Sunday is deliberately absent, because a day the map does not name is
   // the only way the flat pair means anything.
   operating_hours: { mon: "06:00-22:00", tue: "06:00-22:00", wed: "06:00-22:00", thu: "06:00-22:00", fri: "06:00-22:00", sat: "07:00-20:00" },
-  credits_per_zar_regular: 1.6,
-  topup_block_zar: 100,
-  topup_max_zar_per_member: 1000,
+  // P13 §3.9: no slice price, no rate and no top-up cap — the settings GET dropped all four.
   member_per_day_max_minutes: 60,
   peak_hours: "16:00-19:00",
   peak_advance_hours_for_regular: 1,
@@ -619,7 +616,6 @@ export function courtFixture(courtNumber: number, overrides: Record<string, unkn
     court_number: courtNumber,
     name: `Court ${courtNumber}`,
     court_type: "Squash",
-    slice_price_credits: 8,
     is_active: true,
     ...overrides,
   };
@@ -643,7 +639,7 @@ export function memberFixture(overrides: Record<string, unknown> = {}) {
     email_verified: true,
     created_at: new Date().toISOString(),
     rejection_reason: null,
-    balance_credits: 120,
+    balance_minutes: 120,
     ...overrides,
   };
 }
@@ -655,8 +651,8 @@ export function ledgerRowFixture(overrides: Record<string, unknown> = {}) {
     at: "2026-09-01T10:00:00Z",
     from: "Ada Lovelace",
     to: "Club treasury",
-    amountCredits: 24,
-    signedAmountCredits: -24,
+    amountMinutes: 24,
+    signedAmountMinutes: -24,
     type: "BookingCharge",
     comment: "Booking charge",
     subjectUserId: "44444444-4444-4444-4444-444444444444",
@@ -1456,7 +1452,7 @@ export function memberCodeRoutes(options: {
   const { ref, tz } = MEMBER_CODE_FIXTURE;
   return [
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     {
       method: "POST",

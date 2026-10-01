@@ -3,8 +3,9 @@ import type {
   ControlBoardBox, ControlBoardCourt, ControlBoardDevice, ControlBoardLights, ControlBoardView, DeviceErrorCounts, DeviceErrorPage,
   DeviceErrorRow, MemberBookingRules, MemberCodeResetResult, MemberGroup, MemberGroupChip, MemberGroupPreview,
   MemberGroupSaved, MemberGroupsSetResult, MemberTariff, MonitoringSummary, StreamTicket, TraceActor, TraceEvent,
-  TraceView, AdminAdjustResult, adminEndpoints,
+  TraceView, AdminAdjustResult, AdminPackage, AdminSellResult, adminEndpoints,
 } from "../lib/adminApi";
+import { shelfPackage } from "./minutesFixtures";
 import type {
   AdminRoleResult, FingerprintEnrolment, MemberBookingRow, MemberBookingsPage, MemberDetail, MemberDoorRow,
   MemberDoorsPage,
@@ -14,7 +15,7 @@ import type {
   BiometricEnrollmentRow, BulkBookResponse, BulkCancelResponse, DailyAdminPoint, DeviceActivityEntry,
   DeviceActivityPage, DeviceApiKey, DoorEventEntry, DoorLogDoor, DoorLogEntry, DoorLogPage, DoorRow, DoorSignal,
   DoorsView, FleetDoorResult, FleetResult, MemberSpendMonth, MemberSpendReport, RevenueReport, UtilisationRow,
-  WebhookDeliveryDto, WebhookEndpointDto, endpoints,
+  WebhookDeliveryDto, WebhookEndpointDto, endpoints, MemberShelf,
 } from "../lib/api";
 import type { AdminMemberPlay, AdminResult, AdminResultsPage } from "../lib/playApi";
 import type { AddPlayersAnswer, AddedParticipant, CollectAnswer, ReturnAnswer, SeatAnswer } from "../lib/playersApi";
@@ -81,7 +82,7 @@ export function controlBoardTurnedOnBy(): NonNullable<ControlBoardLights["turned
 export function controlBoardCurrent(): ControlBoardBooking {
   return {
     booking_id: ID, starts_at: AT, ends_at: AT, status: "booked", kind: "booking", label: null, booked_by: null,
-    checked_in_at: null, amount_credits: 8, minutes_remaining: 20,
+    checked_in_at: null, amount_minutes: 8, minutes_remaining: 20,
   };
 }
 
@@ -179,8 +180,8 @@ export function traceRetention(): NonNullable<TraceView["retention"]> {
 
 export function traceSummary(): NonNullable<TraceView["summary"]> {
   return {
-    first_seen_at: AT, last_seen_at: AT, minutes_on_court: 40, courts: ["Court 1"], credits_spent: 8,
-    credits_received: 0, doors_entered: 1, doors_refused: 0, bookings_made: 1, bookings_cancelled: 0,
+    first_seen_at: AT, last_seen_at: AT, minutes_on_court: 40, courts: ["Court 1"], minutes_spent: 8,
+    minutes_received: 0, doors_entered: 1, doors_refused: 0, bookings_made: 1, bookings_cancelled: 0,
   };
 }
 
@@ -188,7 +189,7 @@ export function traceSummary(): NonNullable<TraceView["summary"]> {
 export function traceEvent(): TraceEvent {
   return {
     at: AT, strand: "door", kind: "door.released", headline: "…", detail: null, actor: traceActor(), subject: null,
-    court: null, amount_credits: null, balance_after_credits: null, approximate: false, device_code: "gate-1",
+    court: null, amount_minutes: null, balance_after_minutes: null, approximate: false, device_code: "gate-1",
     outage_id: null, source: "audit", source_id: ID,
   };
 }
@@ -240,11 +241,12 @@ export function memberGroupsList(): Reply<typeof adminEndpoints.memberGroups> {
 export function memberGroupWire(): MemberGroup {
   return {
     id: ID, name: "Regular", description: null, status: "active", sort_order: 0, is_system_default: true,
-    system_key: null, credits_per_zar: null, peak_priority: null, pricing: memberGroupPricing(), caps: memberGroupCaps(),
+    system_key: null, package_discount_bps: null, peak_priority: null, caps: memberGroupCaps(),
     windows: [{ day: "mon", start: "06:00", end: "22:00" }], member_count: 0,
   };
 }
 
+/** @deprecated P13-F3: the group `pricing` block is gone from the wire (contract §3.8); delete with its pin. */
 export function memberGroupPricing(): NonNullable<MemberGroup["pricing"]> {
   return {
     mode: "inherit_court", multiplier_bps: 10_000, flat_slice_price_credits: null, effective_example_credits: 8,
@@ -252,6 +254,7 @@ export function memberGroupPricing(): NonNullable<MemberGroup["pricing"]> {
   };
 }
 
+/** @deprecated P13-F3: per-court prices are gone from the wire (contract §3.2); delete with its pin. */
 export function coursePrice(): { court_id: string; court_name: string; credits: number } {
   return { court_id: ID, court_name: "Court 1", credits: 8 };
 }
@@ -281,14 +284,15 @@ export function memberGroupPreview(): MemberGroupPreview {
 export function memberBookingRules(): MemberBookingRules {
   return {
     day: "2026-09-30", groups: [{ id: ID, name: "Regular", description: null }], allowed_windows: [{ start: "06:00", end: "22:00" }],
-    club_hours: { start: "06:00", end: "22:00" }, slice_price_credits: 8, slice_price_range_credits: { min: 8, max: 8 },
-    slice_prices_by_court: [coursePrice()], max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null,
+    club_hours: { start: "06:00", end: "22:00" }, max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null,
     empty_window_reason: null, empty_window_groups: null, tariff: memberTariff(),
   };
 }
 
 export function memberTariff(): MemberTariff {
-  return { top_up_credits_per_zar: 2, rate_group_id: null, peak_priority: false, peak_withheld_by: [] };
+  return {
+    package_discount_bps: null, discount_group_id: null, peak_priority: false, peak_withheld_by: [],
+  };
 }
 
 export function memberGroupsSet(): MemberGroupsSetResult {
@@ -296,20 +300,47 @@ export function memberGroupsSet(): MemberGroupsSetResult {
 }
 
 export function memberGroupChip(): MemberGroupChip {
-  return { id: ID, name: "Regular", system_key: null, credits_per_zar: null, peak_priority: null };
+  return { id: ID, name: "Regular", system_key: null, package_discount_bps: null, peak_priority: null };
 }
 
 /* ─────────────────────────────── credit and the member's code ─────────────────────────────── */
 
 export function adminAdjustResult(): AdminAdjustResult {
   return {
-    entry_id: ID, type: "AdminAdjustment", reason_code: "goodwill", amount_credits: 10, zar_received: null,
-    balance_before_credits: 0, balance_after_credits: 10, member: { user_id: ID, email: "priya@example.test" },
+    entry_id: ID, type: "AdminAdjustment", reason_code: "goodwill", amount_minutes: 10, zar_received: null,
+    balance_before_minutes: 0, balance_after_minutes: 10, member: { user_id: ID, email: "priya@example.test" },
   };
 }
 
+/** P13 §3.7 — the desk sold a package: the adjust answer plus the package. */
+export function adminSellResult(): AdminSellResult {
+  return {
+    entry_id: ID, type: "AdminTopUp", reason_code: "top_up_cash", amount_minutes: 300, zar_received: 550,
+    balance_before_minutes: 0, balance_after_minutes: 300, member: { user_id: ID, email: "priya@example.test" },
+    package: { id: ID, name: "5 hours", minutes: 300, price_zar: 550 },
+  };
+}
+
+/** P13 §3.7 — the shelf as one member sees it, from the desk (no checkouts). */
+export function memberShelf(): MemberShelf {
+  return { discount: null, packages: [shelfPackage()] };
+}
+
+/* ─────────────────────────────── P13: the club's packages (§3.5) ─────────────────────────────── */
+
+export function adminPackage(over: Partial<AdminPackage> = {}): AdminPackage {
+  return {
+    id: ID, name: "5 hours", minutes: 300, price_zar: 550, group: null, sort_order: 1, status: "active",
+    created_at: AT, updated_at: AT, ...over,
+  };
+}
+
+export function adminPackages(): Reply<typeof adminEndpoints.packages> {
+  return { packages: [adminPackage()] };
+}
+
 export function legacyAdjustResult(): Reply<typeof endpoints.adminAdjust> {
-  return { entry_id: ID, amount_credits: 10, balance_after_credits: 10 };
+  return { entry_id: ID, amount_minutes: 10, balance_after_minutes: 10 };
 }
 
 export function memberCodeReset(): MemberCodeResetResult {
@@ -323,7 +354,7 @@ export function memberDetail(): MemberDetail {
     user_id: ID, membership_id: ID, full_name: "Priya Naidoo", email: "priya@example.test", membership_number: "C-1",
     status: "Active", rejection_reason: null, review: null, account_status: "Active", email_verified: true,
     created_at: AT, last_login_at: null, photo_url: null, is_admin: false, admin_source: null, groups: [], tariff: memberTariff(),
-    balance_credits: 0, held_credits: 0, owed_back_credits: 0, held_until: null, held_parts: [], passkey_count: 0,
+    balance_minutes: 0, held_minutes: 0, owed_back_minutes: 0, held_until: null, held_parts: [], passkey_count: 0,
     fingerprints: { count: 0, enrolments: [] }, next_bookings: [], counts_30d: memberCounts(),
   };
 }
@@ -346,7 +377,7 @@ export function fingerprintEnrolment(): FingerprintEnrolment {
 
 export function memberBookingRow(): MemberBookingRow {
   return {
-    booking_id: ID, court_id: ID, court_name: "Court 1", starts_at: AT, ends_at: AT, status: "booked", charged_credits: 8,
+    booking_id: ID, court_id: ID, court_name: "Court 1", starts_at: AT, ends_at: AT, status: "booked", charged_minutes: 8,
     checked_in_at: null, cancelled_at: null, booked_by: memberBookingActor(), role: "organiser", organiser: memberBookingActor(),
   };
 }
@@ -380,11 +411,11 @@ export function adminRoleResult(): AdminRoleResult {
 /* ─────────────────────────────── bookings at the desk (lib/api.ts) ─────────────────────────────── */
 
 export function adminBookAnswer(): Reply<typeof endpoints.adminBook> {
-  return { booking_id: ID, balance_after_credits: 0 };
+  return { booking_id: ID, balance_after_minutes: 0 };
 }
 
 export function adminCancelAnswer(): Reply<typeof endpoints.adminCancelBooking> {
-  return { refunded_credits: 8, penalty_credits: 0 };
+  return { refunded_minutes: 8, penalty_minutes: 0 };
 }
 
 export function adminBlockAnswer(): Reply<typeof endpoints.adminBlock> {
@@ -393,36 +424,36 @@ export function adminBlockAnswer(): Reply<typeof endpoints.adminBlock> {
 
 export function adminBookingQuote(): AdminBookingQuote {
   return {
-    user_id: ID, court_id: ID, court_name: "Court 1", starts_at: AT, ends_at: AT, slices: 1, price_credits: 8,
-    balance_credits: 10, balance_after_credits: 2, overdraws: false, held_credits: 0, owed_back_credits: 0,
+    user_id: ID, court_id: ID, court_name: "Court 1", starts_at: AT, ends_at: AT, slices: 1, price_minutes: 8,
+    balance_minutes: 10, balance_after_minutes: 2, overdraws: false, held_minutes: 0, owed_back_minutes: 0,
   };
 }
 
 export function adminBulkQuote(): AdminBulkQuote {
   return {
-    user_id: ID, total_credits: 8, balance_credits: 10, balance_after_credits: 2, overdraws: false, held_credits: 0,
-    owed_back_credits: 0, items: [adminBulkQuoteItem()],
+    user_id: ID, total_minutes: 8, balance_minutes: 10, balance_after_minutes: 2, overdraws: false, held_minutes: 0,
+    owed_back_minutes: 0, items: [adminBulkQuoteItem()],
   };
 }
 
 export function adminBulkQuoteItem(): AdminBulkQuoteItem {
-  return { index: 0, court_id: ID, court_name: "Court 1", starts_at: AT, slices: 1, price_credits: 8, bookable: true, reason: null };
+  return { index: 0, court_id: ID, court_name: "Court 1", starts_at: AT, slices: 1, price_minutes: 8, bookable: true, reason: null };
 }
 
 /** The declared keys; the rows are read loosely, so their read keys are listed in the test. */
 export function bulkCancelResponse(): BulkCancelResponse {
-  return { requested: 1, succeeded: 1, failed: 0, total_refunded_credits: 8, total_penalty_credits: 0, results: [] };
+  return { requested: 1, succeeded: 1, failed: 0, total_refunded_minutes: 8, total_penalty_minutes: 0, results: [] };
 }
 
 export function bulkBookResponse(): BulkBookResponse {
   return {
-    requested: 1, succeeded: 1, failed: 0, total_charged_credits: 8, payer: bulkBookPayer(), results: [],
+    requested: 1, succeeded: 1, failed: 0, total_charged_minutes: 8, payer: bulkBookPayer(), results: [],
     halted_at: 0, halted_reason: "",
   };
 }
 
 export function bulkBookPayer(): NonNullable<BulkBookResponse["payer"]> {
-  return { user_id: ID, name: "Priya Naidoo", balance_before_credits: 10, balance_after_credits: 2 };
+  return { user_id: ID, name: "Priya Naidoo", balance_before_minutes: 10, balance_after_minutes: 2 };
 }
 
 /* ─────────────────────────────── members (lib/api.ts) ─────────────────────────────── */
@@ -461,15 +492,15 @@ export function memberSpendMember(): MemberSpendReport["member"] {
 
 export function memberSpendTotals(): MemberSpendReport["totals"] {
   return {
-    top_ups_credits: 0, top_ups_zar: 0, spent_credits: 0, refunds_credits: 0, penalties_credits: 0, net_credits: 0,
+    top_ups_minutes: 0, top_ups_zar: 0, spent_minutes: 0, refunds_minutes: 0, penalties_minutes: 0, net_minutes: 0,
     movement_count: 0,
   };
 }
 
 export function memberSpendMonth(): MemberSpendMonth {
   return {
-    month: "2026-09", top_ups_credits: 0, top_ups_zar: 0, spent_credits: 0, refunds_credits: 0, penalties_credits: 0,
-    adjustments_credits: 0, net_credits: 0, movement_count: 0,
+    month: "2026-09", top_ups_minutes: 0, top_ups_zar: 0, spent_minutes: 0, refunds_minutes: 0, penalties_minutes: 0,
+    adjustments_minutes: 0, net_minutes: 0, movement_count: 0,
   };
 }
 
@@ -503,8 +534,8 @@ export function biometricTemplate(): BiometricEnrollmentRow["templates"][number]
 
 export function revenueReport(): RevenueReport {
   return {
-    from: AT, to: AT, gross_topups_zar: 0, reversals_zar: 0, net_zar: 0, gross_topups_credits: 0, reversals_credits: 0,
-    net_credits: 0,
+    from: AT, to: AT, gross_topups_zar: 0, reversals_zar: 0, net_zar: 0, gross_topups_minutes: 0, reversals_minutes: 0,
+    net_minutes: 0,
   };
 }
 
@@ -513,7 +544,7 @@ export function utilisationReport(): Reply<typeof endpoints.reportUtilisation> {
 }
 
 export function utilisationRow(): UtilisationRow {
-  return { court_id: ID, court_number: 1, court_name: "Court 1", slices: 1, booked_minutes: 20, bookings: 1, revenue_credits: 8, quoted_credits: 8 };
+  return { court_id: ID, court_number: 1, court_name: "Court 1", slices: 1, booked_minutes: 20, bookings: 1, kept_minutes: 8, sold_minutes: 8 };
 }
 
 export function noShowReport(): Reply<typeof endpoints.reportNoShows> {
@@ -522,8 +553,8 @@ export function noShowReport(): Reply<typeof endpoints.reportNoShows> {
 
 export function dailyAdminPoint(): DailyAdminPoint {
   return {
-    date: "2026-09-30", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: 0, penalties_credits: 0,
-    adjustments_credits: 0, reversals_credits: 0, share_transfers_credits: 0, net_movement_credits: 0, bookings: 0, no_shows: 0,
+    date: "2026-09-30", top_ups_minutes: 0, booking_charges_minutes: 0, refunds_minutes: 0, penalties_minutes: 0,
+    adjustments_minutes: 0, reversals_minutes: 0, share_transfers_minutes: 0, net_movement_minutes: 0, bookings: 0, no_shows: 0,
   };
 }
 
@@ -570,7 +601,10 @@ export function deviceApiKey(): DeviceApiKey {
 }
 
 export function adminCourt(): AdminCourt {
-  return { id: ID, court_number: 1, name: "Court 1", court_type: "Squash", slice_price_credits: 8, is_active: true };
+  return { id: ID, court_number: 1, name: "Court 1", court_type: "Squash", is_active: true,
+    // P13-F3: courts carry no price (§3.9); only here because the deprecated type still requires it.
+    slice_price_credits: 8,
+  };
 }
 
 export function courtCreateAnswer(): Reply<typeof endpoints.adminCourtsCreate> {
@@ -669,7 +703,7 @@ export function addPlayersAnswer(): AddPlayersAnswer {
 
 export function addedParticipant(): AddedParticipant {
   return {
-    participant_id: ID, seat: 2, user_id: ID, guest_name: null, status: "invited", share_credits: 4, invite_token: null,
+    participant_id: ID, seat: 2, user_id: ID, guest_name: null, status: "invited", share_minutes: 4, invite_token: null,
     invite_path: null,
   };
 }
@@ -679,11 +713,11 @@ export function seatAnswer(): SeatAnswer {
 }
 
 export function returnAnswer(): ReturnAnswer {
-  return { participant_id: ID, status: "removed", return_waiting: false, return_credits: null };
+  return { participant_id: ID, status: "removed", return_waiting: false, return_minutes: null };
 }
 
 export function collectAnswer(): CollectAnswer {
-  return { participant_id: ID, collected_credits: 4, balance_after_credits: -4 };
+  return { participant_id: ID, collected_minutes: 4, balance_after_minutes: -4 };
 }
 
 /* ─────────────────────────────── notifications (lib/notificationsApi.ts) ─────────────────────────────── */

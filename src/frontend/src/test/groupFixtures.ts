@@ -11,7 +11,7 @@ import type { GroupAddRow, GroupAddResult, GroupWindow, MemberGroup, MemberBooki
  *
  * <p>
  * <b>The default group is UNRESTRICTED and INHERITS, because that is what the seed writes.</b>
- * `MemberGroupSeeder` creates both system groups with no window rows, `inherit_court` pricing
+ * `MemberGroupSeeder` creates both system groups with no window rows, no package discount (P13)
  * and null caps, so installing the feature changes nothing for any existing club. A fixture
  * that defaulted to a restricted group would let a test prove the screen handles a state no
  * club is ever in on the day of the migration — and, worse, would hide the one clause that
@@ -27,13 +27,12 @@ export function groupFixture(overrides: Partial<MemberGroup> = {}): MemberGroup 
     status: "active",
     sort_order: 0,
     is_system_default: true,
-    pricing: { mode: "inherit_court", multiplier_bps: 10_000, flat_slice_price_credits: null },
     caps: { max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null },
     windows: [],
     member_count: 0,
-    // D2, as the seed writes the Regular group: no system key, the club's rate, no peak say.
+    // D2 + P13, as the seed writes the Regular group: no system key, no package discount, no peak say.
     system_key: null,
-    credits_per_zar: null,
+    package_discount_bps: null,
     peak_priority: null,
     ...overrides,
   };
@@ -86,7 +85,6 @@ export function bookingRulesFixture(overrides: Partial<MemberBookingRules> = {})
     allowed_windows: [{ start: "06:00", end: "22:00" }],
     // No `club_hours`: the server's booking-rules never sends it (pinned as it.fails in
     // adminResponses.contract.test.ts). The preview takes the club's hours from its settings.
-    slice_price_credits: 8,
     max_slots_per_day: 4,
     max_minutes_per_day: 60,
     advance_booking_days: 14,

@@ -38,12 +38,12 @@ export function slotRow(overrides: Record<string, unknown>) {
   return {
     courtId: COURT_A, courtNumber: 1, startsAtUtc: "", endsAtUtc: "", status: "booked",
     ownerUserId: null, ownerFirstName: null, ownerPhotoUrl: null, isMine: false,
-    bookingId: "bk-1", blockLabel: null, checkedIn: false, amountChargedCredits: 50,
+    bookingId: "bk-1", blockLabel: null, checkedIn: false, amountChargedMinutes: 50,
     ...overrides,
   };
 }
 
-/** A club day in SAST, 16:00–18:00, two courts at 50 cr a slice — far enough ahead that nothing is past. */
+/** A club day in SAST, 16:00–18:00, two courts (P13: a booking costs its minutes, no slice price) — far enough ahead that nothing is past. */
 export function dayFixture(overrides: Record<string, unknown> = {}) {
   return {
     date: "2030-09-09", timezone: "Africa/Johannesburg", sliceMinutes: 15,
@@ -51,8 +51,8 @@ export function dayFixture(overrides: Record<string, unknown> = {}) {
     // Wide enough that 2030 is inside the club's rolling booking window (R5: cells beyond it are "Not open yet").
     advanceBookingDays: 3650, penaltyPct: 30, penaltyWindowMinutes: 15,
     courts: [
-      { id: COURT_A, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 },
-      { id: COURT_B, courtNumber: 2, name: "Court 2", slicePriceCredits: 50 },
+      { id: COURT_A, courtNumber: 1, name: "Court 1" },
+      { id: COURT_B, courtNumber: 2, name: "Court 2" },
     ],
     slots: [] as unknown[],
     ...overrides,
@@ -83,7 +83,7 @@ export function openBookings(options: OpenOptions = {}): FetchStub {
     ...routes,
     { path: "/api/v1/whoami", body: signIn({ isAdmin }) },
     { path: "/api/v1/schedule", body: day },
-    { path: "/api/v1/wallet", body: { balance_credits: balance, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: balance, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     // Review round 1, F1.12 — the upcoming games above the grid; none, unless a test says so.
     { path: "/api/v1/me/bookings/upcoming", body: { timezone: "Africa/Johannesburg", items: [] } },
     // Review round 2, F1-1 — the recent games (C3); none, unless a test says so.

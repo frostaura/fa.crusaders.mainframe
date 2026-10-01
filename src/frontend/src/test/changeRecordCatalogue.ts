@@ -161,13 +161,12 @@ const GROUP_ROW = {
   name: "Juniors",
   description: "Under-18 members",
   status: "active",
-  pricing_mode: "InheritCourt",
-  multiplier_bps: 10000,
-  flat_slice_price_credits: null,
   max_slots_per_day: 2,
   max_minutes_per_day: 120,
   advance_booking_days: 14,
-  credits_per_zar: dec("1.2"),
+  // P13 §3.8: the snapshot dropped pricing_mode, multiplier_bps, flat_slice_price_credits and
+  // credits_per_zar, and gained the group's say on club-package prices.
+  package_discount_bps: 1000,
   peak_priority: true,
 } satisfies Stored;
 
@@ -188,7 +187,7 @@ const BOOKING_FACTS = {
   court: "Court 2",
   starts_at: "2026-10-01T16:00:00+00:00",
   minutes: 60,
-  amount_credits: dec("80.00"),
+  amount_minutes: 80,
 } satisfies Stored;
 
 const BLOCK = {
@@ -196,7 +195,12 @@ const BLOCK = {
 } satisfies Stored;
 
 const COURT = {
-  name: "Court 2", court_number: 2, court_type: "Squash", slice_price_credits: dec("9"), is_active: true,
+  name: "Court 2", court_number: 2, court_type: "Squash", is_active: true,
+} satisfies Stored;
+
+/** P13 §3.5 — a package's before/after: `{name, minutes, price_zar, group, sort_order, status}`. */
+const PACKAGE = {
+  name: "5 hours", minutes: 300, price_zar: dec("550.00"), group: null, sort_order: 1, status: "active",
 } satisfies Stored;
 
 const SEAT = { booking_id: ID.booking, participant_id: ID.participant, seat: 2 } satisfies Stored;
@@ -240,14 +244,14 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     writer: "AdminBulkBookingEndpoints.CancelAsync", before: null,
     after: {
       requested: 3, succeeded: 3, failed: 0,
-      total_refunded_credits: dec("240.00"), total_penalty_credits: dec("0.00"),
+      total_refunded_minutes: 240, total_penalty_minutes: 0,
       booking_ids: [ID.booking, ID.booking2, ID.booking3],
     },
   }),
   row({
     action: "bookings.bulk_booked", area: "booking", headline: "Made several bookings at once",
     writer: "AdminBulkBookingEndpoints.BookAsync", before: null,
-    after: { requested: 2, succeeded: 2, failed: 0, total_charged_credits: dec("160.00"), booking_ids: [ID.booking, ID.booking2] },
+    after: { requested: 2, succeeded: 2, failed: 0, total_charged_minutes: 160, booking_ids: [ID.booking, ID.booking2] },
   }),
   row({
     action: "booking.cancelled_by_admin", area: "booking", headline: "Cancelled a booking — Thandi Mokoena",
@@ -269,10 +273,10 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "booking.overdraft_authorised", area: "booking",
     headline: "Let a booking take a balance below zero — Thandi Mokoena",
     writer: "BookingService (overdrawn)",
-    before: { balance_credits: dec("50.00"), spendable_credits: dec("20.00") },
+    before: { balance_minutes: 50, spendable_minutes: 20 },
     after: {
-      balance_credits: dec("-30.00"), spendable_credits: dec("-60.00"),
-      booking_id: ID.booking, court: "Court 2", starts_at: "2026-10-01T16:00:00+00:00", amount_credits: dec("80.00"),
+      balance_minutes: -30, spendable_minutes: -60,
+      booking_id: ID.booking, court: "Court 2", starts_at: "2026-10-01T16:00:00+00:00", amount_minutes: 80,
       self: false,
     },
   }),
@@ -292,36 +296,50 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "booking.player_accepted_on_behalf", area: "booking",
     headline: "Accepted a game on a member's behalf — Sipho Dlamini",
     writer: "PlayersAdminService.AcceptOnBehalfAsync", before: SEAT,
-    after: { status: "accepted", consented_credits: dec("40.00") },
+    after: { status: "accepted", consented_minutes: 40 },
   }),
   row({
     action: "booking.share_settled_outside", area: "booking",
     headline: "Recorded a share as paid outside the app — Sipho Dlamini",
     writer: "PlayersAdminService.SettleOutsideAsync", before: SEAT,
-    after: { share_credits: dec("40.00"), paid_in_app_credits: dec("0.00"), overdraft_authorised: false },
+    after: { share_minutes: 40, paid_in_app_minutes: 0, overdraft_authorised: false },
   }),
   row({
     action: "booking.share_collected", area: "booking", headline: "Collected a member's share of a booking — Sipho Dlamini",
     writer: "PlayersAdminService.CollectAsync", before: SEAT,
-    after: { collected_credits: dec("40.00"), balance_before_credits: dec("10.00"), balance_after_credits: dec("-30.00") },
+    after: { collected_minutes: 40, balance_before_minutes: 10, balance_after_minutes: -30 },
   }),
 
   // ---- credit ---- WalletEndpoints (adjust)
   row({
-    action: "credit.adjusted", area: "credit", headline: "Adjusted a member's credits — Thandi Mokoena",
-    writer: "WalletEndpoints.AdjustAsync", before: { balance_credits: dec("120.00") },
+    action: "credit.adjusted", area: "credit", headline: "Adjusted a member's minutes — Thandi Mokoena",
+    writer: "WalletEndpoints.AdjustAsync", before: { balance_minutes: 120 },
     after: {
-      balance_credits: dec("100.00"), amount_credits: dec("-20.00"), reason_code: "correction",
+      balance_minutes: 100, amount_minutes: -20, reason_code: "correction",
       zar_received: null, entry_id: ID.entry, related_booking_id: ID.booking,
     },
   }),
   row({
-    action: "credit.topped_up", area: "credit", headline: "Topped up a member's credits — Thandi Mokoena",
-    writer: "WalletEndpoints.AdjustAsync", before: { balance_credits: dec("0.00") },
+    action: "credit.topped_up", area: "credit", headline: "Sold a member a package — Thandi Mokoena",
+    writer: "WalletEndpoints (POST /admin/minutes/{id}/sell, P13 §3.7)", before: { balance_minutes: 0 },
     after: {
-      balance_credits: dec("200.00"), amount_credits: dec("200.00"), reason_code: "top_up_cash",
-      zar_received: dec("125.50"), entry_id: ID.entry, related_booking_id: null,
+      balance_minutes: 300, amount_minutes: 300, reason_code: "top_up_cash",
+      zar_received: dec("550.00"), entry_id: ID.entry, related_booking_id: null,
     },
+  }),
+
+  // ---- package ---- P13 §3.5 / §4.5: area `credit`, subject `package`, none reason-required
+  row({
+    action: "package.created", area: "credit", headline: "Created a minutes package — 5 hours",
+    writer: "AdminPackageEndpoints.CreateAsync", before: null, after: PACKAGE,
+  }),
+  row({
+    action: "package.updated", area: "credit", headline: "Changed a minutes package — 5 hours",
+    writer: "AdminPackageEndpoints.UpdateAsync", before: PACKAGE, after: { ...PACKAGE, price_zar: dec("500.00") },
+  }),
+  row({
+    action: "package.archived", area: "credit", headline: "Archived a minutes package — 5 hours",
+    writer: "AdminPackageEndpoints.ArchiveAsync", before: PACKAGE, after: { ...PACKAGE, status: "archived" },
   }),
 
   // ---- group ---- MemberGroupChanges.Snapshot / Diff
@@ -332,14 +350,14 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
   row({
     action: "group.updated", area: "group", headline: "Changed a member group — Juniors",
     writer: "MemberGroupEndpoints.PatchAsync → MemberGroupChanges.Diff",
-    before: { pricing_mode: "InheritCourt", multiplier_bps: 10000, windows: "" },
-    after: { pricing_mode: "Multiplier", multiplier_bps: 8000, windows: "tue 18:00-21:00, thu 18:00-21:00" },
+    before: { windows: "" },
+    after: { windows: "tue 18:00-21:00, thu 18:00-21:00" },
   }),
   row({
-    variant: "flat price, caps and rate", action: "group.updated", area: "group", headline: "Changed a member group — Juniors",
+    variant: "caps, discount and peak", action: "group.updated", area: "group", headline: "Changed a member group — Juniors",
     writer: "MemberGroupEndpoints.PatchAsync → MemberGroupChanges.Diff",
-    before: { pricing_mode: "Multiplier", multiplier_bps: 8000, flat_slice_price_credits: null, max_slots_per_day: 2, credits_per_zar: dec("1.2"), peak_priority: true },
-    after: { pricing_mode: "FlatPerSlice", multiplier_bps: 10000, flat_slice_price_credits: dec("15.00"), max_slots_per_day: null, credits_per_zar: null, peak_priority: false },
+    before: { max_slots_per_day: 2, package_discount_bps: null, peak_priority: true },
+    after: { max_slots_per_day: null, package_discount_bps: 1000, peak_priority: false },
   }),
   row({
     action: "group.archived", area: "group", headline: "Archived a member group — Juniors",
@@ -421,11 +439,11 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     writer: "AdminConfigEndpoints (PUT settings) → ChangedKeys",
     before: {
       slice_minutes: 15, day_start_minute: 360, gate_access_policy: "active_member",
-      credits_per_zar_regular: dec("1.0"), member_trace_enabled: false, peak_hours: "16:00-19:00",
+      penalty_pct: dec("30"), member_trace_enabled: false, peak_hours: "16:00-19:00",
     },
     after: {
       slice_minutes: 30, day_start_minute: 300, gate_access_policy: "booking_window",
-      credits_per_zar_regular: dec("1.2"), member_trace_enabled: true, peak_hours: "17:00-20:00",
+      penalty_pct: dec("25"), member_trace_enabled: true, peak_hours: "17:00-20:00",
     },
   }),
   // AdminCourtEndpoints (R4 wave B): only what changed, each side.
@@ -437,11 +455,7 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "court.updated", area: "setting", headline: "Changed a court — Glass court",
     writer: "AdminCourtEndpoints.UpdateAsync", before: { name: "Court 2" }, after: { name: "Glass court" },
   }),
-  row({
-    variant: "price", action: "court.updated", area: "setting", headline: "Changed a court — Court 2",
-    writer: "AdminCourtEndpoints.UpdateAsync",
-    before: { slice_price_credits: dec("8.00") }, after: { slice_price_credits: dec("9.50") },
-  }),
+  // P13 §3.9: a court has no price any more, so the "price" variant of court.updated is gone.
   row({
     action: "court.deactivated", area: "setting", headline: "Deactivated a court — Court 2",
     writer: "AdminCourtEndpoints.DeactivateAsync / UpdateAsync", before: { is_active: true }, after: { is_active: false },
@@ -535,7 +549,7 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
 // ---------------------------------------------------------------------------------------
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-const AREA_CODE = /\b(?:bookings?|schedule|credit|group|member|settings|court|device|doors|monitoring|play|webhook|changes)\.[a-z_]+\b/;
+const AREA_CODE = /\b(?:bookings?|schedule|credit|package|group|member|settings|court|device|doors|monitoring|play|webhook|changes)\.[a-z_]+\b/;
 
 /**
  * Why `text` is not something a volunteer should read, or null when it is fine. `field` narrows

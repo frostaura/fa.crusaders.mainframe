@@ -19,7 +19,7 @@ import { SETTINGS_FIXTURE } from "./harness";
  * <p>
  * <b>Every optional field is genuinely optional here.</b> Three backend lanes are building
  * these endpoints in parallel, so the shapes below are written as the minimum D2 §11.8
- * promises, and the fields a page must not require — `would_refund_credits`,
+ * promises, and the fields a page must not require — `would_refund_minutes`,
  * `next_occurrence`, `materialised_through` — are set only where a test
  * is about them. A fixture that always carries every field cannot fail the way production
  * will.
@@ -37,12 +37,12 @@ export const COURT_IDS = {
 
 export function courtsFixture() {
   return [
-    { id: COURT_IDS.one, court_number: 1, name: "Court 1", court_type: "Squash", slice_price_credits: 8, is_active: true },
-    { id: COURT_IDS.two, court_number: 2, name: "Court 2", court_type: "Squash", slice_price_credits: 8, is_active: true },
-    { id: COURT_IDS.three, court_number: 3, name: "Court 3", court_type: "Squash", slice_price_credits: 8, is_active: true },
+    { id: COURT_IDS.one, court_number: 1, name: "Court 1", court_type: "Squash", is_active: true },
+    { id: COURT_IDS.two, court_number: 2, name: "Court 2", court_type: "Squash", is_active: true },
+    { id: COURT_IDS.three, court_number: 3, name: "Court 3", court_type: "Squash", is_active: true },
     // Inactive, and therefore not offerable: a court an admin cannot book one slot on is not a
     // court they may hold every Tuesday for a season.
-    { id: "c0000000-0000-0000-0000-000000000009", court_number: 9, name: "Court 9", court_type: "Squash", slice_price_credits: 8, is_active: false },
+    { id: "c0000000-0000-0000-0000-000000000009", court_number: 9, name: "Court 9", court_type: "Squash", is_active: false },
   ];
 }
 
@@ -142,8 +142,8 @@ export function conflictFixture(overrides: Partial<ScheduleConflict> = {}): Sche
     status: "booked",
     kind: "booking",
     member_name: "Thandi Mokoena",
-    amount_credits: 36,
-    would_refund_credits: 36,
+    amount_minutes: 36,
+    would_refund_minutes: 36,
     ...overrides,
   };
 }
@@ -197,7 +197,7 @@ export function changeRowFixture(overrides: Partial<AdminChangeRow> = {}): Admin
 export function sessionRoutes(): StubRoute[] {
   return [
     { path: "/api/v1/whoami", body: { tenant_slug: "crusaders", tenant_id: "00000000-0000-0000-0000-0000000000cc", user_id: "44444444-4444-4444-4444-444444444444", is_authenticated: true, is_admin: true } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [] } },
   ];
 }
 
