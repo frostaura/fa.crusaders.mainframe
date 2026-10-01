@@ -66,6 +66,35 @@ has been done** — a green CI run on a branch says nothing about either.
 
 ---
 
+## 2a. The money reset — minutes replace credits (P13)
+
+Migration `MinutesReplaceCredits` (`docs/specs/minutes-and-packages.md` §2.4) makes whole
+minutes the unit of account. Converting old credits into minutes has no meaning, so it
+**refuses to run on any database that has money history**: any row in `ledger_entries`,
+`pending_topups` or `device_pay_fors`, any booking with a non-zero charge, or any seat with a
+non-zero share. It fails the deploy with
+`MinutesReplaceCredits: pre-launch reset required — money history exists (<table>)` and leaves
+the schema exactly as it was (the refusal runs first, inside the migration's transaction).
+
+- [ ] Before the first deploy that carries P13, check every club database:
+      `SELECT (SELECT count(*) FROM ledger_entries) + (SELECT count(*) FROM pending_topups)
+      + (SELECT count(*) FROM device_pay_fors);` — and charged bookings or shares if it is
+      not 0. Zero everywhere: nothing to do.
+- [ ] Otherwise, reset that club's database **before** deploying: take a dump for the record,
+      then recreate the database empty (on the compose stack, the Postgres volume) and let
+      `ProductionBootstrap` seed the club again. Pre-launch there is no real money to keep;
+      the dump is the only copy of what was there.
+- [ ] After the deploy, confirm `__EFMigrationsHistory` names `MinutesReplaceCredits` and the
+      club's shelf shows its three seeded packages.
+
+Development stacks reset with `make down-reset`, which drops every volume.
+
+**If skipped:** the API container stops at start-up on the refusal and the club has no
+booking system until the reset is done. Deleting money rows by hand to get past it instead
+erases balances members believe they hold.
+
+---
+
 ## 3. PayFast — production credentials and the first real transaction
 
 The provider is implemented against the published specification and pinned by a fixture
