@@ -82,8 +82,10 @@ async function openSettings(page: Page, extra: ApiRoute[] = [], hash = "") {
   await signIn(page);
   await serveApi(page, routes(extra));
   await page.goto(`/admin/settings${hash}`);
-  if (!hash) await page.getByRole("button", { name: "Door gates" }).click();
-  await expect(unlockField(page)).toBeVisible();
+  // The admin frame and Settings are lazy chunks: cold on a fresh dev server they took longer
+  // than the default 5 s ("Opening the page…"), so the first wait gets the admin specs' 20 s.
+  if (!hash) await page.getByRole("button", { name: "Door gates" }).click({ timeout: 20_000 });
+  await expect(unlockField(page)).toBeVisible({ timeout: 20_000 });
 }
 
 /** WCAG 2.1 relative luminance of a `rgb(r, g, b)` string as the browser reports it. */
