@@ -183,31 +183,40 @@ export default function RegisterPage() {
     // of a 360x640 viewport — the one thing that tells an applicant whose page they are handing a
     // photograph of their face to.
     <AuthShell
+      size="wide"
       subline={REGISTER.subline}
       title={REGISTER.title}
       footer={<>{REGISTER.haveAccount}{" "}<TextLink to="/login" className="py-3">{REGISTER.signIn}</TextLink></>}
     >
       <form onSubmit={submit} noValidate className="flex flex-col gap-5">
         <PendingInviteNote stage="join" />
-        <TextField id="fullName" label={REGISTER.fullName} error={errors.fullName} ref={fullNameRef}
-          input={{ value: values.fullName, onChange: form.set("fullName"), autoComplete: "name" }} />
-        <TextField id="email" label={REGISTER.email} error={errors.email} ref={emailRef}
-          input={{ type: "email", inputMode: "email", value: values.email, onChange: form.set("email"), autoComplete: "email" }} />
-        <TextField id="membershipNumber" label={REGISTER.membershipNumber} hint={REGISTER.membershipHint}
-          error={errors.membershipNumber} ref={membershipRef}
-          input={{ value: values.membershipNumber, onChange: form.set("membershipNumber"), autoComplete: "off" }} />
-        <TextField id="password" label={REGISTER.password} hint={REGISTER.passwordHint} error={errors.password}
-          ref={passwordRef}
-          input={{ value: values.password, onChange: form.set("password"), autoComplete: "new-password" }} />
-        <PhotoPicker
-          ref={photoRef}
-          value={form.photo}
-          // Choosing one answers the complaint, so it goes at that moment, not at the next submit.
-          onChange={(file) => { form.setPhoto(file); form.setErrors((was) => ({ ...was, photo: undefined })); }}
-          error={errors.photo}
-          onBusyChange={form.setPreparing}
-          required
-        />
+        {/* R4 form factor (SPEC 3.17): from a 34rem card the photo stands beside the fields
+            rather than under them; the order (fields, then photo) is the same in both. */}
+        <div className="grid gap-5 @[34rem]/auth:grid-cols-2 @[34rem]/auth:items-start">
+          <div className="flex min-w-0 flex-col gap-5">
+            <TextField id="fullName" label={REGISTER.fullName} error={errors.fullName} ref={fullNameRef}
+              input={{ value: values.fullName, onChange: form.set("fullName"), autoComplete: "name" }} />
+            <TextField id="email" label={REGISTER.email} error={errors.email} ref={emailRef}
+              input={{ type: "email", inputMode: "email", value: values.email, onChange: form.set("email"), autoComplete: "email" }} />
+            <TextField id="membershipNumber" label={REGISTER.membershipNumber} hint={REGISTER.membershipHint}
+              error={errors.membershipNumber} ref={membershipRef}
+              input={{ value: values.membershipNumber, onChange: form.set("membershipNumber"), autoComplete: "off" }} />
+            <TextField id="password" label={REGISTER.password} hint={REGISTER.passwordHint} error={errors.password}
+              ref={passwordRef}
+              input={{ value: values.password, onChange: form.set("password"), autoComplete: "new-password" }} />
+          </div>
+          <div className="min-w-0">
+            <PhotoPicker
+              ref={photoRef}
+              value={form.photo}
+              // Choosing one answers the complaint, so it goes at that moment, not at the next submit.
+              onChange={(file) => { form.setPhoto(file); form.setErrors((was) => ({ ...was, photo: undefined })); }}
+              error={errors.photo}
+              onBusyChange={form.setPreparing}
+              required
+            />
+          </div>
+        </div>
         {/* ONE live region per refusal: this summary speaks; the fields carry the detail and the
             keyboard has already been taken to the first of them. */}
         {problems > 0 ? <Alert>{checkFields(problems)}</Alert> : null}

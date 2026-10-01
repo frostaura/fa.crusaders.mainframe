@@ -124,7 +124,8 @@ test.describe("Register — the application actually goes somewhere", () => {
 
     await expect(page.getByRole("heading", { name: "Check your inbox" })).toBeVisible();
     // Three steps, and the one fact that stops somebody registering twice: how long it takes.
-    await expect(page.getByRole("listitem")).toHaveCount(3);
+    // On the card: from lg the brand panel beside it lists the club's facts too (R4 form factor).
+    await expect(page.locator("[data-auth-shell] ol").getByRole("listitem")).toHaveCount(3);
     await expect(page.getByText(/day or two/i)).toBeVisible();
     // Never a dead end: there is a way back to the screen they will next need — a link, because
     // it navigates (R10; it was a button that called navigate()).

@@ -28,7 +28,7 @@ export async function sideways(page: Page): Promise<number> {
 }
 
 /** Text nodes under `selector` that paint outside the viewport (Range rects, skipping horizontal scrollers). */
-export async function textOffScreen(page: Page, selector = "#main-content"): Promise<string[]> {
+export async function textOffScreen(page: Page, selector = "#main-content, main"): Promise<string[]> {
   return page.evaluate((sel) => {
     const out: string[] = [];
     const root = document.querySelector(sel);
@@ -74,7 +74,7 @@ export async function box(page: Page, selector: string): Promise<Box | null> {
  */
 export async function widthUsed(page: Page): Promise<number> {
   return page.evaluate(() => {
-    const main = document.querySelector("#main-content") as HTMLElement;
+    const main = document.querySelector("#main-content, main") as HTMLElement;
     const shell = main.querySelector("[data-page-shell]") ?? main;
     let left = Infinity;
     let right = -Infinity;

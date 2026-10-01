@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AuthShell } from "./AuthShell";
+import { AUTH_BRAND } from "../lib/authCopy";
 import { composite, contrastRatio, palette, themes, type ThemeName } from "@/lib/tokens";
 
 /**
@@ -48,9 +49,22 @@ describe("AuthShell", () => {
   });
 
   it("still renders the club's name and the subline it was given", () => {
-    render(<AuthShell subline="Apply for a member account. It takes a minute."><p>form</p></AuthShell>);
-    expect(screen.getByText("Crusaders Squash Club")).toBeInTheDocument();
+    const { container } = render(<AuthShell subline="Apply for a member account. It takes a minute."><p>form</p></AuthShell>);
+    // On the card's own band — the brand panel beside it (from lg) names the club too.
+    const band = container.querySelector<HTMLElement>("[data-auth-subline]")!.closest("div.relative")!.parentElement!;
+    expect(within(band).getByText("Crusaders Squash Club")).toBeInTheDocument();
     expect(screen.getByText("Apply for a member account. It takes a minute.")).toBeInTheDocument();
+  });
+
+  /** R4 form factor (SPEC 3.17): from lg the club stands beside the card, as a named section. */
+  it("draws the brand panel beside the card from lg, never below it", () => {
+    const { container } = render(<AuthShell subline="Court bookings."><p>form</p></AuthShell>);
+    const brand = screen.getByRole("region", { name: AUTH_BRAND.club });
+    expect(brand.className.split(" ")).toEqual(expect.arrayContaining(["hidden", "lg:flex"]));
+    for (const fact of AUTH_BRAND.facts) expect(within(brand).getByText(fact)).toBeInTheDocument();
+    const shell = container.querySelector("[data-auth-shell]")!;
+    expect(shell).toHaveAttribute("data-full-bleed");
+    expect(shell.className).toContain("lg:grid-cols-[minmax(0,1fr)_28rem]");
   });
 
   /**

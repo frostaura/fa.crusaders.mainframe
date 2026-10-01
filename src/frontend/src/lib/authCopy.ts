@@ -21,6 +21,21 @@ export const AUTH_SUBLINE = {
   welcome: "Welcome to the club.",
 } as const;
 
+/**
+ * R4 form factor (SPEC 3.17) — the brand panel beside the sign-in card from `lg`. Three facts the
+ * public page already makes and sources (Home), so the panel says nothing the club has not.
+ */
+export const AUTH_BRAND = {
+  club: "Crusaders Squash Club",
+  place: "Northwood Crusaders · Durban North",
+  factsLabel: "The club at a glance",
+  facts: [
+    "Four glass-back courts",
+    "Thirteen league teams across ten divisions",
+    "Book a court and light it from your phone",
+  ],
+} as const;
+
 /** A form that refused to send, summarised just above its button, where the member is looking. The detail is on each field. */
 export function checkFields(count: number): string {
   return count === 1

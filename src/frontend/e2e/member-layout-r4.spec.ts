@@ -86,3 +86,52 @@ test.describe("My Code (SPEC 3.2)", () => {
     expect(rest.y).toBeGreaterThanOrEqual(pass.bottom);
   });
 });
+
+const ANON_ROUTES: ApiRoute[] = [
+  { path: "/api/v1/whoami", body: SESSION_ANON },
+  { path: "/api/v1/session", body: SESSION_ANON },
+];
+
+async function openAnon(page: Page, path: string, width: Width) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width, height: HEIGHT[width] });
+  await serveApi(page, ANON_ROUTES);
+  await page.goto(path);
+  await fontsReady(page);
+}
+
+test.describe("Sign in and Join (SPEC 3.17)", () => {
+  for (const width of WIDTHS) {
+    for (const path of ["/login", "/register"]) {
+      test(`${path} at ${width}px: the club beside the card from lg, the card alone below it`, async ({ page }, info) => {
+        test.skip(info.project.name !== "desktop", "one project sweeps the widths");
+        await openAnon(page, path, width);
+        await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+        await healthy(page);
+        const brand = await box(page, "[data-auth-brand]");
+        const card = (await box(page, "[data-auth-shell] > div:last-child"))!;
+        if (width >= 1024) {
+          expect(brand, "the brand panel stands beside the card").not.toBeNull();
+          expect(card.x).toBeGreaterThanOrEqual(brand!.right);
+          expect(await widthUsed(page)).toBeGreaterThanOrEqual(width >= 1800 ? 0.6 : 0.85);
+        } else {
+          expect(brand).toBeNull();
+        }
+        // Register from xl: the photo beside the fields, in the same order.
+        if (path === "/register" && width >= 1280) {
+          const photo = (await page.getByText("Photo of yourself").first().boundingBox())!;
+          const name = (await page.getByLabel("Full name").boundingBox())!;
+          expect(photo.x).toBeGreaterThan(name.x + name.width);
+        }
+      });
+    }
+  }
+
+  test("390 at 200 % text: the card alone, nothing off screen", async ({ page }) => {
+    await openAnon(page, "/register", 390);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await bigText(page);
+    await healthy(page);
+    expect(await box(page, "[data-auth-brand]")).toBeNull();
+  });
+});
