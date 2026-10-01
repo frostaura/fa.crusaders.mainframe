@@ -193,14 +193,18 @@ public sealed class ScheduleService
         var clubHours = new MinuteWindow(openMinute, closeMinute);
 
         var allowed = GroupRules.AllowedWindows(groups, clubHours);
-        var court = await _db.Courts.Where(c => c.IsActive)
-            .OrderBy(c => c.CourtNumber).Select(c => (decimal?)c.SlicePriceCredits).FirstOrDefaultAsync(ct);
-        var price = GroupRules.PriceFor(groups, court ?? settings.DefaultSlicePriceCredits);
+        var courts = await _db.Courts.Where(c => c.IsActive)
+            .OrderBy(c => c.CourtNumber).Select(c => new { c.Id, c.SlicePriceCredits }).ToListAsync(ct);
+        var price = GroupRules.PriceFor(groups, courts.Count > 0 ? courts[0].SlicePriceCredits : settings.DefaultSlicePriceCredits);
+        // Review round 5 (I5-1, asked by lane C): what THIS viewer pays on each court. One figure on
+        // the first court made the grid derive the rest, wrong for a flat-per-slice group on a
+        // dearer court until Confirm. Same arithmetic as the booking (GroupRules.PriceFor).
+        var perCourt = courts.Select(c => new CourtSlicePrice(c.Id, GroupRules.PriceFor(groups, c.SlicePriceCredits))).ToList();
 
         // An admin's grid states that they have no limit rather than showing them a number that
         // does not apply to them: RemainingToday is null, not a figure they would then wonder
         // about.
-        if (viewerIsAdmin) return AdminRules(date, clubHours, price, settings.AdvanceBookingDays);
+        if (viewerIsAdmin) return AdminRules(date, clubHours, price, settings.AdvanceBookingDays) with { SlicePricesByCourt = perCourt };
 
         var slotCap = GroupRules.SlotCapFor(groups, BookingLimits.MaxSlotsPerDay(settings));
         var minuteCap = GroupRules.MinuteCapFor(groups, BookingLimits.MaxMinutesPerDay(settings));
@@ -233,6 +237,7 @@ public sealed class ScheduleService
             RemainingToday: remaining,
             AdvanceBookingDays: GroupRules.AdvanceDaysFor(groups, settings.AdvanceBookingDays),
             AdminExempt: false,
+            SlicePricesByCourt: perCourt,
             // Present ONLY when the intersection is genuinely empty, so the console can say the
             // true sentence in words instead of drawing a grid that reads as "the club is shut".
             EmptyWindowReason: allowed.Count == 0
@@ -354,7 +359,11 @@ public sealed record ScheduleRules(
     int? RemainingToday,
     int AdvanceBookingDays,
     bool AdminExempt,
-    EmptyWindowReason? EmptyWindowReason);
+    EmptyWindowReason? EmptyWindowReason,
+    IReadOnlyList<CourtSlicePrice>? SlicePricesByCourt = null);
+
+/// <summary>What the viewer pays for one slice of one active court (wire: <c>{ courtId, credits }</c>).</summary>
+public sealed record CourtSlicePrice(Guid CourtId, decimal Credits);
 
 /// <summary>
 /// One window on the wire, as <c>HH:mm</c> rather than as minutes past midnight.

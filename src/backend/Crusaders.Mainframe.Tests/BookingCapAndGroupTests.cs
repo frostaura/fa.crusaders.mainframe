@@ -746,6 +746,50 @@ public class BookingCapAndGroupTests
     }
 
     /// <summary>
+    /// Review round 5 (I5-1, lane C's ask): the grid carries what THIS viewer pays on EACH court,
+    /// and it is what the booking then charges. One figure on the first court made the grid derive
+    /// the rest — wrong for a flat-per-slice group on a dearer court.
+    /// </summary>
+    [Fact]
+    public async Task The_grid_prices_every_court_at_the_viewers_own_price()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await GiveSettingsAsync(host, OpenAllHours);
+        var half = await GroupAsync(host, "Half", g =>
+        {
+            g.PricingMode = GroupPricingMode.Multiplier;
+            g.PriceMultiplierBps = 5_000;
+        });
+        await JoinAsync(host, host.PlayerUser.Id, half.Id);
+        using (var setup = host.NewScope())
+        {
+            var db = setup.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var dear = await db.Courts.FirstAsync(c => c.Id == host.Courts[1].Id);
+            dear.SlicePriceCredits = 20m;
+            await db.SaveChangesAsync();
+        }
+
+        using var scope = host.NewScope();
+        var schedule = scope.ServiceProvider.GetRequiredService<ScheduleService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        var date = DateOnly.FromDateTime(NextWeekAt(9).UtcDateTime);
+
+        var prices = (await schedule.GetDayAsync(date, host.PlayerUser.Id, default)).Rules!.SlicePricesByCourt!
+            .ToDictionary(p => p.CourtId, p => p.Credits);
+        Assert.Equal(4m, prices[host.Courts[0].Id]);
+        Assert.Equal(10m, prices[host.Courts[1].Id]);
+
+        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(9), 1, default));
+        Assert.Equal(prices[host.Courts[1].Id], ok.Booking.AmountChargedCredits);
+
+        var admin = await schedule.GetDayAsync(date, host.AdminUser.Id, viewerIsAdmin: true, default);
+        Assert.Equal(host.Courts.Count(c => c.IsActive), admin.Rules!.SlicePricesByCourt!.Count);
+    }
+
+    /// <summary>
     /// An admin's grid states that they have no limit rather than showing them a number that
     /// does not apply to them.
     /// </summary>
