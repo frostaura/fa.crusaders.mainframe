@@ -13,10 +13,11 @@ import { endpoints, type AdminCourt } from "../../lib/api";
 import { COURTS_COPY } from "../../lib/courtsCopy";
 
 /**
- * Admin · Courts (`/admin/courts`) — the club's courts, their prices, and whether each is in use.
+ * Admin · Courts (`/admin/courts`) — the club's courts and whether each is in use. A court has no
+ * price (P13, contract §3.9): a booking costs its playing minutes, whatever the court.
  *
  * <p>
- * <b>Moved out of Settings</b> (plan P6). A court is a record with a lifecycle — added, priced,
+ * <b>Moved out of Settings</b> (plan P6). A court is a record with a lifecycle — added, renamed,
  * taken out of use, put back — not a club-wide number, and it used to share one Save button with
  * the door policy. Here each court is a row that reads, and one press opens it in a sheet.
  * </p>
@@ -89,21 +90,11 @@ export default function AdminCourtsPage() {
       </StateBlock>
       <CourtSheet
         court={editing}
-        suggestedPrice={usualPrice(courts)}
         onClose={() => setEditing(null)}
         onSaved={() => void load()}
       />
     </PageShell>
   );
-}
-
-/** The price most of the club's courts in use charge — where a new court's price starts. */
-function usualPrice(courts: AdminCourt[] | null): number | null {
-  const prices = (courts ?? []).filter((court) => court.is_active).map((court) => court.slice_price_credits);
-  if (prices.length === 0) return null;
-  const counts = new Map<number, number>();
-  for (const price of prices) counts.set(price, (counts.get(price) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
 function CourtListSkeleton() {
@@ -125,7 +116,7 @@ function CourtListSkeleton() {
 
 /**
  * The courts as cards (R4 form factor, SPEC §3.16): a 4-row list floated in 58 % of a 1920
- * screen. Each court is a card — its number, name, rate, whether it is in use, Edit — packed as
+ * screen. Each court is a card — its number, name, type, whether it is in use, Edit — packed as
  * many across as the box holds (AutoGrid card, at most 4), one across on a phone.
  */
 function CourtList({ courts, onEdit }: { courts: AdminCourt[]; onEdit: (court: AdminCourt) => void }) {
@@ -154,10 +145,7 @@ function CourtRow({ court, onEdit }: { court: AdminCourt; onEdit: () => void }) 
       </span>
       <div className="min-w-0 flex-1 basis-20">
         <p className="truncate text-sm font-semibold text-text-primary" title={court.name}>{court.name}</p>
-        <p className="text-sm tabular-nums text-text-secondary">
-          {COURTS_COPY.price(court.slice_price_credits)}
-          <span> · {court.court_type}</span>
-        </p>
+        <p className="text-sm text-text-secondary">{court.court_type}</p>
       </div>
       <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
         <Badge tone={court.is_active ? "success" : "neutral"} className="whitespace-nowrap">{court.is_active ? COURTS_COPY.inUse : COURTS_COPY.notInUse}</Badge>

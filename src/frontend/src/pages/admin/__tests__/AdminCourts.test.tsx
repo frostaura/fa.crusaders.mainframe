@@ -8,24 +8,26 @@ import { COURTS_COPY } from "@/lib/courtsCopy";
  * Admin · Courts — the Courts editor, moved out of Settings (plan P6).
  *
  * <p>
- * Held here: prices are credits and are labelled so (the field once said "(R)"); a failed read is
- * never the empty state; an add is refused at the sheet when it has no name, not by a toast; an
- * edit sends only what changed; and taking a court out of use is the API's soft deactivation.
+ * Held here: a court has no price (P13, contract §3.9) — not on the list, not in the sheet, not on
+ * the wire; a failed read is never the empty state; an add is refused at the sheet when it has no
+ * name, not by a toast; an edit sends only what changed; and taking a court out of use is the
+ * API's soft deactivation.
  * </p>
  */
 afterEach(() => vi.unstubAllGlobals());
 
-const COURTS = [courtFixture(1), courtFixture(2, { is_active: false }), courtFixture(3, { name: "Glass court", slice_price_credits: 12.5 })];
+const COURTS = [courtFixture(1), courtFixture(2, { is_active: false }), courtFixture(3, { name: "Glass court" })];
 
 const routes = (extra: StubRoute[] = []): StubRoute[] => [
   { path: "/api/v1/admin/courts/", body: COURTS },
   ...extra,
 ];
 
-const priceField = () => screen.getByLabelText(COURTS_COPY.priceLabel);
+/** Nothing on a court may be a price: no rand, no "cr", no "slice" price, no "credit". */
+const PRICE_WORDS = /\bcr\b|credit|price|\bR\s?\d|per slice/i;
 
 describe("the courts list", () => {
-  it("lists every court with its number, its price in credits and whether it is in use", async () => {
+  it("lists every court with its number, its type and whether it is in use — and no price", async () => {
     stubFetch(routes());
     renderPage(<AdminCourtsPage />);
 
@@ -33,11 +35,13 @@ describe("the courts list", () => {
     const rows = within(list).getAllByRole("listitem");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent("Court number 1");
-    expect(rows[0]).toHaveTextContent("8 cr a slice");
+    expect(rows[0]).toHaveTextContent("Squash");
     expect(rows[0]).toHaveTextContent(COURTS_COPY.inUse);
     expect(rows[1]).toHaveTextContent(COURTS_COPY.notInUse);
-    expect(rows[2]).toHaveTextContent("12.50 cr a slice");
+    expect(rows[2]).toHaveTextContent("Glass court");
     expect(list).toHaveTextContent(COURTS_COPY.count(2, 3));
+    expect(list.textContent).not.toMatch(PRICE_WORDS);
+    expect(document.body.textContent).not.toMatch(PRICE_WORDS);
   });
 
   /** An empty collection on a failed read is not an answer: the failure, a retry, no "No courts". */
@@ -59,20 +63,18 @@ describe("the courts list", () => {
 });
 
 describe("editing a court", () => {
-  /**
-   * A court's slice price is what a member is CHARGED, in credits — the unit of account. The field
-   * was once labelled "(R)", so an admin priced courts in the wrong unit. (Moved from
-   * AdminSettings.test.tsx with the editor.)
-   */
-  it("prices courts in credits, not rand", async () => {
+  /** P13 §3.9: the sheet is the name and the in-use switch — there is nothing to price. */
+  it("edits a court's name and whether it is in use, and nothing that costs anything", async () => {
     stubFetch(routes());
     renderPage(<AdminCourtsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: COURTS_COPY.editLabel("Court 1") }));
-    await screen.findByRole("dialog", { name: COURTS_COPY.editTitle("Court 1") });
-    expect(priceField()).toHaveValue(8);
-    expect(screen.queryByLabelText(/Price per slice \(R\)/)).toBeNull();
-    expect(screen.getByText(COURTS_COPY.priceDescription)).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: COURTS_COPY.editTitle("Court 1") });
+    expect(within(dialog).getByLabelText(COURTS_COPY.nameLabel)).toHaveValue("Court 1");
+    expect(within(dialog).getByRole("switch", { name: COURTS_COPY.activeLabel })).toBeChecked();
+    expect(within(dialog).queryAllByRole("spinbutton")).toHaveLength(0);
+    expect(dialog.textContent).not.toMatch(PRICE_WORDS);
+    expect(within(dialog).getByRole("button", { name: /close/i })).toBeInTheDocument();
   });
 
   it("sends only what changed, then closes and re-reads", async () => {
@@ -83,13 +85,13 @@ describe("editing a court", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: COURTS_COPY.editLabel("Glass court") }));
     const dialog = await screen.findByRole("dialog", { name: COURTS_COPY.editTitle("Glass court") });
-    fireEvent.change(priceField(), { target: { value: "14" } });
+    fireEvent.change(within(dialog).getByLabelText(COURTS_COPY.nameLabel), { target: { value: "Glass hall" } });
     fireEvent.click(within(dialog).getByRole("button", { name: COURTS_COPY.saveEdit }));
 
     await waitFor(() => {
       const patch = stub.calls.find((c) => c.method === "PATCH");
       expect(patch?.path).toBe(`/api/v1/admin/courts/${COURTS[2].id}`);
-      expect(patch?.body).toEqual({ slicePriceCredits: 14 });
+      expect(patch?.body).toEqual({ name: "Glass hall" });
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(stub.calls.filter((c) => c.method === "GET" && c.path === "/api/v1/admin/courts/")).toHaveLength(2);
@@ -115,16 +117,16 @@ describe("editing a court", () => {
 
   it("keeps the sheet open and says why when the save is refused", async () => {
     stubFetch(routes([
-      { method: "PATCH", path: "/api/v1/admin/courts/", status: 400, body: { error: "price_negative" } },
+      { method: "PATCH", path: "/api/v1/admin/courts/", status: 400, body: { error: "name_required" } },
     ]));
     renderPage(<AdminCourtsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: COURTS_COPY.editLabel("Court 1") }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(priceField(), { target: { value: "9" } });
+    fireEvent.change(within(dialog).getByLabelText(COURTS_COPY.nameLabel), { target: { value: "Court One" } });
     fireEvent.click(within(dialog).getByRole("button", { name: COURTS_COPY.saveEdit }));
 
-    expect(await within(dialog).findByText(/The price can't be below 0/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(new RegExp(COURTS_COPY.errorCodes.name_required))).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
@@ -144,45 +146,30 @@ describe("adding a court", () => {
     expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
   });
 
-  it("starts at the club's usual price, and posts the name and price in credits", async () => {
+  it("posts the name and the type only — no price on the wire", async () => {
     const stub = stubFetch(routes([{ method: "POST", path: "/api/v1/admin/courts/", body: { id: "new", court_number: 4 } }]));
     renderPage(<AdminCourtsPage />);
 
     await screen.findByRole("region", { name: COURTS_COPY.listLabel });
     fireEvent.click(screen.getByRole("button", { name: COURTS_COPY.add }));
     const dialog = await screen.findByRole("dialog", { name: COURTS_COPY.addTitle });
-    // Court 1 (8) and the glass court (12.5) are in use; 8 is not "usual" by count alone — the
-    // tie goes to the first seen, which is the lowest-numbered court's price.
-    expect(priceField()).toHaveValue(8);
+    expect(dialog.textContent).not.toMatch(PRICE_WORDS);
     fireEvent.change(screen.getByLabelText(COURTS_COPY.nameLabel), { target: { value: "  Court 5  " } });
     fireEvent.click(within(dialog).getByRole("button", { name: COURTS_COPY.saveNew }));
 
     await waitFor(() => {
-      expect(stub.calls.find((c) => c.method === "POST")?.body)
-        .toEqual({ name: "Court 5", courtType: "Squash", slicePriceCredits: 8 });
+      const post = stub.calls.find((c) => c.method === "POST");
+      expect(post?.body).toEqual({ name: "Court 5", courtType: "Squash" });
+      expect(Object.keys(post?.body as object)).toEqual(["name", "courtType"]);
     });
     expect(await screen.findByText(COURTS_COPY.added("Court 5"))).toBeInTheDocument();
-  });
-
-  it("refuses a price in fractions of a cent", async () => {
-    stubFetch(routes());
-    renderPage(<AdminCourtsPage />);
-
-    await screen.findByRole("region", { name: COURTS_COPY.listLabel });
-    fireEvent.click(screen.getByRole("button", { name: COURTS_COPY.add }));
-    const dialog = await screen.findByRole("dialog", { name: COURTS_COPY.addTitle });
-    fireEvent.change(screen.getByLabelText(COURTS_COPY.nameLabel), { target: { value: "Court 5" } });
-    fireEvent.change(priceField(), { target: { value: "8.005" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: COURTS_COPY.saveNew }));
-
-    expect(within(dialog).getByText(COURTS_COPY.priceInvalid)).toBeInTheDocument();
-    expect(priceField()).toHaveFocus();
   });
 });
 
 /**
  * Review round 3 (admin lost-reply audit): a court save whose reply is lost is read back from
- * the courts list. The stubs perform the PATCH, then fail the reply.
+ * the courts list. The stubs perform the PATCH, then fail the reply. With no price (P13), the
+ * read-back compares what a court still has: its name and whether it is in use.
  */
 describe("a court save whose reply was lost", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -195,7 +182,7 @@ describe("a court save whose reply was lost", () => {
       {
         method: "PATCH", path: "/api/v1/admin/courts/",
         respond: () => {
-          if (landed) courts = COURTS.map((c) => (c.id === COURTS[2].id ? { ...c, slice_price_credits: 14 } : c));
+          if (landed) courts = COURTS.map((c) => (c.id === COURTS[2].id ? { ...c, is_active: false } : c));
           return refuse(504, { error: "gateway_timeout" });
         },
       },
@@ -204,19 +191,19 @@ describe("a court save whose reply was lost", () => {
   async function save() {
     fireEvent.click(await screen.findByRole("button", { name: COURTS_COPY.editLabel("Glass court") }));
     const dialog = await screen.findByRole("dialog", { name: COURTS_COPY.editTitle("Glass court") });
-    fireEvent.change(priceField(), { target: { value: "14" } });
+    fireEvent.click(within(dialog).getByRole("switch", { name: COURTS_COPY.activeLabel }));
     fireEvent.click(within(dialog).getByRole("button", { name: COURTS_COPY.saveEdit }));
     return dialog;
   }
 
-  it("says it saved when the list has the new price", async () => {
+  it("says it saved when the list shows the court out of use", async () => {
     stubFetch(lost(true));
     renderPage(<AdminCourtsPage />);
     await save();
     expect(await screen.findByText(`${COURTS_COPY.saved("Glass court")} The club's reply didn't arrive, so we checked its record.`)).toBeInTheDocument();
   });
 
-  it("says nothing changed when the list still has the old price", async () => {
+  it("says nothing changed when the list still shows it in use", async () => {
     stubFetch(lost(false));
     renderPage(<AdminCourtsPage />);
     const dialog = await save();

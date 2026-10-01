@@ -4,13 +4,13 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./
 
 /**
  * Admin · Courts (`/admin/courts`, plan P6) in a real browser: the list reads, a court opens in a
- * sheet (from the right on a desktop, from the bottom on a phone), prices are credits, and the page
- * passes axe in both themes.
+ * sheet (from the right on a desktop, from the bottom on a phone), a court carries no price (P13,
+ * contract §3.9 — a booking costs its minutes), and the page passes axe in both themes.
  */
 
 const COURTS = [1, 2, 3].map((n) => ({
   id: `2222222${n}-2222-2222-2222-222222222222`, court_number: n, name: n === 3 ? "Glass court" : `Court ${n}`,
-  court_type: "Squash", slice_price_credits: n === 3 ? 12.5 : 8, is_active: n !== 2,
+  court_type: "Squash", is_active: n !== 2,
 }));
 
 function routes(extra: ApiRoute[] = []): ApiRoute[] {
@@ -30,7 +30,7 @@ async function openCourts(page: Page, extra: ApiRoute[] = []) {
   await expect(page.getByRole("region", { name: "The club’s courts" })).toBeVisible();
 }
 
-test("lists the courts and edits one in a sheet, in credits", async ({ page }) => {
+test("lists the courts and renames one in a sheet that has no price", async ({ page }) => {
   const sent: unknown[] = [];
   await openCourts(page, [{
     method: "PATCH", path: "/api/v1/admin/courts/",
@@ -43,13 +43,27 @@ test("lists the courts and edits one in a sheet, in credits", async ({ page }) =
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Close" })).toBeVisible();
 
-  const price = sheet.getByRole("spinbutton", { name: "Price per slice (credits)" });
-  await expect(price).toHaveValue("12.5");
-  await price.fill("14");
+  await expect(sheet.getByRole("spinbutton")).toHaveCount(0);
+  await expect(sheet).not.toContainText(/price|credit|\bcr\b/i);
+  await sheet.getByRole("textbox", { name: "Name" }).fill("Glass hall");
   await sheet.getByRole("button", { name: "Save court" }).click();
   await expect.poll(() => sent.length).toBe(1);
-  expect(sent[0]).toEqual({ slicePriceCredits: 14 });
+  expect(sent[0]).toEqual({ name: "Glass hall" });
   await expect(sheet).toBeHidden();
+});
+
+test("adds a court with its name and type only", async ({ page }) => {
+  const sent: unknown[] = [];
+  await openCourts(page, [{
+    method: "POST", path: "/api/v1/admin/courts/",
+    respond: (request) => { sent.push(request.body); return { id: "new", court_number: 4 }; },
+  }]);
+  await page.getByRole("button", { name: "Add court" }).first().click();
+  const sheet = page.getByRole("dialog", { name: "Add a court" });
+  await sheet.getByRole("textbox", { name: "Name" }).fill("Court 4");
+  await sheet.getByRole("button", { name: "Add court" }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0]).toEqual({ name: "Court 4", courtType: "Squash" });
 });
 
 test("refuses a court with no name at the sheet", async ({ page }) => {

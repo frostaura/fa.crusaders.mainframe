@@ -4,15 +4,13 @@ import { unsureWords } from "./lostReplyCopy";
  * The Courts page's words (`/admin/courts`). Tests query by these.
  *
  * <p>
- * Prices are in CREDITS, always, and the copy says so wherever a price is set: a court's slice
- * price is what a member is charged, in the unit of account, and it was once labelled "(R)" —
- * an admin priced courts in the wrong unit.
+ * <b>A court has no price</b> (P13, contract §3.9): a booking costs its own playing minutes, so a
+ * court is a name, a type and whether it is in use — nothing here may talk about what it costs.
  * </p>
  */
 export const COURTS_COPY = {
   title: "Courts",
-  description: "The courts members can book, and what a slice on each costs. Prices are in credits — rand only ever"
-    + " buys credits.",
+  description: "The courts members can book, and whether each is in use. A booking costs the minutes it is played for, on any court.",
   add: "Add court",
   edit: "Edit",
   editLabel: (name: string) => `Edit ${name}`,
@@ -24,20 +22,16 @@ export const COURTS_COPY = {
   listLabel: "The club’s courts",
   count: (inUse: number, total: number) => `${inUse} in use · ${total} ${total === 1 ? "court" : "courts"}`,
   number: (n: number) => `Court number ${n}`,
-  price: (credits: number) => `${formatCredits(credits)} cr a slice`,
   inUse: "In use",
   notInUse: "Not in use",
 
   addTitle: "Add a court",
-  addDescription: "It can be booked the moment it is added, at the price you set here.",
+  addDescription: "Members can book it the moment it is added.",
   editTitle: (name: string) => `Edit ${name}`,
-  editDescription: "Changes apply to bookings made from now on. Bookings already made keep the price they were charged.",
+  editDescription: "Changes apply from now on. Bookings already made on it stay as they are.",
   nameLabel: "Name",
   nameDescription: "What members see on the booking grid.",
   nameRequired: "Give the court a name.",
-  priceLabel: "Price per slice (credits)",
-  priceDescription: "Credits, not rand. Members are charged this per slice; rand only ever buys credits.",
-  priceInvalid: "The price has to be 0 or more, in whole cents.",
   activeLabel: "Members can book this court",
   activeOn: "In use — on the booking grid.",
   activeOff: "Not in use — members can’t book it. Nothing already booked on it is cancelled.",
@@ -50,17 +44,8 @@ export const COURTS_COPY = {
   addAction: "add the court",
   errorCodes: {
     name_required: "Give the court a name.",
-    price_negative: "The price can't be below 0.",
   } as Record<string, string>,
 } as const;
-
-/**
- * @deprecated P13-F3: courts carry no price (contract §3.9, §7.1); deleted in phase 2.
- * `8` → `"8"`, `12.5` → `"12.50"` — credits to the cent, without a trailing `.00` on a whole number.
- */
-export function formatCredits(credits: number): string {
-  return Number.isInteger(credits) ? String(credits) : credits.toFixed(2);
-}
 
 /**
  * A court write whose reply was lost, read back from the courts list (review round 3, the admin
