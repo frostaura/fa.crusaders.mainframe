@@ -42,6 +42,10 @@ function signedFixed(value: number): string {
   return value < 0 && Number(magnitude) !== 0 ? `${MINUS}${magnitude}` : magnitude;
 }
 
+/**
+ * @deprecated P13 — minutes, not credits. Use `minutesCompact` / `<Minutes>` (`lib/minutes.ts`).
+ * Kept only until phase 2 deletes it; `src/credit-formatters.ratchet.test.ts` lists who still calls it.
+ */
 export function formatCredits(value: number, options?: { long?: boolean }) {
   const amount = signedFixed(value);
   return options?.long ? `${amount} credits` : `${amount} cr`;
@@ -69,6 +73,9 @@ export function formatMoney(value: number) {
 }
 
 /**
+ * @deprecated P13 — minutes, not credits. Use `minutesSigned` / `<Minutes signed>` (`lib/minutes.ts`).
+ * Kept only until phase 2 deletes it; `src/credit-formatters.ratchet.test.ts` lists who still calls it.
+ *
  * A signed credit figure, with the sign shown explicitly.
  *
  * The ledger table built this inline as `+`/`−` plus `toFixed(2)` plus a literal " cr",

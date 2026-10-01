@@ -54,7 +54,10 @@ export const COURTS_COPY = {
   } as Record<string, string>,
 } as const;
 
-/** `8` → `"8"`, `12.5` → `"12.50"` — credits to the cent, without a trailing `.00` on a whole number. */
+/**
+ * @deprecated P13-F3: courts carry no price (contract §3.9, §7.1); deleted in phase 2.
+ * `8` → `"8"`, `12.5` → `"12.50"` — credits to the cent, without a trailing `.00` on a whole number.
+ */
 export function formatCredits(credits: number): string {
   return Number.isInteger(credits) ? String(credits) : credits.toFixed(2);
 }
