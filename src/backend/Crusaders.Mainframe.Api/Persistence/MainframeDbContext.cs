@@ -824,6 +824,7 @@ public partial class MainframeDbContext : DbContext
             e.Property(s => s.Name).HasMaxLength(128).IsRequired();
             e.Property(s => s.Label).HasMaxLength(128).IsRequired();
             e.Property(s => s.Status).HasConversion<int>();
+            e.Property(s => s.EarlierRulesJson).HasColumnType("jsonb");
             e.HasQueryFilter(s => s.TenantId == _tenant.TenantId);
         });
 

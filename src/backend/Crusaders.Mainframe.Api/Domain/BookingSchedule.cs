@@ -96,6 +96,14 @@ public sealed class BookingSchedule : ITenantScoped
     /// </para>
     /// </summary>
     public DateTimeOffset? MaterialisedThrough { get; set; }
+
+    /// <summary>
+    /// The rules "from this date on" changes replaced, oldest first, each with the first date it
+    /// no longer governs — <c>[{ until, days_of_week, start_minute, end_minute, interval_weeks }]</c>,
+    /// or null when the rule was never changed from a date. Read through
+    /// <see cref="Services.ScheduleRuleHistory"/>, which says why (review round 4 wave B, A4-3).
+    /// </summary>
+    public string? EarlierRulesJson { get; set; }
 }
 
 /// <summary>

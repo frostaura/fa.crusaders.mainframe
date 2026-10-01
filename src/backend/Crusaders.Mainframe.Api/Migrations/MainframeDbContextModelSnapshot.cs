@@ -638,6 +638,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<int>("DaysOfWeek")
                         .HasColumnType("integer");
 
+                    b.Property<string>("EarlierRulesJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateOnly?>("EndDate")
                         .HasColumnType("date");
 

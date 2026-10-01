@@ -76,16 +76,23 @@ public static class ScheduleOccurrences
         // weeks is what made it visible; the code and the fixture were fixed together.
         var anchor = WeekStart(schedule.StartDate);
 
-        // A stored zero or negative interval is a hand-edited column, not a PUT, and the honest
-        // reading of "every 0 weeks" is "every week" — never a division by zero on a read.
-        var interval = Math.Max((int)schedule.IntervalWeeks, 1);
+        // Each date is read at the rule in force ON it (review round 4 wave B, A4-3): a change
+        // "from 20 Oct" leaves the dates before 20 Oct on the rule it replaced — days, hours and
+        // interval alike. Every rule keeps the start date's anchor.
+        var earlier = ScheduleRuleHistory.Earlier(schedule);
+        var current = ScheduleRuleHistory.Current(schedule);
 
         for (var day = first; day <= last; day = day.AddDays(1))
         {
-            if ((schedule.DaysOfWeek & (1 << (int)day.DayOfWeek)) == 0) continue;
+            var rule = ScheduleRuleHistory.For(day, earlier, current);
+            if ((rule.DaysOfWeek & (1 << (int)day.DayOfWeek)) == 0) continue;
+
+            // A stored zero or negative interval is a hand-edited column, not a PUT, and the
+            // honest reading of "every 0 weeks" is "every week" — never a division by zero.
+            var interval = Math.Max((int)rule.IntervalWeeks, 1);
             if ((WeekStart(day).DayNumber - anchor.DayNumber) / 7 % interval != 0) continue;
 
-            yield return At(schedule, zone, day, byDate.GetValueOrDefault(day));
+            yield return At(rule, zone, day, byDate.GetValueOrDefault(day));
         }
     }
 
@@ -99,11 +106,11 @@ public static class ScheduleOccurrences
     /// </para>
     /// </summary>
     private static ScheduleOccurrence At(
-        BookingSchedule schedule, TimeZoneInfo zone, DateOnly day, BookingScheduleException? exception)
+        ScheduleRule rule, TimeZoneInfo zone, DateOnly day, BookingScheduleException? exception)
     {
         var overridden = exception?.Kind == ScheduleExceptionKind.Overridden;
-        var startMinute = (overridden ? exception!.StartMinute : null) ?? schedule.StartMinute;
-        var endMinute = (overridden ? exception!.EndMinute : null) ?? schedule.EndMinute;
+        var startMinute = (overridden ? exception!.StartMinute : null) ?? rule.StartMinute;
+        var endMinute = (overridden ? exception!.EndMinute : null) ?? rule.EndMinute;
 
         var status = exception?.Kind switch
         {

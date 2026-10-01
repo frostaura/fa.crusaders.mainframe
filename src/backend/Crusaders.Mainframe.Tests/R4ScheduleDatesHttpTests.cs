@@ -107,8 +107,9 @@ public sealed class R4ScheduleDatesHttpTests(PostgresFixture pg) : IClassFixture
             .GetProperty("occurrences").EnumerateArray().ToList();
         var firstDate = dates.Single(d => d.GetProperty("date").GetString() == first.ToString("yyyy-MM-dd"));
         Assert.Equal("18:00", Clock(firstDate.GetProperty("starts_at")));
-        Assert.Equal("18:30", Clock(firstDate.GetProperty("rule_starts_at")));
-        Assert.False(firstDate.GetProperty("on_rule").GetBoolean());
+        // Wave B: a date before the change is read at the rule that governs IT — the old one.
+        Assert.Equal("18:00", Clock(firstDate.GetProperty("rule_starts_at")));
+        Assert.True(firstDate.GetProperty("on_rule").GetBoolean());
         Assert.Equal("18:00", Clock(firstDate.GetProperty("courts")[0].GetProperty("starts_at")));
         var laterDate = dates.Single(d => d.GetProperty("date").GetString() == from.ToString("yyyy-MM-dd"));
         Assert.Equal("18:30", Clock(laterDate.GetProperty("starts_at")));

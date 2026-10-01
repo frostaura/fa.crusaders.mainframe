@@ -137,7 +137,7 @@ public static class AdminScheduleEndpoints
 
         if (await ScheduleRequestParsing.RefuseAgainstTheClubAsync(spec!, null, db, ct) is { } bad) return bad;
 
-        var preview = await schedules.PreviewAsync(spec!, null, ctx.User.Id() ?? Guid.Empty, ct);
+        var preview = await schedules.PreviewAsync(spec!, null, ctx.User.Id() ?? Guid.Empty, null, ct);
         return Results.Ok(ProjectPreview(preview, view));
     }
 
@@ -151,7 +151,7 @@ public static class AdminScheduleEndpoints
         if (await ScheduleRequestParsing.RefuseAgainstTheClubAsync(spec!, null, db, ct) is { } bad) return bad;
 
         var actorId = ctx.User.Id() ?? Guid.Empty;
-        var preview = await schedules.PreviewAsync(spec!, null, actorId, ct);
+        var preview = await schedules.PreviewAsync(spec!, null, actorId, null, ct);
 
         if (TooLargeOrConflicting(preview, view) is { } stop) return stop;
 
@@ -218,13 +218,13 @@ public static class AdminScheduleEndpoints
         if (refusal is not null) return refusal;
         if (await ScheduleRequestParsing.RefuseAgainstTheClubAsync(spec!, id, db, ct) is { } bad) return bad;
 
-        var actorId = ctx.User.Id() ?? Guid.Empty;
-        var preview = await schedules.PreviewAsync(spec!, id, actorId, ct);
-        if (TooLargeOrConflicting(preview, view) is { } stop) return stop;
-
         var today = ScheduleClock.Today(zone, DateTimeOffset.UtcNow);
         var asked = req.EffectiveFrom ?? today;
         var effective = asked < today ? today : asked;
+
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        var preview = await schedules.PreviewAsync(spec!, id, actorId, effective, ct);
+        if (TooLargeOrConflicting(preview, view) is { } stop) return stop;
 
         var before = Snapshot(new ScheduleSpec(
             row.Name, row.Label, row.DaysOfWeek, row.StartMinute, row.EndMinute,
@@ -234,6 +234,8 @@ public static class AdminScheduleEndpoints
 
         await schedules.CancelFutureAsync(id, ScheduleClock.InstantAt(zone, effective, 0), ct);
 
+        // The rule being replaced keeps every date before `effective` (A4-3, wave B).
+        row.EarlierRulesJson = ScheduleRuleHistory.Store(ScheduleRuleHistory.Supersede(row, effective));
         Apply(row, spec!);
         await ReplaceCourtsAsync(db, row, spec!.CourtIds, ct);
 
@@ -363,7 +365,7 @@ public static class AdminScheduleEndpoints
             return (occurrenceDate, null, Results.NotFound(new { error = ScheduleRequestParsing.NotFound }));
         }
 
-        if (ScheduleClock.InstantAt(zone, occurrenceDate, row.StartMinute) <= DateTimeOffset.UtcNow)
+        if (ScheduleClock.InstantAt(zone, occurrenceDate, ScheduleRuleHistory.For(row, occurrenceDate).StartMinute) <= DateTimeOffset.UtcNow)
         {
             return (occurrenceDate, row, Results.Conflict(new
             {

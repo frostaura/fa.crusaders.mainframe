@@ -50,9 +50,13 @@ public sealed class BookingScheduleService
         BookingService bookings, ILogger<BookingScheduleService> logger)
     { _db = db; _tenant = tenant; _settings = settings; _bookings = bookings; _logger = logger; }
 
-    /// <summary>What a rule would produce over the horizon, and everything already in its way.</summary>
+    /// <summary>
+    /// What a rule would produce over the horizon, and everything already in its way.
+    /// <paramref name="from"/> is an edit's effective date: the new rule produces nothing before
+    /// it, so nothing before it can be in its way (review round 4 wave B, A4-3).
+    /// </summary>
     public async Task<SchedulePreview> PreviewAsync(
-        ScheduleSpec spec, Guid? excludeScheduleId, Guid actorId, CancellationToken ct)
+        ScheduleSpec spec, Guid? excludeScheduleId, Guid actorId, DateOnly? from, CancellationToken ct)
     {
         var view = await _settings.GetAsync(ct);
         var (zone, _, _) = DoorClock.ZoneOf(view);
@@ -67,7 +71,7 @@ public sealed class BookingScheduleService
             : [];
 
         var occurrences = ScheduleOccurrences
-            .Expand(rule, exceptions, zone, spec.StartDate, horizon)
+            .Expand(rule, exceptions, zone, from is { } f && f > spec.StartDate ? f : spec.StartDate, horizon)
             .Where(o => o.Status != ScheduleOccurrenceStatus.Skipped)
             .ToList();
 
