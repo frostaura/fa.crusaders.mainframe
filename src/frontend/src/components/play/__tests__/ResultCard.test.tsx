@@ -312,7 +312,16 @@ describe("focus after recording (R2 F2-12)", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: RESULT_SHEET.submit }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await waitFor(() => expect(screen.getByRole("heading", { name: RESULT_CARD.title })).toHaveFocus(), { timeout: 5000 });
+    await waitFor(() => expect(screen.getByRole("heading", { name: RESULT_CARD.title })).toHaveFocus(), {
+      timeout: 5000,
+      // Green here at any load, red only on the Linux runner: say what DOES hold focus, so the
+      // next red run names the culprit instead of asking for another guess.
+      onTimeout: (error) => {
+        const active = document.activeElement;
+        error.message += `\nFocus is on: ${active === document.body ? "<body>" : active?.outerHTML.slice(0, 400) ?? "nothing"}`;
+        return error;
+      },
+    });
     // The test's own budget covers the render, eight score fields, the close AND the focus wait —
     // at vitest's default 5 s the 5 s focus wait above could never finish on a slow runner.
   }, 15_000);
