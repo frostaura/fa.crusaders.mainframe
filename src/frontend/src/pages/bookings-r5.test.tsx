@@ -6,6 +6,7 @@ import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, slotRow 
 import { liftWithReason } from "../test/liftHold";
 import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET, bookCellLabel } from "../lib/bookingsCopy";
 import { HOLD_LIFTED } from "../lib/scheduleEnd";
+import { notYetOpenSentence } from "../lib/gridCopy";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -120,5 +121,28 @@ describe("I5-1 — booking for a member, the grid prices at the MEMBER's group p
   it("derives it from the single figure on an older server", async () => {
     openBookings({ isAdmin: true, at: `/bookings?date=2030-09-09&as=${NALEDI}`, routes: memberRoutes() });
     expect(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 30) })).toBeInTheDocument();
+  });
+});
+
+describe("P5 — a slot past the club's rolling booking window is drawn not yet open", () => {
+  it("is never a Book cell, for a member or the desk, and says why when pressed", async () => {
+    // 2030 is far beyond a 14-day window: the club would refuse every one of these (too_far_ahead).
+    openBookings({ day: dayFixture({ advanceBookingDays: 14 }) });
+    const cell = await screen.findByRole("button", { name: "Court 1 at 16:00 — not open for booking yet" });
+    expect(cell).toHaveTextContent("Not open yet");
+    expect(screen.queryAllByRole("button", { name: /^Book Court/ })).toHaveLength(0);
+    fireEvent.click(cell);
+    expect((await screen.findAllByText(notYetOpenSentence("Court 1 at 16:00", 14))).length).toBeGreaterThan(0);
+  });
+
+  it("applies to the desk too — the API refuses an admin the same way", async () => {
+    openBookings({ isAdmin: true, day: dayFixture({ advanceBookingDays: 14 }) });
+    expect(await screen.findByRole("button", { name: "Court 2 at 17:45 — not open for booking yet" })).toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: /^Book Court/ })).toHaveLength(0);
+  });
+
+  it("offers the slots inside the window", async () => {
+    openBookings({ day: dayFixture({ advanceBookingDays: 3650 }) });
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ })).toBeInTheDocument();
   });
 });

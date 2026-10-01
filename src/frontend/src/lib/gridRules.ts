@@ -105,6 +105,11 @@ export type CellFacts = {
   outOfHours: boolean;
   /** The peak mirror the client already carries, evaluated by `lib/scheduleGrid`. */
   peakRestricted: boolean;
+  /**
+   * Starts beyond the club's rolling booking window (now + `advanceBookingDays`), which the API
+   * refuses for everyone, the desk included (`too_far_ahead`) — R5: such cells were drawn Book.
+   */
+  notYetOpen?: boolean;
 };
 
 export type CellVerdict = { bookable: boolean; reason: GridReason | null };
@@ -126,6 +131,7 @@ const BOOKABLE: CellVerdict = { bookable: true, reason: null };
 export function cellVerdict(rules: ViewerRules, cell: CellFacts): CellVerdict {
   if (cell.isPast) return { bookable: false, reason: "past_time" };
   if (cell.outOfHours) return { bookable: false, reason: "out_of_hours" };
+  if (cell.notYetOpen) return { bookable: false, reason: "too_far_ahead" };
   // An admin is exempt from every RULE — never from the clock and never from the club's hours.
   if (rules.adminExempt) return BOOKABLE;
   if (rules.emptyWindow) return { bookable: false, reason: "no_bookable_window" };

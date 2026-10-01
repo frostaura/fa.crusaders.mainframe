@@ -7,7 +7,7 @@ import { adminWalletNote } from "./bookingsCopy";
 import { schedulePriceSource, viewerSlicePrice } from "./viewerPrice";
 import {
   closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence, groupRateLine,
-  memberEmptyWindowSentence, memberRestrictionSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
+  memberEmptyWindowSentence, memberRestrictionSentence, notYetOpenSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
 } from "./gridCopy";
 
 /** The member the desk is booking for, and their rules — what a window-locked cell explains (R2 F1-3). */
@@ -157,6 +157,7 @@ const SENTENCE: Partial<Record<GridReason, (c: SentenceContext) => string>> = {
   per_day_minute_cap: (c) => `You've booked your ${c.rules.maxMinutesPerDay ?? 0} minutes of court time for that day. `
     + "Cancel one of them, or pick another day.",
   court_inactive: (c) => `${c.where} is not in use at the moment. The club can tell you when it is back.`,
+  too_far_ahead: (c) => notYetOpenSentence(c.where, c.day?.advanceBookingDays ?? null),
 };
 
 /** A window lock while booking FOR a member is about the member's groups, never the admin's. */

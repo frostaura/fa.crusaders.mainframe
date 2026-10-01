@@ -65,6 +65,8 @@ export const CELL_TEXT = {
   available: "Book",
   past: "—",
   closed: "Closed",
+  /** R5 — beyond the club's rolling booking window: free, but not bookable until it opens. */
+  notYetOpen: "Not open yet",
   /** The member's own daily cap is reached — the COURT is free, so never "Full" (R2 F1-6). */
   limit: "Your limit",
   hold: "Club hold",

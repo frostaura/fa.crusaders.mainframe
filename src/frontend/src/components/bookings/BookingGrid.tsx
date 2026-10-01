@@ -235,6 +235,7 @@ type RowsProps = Pick<BoardProps, "ctx" | "slotsByCourt" | "timeSlices" | "pastT
 };
 
 const NOTHING_HOLDING: ReadonlySet<string> = new Set();
+const DAY_MS = 86_400_000;
 
 /**
  * The day's rows. Memoised against the board's own churn — the roving stop moves one cell, a
@@ -244,6 +245,8 @@ const NOTHING_HOLDING: ReadonlySet<string> = new Set();
 const GridRows = memo(function GridRows(props: RowsProps) {
   const { ctx, slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, collapsedRows, stopRow, stopCol, lineOf, holding } = props;
   const { day } = ctx;
+  // R5 — the club's rolling window: a slot further out than now + N days is refused on Book.
+  const openUntilMs = day.advanceBookingDays > 0 ? peakNowMs + day.advanceBookingDays * DAY_MS : Infinity;
   return (
     <>
       {timeSlices.map((t, rowIndex) => {
@@ -276,6 +279,7 @@ const GridRows = memo(function GridRows(props: RowsProps) {
                   facts={{
                     minuteOfDay: t.minuteOfDay, sliceMinutes: day.sliceMinutes, isPast, outOfHours: t.outOfHours,
                     peakRestricted: peakRestricted(day, t.minuteOfDay, cellStartMs, peakNowMs),
+                    notYetOpen: cellStartMs > openUntilMs,
                   }}
                 />
               );

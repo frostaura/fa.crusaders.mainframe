@@ -37,7 +37,8 @@ function dayWith(rules: unknown, extra: Record<string, unknown> = {}) {
   return {
     date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
     dayStartMinute: 16 * 60, dayEndMinute: 19 * 60,
-    advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
+    advanceBookingDays: 3650, // 2030 inside the rolling booking window (R5 "Not open yet")
+    penaltyPct: 30, penaltyWindowMinutes: 15,
     courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
     slots: [], rules, ...extra,
   };

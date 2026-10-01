@@ -48,7 +48,8 @@ export function dayFixture(overrides: Record<string, unknown> = {}) {
   return {
     date: "2030-09-09", timezone: "Africa/Johannesburg", sliceMinutes: 15,
     dayStartMinute: 16 * 60, dayEndMinute: 18 * 60,
-    advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
+    // Wide enough that 2030 is inside the club's rolling booking window (R5: cells beyond it are "Not open yet").
+    advanceBookingDays: 3650, penaltyPct: 30, penaltyWindowMinutes: 15,
     courts: [
       { id: COURT_A, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 },
       { id: COURT_B, courtNumber: 2, name: "Court 2", slicePriceCredits: 50 },

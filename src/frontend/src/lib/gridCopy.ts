@@ -49,6 +49,17 @@ export function closedSentence(day: string, hours: { start: string; end: string 
   return `The club is open ${hours.start}–${hours.end} on ${weekdayPlural(day)}.`;
 }
 
+/**
+ * R5 — a free slot past the club's rolling booking window. The grid used to draw it "Book" and
+ * the club refused it on Confirm (`too_far_ahead`); it is drawn "Not open yet" and says when.
+ */
+export function notYetOpenSentence(where: string, advanceDays: number | null): string {
+  const window = advanceDays && advanceDays > 0
+    ? ` The club opens each slot for booking ${advanceDays} ${advanceDays === 1 ? "day" : "days"} ahead, to the minute.`
+    : "";
+  return `${where} isn't open for booking yet.${window}`;
+}
+
 /** The accessible name of a Closed cell — what it is, then why it is not yours. */
 export function closedCellLabel(where: string): string {
   return `${where} — the club is closed`;
@@ -143,6 +154,7 @@ export function unavailableWhy(reason: string, forName: string | null = null): s
     case "group_window": return forName ? `outside ${forName}'s booking times` : "outside the times you can book";
     case "no_bookable_window": return forName ? `not open to ${forName} on this day` : "not open to you on this day";
     case "court_inactive": return "this court is not in use";
+    case "too_far_ahead": return "not open for booking yet";
     default: return "not available";
   }
 }

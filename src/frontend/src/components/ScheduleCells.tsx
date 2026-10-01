@@ -388,7 +388,7 @@ function HoldingCell(props: SlotCellProps) {
 function UnavailableCell(props: SlotCellProps & { reason: GridReason }) {
   const { ctx, reason, where } = props;
   const quota = isQuota(reason);
-  const closed = reason === "out_of_hours";
+  const closed = reason === "out_of_hours" || reason === "too_far_ahead";
   // An ordinary, ENABLED button: pressing it is the whole point — it explains. `aria-disabled`
   // would tell assistive tech (and Playwright) it cannot be operated. No watermark: it does not
   // book, and a fingerprint on it would promise that it does.
@@ -654,6 +654,7 @@ function isQuota(reason: GridReason): boolean {
 /** The short word an unavailable cell wears — D4 §7.3's table. */
 function unavailableWord(reason: GridReason, ctx: BoardContext): string {
   if (reason === "out_of_hours") return CELL_TEXT.closed;
+  if (reason === "too_far_ahead") return CELL_TEXT.notYetOpen;
   if (isQuota(reason)) return CELL_TEXT.limit;
   return restrictionLabel(reason, ctx.rules.allowedWindows ?? [], Boolean(ctx.forName));
 }
