@@ -4,16 +4,14 @@ using Crusaders.Mainframe.Api.Persistence;
 namespace Crusaders.Mainframe.Api.Workers;
 
 /// <summary>
-/// Closes top-up checkouts PayFast never reported on (M4-1): on start, then every
+/// Closes package checkouts PayFast never reported on (M4-1): on start, then every
 /// <see cref="Interval"/>. See <see cref="TopUpEndpoints.ExpireStaleAsync"/>.
 ///
 /// <para>
-/// <b>The pass on start is the one-off fix</b> for the rows production had already stranded at
-/// <c>Pending</c> — every abandoned checkout since top-ups went live. It is safe to run any number
-/// of times: it only touches rows still <c>Pending</c> past the lifetime, mails nobody, and leaves
-/// each one reopenable, so a COMPLETE that arrives later still credits the member. The counting
-/// rule already ignores those rows, so this is housekeeping for the status page and the desk, not
-/// what unblocks the member.
+/// Safe to run any number of times: it only touches rows still <c>Pending</c> past the lifetime,
+/// mails nobody, and leaves each one reopenable, so a COMPLETE that arrives later still posts the
+/// locked minutes. The shelf already stops listing those rows as open checkouts, and there is no
+/// cap for them to hold (P13), so this is housekeeping for the status page and the desk.
 /// </para>
 /// </summary>
 public sealed class TopUpExpiryWorker(IServiceScopeFactory scopes, ILogger<TopUpExpiryWorker> logger) : BackgroundService
