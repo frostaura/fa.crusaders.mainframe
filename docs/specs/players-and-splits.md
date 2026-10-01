@@ -17,14 +17,15 @@ and this document disagree, one of them is a defect; say which.
   no-show, reversal, displacement, a cancelled court lit after all, a release — keeps settling
   against the organiser alone. `settlement-model.md` is untouched and still true of a split booking.
 - **A partner's share moves to the organiser** as a `ShareTransfer` ledger pair when they accept:
-  one row debits the partner, the other credits the organiser, both naming the booking, posted in
-  one save under references `share:{participant}:{seq}:out` (the debited member's row) and
-  `:in` (the credited member's). The pair nets to zero, so **no club report moves** — revenue,
+  one row takes the minutes from the partner, the other adds them to the organiser, both naming
+  the booking, posted in one save under references `share:{participant}:{seq}:out` (the paying
+  member's row) and `:in` (the receiving member's). Both rows are whole minutes and the pair nets
+  to exactly 0, so **no club report moves** — revenue,
   spend, refunds, penalties and the per-booking `Owed` sum are what they were.
 - **`booking_participants`** — one row per seat: `Seat` 1–4 (1–2 team A, 3–4 team B; 1 is the
   organiser), `UserId` (null for a guest or an unclaimed link seat), `GuestName`, `Status`
-  (`invited` · `accepted` · `declined` · `withdrawn` · `removed` · `lapsed`), `ShareCredits` (what
-  the seat is asked to pay), `ConsentedCredits` (the most the partner agreed to), `ShareWeight`,
+  (`invited` · `accepted` · `declined` · `withdrawn` · `removed` · `lapsed`), `ShareMinutes` (what
+  the seat is asked to pay), `ConsentedMinutes` (the most the partner agreed to; both whole minutes), `ShareWeight`,
   `SplitMode` (seat 1 only), `InviteTokenHash`, `CheckedInAt`, `SettledOutsideAt`, `LapsedAt`,
   nudge and reminder counters, and `Version` (optimistic concurrency, bumped by the context).
 - **The four-player ceiling is the database's**: `Seat BETWEEN 1 AND 4` and a unique index on
@@ -38,20 +39,22 @@ and this document disagree, one of them is a defect; say which.
 
 ## 2. Splitting the price
 
-`SplitCalculator` divides the price `P` across the live seats so the shares **sum to `P` exactly,
-always** (pinned over 5 000 generated cases):
+`SplitCalculator` divides the price `P` — the booking's length in minutes, `SliceMinutes ×
+SliceCount`, a whole number — across the live seats so the shares **sum to `P` exactly, always**
+(pinned over 5 000 generated cases):
 
 | Mode | Partner seat | Organiser (seat 1) |
 | --- | --- | --- |
-| `equal` | `⌊P / payers⌋` — whole credits, rounded down | `P − Σ partners` |
+| `equal` | `⌊P / payers⌋` — whole minutes, rounded down | `P − Σ partners` |
 | `ratio` | `⌊P × weight / Σ weights⌋` — weights 0–100 | `P − Σ partners` |
-| `amount` | the organiser's figure, ≥ 0, ≤ 2 dp | `P − Σ partners`, refused below 0 (`split_exceeds_price`) |
+| `amount` | the organiser's figure: a whole number of minutes ≥ 0, else `split_amount_invalid` | `P − Σ partners`, refused below 0 (`split_exceeds_price`) |
 
 Guests are in the split with share 0 and are not a head in an equal split. **The rounding rule**:
-partners are rounded down to whole credits, and the organiser — who chose to split — takes the odd
-credit and any sub-credit fraction. Adding a player re-splits an `equal`/`ratio` booking (every
+partners are rounded down to whole minutes, and the organiser — who chose to split — keeps the
+remainder, so the shares always sum to the price: a 32-minute game split equally three ways is 10
+and 10 for the partners and 12 for the organiser. Nothing holds a fraction of a minute. Adding a player re-splits an `equal`/`ratio` booking (every
 share goes down); removing, declining or withdrawing does NOT re-split — the organiser absorbs the
-freed share until they re-split themselves, and their own seat's `share_credits` says so: it is
+freed share until they re-split themselves, and their own seat's `share_minutes` says so: it is
 recomputed as `P − Σ live partners` in one statement after the seat change commits (review round 4,
 M4-6).
 
@@ -60,7 +63,7 @@ M4-6).
 `ShareLedger.ReconcileAsync(booking)` is the one writer of `ShareTransfer`. For each partner seat:
 
 ```
-target = min( ConsentedCredits , ⌊ Owed(b) × ShareCredits / P ⌋₂ )    — ShareRules.TargetFor
+target = min( ConsentedMinutes , ⌊ Owed(b) × ShareMinutes / P ⌋ )    — ShareRules.TargetFor
 paid   = −Σ the partner's rows under share:{participant}:*
 closed → target = min( target , paid )          (lapsed, or past the share deadline)
 post   = the pair for (target − paid)
@@ -77,19 +80,19 @@ rule of its own:
 | displaced (S8) | 0 |
 | cancelled before anybody checked in | 0 — **the late-cancel penalty is the organiser's alone** |
 | cancelled after check-in (S4) | the full share |
-| no-show (S5) | pro rata of the penalty — `⌊9.60 × 16/32⌋₂ = 4.80` |
+| no-show (S5) | pro rata of the penalty, rounded down; the organiser keeps the remainder. A 30% penalty on a 32-minute booking is `⌊32 × 30 / 100⌋ = 9`, and a partner holding 16 of the 32 owes `⌊9 × 16 / 32⌋ = 4` |
 | no-show with no reachable box (S5a) | 0 |
 | no-show reversed (S6), live, played | the full share |
 | **closed** — the seat lapsed, or the share deadline passed | the above, but never more than already paid: a return is still made, a collection never is |
 
 **What the organiser is told on a split cancel (review round 1, B3).** The member's
-`GET /bookings/{id}/cancellation-quote` gains `net_credits` (the refund less what goes on to the
-partners) and `partner_refunds: [{user_id, name, credits}]`, each computed by the share rule above
-against the cancelled booking; `POST /bookings/{id}/cancel` answers `{refunded_credits,
-penalty_credits, net_credits, partner_refunds}`, each partner's figure measured against what they
+`GET /bookings/{id}/cancellation-quote` gains `net_minutes` (the refund less what goes on to the
+partners) and `partner_refunds: [{user_id, name, minutes}]`, each computed by the share rule above
+against the cancelled booking; `POST /bookings/{id}/cancel` answers `{refunded_minutes,
+penalty_minutes, net_minutes, partner_refunds}`, each partner's figure measured against what they
 had paid before the cancel (so a return that waits for cover is still named). The desk's `POST /admin/bookings/{id}/cancel`
 answers the same four fields, and each `POST /admin/bookings/bulk-cancel` result row carries
-`net_credits` and `partner_refunds` (lane F1's ask).
+`net_minutes` and `partner_refunds` (lane F1's ask).
 
 **Idempotent**: it posts only the difference, so running it twice — or from the hook and the worker
 in the same minute — writes nothing the second time. **Locked on the debited member only**: a
@@ -108,10 +111,10 @@ Int32 range, else 48 — then clamped 1–168; `Persistence/ShareDeadlineBackfil
 **Never a debt.** A collection the partner cannot cover is not posted; the share stays unpaid and
 payable by the partner until the **share deadline** after which it lapses and the organiser's
 cover stands. **A closed seat is never collected from**:
-the partner topping up afterwards does not reopen it, although the sweep still reconciles the
+the partner buying minutes afterwards does not reopen it, although the sweep still reconciles the
 booking for a week (returns still flow). Only an admin's explicit collect
 (`ReconcileOptions.OverdraftSeatId`, `ShareLedger.CollectAsync`) may collect from a closed seat or
-take a partner below zero. A collection checks the partner's **spendable** credits (§3a), not
+take a partner below zero. A collection checks the partner's **spendable** minutes (§3a), not
 their balance.
 
 **Nor a debt the other way — a return must be COVERED.** A return from booking X to seat s posts
@@ -136,7 +139,7 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earm
   earmark and then on the free balance; a later one gets only what is left. That holds even when
   games still hold money and a desk debit has left the holds underwater (only `min(balance,
   held(all))` stands behind them) — the older return is paid first, whatever order the reconciles
-  run in. Retries run in the same order (seats within a booking, the sweep, the credit hook) so the
+  run in. Retries run in the same order (seats within a booking, the sweep, the incoming-minutes hook) so the
   receipts read that way; the arithmetic, not the order, is what guarantees it.
   A waiting return that grows (a partial refund, then a desk remove on the same seat) **keeps its
   original stamp**, so the extra is served ahead of returns stamped in between — deliberately: the
@@ -161,18 +164,18 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earm
   seeded random scenarios (150 seeds in CI; `PLAYERS_PROPERTY_SEEDS` for more,
   `PLAYERS_PROPERTY_FIRST_SEED` to move the window, `PLAYERS_PROPERTY_BIAS` = `mixed` | `debt` |
   `balanced`). Some played games are dated 10–40 days back, past the sweep's window (so a return
-waiting on one is reached only by the sweep's read of stamped seats). Partners are funded 100; the steps are withdraw, organiser and desk remove,
-  settle-outside, cancel, goodwill credit, top-up, correction debit, deadline passing, random-order
+waiting on one is reached only by the sweep's read of stamped seats). Partners are funded 100 minutes; the steps are withdraw, organiser and desk remove,
+  settle-outside, cancel, a goodwill adjustment, a purchase, a correction debit, deadline passing, random-order
   reconciles, an organiser spend (allowed exactly when the model's spendable covers it), check-in
-  then cancel (S4), lowering a share, a concurrent burst (every reconcile, the sweep, a desk credit
+  then cancel (S4), lowering a share, a concurrent burst (every reconcile, the sweep, a desk adjustment
   and a desk remove together), and — on debt seeds — a squeeze: free balance thinned below zero, the
-  biggest share withdrawn after its deadline, the smallest on another game likewise, then a top-up
-  of 4 — and, on a seed with an old game, an old-game squeeze: the free balance pushed down, a
-  goodwill 16 naming the old game (its returns wait), a top-up leaving the first short by less than
+  biggest share withdrawn after its deadline, the smallest on another game likewise, then a purchase
+  of 4 minutes — and, on a seed with an old game, an old-game squeeze: the free balance pushed down, a
+  goodwill 16 minutes naming the old game (its returns wait), a purchase leaving the first short by less than
   a young game's hold, then that game's deadline passing, so only the sweep can pay it. After every step it checks the balance never ran negative at any return row, **liveness**
   (a balance covering every earmark plus every waiting return leaves nothing waiting), and FCFS
   across the step (a return paid while an earlier-stamped one still waits took no more than its
-  own game's earmark); at the end it tops the organiser up to exactly earmarks plus waiting returns
+  own game's earmark); at the end it brings the organiser's balance to exactly earmarks plus waiting returns
   and requires nothing left waiting.
 
 The rule is keyed on coverage, never on the deadline: a hold released at the deadline and spent,
@@ -183,14 +186,14 @@ covered, before the deadline or after. Spend checks, by contrast, set aside EVER
 - the seat is stamped `ReturnPendingSince` (indexed) and **both sides are told once**, under
   `players.return_waiting` — never again while it keeps waiting;
 - it is retried by the minute sweep, which selects every seat carrying the stamp **however old
-  the booking**, and at once by **any credit the organiser receives** — a top-up, a desk
-  adjustment, a refund, anything but a share moving between players (`ShareHook.AfterCreditAsync`,
-  after the commit);
+  the booking**, and at once by **any minutes the organiser receives** — a purchase, a desk
+  sale or adjustment, a refund, anything but a share moving between players (`ShareHook`'s
+  incoming-minutes hook, after the commit);
 - the stamp clears when the return posts or is no longer due;
 - **while it waits it is set aside** from what the organiser may spend, exactly like a hold
-  (§3a, `owed_back_credits`). Posting stays all-or-nothing, so credit arriving short of the whole
-  return accumulates, unspendable, until it covers it — a top-up of 10 against a waiting 16 cannot
-  buy an 8-credit court, and the next 6 pay the partner;
+  (§3a, `owed_back_minutes`). Posting stays all-or-nothing, so minutes arriving short of the whole
+  return accumulate, unspendable, until they cover it — 10 minutes bought against a waiting return
+  of 16 cannot be spent on any booking, and the next 6 pay the partner;
 - after an outage nothing strands: the worker's first pass after it starts reconciles, per club,
   every booking on which a return is due and neither made nor stamped, whatever its age
   (`ShareSweep.CatchUpAsync`) — chosen in SQL from seats whose target is certainly nothing (off the
@@ -205,38 +208,38 @@ covered, before the deadline or after. Spend checks, by contrast, set aside EVER
   costs a retry an hour and one log line per step. A reconcile that succeeds clears the marker —
   but only one recorded before it STARTED, so a failure recorded while it ran survives. One
   booking's failure is logged and the rest of the club's sweep — and every other booking in the
-  hook, the post-settlement and the credit hook alike, each failing booking marked — goes on.
+  hook, the post-settlement and the incoming-minutes hook alike, each failing booking marked — goes on.
   A marked booking with no partner seats (its players all came off, or it never had any) is still
   visited — the sweep reads marked bookings straight off `bookings` — and its marker cleared
   (review round 7). A club's start-up catch-up counts as done once every booking it failed on is
   marked (the marker makes it good); only a failure it could not even mark is retried next pass.
   Rolling the marker migrations back forgets outstanding markers (their `Down` says so).
 - **the marker is staged with the money** (review round 8): every save that may move a booking's
-  `Owed` — a ledger row naming it other than a share transfer (a refund, a penalty, a desk credit
-  or debit naming it), or a change to its status or check-in — sets `ShareReconcileDueAt` on it, when
+  `Owed` — a ledger row naming it other than a share transfer (a refund, a penalty, a desk
+  adjustment up or down naming it), or a change to its status or check-in — sets `ShareReconcileDueAt` on it, when
   it has partner seats, in the SAME transaction (`MainframeDbContext.ShareStaging`), counting no
   failed attempt, so the sweep takes it at its next pass without backing off. The hook's
   reconcile, starting after the commit, clears it (the guarded clear). A settlement whose hook
   never runs — the admin's connection dropped, a restart in between — is therefore made good by the
-  next minute sweep however old the game; before, a desk credit on a game past the sweep's window
+  next minute sweep however old the game; before, a desk adjustment adding minutes on a game past the sweep's window
   stranded the partner's return for good. And the hook itself runs on `CancellationToken.None`,
   whatever token its caller hands it: a request's cancellation must not abort money follow-up.
 - a return starting or stopping waiting moves the organiser's spendable without a ledger row, so
-  their live wallet gets a `balance` frame with `delta_credits` 0 and the reason `share_set_aside`.
+  their live wallet gets a `balance` frame with `delta_minutes` 0 and the reason `share_set_aside`.
 
-**Chaining is not recursive.** When a waiting return posts it credits the partner, but a credit
-arriving as a share transfer does not itself retry that partner's own waiting returns — if Sam's
+**Chaining is not recursive.** When a waiting return posts it pays the partner, but minutes
+arriving as a share transfer do not themselves retry that partner's own waiting returns — if Sam's
 refund from Olive would cover Sam's waiting refund to Jo, Jo is paid at the next minute sweep, not
 in the same breath. That bounds every retry to one level; the cost is a minute's delay down a chain.
 
 Nothing overdraws the organiser silently: only the desk's named overdraft — an admin remove or
 settle-outside sent with `allowNegativeBalance` (§7) — posts it regardless. In practice most late
-returns follow a fall in what the organiser owes, which credits them first.
+returns follow a fall in what the organiser owes, which refunds them first.
 
 **When it runs**: after every participant action (after its own commit); after each existing
 settlement path commits — `POST /bookings/{id}/cancel`, `POST /admin/bookings/{id}/cancel`, the
 admin bulk cancel, the no-show sweep, each court-box event that settles a booking, and **a desk
-credit adjustment naming the booking** (`POST /admin/credit/{user}/adjust` with
+minutes adjustment naming the booking** (`POST /admin/minutes/{user}/adjust` with
 `relatedBookingId`, however old the booking) — through `ShareHook`, in a fresh scope, never
 throwing; and in `ShareWorker`'s minute sweep over every split booking whose game ended within
 `share_lapse_hours` + 7 days (which also reaches the bookings a reversal displaced or a release
@@ -248,12 +251,12 @@ The lapse sweep reads accepted seats only in the week after the deadline (a paid
 lapses), but every still-INVITED seat past its deadline whatever its age (a partial index holds only
 unanswered seats), so an invite outlives no worker outage.
 
-## 3a. Held credits — shares are not spendable until the deadline
+## 3a. Held minutes — shares are not spendable until the deadline
 
 Decided 2026-09-28 (reversible; `memory/decisions-players.md`). A share can come back: the partner
 withdraws, the organiser lowers or re-splits (adding a player re-splits an equal booking), removes
 them, the desk settles it outside the app, or the organiser cancels late (the penalty is theirs
-alone, so the refund falls short of the returns). Each return debits the organiser, so credits an
+alone, so the refund falls short of the returns). Each return debits the organiser, so minutes an
 organiser receives as shares are **held**:
 
 - **What**: per booking the member is the payer of, the net of their `ShareTransfer` rows on it,
@@ -263,7 +266,7 @@ organiser receives as shares are **held**:
   unchanged; `spendable = balance − held`.
 - **Every member spend check** reads `LedgerService.GetSpendableAsync`: a booking (single, bulk, on
   behalf), a walk-up, the charge on activation, a volunteer paying at the box, a partner paying a
-  share (accept and reconcile). A refusal's `current_credits` is the spendable figure. Only an
+  share (accept and reconcile). A refusal's `current_minutes` is the spendable figure. Only an
   admin's explicit `allowNegativeBalance` looks past it.
 - **Consistent under the lock**: a collection raises the organiser's balance and hold in one save,
   so spendable does not move; a return locks the organiser, the lock every spend check holds.
@@ -271,27 +274,27 @@ organiser receives as shares are **held**:
   refund covers every return; after check-in (S4) every share stays owed in full, so nothing is
   held and the organiser may spend it. Anything that later hands such a share back is a return
   that must be covered (§3) — the desk's overdraft is the only way past that.
-- **One meaning for `balance_credits`: the raw balance, everywhere.** Wherever a balance is shown
+- **One meaning for `balance_minutes`: the raw balance, everywhere.** Wherever a balance is shown
   beside a spend — `GET /wallet`, the wallet SSE stream's opening frame and named `balance` frame,
   the invite view, the accept's answer, the admin booking quote and the admin bulk quote —
-  `spendable_credits`, `held_credits` and `owed_back_credits` sit beside it; `GET /wallet`, the
+  `spendable_minutes`, `held_minutes` and `owed_back_minutes` sit beside it; `GET /wallet`, the
   stream and `GET /me/profile` also carry `held_until` (the earliest release — a stamped deadline).
-- **`owed_back_credits`** is the other part that is not spendable: returns already due to
-  partners and WAITING for this member's credits (§3). Kept apart from `held_credits` because it
+- **`owed_back_minutes`** is the other part that is not spendable: returns already due to
+  partners and WAITING for this member's minutes (§3). Kept apart from `held_minutes` because it
   means something else — money that is going, not money that might — and it has no release date.
-  `spendable_credits = balance_credits − held_credits − owed_back_credits`, and every spend check
+  `spendable_minutes = balance_minutes − held_minutes − owed_back_minutes`, and every spend check
   uses exactly that. A booking's own hold is not counted twice when it also has a waiting return.
 
 ## 4. Consent
 
-- A partner **accepts** a seat naming the share they were shown — `expectedShareCredits`, required
+- A partner **accepts** a seat naming the share they were shown — `expectedShareMinutes` (a whole number), required
   on both accept routes (`400 expected_share_required`, asked only once the seat is the caller's).
-  A share that has risen past it is refused `409 share_changed {share_credits}` and nothing
+  A share that has risen past it is refused `409 share_changed {share_minutes}` and nothing
   changes: a tap is consent to the figure the partner read, not the one the organiser typed after.
-  Otherwise the seat becomes `accepted`, `ConsentedCredits` rises to the share, and the first
+  Otherwise the seat becomes `accepted`, `ConsentedMinutes` rises to the share, and the first
   payment posts in the SAME save, under the partner's lock. A partner who cannot cover it from
-  their spendable credits is answered `402 insufficient_balance` with `current_credits` /
-  `required_credits` and nothing changes. The loser of a racing accept is answered from the
+  their spendable minutes is answered `402 insufficient_balance` with `current_minutes` /
+  `required_minutes` and nothing changes. The loser of a racing accept is answered from the
   winner's row: 200 only if the consent on it still covers the share (and the share is still the
   figure they named), else `409 share_changed`.
 - **An open link seat is claimed only through its link.** The seat route answers an unclaimed seat
@@ -315,8 +318,8 @@ organiser receives as shares are **held**:
 - **D12 — the partner's daily cap.** An accepted seat counts against the PARTNER's
   `member_max_slots_per_day` / `member_per_day_max_minutes` (their groups' caps apply), both when
   they accept (`409 partner_cap_exceeded` with the cap's figures) and when they later book for
-  themselves. Asked only for a game still ahead, and only on the first yes. Peak hours, group
-  windows and pricing bind the organiser only.
+  themselves. Asked only for a game still ahead, and only on the first yes. Peak hours and group
+  windows bind the organiser only.
 - **At the court**: an accepted partner with an active membership finds the booking through
   `CourtActivationService.FindForUserAsync` (QR / code), `CandidatesAsync` + `PlayersOfAsync`
   (PIN, biometric). Their scan checks the booking in and stamps their OWN seat's `CheckedInAt`; it
@@ -398,24 +401,24 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 
 | Route | Body → answer |
 | --- | --- |
-| `POST /api/v1/bookings` | + optional `players: [{userId?, guestName?, link?, seat?, weight?, amount?}]`, `splitMode`, `organiserWeight`. Validated in full (against the quoted price) BEFORE booking. → `{booking_id, balance_after_credits, players: {booking_id, participants: [{participant_id, seat, user_id, guest_name, status, share_credits, invite_token, invite_path}]}, players_error}` |
+| `POST /api/v1/bookings` | + optional `players: [{userId?, guestName?, link?, seat?, weight?, amount?}]`, `splitMode`, `organiserWeight`. `amount` is a whole number of minutes. Validated in full (against the price) BEFORE booking. → `{booking_id, balance_after_minutes, players: {booking_id, participants: [{participant_id, seat, user_id, guest_name, status, share_minutes, invite_token, invite_path}]}, players_error}` |
 | `POST /api/v1/bookings/bulk` | + the same `players`/`splitMode`/`organiserWeight`, applied to every newly booked item → adds `players: [{booking_id, players, players_error}]`. The payload's shape is checked price-free, then the split against EVERY item's price, before anything is booked: any failure books nothing |
-| `POST /api/v1/players/split-preview` | `{priceCredits, splitMode, organiserWeight, players}` → `{price_credits, shares: [{seat, team, share_credits, weight}]}` — pure, for the live totals bar |
-| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_credits, weight, consented_credits, paid_credits, target_credits, unpaid_credits, returned_credits, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_credits, organiser_owed_credits, shares_received_credits, organiser_net_credits, unpaid_credits, share_deadline, is_split} (`unpaid_credits` counts every live partner seat still owing, an unclaimed open link seat at its full share until the seat closes or the game is off — review round 1, B4; `returned_credits` is, on a cancelled game, what the cancellation sent back and, elsewhere, every return so far — review round 4, M4-4), attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
+| `POST /api/v1/players/split-preview` | `{priceMinutes, splitMode, organiserWeight, players}` → `{price_minutes, shares: [{seat, team, share_minutes, weight}]}` — pure, for the live totals bar |
+| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_minutes, weight, consented_minutes, paid_minutes, target_minutes, unpaid_minutes, returned_minutes, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_minutes, organiser_owed_minutes, shares_received_minutes, organiser_net_minutes, unpaid_minutes, share_deadline, is_split} (`unpaid_minutes` counts every live partner seat still owing, an unclaimed open link seat at its full share until the seat closes or the game is off — review round 1, B4; `returned_minutes` is, on a cancelled game, what the cancellation sent back and, elsewhere, every return so far — review round 4, M4-4), attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
 | `POST /api/v1/bookings/{id}/players` | organiser: `{players, splitMode?, organiserWeight?}` → as the create's `players`; `409 player_previously_declined` / `player_previously_removed {user_id}`, `409 player_invite_limit {limit, invites_made}` |
 | `DELETE /api/v1/bookings/{id}/players/{pid}` | organiser → `{participant_id, status}` |
 | `POST /api/v1/bookings/{id}/players/{pid}/nudge` | organiser → `{participant_id, nudges_left}`; `429 nudge_limit {limit, retry_after}`; `409 nothing_to_nudge` |
 | `POST /api/v1/bookings/{id}/players/{pid}/link` | organiser → `{participant_id, invite_token, invite_path}` (rotates) |
-| `PUT /api/v1/bookings/{id}/split` | organiser: `{mode, seats: [{participantId, weight?, amount?}]}` → `{booking_id, split_mode, shares: [{participant_id, seat, share_credits, weight, needs_consent}]}` |
-| `POST /api/v1/bookings/{id}/players/{pid}/accept` | partner: `{expectedShareCredits}` → `{participant_id, booking_id, status, share_credits, consented_credits, paid_credits, balance_credits, spendable_credits, held_credits}`; `400 expected_share_required`, `409 share_changed {share_credits}`, `402 insufficient_balance`, `409 partner_cap_exceeded {cap: slots\|minutes, …}`, `409 invite_closed`, `409 already_in_booking`, `409 player_previously_removed`, `403 membership_inactive`; `404 invite_not_found` for an unclaimed link seat (claim it by its link) |
+| `PUT /api/v1/bookings/{id}/split` | organiser: `{mode, seats: [{participantId, weight?, amount?}]}` → `{booking_id, split_mode, shares: [{participant_id, seat, share_minutes, weight, needs_consent}]}` |
+| `POST /api/v1/bookings/{id}/players/{pid}/accept` | partner: `{expectedShareMinutes}` → `{participant_id, booking_id, status, share_minutes, consented_minutes, paid_minutes, balance_minutes, spendable_minutes, held_minutes}`; `400 expected_share_required`, `409 share_changed {share_minutes}`, `402 insufficient_balance`, `409 partner_cap_exceeded {cap: slots\|minutes, …}`, `409 invite_closed`, `409 already_in_booking`, `409 player_previously_removed`, `403 membership_inactive`; `404 invite_not_found` for an unclaimed link seat (claim it by its link) |
 | `POST …/{pid}/decline` · `POST …/{pid}/withdraw` | partner → `{participant_id, status}`; withdraw `409 withdraw_window_closed {closed_at}` |
 | `GET /api/v1/me/invites` | → `{items: [invite], count, timezone}` — the Invites tab and badge; each `invite` also carries `timezone` |
-| `GET /api/v1/me/invites/{participantId}` | → the caller's OWN seat in any status: `{participant_id, booking_id, status, lapsed, settled_outside, booking_status, court_name, starts_at, ends_at, organiser_name, share_credits, timezone}`; 404 for anybody else's seat (review round 1, for F2's deep links) |
-| `GET /api/v1/invites/{token}/preview` | **anonymous** — `{organiser_first_name, court_name, starts_at, ends_at, share_credits, timezone}` and nothing else; `404 invite_not_found` for an unknown or other club's token, an answered seat, a game that is not `Booked`, or a closed share window. The token is the credential; global per-address limiter (review round 1, F2) |
+| `GET /api/v1/me/invites/{participantId}` | → the caller's OWN seat in any status: `{participant_id, booking_id, status, lapsed, settled_outside, booking_status, court_name, starts_at, ends_at, organiser_name, share_minutes, timezone}`; 404 for anybody else's seat (review round 1, for F2's deep links) |
+| `GET /api/v1/invites/{token}/preview` | **anonymous** — `{organiser_first_name, court_name, starts_at, ends_at, share_minutes, timezone}` and nothing else; `404 invite_not_found` for an unknown or other club's token, an answered seat, a game that is not `Booked`, or a closed share window. The token is the credential; global per-address limiter (review round 1, F2) |
 | `GET /api/v1/invites/{token}` | → `invite`; 404 `invite_not_found`, 409 `invite_closed`, 409 `already_in_booking`, 409 `player_previously_removed` |
-| `POST /api/v1/invites/{token}/accept` · `…/decline` | as the seat routes (accept takes `{expectedShareCredits}`) |
+| `POST /api/v1/invites/{token}/accept` · `…/decline` | as the seat routes (accept takes `{expectedShareMinutes}`) |
 | `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games}]}` — only games that have started AND the box checked in (review round 1, B11) |
-| `GET /api/v1/me/bookings/upcoming` | → `{timezone, items: [{booking_id, court_name, starts_at, ends_at, role: organiser\|partner, status, players [{name, photo_url, status}], my_share_credits, needs_action}]}` — every `Booked` game whose end is ahead where the caller is organiser or on an ACCEPTED partner seat, soonest first, at most 50 (review round 1, B2). `my_share_credits`: a partner's own share; the organiser's is the price less the live partners' shares. `needs_action`: a partner asked for more than they consented to, or still owing on an open seat. The schedule marks an accepted partner's game `isMine: true` with `role: "partner"` (`"organiser"` on the booker's own; null otherwise). |
+| `GET /api/v1/me/bookings/upcoming` | → `{timezone, items: [{booking_id, court_name, starts_at, ends_at, role: organiser\|partner, status, players [{name, photo_url, status}], my_share_minutes, needs_action}]}` — every `Booked` game whose end is ahead where the caller is organiser or on an ACCEPTED partner seat, soonest first, at most 50 (review round 1, B2). `my_share_minutes`: a partner's own share; the organiser's is the price less the live partners' shares. `needs_action`: a partner asked for more than they consented to, or still owing on an open seat. The schedule marks an accepted partner's game `isMine: true` with `role: "partner"` (`"organiser"` on the booker's own; null otherwise). |
 | `GET /api/v1/me/bookings/recent` | → `{timezone, items: [ …the upcoming item…, result_status: none\|pending\|confirmed\|disputed, can_record }]}` — every `Booked`/`Completed`/`NoShow` game that ENDED within `result_record_days` (7) where the caller is the organiser or holds an accepted partner seat, newest first, at most 50 (review round 2, C3). `result_status` is the live result (a pending one past its deadline reads `confirmed`); `can_record` is play.md §3.1's test with no live result. The upcoming list does not carry the two fields. |
 | *(notice)* `players.club_seat` | review round 1, B8: the club added the member to a game (`Accepted: false`, links the invite; keyed `invited:club:` so the invite loop's collapse applies) or put them in it (admin add with `accepted`, or accept-on-behalf; links the booking; nothing collected until they accept their share). Mailed. A club collect's receipts say the club collected it and, below zero, where the partner's balance stands; a received share's receipt says it is held and until when (B12). |
 | `GET /api/v1/me/partners/favourites` · `PUT`/`DELETE /api/v1/me/partners/favourites/{userId}` | → `{items: [{user_id, name, photo_url}]}` / `{user_id, favourite}` |
@@ -425,27 +428,27 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `POST /api/v1/me/notifications/{id}/read` · `POST …/read-all` | → `{id, read}` / `{marked}` |
 | `GET/PUT /api/v1/me/preferences` | + `share_results` (D13, stored only); `findable_in_directory` and `show_on_leaderboards` accepted as aliases of `findable` and `show_in_leaderboards` |
 
-`invite` = `{participant_id, booking_id, status, seat, team, open_link, court_name, starts_at, ends_at, organiser {user_id, name, photo_url}, players, share_credits, to_pay_credits, needs_consent, balance_credits, spendable_credits, held_credits, balance_after_credits, short_by_credits, share_deadline, cap, timezone}` — `balance_credits` is the viewer's raw balance and `balance_after_credits` that less `to_pay_credits`; `short_by_credits` is measured against `spendable_credits` (§3a), which is what the accept checks; `share_deadline` is the booking's frozen deadline (§3); `cap` is null, or the partner-cap figures when accepting would break the partner's own daily cap.
+`invite` = `{participant_id, booking_id, status, seat, team, open_link, court_name, starts_at, ends_at, organiser {user_id, name, photo_url}, players, share_minutes, to_pay_minutes, needs_consent, balance_minutes, spendable_minutes, held_minutes, balance_after_minutes, short_by_minutes, share_deadline, cap, timezone}` — `balance_minutes` is the viewer's raw balance and `balance_after_minutes` that less `to_pay_minutes`; `short_by_minutes` is measured against `spendable_minutes` (§3a), which is what the accept checks; `share_deadline` is the booking's frozen deadline (§3); `cap` is null, or the partner-cap figures when accepting would break the partner's own daily cap.
 
 **Every member payload that is a cold entry point carries the club's zone** as a top-level `timezone` (as does `GET /api/v1/me/profile`, read at every app start). A member opens a booking or an invite straight from a mail, on a phone that may be in another zone; the client learns the zone from any top-level `timezone` and, until it has, writes court times in the phone's zone. A stored zone the platform cannot read is reported as `UTC`, the zone the times were actually computed in.
 
-**Wallet and profile (§3a)**: `GET /api/v1/wallet` adds `held_credits`, `spendable_credits`,
+**Wallet and profile (§3a)**: `GET /api/v1/wallet` adds `held_minutes`, `spendable_minutes`,
 `held_until`; the wallet SSE stream's opening frame and named `balance` frame carry the same three;
-`GET /api/v1/me/profile` adds `held_credits`, `owed_back_credits`, `held_until`. `held_until` is null when nothing is held.
-All of them (and the admin member detail) also carry `held_parts: [{credits, until}]` — one part per share deadline,
-soonest first, summing to `held_credits` (review round 2, C4); `held_until` is the first part's `until`, kept for older clients.
-The admin booking quote and the admin bulk quote add `spendable_credits` and `held_credits`;
-their `balance_credits` is raw and their `overdraws` is on spendable.
+`GET /api/v1/me/profile` adds `held_minutes`, `owed_back_minutes`, `held_until`. `held_until` is null when nothing is held.
+All of them (and the admin member detail) also carry `held_parts: [{minutes, until}]` — one part per share deadline,
+soonest first, summing to `held_minutes` (review round 2, C4); `held_until` is the first part's `until`, kept for older clients.
+The admin booking quote and the admin bulk quote add `spendable_minutes` and `held_minutes`;
+their `balance_minutes` is raw and their `overdraws` is on spendable.
 
 ### Admin (god mode — every one in `admin_change_log`)
 
 | Route | Body → answer |
 | --- | --- |
 | `POST /api/v1/admin/bookings/{id}/players` | `{userId? \| guestName?, accepted?, reason?}` — neither: an open link seat. `accepted` places a member without their consent (collects nothing). → as the organiser's add |
-| `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason, allowNegativeBalance?}` → `{participant_id, status, return_waiting, return_credits}` — `return_waiting` is true (with `return_credits`, the amount due back) when the hand-back passed the coverage check but a spend raced it and the reconcile left it waiting (§3); `return_credits` is null otherwise. `allowNegativeBalance: true` is required whenever the hand-back is not covered by the organiser's coverage (§3), whatever the deadline: `400 overdraft_not_authorised {return_credits, covered_credits}` |
+| `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason, allowNegativeBalance?}` → `{participant_id, status, return_waiting, return_minutes}` — `return_waiting` is true (with `return_minutes`, the amount due back) when the hand-back passed the coverage check but a spend raced it and the reconcile left it waiting (§3); `return_minutes` is null otherwise. `allowNegativeBalance: true` is required whenever the hand-back is not covered by the organiser's coverage (§3), whatever the deadline: `400 overdraft_not_authorised {return_minutes, covered_minutes}` |
 | `POST …/{pid}/accept` | `{reason}` — accept on behalf; records no consent |
-| `POST …/{pid}/settle-outside` | `{reason, allowNegativeBalance?}` → as remove, with `return_waiting` / `return_credits` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted`. `allowNegativeBalance: true` is required whenever the hand-back is not covered, as for remove |
-| `POST …/{pid}/collect` | `{reason, allowNegativeBalance: true}` — the only path that may take a partner below zero, or collect from a lapsed seat → `{participant_id, collected_credits, balance_after_credits}`; `400 overdraft_not_authorised`, `409 nothing_to_collect`, `409 conflict_retry`. The consent, the change-log line (the figure actually posted) and the pair are one transaction under the partner's lock |
+| `POST …/{pid}/settle-outside` | `{reason, allowNegativeBalance?}` → as remove, with `return_waiting` / `return_minutes` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted`. `allowNegativeBalance: true` is required whenever the hand-back is not covered, as for remove |
+| `POST …/{pid}/collect` | `{reason, allowNegativeBalance: true}` — the only path that may take a partner below zero, or collect from a lapsed seat → `{participant_id, collected_minutes, balance_after_minutes}`; `400 overdraft_not_authorised`, `409 nothing_to_collect`, `409 conflict_retry`. The consent, the change-log line (the figure actually posted) and the pair are one transaction under the partner's lock |
 
 Change-log actions: `booking.player_added`, `booking.player_removed`,
 `booking.player_accepted_on_behalf`, `booking.share_settled_outside`, `booking.share_collected`
@@ -475,7 +478,7 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 | --- | --- |
 | Seats, split, consent, accept/decline/withdraw | `Services/Players/PlayersService.cs`, `PlayersService.Member.cs`, `SplitCalculator.cs` |
 | The target rule | `Services/Players/ShareRules.cs` |
-| Held credits, spendable | `Services/Players/ShareHolds.cs`, `Services/LedgerService.cs` — `GetHeldAsync`, `GetSpendableAsync` |
+| Held minutes, spendable | `Services/Players/ShareHolds.cs`, `Services/LedgerService.cs` — `GetHeldAsync`, `GetSpendableAsync` |
 | The one writer of `ShareTransfer` | `Services/Players/ShareLedger.cs` |
 | After settlement / the minute sweep | `Services/Players/ShareHook.cs`, `ShareSweep.cs`, `Workers/ShareWorker.cs`; the marker staged with the money: `Persistence/MainframeDbContext.ShareStaging.cs` |
 | Partner cap (D12) | `Services/BookingRules.cs` — `PartnerCapRefusalAsync`, `HeldAsync` |

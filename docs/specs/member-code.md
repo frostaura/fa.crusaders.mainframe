@@ -397,8 +397,9 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    `code_step` to `codes:m1` devices. Phones still show legacy codes. Dean can pilot v1 on his own
    phone: v1 tokens are accepted online everywhere, even from un-flashed boards, because a board
    passes scanned bytes through unchanged.
-2. **Dean flashes** the ESP8266 bridge (2.1.0) and each ESP32 door (1.1.0) — the physical USB step,
-   below. Each board then reports `codes:m1`.
+2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.0,
+   which also shows pay-for amounts in minutes, §9.3) and each ESP32 door (1.1.0) — the physical USB
+   step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
    `codes:m1` on its latest heartbeat (and at least one does), the phase becomes `v1` and
    `member_code_cutover_at` is stamped. Phones switch to v1 codes; `codes:m1` devices get v1 roster
@@ -422,8 +423,9 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
   **1 ON 2 ON 3 ON 4 ON 5–8 OFF**. (`make flash-bridge` is the PlatformIO equivalent.)
 - **Each door (ESP32)**: Arduino IDE, sketch `src/iot/door-gate/arduino/door_gate/`, board
   `esp32:esp32:esp32` (core 2.0.17), its own `secrets.h`; USB, upload.
-- **Proof it landed**: the Devices page shows firmware **2.1.0** for the box and **1.1.0** for
-  each door, and — once the backend lane ships — `codes:m1`.
+- **Proof it landed**: the Devices page shows firmware **2.2.0** for the box (a box still on
+  2.1.0 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
+  `codes:m1`. The Mega stays **2.0.0**: the bridge is the only half of the box that is flashed.
 
 ---
 
@@ -470,17 +472,31 @@ quote and its confirm; `amount_label` is confirm-only; `scan_age_ms` is v1-only 
 Every decision is a **200** (the door's rule: a refusal is an answer):
 
 ```json
-{"payable":true,"reason":"ok","court_number":2,"amount_credits":50.0,"amount_label":"50"}
+{"payable":true,"reason":"ok","court_number":2,"amount_minutes":50,"amount_label":"50"}
 {"payable":false,"reason":"split_booking","court_number":2}
-{"paid":true,"reason":"ok","court_number":2,"amount_credits":50.0,"amount_label":"50","balance_after_credits":118.0,"replayed":false,"granted_seconds":0}
+{"paid":true,"reason":"ok","court_number":2,"amount_minutes":50,"amount_label":"50","balance_after_minutes":118,"replayed":false,"granted_seconds":0}
 {"paid":false,"reason":"price_changed","court_number":2,"amount_label":"55"}
 ```
 
-`amount_label` is the **server's** rendering of `amount_credits`, invariant culture, at most one
-decimal point and two decimals, no trailing zeros (`50`, `32.5`), **at most 6 characters** — the
-box has no decimal arithmetic and shows the label verbatim; a longer one is not a quote the glass
-can ask (the box treats it as no decision). The server refuses a confirm whose `amount_label` is
-not its current label with `price_changed`, so a member pays what they agreed to or nothing.
+The quote body is `{payable, reason, court_number, amount_minutes, amount_label}` and the confirm
+body `{paid, reason, court_number, amount_minutes, amount_label, balance_after_minutes, replayed,
+granted_seconds}`, in that byte order; every amount is a whole number of minutes. The firmware reads
+none of the `*_minutes` keys — only `amount_label` and the reason.
+
+`amount_label` is the **server's** rendering of `amount_minutes` (`MoneyFormat.MinutesLabel`): the
+whole number of minutes in invariant culture, **1–4 ASCII digits** with no sign, separator or
+decimal point (`45`, `9999`). The box does no arithmetic on it and shows it verbatim. Its
+`validAmountLabel` accepts exactly 1–4 digits, with a leading zero only for `"0"`; anything else is
+not a quote the glass can ask, and the box treats it as no decision (the corpus's five-digit
+`12345` falls back to the walk-up choice). A price above 9999 minutes never gets that far: the
+server refuses it as `amount_unshowable` before any money moves, a reason the box does not know by
+name, so it shows `SEE THE DESK`. `kMaxAmountLabelLen` (the server's `MaxLabelLength`) stays 6 as
+the buffer and wire bound; four digits is the content rule. The server refuses a confirm whose
+`amount_label` is not its current label with `price_changed`, so a member pays what they agreed to
+or nothing.
+
+A bridge still on 2.1.0 keeps working against this server, because a whole-number label passes its
+older check, but its glass names the unit `cr` instead of `MIN` until it is flashed to 2.2.0.
 
 Reasons: `not_booked` (nothing live on that court — the box falls back to walk-up), `split_booking`
 (**any** accepted partner holds a share — D11: shares are paid in the app, never at the box),
@@ -499,17 +515,18 @@ The firmware drives the fitted 20×4 panel with the **safe-subset contract**: ro
 16 columns must still be a complete message (a 1602 fitted by mistake degrades, never lies), row 3
 holds what to press in columns 0–15 with the countdown in 16–19. Every screen below is in the
 `ScreenScript` table and the table-driven contract test renders each at its widest facts —
-court **9999**, label **9999.5** — and asserts all of it.
+court **9999**, label **9999** — and asserts all of it.
 
-The founder's words are `CT2 BOOKED / PAY 50cr? PRESS CT2`. As two lines, row 1 would be 19
-columns and the safe subset clips it to `PAY 50cr? PRESS ` — a question with its instruction cut
-off. So the same words run down three rows:
+The founder's words, in minutes, are `CT2 BOOKED / PAY 50 MIN? PRESS CT2`. As two lines, row 1
+would be 21 columns and the safe subset clips it to `PAY 50 MIN? PRES` — a question with its
+instruction cut off. So the same words run down three rows:
 
 | Screen | Row 0 | Row 1 | Row 2 | Row 3 | Hold |
 |---|---|---|---|---|---|
-| `PayForQuote` | `CT2 BOOKED` | `PAY 50cr?` | `PRESS CT2 TO PAY` | `A   B   C   D` + countdown | choice |
-| widest | `CT9999 BOOKED` (13) | `PAY 9999.5cr?` (13) | `PRESS CT9999 TO PAY` (19) | court cells | |
-| `PayForPaid` | `PAID FOR CT2` | `50cr CHARGED` | `Booker refunded` | `THANK YOU` | revert |
+| `PayForQuote` | `CT2 BOOKED` | `PAY 50 MIN?` | `PRESS CT2 TO PAY` | `A   B   C   D` + countdown | choice |
+| widest | `CT9999 BOOKED` (13) | `PAY 9999 MIN?` (13) | `PRESS CT9999 TO PAY` (19) | court cells | |
+| `PayForPaid` | `PAID FOR CT2` | `50 MIN PAID` | `Booker refunded` | `THANK YOU` | revert |
+| widest | `PAID FOR CT9999` (15) | `9999 MIN PAID` (13) | | | |
 | `PayForSplit` | `SPLIT BOOKING` | `PAY IN APP` | `Each player's share` | `NOTHING CHARGED` | revert |
 | `PayForNothingToPay` | `NOTHING TO PAY` | `Already paid for` | — | `NOTHING CHARGED` | revert |
 | `PayForPriceChanged` | `PRICE CHANGED` | `Nothing charged` | `Press court again` | court cells | revert |
@@ -517,7 +534,9 @@ off. So the same words run down three rows:
 
 The founder's `SPLIT - PAY IN APP` is 18 columns; it becomes `SPLIT BOOKING` over `PAY IN APP`,
 keeping the instruction verbatim. Other refusals reuse the existing screens:
-`insufficient_balance` → `TOO FEW CREDITS`, `not_recognised`/`code_used` → `CODE NOT KNOWN`,
+`insufficient_balance` → `TOO FEW MINUTES` (the `InsufficientBalance` screen: `TOO FEW MINUTES` /
+`Buy more time` / `Buy in the app`; a walk-up or a scan refused for balance shows `TOO FEW MINUTES` /
+`BUY & RETRY`), `not_recognised`/`code_used` → `CODE NOT KNOWN`,
 `ended` → `THAT SLOT ENDED`, anything else → `SEE THE DESK`; no connection on a confirm →
 `NO CONNECTION`. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
 `!LCD` lines ahead of the `!ON`. **Everything reaches the Mega through `!ROW`/`!SHOW`/`!LCD`/`!ON`
@@ -668,8 +687,9 @@ Each is a server behaviour; none changes a byte the corpus holds.
   lost phone's passkey signs straight back in under the new epoch and enrols for the new secret;
   *why false for oneself:* signing out a forgotten tablet should not cost the passkey on the phone
   in hand. A member without a code row still has their sessions ended.
-- **Pay-for refusals beyond §9.2.** A price whose label would exceed six characters is refused as
-  `amount_unshowable` (the box reads it as SEE THE DESK) rather than sent for the box to discard.
+- **Pay-for refusals beyond §9.2.** A price above 9999 minutes, whose label would exceed four
+  digits, is refused as `amount_unshowable` before any money moves (the box reads it as SEE THE
+  DESK) rather than sent for the box to discard.
   `not_chargeable` answers a booking the reassignment path will not touch — including one **never
   charged**: D10 takes over a paid charge, and the box's PAID glass ("Booker refunded") and both
   emails would be false with nobody refunded; the glass is firmware, so the server refuses instead.

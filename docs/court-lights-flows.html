@@ -284,7 +284,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
       <p class="why">One compose file brings up Postgres, the API, the web app and the gateway that serves both on port 8088.</p>
 <pre><code>docker compose up -d --build</code></pre>
       <ul>
-        <li>Open <code>http://&lt;server-address&gt;:8088</code> on the LAN. Create the admin account and the club (tenant); set prices, windows and the default button map under <b>Settings</b>.</li>
+        <li>Open <code>http://&lt;server-address&gt;:8088</code> on the LAN. Create the admin account and the club (tenant); set windows and the default button map under <b>Settings</b>, and check the minute packages members will buy under <b>Packages</b>.</li>
         <li>To update later: <code>git pull</code> then the same command. Data lives in a Docker volume and survives it.</li>
       </ul>
     </li>
@@ -357,12 +357,12 @@ SCAN TO START</span>.</li>
 </section>
 
 <section id="doors">
-  <header><h2>…and the doors</h2><p>The same club, the same key, the same API — one small board per door instead of one per four courts. A member holds up the code their phone already shows them and the lock lets go for fifteen seconds. Nothing here touches a court, a booking or a credit.</p></header>
+  <header><h2>…and the doors</h2><p>The same club, the same key, the same API — one small board per door instead of one per four courts. A member holds up the code their phone already shows them and the lock lets go for fifteen seconds. Nothing here touches a court, a booking or a balance.</p></header>
 
   <div class="tiles">
     <div class="tile"><div class="k">The board</div><div class="v">One ESP32, one lock, one lamp.</div><div class="d">A QR scanner on a serial port, one relay on the lock, one LED. No screen and no buttons — the lamp is the whole of what a member sees. It calls out and never listens, exactly like the court box.</div></div>
     <div class="tile"><div class="k">The image</div><div class="v">One firmware for every door.</div><div class="d">Nothing about a particular door is compiled in. You name the door in the web app; the board never learns its own name, so a spare board is simply a spare board.</div></div>
-    <div class="tile"><div class="k">The rule</div><div class="v">A door is not attendance.</div><div class="d">Walking in may mean collecting a racquet or watching someone else play. An open never checks anyone in, never reverses a no-show and never moves a credit.</div></div>
+    <div class="tile"><div class="k">The rule</div><div class="v">A door is not attendance.</div><div class="d">Walking in may mean collecting a racquet or watching someone else play. An open never checks anyone in, never reverses a no-show and never moves a minute of anyone's balance.</div></div>
   </div>
 
   <div id="doorlist" style="margin-top:22px"></div>
@@ -440,10 +440,10 @@ SEE THE DESK</span></td><td>The code is known but there is nothing to light: no 
 SEE THE DESK</span></td><td>Booking code for a court this box doesn't switch (offline it names it: <span class="lcd">COURT B NOT C</span>).</td><td>Go to the right court.</td></tr>
       <tr><td><span class="lcd">COURT B IS ON
 ALREADY LIT</span></td><td>Offline re-scan on a court that is already lit.</td><td>Nothing; OFF still works for the person who lit it.</td></tr>
-      <tr><td><span class="lcd">TOO FEW CREDITS
-TOP UP &amp; RETRY</span> / <span class="lcd">COURT NOT FREE
+      <tr><td><span class="lcd">TOO FEW MINUTES
+BUY &amp; RETRY</span> / <span class="lcd">COURT NOT FREE
 SCAN TO START</span> / <span class="lcd">NO TIME BEFORE
-NEXT BOOKING</span></td><td>Walk-up refused by the backend: balance, the court is lit, or a booking starts too soon.</td><td>Top up, pick another court, or a shorter time.</td></tr>
+NEXT BOOKING</span></td><td>Walk-up refused by the backend: balance, the court is lit, or a booking starts too soon.</td><td>Buy minutes in the app, pick another court, or a shorter time.</td></tr>
       <tr><td><span class="lcd">NOT YOUR COURT
 SCAN TO START</span></td><td>OFF pressed for a court by someone other than the person who lit it.</td><td>Nothing; the timer will end it.</td></tr>
       <tr><td><span class="lcd">TRY AGAIN
@@ -496,11 +496,11 @@ var FLOWS=[
   {l:'api',t:'Last seen',d:'Stamps <i>last seen</i>. The Devices page calls a box offline after three missed beats at the interval you set, but never sooner than three minutes.<small>The floor matters at short intervals: on the 15-second minimum, three beats is 45 seconds and ordinary WiFi jitter would paint healthy boxes red all evening. At the default 60 s the two agree exactly.</small>'}
  ]},
 {id:'book',t:'Booking a court',tags:['member','money'],tg:['charge at booking'],
- s:'The slot, the credit charge and the court code are created in one transaction. The code is what the member shows at the box.',
+ s:'The slot, the charge in minutes and the court code are created in one transaction. The code is what the member shows at the box.',
  steps:[
   {l:'phone',t:'Pick a slot',d:'Member picks a court and a time slice. The grid shows photo and name only, and it only draws the hours that weekday is open — the club\'s opening hours are a per-day setting the booking rule enforces, not a label.',
-   o:[{t:'outside opening hours',d:'Refused with that day\'s own open and close times. A slice that starts inside the window but runs past close is refused too, rather than silently shortened.'},{t:'too few credits',d:'Refused with the balance and the price. An admin booking on the member\'s behalf may re-send the request asking for the overdraft by name — same price, same charge, wallet goes negative, and the audit row says who authorised it and how deep.'}]},
-  {l:'api',t:'Reserve + charge + mint',d:'In one unit of work: reserve the slot (a database exclusion constraint makes a double-booking impossible), post the <code>BookingCharge</code> ledger row in credits, mint the booking\'s 12-character code.<small>Balance is never a stored number; it is the sum of ledger rows. Every row carries actor, subject, reason and reference.</small>'},
+   o:[{t:'outside opening hours',d:'Refused with that day\'s own open and close times. A slice that starts inside the window but runs past close is refused too, rather than silently shortened.'},{t:'too few minutes',d:'Refused with the balance and the price. An admin booking on the member\'s behalf may re-send the request asking for the overdraft by name — same price, same charge, wallet goes negative, and the audit row says who authorised it and how deep.'}]},
+  {l:'api',t:'Reserve + charge + mint',d:'In one unit of work: reserve the slot (a database exclusion constraint makes a double-booking impossible), post the <code>BookingCharge</code> ledger row for exactly the booking\'s length in minutes, mint the booking\'s 12-character code.<small>Balance is never a stored number; it is the sum of ledger rows. Every row carries actor, subject, reason and reference.</small>'},
   {l:'phone',t:'Court Code page',d:'Shows the code as a QR and as text. Valid until the booking ends plus the grace window.'},
   {l:'api',t:'Email + webhooks',d:'The member gets an email. Webhooks mirror the same event for anyone the club has wired up.',
    o:[{t:'cancel early',d:'Full refund as a separate ledger row.'},{t:'cancel late',d:'Refund minus the late-cancellation penalty, posted as two rows so "how much penalty did I pay?" always has an answer.'},{t:'after lights-on',d:'Nothing comes back.'}]},
@@ -538,7 +538,7 @@ var FLOWS=[
   {l:'mega',t:'Time',d:'They press a duration and the ESP turns the two presses into an intent: court C, 30 minutes. Any press re-arms the screen\'s own clock, so reading it slowly never loses the choice.'},
   {l:'box',t:'POST walkup',d:'Sends <code>{mac, court, minutes, token, nonce}</code>. The nonce is reused on a retry so a flaky link can\'t charge twice.'},
   {l:'api',t:'Price, charge, grant',d:'Checks the balance, creates a walk-up booking, posts the charge, answers granted seconds. A replayed nonce returns the original grant.',
-   o:[{t:'insufficient_balance',d:'',lcd:L('TOO FEW CREDITS','TOP UP & RETRY')},{t:'court_in_use',d:'',lcd:L('COURT NOT FREE','SCAN TO START')},{t:'no_time_available',d:'The court is free but a booking starts before the requested time would end.',lcd:L('NO TIME BEFORE','NEXT BOOKING')},{t:'offline',d:'Money needs the backend.',lcd:L('NO CONNECTION','SCAN TO START')}]},
+   o:[{t:'insufficient_balance',d:'',lcd:L('TOO FEW MINUTES','BUY & RETRY')},{t:'court_in_use',d:'',lcd:L('COURT NOT FREE','SCAN TO START')},{t:'no_time_available',d:'The court is free but a booking starts before the requested time would end.',lcd:L('NO TIME BEFORE','NEXT BOOKING')},{t:'offline',d:'Money needs the backend.',lcd:L('NO CONNECTION','SCAN TO START')}]},
   {l:'mega',t:'Lights',d:'Relay closes; the button window disarms on spend so a second press can\'t buy again on the same scan.',lcd:L('COURT C  30 MIN')}
  ]},
 {id:'off',t:'Lights off: on time, by button, or past the cap',tags:['member','hardware'],tg:['hardware'],
@@ -577,15 +577,15 @@ var FLOWS=[
   {l:'api',t:'Activation lands',d:'The cue gate applies (scanned before the window → nothing charged). Otherwise the lit window is bounded to the booking\'s own slot, the sold minutes and the release\'s held time, and priced pro-rata. The retained late penalty is netted so the total never exceeds the original price.'},
   {l:'phone',t:'Email',d:'Says the lights ran N minutes and what it cost.'}
  ]},
-{id:'topup',t:'Topping up credits with PayFast',tags:['member','money'],tg:['ZAR → credits'],
- s:'Rand is captured for reconciliation; the ledger only ever speaks credits.',
+{id:'topup',t:'Buying minutes with PayFast',tags:['member','money'],tg:['ZAR → minutes'],
+ s:'Members buy packages of minutes. Rand is captured for reconciliation; a balance only ever counts whole minutes.',
  steps:[
-  {l:'phone',t:'Choose amount',d:'The page shows the credits it converts to at the member-class rate.'},
-  {l:'api',t:'Pending top-up',d:'Creates a <code>PendingTopup</code> row holding the rand amount and redirects to PayFast.'},
+  {l:'phone',t:'Choose a package',d:'The page lists the club\'s packages, at the member\'s group discount if one of their groups sets one, and any packages of the member\'s own groups. A discount lowers the rand price, never the minutes. There is no spend cap.'},
+  {l:'api',t:'Lock the purchase',d:'Creates a <code>PendingTopup</code> row locking the package, its minutes and the rand price, and redirects to PayFast. Editing the package afterwards never changes this checkout; an unpaid one expires after an hour.'},
   {l:'pay',t:'Checkout',d:'PayFast takes the payment.'},
   {l:'pay',t:'ITN webhook',d:'PayFast calls the backend\'s notification endpoint.'},
-  {l:'api',t:'Credit the ledger',d:'Validates the signature and the amount against the pending row, posts one credit-denominated <code>TopUp</code> row, marks the pending row settled.',
-   o:[{t:'replayed ITN',d:'Recognised and ignored; no second credit.'}]},
+  {l:'api',t:'Add the minutes',d:'Validates the signature and the amount against the pending row, posts one <code>TopUp</code> row for the locked minutes, marks the pending row settled.',
+   o:[{t:'replayed ITN',d:'Recognised and ignored; the minutes are never added twice.'}]},
   {l:'phone',t:'Balance updates',d:'Email confirms.'}
  ]},
 {id:'link',t:'Inside the box: Mega and ESP keep each other honest',tags:['hardware'],tg:['9600 baud'],
@@ -603,20 +603,20 @@ var FLOWS=[
   {l:'mega',t:'Watchdog + I²C guard',d:'A watchdog guards the whole loop; the display bus has a timeout and re-syncs itself after a hiccup instead of freezing the glass or the board.<small>The Mega\'s relay timer is independent of the ESP: a court never stays lit because the bridge stopped talking.</small>'}
  ]},
 {id:'admin',t:'Changing settings from anywhere',tags:['admin'],tg:['next heartbeat'],
- s:'Court numbers, button maps, prices, windows and the heartbeat interval are edited on the web and reach the box within a minute. Nothing is configured on the box.',
+ s:'Court numbers, button maps, windows and the heartbeat interval are edited on the web and reach the box within a minute. Nothing is configured on the box.',
  steps:[
-  {l:'desk',t:'Save on the web',d:'<b>Devices:</b> name, court per relay, per-box button map (a minute button may grant 1 to 90; 90 is the relay cap, and the default map is 15/30/45/60), delete. <b>Settings:</b> slice prices, grace and cue windows, walk-up max, heartbeat interval (15–300 s), the club\'s default button map.'},
+  {l:'desk',t:'Save on the web',d:'<b>Devices:</b> name, court per relay, per-box button map (a minute button may grant 1 to 90; 90 is the relay cap, and the default map is 15/30/45/60), delete. <b>Settings:</b> slice length, grace and cue windows, walk-up max, heartbeat interval (15–300 s), the club\'s default button map.'},
   {l:'api',t:'Validate + store',d:'A button can\'t name a court the box doesn\'t have; every number is a tenant setting, none hardcoded.<small>A save on the Devices page sends only its own fields, so it can\'t revert something someone changed on Settings meanwhile.</small>'},
   {l:'box',t:'Next heartbeat',d:'Picks the change up within the interval. The Devices page\'s offline threshold follows the interval you set — three missed beats, floored at three minutes.'},
   {l:'mega',t:'Applied',d:'New court mapping and button meanings are live.'}
  ]},
-{id:'adjust',t:'The desk adjusts a member\'s credits',tags:['admin','money'],tg:['manual'],
+{id:'adjust',t:'The desk adjusts a member\'s minutes',tags:['admin','money'],tg:['manual'],
  s:'Manual compensation is money that already moved. The system nets it; it never treats it as an instruction.',
  steps:[
-  {l:'desk',t:'Adjust ± credits',d:'An amount, a reason, and optionally which of <i>this member\'s</i> bookings it relates to.',
+  {l:'desk',t:'Adjust ± minutes',d:'A whole number of minutes, a reason, and optionally which of <i>this member\'s</i> bookings it relates to.',
    o:[{t:'another member\'s booking',d:'Refused by the backend.'}]},
   {l:'api',t:'Ledger row + audit',d:'Posted as <code>{actor: admin, subject: member}</code> with the reason; the member is emailed.'},
-  {l:'api',t:'Netted later',d:'If a reversal later runs for that booking, a positive adjustment reduces the penalty it gives back and a negative one reduces the refund it takes away, stopping at zero per leg. The audit row records which adjustments were netted.<small>A wrong no-show does not need a hand credit at all; the late scan reverses it on its own.</small>'}
+  {l:'api',t:'Netted later',d:'If a reversal later runs for that booking, a positive adjustment reduces the penalty it gives back and a negative one reduces the refund it takes away, stopping at zero per leg. The audit row records which adjustments were netted.<small>A wrong no-show does not need a hand adjustment at all; the late scan reverses it on its own.</small>'}
  ]}
 ];
 
@@ -625,7 +625,7 @@ var DEPLOY={id:'deploy',t:'Deployment order',tags:[],tg:['once'],
  steps:[
   {l:'you',t:'Prepare the server',d:'Any always-on machine on the club LAN. Docker installed, a DHCP reservation on the router so its address never changes, <code>.env</code> filled in from <code>.env.example</code>.'},
   {l:'server',t:'docker compose up',d:'One command brings up Postgres, the API, the web app and the gateway on port 8088.'},
-  {l:'web',t:'Create club + settings',d:'Admin account, the club, prices, windows and the default button map under <b>Settings</b>.',
+  {l:'web',t:'Create club + settings',d:'Admin account, the club, windows and the default button map under <b>Settings</b>. A new club starts with three minute packages (1, 5 and 10 hours) under <b>Packages</b>.',
    o:[{t:'Cloudflare (optional)',d:'A tunnel on the same machine pointing at port 8088 gives members remote booking. The box never uses it.'}]},
   {l:'web',t:'Copy the API key',d:'<b>Devices → Device API key → reveal → copy.</b>'},
   {l:'you',t:'Write secrets.h',d:'Four lines beside the bridge sketch: WiFi name, WiFi password, <code>http://&lt;reserved-address&gt;:8088</code>, the key.'},
@@ -730,7 +730,7 @@ var DOORS=[
    o:[{t:'too early',d:'A real booking, but its entry window has not opened yet. Told plainly, because the club minted that code for that person and a desk may not be staffed.'},{t:'not recognised',d:'Unknown, expired, another club\'s — or a booking code presented after its slot ended. Deliberately one answer for all of them: a door that told them apart would be a way to test which codes are real.'},{t:'not an active member',d:'Suspended, rejected, or not yet approved.'},{t:'no booking',d:'Only under the bookings-only policy, and only for somebody who is not a club admin.'}]},
   {l:'gate',t:'Release the lock',d:'For the club\'s release time — <b>fifteen seconds</b> by default, and never more than thirty however the setting is edited. The lamp goes solid.<small>Never for "what is left of the booking": a door held open for twenty-five minutes is not a door.</small>',
    o:[{t:'a second member arrives while it is open',d:'The thirty-second cap is a budget for the whole opening, not for one scan, so a longer release buys fewer extensions. At fifteen seconds a queue gets <b>one</b>: scan at 14 s and the door stays open to 29 s; the next scan gets the second that is left, and the one after that is refused while the lock relatches. At the old three seconds the same rule allowed nine. Nobody who scans once notices; somebody holding a phone at the reader meets the cap nine times sooner, which is what the cap is for.'}]},
-  {l:'api',t:'Nothing else happens',d:'No attendance stamped, no no-show reversed, no credit moved, no booking touched. Walking through a door says nothing about a court.'}
+  {l:'api',t:'Nothing else happens',d:'No attendance stamped, no no-show reversed, no minutes moved, no booking touched. Walking through a door says nothing about a court.'}
  ]},
 {id:'door-off',t:'The door when the network is gone',tags:[],tg:['offline'],
  s:'It decides from the bookings it already holds — a narrower rule than the court box\'s, and knowingly so.',

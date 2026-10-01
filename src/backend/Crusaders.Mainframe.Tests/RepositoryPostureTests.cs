@@ -131,6 +131,13 @@ public sealed class RepositoryPostureTests
     /// and it is not an event.
     /// </para>
     /// <para>
+    /// A type may also be named through a constant of an <c>*Events</c> class
+    /// (<c>MinutesEvents.Purchased</c>, P13 §5) — declared once so an emitter cannot misspell it.
+    /// Such a reference inside the window counts as the constant's value. Only <c>*Events</c>
+    /// classes are resolved: <c>AdminChangeActions</c> and the notice catalogue hold the same
+    /// <c>family.verb</c> shape for things that are not webhook events.
+    /// </para>
+    /// <para>
     /// If this ever mis-reads the tree the failure is loud and names what it found, which is
     /// the right failure mode for a heuristic. What it must never do is quietly agree.
     /// </para>
@@ -138,11 +145,14 @@ public sealed class RepositoryPostureTests
     private static HashSet<string> EmittedEventTypes()
     {
         var literal = new Regex(@"(?<!Action = )(?<!Action: )""(?<type>[a-z][a-z_]*\.[a-z][a-z_]*)""");
+        var constant = new Regex(@"\b(?<cls>[A-Z]\w*Events)\.(?<name>[A-Z]\w*)\b");
         var starters = new[] { "\n    private ", "\n    public ", "\n    internal ", "\n    protected " };
         var types = new HashSet<string>(StringComparer.Ordinal);
 
         var api = Path.Combine(RepoRoot(), "src", "backend", "Crusaders.Mainframe.Api");
-        foreach (var file in Directory.EnumerateFiles(api, "*.cs", SearchOption.AllDirectories))
+        var files = Directory.EnumerateFiles(api, "*.cs", SearchOption.AllDirectories).ToList();
+        var named = EventConstants(files);
+        foreach (var file in files)
         {
             var source = File.ReadAllText(file);
             foreach (Match call in Regex.Matches(source, @"EmitAsync\("))
@@ -154,9 +164,34 @@ public sealed class RepositoryPostureTests
                 {
                     types.Add(hit.Groups["type"].Value);
                 }
+                foreach (Match hit in constant.Matches(source[start..end]))
+                {
+                    var key = $"{hit.Groups["cls"].Value}.{hit.Groups["name"].Value}";
+                    Assert.True(named.TryGetValue(key, out var type) || hit.Groups["name"].Value == "All",
+                        $"{Path.GetFileName(file)} emits {key}, which no *Events class declares as a constant.");
+                    if (type is not null) types.Add(type);
+                }
             }
         }
         return types;
+    }
+
+    /// <summary><c>Class.Name</c> → value, for every <c>const string</c> event name in a <c>static class *Events</c>.</summary>
+    private static Dictionary<string, string> EventConstants(IEnumerable<string> files)
+    {
+        var named = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            var source = File.ReadAllText(file);
+            foreach (Match cls in Regex.Matches(source, @"static class (?<cls>[A-Z]\w*Events)\b"))
+            {
+                foreach (Match c in Regex.Matches(source[cls.Index..], @"const string (?<name>[A-Z]\w*) = ""(?<type>[a-z][a-z_]*\.[a-z][a-z_]*)"";"))
+                {
+                    named[$"{cls.Groups["cls"].Value}.{c.Groups["name"].Value}"] = c.Groups["type"].Value;
+                }
+            }
+        }
+        return named;
     }
 
     /// <summary>Every event name the admin console offers in its subscription picker.</summary>
