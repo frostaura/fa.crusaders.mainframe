@@ -278,11 +278,11 @@ export const BOOK_SHEET = {
   needMoreBody: "Top up, then book — a member's balance can't go below zero.",
   stillNeeded: "Still needed",
   bookedTitle: (booked: number, total: number) => {
-    if (booked === total) return total === 1 ? "Court booked" : `All ${total} booked`;
+    if (booked === total) return total === 1 ? "Court booked" : total === 2 ? "Both booked" : `All ${total} booked`;
     return `${booked} of ${total} booked`;
   },
   heldTitle: (held: number, total: number) => {
-    if (held === total) return total === 1 ? "Court held" : `All ${total} held`;
+    if (held === total) return total === 1 ? "Court held" : total === 2 ? "Both held" : `All ${total} held`;
     return `${held} of ${total} held`;
   },
   noneBookedTitle: "Nothing was booked",

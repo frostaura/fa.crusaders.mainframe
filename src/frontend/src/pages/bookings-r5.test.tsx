@@ -4,7 +4,7 @@ import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
 import { COURT_A, dayFixture, openBookings, resetSheets, sast, slotRow } from "../test/bookingsKit";
 import { liftWithReason } from "../test/liftHold";
-import { CANCEL_SHEET, LIFT_HOLD_SHEET } from "../lib/bookingsCopy";
+import { BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET } from "../lib/bookingsCopy";
 import { HOLD_LIFTED } from "../lib/scheduleEnd";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
@@ -77,5 +77,7 @@ describe("A5-10 — a batch of two cancelled reads \"Both cancelled\"", () => {
     expect(CANCEL_SHEET.cancelledTitle(2, 2)).toBe("Both cancelled");
     expect(CANCEL_SHEET.cancelledTitle(3, 3)).toBe("All 3 cancelled");
     expect(CANCEL_SHEET.cancelledTitle(1, 2)).toBe("1 of 2 cancelled");
+    expect(BOOK_SHEET.bookedTitle(2, 2)).toBe("Both booked");
+    expect(BOOK_SHEET.heldTitle(2, 2)).toBe("Both held");
   });
 });
