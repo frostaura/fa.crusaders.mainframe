@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-bundle
 description: "What loads first and why: shell, landing, sign-in and My Code in the entry; the admin frame one lazy chunk that never re-suspends; 4 icon weights shipped; first load 557 → 304 (P10) → 255 kB gzip (perf, 2026-09-30)."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — the frontend bundle
@@ -44,10 +44,11 @@ entry → 304 kB. Perf lane 2026-09-30: 328 → **255 kB** (entry 166 + React 74
   lazy code into the entry (+12 kB gzip).
 - **Member pages' loaders live in `src/routeChunks.ts`**: the opened page's code starts once
   `whoami` is SENT; **Bookings' once the page's reads have settled** (`lib/api` `whenApiQuiet`,
-  300 ms with nothing in flight), and Wallet/Profile/desk frame each wait for it too (R4).
-  **Why not beside `whoami`:** measured A/B (slow 4G, 4x CPU) it made a cold My Code — the door
-  page — 0.9 s slower; settled-gated, My Code is unchanged and Bookings tapped 1 s after My Code
-  shows fell 1.05 → 0.64 s. Hints only: failures swallowed, not offline, not under Save-Data.
+  300 ms idle); the tab bar's prefetch waits for it before EVERY page, Bookings too (R5 P5-4).
+  **Why not beside `whoami`:** measured twice (R4; R5 A/B slow 4G 4x CPU): the member CODE paints
+  1.0 s later (2.69 → 3.70 s) for first Bookings 1.65 → 0.46 s. Still ~1.6 s tapped as My Code shows
+  (~34 files, some desk-only; asked of lane C); `/me/invites` starts at the press (`lib/earlyInvites`).
+  Hints only: failures swallowed, not offline, not under Save-Data.
 - **A member's install set (`precache.json` `first`) leaves out chart chunks and the desk's
   frame** (R4, P4-6: 666 → 514 kB gzip); precached after control, still every chunk on the phone.
 - **The date picker's calendar is its own chunk**, prefetched on pointer/focus intent.

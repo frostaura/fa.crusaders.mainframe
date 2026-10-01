@@ -47,7 +47,8 @@ last_verified: 2026-10-01
   spinner overflows every icon button by a few px and is never seen.
 - **A rem `max-width` container query is a large-text query** (R4, lane F3): `[@container(max-width:18rem)]`
   is 288 px at normal text and 576 px at 200 %, so a tile hides (or an avatar stacks) only when the
-  TEXT is large for the box — the switcher, the Overview's links and the member header use it.
+  TEXT is large for the box — the switcher, the Overview's links, the member header and the app bar
+  (R5 `@container/appbar`: tabs inline from 44rem). A query container does NOT trap a fixed child.
 - **`auto-fit` cannot collapse a track that a `col-span-full` item spans**: the armed confirm's
   sentence kept three tracks open and the pair took two of three (R4 A-15). Give the pair its own grid.
 - **A utility's `display` beats the `hidden` ATTRIBUTE** (R4, L2): preflight's `[hidden]` and `.flex`

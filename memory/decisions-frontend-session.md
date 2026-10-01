@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-session
 description: "Identity keys every per-person read; a 401 trades the refresh cookie once, single-flight; only a refresh 401 ends a session; a lapse keeps the member code's key (only sign-out wipes it); every chunk precached; the chip shows spendable."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — the PWA's session and balance feedback
@@ -45,7 +45,7 @@ unit tests; each was wrong in the running app.
   401 never clears a newer token. **Why:** a redeploy's 503 signed everyone out; another tab's sign-out
   was undone by this tab's in-flight exchange. Tests needing an ended session must stub refresh 401.
 - **A lapse is not a sign-out (F4.1, the P7 decision).** An ending nobody pressed drops the token
-  and caches but KEEPS the confirmed identity, the member code's key and the last-known door
+  and caches (never the offline shell — R5 M5-1) but KEEPS the confirmed identity, the member code's key and the last-known door
   facts; `/my-code` renders signed out from the key, asking the club nothing. Only the sign-out
   buttons (and a different member signing in) wipe them. **Why:** the D3 wipe-on-expiry turned
   "signed out after a while" into "locked out at the door"; with a 30-day cookie a lapse is rare.

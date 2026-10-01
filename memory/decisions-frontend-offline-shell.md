@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-frontend-offline-shell
-description: "The service worker per build (id stamped by vite, caches named for it, last build pruned), the document revalidated (no-cache), My Code painted while whoami is out, and the chip's one-row wallet read."
+description: "Worker per build (stamped id, caches named for it, last build pruned), document no-cache, a stalled navigation served the shell at 2 s, endings keep the shell, header kept while whoami is out."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — the offline shell across deploys (review round 4, lane F4)
@@ -32,3 +32,18 @@ The worker still caches NO member data (`public/sw.js` header, `offline-shell` a
 - **Proof method for a worker change:** `e2e/sw-update.spec.ts` — two real builds (a copy with one
   file changed), switch the origin, `registration.update()`; assert caches, reuse, no member data.
   A precache lane once fetched `undefined` (queue emptied under its await) — keep the guard.
+
+## Review round 5 (lane B)
+
+- **A session ending deletes every `crusaders-` cache EXCEPT `crusaders-shell-*` / `crusaders-assets-*`**
+  (`lib/pwa` page half + the worker's `CLEAR_CACHES`; M5-1). **Why:** they hold no member data
+  (member reads are IndexedDB, wiped by `wipeMemberData`), and purging them meant a lapsed phone
+  could not open at all offline — My Code included — though the lapse screen promises the code
+  works. The leaking `crusaders-api-v1` still goes. Proof: `e2e/offline-shell` lapse case.
+- **A navigation races the network against 2 s (`NAV_WAIT_MS`), then serves the cached shell**
+  (P5-1); a late answer still refreshes it (`waitUntil`); no shell cached = wait as before.
+  **Why:** one bar of signal STALLS a request rather than failing it — My Code was blank 20 s+.
+- **The header's bell, chip and account menu render for the member this phone confirmed while
+  `whoami` is out** (P5-6, `useDataOwner` like the tab bar); the chip draws the kept wallet read
+  ("Last known at HH:MM"), never re-asked while the check is out. **Why:** Sign out was unreachable.
+
