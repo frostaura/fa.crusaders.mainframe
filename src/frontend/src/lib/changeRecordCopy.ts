@@ -109,6 +109,13 @@ const FIELD_LABEL: Record<string, string> = {
   event_count: "Events shown",
   games: "Games",
   format: "Format",
+  // R5 A5-2: a batch's own row — its bookings one per line, and its counts and totals.
+  bookings: "Bookings",
+  requested: "Asked for",
+  succeeded: "Done",
+  failed: "Not done",
+  total_refunded_credits: "Refunded in all",
+  total_penalty_credits: "Penalties in all",
 };
 
 /** Membership and result states as the Members page says them. */
@@ -270,9 +277,57 @@ function rateInWords(token: string): string | null {
   return `${Number(n.toFixed(2))} cr per ${clubCurrencySymbol()}1`;
 }
 
+/** What happened to one item of a batch (R5 A5-2), as the line ends it. */
+const BATCH_ITEM_WORDS: Record<string, string> = {
+  cancelled: "cancelled",
+  block_lifted: "hold lifted",
+  already_cancelled: "already cancelled",
+  booked: "booked",
+};
+
+type BatchItem = {
+  member_name?: string | null; block_label?: string | null; court?: number | null; starts_at?: string | null;
+  status?: string | null; error?: string | null; refund_credits?: number | null; penalty_credits?: number | null;
+  amount_credits?: number | null;
+};
+
+/** "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50.00 cr back". */
+function batchItemInWords(item: BatchItem, timezone?: string): string {
+  const who = item.member_name ?? (item.block_label ? `${item.block_label} (club hold)` : null);
+  const when = typeof item.starts_at === "string" && Number.isFinite(Date.parse(item.starts_at))
+    ? clubDayAndClock(item.starts_at, timezone) : null;
+  const where = [item.court != null ? `Court ${item.court}` : null, when].filter(Boolean).join(", ");
+  const status = item.status ?? "";
+  let outcome = BATCH_ITEM_WORDS[status] ?? (status ? inWords(status).toLowerCase() : "");
+  if (status === "refused" || status === "failed") {
+    const verb = item.amount_credits !== undefined ? "not booked" : "not cancelled";
+    outcome = item.error ? `${verb} (${inWords(item.error)})` : verb;
+  }
+  const money: string[] = [];
+  if (status === "booked" && item.amount_credits) money.push(formatCredits(item.amount_credits));
+  if (item.refund_credits) money.push(`${formatCredits(item.refund_credits)} back`);
+  if (item.penalty_credits) money.push(`${formatCredits(item.penalty_credits)} penalty`);
+  const end = [outcome, ...money].filter(Boolean).join(", ");
+  return [who, where, end].filter(Boolean).join(" — ");
+}
+
+/** A batch's `bookings` — the server's JSON text of one object per item — one line each. */
+function batchInWords(token: string, timezone?: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(token.startsWith("[") ? token : `[${token}]`);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const items = parsed.filter((x): x is BatchItem => typeof x === "object" && x !== null);
+  return items.length > 0 ? items.map((item) => batchItemInWords(item, timezone)).join("\n") : null;
+}
+
 /** The fields whose values have their own words (R4 A4-6); undefined for every other field. */
-function fieldInWords(field: string, token: string): string | null | undefined {
+function fieldInWords(field: string, token: string, timezone?: string): string | null | undefined {
   switch (field) {
+    case "bookings": return batchInWords(token, timezone);
     case "credits_per_zar": return rateInWords(token);
     case "windows": return windowsInWords(token);
     case "pricing_mode": return PRICING_WORDS[token.toLowerCase()] ?? inWords(token);
@@ -293,7 +348,7 @@ export function changeValueInWords(field: string, value: string | null | undefin
   const token = value.trim();
   // An emptied list or text is no value — except where "none" is itself the fact (times).
   if (token === "" && field !== "windows") return null;
-  const own = fieldInWords(field, token);
+  const own = fieldInWords(field, token, timezone);
   if (own !== undefined) return own;
   // The first reading that recognises the value, in this order; the value itself when none does.
   const readings = [

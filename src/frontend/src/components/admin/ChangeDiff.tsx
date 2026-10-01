@@ -33,10 +33,11 @@ export function ChangeDiff({ row }: { row: Pick<AdminChangeRow, "area" | "action
       ) : null}
       {facts.length > 0 ? (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          {/* pre-line: a batch's bookings are one per line (R5 A5-2). */}
           {facts.map((fact) => (
             <div key={fact.field} className="contents">
               <dt className="min-w-0 break-words text-text-secondary">{fact.label}</dt>
-              <dd className="min-w-0 break-words tabular-nums text-text-primary">{fact.value}</dd>
+              <dd className="min-w-0 whitespace-pre-line break-words tabular-nums text-text-primary">{fact.value}</dd>
             </div>
           ))}
         </dl>

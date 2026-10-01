@@ -180,3 +180,50 @@ describe("every box screen setting has the Settings page's caption (R5 A5-8)", (
     expect(changed[0].label).not.toMatch(/lcd/i);
   });
 });
+
+/**
+ * Review round 5, A5-2: a bulk cancel's row named nobody and listed its bookings as ids; the server
+ * now sends `bookings` — one object per item — and the record says each one, a line apiece.
+ */
+describe("a batch's bookings, each named once (R5 A5-2)", () => {
+  const ZONE = "Africa/Johannesburg";
+  it("says each cancelled booking's member, court, time and what came back", () => {
+    const items = [
+      { booking_id: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: "Olga Smith", block_label: null, court: 2, starts_at: "2026-10-03T16:00:00Z", status: "cancelled", refund_credits: 50, penalty_credits: 0 },
+      { booking_id: "b5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: null, block_label: "Coaching", court: 3, starts_at: "2026-10-03T16:00:00Z", status: "block_lifted", refund_credits: 0, penalty_credits: 0 },
+      { booking_id: "c5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: "Ben Ng", block_label: null, court: 1, starts_at: "2026-10-03T16:30:00Z", status: "already_cancelled", refund_credits: 0, penalty_credits: 0 },
+    ];
+    const { facts } = presentChanges({
+      area: "booking", action: "bookings.bulk_cancelled",
+      changes: [
+        { field: "bookings", label: "Bookings", before: null, after: items.map((i) => JSON.stringify(i)).join(", ") },
+        { field: "booking_ids", label: "Booking ids", before: null, after: items.map((i) => i.booking_id).join(", ") },
+        { field: "total_refunded_credits", label: "Total refunded credits", before: null, after: "50.00" },
+      ],
+    }, ZONE);
+    const bookings = facts.find((f) => f.field === "bookings")!;
+    expect(bookings.label).toBe("Bookings");
+    expect(bookings.value.split("\n")).toEqual([
+      "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50.00 cr back",
+      "Coaching (club hold) — Court 3, Sat 3 Oct, 18:00 — hold lifted",
+      "Ben Ng — Court 1, Sat 3 Oct, 18:30 — already cancelled",
+    ]);
+    expect(facts.map((f) => f.value).join(" ")).not.toMatch(/a5604dd3|booking_id|\{/);
+    expect(facts.find((f) => f.field === "total_refunded_credits")).toEqual({ field: "total_refunded_credits", label: "Refunded in all", value: "50.00 cr" });
+  });
+
+  it("says each booking of a bulk book, and a refused one with its reason", () => {
+    const items = [
+      { index: 0, booking_id: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", court: 2, starts_at: "2026-10-03T16:00:00Z", status: "booked", error: null, amount_credits: 50 },
+      { index: 1, booking_id: null, court: 2, starts_at: "2026-10-03T16:15:00Z", status: "refused", error: "slot_taken", amount_credits: 0 },
+    ];
+    const { facts } = presentChanges({
+      area: "booking", action: "bookings.bulk_booked",
+      changes: [{ field: "bookings", before: null, after: items.map((i) => JSON.stringify(i)).join(", ") }],
+    }, ZONE);
+    expect(facts[0].value.split("\n")).toEqual([
+      "Court 2, Sat 3 Oct, 18:00 — booked, 50.00 cr",
+      "Court 2, Sat 3 Oct, 18:15 — not booked (Slot taken)",
+    ]);
+  });
+});
