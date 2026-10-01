@@ -6,11 +6,7 @@ import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { AnimatedAlert, AnimatedCheck } from "@/components/ui/feedback-marks";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Warning } from "@/components/ui/icons";
-import { Input } from "@/components/ui/input";
-import { MemberCombobox } from "@/components/ui/member-combobox";
-import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
 import { worthRetrying } from "@/lib/bookingErrors";
@@ -21,11 +17,11 @@ import { heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
 import { MoneyRows, SendingNote, SlotList, SlotSummary, Stepper } from "./SheetParts";
-import { isAdminRun, slotCount, type BookAs } from "./bookFlow";
+import { isAdminRun, slotCount } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
 import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
 import { ConfirmPlayers, ResultPlayers } from "./PlayersOutcomeView";
-import { LazySplitStep, loadSplitStep, usePrefetchWhen } from "./lazyParts";
+import { LazyBookAsChoice, LazySplitStep, loadSplitStep, usePrefetchWhen } from "./lazyParts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { refusalSentence, useBookFlow, type BookFlow, type BookFlowInput } from "./useBookFlow";
 import { useSendingGuard } from "./useSendingGuard";
@@ -177,7 +173,9 @@ function StepView(props: StepViewProps) {
       <>
         <SlotList lines={flow.lines.map((l) => ({ ...l, price: null, note: undefined, priceLoading: false }))}
           label={BOOK_SHEET.slotsLabel} refusedWord={BOOK_SHEET.notBookable} />
-        {isAdmin ? <BookAsChoice flow={flow} /> : null}
+        {/* R5 (lane B's lead) — the desk's "book as" picker is its own chunk, so a member's first
+            Bookings visit does not fetch the member combobox, cmdk and the radio cards. */}
+        {isAdmin ? <Suspense fallback={<Skeleton className="h-40 w-full" />}><LazyBookAsChoice flow={flow} /></Suspense> : null}
       </>
     );
   }
@@ -284,61 +282,6 @@ function QuoteProblem({ flow }: { flow: BookFlow }) {
       {worthRetrying(state.error) ? <Button variant="outline" onClick={flow.quote.retry}>{BOOK_SHEET.retry}</Button> : null}
     </div>
   );
-}
-
-/* ─────────────────────────────── book as (admin) ─────────────────────────────── */
-
-function BookAsChoice({ flow }: { flow: BookFlow }) {
-  const { who, setWho } = flow;
-  const pick = (kind: string) => {
-    if (kind === who.kind) return;
-    if (kind === "member") setWho({ kind: "member", userId: null });
-    else if (kind === "hold") setWho({ kind: "hold", label: "" });
-    else setWho({ kind: "self" });
-  };
-  const labelId = useId();
-  return (
-    <div className="grid gap-3">
-      <p id={labelId} className="text-sm font-semibold text-text-primary">{BOOK_SHEET.bookAs}</p>
-      <RadioGroup value={who.kind} onValueChange={pick} aria-labelledby={labelId}>
-        <RadioCard value="self" title={BOOK_SHEET.asSelf} description={BOOK_SHEET.asSelfHint} />
-        <RadioCard value="member" title={BOOK_SHEET.asMember} description={BOOK_SHEET.asMemberHint} />
-        <RadioCard value="hold" title={BOOK_SHEET.asHold} description={BOOK_SHEET.asHoldHint} />
-      </RadioGroup>
-      <WhoDetail flow={flow} who={who} />
-    </div>
-  );
-}
-
-function WhoDetail({ flow, who }: { flow: BookFlow; who: BookAs }) {
-  if (who.kind === "member") {
-    return (
-      <MemberCombobox
-        members={flow.members.list}
-        loading={flow.members.loading}
-        value={who.userId}
-        onChange={(id) => flow.setWho({ kind: "member", userId: id })}
-        label={BOOK_SHEET.memberLabel}
-        placeholder={BOOK_SHEET.memberPlaceholder}
-        error={flow.problem === "member" ? BOOK_SHEET.memberMissing : null}
-      />
-    );
-  }
-  if (who.kind === "hold") {
-    return (
-      <Field invalid={flow.problem === "hold"}>
-        <FieldLabel>{BOOK_SHEET.holdLabel}</FieldLabel>
-        <Input
-          value={who.label}
-          maxLength={128}
-          placeholder={BOOK_SHEET.holdPlaceholder}
-          onChange={(e) => flow.setWho({ kind: "hold", label: e.target.value })}
-        />
-        {flow.problem === "hold" ? <FieldError>{BOOK_SHEET.holdMissing}</FieldError> : null}
-      </Field>
-    );
-  }
-  return null;
 }
 
 /* ─────────────────────────────── the result ─────────────────────────────── */

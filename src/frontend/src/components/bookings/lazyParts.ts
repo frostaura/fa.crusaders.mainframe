@@ -8,9 +8,12 @@ import { lazy, useEffect } from "react";
  */
 export const loadCancelSheet = () => import("./CancelSheet");
 export const loadSplitStep = () => import("./SplitStep");
+/** R5 — the desk's "book as" picker: only an admin's sheet ever fetches it. */
+export const loadBookAsChoice = () => import("./BookAsChoice");
 
 export const LazyCancelSheet = lazy(() => loadCancelSheet().then((m) => ({ default: m.CancelSheet })));
 export const LazySplitStep = lazy(() => loadSplitStep().then((m) => ({ default: m.SplitStep })));
+export const LazyBookAsChoice = lazy(() => loadBookAsChoice().then((m) => ({ default: m.BookAsChoice })));
 
 /** Fetch `load` at idle once `ready` — after the page's own reads, never competing with them. */
 export function usePrefetchWhen(ready: boolean, load: () => Promise<unknown>): void {

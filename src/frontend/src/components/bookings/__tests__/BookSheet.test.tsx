@@ -257,28 +257,30 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   });
   const members = [{ id: NALEDI, name: "Naledi Khumalo", balance: 44 }, { id: ME, name: "Desk Admin", balance: 0 }];
 
-  it("names the book-as combobox for who the booking is for", () => {
+  it("names the book-as combobox for who the booking is for", async () => {
     stubFetch([]);
     open({ isAdmin: true, members });
-    fireEvent.click(screen.getByRole("radio", { name: BOOK_SHEET.asMember }));
+    // R5 — the desk's picker is its own lazy chunk.
+    fireEvent.click(await screen.findByRole("radio", { name: BOOK_SHEET.asMember }));
     const combo = screen.getByRole("combobox", { name: new RegExp(`^${BOOK_SHEET.memberLabel}`) });
     expect(combo).toBeTruthy();
     expect(BOOK_SHEET.memberLabel).toBe("Member to book for");
   });
 
-  it("is a stepper: Slots with Book as, then Confirm — Cancel first, Back after", () => {
+  it("is a stepper: Slots with Book as, then Confirm — Cancel first, Back after", async () => {
     stubFetch([]);
     open({ isAdmin: true, members });
     expect(screen.getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(1, 2, BOOK_SHEET.steps.slots));
-    const group = screen.getByRole("radiogroup", { name: BOOK_SHEET.bookAs });
+    const group = await screen.findByRole("radiogroup", { name: BOOK_SHEET.bookAs });
     expect(within(group).getAllByRole("radio").map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
     expect(screen.getByRole("button", { name: BOOK_SHEET.cancel })).toBeTruthy();
   });
 
-  it("says who is missing on Continue rather than greying the button out", () => {
+  it("says who is missing on Continue rather than greying the button out", async () => {
     stubFetch([]);
     open({ isAdmin: true, members });
-    fireEvent.click(screen.getByRole("radio", { name: BOOK_SHEET.asMember }));
+    // R5 — the desk's picker is its own lazy chunk.
+    fireEvent.click(await screen.findByRole("radio", { name: BOOK_SHEET.asMember }));
     const next = screen.getByRole("button", { name: BOOK_SHEET.next });
     expect(next).not.toBeDisabled();
     fireEvent.click(next);

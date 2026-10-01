@@ -23,4 +23,12 @@ describe("lazy parts of Bookings", () => {
     expect(valueImport(sheet, "/SplitStep")).toBe(false);
     expect(sheet).toContain("LazySplitStep");
   });
+
+  it("keeps the desk's book-as picker (member combobox, radio cards) out of a member's sheet", () => {
+    const sheet = read("components/bookings/BookSheet.tsx");
+    expect(valueImport(sheet, "/BookAsChoice")).toBe(false);
+    expect(valueImport(sheet, "ui/member-combobox")).toBe(false);
+    expect(valueImport(sheet, "ui/radio-group")).toBe(false);
+    expect(sheet).toContain("LazyBookAsChoice");
+  });
 });
