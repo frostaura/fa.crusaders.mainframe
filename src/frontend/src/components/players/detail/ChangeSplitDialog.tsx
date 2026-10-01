@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Alert } from "@/components/Alert";
+import { SendingNote } from "@/components/bookings/SheetParts";
 import { SplitStep } from "@/components/bookings/SplitStep";
 import { hasPaying, updateSeat, withMode, type PlayersDraft } from "@/components/bookings/playersDraft";
 import { useSplitPreview } from "@/components/bookings/useSplitPreview";
@@ -29,6 +30,10 @@ type Props = {
   onDone: (notice: Notice) => void;
   /** Read the booking again — a lost reply that did not land, or could not be checked (R3). */
   onStale?: () => void;
+  /** R5 I5-2 — told while the save is in flight, so the page's own ways out (system Back) wait too. */
+  onBusyChange?: (busy: boolean) => void;
+  /** Ways out refused by the page (the system Back) — the waiting line is said again on each. */
+  refused?: number;
 };
 
 /**
@@ -52,7 +57,8 @@ function useSplitEditor(detail: BookingDetail): SplitEditor {
   };
 }
 
-export function ChangeSplitDialog({ detail, onClose, onDone, onStale }: Props) {
+export function ChangeSplitDialog(props: Props) {
+  const { detail, onClose, onDone, onStale, onBusyChange, refused = 0 } = props;
   const editor = useSplitEditor(detail);
   const { refresh } = useBalance();
   const body = splitChangeOf(detail, editor.draft);
@@ -67,6 +73,7 @@ export function ChangeSplitDialog({ detail, onClose, onDone, onStale }: Props) {
     },
     {
       success: ({ value, proven }) => {
+        onBusyChange?.(false); // answered: the close that follows is not a way out mid-flight
         const askedAgain = value.shares.some((s) => s.needs_consent);
         const text = askedAgain ? CHANGE_SPLIT.doneAskedAgain : CHANGE_SPLIT.done;
         onDone({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
@@ -76,8 +83,15 @@ export function ChangeSplitDialog({ detail, onClose, onDone, onStale }: Props) {
     },
   );
   const blocked = body === null || editor.problem !== null || editor.preview.state.status !== "ready";
+  // Told at once, not in an effect: a Back a frame after the press is refused too.
+  const run = () => {
+    onBusyChange?.(true);
+    void save.run().finally(() => onBusyChange?.(false));
+  };
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !save.pending) onClose(); }}>
+    // R5 I5-2 — the page decides every close (Cancel, ×, Escape, scrim, system Back): refused while
+    // the save is on its way, with the waiting line said again.
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent data-dialog="change-split">
         <DialogHeader>
           <DialogTitle>{CHANGE_SPLIT.title}</DialogTitle>
@@ -90,8 +104,9 @@ export function ChangeSplitDialog({ detail, onClose, onDone, onStale }: Props) {
           {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action, unsure: PLAYERS_UNSURE.split })}</Alert> : null}
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>{CHANGE_SPLIT.cancel}</Button>
-          <Button pending={save.pending} disabled={blocked} onClick={() => void save.run()} data-save-split="">
+          <SendingNote text={save.pending ? CHANGE_SPLIT.sending : null} refused={refused} />
+          {save.pending ? null : <Button variant="outline" onClick={onClose}>{CHANGE_SPLIT.cancel}</Button>}
+          <Button pending={save.pending} disabled={blocked} onClick={run} data-save-split="">
             {CHANGE_SPLIT.save}
           </Button>
         </DialogFooter>

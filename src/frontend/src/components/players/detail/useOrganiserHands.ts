@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useReducer, useRef, useState } from "react";
+import { useLateLanding } from "@/components/bookings/useSendingGuard";
 import type { PickedPlayer } from "@/components/players/PlayerPicker";
+import { useToast } from "@/components/Toast";
+import { useSheetHistory } from "@/lib/bookingSheetHistory";
 import { useBalance } from "@/lib/balance";
 import {
   playersEndpoints, type AddPlayersAnswer, type BookingDetail, type DetailPlayer, type PlayerSpec,
@@ -58,8 +61,53 @@ function newLinkSeat(answer: AddPlayersAnswer): ShareTarget | null {
   return seat ? { name: DETAIL_ACTIONS.openSeatName, participantId: seat.participant_id, path: seat.invite_path } : null;
 }
 
-export function useOrganiserHands(detail: BookingDetail, reload: () => void, say: Say) {
+/** The toast push when a provider is above us; null in a bare render. */
+function useOptionalPush() {
+  try {
+    return useToast().push;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * R5 I5-2 — what the page says about a write, said where it can still be read: on the page while
+ * the page is there, in a toast once it has gone (a forced route, a sign-out) — a landing is never
+ * left to a notice that died with the page.
+ */
+function useTell(say: Say): Say {
+  const late = useLateLanding();
+  const push = useOptionalPush();
+  return (notice: Notice) => {
+    if (late.live()) say(notice);
+    else push?.({ tone: notice.tone, text: notice.text });
+  };
+}
+
+/**
+ * R5 I5-2 — a dialog whose write may be in flight: the system Back closes it like the ×, but
+ * while the write is on its way every way out is refused (the history entry goes back on) and
+ * the dialog says again that it is waiting. `busy` is a ref so a Back a frame after the press is
+ * refused too.
+ */
+function useGuardedDialog(open: boolean, close: () => void, tag: string) {
+  const busy = useRef(false);
+  const [refused, bumpRefused] = useReducer((n: number) => n + 1, 0);
+  const tryClose = (): boolean => {
+    if (busy.current) {
+      bumpRefused();
+      return false;
+    }
+    close();
+    return true;
+  };
+  useSheetHistory(open, tryClose, tag);
+  return { busy, refused, tryClose, setBusy: (next: boolean) => { busy.current = next; } };
+}
+
+export function useOrganiserHands(detail: BookingDetail, reload: () => void, pageSay: Say) {
   const bookingId = detail.booking_id;
+  const say = useTell(pageSay);
   const { refresh } = useBalance();
   const [inviting, setInviting] = useState(false);
   const [removing, setRemoving] = useState<DetailPlayer | null>(null);
@@ -67,6 +115,8 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
   const [nudgingId, setNudgingId] = useState<string | null>(null);
   const [asking, setAsking] = useState<PickedPlayer | null>(null);
   const [changingSplit, setChangingSplit] = useState(false);
+  const removeGuard = useGuardedDialog(removing !== null, () => setRemoving(null), "remove-player");
+  const splitGuard = useGuardedDialog(changingSplit, () => setChangingSplit(false), "change-split");
 
   // R3 lost-reply audit — an add whose reply was lost is looked for on the booking.
   const invite = useAsyncAction(
@@ -110,6 +160,7 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
     (p: DetailPlayer) => removeOrProve(bookingId, p.participant_id ?? ""),
     {
       success: ({ proven }, p) => {
+        removeGuard.setBusy(false); // answered: the close below is not a way out mid-flight
         setRemoving(null);
         const text = DETAIL_ACTIONS.removed(seatName(p, detail.players));
         say({ tone: "success", text: proven ? PLAYERS_LOST(text) : text });
@@ -143,14 +194,24 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
     cancelAsk: () => setAsking(null),
     changingSplit,
     openSplit: () => setChangingSplit(true),
-    closeSplit: () => setChangingSplit(false),
-    splitDone: (notice: Notice) => { setChangingSplit(false); say(notice); reload(); },
+    /** Refused (false) while the save is on its way. */
+    closeSplit: () => { splitGuard.tryClose(); },
+    splitDone: (notice: Notice) => { splitGuard.setBusy(false); setChangingSplit(false); say(notice); reload(); },
+    /** The split dialog reports its save in flight, so the system Back waits too (I5-2). */
+    setSplitBusy: splitGuard.setBusy,
+    splitRefused: splitGuard.refused,
     invitePending: invite.pending,
     nudge,
     isNudging: (p: DetailPlayer) => nudge.pending && nudgingId === p.participant_id,
     removing,
     askRemove: (p: DetailPlayer) => { remove.reset(); setRemoving(p); },
-    cancelRemove: () => setRemoving(null),
+    /** Keep, the ×, Escape, the scrim — refused while the remove is on its way (I5-2). */
+    cancelRemove: () => { removeGuard.tryClose(); },
+    confirmRemove: (p: DetailPlayer) => {
+      removeGuard.setBusy(true);
+      void remove.run(p).finally(() => removeGuard.setBusy(false));
+    },
+    removeRefused: removeGuard.refused,
     remove,
     sharing,
     share: (p: DetailPlayer) => setSharing({ name: seatName(p, detail.players), participantId: p.participant_id, path: null }),

@@ -470,6 +470,8 @@ export const DETAIL_ACTIONS = {
   removeKeep: "Keep them",
   removed: (name: string) => `${name} is off this game.`,
   removeAction: "remove that player",
+  /** R5 I5-2 — said in place of "Keep them" while the remove is on its way, and again on each refused way out. */
+  removeSending: "Taking them off — waiting for the club. This stays open until it answers.",
   openSeatName: "Open seat",
   /** The seat an add was making, in the middle of a sentence (a lost reply). */
   newOpenSeat: "the new open seat",
@@ -485,6 +487,8 @@ export const CHANGE_SPLIT = {
   done: "The split is changed.",
   doneAskedAgain: "The split is changed. Anyone whose share went up has been asked again.",
   action: "change the split",
+  /** R5 I5-2 — said in place of Cancel while the save is on its way, and again on each refused way out. */
+  sending: "Saving the split — waiting for the club. This stays open until it answers.",
   /** R2 F2-3 — what saving does to a booking that already stands: money that moves, not booking-time words. */
   effectsTitle: "What saving does",
   askedFor: (name: string, amount: string) => `${name} is asked for ${amount}.`,

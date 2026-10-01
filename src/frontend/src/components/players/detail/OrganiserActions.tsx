@@ -1,4 +1,5 @@
 import { Alert } from "@/components/Alert";
+import { SendingNote } from "@/components/bookings/SheetParts";
 import { PlayerPickerDialog } from "@/components/players/PlayerPicker";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,7 +90,12 @@ export function OrganiserDialogs({ hands }: { hands: OrganiserHands }) {
         onPick={hands.pick}
       />
       {hands.asking ? <ShareAskDialog detail={detail} pick={hands.asking} onCancel={hands.cancelAsk} onAsk={hands.ask} /> : null}
-      {hands.changingSplit ? <ChangeSplitDialog detail={detail} onClose={hands.closeSplit} onDone={hands.splitDone} onStale={hands.reload} /> : null}
+      {hands.changingSplit ? (
+        <ChangeSplitDialog
+          detail={detail} onClose={hands.closeSplit} onDone={hands.splitDone} onStale={hands.reload}
+          onBusyChange={hands.setSplitBusy} refused={hands.splitRefused}
+        />
+      ) : null}
       {hands.removing ? <RemoveDialog hands={hands} player={hands.removing} /> : null}
       {hands.sharing ? (
         <ShareLinkDialog
@@ -109,8 +115,11 @@ function RemoveDialog({ hands, player }: { hands: OrganiserHands; player: Detail
   const name = seatName(player, hands.detail.players);
   const open = player.kind === "open_link";
   const error = hands.remove.error;
+  const busy = hands.remove.pending;
   return (
-    <Dialog open onOpenChange={(next) => { if (!next && !hands.remove.pending) hands.cancelRemove(); }}>
+    // R5 I5-2 — every way out (Keep, ×, Escape, scrim, the system Back) waits while the remove is
+    // on its way; the footer says so in place of Keep.
+    <Dialog open onOpenChange={(next) => { if (!next) hands.cancelRemove(); }}>
       <DialogContent data-dialog="remove-player">
         <DialogHeader>
           <DialogTitle>{open ? DETAIL_ACTIONS.removeOpenTitle : DETAIL_ACTIONS.removeTitle(name)}</DialogTitle>
@@ -122,8 +131,9 @@ function RemoveDialog({ hands, player }: { hands: OrganiserHands; player: Detail
           </DialogBody>
         ) : null}
         <DialogFooter>
-          <Button variant="outline" onClick={hands.cancelRemove}>{DETAIL_ACTIONS.removeKeep}</Button>
-          <Button variant="danger" pending={hands.remove.pending} onClick={() => void hands.remove.run(player)}>
+          <SendingNote text={busy ? DETAIL_ACTIONS.removeSending : null} refused={hands.removeRefused} />
+          {busy ? null : <Button variant="outline" onClick={hands.cancelRemove}>{DETAIL_ACTIONS.removeKeep}</Button>}
+          <Button variant="danger" pending={busy} onClick={() => hands.confirmRemove(player)}>
             {DETAIL_ACTIONS.removeConfirm}
           </Button>
         </DialogFooter>
