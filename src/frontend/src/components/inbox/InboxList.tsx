@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StateBlock } from "@/components/ui/state-block";
 import { ApiError } from "@/lib/api";
 import { INBOX_COPY as COPY } from "@/lib/playersCopy";
+import type { MemberNotification } from "@/lib/playersApi";
 import { useTicker } from "@/lib/useTicker";
 import { InboxRow } from "./InboxRow";
 import type { InboxFeed } from "./useInbox";
@@ -20,7 +21,13 @@ import type { InboxFeed } from "./useInbox";
  * the rows above it standing and says so beside the button.
  * </p>
  */
-export function InboxList({ feed, listRef }: { feed: InboxFeed; listRef?: Ref<HTMLOListElement> }) {
+/**
+ * R4 form factor (SPEC 3.6) — beside a detail pane a row with a target opens it there: `pick` holds
+ * the open notice and what a press does instead of navigating. Absent, rows navigate as ever.
+ */
+export type InboxPick = { id: string | null; onPick: (notice: MemberNotification) => void };
+
+export function InboxList({ feed, listRef, pick }: { feed: InboxFeed; listRef?: Ref<HTMLOListElement>; pick?: InboxPick }) {
   // The "Today, 18:05" face turns into a date at midnight; a minute is fine enough.
   const now = useTicker(true, 60_000);
   return (
@@ -43,7 +50,7 @@ export function InboxList({ feed, listRef }: { feed: InboxFeed; listRef?: Ref<HT
         data-inbox-list=""
         className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none"
       >
-        {feed.items.map((n) => <InboxRow key={n.id} notice={n} now={now} feed={feed} />)}
+        {feed.items.map((n) => <InboxRow key={n.id} notice={n} now={now} feed={feed} pick={pick} />)}
       </ol>
       {feed.more.error ? (
         <Alert tone="danger">{isCursorExpired(feed.more.error) ? COPY.cursorExpired : COPY.showMoreFailed}</Alert>

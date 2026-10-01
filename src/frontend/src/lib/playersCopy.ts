@@ -414,6 +414,8 @@ export const DETAIL_COPY = {
   title: "Booking",
   /** R4 form factor — the docked bar that holds the organiser's one verb on a phone. */
   actionsLabel: "Booking actions",
+  /** R4 form factor — from a panel showing the booking inside another page (the Inbox). */
+  openPage: "Open the booking",
   back: "Bookings",
   backToBookings: "Back to Bookings",
   readAction: "read this booking",
@@ -929,6 +931,11 @@ export const INVITE_REFUSAL: Record<string, string> = {
 /** The bell in the top bar and the member's inbox at `/inbox`. */
 export const INBOX_COPY = {
   title: INBOX_TITLE,
+  /** R4 form factor (SPEC 3.6) — the split view's detail pane. */
+  pickTitle: "Pick a notification",
+  pickHint: "Its game, its money or its invite opens here, so you can act on it without leaving your inbox.",
+  noticeLabel: "The notification",
+  openTarget: "Open it",
   description: "Invites, shares and changes to your games.",
   listLabel: "Your notifications",
   /** StateBlock's "Couldn't read your notifications — …". */

@@ -12,6 +12,7 @@ import { failureOf, knownUnchanged, markReadOrProve } from "./inboxReadBack";
 import { cn } from "@/lib/utils";
 import { appPath, inboxWhen, KIND_ICON, kindWord } from "./notificationKinds";
 import type { InboxFeed } from "./useInbox";
+import type { InboxPick } from "./InboxList";
 
 /**
  * One notice. With a link, the whole row is ONE link (it navigates) and opening it marks the
@@ -22,7 +23,9 @@ import type { InboxFeed } from "./useInbox";
  * the row's description.
  * </p>
  */
-export function InboxRow({ notice, now, feed }: { notice: MemberNotification; now: number; feed: InboxFeed }) {
+export function InboxRow(props: { notice: MemberNotification; now: number; feed: InboxFeed; pick?: InboxPick }) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { notice, now, feed, pick } = props;
   const unread = feed.isUnread(notice);
   const to = appPath(notice.link);
   const headlineId = useId();
@@ -35,10 +38,19 @@ export function InboxRow({ notice, now, feed }: { notice: MemberNotification; no
       {to ? (
         <Link
           to={to}
-          onClick={() => feed.openedUnread(notice)}
+          onClick={(event) => {
+            feed.openedUnread(notice);
+            // Beside a pane the target opens there; a modified click still opens the page.
+            if (pick && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+              event.preventDefault();
+              pick.onPick(notice);
+            }
+          }}
+          data-split-item=""
+          aria-current={pick?.id === notice.id ? "true" : undefined}
           aria-labelledby={headlineId}
           aria-describedby={metaId}
-          className={cn(row, "no-underline transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none")}
+          className={cn(row, "no-underline transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none aria-[current=true]:bg-accent-soft")}
         >
           {body}
         </Link>

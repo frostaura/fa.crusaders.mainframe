@@ -417,3 +417,49 @@ test.describe("Invites (SPEC 3.5)", () => {
     await healthy(page);
   });
 });
+
+test.describe("Inbox (SPEC 3.6)", () => {
+  const at = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
+  const notices = [
+    { id: "n1", kind: "players.share_moved", headline: "Sam paid you 25.00 credits", link: `/bookings/${BOOKING}`, booking_id: BOOKING, created_at: at(5), read_at: null },
+    { id: "n2", kind: "players.response", headline: "Alex accepted — Court 1", link: `/bookings/${BOOKING}`, booking_id: BOOKING, created_at: at(9), read_at: null },
+  ];
+  const routes = (): ApiRoute[] => [
+    { path: "/api/v1/me/notifications", body: { items: notices, unread_count: 2, next_cursor: null, timezone: "Africa/Johannesburg" } },
+    { method: "POST", path: "/api/v1/me/notifications/", respond: ({ path }) => ({ id: path.split("/").at(-2), read: true }) },
+    { path: `/api/v1/bookings/${BOOKING}`, body: detailFixture() },
+    ...memberShellRoutes({ unread: 2 }),
+  ];
+
+  for (const width of WIDTHS) {
+    test(`${width}px: from lg a notice opens its booking in place beside the list`, async ({ page }, info) => {
+      test.skip(info.project.name !== "desktop", "one project sweeps the widths");
+      await open(page, "/inbox", routes(), width);
+      const list = page.getByRole("list", { name: "Your notifications" });
+      await expect(list.getByRole("listitem")).toHaveCount(2);
+      await healthy(page);
+      const first = list.getByRole("link", { name: "Sam paid you 25.00 credits" });
+      if (width >= 1024) {
+        await first.click();
+        await expect(page).toHaveURL(/\/inbox\?n=n1/);
+        const panel = page.locator(`[data-booking-panel="${BOOKING}"]`);
+        await expect(panel.getByRole("region", { name: "Money" })).toBeVisible();
+        const l = (await list.boundingBox())!;
+        const p = (await panel.boundingBox())!;
+        expect(p.x).toBeGreaterThanOrEqual(l.x + l.width);
+        expect(await page.getByRole("heading", { level: 1 }).count(), "one h1 on the page").toBe(1);
+        await expect(panel.getByRole("link", { name: DETAIL_COPY.openPage })).toHaveAttribute("href", `/bookings/${BOOKING}`);
+      } else {
+        await first.click();
+        await expect(page).toHaveURL(new RegExp(`/bookings/${BOOKING}$`));
+      }
+    });
+  }
+
+  test("390 at 200 % text: the list alone, nothing off screen", async ({ page }) => {
+    await open(page, "/inbox", routes(), 390);
+    await expect(page.getByRole("list", { name: "Your notifications" })).toBeVisible();
+    await bigText(page);
+    await healthy(page);
+  });
+});

@@ -1,3 +1,4 @@
+import { INBOX_COPY } from "../src/lib/playersCopy";
 import { type Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { memberShellRoutes } from "./playersKit";
@@ -75,7 +76,15 @@ test.describe("the bell and the inbox", () => {
     await expect(list.getByRole("listitem")).toHaveCount(5);
 
     await list.getByRole("link", { name: INVITE_HEADLINE }).click();
-    await expect(page).toHaveURL(new RegExp(`/invites/${PID}$`));
+    if ((page.viewportSize()?.width ?? 0) >= 1024) {
+      // R4 form factor (SPEC 3.6): beside the list the invite opens in place, its way to the
+      // invite's own page one link away.
+      await expect(page).toHaveURL(/\/inbox\?n=/);
+      await expect(list.getByRole("link", { name: INVITE_HEADLINE })).toHaveAttribute("aria-current", "true");
+      await expect(page.locator("[data-split-detail]").getByRole("link", { name: INBOX_COPY.openTarget })).toHaveAttribute("href", `/invites/${PID}`);
+    } else {
+      await expect(page).toHaveURL(new RegExp(`/invites/${PID}$`));
+    }
     await expect(bell(page)).toHaveAccessibleName("Notifications, 2 unread");
 
     await bell(page).click();

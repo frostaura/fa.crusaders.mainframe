@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { AdminDialogs, AdminSection } from "@/components/players/admin/AdminPanel";
@@ -26,6 +26,9 @@ import { CalendarBlank } from "@/components/ui/icons";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
+import { TextLink } from "@/components/ui/text-link";
+import { typography } from "@/lib/typography";
+import { cn } from "@/lib/utils";
 import { StaleNotice } from "@/components/shell/StaleNotice";
 import { useAuth } from "@/lib/auth";
 import { memberReads } from "@/lib/offline/memberReads";
@@ -54,10 +57,7 @@ export default function BookingDetailPage() {
   // R3 M-2 / I-8 — re-read at the start and end, on coming back, on a wallet movement, and on a
   // slow poll while the game is live and nobody is in yet.
   useDetailLiveness(read.data, read.readAt, read.reload);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  // R3 I-5 — once the page reads the booking as cancelled its own banner says so: the cancel's
-  // notice (said while the re-read was on its way) steps aside, so the page says it once.
-  const shown = notice && !(notice.text === DETAIL_CANCEL.cancelled && read.data && isCancelled(read.data)) ? notice : null;
+  const { shown, setNotice } = useDetailNotice(read.data);
   return (
     // R4 form factor (SPEC 3.3): `content` to xl, `wide` from it, where the money stands in a rail.
     <PageShell width="content" className="xl:max-w-wide">
@@ -82,6 +82,46 @@ export default function BookingDetailPage() {
  * wasted read — an admin's own game reads when its card appears, as before. Started once per
  * booking (a ref, so StrictMode's second effect run does not send it twice).
  */
+/**
+ * What the page last said about a write, and when it steps aside. R3 I-5 — once the page reads the
+ * booking as cancelled its own banner says so: the cancel's notice (said while the re-read was on
+ * its way) steps aside, so the page says it once.
+ */
+function useDetailNotice(detail: BookingDetail | null) {
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const shown = notice && !(notice.text === DETAIL_CANCEL.cancelled && detail && isCancelled(detail)) ? notice : null;
+  return { shown, setNotice };
+}
+
+/**
+ * One booking as a panel inside another page (R4 form factor, SPEC 3.6: the Inbox's detail pane
+ * shows a share, a payment or a change to a game IN PLACE). The page's own body — the same reads,
+ * liveness, writes and dialogs — under an h2 instead of the page's h1, with the way to the full
+ * page. It is its own `@container/page`, so the body lays itself out by the PANE's width.
+ */
+export function BookingDetailPanel({ bookingId }: { bookingId: string }) {
+  const read = useBookingDetail(bookingId);
+  useDetailLiveness(read.data, read.readAt, read.reload);
+  const { shown, setNotice } = useDetailNotice(read.data);
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} data-booking-panel={bookingId} className="@container/page flex min-w-0 flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-[1_1_16rem]">
+          <h2 id={headingId} className={cn(typography({ variant: "h2" }), "break-words")}>{read.data ? detailTitle(read.data) : DETAIL_COPY.title}</h2>
+          {read.data ? <p className="mt-1 text-sm text-text-secondary">{headerLine(read.data)}</p> : null}
+        </div>
+        <div className="flex items-center gap-2">
+          <TextLink to={`/bookings/${bookingId}`} variant="standalone">{DETAIL_COPY.openPage}</TextLink>
+          <RefreshButton onRefresh={read.reload} loading={read.loading} label={DETAIL_COPY.refresh} />
+        </div>
+      </div>
+      {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice="">{shown.text}</Alert> : null}
+      <DetailBody read={read} say={setNotice} earlyResult={null} />
+    </section>
+  );
+}
+
 function useEarlyResult(bookingId: string): EarlyResult | null {
   const auth = useAuth();
   // Only when the link that brought us here knew the game is live (`lib/bookingLink`): a
