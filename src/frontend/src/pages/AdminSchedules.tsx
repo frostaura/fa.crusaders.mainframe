@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "../components/Alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { AutoGrid } from "../components/ui/auto-grid";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { StateBlock } from "../components/ui/state-block";
 import { TextLink } from "../components/ui/text-link";
@@ -57,9 +58,10 @@ function ScheduleListRow({ row, timezone }: { row: ScheduleRow; timezone?: strin
     intervalWeeks: row.interval_weeks,
   });
   return (
-    <li>
-      <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
-        <div className="space-y-1">
+    <li className="flex">
+      {/* A card (R4 form factor, SPEC §3.14): the rows sat in one 1,500px list at 1920. */}
+      <div className="flex w-full flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
+        <div className="flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-text-primary">{row.name}</h2>
             {/* A word, not a colour: "Ended" is the state, and the badge carries the word. */}
@@ -72,7 +74,7 @@ function ScheduleListRow({ row, timezone }: { row: ScheduleRow; timezone?: strin
             nothing to anybody tabbing down it. */}
         {/* R10: it navigates, so it is a link that looks like one — it was a bordered box
             posing as a button. */}
-        <TextLink variant="standalone" to={`/admin/schedules/${row.id}`} className="shrink-0 text-sm">
+        <TextLink variant="standalone" to={`/admin/schedules/${row.id}`} className="self-start text-sm">
           {`Open ${row.name}`}
         </TextLink>
       </div>
@@ -135,10 +137,14 @@ export function AdminSchedulesPage() {
     return (
       <PageShell width="full">
         {header}
-        <ScheduleEditor
-          onCancel={() => { setCreating(false); }}
-          onCreated={(row) => { setCreating(false); setCreated(row); load(); }}
-        />
+        {/* A form reads in a column, not across 1,500px (R4 form factor): the editor keeps the
+            80rem it was drawn for, its conflicts panel included. */}
+        <div className="w-full max-w-wide">
+          <ScheduleEditor
+            onCancel={() => { setCreating(false); }}
+            onCreated={(row) => { setCreating(false); setCreated(row); load(); }}
+          />
+        </div>
       </PageShell>
     );
   }
@@ -183,11 +189,18 @@ export function AdminSchedulesPage() {
           emptyIcon={CalendarDots}
           emptyTitle={status === "active" ? LIST_EMPTY_TITLE : "None in that list."}
           emptyHint={status === "active" ? `${LIST_EMPTY_HINT} ${LIST_EMPTY_ENDED_POINTER}` : "Try “All of them”."}
+          // The way out of an empty list is on it (R4 form factor): it was one centred line on a
+          // 1,200px canvas with the button far away in the header.
+          emptyAction={status === "active" ? (
+            <Button variant="outline" className="!h-auto min-h-touch whitespace-normal py-2" onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
+              Create the first one
+            </Button>
+          ) : null}
           skeleton={<CardListSkeleton rows={3} />}
         >
-          <ul className="divide-y divide-border rounded-xl border border-border bg-bg-surface shadow-xs">
+          <AutoGrid as="ul" min="panel" max={3} gap="lg">
             {(rows ?? []).map((row) => <ScheduleListRow key={row.id} row={row} timezone={read.timezone} />)}
-          </ul>
+          </AutoGrid>
         </StateBlock>
       </div>
     </PageShell>

@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "../components/u
 import { IconButton } from "../components/ui/icon-button";
 import { Input } from "../components/ui/input";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { WithAside } from "../components/ui/with-aside";
 import { RefreshButton } from "../components/ui/refresh-button";
 import { Skeleton } from "../components/ui/skeleton";
 import { StateBlock } from "../components/ui/state-block";
@@ -21,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { UnsureOutcome, unsureSentence, writeOrReadBack } from "../lib/lostReply";
 import { LOST_REPLY, unsureWords } from "../lib/lostReplyCopy";
-import { Check, Copy, Plus, Trash, WebhooksLogo, X } from "../components/ui/icons";
+import { CaretDown, CaretUp, Check, Copy, Plus, Trash, WebhooksLogo, X } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { clubDayAndClock } from "../lib/clubClock";
 import { useToast } from "../components/Toast";
@@ -355,6 +356,10 @@ export default function AdminWebhooksPage() {
 
       {createdSecret && <SecretBlock secret={createdSecret} onDismiss={() => setCreatedSecret(null)} />}
 
+      {/* R4 form factor (SPEC §3.15): from a 64rem box the variable catalogue is a rail beside the
+          endpoints — sticky, scrolling on its own — instead of a table that made the page 2,800–
+          5,600px tall; narrower, it follows the endpoints, folded until asked for. */}
+      <WithAside at="64rem" asideWidth="24rem" asideLabel="Variable catalogue" aside={<VariableCatalogCard />}>
       <Card>
         {/* On a phone the action goes UNDER the heading (R3 X-4): beside it, the heading's longest
             word plus "New endpoint" at 200% text were wider than the card and the page scrolled. */}
@@ -414,8 +419,7 @@ export default function AdminWebhooksPage() {
         error={createError}
         onCreate={() => void createAction.run()}
       />
-
-      <VariableCatalogCard />
+      </WithAside>
     </PageShell>
   );
 }
@@ -928,7 +932,14 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
    Variable catalog — discoverability for admins.
    ============================================================================ */
 
+/**
+ * The placeholders each event carries. Beside the endpoints (a 64rem box) it is always open and
+ * reads as one card per event — the three-column table does not fit a 24rem rail. Narrower it is
+ * folded behind its heading until asked for (it is reference, not work), and from `sm` it opens as
+ * the table. Every class written whole, so the scanner sees it.
+ */
 function VariableCatalogCard() {
+  const [open, setOpen] = useState(false);
   return (
     <Card>
       <CardHeader>
@@ -938,7 +949,21 @@ function VariableCatalogCard() {
           variables are on every event.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+      {/* Its own row, not a CardAction: a hidden action leaves the header's second column for
+          the description to flow into, and the title was squeezed to a letter a line. */}
+      <CardContent className="@[64rem]/aside:hidden">
+        <Button
+          variant="outline"
+          size="sm"
+          aria-expanded={open}
+          aria-controls="webhook-catalogue"
+          onClick={() => setOpen((v) => !v)}
+          icon={open ? <CaretUp aria-hidden="true" /> : <CaretDown aria-hidden="true" />}
+        >
+          {open ? "Hide the catalogue" : "Show the catalogue"}
+        </Button>
+      </CardContent>
+      <CardContent id="webhook-catalogue" className={cn("flex-col gap-4", open ? "flex" : "hidden @[64rem]/aside:!flex")}>
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-overline text-text-secondary">Envelope (every event)</p>
           <div className="flex flex-wrap gap-1.5">
@@ -947,7 +972,7 @@ function VariableCatalogCard() {
         </div>
         {/* On a phone, one card per event (VIS F3-15): the three-column table at 390 made each row
             ~240px tall with "What it means" off the right edge. The table is the sm+ reading. */}
-        <ul aria-label="Events and the variables each carries" className="flex flex-col divide-y divide-border rounded-lg border border-border sm:hidden">
+        <ul aria-label="Events and the variables each carries" className="flex flex-col divide-y divide-border rounded-lg border border-border sm:hidden @[64rem]/aside:!flex">
           {EVENTS.map((e) => (
             <li key={e.name} className="flex flex-col gap-1.5 p-3">
               <span className="font-mono text-xs font-semibold text-text-primary [overflow-wrap:anywhere]">{e.name}</span>
@@ -956,7 +981,7 @@ function VariableCatalogCard() {
             </li>
           ))}
         </ul>
-        <div className="hidden rounded-lg border border-border sm:block">
+        <div className="hidden rounded-lg border border-border sm:block @[64rem]/aside:!hidden">
           <Table label="Events and the variables each carries">
             <TableHeader>
               <TableRow>

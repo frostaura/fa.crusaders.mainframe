@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
+import { AutoGrid } from "../components/ui/auto-grid";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { StateBlock } from "../components/ui/state-block";
@@ -518,7 +519,9 @@ function GroupList(props: {
 function Cards(props: Parameters<typeof GroupList>[0] & { groups: MemberGroup[] }) {
   const { groups, context, onOpen, onPreview, writes } = props;
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    // By the box (R4 form factor, SPEC §3.13): a 26rem card at the least, three across at 1920
+    // beside the rail, two at 1280, one on a phone — `xl:grid-cols-2` was the viewport's answer.
+    <AutoGrid min="panel" max={3} gap="lg">
       {groups.map((group) => (
         <GroupCard
           key={group.id}
@@ -536,7 +539,7 @@ function Cards(props: Parameters<typeof GroupList>[0] & { groups: MemberGroup[] 
           onDelete={() => writes.remove(group)}
         />
       ))}
-    </div>
+    </AutoGrid>
   );
 }
 

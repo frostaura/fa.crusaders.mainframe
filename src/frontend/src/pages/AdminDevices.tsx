@@ -37,6 +37,7 @@ import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapC
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
 import { useToast } from "../components/Toast";
 import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
+import { AutoGrid } from "../components/ui/auto-grid";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { StateBlock } from "../components/ui/state-block";
 import { Skeleton } from "../components/ui/skeleton";
@@ -1155,7 +1156,9 @@ export function AdminDevicesPage() {
           emptyHint="Flash one with the key above and power it on — it registers itself."
           skeleton={<CardListSkeleton rows={2} />}
         >
-          <div className="flex flex-col gap-3">
+          {/* By the box (R4 form factor, SPEC §3.16): a 26rem card at the least — three across at
+              1920 beside the rail, two at 1280, one on a phone. One column was 10,000px at 1920. */}
+          <AutoGrid min="panel" max={3} gap="md" className="items-start">
             {boxes.map((device) => {
               // One coverage per row: the confirm, the notice and the toast all read it.
               const coverage = coverageWithout(device, devices,
@@ -1169,7 +1172,7 @@ export function AdminDevicesPage() {
                 />
               );
             })}
-          </div>
+          </AutoGrid>
           {/* A2.5: gates are VISIBLE here and editable only on Doors. */}
           <GateRows gates={gates} tenantHeartbeat={tenantHeartbeat} now={now} />
         </StateBlock>

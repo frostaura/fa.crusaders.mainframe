@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { AutoGrid } from "../components/ui/auto-grid";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { TextLink } from "../components/ui/text-link";
 import { Door, WarningCircle } from "../components/ui/icons";
@@ -165,7 +166,9 @@ function DoorsList({ store, rows, now, livenessOf, settings }: {
       {/* `items-stretch` and an internal footer: B18. Tiles misaligned whenever one door
           carried more chips than its neighbour, so three cards in a row ended with their
           scan counts at three different heights and the eye had to hunt for each. */}
-      <div className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {/* R4 form factor: sized by the box — 18rem a tile, at most four across (1920 beside the
+          rail) — where `sm:`/`xl:` columns were the viewport's answer, wrong beside the rail. */}
+      <AutoGrid min="card" max={4} gap="lg" className="items-stretch">
         {rows.map((row) => (
           <DoorTile
             key={row.device.id}
@@ -179,7 +182,7 @@ function DoorsList({ store, rows, now, livenessOf, settings }: {
             settings={settings}
           />
         ))}
-      </div>
+      </AutoGrid>
     </>
   );
 }
