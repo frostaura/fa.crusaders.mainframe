@@ -168,7 +168,7 @@ export function MemberDecision(props: Props) {
   const status = props.detail.status;
   if (!items || (status !== "PendingApproval" && status !== "Rejected")) return null;
   return (
-    <div data-member-decision="" className="flex flex-wrap items-center gap-2">
+    <div data-member-decision="" className="-mt-4 flex flex-wrap items-center gap-2">
       <DecisionButton item={items.approve} variant={status === "Rejected" ? "outline" : "primary"} icon={<UserPlus aria-hidden="true" />} />
       {status === "PendingApproval" ? <DecisionButton item={items.reject} variant="danger-soft" icon={<UserMinus aria-hidden="true" />} /> : null}
     </div>
@@ -180,7 +180,7 @@ function DecisionButton({ item, variant, icon }: { item: ActionsMenuItem; varian
   return (
     <ConfirmDialog
       {...item.confirm}
-      trigger={<Button variant={variant} icon={icon} className="!h-auto min-h-touch whitespace-normal py-2">{item.label}</Button>}
+      trigger={<Button variant={variant} icon={icon} className="!h-auto min-h-touch flex-[1_1_auto] whitespace-normal py-2 sm:flex-none">{item.label}</Button>}
     />
   );
 }

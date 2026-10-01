@@ -959,6 +959,8 @@ function VariableCatalogCard() {
           aria-controls="webhook-catalogue"
           onClick={() => setOpen((v) => !v)}
           icon={open ? <CaretUp aria-hidden="true" /> : <CaretDown aria-hidden="true" />}
+          // Its words wrap at 200 % text rather than widening a 390 phone by 2px.
+          className="!h-auto min-h-touch max-w-full whitespace-normal py-2"
         >
           {open ? "Hide the catalogue" : "Show the catalogue"}
         </Button>

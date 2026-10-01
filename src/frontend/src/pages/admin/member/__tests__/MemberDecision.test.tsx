@@ -19,14 +19,17 @@ describe("member detail — the decision on an application", () => {
     return (await screen.findAllByRole("menuitem")).map((item) => item.textContent);
   }
 
-  it("puts Approve and Reject on a pending applicant's header, and not in the ⋯", async () => {
+  it("puts Approve and Reject under a pending applicant's name, and not in the ⋯", async () => {
     const detail = detailFixture({ status: "PendingApproval" });
     serve(baseRoutes(detail));
     renderMember();
     await screen.findByTestId("member-balance");
     const header = screen.getByRole("heading", { level: 1 }).closest("[data-page-header]") as HTMLElement;
-    expect(within(header).getByRole("button", { name: ACTIONS_COPY.approve })).toBeInTheDocument();
-    expect(within(header).getByRole("button", { name: ACTIONS_COPY.reject })).toBeInTheDocument();
+    // The row right after the header, before the summary card.
+    const decision = header.nextElementSibling as HTMLElement;
+    expect(decision).toHaveAttribute("data-member-decision");
+    expect(within(decision).getByRole("button", { name: ACTIONS_COPY.approve })).toBeInTheDocument();
+    expect(within(decision).getByRole("button", { name: ACTIONS_COPY.reject })).toBeInTheDocument();
     const items = await menuItems(detail.full_name ?? "");
     expect(items).not.toContain(ACTIONS_COPY.approve);
     expect(items).not.toContain(ACTIONS_COPY.reject);

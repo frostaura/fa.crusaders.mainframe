@@ -67,7 +67,9 @@ const FRAME = cn(
 
 const TABLE = "block [@container(min-width:48rem)]:table [@container(min-width:48rem)]:table-fixed";
 const HEAD = "hidden [@container(min-width:48rem)]:table-header-group";
-const BODY = "grid gap-3 [@container(min-width:36rem)]:grid-cols-2 [@container(min-width:48rem)]:table-row-group";
+/** `grid-cols-1`, not an implicit column: that one is floored at the card's widest word and ran the
+ *  compact card past a 390 phone at 200 % text (gotchas-frontend-layout). */
+const BODY = "grid grid-cols-1 gap-3 [@container(min-width:36rem)]:grid-cols-2 [@container(min-width:48rem)]:table-row-group";
 
 /**
  * A card is COMPACT (R4 form factor, SPEC §3.8/§4.3): a wrapping row — who, then the balance on

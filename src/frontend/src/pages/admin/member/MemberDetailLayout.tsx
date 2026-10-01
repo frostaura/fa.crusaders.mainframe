@@ -177,15 +177,16 @@ function MemberHeader(props: HeaderProps) {
         description={subline}
         actions={(
           <>
-            {/* R4 form factor: an application's decision is ON the header, beside the record it is
-                about — the queue is cleared with ↓, Enter, Approve — not two menus deep. */}
-            <MemberDecision detail={detail} name={name} onChanged={state.reload} />
             <RefreshButton label={MEMBER_COPY.refresh} onRefresh={() => void state.reload()} loading={state.loading} />
             <MemberActions detail={detail} name={name} onChanged={state.reload} />
           </>
         )}
         freshness={<Freshness at={state.readAt} />}
       />
+      {/* R4 form factor: an application's decision is ON the header, under the name it is about —
+          the queue is cleared with ↓, Enter, Approve — not two menus deep. Its own row, so on a
+          phone the two worded buttons are full-width thumb targets, not a third header line. */}
+      <MemberDecision detail={detail} name={name} onChanged={state.reload} />
       {state.error ? (
         // A refresh that failed keeps the last good read on screen — and says so, with a way back.
         <Alert tone="warning" live="polite">
