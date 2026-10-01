@@ -264,7 +264,7 @@ test.describe("P8: the welcome wizard", () => {
     await serveApi(page, p8Routes({ recorder }));
     await page.goto("/my-code");
     await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
-    await expect(page.getByText(GET_STARTED.stepOf(1, 8))).toHaveCount(0);
+    await expect(page.getByText(GET_STARTED.stepOf(1, 7))).toHaveCount(0);
     await expect(page).toHaveURL(/\/my-code$/);
   });
 
@@ -278,21 +278,20 @@ test.describe("P8: the welcome wizard", () => {
     await expect(page.getByRole("heading", { level: 2, name: GET_STARTED.steps.welcome.title })).toBeVisible();
 
     const titles = [
-      GET_STARTED.steps.code.title, GET_STARTED.steps.passkey.title, GET_STARTED.steps.fingerprint.title,
+      GET_STARTED.steps.code.title, GET_STARTED.steps.passkey.title,
       GET_STARTED.steps.topup.title, GET_STARTED.steps.book.title, GET_STARTED.steps.install.title,
       GET_STARTED.steps.privacy.title,
     ];
     for (const [i, title] of titles.entries()) {
       await page.getByRole("button", { name: GET_STARTED.next, exact: true }).click();
       await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
-      await expect(page.getByText(GET_STARTED.stepOf(i + 2, 8))).toBeVisible();
+      await expect(page.getByText(GET_STARTED.stepOf(i + 2, 7))).toBeVisible();
     }
-    // The court-box fingerprint step was an explanation, never a control: nothing it said was pressable.
     await page.getByRole("button", { name: GET_STARTED.finish }).click();
     await expect(page).toHaveURL(/\/my-code$/);
     expect(recorder.calls.some((c) => c.path.endsWith("/member/complete"))).toBe(true);
     expect(recorder.calls.filter((c) => c.path.endsWith("/member/step")).map((c) => (c.body as { step: string }).step))
-      .toEqual(["code", "passkey", "fingerprint", "topup", "book", "install", "privacy"]);
+      .toEqual(["code", "passkey", "topup", "book", "install", "privacy"]);
 
     // Once per sign-in: arriving at the landing again does not send the member round again.
     await page.goto("/my-code");

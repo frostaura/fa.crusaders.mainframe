@@ -53,7 +53,8 @@ unit tests; each was wrong in the running app.
   4 lanes); the desk's follow after claim (2 lanes; a sign-out stops them). A slow install is no
   offline. A failed chunk: own boundary + Retry; online, one reload per 5 min (looped).
 - **The first-run wizard is offered only on a landing a sign-in delivered (F4.8)** — router state
-  `{ signedIn: true }` from Login. `/my-code` is the app's start URL and the door.
+  `{ signedIn: true }` from Login. `/my-code` is the app's start URL and the door. **No court-box
+  fingerprint step** (slot `enabled: false`): the box doesn't read fingerprints yet (Dean, 2026-10-01); passkeys are app sign-in only.
 - **The credits chip shows SPENDABLE (F1.11)**, naming the whole and the held/owed parts —
   supersedes D11 §3a's "the figure stays the whole balance" (550 shown, a 520 booking refused). Its flyout (R3 M-1) is the NET change of that figure over a burst of frames under 1 s apart — a split cancel's last frame read −33 while the chip rose 100.
 

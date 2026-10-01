@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe("the step list", () => {
   it("walks the eight steps in order, with the privacy choice last (P11, D13)", () => {
-    expect(memberSteps()).toEqual(["welcome", "code", "passkey", "fingerprint", "topup", "book", "install", "privacy"]);
+    expect(memberSteps()).toEqual(["welcome", "code", "passkey", "topup", "book", "install", "privacy"]);
   });
 
   it("has a title for every step it walks", () => {

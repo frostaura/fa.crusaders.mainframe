@@ -311,11 +311,9 @@ export const WHATS_NEXT_DISMISS_KEY = "crusaders.onboarding.whats-next-until";
  * say. Tests query by these, so a rewording is one edit here.
  *
  * <p>
- * <b>Only what the product does.</b> The fingerprint step describes the enrolment the club
- * actually runs — in person, witnessed by a club admin at the club's reader, consent first
- * (`docs/specs/biometric-abstraction.md` § Admin-led enrollment flow) — because there is no
- * self-service enrolment and a wizard that implied one would send a member to a box that
- * cannot help them. The notifications line says email, because every player-affecting event
+ * <b>Only what the product does.</b> There is no court-box fingerprint step: the court box does
+ * not read fingerprints yet (Dean, 2026-10-01), and a passkey's "fingerprint" is the phone's own
+ * unlock for signing in to this app, nothing more. The notifications line says email, because every player-affecting event
  * sends one and there are no push notifications.
  * </p>
  */
@@ -355,6 +353,7 @@ export const GET_STARTED = {
       body: [
         "A passkey lets this phone sign you in with Face ID, your fingerprint or your screen lock — no password to type.",
         "Your face or fingerprint never leaves your phone. The club only ever sees a key your phone makes for this app.",
+        "Passkeys are for signing in to this app. At the club, your code is what opens the door and switches on a court.",
       ],
       add: "Add a passkey",
       addAction: "add the passkey",
@@ -364,17 +363,6 @@ export const GET_STARTED = {
       checking: "Checking your passkeys",
       manage: "Manage passkeys in Profile",
       failed: "Couldn't add the passkey. Nothing was saved — try again.",
-    },
-    fingerprint: {
-      title: "Your fingerprint at the court box",
-      body: [
-        "The court box can also recognise a fingerprint, so you can switch on a court you've booked without your phone.",
-        "Fingerprints are enrolled in person: ask a club admin at the club, and they will enrol a finger for you at "
-          + "the club's reader while you're there. You'll be asked to agree first.",
-        "The fingerprint is kept on the club's own machine and never leaves it. You can ask for it to be deleted at any time.",
-      ],
-      tip: "Enrol a second finger too, in case the first one doesn't read on the day.",
-      optional: "Optional — your code always works.",
     },
     topup: {
       title: "Put credit in your wallet",

@@ -86,14 +86,14 @@ describe("the welcome wizard", () => {
     api();
     wizardAt();
     expect(await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.welcome.title })).toBeInTheDocument();
-    expect(screen.getByText(GET_STARTED.stepOf(1, 8))).toBeInTheDocument();
+    expect(screen.getByText(GET_STARTED.stepOf(1, 7))).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: GET_STARTED.back })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: GET_STARTED.next }));
     const code = await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.code.title });
     // Focus follows the step, because the route did not change and nothing else would move it.
     await waitFor(() => expect(code).toHaveFocus());
-    expect(screen.getByText(GET_STARTED.stepOf(2, 8))).toBeInTheDocument();
+    expect(screen.getByText(GET_STARTED.stepOf(2, 7))).toBeInTheDocument();
     expect(screen.getByRole("link", { name: GET_STARTED.steps.code.link })).toHaveAttribute("href", "/my-code");
 
     fireEvent.click(screen.getByRole("button", { name: GET_STARTED.back }));
@@ -162,15 +162,22 @@ describe("the welcome wizard", () => {
 });
 
 describe("the welcome wizard's steps", () => {
-  it("explains the court-box fingerprint as the in-person enrolment it is, with nothing to press", async () => {
+  it("never claims the court box reads fingerprints — an old link to that step opens the welcome", async () => {
+    // Dean, 2026-10-01: the court box does not read fingerprints yet. A passkey's fingerprint is
+    // the phone's own unlock for signing in to this app, and the passkey step says so.
     api();
     wizardAt("/get-started?step=fingerprint");
-    const step = (await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.fingerprint.title })).closest("section")!;
-    expect(step).toHaveTextContent(/ask a club admin/i);
-    expect(step).toHaveTextContent(/agree first/i);
-    expect(within(step).queryAllByRole("button")).toHaveLength(0);
-    // A biometric surface never carries the club's watermark.
-    expect(step.querySelector("[data-watermark]")).toBeNull();
+    expect(await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.welcome.title })).toBeInTheDocument();
+    expect(screen.queryByText(/court box can also recognise a fingerprint/i)).toBeNull();
+    expect(screen.getByText(GET_STARTED.stepOf(1, 7))).toBeInTheDocument();
+  });
+
+  it("says a passkey is for signing in to this app, and the code is what works at the club", async () => {
+    api();
+    wizardAt("/get-started?step=passkey");
+    const step = (await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.passkey.title })).closest("section")!;
+    expect(step).toHaveTextContent(/signing in to this app/i);
+    expect(step).toHaveTextContent(/your code is what opens the door/i);
   });
 
   it("says so plainly when this browser cannot make a passkey", async () => {
@@ -395,7 +402,7 @@ describe("the welcome wizard's privacy step (P11, D13)", () => {
     await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.install.title });
     fireEvent.click(screen.getByRole("button", { name: GET_STARTED.next }));
     expect(await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.privacy.title })).toBeInTheDocument();
-    expect(screen.getByText(GET_STARTED.stepOf(8, 8))).toBeInTheDocument();
+    expect(screen.getByText(GET_STARTED.stepOf(7, 7))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: GET_STARTED.finish })).toBeInTheDocument();
 
     const findable = await screen.findByRole("switch", { name: PRIVACY_COPY.findableLabel });

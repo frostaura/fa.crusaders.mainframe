@@ -8,7 +8,6 @@ import { LANDING_PATH } from "@/components/shell/nav";
 import { useOnboarding } from "@/components/onboarding/useOnboarding";
 import { BookStep } from "@/components/onboarding/steps/BookStep";
 import { CodeStep } from "@/components/onboarding/steps/CodeStep";
-import { FingerprintStep } from "@/components/onboarding/steps/FingerprintStep";
 import { InstallStep } from "@/components/onboarding/steps/InstallStep";
 import { PasskeyStep } from "@/components/onboarding/steps/PasskeyStep";
 import { PrivacyStep } from "@/components/onboarding/steps/PrivacyStep";
@@ -44,7 +43,6 @@ const STEP_VIEWS: Partial<Record<MemberStepId, ComponentType<{ focusOnMount?: bo
   welcome: WelcomeStep,
   code: CodeStep,
   passkey: PasskeyStep,
-  fingerprint: FingerprintStep,
   topup: TopUpStep,
   book: BookStep,
   install: InstallStep,

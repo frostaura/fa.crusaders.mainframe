@@ -55,7 +55,9 @@ export const MEMBER_STEP_SLOTS = [
   { id: "welcome", enabled: true },
   { id: "code", enabled: true },
   { id: "passkey", enabled: true },
-  { id: "fingerprint", enabled: true },
+  // Off (Dean, 2026-10-01): the court box does not read fingerprints yet, so the wizard must not
+  // say it does. The id stays so a phone whose resume point names it still opens cleanly.
+  { id: "fingerprint", enabled: false },
   { id: "topup", enabled: true },
   { id: "book", enabled: true },
   { id: "install", enabled: true },
