@@ -56,14 +56,14 @@ public static class AdminLedgerEndpoints
         });
     }
 
-    /// <summary>Count, money in, money out (a magnitude) and net over the filtered range, in credits.</summary>
+    /// <summary>Count, minutes in, minutes out (a magnitude) and net over the filtered range (P13 §12.7).</summary>
     private static async Task<object> TotalsAsync(MainframeDbContext db, LedgerQuery query, CancellationToken ct)
     {
         var range = Filtered(db, query, null);
         var count = await range.CountAsync(ct);
-        var credits = await range.Where(l => l.AmountCredits > 0).SumAsync(l => l.AmountCredits, ct);
-        var debits = await range.Where(l => l.AmountCredits < 0).SumAsync(l => -l.AmountCredits, ct);
-        return new { count, credits, debits, net = credits - debits };
+        var inMinutes = await range.Where(l => l.AmountMinutes > 0).SumAsync(l => l.AmountMinutes, ct);
+        var outMinutes = await range.Where(l => l.AmountMinutes < 0).SumAsync(l => -l.AmountMinutes, ct);
+        return new { count, in_minutes = inMinutes, out_minutes = outMinutes, net_minutes = inMinutes - outMinutes };
     }
 
     /// <summary>The window, the filters and the keyset, newest first with the id as tie-break.</summary>
@@ -206,7 +206,7 @@ public static class LedgerRowMapper
             _ => (Treasury, e.Reason ?? e.Type.ToString()),
         };
 
-        var (fromLabel, toLabel) = e.AmountCredits >= 0
+        var (fromLabel, toLabel) = e.AmountMinutes >= 0
             ? (counterparty, subject)   // money flowed INTO subject
             : (subject, counterparty);  // money flowed OUT of subject
 
@@ -215,8 +215,8 @@ public static class LedgerRowMapper
             At: e.CreatedAt,
             From: fromLabel,
             To: toLabel,
-            AmountCredits: Math.Abs(e.AmountCredits),
-            SignedAmountCredits: e.AmountCredits,
+            AmountMinutes: Math.Abs(e.AmountMinutes),
+            SignedAmountMinutes: e.AmountMinutes,
             Type: e.Type.ToString(),
             Comment: comment,
             SubjectUserId: e.UserId,
@@ -251,7 +251,7 @@ public sealed record LedgerRowDto(
     DateTimeOffset At,
     string From,
     string To,
-    decimal AmountCredits,
+    int AmountMinutes,
 
     /// <summary>
     /// The same amount, keeping its sign, so a reader can tell money in from money out
@@ -260,12 +260,12 @@ public sealed record LedgerRowDto(
     /// <para>
     /// This was <c>SignedAmountZar</c> while holding credits — the unit lie
     /// <c>CLAUDE.md</c> says must never be added a second time. It was also simply broken:
-    /// the frontend has always read <c>signedAmountCredits</c>, so the field arrived
+    /// the frontend has always read <c>signedAmountMinutes</c>, so the field arrived
     /// undefined, every row in the admin ledger and the member wallet rendered with a minus
     /// sign, and the credits/debits totals on the admin ledger page were both zero.
     /// </para>
     /// </summary>
-    decimal SignedAmountCredits,
+    int SignedAmountMinutes,
     string Type,
     string Comment,
     Guid SubjectUserId,

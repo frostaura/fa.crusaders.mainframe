@@ -68,7 +68,7 @@ public sealed class IdentificationResolver
     /// pushed in clear to every box driving that court and sit in box RAM for hours, on
     /// the stated understanding that "nothing a box holds is a member's identity". Making
     /// them a spendable identity meant anyone who read a roster code — a lifted box, a
-    /// LAN sniff, a glance at a phone — could buy court time on that member's credits at
+    /// LAN sniff, a glance at a phone — could buy court time on that member's minutes at
     /// any box, or charge them for a stranger's court as the payer. So a booking code
     /// opens its own booking on the activation paths (<c>/activate</c>, <c>/events</c>,
     /// which resolve codes themselves) and nothing else; the wallet needs the short-lived

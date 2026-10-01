@@ -12,7 +12,7 @@ namespace Crusaders.Mainframe.Api.Security;
 /// <c>frame-ancestors</c>, no <c>nosniff</c> and no <c>Referrer-Policy</c> on any hop, gateway or
 /// Kestrel. That is clickjacking with money on the other side of it: a transparent decoy over
 /// that frame gets a member to press <i>Book for 50.00 cr</i> or <i>Confirm cancellation</i>, and
-/// an admin to press <i>Adjust credit</i>, <i>Suspend member</i> or <i>Regenerate key</i> — every
+/// an admin to press <i>Adjust minutes</i>, <i>Suspend member</i> or <i>Regenerate key</i> — every
 /// one of them a single click.
 /// </para>
 /// <para>

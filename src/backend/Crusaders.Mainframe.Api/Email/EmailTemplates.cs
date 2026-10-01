@@ -22,8 +22,8 @@ public sealed record BookingConfirmationDetails(
     string CourtName,
     string StartsAtLocal,
     string Duration,
-    decimal AmountCredits,
-    decimal BalanceAfterCredits,
+    int AmountMinutes,
+    int BalanceAfterMinutes,
     int PenaltyWindowMinutes,
     decimal PenaltyPct,
     bool IsWalkUp = false,
@@ -63,7 +63,7 @@ public sealed record CancelledSlot(string CourtName, string? WhenLocal = null)
 /// </summary>
 /// <remarks>
 /// <b><see cref="CurrencySymbol"/> denominates <see cref="AmountZar"/> and nothing else on this
-/// record.</b> <see cref="CreditsAdded"/> and <see cref="BalanceAfterCredits"/> are credits,
+/// record.</b> <see cref="MinutesAdded"/> and <see cref="BalanceAfterMinutes"/> are credits,
 /// they convert at <see cref="ConversionRate"/>, and at the shipped 1.6 they are not the same
 /// size as the money — so putting the club's money sign on either of them would overstate a
 /// balance by 60%. See <see cref="Services.CurrencySymbol"/>, which is where that decision is
@@ -71,9 +71,9 @@ public sealed record CancelledSlot(string CourtName, string? WhenLocal = null)
 /// </remarks>
 public sealed record TopUpReceipt(
     decimal AmountZar,
-    decimal CreditsAdded,
+    int MinutesAdded,
     decimal ConversionRate,
-    decimal BalanceAfterCredits,
+    int BalanceAfterMinutes,
     string Reference,
     string CurrencySymbol);
 
@@ -131,7 +131,8 @@ public static partial class EmailTemplates
     /// string is the one place that drifted.
     /// </para>
     /// </remarks>
-    internal static string Cr(decimal value) => Services.MoneyFormat.Credits(value);
+    // P13-B4: the call sites become EmailTemplates.Min (contract §6); Cr already renders minutes in prose.
+    internal static string Cr(int value) => Services.MoneyFormat.Minutes(value);
 
     /// <summary>
     /// Real money, in the club's own symbol. Only for amounts that really are money — what the
@@ -377,7 +378,7 @@ public static partial class EmailTemplates
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>AmountCredits</c> and <c>BalanceAfterCredits</c> are <b>credits</b>, and the penalty
+    /// <c>AmountMinutes</c> and <c>BalanceAfterMinutes</c> are <b>credits</b>, and the penalty
     /// policy is the tenant's rather than a literal: the template this replaced hardcoded
     /// "within 15 minutes … 30%" and went on saying it after an admin had moved the club to 30
     /// minutes at 50%.
@@ -402,11 +403,11 @@ public static partial class EmailTemplates
                 new FactRow("Court", d.CourtName),
                 new FactRow(d.IsWalkUp ? "Started" : "Starts", d.StartsAtLocal),
                 new FactRow("Court time", d.Duration),
-                new FactRow("Charged", Cr(d.AmountCredits)),
-                new FactRow("Balance after", Cr(d.BalanceAfterCredits)),
+                new FactRow("Charged", Cr(d.AmountMinutes)),
+                new FactRow("Balance after", Cr(d.BalanceAfterMinutes)),
             ]),
         };
-        if (d.BalanceAfterCredits < 0) blocks.Add(OverdrawnNotice(d.BalanceAfterCredits, d.MadeByClub));
+        if (d.BalanceAfterMinutes < 0) blocks.Add(OverdrawnNotice(d.BalanceAfterMinutes, d.MadeByClub));
         blocks.Add(CancellationTerms(d));
         if (receipt is not null) blocks.Add(new Footnote("Your receipt is attached to this email as a PDF."));
 
@@ -415,8 +416,8 @@ public static partial class EmailTemplates
                 ? $"Court time started — {d.CourtName}, {d.Duration}"
                 : $"Booking confirmed — {d.CourtName}, {d.StartsAtLocal}",
             Preheader: d.IsWalkUp
-                ? $"{d.Duration} on {d.CourtName}. {Cr(d.AmountCredits)} charged."
-                : $"{d.StartsAtLocal} on {d.CourtName}. {Cr(d.AmountCredits)} charged.",
+                ? $"{d.Duration} on {d.CourtName}. {Cr(d.AmountMinutes)} charged."
+                : $"{d.StartsAtLocal} on {d.CourtName}. {Cr(d.AmountMinutes)} charged.",
             Heading: d.IsWalkUp ? "You're on court" : "You're booked",
             Blocks: blocks,
             WhyThis: WhyBooking), receipt);
@@ -436,13 +437,13 @@ public static partial class EmailTemplates
     /// (decision R19); the opening clause is then about the booking, not about the club.
     /// </para>
     /// </remarks>
-    private static EmailBlock OverdrawnNotice(decimal balanceAfterCredits, bool madeByClub)
+    private static EmailBlock OverdrawnNotice(int balanceAfterMinutes, bool madeByClub)
     {
         var opening = madeByClub
             ? "The club made this booking for you, and it takes"
             : "This booking takes";
         return new Callout(CalloutTone.Danger,
-            $"{opening} your balance to {Cr(balanceAfterCredits)}. "
+            $"{opening} your balance to {Cr(balanceAfterMinutes)}. "
             + "Top up to clear it — what you owe comes off your next top-up before anything else.");
     }
 
@@ -488,14 +489,14 @@ public static partial class EmailTemplates
     /// here would name a movement that is not on the statement.
     /// </para>
     /// </remarks>
-    public static EmailMessage WalkUpNotStarted(ClubIdentity club, string to, string courtName, decimal refundedCredits)
+    public static EmailMessage WalkUpNotStarted(ClubIdentity club, string to, string courtName, int refundedMinutes)
     {
         var blocks = new List<EmailBlock>
         {
             new Paragraph($"The box couldn't start {courtName} for you, so the court time you pressed for wasn't sold."),
         };
-        blocks.Add(refundedCredits > 0
-            ? new Callout(CalloutTone.Success, $"{Cr(refundedCredits)} has gone straight back onto your balance. You are exactly where you were before you pressed.")
+        blocks.Add(refundedMinutes > 0
+            ? new Callout(CalloutTone.Success, $"{Cr(refundedMinutes)} has gone straight back onto your balance. You are exactly where you were before you pressed.")
             : new Callout(CalloutTone.Success, "Nothing was taken off your balance."));
         blocks.Add(new Paragraph("Try again at the box, or ask at the desk."));
 
@@ -511,20 +512,20 @@ public static partial class EmailTemplates
     /// A cancelled booking. Both figures are <b>credits</b>.
     /// </summary>
     /// <remarks>
-    /// <paramref name="refundedCredits"/> is the <b>gross</b> refund — the
+    /// <paramref name="refundedMinutes"/> is the <b>gross</b> refund — the
     /// <c>CancellationRefund</c> row exactly as the ledger holds it, never that row less the
     /// penalty. Netting is forbidden, so a mail quoting a net figure names a number the member
     /// cannot find on their wallet, and read as English beside the penalty line it double-counts
     /// the deduction. <paramref name="byClub"/> is null when the member cancelled it themselves.
     /// </remarks>
     public static EmailMessage BookingCancellation(
-        ClubIdentity club, string to, CancelledSlot slot, decimal refundedCredits, decimal? penaltyCredits,
+        ClubIdentity club, string to, CancelledSlot slot, int refundedMinutes, int? penaltyMinutes,
         ClubCancellation? byClub = null)
     {
         var rows = new List<FactRow> { new("Court", slot.CourtName) };
         if (slot.WhenLocal is { Length: > 0 } when) rows.Add(new FactRow("When", when));
-        rows.Add(new FactRow("Refunded to your balance", Cr(refundedCredits)));
-        if (penaltyCredits is > 0) rows.Add(new FactRow("Late-cancellation penalty", Cr(penaltyCredits.Value)));
+        rows.Add(new FactRow("Refunded to your balance", Cr(refundedMinutes)));
+        if (penaltyMinutes is > 0) rows.Add(new FactRow("Late-cancellation penalty", Cr(penaltyMinutes.Value)));
 
         var blocks = new List<EmailBlock>
         {
@@ -539,7 +540,7 @@ public static partial class EmailTemplates
 
         return EmailChrome.Compose(club, to, new EmailContent(
             Subject: byClub is null ? $"Booking cancelled — {slot.Label}" : $"The club cancelled your booking — {slot.Label}",
-            Preheader: $"{Cr(refundedCredits)} back on your balance.",
+            Preheader: $"{Cr(refundedMinutes)} back on your balance.",
             Heading: byClub is null ? "Cancelled" : "Cancelled by the club",
             Blocks: blocks,
             WhyThis: WhyBooking));
@@ -558,18 +559,18 @@ public static partial class EmailTemplates
     /// the ledger, which holds the two legs and no netted row.
     /// </para>
     /// <para>
-    /// <paramref name="refundedCredits"/> is therefore the gross leg, and the two figures are
+    /// <paramref name="refundedMinutes"/> is therefore the gross leg, and the two figures are
     /// stated as the two movements they are. No netted total is printed either: that netted
     /// number is precisely what started this.
     /// </para>
     /// </remarks>
     public static EmailMessage BookingNoShow(
-        ClubIdentity club, string to, string courtName, decimal refundedCredits, decimal penaltyCredits) =>
+        ClubIdentity club, string to, string courtName, int refundedMinutes, int penaltyMinutes) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Missed booking — {courtName}",
-            Preheader: penaltyCredits > 0
-                ? $"Refunded {Cr(refundedCredits)}, less a no-show penalty of {Cr(penaltyCredits)}."
-                : $"Refunded {Cr(refundedCredits)}, with no penalty.",
+            Preheader: penaltyMinutes > 0
+                ? $"Refunded {Cr(refundedMinutes)}, less a no-show penalty of {Cr(penaltyMinutes)}."
+                : $"Refunded {Cr(refundedMinutes)}, with no penalty.",
             Heading: "You missed this booking",
             Blocks:
             [
@@ -577,8 +578,8 @@ public static partial class EmailTemplates
                 new Facts(
                 [
                     new FactRow("Court", courtName),
-                    new FactRow("Booking refunded", Cr(refundedCredits)),
-                    new FactRow("No-show penalty", penaltyCredits > 0 ? Cr(penaltyCredits) : "None"),
+                    new FactRow("Booking refunded", Cr(refundedMinutes)),
+                    new FactRow("No-show penalty", penaltyMinutes > 0 ? Cr(penaltyMinutes) : "None"),
                 ]),
                 new Footnote("Both of those are separate lines in your wallet — the refund and the penalty are two movements, not one."),
                 new Callout(CalloutTone.Info, "If you were at the court and couldn't get the lights on, tell the club. They can reverse this."),
@@ -606,10 +607,10 @@ public static partial class EmailTemplates
     /// A booking the member cancelled, whose code somebody then used to light the court.
     /// </summary>
     public static EmailMessage CancelledBookingLightsCharged(
-        ClubIdentity club, string to, string courtName, int minutes, decimal amountCredits) =>
+        ClubIdentity club, string to, string courtName, int minutes, int amountMinutes) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Lights charged — {courtName}",
-            Preheader: $"{minutes} minutes of court time on a booking you had cancelled: {Cr(amountCredits)}.",
+            Preheader: $"{minutes} minutes of court time on a booking you had cancelled: {Cr(amountMinutes)}.",
             Heading: "Your cancelled booking was used",
             Blocks:
             [
@@ -618,7 +619,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Court", courtName),
                     new FactRow("Lights were on for", $"{minutes} min"),
-                    new FactRow("Charged", Cr(amountCredits)),
+                    new FactRow("Charged", Cr(amountMinutes)),
                 ]),
                 new Callout(CalloutTone.Warning, "Court time is not refunded once the lights have been on, so this charge stands."),
                 new Paragraph("If that wasn't you, your access code has been used by somebody else — tell the club and they can look at who opened the court."),
@@ -641,7 +642,7 @@ public static partial class EmailTemplates
 
     /// <summary>A no-show the box's own record overturned.</summary>
     public static EmailMessage NoShowReversed(
-        ClubIdentity club, string to, string courtName, decimal refunded, decimal penalised) =>
+        ClubIdentity club, string to, string courtName, int refunded, int penalised) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"No-show reversed — {courtName}",
             Preheader: "The court's check-in reached the club late. The booking now stands as played.",
@@ -679,8 +680,8 @@ public static partial class EmailTemplates
     /// </remarks>
     public static EmailMessage TopUpConfirmation(ClubIdentity club, string to, TopUpReceipt r) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"Top-up confirmed — {Cr(r.CreditsAdded)}",
-            Preheader: $"{Zar(r.AmountZar, r.CurrencySymbol)} paid. Your balance is now {Cr(r.BalanceAfterCredits)}.",
+            Subject: $"Top-up confirmed — {Cr(r.MinutesAdded)}",
+            Preheader: $"{Zar(r.AmountZar, r.CurrencySymbol)} paid. Your balance is now {Cr(r.BalanceAfterMinutes)}.",
             Heading: "Your wallet has been topped up",
             Blocks:
             [
@@ -692,8 +693,8 @@ public static partial class EmailTemplates
                     // quoting "1.6 credits per R1" is quoting a rate against a currency it does
                     // not take.
                     new FactRow("Your rate", $"{Num(r.ConversionRate)} credits per {r.CurrencySymbol}1"),
-                    new FactRow("Credited", Cr(r.CreditsAdded)),
-                    new FactRow("Balance after", Cr(r.BalanceAfterCredits)),
+                    new FactRow("Credited", Cr(r.MinutesAdded)),
+                    new FactRow("Balance after", Cr(r.BalanceAfterMinutes)),
                     new FactRow("Reference", r.Reference),
                 ]),
                 new Footnote($"Credits are what you book court time with. {r.CurrencySymbol} is only the payment rail — keep the reference above if you ever need to ask about this payment."),
@@ -768,7 +769,7 @@ public static partial class EmailTemplates
                 new Facts(
                 [
                     new FactRow("Amount", Zar(amountZar, currencySymbol)),
-                    new FactRow("Credited", Cr(0m)),
+                    new FactRow("Credited", Cr(0)),
                     new FactRow("Reference", reference),
                 ]),
                 new Callout(CalloutTone.Info, "Your wallet balance has not changed."),
@@ -780,13 +781,13 @@ public static partial class EmailTemplates
     /// hand is told what moved and why.
     /// </summary>
     public static EmailMessage CreditAdjustment(
-        ClubIdentity club, string to, decimal amountCredits, decimal balanceAfterCredits, string reason)
+        ClubIdentity club, string to, int amountMinutes, int balanceAfterMinutes, string reason)
     {
-        var added = amountCredits >= 0;
-        var size = Cr(Math.Abs(amountCredits));
+        var added = amountMinutes >= 0;
+        var size = Cr(Math.Abs(amountMinutes));
         return EmailChrome.Compose(club, to, new EmailContent(
             Subject: added ? $"Credit added — {size}" : $"Credit deducted — {size}",
-            Preheader: $"Your balance is now {Cr(balanceAfterCredits)}.",
+            Preheader: $"Your balance is now {Cr(balanceAfterMinutes)}.",
             Heading: added ? "Credits added to your wallet" : "Credits taken off your wallet",
             Blocks:
             [
@@ -794,7 +795,7 @@ public static partial class EmailTemplates
                 new Facts(
                 [
                     new FactRow("Amount", (added ? "+" : "−") + size),
-                    new FactRow("Balance after", Cr(balanceAfterCredits)),
+                    new FactRow("Balance after", Cr(balanceAfterMinutes)),
                     new FactRow("Reason given", reason),
                 ]),
                 new Paragraph("If that doesn't look right, reply to this email or speak to the desk. The movement stays on your wallet either way — a correction is a second line, never a deleted one."),
@@ -932,17 +933,17 @@ public static partial class EmailTemplates
     /// them for its own hardware.
     /// </remarks>
     public static EmailMessage BookingRefundedForOutage(
-        ClubIdentity club, string to, string courtName, decimal refundedCredits) =>
+        ClubIdentity club, string to, string courtName, int refundedMinutes) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Refunded — {courtName} was offline",
-            Preheader: $"{Cr(refundedCredits)} back, no penalty. You have not been marked down for this.",
+            Preheader: $"{Cr(refundedMinutes)} back, no penalty. You have not been marked down for this.",
             Heading: "Your booking has been refunded in full",
             Blocks:
             [
                 new Paragraph($"The court controller at {club.Name} was offline during your booking on {courtName}, so the lights could not be released against your name."),
                 new Facts(
                 [
-                    new FactRow("Refunded", Cr(refundedCredits)),
+                    new FactRow("Refunded", Cr(refundedMinutes)),
                     new FactRow("Penalty", "None"),
                 ]),
                 new Callout(CalloutTone.Success, "You have not been marked down for missing it, and nothing has been deducted."),
@@ -984,17 +985,17 @@ public static partial class EmailTemplates
     /// </para>
     /// </remarks>
     public static EmailMessage BookingRefundedForOutOfServiceBox(
-        ClubIdentity club, string to, string courtName, decimal refundedCredits) =>
+        ClubIdentity club, string to, string courtName, int refundedMinutes) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Refunded — the box on {courtName} is out of service",
-            Preheader: $"{Cr(refundedCredits)} back, no penalty. This refund is final.",
+            Preheader: $"{Cr(refundedMinutes)} back, no penalty. This refund is final.",
             Heading: "Your booking has been refunded in full",
             Blocks:
             [
                 new Paragraph($"Nobody checked in on {courtName} at {club.Name} during your booking, and the box on that court is out of service — it could not open the court, and it will never send the club a record of anyone who played."),
                 new Facts(
                 [
-                    new FactRow("Refunded", Cr(refundedCredits)),
+                    new FactRow("Refunded", Cr(refundedMinutes)),
                     new FactRow("Penalty", "None"),
                 ]),
                 new Callout(CalloutTone.Success, "You have not been marked down for missing it, and nothing has been deducted."),

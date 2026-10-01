@@ -60,7 +60,7 @@ public sealed record PauseCoverage(IReadOnlySet<DateOnly> Paused, IReadOnlyDicti
 /// earns by the streak's remainder (<c>streak % E</c>) and threw an earn away at the cap, so where
 /// a run started decided which earns were lost: one extra attended week at the start of a run
 /// could end a streak that the same history without it survived (the X/Y regression test).
-/// Stated as credit <c>c = bank × E + progress</c>, this rule is: attend → <c>min(c + 1, K × E)</c>;
+/// Stated as a running count <c>c = bank × E + progress</c>, this rule is: attend → <c>min(c + 1, K × E)</c>;
 /// miss → <c>c − E</c> when <c>c ≥ E</c>, else broken. Both are non-decreasing in <c>c</c>, and a
 /// break needs <c>c &lt; E</c> — so more attended or paused weeks can only keep <c>c</c>, and the
 /// streak, at least as high. The seeded property test holds it to that.

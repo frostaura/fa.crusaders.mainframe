@@ -1,7 +1,7 @@
 namespace Crusaders.Mainframe.Api.Email;
 
 /// <summary>What both members are told when one pays for the other's court at the box (D10).</summary>
-public sealed record PaidForCourt(string CourtName, string StartsAtLocal, decimal AmountCredits, string OtherName);
+public sealed record PaidForCourt(string CourtName, string StartsAtLocal, int AmountMinutes, string OtherName);
 
 /// <summary>
 /// The two D10 messages (<c>docs/specs/member-code.md</c> §9): the payer's receipt and the
@@ -14,7 +14,7 @@ public static partial class EmailTemplates
     public static EmailMessage YouPaidForACourt(ClubIdentity club, string to, PaidForCourt p) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"You paid for {p.CourtName}",
-            Preheader: $"{Cr(p.AmountCredits)} for {p.OtherName}'s booking, paid at the court box.",
+            Preheader: $"{Cr(p.AmountMinutes)} for {p.OtherName}'s booking, paid at the court box.",
             Heading: "You paid for a court at the box",
             Blocks:
             [
@@ -23,7 +23,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Court", p.CourtName),
                     new FactRow("Time", p.StartsAtLocal),
-                    new FactRow("Charged", Cr(p.AmountCredits)),
+                    new FactRow("Charged", Cr(p.AmountMinutes)),
                 ]),
                 new Footnote($"{p.OtherName} has been refunded the same amount. If this was not you, tell the club — your code may have been used by somebody holding your phone."),
             ],
@@ -33,7 +33,7 @@ public static partial class EmailTemplates
     public static EmailMessage YourCourtWasPaidFor(ClubIdentity club, string to, PaidForCourt p) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"{p.OtherName} paid for your court",
-            Preheader: $"{Cr(p.AmountCredits)} is back in your wallet.",
+            Preheader: $"{Cr(p.AmountMinutes)} is back in your wallet.",
             Heading: "Somebody paid for your court",
             Blocks:
             [
@@ -42,7 +42,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Court", p.CourtName),
                     new FactRow("Time", p.StartsAtLocal),
-                    new FactRow("Refunded to you", Cr(p.AmountCredits)),
+                    new FactRow("Refunded to you", Cr(p.AmountMinutes)),
                 ]),
                 new Footnote("The refund is its own line in your wallet. Your booking is unchanged."),
             ],

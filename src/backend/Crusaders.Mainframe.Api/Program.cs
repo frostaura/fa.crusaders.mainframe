@@ -113,7 +113,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             // member's phone displays at the court, which a camera in a public room
             // photographs by design. Without this check that token is a valid
             // Authorization header for the whole API as that member: scan the screen,
-            // read the wallet, book on their credits. The planned printed member-card
+            // read the wallet, book on their minutes. The planned printed member-card
             // QR would have made it permanent rather than one-minute.
             //
             // Enforced here rather than per-endpoint so a new endpoint is covered by

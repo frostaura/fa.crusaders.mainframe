@@ -24,8 +24,8 @@ public sealed record TraceEventRow(
     Guid? SubjectUserId,
     string? SubjectName,
     TraceCourtRef? Court,
-    decimal? AmountCredits,
-    decimal? BalanceAfterCredits,
+    int? AmountMinutes,
+    int? BalanceAfterMinutes,
     IReadOnlyDictionary<string, object?> Detail)
 {
     /// <summary>
@@ -68,7 +68,7 @@ public sealed record TraceEventRow(
 /// </summary>
 public sealed record TraceSummary(
     DateTimeOffset? FirstSeenAt, DateTimeOffset? LastSeenAt, int MinutesOnCourt,
-    IReadOnlyList<string> Courts, decimal CreditsSpent, decimal CreditsReceived,
+    IReadOnlyList<string> Courts, int MinutesSpent, int MinutesReceived,
     int DoorsEntered, int DoorsRefused, int BookingsMade, int BookingsCancelled);
 
 /// <summary>One member's night: the page the caller asked for, and what the whole range came to.</summary>
@@ -119,7 +119,7 @@ public static class AdminMemberTraceAssembly
     private sealed record Strands(
         List<AuditLog> Audit, List<LedgerEntry> Ledger, List<ReceiptRow> Receipts,
         Dictionary<Guid, TraceCourtRef> Courts, Dictionary<Guid, Guid> BookingCourts,
-        List<Guid> NotADoor, Dictionary<Guid, string> Names, HashSet<Guid> Admins, decimal Opening)
+        List<Guid> NotADoor, Dictionary<Guid, string> Names, HashSet<Guid> Admins, int Opening)
     {
         /// <summary>The boards the rows name, by id → code.</summary>
         public Dictionary<Guid, string> DeviceCodes { get; init; } = [];
@@ -315,11 +315,11 @@ public static class AdminMemberTraceAssembly
     /// moved and never what was left, which is the first thing anybody asks of it.
     /// </para>
     /// </summary>
-    private static Task<decimal> OpeningBalanceAsync(
+    private static Task<int> OpeningBalanceAsync(
         MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
         => db.LedgerEntries.AsNoTracking()
             .Where(l => l.UserId == q.UserId && l.CreatedAt < q.From)
-            .SumAsync(l => l.AmountCredits, ct);
+            .SumAsync(l => l.AmountMinutes, ct);
 
     /// <summary>
     /// Which of the people on these rows this club has marked as administrators.
@@ -385,8 +385,8 @@ public static class AdminMemberTraceAssembly
                 SubjectUserId: row.SubjectUserId,
                 SubjectName: PersonNames.Of(row.SubjectUserId, s.Names),
                 Court: court,
-                AmountCredits: null,
-                BalanceAfterCredits: null,
+                AmountMinutes: null,
+                BalanceAfterMinutes: null,
                 Detail: AuditDetail(row.Action, details))
             {
                 // A removed board keeps the code its rows were written with.
@@ -413,7 +413,7 @@ public static class AdminMemberTraceAssembly
         foreach (var row in s.Ledger)
         {
             var own = row.UserId == q.UserId;
-            if (own) running += row.AmountCredits;
+            if (own) running += row.AmountMinutes;
 
             var kind = TraceKinds.OfLedger(row.Type);
             var actorKind = ActorKindOf(row.ActorUserId, hasDevice: false, s.Admins);
@@ -427,7 +427,7 @@ public static class AdminMemberTraceAssembly
                 Kind: kind,
                 Headline: TraceKinds.Headline(kind, new TraceFacts
                 {
-                    AmountCredits = row.AmountCredits,
+                    AmountMinutes = row.AmountMinutes,
                     CourtName = court?.Name,
                     ActorName = actorName,
                     ActorKind = actorKind,
@@ -438,8 +438,8 @@ public static class AdminMemberTraceAssembly
                 SubjectUserId: row.UserId,
                 SubjectName: PersonNames.Of(row.UserId, s.Names),
                 Court: court,
-                AmountCredits: row.AmountCredits,
-                BalanceAfterCredits: own ? running : null,
+                AmountMinutes: row.AmountMinutes,
+                BalanceAfterMinutes: own ? running : null,
                 Detail: Detail(
                     ("ledger_type", row.Type.ToString()),
                     ("reason", row.Reason),
@@ -482,8 +482,8 @@ public static class AdminMemberTraceAssembly
                 SubjectUserId: null,
                 SubjectName: null,
                 Court: court,
-                AmountCredits: null,
-                BalanceAfterCredits: null,
+                AmountMinutes: null,
+                BalanceAfterMinutes: null,
                 Detail: Detail(
                     ("booking_id", row.BookingId),
                     ("relay", row.Relay),
@@ -595,7 +595,7 @@ public static class AdminMemberTraceAssembly
 
         var money = events
             .Where(e => e.Source == LedgerSource && e.SubjectUserId == traced)
-            .Select(e => e.AmountCredits ?? 0m)
+            .Select(e => e.AmountMinutes ?? 0)
             .ToList();
 
         return new TraceSummary(
@@ -603,8 +603,8 @@ public static class AdminMemberTraceAssembly
             LastSeenAt: present.Count > 0 ? present.Max() : null,
             MinutesOnCourt: MinutesOnCourt(receipts),
             Courts: [.. events.Where(e => e.Court is not null).Select(e => e.Court!.Name).Distinct().Order()],
-            CreditsSpent: -money.Where(a => a < 0).Sum(),
-            CreditsReceived: money.Where(a => a > 0).Sum(),
+            MinutesSpent: -money.Where(a => a < 0).Sum(),
+            MinutesReceived: money.Where(a => a > 0).Sum(),
             DoorsEntered: events.Count(e => e.Kind is TraceKinds.DoorOpened or TraceKinds.DoorOpenedOffline),
             DoorsRefused: events.Count(e => e.Kind == TraceKinds.DoorRefused),
             BookingsMade: events.Count(e => e.Kind is TraceKinds.BookingMade or TraceKinds.BookingMadeForThem),

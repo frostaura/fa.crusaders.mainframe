@@ -46,7 +46,7 @@ public readonly record struct TraceFacts
     public string? CourtName { get; init; }
 
     /// <summary>The movement, in credits, unsigned — the sentence carries the direction.</summary>
-    public decimal? AmountCredits { get; init; }
+    public int? AmountMinutes { get; init; }
 
     /// <summary>Who did it, when naming them makes the sentence say something.</summary>
     public string? ActorName { get; init; }
@@ -548,7 +548,7 @@ public static class TraceKinds
     {
         // Block body for the lizard reason in `memory/gotchas.md`: a `{ }` property pattern in
         // an expression-bodied member costs this file its scope in lizard's C# parser.
-        return facts.AmountCredits is { } amount
+        return facts.AmountMinutes is { } amount
             ? Math.Abs(amount).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
             : "—";
     }

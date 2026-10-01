@@ -56,9 +56,9 @@ public static class ReportingEndpoints
             var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).ToList();
             var reversed = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).ToList();
 
-            // Rand comes from ZarPaid; credits come from AmountCredits. They are not
+            // Rand comes from ZarPaid; credits come from AmountMinutes. They are not
             // interchangeable and this endpoint used to treat them as though they were —
-            // it summed AmountCredits and labelled the result gross_topups_zar, which the
+            // it summed AmountMinutes and labelled the result gross_topups_zar, which the
             // admin revenue page then printed with a rand sign. A Regular member's R1000
             // top-up posts 1600 credits and a League member's posts 2400, so the club was
             // shown R1600–R2400 of income for R1000 actually received, and no amount of
@@ -73,9 +73,9 @@ public static class ReportingEndpoints
                 gross_topups_zar = funding.Sum(SignedZar),
                 reversals_zar = reversed.Sum(SignedZar),
                 net_zar = funding.Sum(SignedZar) + reversed.Sum(SignedZar),
-                gross_topups_credits = funding.Sum(r => r.AmountCredits),
-                reversals_credits = reversed.Sum(r => r.AmountCredits),
-                net_credits = funding.Sum(r => r.AmountCredits) + reversed.Sum(r => r.AmountCredits),
+                gross_topups_minutes = funding.Sum(r => r.AmountMinutes),
+                reversals_minutes = reversed.Sum(r => r.AmountMinutes),
+                net_minutes = funding.Sum(r => r.AmountMinutes) + reversed.Sum(r => r.AmountMinutes),
             });
         });
 
@@ -102,7 +102,7 @@ public static class ReportingEndpoints
                 .ToDictionaryAsync(c => c.Id, c => new { c.CourtNumber, c.Name }, ct);
 
             // Revenue is what the club KEPT, read off the ledger — not the price quoted at
-            // booking. This summed AmountChargedCredits, so a booking that was swept as a
+            // booking. This summed AmountChargedMinutes, so a booking that was swept as a
             // no-show (charged −50, refunded +50, penalised −15, then credited +5 by the
             // desk) counted as 50 of revenue when settlement-model S5 says the club's take
             // is the penalty, netted per I3, and the ledger says 10. Court 4 read 100 on a
@@ -112,8 +112,8 @@ public static class ReportingEndpoints
             var settled = await db.LedgerEntries
                 .Where(l => l.RelatedBookingId != null && bookingIds.Contains(l.RelatedBookingId!.Value))
                 .GroupBy(l => l.RelatedBookingId!.Value)
-                .Select(g => new { BookingId = g.Key, Credits = g.Sum(x => x.AmountCredits) })
-                .ToDictionaryAsync(x => x.BookingId, x => x.Credits, ct);
+                .Select(g => new { BookingId = g.Key, Minutes = g.Sum(x => x.AmountMinutes) })
+                .ToDictionaryAsync(x => x.BookingId, x => x.Minutes, ct);
 
             var byCourt = bookings.GroupBy(b => b.CourtId)
                 .Select(g =>
@@ -130,8 +130,8 @@ public static class ReportingEndpoints
                         // and are what a utilisation percentage would have to be built from.
                         booked_minutes = g.Sum(b => b.SliceMinutes * b.SliceCount),
                         bookings = g.Count(),
-                        revenue_credits = g.Sum(b => -settled.GetValueOrDefault(b.Id, 0m)),
-                        quoted_credits = g.Sum(b => b.AmountChargedCredits),
+                        kept_minutes = g.Sum(b => -settled.GetValueOrDefault(b.Id, 0)),
+                        sold_minutes = g.Sum(b => b.AmountChargedMinutes),
                         blocked_minutes = blockedByCourt.GetValueOrDefault(g.Key, 0),
                     };
                 })
@@ -228,30 +228,30 @@ public static class ReportingEndpoints
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_credits = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountCredits),
-                    booking_charges_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
-                    refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
-                    penalties_credits = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    top_ups_minutes = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    booking_charges_minutes = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    refunds_minutes = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    penalties_minutes = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     // What the desk handed out or took back by hand. It was in the member's
                     // own report and on Transactions and nowhere on the club's report — a
                     // tenant with 2,525.50 credits of AdminAdjustment had no screen that
                     // showed the figure at all, on the report whose job is where the money
                     // went.
-                    adjustments_credits = le.Where(x => LedgerEntryTypes.Adjustment.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    adjustments_minutes = le.Where(x => LedgerEntryTypes.Adjustment.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     // A payment clawed back after the fact. It was in NO bucket: this row
                     // summed Funding, Spend, Refund, Penalty and Adjustment and stopped,
                     // under a card that called those five "every ledger movement in the club
                     // summed". A -160.00 reversal inside the window made the card print
                     // +555.00 over a true movement of +395.00. The member's own report has
-                    // carried `reversals_credits` since it was made to reconcile; the club's
+                    // carried `reversals_minutes` since it was made to reconcile; the club's
                     // had not, so the two screens disagreed by exactly the reversals.
-                    reversals_credits = le.Where(x => LedgerEntryTypes.Reversal.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    reversals_minutes = le.Where(x => LedgerEntryTypes.Reversal.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     // D11: shares moving between two members. Club-wide the pairs net to zero,
                     // so this reads 0 on every real day; it is here so the buckets still sum to
-                    // net_movement_credits whatever the ledger holds.
-                    share_transfers_credits = le.Where(x => LedgerEntryTypes.Transfer.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    // net_movement_minutes whatever the ledger holds.
+                    share_transfers_minutes = le.Where(x => LedgerEntryTypes.Transfer.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     // The day's movement, summed WITHOUT looking at the type — the same
-                    // arithmetic `net_movement_credits` uses on the member's own report, so
+                    // arithmetic `net_movement_minutes` uses on the member's own report, so
                     // the two screens cannot mean different things by "net".
                     //
                     // It is also the guard. The six bucket columns above must add up to this
@@ -261,7 +261,7 @@ public static class ReportingEndpoints
                     // message, instead of quietly making the club's report stop summing to
                     // its own total. `LedgerEntryTypeCoverageTests` asserts the bucket TABLE
                     // is total; it cannot see whether an endpoint uses all of it.
-                    net_movement_credits = le.Sum(x => x.AmountCredits),
+                    net_movement_minutes = le.Sum(x => x.AmountMinutes),
                     // D2-B35. The member-facing /reports/me/daily further down is NOT
                     // changed by this: it is pre-filtered by UserId, and a block has none.
                     bookings = bk.Count(b => b.Status is not BookingStatus.Cancelled and not BookingStatus.AdminBlock),
@@ -288,22 +288,22 @@ public static class ReportingEndpoints
             var ledgerByDay = entries.GroupBy(e => LocalDay(e.CreatedAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
             var bookingsByDay = bookings.GroupBy(b => LocalDay(b.StartsAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
 
-            decimal running = 0m;
+            int running = 0;
             // Seed running balance with everything before the window so the chart line starts at the right value.
-            running = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt < f).SumAsync(x => (decimal?)x.AmountCredits, ct) ?? 0m;
+            running = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt < f).SumAsync(x => (int?)x.AmountMinutes, ct) ?? 0;
 
             var rows = allDays.Select(d =>
             {
                 var le = ledgerByDay.GetValueOrDefault(d) ?? new();
                 var bk = bookingsByDay.GetValueOrDefault(d) ?? new();
-                var dayDelta = le.Sum(x => x.AmountCredits);
+                var dayDelta = le.Sum(x => x.AmountMinutes);
                 running += dayDelta;
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_credits = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountCredits),
-                    spent_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
-                    refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    top_ups_minutes = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    spent_minutes = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    refunds_minutes = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     // Attendance, which nothing in the product showed anywhere. CheckedInAt
                     // is the source of truth for it — the settlement model hangs the refund
@@ -311,7 +311,7 @@ public static class ReportingEndpoints
                     // whether the club believed they had turned up.
                     attended = bk.Count(b => b.CheckedInAt is not null),
                     minutes_on_court = bk.Where(b => b.CheckedInAt is not null).Sum(b => b.SliceMinutes * b.SliceCount),
-                    balance_credits = running,
+                    balance_minutes = running,
                 };
             }).ToList();
             return Results.Ok(rows);
@@ -335,7 +335,7 @@ public static class ReportingEndpoints
     private static decimal SignedZar(LedgerEntry e)
     {
         var rand = Math.Abs(e.ZarPaid ?? 0m);
-        return e.AmountCredits < 0 ? -rand : rand;
+        return e.AmountMinutes < 0 ? -rand : rand;
     }
 
     /// <summary>The club-local calendar day an instant falls on, per <c>reporting.md</c>.</summary>
@@ -452,9 +452,9 @@ public static class ReportingEndpoints
     /// nothing else, so a member whose ledger held 2,500 credits of admin adjustments read
     /// "0 in, 950 out, 100 back" on a page whose header said 1,635 — the two screens
     /// disagreeing with no way to see why. Every bucket a movement can land in is now here,
-    /// and <c>net_movement_credits</c> is their sum: for a range covering the whole ledger
+    /// and <c>net_movement_minutes</c> is their sum: for a range covering the whole ledger
     /// it equals the balance, and for any other range it is exactly what the balance moved
-    /// by. <c>penalties_credits</c> is the total <c>reporting.md</c> asks for beside the
+    /// by. <c>penalties_minutes</c> is the total <c>reporting.md</c> asks for beside the
     /// count it already had.
     /// </para>
     /// </summary>
@@ -462,33 +462,33 @@ public static class ReportingEndpoints
         List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to,
         int attendedBookings = 0, int minutesOnCourt = 0)
     {
-        var topUps = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits);
-        var spent = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits);
-        var refunds = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits);
-        var penaltiesTotal = -entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountCredits);
-        var adjustments = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountCredits);
-        var reversals = entries.Where(e => LedgerEntryTypes.Reversal.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var topUps = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountMinutes);
+        var spent = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountMinutes);
+        var refunds = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountMinutes);
+        var penaltiesTotal = -entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountMinutes);
+        var adjustments = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountMinutes);
+        var reversals = entries.Where(e => LedgerEntryTypes.Reversal.Contains(e.Type)).Sum(e => e.AmountMinutes);
         // D11: shares paid to (−) or received from (+) other players for split bookings.
-        var shares = entries.Where(e => LedgerEntryTypes.Transfer.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var shares = entries.Where(e => LedgerEntryTypes.Transfer.Contains(e.Type)).Sum(e => e.AmountMinutes);
         // A penalty is a debit. A reversed no-show posts a positive row of the same type
         // to give the money back, and that row is not a second penalty.
-        var penalties = entries.Count(e => LedgerEntryTypes.Penalty.Contains(e.Type) && e.AmountCredits < 0);
+        var penalties = entries.Count(e => LedgerEntryTypes.Penalty.Contains(e.Type) && e.AmountMinutes < 0);
         return new
         {
             from,
             to,
-            top_ups_credits = topUps,
-            spent_credits = spent,
-            refunds_credits = refunds,
-            penalties_credits = penaltiesTotal,
-            adjustments_credits = adjustments,
-            reversals_credits = reversals,
-            share_transfers_credits = shares,
+            top_ups_minutes = topUps,
+            spent_minutes = spent,
+            refunds_minutes = refunds,
+            penalties_minutes = penaltiesTotal,
+            adjustments_minutes = adjustments,
+            reversals_minutes = reversals,
+            share_transfers_minutes = shares,
             // What court time actually cost this member once the players settled up: spend,
             // less refunds, plus penalties, less the shares others paid them (plus the shares
             // they paid others). The club's figures are unchanged; this is the member's own.
-            net_court_spend_credits = spent - refunds + penaltiesTotal - shares,
-            net_movement_credits = entries.Sum(e => e.AmountCredits),
+            net_court_spend_minutes = spent - refunds + penaltiesTotal - shares,
+            net_movement_minutes = entries.Sum(e => e.AmountMinutes),
             penalty_count = penalties,
             attended_bookings = attendedBookings,
             minutes_on_court = minutesOnCourt,
@@ -499,12 +499,12 @@ public static class ReportingEndpoints
     private static string LedgerCsv(IEnumerable<LedgerEntry> entries)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("created_at,type,amount_credits,reason,external_reference,related_booking_id");
+        sb.AppendLine("created_at,type,amount_minutes,reason,external_reference,related_booking_id");
         foreach (var e in entries)
         {
             sb.Append(e.CreatedAt.ToString("o", CultureInfo.InvariantCulture)).Append(',');
             sb.Append(e.Type).Append(',');
-            sb.Append(e.AmountCredits.ToString(CultureInfo.InvariantCulture)).Append(',');
+            sb.Append(e.AmountMinutes.ToString(CultureInfo.InvariantCulture)).Append(',');
             sb.Append(Csv(e.Reason)).Append(',');
             sb.Append(Csv(e.ExternalReference)).Append(',');
             sb.AppendLine(e.RelatedBookingId?.ToString() ?? "");

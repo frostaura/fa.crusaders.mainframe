@@ -134,20 +134,20 @@ public static class AdminMemberEndpoints
                 .Where(l => l.UserId == membership.UserId && l.CreatedAt >= f && l.CreatedAt < t)
                 .ToListAsync(ct);
 
-            // Bucket by year-month (UTC). Output: chronological list of {month, top_ups_credits, spent_credits, refunds_credits, penalties_credits, net_credits}.
+            // Bucket by year-month (UTC). Output: chronological list of {month, top_ups_minutes, spent_minutes, refunds_minutes, penalties_minutes, net_minutes}.
             var buckets = entries
                 .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month })
                 .OrderBy(g2 => g2.Key.Year).ThenBy(g2 => g2.Key.Month)
                 .Select(g2 => new
                 {
                     month = $"{g2.Key.Year:0000}-{g2.Key.Month:00}",
-                    top_ups_credits = g2.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    top_ups_minutes = g2.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountMinutes),
                     top_ups_zar = g2.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.ZarPaid ?? 0m),
-                    spent_credits = -g2.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits),
-                    refunds_credits = g2.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits),
-                    penalties_credits = -g2.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountCredits),
-                    adjustments_credits = g2.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountCredits),
-                    net_credits = g2.Sum(e => e.AmountCredits),
+                    spent_minutes = -g2.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    refunds_minutes = g2.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    penalties_minutes = -g2.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    adjustments_minutes = g2.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    net_minutes = g2.Sum(e => e.AmountMinutes),
                     movement_count = g2.Count(),
                 })
                 .ToList();
@@ -168,17 +168,17 @@ public static class AdminMemberEndpoints
                 },
                 totals = new
                 {
-                    top_ups_credits = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    top_ups_minutes = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountMinutes),
                     top_ups_zar = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.ZarPaid ?? 0m),
-                    spent_credits = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits),
-                    refunds_credits = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits),
-                    penalties_credits = -entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    spent_minutes = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    refunds_minutes = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    penalties_minutes = -entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountMinutes),
 
                     // Present in the monthly breakdown above and absent here until now, so
                     // the columns did not sum to the total. A pre-existing inconsistency,
                     // not one introduced by the LightsPurchase sweep.
-                    adjustments_credits = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountCredits),
-                    net_credits = entries.Sum(e => e.AmountCredits),
+                    adjustments_minutes = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    net_minutes = entries.Sum(e => e.AmountMinutes),
                     movement_count = entries.Count,
                 },
                 monthly = buckets,
@@ -275,7 +275,7 @@ public static class AdminMemberEndpoints
 
     /// <summary>
     /// A member's groups as every admin read names them: id, name, system key, and the two
-    /// tariff fields a screen needs to explain a rate or a peak refusal.
+    /// tariff fields a screen needs to explain a discount or a peak refusal.
     /// </summary>
     internal static List<object> GroupsWire(IEnumerable<TariffGroup> groups)
     {
@@ -284,7 +284,7 @@ public static class AdminMemberEndpoints
             id = g.Id,
             name = g.Name,
             system_key = g.SystemKey,
-            credits_per_zar = g.CreditsPerZar,
+            package_discount_bps = g.PackageDiscountBps,
             peak_priority = g.PeakPriority,
         }).ToList();
     }
@@ -366,7 +366,7 @@ public static class AdminMembersList
         public string? AdminSource { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public string? RejectionReason { get; init; }
-        public decimal BalanceCredits { get; init; }
+        public int BalanceMinutes { get; init; }
     }
 
     private static async Task<List<Row>> RowsAsync(IQueryable<Membership> q, MainframeDbContext db, InherentAdmins inherent, CancellationToken ct)
@@ -398,7 +398,7 @@ public static class AdminMembersList
             CreatedAt = m.CreatedAt,
             RejectionReason = m.RejectionReason,
             // Correlated subquery — EF translates to a single per-row SUM. Cheap at member-list scale.
-            BalanceCredits = db.LedgerEntries.Where(l => l.UserId == m.UserId).Sum(l => (decimal?)l.AmountCredits) ?? 0m,
+            BalanceMinutes = db.LedgerEntries.Where(l => l.UserId == m.UserId).Sum(l => (int?)l.AmountMinutes) ?? 0,
         }).ToListAsync(ct);
     }
 
@@ -427,7 +427,7 @@ public static class AdminMembersList
                 admin_source = r.AdminSource,
                 created_at = r.CreatedAt,
                 rejection_reason = r.RejectionReason,
-                balance_credits = r.BalanceCredits,
+                balance_minutes = r.BalanceMinutes,
             };
         }).ToList();
     }

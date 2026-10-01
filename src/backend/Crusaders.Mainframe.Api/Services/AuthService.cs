@@ -70,7 +70,7 @@ public sealed class AuthService
         // member's own invisible account. Reproduced against a real SMTP host.
         //
         // EmailDispatch.InBackground is the shape this codebase already uses for the PayFast
-        // ITN and the desk's credit adjustment, for the same reason: the ledger is the record,
+        // ITN and the desk's minutes adjustment, for the same reason: the ledger is the record,
         // and the mail server is allowed to be slow independently of it.
         //
         // `ct` is deliberately NOT passed on. It is the request's token, and the request is

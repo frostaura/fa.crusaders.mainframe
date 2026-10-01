@@ -113,18 +113,18 @@ public static class AdminMemberDetailEndpoints
             // explain a rate the POST would not quote.
             tariff = new
             {
-                top_up_credits_per_zar = tariff.TopUpRate,
-                rate_group_id = tariff.RateGroup?.Id,
+                package_discount_bps = tariff.PackageDiscountBps,
+                discount_group_id = tariff.DiscountGroup?.Id,
                 peak_priority = tariff.PeakPriority,
                 peak_withheld_by = tariff.PeakWithheldBy,
             },
-            balance_credits = await ledger.GetBalanceAsync(userId, ct),
+            balance_minutes = await ledger.GetBalanceAsync(userId, ct),
             // D11: the same held / owed-back figures the member's own wallet shows, so the desk
             // sees that part of a balance belongs to partners before it acts on it.
-            held_credits = held.Held,
-            owed_back_credits = held.OwedBack,
+            held_minutes = held.Held,
+            owed_back_minutes = held.OwedBack,
             held_until = held.ReleasesAt,
-            // C4: one part per share deadline, soonest first, summing to held_credits; held_until is the first.
+            // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
             held_parts = held.WireParts(),
             passkey_count = await db.WebAuthnCredentials.AsNoTracking().CountAsync(c => c.UserId == userId, ct),
             fingerprints = await FingerprintsAsync(db, userId, ct),
@@ -365,7 +365,7 @@ public sealed record MemberBookingRow(
     [property: JsonPropertyName("starts_at")] DateTimeOffset StartsAt,
     [property: JsonPropertyName("ends_at")] DateTimeOffset EndsAt,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("charged_credits")] decimal ChargedCredits,
+    [property: JsonPropertyName("charged_minutes")] int ChargedMinutes,
     [property: JsonPropertyName("checked_in_at")] DateTimeOffset? CheckedInAt,
     [property: JsonPropertyName("cancelled_at")] DateTimeOffset? CancelledAt,
     [property: JsonPropertyName("booked_by")] MemberBookingActor BookedBy)
@@ -409,7 +409,7 @@ public sealed record MemberBookingRow(
             StartsAt: b.StartsAt,
             EndsAt: b.EndsAt,
             Status: b.Status.ToString().ToLowerInvariant(),
-            ChargedCredits: b.AmountChargedCredits,
+            ChargedMinutes: b.AmountChargedMinutes,
             CheckedInAt: b.CheckedInAt,
             CancelledAt: b.CancelledAt,
             BookedBy: new MemberBookingActor(

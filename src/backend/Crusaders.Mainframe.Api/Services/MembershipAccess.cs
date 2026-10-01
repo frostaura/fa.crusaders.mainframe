@@ -13,7 +13,7 @@ namespace Crusaders.Mainframe.Api.Services;
 /// (<c>member_suspended</c>), the activation candidate set and the cached roster all carried
 /// it, while <c>POST /api/v1/device/walkup</c> — the touchpad at the court, which creates its
 /// own booking and so never meets a candidate set — carried none of it. A member suspended
-/// at the desk walked up, was sold fifty credits of court time and had the lights switched
+/// at the desk walked up, was sold fifty minutes of court time and had the lights switched
 /// on for them; the suspension modal on the console promises, in those words, that they
 /// cannot "open a court at the box". This type is what makes that sentence true, and having
 /// exactly one home for it is what stops the fifth door being written without it.

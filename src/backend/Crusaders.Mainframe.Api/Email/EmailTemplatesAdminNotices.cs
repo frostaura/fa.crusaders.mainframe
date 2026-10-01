@@ -24,10 +24,10 @@ public sealed record ScheduleConflictNotice(string ScheduleName, string FirstDat
 /// <summary>An admin's booking that took a balance below zero. Every figure is credits.</summary>
 public sealed record OverdraftNotice(
     string ActorName, string MemberName, bool Self, string CourtName, string StartsAtLocal,
-    decimal AmountCredits, decimal BalanceAfterCredits, string ConsoleUrl)
+    int AmountMinutes, int BalanceAfterMinutes, string ConsoleUrl)
 {
     /// <summary>Credits held for partners' shares; null on a notice queued before it was carried.</summary>
-    public decimal? HeldCredits { get; init; }
+    public int? HeldMinutes { get; init; }
 }
 
 /// <summary>A code a board accepted that the server could not have issued. Placeholder for P7.</summary>
@@ -207,9 +207,9 @@ public static partial class EmailTemplates
     /// </summary>
     private static string OverdraftHeadlineFigure(OverdraftNotice o)
     {
-        return o.HeldCredits is { } held
-            ? $"Can spend after: {Cr(o.BalanceAfterCredits - held)}"
-            : $"Balance after: {Cr(o.BalanceAfterCredits)}";
+        return o.HeldMinutes is { } held
+            ? $"Can spend after: {Cr(o.BalanceAfterMinutes - held)}"
+            : $"Balance after: {Cr(o.BalanceAfterMinutes)}";
     }
 
     private static IReadOnlyList<FactRow> OverdraftFacts(OverdraftNotice o)
@@ -218,20 +218,20 @@ public static partial class EmailTemplates
         {
             new("Court", o.CourtName),
             new("When", o.StartsAtLocal),
-            new("Charged", Cr(o.AmountCredits)),
+            new("Charged", Cr(o.AmountMinutes)),
         };
-        if (o.HeldCredits is not { } held)
+        if (o.HeldMinutes is not { } held)
         {
-            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterCredits)));
+            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterMinutes)));
             return rows;
         }
 
-        rows.Add(new FactRow("Can spend after", Cr(o.BalanceAfterCredits - held)));
+        rows.Add(new FactRow("Can spend after", Cr(o.BalanceAfterMinutes - held)));
         // Only when they differ: a second figure that always equals the first is noise.
-        if (held != 0m)
+        if (held != 0)
         {
             rows.Add(new FactRow("Held for partners", Cr(held)));
-            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterCredits)));
+            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterMinutes)));
         }
         return rows;
     }

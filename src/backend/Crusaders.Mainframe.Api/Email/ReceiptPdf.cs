@@ -68,8 +68,8 @@ public static class ReceiptPdf
         string courtName,
         string startsAtLocal,
         string duration,
-        decimal amountCredits,
-        decimal balanceAfterCredits,
+        int amountMinutes,
+        int balanceAfterMinutes,
         string issuedAtLocal)
     {
         var lines = new List<Line>
@@ -85,8 +85,8 @@ public static class ReceiptPdf
             new("Starts", startsAtLocal),
             new("Duration", duration),
             new(""),
-            new("Charged", Credits(amountCredits)),
-            new("Balance after", Credits(balanceAfterCredits)),
+            new("Charged", Credits(amountMinutes)),
+            new("Balance after", Credits(balanceAfterMinutes)),
             new(""),
             new("Times are this club's local time. Credits are its unit of account."),
             new("This receipt records one ledger movement; your wallet holds the full history."),

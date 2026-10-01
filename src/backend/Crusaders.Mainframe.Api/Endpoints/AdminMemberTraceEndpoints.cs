@@ -47,7 +47,7 @@ public static class AdminMemberTraceEndpoints
     /// <summary>Columns of the export, in the order the rows are written.</summary>
     private const string Header =
         "date,time,timezone,at_utc,strand,kind,headline,actor,actor_kind,is_self,subject,court," +
-        "amount_credits,balance_after_credits,source";
+        "amount_minutes,balance_after_minutes,source";
 
     /// <summary>How many rows the file actually holds, so a page announces the file and not its page size.</summary>
     public const string RowsHeader = "X-Crusaders-Rows";
@@ -303,8 +303,8 @@ public static class AdminMemberTraceEndpoints
             last_seen_at = s.LastSeenAt,
             minutes_on_court = s.MinutesOnCourt,
             courts = s.Courts,
-            credits_spent = s.CreditsSpent,
-            credits_received = s.CreditsReceived,
+            minutes_spent = s.MinutesSpent,
+            minutes_received = s.MinutesReceived,
             doors_entered = s.DoorsEntered,
             doors_refused = s.DoorsRefused,
             bookings_made = s.BookingsMade,
@@ -346,8 +346,8 @@ public static class AdminMemberTraceEndpoints
             court = e.Court is null
                 ? null
                 : new { id = e.Court.Id, number = e.Court.Number, name = e.Court.Name },
-            amount_credits = e.AmountCredits,
-            balance_after_credits = e.BalanceAfterCredits,
+            amount_minutes = e.AmountMinutes,
+            balance_after_minutes = e.BalanceAfterMinutes,
             approximate = e.Approximate,
             device_code = e.DeviceCode,
             outage_id = e.OutageId,
@@ -373,8 +373,8 @@ public static class AdminMemberTraceEndpoints
             e.IsSelf(query.UserId) ? "yes" : "no",
             e.SubjectName,
             e.Court?.Name,
-            Number(e.AmountCredits),
-            Number(e.BalanceAfterCredits),
+            Number(e.AmountMinutes),
+            Number(e.BalanceAfterMinutes),
             e.Source);
     }
 

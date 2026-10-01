@@ -41,7 +41,7 @@ public static class MeProfileEndpoints
                 // the booking grid's photo-and-name rule) and what they add up to for the two
                 // things the member class used to decide.
                 groups = tariff.Groups.Select(g => new { id = g.Id, name = g.Name }).ToList(),
-                top_up_credits_per_zar = tariff.TopUpRate,
+                package_discount_bps = tariff.PackageDiscountBps,
                 peak_priority = tariff.PeakPriority,
 
                 // The club's money symbol, on this payload because it is the one club-wide
@@ -65,10 +65,10 @@ public static class MeProfileEndpoints
 
                 // D11: credits received as an organiser's shares, held for the partners until the
                 // earliest share deadline — so the first paint can say "12 cr held until …".
-                held_credits = held.Held,
-                owed_back_credits = held.OwedBack,
+                held_minutes = held.Held,
+                owed_back_minutes = held.OwedBack,
                 held_until = held.ReleasesAt,
-                // C4: one part per share deadline, soonest first, summing to held_credits; held_until is the first.
+                // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
                 held_parts = held.WireParts(),
             });
         });
