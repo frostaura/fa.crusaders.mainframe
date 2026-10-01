@@ -134,14 +134,20 @@ test.describe("P11: the club's ledger, filtered to shares", () => {
       { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
     ]);
     await page.goto("/admin/ledger?from=2026-09-01&to=2026-12-31");
-    await expect(page.getByRole("heading", { level: 1, name: "Transactions" })).toBeVisible();
+    // The admin frame is its own lazy chunk; on a cold dev server (the first admin page of a run)
+    // it compiles in more than the default 5 s.
+    await expect(page.getByRole("heading", { level: 1, name: "Transactions" })).toBeVisible({ timeout: 20_000 });
 
     const asked = page.waitForRequest((req) => req.url().includes("/api/v1/admin/ledger") && req.url().includes("type=ShareTransfer"));
+    // On a phone the filters are folded behind one button that says what they are (R4 form factor).
+    const filters = page.getByRole("button", { name: /^Filters ·/ });
+    if (await filters.isVisible()) await filters.click();
     await page.getByRole("combobox", { name: "Type" }).click();
     await page.getByRole("option", { name: LEDGER_TYPE_LABEL.ShareTransfer }).click();
     await expect(page).toHaveURL(/type=ShareTransfer/);
     await asked;
-    await expect(page.getByText("Share of a split booking").first()).toBeVisible();
+    // In the book itself: the phone's folded-filters button names the chosen type too (R4 form factor).
+    await expect(page.getByRole("table", { name: "Club ledger" }).getByText("Share of a split booking").filter({ visible: true }).first()).toBeVisible();
     // The club's book never groups: both legs are rows, and they net to zero.
     await expect(page.getByRole("button", { name: /Shares for|Your share/ })).toHaveCount(0);
     await expect(page.locator("[data-ledger-total]").last()).toHaveText("0.00 cr");
