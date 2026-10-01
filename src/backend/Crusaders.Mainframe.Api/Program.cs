@@ -359,11 +359,13 @@ builder.Services.AddRateLimiter(options =>
 
     // The stable code a client words ("too many requests — wait a moment"), apart from a
     // network failure, with the wait in the body as well as the header.
+    // The wait is the refusing limiter's own (P5-2, RateLimitRetry), not a flat minute.
     options.OnRejected = async (ctx, ct) =>
     {
-        ctx.HttpContext.Response.Headers.RetryAfter = "60";
+        var wait = RateLimitRetry.Seconds(ctx.Lease);
+        ctx.HttpContext.Response.Headers.RetryAfter = wait.ToString(CultureInfo.InvariantCulture);
         await ctx.HttpContext.Response.WriteAsJsonAsync(
-            new { error = "rate_limited", message = "Too many requests. Try again shortly.", retry_after_seconds = 60 }, ct);
+            new { error = "rate_limited", message = "Too many requests. Try again shortly.", retry_after_seconds = wait }, ct);
     };
 });
 

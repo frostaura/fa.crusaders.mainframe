@@ -33,10 +33,42 @@ public sealed class R2RateLimitHttpTests(PostgresFixture pg) : IClassFixture<Pos
         var refused = await olive.GetAsync("/api/v1/me/profile");
         var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("rate_limited", body.GetProperty("error").GetString());
-        Assert.Equal(60, body.GetProperty("retry_after_seconds").GetInt32());
+        // The fixed window's own reset (P5-2): within the minute, never zero, and the header agrees.
+        var wait = body.GetProperty("retry_after_seconds").GetInt32();
+        Assert.InRange(wait, 1, 60);
+        Assert.Equal(wait.ToString(System.Globalization.CultureInfo.InvariantCulture), refused.Headers.RetryAfter?.ToString());
 
         // Same address, another member: untouched by Olive's budget.
         Assert.Equal(HttpStatusCode.OK, (await club.Client(f, club.Sam).GetAsync("/api/v1/me/profile")).StatusCode);
+    }
+
+    /// <summary>
+    /// Review round 5, P5-2: a write refused by the per-member token bucket says when the next
+    /// token lands — a second — not the flat minute every 429 used to claim.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_refused_write_says_the_buckets_own_wait_not_a_minute()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = new TestWebAppFactory
+        {
+            ConnectionString = pg.ConnectionString,
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1, ["WritesPerMinute"] = 60, ["WritesBurst"] = 2 },
+        };
+        var club = await PlayersClub.SeedAsync(f, "r5rlwrite");
+        var olive = club.Client(f, club.Organiser);
+
+        HttpResponseMessage? refused = null;
+        for (var i = 0; i < 6 && refused is null; i++)
+        {
+            var response = await olive.PostAsJsonAsync("/api/v1/bookings", new { });
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) refused = response;
+        }
+
+        Assert.NotNull(refused);
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, body.GetProperty("retry_after_seconds").GetInt32());
+        Assert.Equal("1", refused.Headers.RetryAfter?.ToString());
     }
 
     [SkippableFact]

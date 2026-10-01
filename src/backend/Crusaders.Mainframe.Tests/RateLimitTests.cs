@@ -81,7 +81,8 @@ public sealed class RateLimitTests : IClassFixture<PostgresFixture>
         }
 
         Assert.NotNull(refused);
-        Assert.Equal("60", refused.Headers.RetryAfter?.ToString());
+        // The fixed window's own reset (P5-2): whole seconds within the minute, never zero.
+        Assert.InRange(int.Parse(refused.Headers.RetryAfter!.ToString(), System.Globalization.CultureInfo.InvariantCulture), 1, 60);
 
         var body = await refused.Content.ReadAsStringAsync();
         Assert.Contains("rate_limited", body);
