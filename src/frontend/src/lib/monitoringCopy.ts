@@ -428,3 +428,15 @@ export function courtAnnouncement(name: string, state: CourtExpectation, minutes
   const minutes = minutesLeft === 1 ? "1 minute left" : `${minutesLeft} minutes left`;
   return `${name}, ${word}, ${minutes}.`;
 }
+
+/**
+ * The fault resolve's note (R5 A5-5). The page promised that resolving "records what you did about
+ * it", and the dialog had nowhere to say it: every resolve sent an empty note and the change record
+ * carried no reason. The note is required — it is the whole of what resolving records.
+ */
+export const FAULT_RESOLVE_NOTE = {
+  label: "What did you do?",
+  help: "Kept with the fault and on the club's change record, so the next person knows what was tried.",
+  placeholder: "Reseated the scanner cable, restarted the box…",
+  missing: "Say what you did — it is kept with the fault and on the club's change record.",
+} as const;

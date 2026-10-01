@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Alert } from "../../components/Alert";
 import { ConfirmDialog } from "../../components/admin/ConfirmDialog";
 import { useToast } from "../../components/Toast";
@@ -6,6 +6,8 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
 import { Checkbox } from "../../components/ui/checkbox";
+import { Field, FieldDescription, FieldLabel } from "../../components/ui/field";
+import { Textarea } from "../../components/ui/textarea";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
 import { StateBlock } from "../../components/ui/state-block";
@@ -19,6 +21,8 @@ import { cn } from "../../lib/utils";
 import { clubDayAndClock, clubRowTime } from "../../lib/clubClock";
 import { relative } from "../../lib/deviceLiveness";
 import { ApiError } from "../../lib/api";
+import { REQUIRED_MARK } from "../../lib/confirmDialogCopy";
+import { FAULT_RESOLVE_NOTE } from "../../lib/monitoringCopy";
 import {
   DEVICE_ERROR_SEVERITIES, adminEndpoints,
   type DeviceErrorPage, type DeviceErrorRow, type DeviceErrorSeverity, type DeviceErrorState,
@@ -243,7 +247,7 @@ export function MonitoringFaultsPage() {
       <FaultFilters filters={filters} onFilters={setFilters} boards={boards} />
 
       {selectedIds.length > 0 && (
-        <SelectionStrip ids={selectedIds} onClear={clear} onResolve={() => resolve(selectedIds, "")} />
+        <SelectionStrip ids={selectedIds} onClear={clear} onResolve={(note) => resolve(selectedIds, note)} />
       )}
 
       {batch && <BatchOutcome batch={batch} onDone={closeBatch} />}
@@ -386,7 +390,7 @@ function resolveBody(count: number): string {
 function SelectionStrip({ ids, onClear, onResolve }: {
   ids: string[];
   onClear: () => void;
-  onResolve: () => Promise<string>;
+  onResolve: (note: string) => Promise<string>;
 }) {
   const one = ids.length === 1;
   return (
@@ -399,16 +403,64 @@ function SelectionStrip({ ids, onClear, onResolve }: {
         {one ? "1 fault selected" : `${ids.length} faults selected`}
       </p>
       <Button variant="ghost" onClick={onClear}>Clear</Button>
-      <ConfirmDialog
+      <ResolveDialog
         trigger={<Button icon={<Check aria-hidden="true" />}>{one ? "Mark it resolved" : `Mark ${ids.length} resolved`}</Button>}
-        tone="primary"
         title={one ? "Mark this fault resolved?" : `Mark these ${ids.length} faults resolved?`}
-        description={resolveBody(ids.length)}
+        count={ids.length}
         confirmLabel={one ? "Mark it resolved" : `Mark all ${ids.length} resolved`}
         cancelLabel={one ? "Leave it open" : "Leave them open"}
-        onConfirm={onResolve}
+        onResolve={onResolve}
       />
     </div>
+  );
+}
+
+/**
+ * The resolve confirm, with the note that IS the record (R5 A5-5): what the admin did, kept with the
+ * fault and sent as the change record's reason. Required, the house way — the primary stays enabled
+ * and a press without a note says so and focuses the field.
+ */
+function ResolveDialog(props: {
+  trigger: ReactElement;
+  title: string;
+  count: number;
+  confirmLabel: string;
+  cancelLabel: string;
+  onResolve: (note: string) => unknown;
+}) {
+  const { trigger, title, count, confirmLabel, cancelLabel, onResolve } = props;
+  const [note, setNote] = useState("");
+  return (
+    <ConfirmDialog
+      trigger={trigger}
+      tone="primary"
+      title={title}
+      description={resolveBody(count)}
+      confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
+      notReady={note.trim() === ""}
+      notReadyMessage={FAULT_RESOLVE_NOTE.missing}
+      onConfirm={async () => {
+        await onResolve(note.trim());
+        setNote("");
+      }}
+    >
+      <Field>
+        <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <FieldLabel>{FAULT_RESOLVE_NOTE.label}</FieldLabel>
+          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
+        </span>
+        <Textarea
+          rows={3}
+          value={note}
+          required
+          aria-required="true"
+          placeholder={FAULT_RESOLVE_NOTE.placeholder}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <FieldDescription>{FAULT_RESOLVE_NOTE.help}</FieldDescription>
+      </Field>
+    </ConfirmDialog>
   );
 }
 
@@ -495,8 +547,11 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
   const resolved = Boolean(row.resolved_at);
 
   return (
-    <li className="border-t border-border pt-4 first:border-t-0 first:pt-0">
-      <div className="flex min-w-0 flex-wrap items-start gap-2">
+    // R5 F5-2: on a phone the text squeezed to ~25px beside "Mark resolved" and the term column.
+    // The text now has the row's whole width; the action sits under it; the terms stack over their
+    // values until the ROW (not the viewport — 200 % text) has room for two columns.
+    <li className="border-t border-border pt-4 [container-type:inline-size] first:border-t-0 first:pt-0">
+      <div className="flex min-w-0 items-start gap-2">
         {!resolved && (
           // The whole 44px box is the target (A11Y F3-19: the box itself measured 20 × 20; its
           // `after:` extension is invisible to a pointer-size audit and to a reader of the page).
@@ -509,7 +564,7 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
             />
           </label>
         )}
-        <div className="min-w-0 flex-1 space-y-1">
+        <div data-fault-text="" className="min-w-0 flex-1 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Badge tone={tone}>{SEVERITY_WORD[row.severity]}</Badge>
             <p className="min-w-0 break-words font-medium text-text-primary">{said.title}</p>
@@ -526,17 +581,17 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
               relative(row.last_seen_at, now),
             )}
           </p>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-text-muted">What it means</dt>
-            <dd className="min-w-0 break-words text-text-secondary">{said.means}</dd>
-            <dt className="text-text-muted">What to do</dt>
+          <dl className="grid grid-cols-1 gap-x-3 text-sm [@container(min-width:32rem)]:grid-cols-[auto_minmax(0,1fr)] [@container(min-width:32rem)]:gap-y-1">
+            <dt className="font-medium text-text-muted">What it means</dt>
+            <dd className="mb-1 min-w-0 break-words text-text-secondary [@container(min-width:32rem)]:mb-0">{said.means}</dd>
+            <dt className="font-medium text-text-muted">What to do</dt>
             <dd className="min-w-0 break-words text-text-secondary">{said.doThis}</dd>
           </dl>
           {row.detail && !said.unrecognised && said.means !== faultDetail(row.detail, timezone) && (
             <p className="min-w-0 break-words text-xs text-text-muted">{faultDetail(row.detail, timezone)}</p>
           )}
           {resolved && (
-            <p className="text-sm text-success-strong">
+            <p className="break-words text-sm text-success-strong">
               {resolvedLine(
                 row.resolved_by_name ?? null,
                 clubDayAndClock(row.resolved_at!, timezone),
@@ -544,22 +599,23 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
               )}
             </p>
           )}
+          {!resolved && (
+            <div className="pt-1">
+              <ResolveDialog
+                trigger={(
+                  <Button variant="outline" size="sm" className="max-w-full whitespace-normal">
+                    Mark resolved{" "}<span className="sr-only">{`— ${said.title}`}</span>
+                  </Button>
+                )}
+                title={`Mark “${said.title}” resolved?`}
+                count={1}
+                confirmLabel="Mark resolved"
+                cancelLabel="Leave it open"
+                onResolve={onResolve}
+              />
+            </div>
+          )}
         </div>
-        {!resolved && (
-          <ConfirmDialog
-            trigger={(
-              <Button variant="outline" size="sm" className="shrink-0">
-                Mark resolved{" "}<span className="sr-only">{`— ${said.title}`}</span>
-              </Button>
-            )}
-            tone="primary"
-            title={`Mark “${said.title}” resolved?`}
-            description={resolveBody(1)}
-            confirmLabel="Mark resolved"
-            cancelLabel="Leave it open"
-            onConfirm={() => onResolve("")}
-          />
-        )}
       </div>
     </li>
   );

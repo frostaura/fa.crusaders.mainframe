@@ -5,6 +5,14 @@ import { renderPage, signIn, stubFetch, unreachable, type StubRoute } from "../.
 import { deviceErrorFixture, deviceErrorPageFixture } from "../../test/monitoringFixtures";
 import { NOTHING_CHANGED } from "../../components/Toast";
 import type { DeviceErrorRow } from "../../lib/adminApi";
+import { FAULT_RESOLVE_NOTE } from "../../lib/monitoringCopy";
+
+/** What the admin did — the note resolving records (R5 A5-5). */
+function sayWhatWasDone(dialog: HTMLElement, note = "Reseated the scanner cable") {
+  fireEvent.change(within(dialog).getByRole("textbox", { name: new RegExp(FAULT_RESOLVE_NOTE.label.replace("?", "\\?")) }), {
+    target: { value: note },
+  });
+}
 
 /**
  * The fault list — GOAL item 7.
@@ -135,9 +143,44 @@ describe("the fault list", () => {
     expect(dialog).toHaveTextContent(/The scanner stopped answering/);
     expect(dialog).toHaveTextContent(/comes back if the board reports it again/);
     expect(stub.calls.some((c) => c.method === "POST" && c.path.includes("/resolve"))).toBe(false);
+    sayWhatWasDone(dialog);
     fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
 
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path.includes("/resolve"))).toBe(true));
+    // The note IS what resolving records (R5 A5-5): it went, trimmed, as `note`.
+    const post = stub.calls.find((c) => c.method === "POST" && c.path.includes("/resolve"))!;
+    expect(post.body).toEqual({ note: "Reseated the scanner cable" });
+  });
+
+  /**
+   * R5 A5-5: the page promised resolving "records what you did about it", and the dialog had no
+   * field — every resolve sent `note: ""` and the change record carried no reason.
+   */
+  it("asks what was done, and will not resolve without it", async () => {
+    const stub = stubFetch(routes([deviceErrorFixture()]));
+    renderPage(<MonitoringFaultsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Mark resolved — The scanner stopped answering/ }));
+    const dialog = await screen.findByRole("dialog");
+    const field = within(dialog).getByRole("textbox", { name: /What did you do\?/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
+
+    expect(await within(dialog).findByText(FAULT_RESOLVE_NOTE.missing)).toBeInTheDocument();
+    expect(field).toHaveFocus();
+    expect(stub.calls.some((c) => c.path.includes("/resolve")), "a resolve with nothing recorded").toBe(false);
+  });
+
+  /**
+   * R5 F5-2: on a phone the fault's text squeezed to ~25px beside "Mark resolved". The action now
+   * sits UNDER the text, inside its column, and the terms stack over their values at base.
+   */
+  it("puts the resolve under the fault's text, never beside it, and stacks the terms", async () => {
+    stubFetch(routes([deviceErrorFixture()]));
+    renderPage(<MonitoringFaultsPage />);
+    const trigger = await screen.findByRole("button", { name: /Mark resolved — The scanner stopped answering/ });
+    const text = trigger.closest("[data-fault-text]");
+    expect(text, "the action is inside the text column").not.toBeNull();
+    expect(text!.querySelector("dl")!.className).toMatch(/(^| )grid-cols-1( |$)/);
   });
 
   /**
@@ -152,7 +195,9 @@ describe("the fault list", () => {
     renderPage(<MonitoringFaultsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Mark resolved/ }));
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark resolved" }));
+    const dialog = await screen.findByRole("dialog");
+    sayWhatWasDone(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
 
     expect(await screen.findByText(NOTHING_CHANGED)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.path.includes("/resolve"))).toBe(true);
@@ -172,7 +217,9 @@ describe("the fault list", () => {
     renderPage(<MonitoringFaultsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Mark resolved/ }));
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark resolved" }));
+    const dialog = await screen.findByRole("dialog");
+    sayWhatWasDone(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
 
     expect(await screen.findByText(/Couldn't reach the club/)).toBeInTheDocument();
     expect(screen.queryByText(NOTHING_CHANGED), "a claim about a write nobody saw land")
@@ -200,7 +247,9 @@ describe("the fault list", () => {
     fireEvent.click(boxes[0]);
     fireEvent.click(boxes[1]);
     fireEvent.click(await screen.findByRole("button", { name: /Mark 2 resolved/ }));
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark all 2 resolved" }));
+    const dialog = await screen.findByRole("dialog");
+    sayWhatWasDone(dialog, "Power-cycled the box");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark all 2 resolved" }));
 
     // Four seconds is not enough to read two outcomes, and the toast viewport carries no
     // live region of its own by design.
