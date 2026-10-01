@@ -33,10 +33,10 @@ A 5xx, a timeout or a dropped connection is an UNKNOWN outcome, never "didn't go
   (anybody asked for newly in the group — one save adds all or none), a member's groups (their
   detail holds the set sent), board edit/delete (the row as asked, or gone). No admin write is direct.
 - **`ConfirmDialog` takes `describe(error)`** before `describeFailure`: how a dialog says an `UnsureOutcome`.
-- **The desk top-up's live region speaks the caller's line** (`{ said }` from `onApply`): not
-  known / nothing arrived / an earlier press landed — never "didn't go through" over an unknown.
-  A 409 `idempotency_key_reused` re-reads the balance (row AND sheet target). *Why:* the sheet
-  showed the pre-landing balance and an "after" summed onto it (R3 I-6).
+- **The desk top-up's live region speaks the caller's line** (`{ said }`), never "didn't go
+  through" over an unknown; a 409 `idempotency_key_reused` re-reads the balance (R3 I-6). **R5
+  I5-3: the sheet cannot close mid-credit** (`useSendingGuard`, set AT the press); the hooks'
+  `close()` refuse in flight (it reset ref + key); a landing after the page went is a toast.
 
 Response contracts and paging: [`decisions-admin-contracts.md`](decisions-admin-contracts.md).
 

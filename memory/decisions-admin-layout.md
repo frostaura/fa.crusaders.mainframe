@@ -18,14 +18,24 @@ Spec: the round's `SPEC.md` §3/§4. Primitives: `components/ui` (`SplitView`, `
   carries sort, groups and row actions the dense list cannot. Below 64rem the record alone, as
   before. The URL is the filter on the list; beside a record it is state (`useMembersFilters`), and
   the record's back link returns to the list as it was left (`membersSplit` context).
-- **The list draws 50 rows a page ("Show N more")**; every row is still READ (counts are the
-  club's). Phone cards are compact (~126px, was 250): 282 members went 72,402px → 6,932px at 390.
+- **The list draws 50 rows a page ("Show N more")**; every row is still READ (chip counts, search
+  and sort are the club's — paging on demand waits on F: `status_counts` + server `q`/`sort`).
+  **R5 §4.3: a phone card is a 3-column grid, ~72px** (R4's wrap was ~126): who over two lines ·
+  balance over status · the 44px ⋯, which holds Top up below a 48rem box (`useBoxAtLeast(48)`);
+  an application keeps Approve/Reject on a third line — they are the queue.
+- **R5 P5: a member's record open reads no groups and no enrolments** (`useGroupMemberships` /
+  `useFingerprints` `enabled`): only the table draws them, and a deep link read every group's
+  member list for nothing. The attention counts: see `lib/adminAttention` (arrival = the 30 s
+  fresh window; the members loader hands its pending count, adopted, not re-asked).
 - **An application's decision is on the record's header** (Approve/Reject; Approve for a turned-
   down one), not in the ⋯ — the queue is cleared with ↓, Enter, Approve. Same confirm, same
   lost-reply read-back (`MemberActions` `MemberDecision`).
 - **V-14:** the address gets its own column only where the table's box is 76rem (2xl beside the
   rail); below it, under the name. Optional cells are `hidden` at 48rem AND at base — CELL makes
   every cell a table-cell from 48rem, and a cell drawn under a hidden header shifted the balance.
+  R5: **no Groups column when nobody on the page is in a group** (9rem of "No groups" beside
+  wrapping addresses). §3.8's placeholder pane is NOT built: it would trade the table (sort,
+  groups, row actions) for the dense list at xl — a call for Dean, not a lane.
 - **Transactions:** filters and the four totals are one sticky `ContextBar` (by room, R5); on a phone
   the filters fold behind one "Filters · range · type" button. From a 72rem box an opened row
   fills a side panel (`WithAside` sheet; `useBoxAtLeast` decides modal sheet vs panel, in rem) and
