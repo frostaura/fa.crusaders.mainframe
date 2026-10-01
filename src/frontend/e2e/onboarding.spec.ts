@@ -51,9 +51,13 @@ test.describe("the always-reachable guide", () => {
     await page.goto("/how-it-works");
 
     await expect(page.getByRole("heading", { level: 1, name: "How it works" })).toBeVisible();
+    // Eight since P13: "Buy minutes" comes first, because every step after it spends them.
     const steps = page.getByRole("listitem");
-    await expect(steps).toHaveCount(7);
-    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(7);
+    await expect(steps).toHaveCount(8);
+    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(8);
+    await expect(page.getByRole("heading", { level: 2 }).first()).toHaveAccessibleName("Buy minutes");
+    await expect(steps.first()).toContainText(/a booking costs exactly its playing time/);
+    expect(await page.locator("main").innerText()).not.toMatch(/credit|top.?up|\bcr\b/i);
     // The three drawings, each a real image with a real name.
     const images = page.getByRole("img");
     await expect(images).toHaveCount(3);
@@ -93,7 +97,7 @@ test.describe("the always-reachable guide", () => {
       building. Reading the page between those two states is reading a screen that is still
       asking, which is what made this assertion flaky rather than wrong.
     */
-    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(6);
+    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(7);
     expect(await page.locator("body").innerText()).not.toMatch(/door/i);
   });
 

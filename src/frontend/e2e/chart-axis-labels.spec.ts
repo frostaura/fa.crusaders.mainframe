@@ -11,16 +11,21 @@ import { expect, serveApi, SESSION_ADMIN, signIn, test } from "./fixtures";
  * </p>
  *
  * <ul>
- * <li><b>Every credit tick above 99 wrapped onto two lines.</b> "100.00" above "cr", on an
+ * <li><b>Every money tick above 99 wrapped onto two lines</b> (the number above its unit) on an
  * ordinary club's ordinary chart. recharts decides whether a tick fits by measuring it in a
  * hidden <code>&lt;span&gt;</code> that inherits the BODY's font size while drawing it at the
  * axis's 11px, so it judged every label about 45% too wide. A wrapped tick doubles the label
  * column's height and pushes the topmost one into the SVG's clip.</li>
  * <li><b>A four-figure negative overhung the chart's own left edge.</b> The signed charts plot
  * net series and net goes negative on any day whose penalty rows reverse an earlier sweep;
- * "-1350.00 cr" is 57.3px against the 56px the shipped 64px gutter left it, and what sits in
+ * the label was 57.3px against the 56px the shipped 64px gutter left it, and what sits in
  * that 1.3px is the carousel's Previous arrow.</li>
  * </ul>
+ *
+ * <p>
+ * P13: the ticks are minutes now — "−1 d", "−16 h", "8 h" — on human steps, each label one
+ * unbreakable word, the gutter costed from glyph widths measured in this browser.
+ * </p>
  *
  * <p>
  * <b>The font is planted rather than assumed.</b> This repository is worked in a git worktree
@@ -39,8 +44,8 @@ const FIGTREE = readFileSync(
 
 /**
  * A club whose penalties went four figures negative on one day and stayed ordinary on the
- * other — so the same chart has to draw "-1350.00 cr" and "200.00 cr" without either of them
- * wrapping or overhanging.
+ * other — so the same chart has to draw "−1 d" and "−16 h" without either of them wrapping or
+ * overhanging.
  */
 const DAILY = [
   { date: "2026-09-01", top_ups_minutes: 200, booking_charges_minutes: 30, refunds_minutes: 8, penalties_minutes: -1350, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: -1172, bookings: 4, no_shows: 1 },
@@ -105,8 +110,11 @@ test("no y-axis tick label wraps onto two lines", async ({ page }) => {
   const labels = await axisLabels(page);
 
   expect(labels.length).toBeGreaterThan(4);
-  // The credit labels are the ones that were breaking; the count axes were never in question.
-  expect(labels.filter((l) => l.text.includes("cr")).length).toBeGreaterThan(0);
+  // The minutes labels are the multi-word ones; the count axes were never in question.
+  const minutes = labels.filter((l) => /\d\s(min|h|d)\b/.test(l.text));
+  expect(minutes.length).toBeGreaterThan(0);
+  // Whole minutes in the app's format: no decimal and no old unit on any tick (P13).
+  expect(labels.filter((l) => /\d\.\d|\bcr\b/.test(l.text))).toEqual([]);
   expect(labels.filter((l) => l.lines > 1)).toEqual([]);
 });
 
@@ -126,7 +134,8 @@ test("the four-figure negative the signed charts can produce is drawn in full", 
   // Named explicitly, so a future change that quietly stops the chart reaching four figures
   // cannot turn the two tests above into assertions about nothing.
   // U+2212, the one minus sign every displayed amount uses (effbaafc) — never a hyphen.
-  const negative = labels.filter((l) => /^\u2212\d{4}\./.test(l.text));
+  // P13: −1350 net reaches the "−1 d" tick (a step of 8 hours: −1 d, −16 h, −8 h, 0 min, 8 h).
+  const negative = labels.filter((l) => /^\u2212\d+\s(d|h)/.test(l.text));
   expect(negative.length).toBeGreaterThan(0);
   for (const label of negative) {
     expect(label.lines, label.text).toBeLessThanOrEqual(1);
