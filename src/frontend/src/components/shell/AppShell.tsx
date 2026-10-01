@@ -178,9 +178,14 @@ export default function AppShell() {
             <CrestLink to={memberChrome ? LANDING_PATH : "/"} />
           </div>
           {memberChrome ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
-          {signedIn ? <NotificationBell className="ml-auto md:-mr-4" /> : null}
-          <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !signedIn && "ml-auto")}>
-            {signedIn ? <><CreditsChip /><AccountMenu /></> : null}
+          {/*
+            P5-6 (review round 5) — for the member this phone confirmed, not only once the club has
+            said so again: on one bar of signal the check is out for many seconds, and the bell,
+            the chip and Sign out went with it while the page and the tab bar were already drawn.
+          */}
+          {memberChrome ? <NotificationBell className="ml-auto md:-mr-4" /> : null}
+          <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !memberChrome && "ml-auto")}>
+            {memberChrome ? <><CreditsChip /><AccountMenu /></> : null}
             {auth.status === "anonymous" ? (
               <Button asChild variant="outline" size="sm"><Link to="/login">Sign in</Link></Button>
             ) : null}

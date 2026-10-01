@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Wallet } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { WalletResponse } from "@/lib/api";
 import { useBalance, walletHref, walletLabel, walletTone } from "@/lib/balance";
-import type { BalanceDelta, HeldFigures, LiveState } from "@/lib/liveBalance";
+import { heldFrom, type BalanceDelta, type HeldFigures, type LiveState } from "@/lib/liveBalance";
+import { memberReads } from "@/lib/offline/memberReads";
+import { useCachedRead } from "@/lib/offline/useCachedRead";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn, formatCredits } from "@/lib/utils";
@@ -174,8 +177,34 @@ function ChipFigure({ balance, loading, displayed }: { balance: number | null; l
   return <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(displayed)}</span>;
 }
 
+/**
+ * P5-6 (review round 5) — while the session check is out (or the club cannot be reached), the
+ * figure this phone kept for the member it confirmed: the wallet page's last read, drawn and never
+ * re-asked here (the check gates it). Null when the live balance is in charge, or nothing was kept.
+ */
+type Kept = { balance: number; held: HeldFigures; at: number | null } | null;
+
+function useKeptFigures(waiting: boolean): Kept {
+  const kept = useCachedRead<WalletResponse>(waiting ? memberReads.wallet.key : null, memberReads.wallet.load, { whileChecking: false });
+  const wallet = kept.data;
+  if (!waiting || !wallet || typeof wallet.balance_credits !== "number") return null;
+  return { balance: wallet.balance_credits, held: heldFrom(wallet), at: kept.readAt };
+}
+
+/** "Last known at 18:04 — …": a kept figure says it is one. */
+function keptTitle(at: number | null, rest: string): string {
+  const time = at === null ? null : new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${time ? `Last known at ${time}` : "Last known"}, not yet confirmed by the club — ${rest}`;
+}
+
 export function CreditsChip() {
-  const { balance, loading, state, delta, held } = useBalance();
+  const live = useBalance();
+  const auth = useAuth();
+  const kept = useKeptFigures(auth.status !== "authenticated");
+  const { state, delta } = live;
+  const balance = kept ? kept.balance : live.balance;
+  const held = kept ? kept.held : live.held;
+  const loading = kept ? false : live.loading;
   // F1.11 (supersedes D11 §3a's "the figure stays the whole balance"): the figure is what can be
   // spent; the name and title say what is held for partners and owed back to them.
   const figures = chipFigures(balance, held);
@@ -203,7 +232,7 @@ export function CreditsChip() {
         data-zero-entice={entice.breathing || undefined}
         data-live-state={state}
         aria-label={chipLabel(balance, loading, state, figures)}
-        title={chipTitle(state, loading, balance, figures)}
+        title={kept ? keptTitle(kept.at, chipTitle(state, loading, balance, figures)) : chipTitle(state, loading, balance, figures)}
         className={cn(
           // A 44px floor in PIXELS at every pointer (it sits beside the 44px account button, and
           // on a phone it is a fingertip target), and no fixed height: at a 32px root the figure
