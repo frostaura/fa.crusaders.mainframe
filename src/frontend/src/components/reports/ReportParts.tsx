@@ -81,17 +81,22 @@ const TILE_TONES: Record<TileTone, string> = {
 
 export type Tile = { label: string; value: string; tone: TileTone };
 
-/** The headline figures for a period: two across on a phone, four from `sm`. */
+/**
+ * The headline figures for a period: as many 9rem tiles across as the BOX holds, four at most
+ * (R5 X5-4). A fixed `grid-cols-2` at 390 with 200 % text gave each tile 150px and `break-words`
+ * cut the money mid-figure ("R2 / 50. / 50"); an AutoGrid falls to one column there instead, and
+ * a figure only ever breaks at its space ("250.00 / cr"), never inside the number.
+ */
 export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
   return (
-    <dl aria-label={label} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <AutoGrid as="dl" min="stat" max={4} gap="md" aria-label={label} data-stat-tiles="">
       {tiles.map((tile) => (
         <div key={tile.label} className={cn("flex min-w-0 flex-col gap-1 rounded-xl p-4", TILE_TONES[tile.tone])}>
           <dt className="break-words text-xs font-semibold uppercase tracking-overline">{tile.label}</dt>
-          <dd className="break-words text-2xl font-semibold tabular-nums tracking-tight">{tile.value}</dd>
+          <dd className="text-2xl font-semibold tabular-nums tracking-tight">{tile.value}</dd>
         </div>
       ))}
-    </dl>
+    </AutoGrid>
   );
 }
 
@@ -180,9 +185,10 @@ export function TableNotes({ children }: { children: ReactNode }) {
 export function ReportSkeleton() {
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* The tiles' own grid, so the skeleton holds the shape the figures arrive in (R5 X5-4). */}
+      <AutoGrid min="stat" max={4} gap="md">
         {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
-      </div>
+      </AutoGrid>
       <Skeleton className="h-40 rounded-xl" />
       <Skeleton className="h-72 rounded-xl" />
       <div className="flex flex-col gap-2">
