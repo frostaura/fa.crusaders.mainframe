@@ -445,7 +445,8 @@ export const ADMIN_TOUR = {
   bar: "Tap the section bar to get here.",
   stops: [
     { navId: "overview", title: "Overview", body: "What needs you right now — applications waiting, doors and faults — across the whole club." },
-    { navId: "members", title: "Members", body: "Approve new applications, top up wallets and open anybody's bookings, wallet or door history." },
+    // R5 lane G: Dean could not find where to make someone an admin — the tour says where.
+    { navId: "members", title: "Members", body: "Approve new applications, top up wallets, make someone an admin from their ⋯ menu, and open anybody's bookings, wallet or door history." },
     { navId: "groups", title: "Groups", body: "Who may book when, at what top-up rate, and the limits each group plays under." },
     { navId: "transactions", title: "Transactions", body: "Every credit movement in the club's ledger, with who did it and why." },
     { navId: "control-board", title: "Control board", body: "Every court's lights and bookings live, plus doors, boards and faults." },
