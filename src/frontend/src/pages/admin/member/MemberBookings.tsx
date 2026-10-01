@@ -16,6 +16,8 @@ import { BOOKINGS_TAB_COPY as COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
 import { DETAIL_LINKS } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useRead } from "@/lib/useRead";
+import { adminMemberReads, joinEarly } from "@/lib/offline/adminEarlyReads";
+import { useDataOwner } from "@/lib/offline/useCachedRead";
 import { BookingLine, BookingListSkeleton } from "./parts";
 import { bookingWhen, dayParts, zoneNow } from "./memberTime";
 import { firstName, useMemberDetail } from "./useMemberDetail";
@@ -161,7 +163,9 @@ type Extra = { base: MemberBookingsPage | null; items: MemberBookingRow[]; curso
  * switch between upcoming and past can never splice one list's tail onto another's head.
  */
 function useBookingPages(userId: string, when: BookingsWhen) {
-  const load = useCallback(() => memberDetailEndpoints.bookings(userId, { when }), [userId, when]);
+  // P4-5 (R4 wave B) — joins the page the member's detail started beside itself on a direct load.
+  const { who } = useDataOwner();
+  const load = useCallback(() => joinEarly(who, adminMemberReads.bookings(userId, when)), [who, userId, when]);
   const [first, retry] = useRead(`${userId}:${when}`, load);
   const [extra, setExtra] = useState<Extra>({ base: null, items: [], cursor: null });
   const base = first.data;

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useOutletContext } from "react-router-dom";
 import { memberDetailEndpoints, type MemberDetail } from "@/lib/memberDetailApi";
 import { MEMBER_COPY } from "@/lib/memberDetailCopy";
+import { startMemberDetailReads } from "@/lib/offline/adminEarlyReads";
+import { useDataOwner } from "@/lib/offline/useCachedRead";
 
 /**
  * The one read the member-detail page is built on, and the context every tab takes it from.
@@ -55,6 +57,9 @@ export function useMemberDetailRead(userId: string): MemberDetailState {
     }
   }, [userId]);
 
+  // P4-5 (R4 wave B) — the tabs' own reads start beside the detail, not a round trip after it.
+  const { who } = useDataOwner();
+  useEffect(() => { startMemberDetailReads(who, userId, window.location); }, [who, userId]);
   useEffect(() => { void reload(); }, [reload]);
 
   const patch = useCallback((next: Partial<MemberDetail>) => {

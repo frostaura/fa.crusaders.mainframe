@@ -4,6 +4,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StateBlock } from "@/components/ui/state-block";
 import { TextLink } from "@/components/ui/text-link";
 import { playEndpoints, type AdminMemberPlay } from "@/lib/playApi";
+import { adminMemberReads, joinEarly } from "@/lib/offline/adminEarlyReads";
+import { useDataOwner } from "@/lib/offline/useCachedRead";
 import { hoursAndMinutes, MEMBER_PLAY_CARD as COPY, PLAY_REFUSAL } from "@/lib/playCopy";
 
 /**
@@ -19,14 +21,17 @@ function usePlaySummary(userId: string) {
   const [nonce, setNonce] = useState(0);
   const asked = `${userId}:${nonce}`;
   const [held, setHeld] = useState<Held>({ key: "", data: null, error: null });
+  const { who } = useDataOwner();
   useEffect(() => {
     let live = true;
-    playEndpoints.adminMemberPlay(userId).then(
+    // The first read joins the one the member page started beside its detail (P4-5).
+    const read = asked.endsWith(":0") ? joinEarly(who, adminMemberReads.play(userId)) : playEndpoints.adminMemberPlay(userId);
+    read.then(
       (data) => { if (live) setHeld({ key: asked, data, error: null }); },
       (error: unknown) => { if (live) setHeld({ key: asked, data: null, error }); },
     );
     return () => { live = false; };
-  }, [userId, asked]);
+  }, [userId, asked, who]);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const fresh = held.key === asked;
   return { data: fresh ? held.data : null, error: fresh ? held.error : null, loading: !fresh, reload };
