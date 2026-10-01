@@ -22,30 +22,31 @@ the worker still caches NO member data. Code: `src/frontend/src/lib/offline/`.
   once with its "as of", the club is asked behind it, and a read in flight is joined (one request
   per key — StrictMode's second mount joins too, so tests counting first reads changed).
 - **A failed refresh never blanks** — offline, 5xx or 429 alike (form-factor review: one 429 swapped a
-  whole screen for "The club is busy"). `StaleNotice` says "You're offline" when the club was never
-  reached, "Couldn't refresh" when it answered with a failure, each with the time.
+  whole screen for "The club is busy"). `StaleNotice` says "You're offline" ONLY when the club was
+  never reached — no network, or the read/session check got no answer (`DataOwner.unreachable`:
+  whoami's cause is a NetworkError) — and "Couldn't refresh" when it answered with a failure. **Why
+  (R5 V5-2):** keyed on `auth.status === "offline"` alone, a whoami 503 read "You're offline" on
+  Booking detail/Inbox/Profile while Bookings/Wallet said "Couldn't refresh" for the same outage.
+- **Kept since R5 (M5-6):** the open invites (`useKeptInvites`, the `useMyInvites` shape) and Wallet
+  activity per range (`memberReads.walletActivity` + `useKeptReport`). NOT in `readsFor`: lane B's
+  `earlyInvites` starts that read at the press — one request, not two. Rendering offline also needs
+  the route on `RequireAuth`'s list (integrator).
 - **Offline-capable routes** (`RequireAuth`): /my-code, /bookings, /bookings/:id, /wallet, /profile,
   /inbox — offline or while `whoami` is out, for the member this phone confirmed. Only My Code
   renders signed out. The tab bar stays for that member (`AppShell` via `useDataOwner`).
 - **Writes offline are refused before sending** (`OfflineError`, "needs a connection … Nothing was
-  sent"), known not to have landed (no read-back). **Nothing is queued** — a booking sent when
-  signal returns could charge for a court taken meanwhile. A grid kept because the club was
+  sent"; also when the page says "You're offline" but `onLine` lies — Inbox Mark all read, R5 M5-5).
+  **Nothing is queued** — a booking sent when signal returns could charge for a court taken meanwhile. A grid kept because the club was
   unreachable books nothing (toast); one kept through a 429/5xx still books (the club answers).
 - **Reads start with the code (P4-5):** `routeIntent` on a nav link's press/hover/focus; the opened
   page's reads beside `whoami` on a direct load (none for My Code); the result read beside the
   detail when the phone has the booking (a cold deep link with no copy still waits — F2.15 pins
   "a cancelled booking asks no result"). Admin member tabs (/play, bookings) start beside the
   detail, memory only (`adminEarlyReads`). The profile provider waits for the check (`whileChecking: false`).
-- **Kept reads come back key by key** (`loadKept`, on the first subscriber), never the whole
-  store at boot: reading it all back cost a cold My Code ~110 ms (structured clone at 4x CPU,
-  A/B 1074 → 960 ms median). Stale records are deleted once the app settles (15 s, then idle).
-- **Measured** (390, slow 4G, 4x CPU, worker on; A/B interleaved against the pre-lane build at the
-  same moment — load 15–40, four orphaned `yes` processes held four cores all morning): revisit
-  Bookings 625 → 441 ms, Wallet 444 → 396; first tap Bookings 967 → 786, Wallet 562 → 507 (its
-  read now starts at the press, 10 ms vs 411); warm /bookings unchanged (~1.9 s, code-bound);
-  offline Bookings/Wallet/Inbox/Profile 0/4 → 4/4 drawn, tab bar 0/5 → 5/5. Warm My Code paint
-  +~100 ms with DCL +110 ms from first-load growth (offline lib ~8 kB raw, the layout lane's CSS
-  +10 kB) — not resolvable at that load; re-measure on a quiet machine.
+- **Kept reads come back key by key** (`loadKept`, first subscriber), never the whole store at boot
+  (cost a cold My Code ~110 ms). Stale records are deleted once the app settles (15 s, then idle).
+- **Measured** (390, slow 4G, 4x CPU, A/B, load 15–40): revisit Bookings 625 → 441 ms; first tap
+  Bookings 967 → 786; offline pages 0/4 → 4/4 drawn. Warm My Code +~100 ms — re-measure quietly.
 
 ## Traps met
 

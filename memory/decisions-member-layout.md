@@ -7,8 +7,7 @@ last_verified: 2026-10-01
 
 # Live decisions — the layout system and the member screens (review round 4, form factor, lane L1)
 
-Spec: the round's `SPEC.md` §2/§3/§4; the rules are in `docs/specs/design-system.md` (Widths,
-Page shell, "Use the width"). Admin screens: `decisions-admin-layout`.
+Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admin: `decisions-admin-layout`.
 
 - **Every layout decision is a container query on the box it lays out** (`@tailwindcss/container-queries`
   0.1.1, pinned; every PageShell is `@container/page`) — *why:* beside the admin rail and at 200 %
@@ -26,10 +25,13 @@ Page shell, "Use the width"). Admin screens: `decisions-admin-layout`.
 - **Bookings rail is WithAside `first`:** DOM-first so a phone gets the games strip above the week,
   drawn in the right column from a 72rem page. Game lists step by the RAIL's box (strip → 2 → 3 →
   vertical list); a viewport `md:` lost to the container variants in the cascade.
-- **Inbox opens a notice's target in place** (`?n=`): a booking via `BookingDetailPanel` (the page's
-  body under an h2, its own `@container/page`), an invite via `InviteDetail` (the sheet's flow,
-  body and actions). Invites keep the pick in `?seat=`; Profile's tab in `?tab=` (a fragment other
-  than `#my-game` opens Account, so My Code's `/profile#door-history` still lands).
+- **Inbox opens a notice's target in place** (`?n=`; Invites `?seat=`; Profile's tab `?tab=`).
+  **R5 X5-3: "in place or go to the page" is the SplitView's OWN measure** (`useSplitLayout`: its box
+  against `splitAt` in rem, passed as `layout`), never `useMediaQuery(lg)` — at 200 % text the two
+  disagreed and a pick hid the list with no way back. Stacked, rows take the phone's flow; a pick
+  still open shows under a back control, focus on its heading; a pick from the bare list is PUSHED,
+  switching replaces (`usePickParam`). Picks are announced. Only the picked Inbox row names a
+  border class: forced colours (`index.css`) frame every link whose class says "border".
 - **An invitee's answer is docked too** (R5 F5): Review your share + Decline in a bottom
   ContextBar ("Your answer") below lg, inline from it — same JS switch as the organiser's Invite.
 - **A no-show and a late cancel show the ledger's own rows** (R5 M5-3/M5-7): paid at booking (the
@@ -40,9 +42,8 @@ Page shell, "Use the width"). Admin screens: `decisions-admin-layout`.
   A no-show's title ends at `sold_ends_at` (the sweep truncates `ends_at`). Figures never wrap
   mid-value: `dd` nowrap, `keepAmounts` NBSP inside sentences. A 404 with `?seat=` reads the
   member's own seat and says "You were taken off this game".
-- **Not built:** the selection list docked in the Bookings rail; Record result as the
-  docked verb on booking detail; Wallet's 30-day mini totals (a new read); preselecting the
-  first unread from the bell; How it works' sticky index; Top up's info aside.
+- **Not built:** Bookings rail selection dock; Record result docked on booking detail; Wallet's
+  30-day mini totals; preselecting the first unread from the bell; How it works' sticky index.
 
 ## Traps found
 - **The container-queries plugin emits NOTHING for `@[56rem]/name:` before an arbitrary property**
