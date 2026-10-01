@@ -161,12 +161,6 @@ export function NetMinutes({ value }: { value: number }) {
 }
 
 /**
- * @deprecated P13 — the member's Activity page (F2) still imports the old name; it goes when
- * that page moves to {@link NetMinutes} (phase 2 deletes it either way).
- */
-export const NetCredits = NetMinutes;
-
-/**
  * A table cell's figure or date, kept on one line. A phone's table scrolls sideways inside its
  * own region; a "2 h 40 min" broken over two lines, or a date over three, is a column nobody can
  * scan down.
