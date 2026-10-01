@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-backend-hygiene
 description: "P10 backend hygiene rules: a retired settings key stays bound and ignored, the dev seeder skips any held slot, per-booking codes stay until no rollout phase reaches them, PayFast source check is spec'd but unbuilt."
 type: decision
-last_verified: 2026-09-29
+last_verified: 2026-10-01
 ---
 
 # Live decisions — backend hygiene (P10)
@@ -12,7 +12,9 @@ last_verified: 2026-09-29
   the PWA sends the whole settings page back; an older cached PWA that still carries the key would
   be refused 400 on every save for a setting that no longer exists. A value already stored in a
   club's document is left alone and never read. Delete the binding only once no supported PWA
-  build can send it.
+  build can send it. P13 retired five money keys the same way (`slicePriceCredits`,
+  `creditsPerZarRegular`, `creditsPerZarLeague` — no longer refused — `topupBlockZar`,
+  `topupMaxZarPerMember`; `AdminSettingsHttpTests+Economics`).
 - **The Development seeder skips any planned demo booking that overlaps a live
   (non-cancelled) booking on its court; it never moves one.** *Why:* it runs on every dev boot
   against a database that has lived — `NoShowWorker` has swept earlier seeded rows to `NoShow`

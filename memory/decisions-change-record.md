@@ -23,9 +23,9 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   path+query, same member within 30 s is folded; exports are never folded. *Why:* React's dev
   StrictMode (and any retry) fetched twice and each wrote an undeletable row. Process-local by
   design — on another topology the worst case is the old duplicate, never a lost row.
-- **A desk top-up code must state the rand it took** (`zarReceived`, B7) on all three top-up codes
-  (cash, EFT, card offline all post `AdminTopUp`, which revenue counts); stored as `ZarPaid`.
-  *Why:* revenue is rand; a credits-only row read R0.00. Other codes ignore it (goodwill isn't revenue).
+- **A desk sale states the rand it took** (B7; P13 `/sell`, default = the member's shelf price) as
+  `ZarPaid` on `AdminTopUp`. *Why:* revenue is rand; `/adjust` takes none. Its `credit.topped_up` row
+  is the adjust shape + `package_id`/`package_name` (codes kept, §2.5).
 - **Ledger rows carry `actor_name`** (B9): whoever moved money on the owner's behalf; null for
   the owner's own, the system's (`Guid.Empty`) and a member-to-member share unless an admin moved
   it. The older record fields stay camelCase; the round-1 additions use the contract's snake names.
@@ -39,7 +39,7 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   words, balance halves joined, one-sided values as facts — EXCEPT a group edit's cleared peak say
   or rate, an edit ("yes → no say"; R5 A5-3: a fact read as the change TO yes). *Why:* writers store
   keys and tokens; a new key falls back to words. R3: club day+clock, short dates, lengths in words,
-  `spendable_credits` as "Can spend"; R5: a rate is "1.6 cr per R1"; a batch's `bookings` a line each.
+  `spendable_minutes` as "Can spend"; a batch's `bookings` a line each; P13 `package.*` rows store the whole package, `group` as a name.
 - **R3 (lane B):** a REJECTED applicant can be approved (A-2) — the same approval, reason cleared;
   nothing else is approvable. *Why:* the console offered it and got a bare 404.
   **Both admin-grant mails carry the reason** (A-3) — required since B10, dropped on the way out.
