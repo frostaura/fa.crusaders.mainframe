@@ -161,6 +161,20 @@ describe("the section switcher (below xl)", () => {
     expect(await screen.findByRole("button", { name: /1 membership application awaiting review/ })).toBe(bar);
   });
 
+  /**
+   * R5 V5-9: the console-wide total was red on the header's Admin tab and amber on the bar — one
+   * number in two colours reads as two different things. Both now wear the tab's danger fill.
+   */
+  it("wears the console total in the Admin tab's colour", async () => {
+    stubFetch(routes({ pending: 1 }));
+    renderFrame("/admin/members");
+    await screen.findByRole("button", { name: /1 membership application awaiting review/ });
+    const total = document.querySelector("[data-admin-badge='total']")!;
+    expect(total.className).toContain("bg-danger-solid");
+    expect(total.className).toContain("text-danger-ink");
+    expect(total.className).not.toMatch(/warning/);
+  });
+
   it("opens the same grouped list in a sheet, and Escape returns focus to the bar", async () => {
     stubFetch(routes({}));
     renderFrame("/admin/settings");

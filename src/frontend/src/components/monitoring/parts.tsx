@@ -27,7 +27,7 @@ export function DownloadCsvLink({ href, label = "Download CSV", className }: {
   className?: string;
 }) {
   return (
-    // R5 X5-11: nowrap ran "Download CSV" 65px past a 320px phone at 200 % text; it may wrap.
+    // R5 X5-11: at 320px with 200 % text a nowrap label is wider than the bar; it may wrap.
     <Button asChild variant="outline" className={cn("max-w-full whitespace-normal", className)}>
       <a href={href}>
         <DownloadSimple size={16} aria-hidden="true" />
@@ -83,7 +83,9 @@ export function FilterSelect({ id, label, value, options, onChange, className }:
   className?: string;
 }) {
   return (
-    <Field controlId={id} className={cn("min-w-40 flex-[1_1_10rem] sm:flex-none", className)}>
+    // R5 X5-11: `min-w-40` is 10rem — 320px at 200 % text, the whole of a 320 phone, and the page
+    // scrolled 65px sideways. The floor is capped at the bar's own width.
+    <Field controlId={id} className={cn("min-w-[min(10rem,100%)] flex-[1_1_10rem] sm:flex-none", className)}>
       <FieldLabel>{label}</FieldLabel>
       <Select value={value === "" ? ANY : value} onValueChange={(next) => onChange(next === ANY ? "" : next)}>
         <SelectTrigger className="w-full sm:w-auto sm:min-w-44">

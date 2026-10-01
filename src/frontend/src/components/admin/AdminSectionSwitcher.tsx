@@ -60,7 +60,11 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
       <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center rounded-lg bg-accent-soft p-2 text-accent-strong [@container(max-width:18rem)]:hidden">
         <ItemIcon size={20} weight="fill" />
       </span>
-      <span className="flex min-w-0 flex-1 flex-col items-start text-left">
+      {/* No `min-w-0`: the block keeps its longest word as a floor, and the bar WRAPS (below) — so
+          when "Transactions" cannot sit beside the count and caret at 320 / 200 %, those two drop to
+          a line of their own instead of the word breaking (R5 V-16). `max-w-full` keeps a word wider
+          than the whole bar inside it, where `break-words` takes over. */}
+      <span className="flex max-w-full flex-1 flex-col items-start text-left">
         {/* Wrapping, never truncating: at a 32px root font on a 320px phone "Courts & hardware"
             is wider than the bar, and a clipped section name is a silent loss (e2e/admin-doors).
             `break-words` breaks a word only when it cannot fit its line at all. */}
@@ -70,13 +74,15 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
       {/* R4 A4-8 / V4-8: the count is the WHOLE console's (applications, doors, faults), and set
           beside the name it read as this section's ("Boards 77"). It sits with the caret — the
           control that opens every other section — at the far end of the bar, never in the name's
-          row, so it takes no width from the name at 200 % text either (V-16). */}
-      <span className="inline-flex shrink-0 items-center gap-1">
+          row, so it takes no width from the name at 200 % text either (V-16). It wears the header
+          Admin tab's danger fill (R5 V5-9): one number in two colours read as two numbers. */}
+      <span className="ml-auto inline-flex shrink-0 items-center gap-[min(0.25rem,4px)]">
         {attention.total > 0 ? (
           <span
             aria-hidden="true"
             data-admin-badge="total"
-            className="inline-flex min-w-5 items-center justify-center rounded-full bg-warning-soft px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-warning-strong"
+            // Pixel-capped like the Admin tab's (X-10): a rem box was 54px at 200 % text, taken from the name.
+            className="inline-flex min-w-[min(1.25rem,24px)] items-center justify-center rounded-full bg-danger-solid px-[min(0.375rem,6px)] py-0.5 text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink"
           >
             {attention.total > 99 ? "99+" : attention.total}
           </span>
@@ -110,7 +116,9 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
             aria-label={switcherName(item, attention)}
             className={cn(
               // px-2 inside the bar's own px-2 (sm: px-4, lg: px-6) puts the icon on the page gutter (16 / 24 / 32px).
-              "no-lift flex min-h-appbar w-full items-center gap-3 rounded-lg border border-transparent px-2",
+              // Gaps in px, capped (R5 V-16): two rem gaps were 48px at 200 % text, taken from the
+              // name, and "HARDWAR / E" and "Repeatin / g" broke mid-word at 320.
+              "no-lift flex min-h-appbar w-full flex-wrap items-center gap-[min(0.75rem,12px)] rounded-lg border border-transparent px-2",
               "transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none",
             )}
           >
