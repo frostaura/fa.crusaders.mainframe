@@ -32,6 +32,14 @@ export type AdminSectionSwitcherProps = {
   className?: string;
 };
 
+/*
+ * Pixel-capped boxes (R5 V-16), as inline styles — the vocabulary keeps arbitrary spacing in `ui/`.
+ * Rem gaps and a rem badge were 48px + 54px at 200 % text, taken from the section's name.
+ */
+const BAR_GAP = { gap: "min(0.75rem, 12px)" } as const;
+const TIGHT_GAP = { gap: "min(0.25rem, 4px)" } as const;
+const TOTAL_BOX = { minWidth: "min(1.25rem, 24px)", paddingInline: "min(0.375rem, 6px)" } as const;
+
 /** The item to name on the bar — the Overview when the path is somehow outside every item. */
 function currentItem(pathname: string): AdminNavItem {
   return activeAdminItem(pathname) ?? ADMIN_NAV_ITEMS[0];
@@ -76,13 +84,14 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
           control that opens every other section — at the far end of the bar, never in the name's
           row, so it takes no width from the name at 200 % text either (V-16). It wears the header
           Admin tab's danger fill (R5 V5-9): one number in two colours read as two numbers. */}
-      <span className="ml-auto inline-flex shrink-0 items-center gap-[min(0.25rem,4px)]">
+      <span className="ml-auto inline-flex shrink-0 items-center" style={TIGHT_GAP}>
         {attention.total > 0 ? (
           <span
             aria-hidden="true"
             data-admin-badge="total"
             // Pixel-capped like the Admin tab's (X-10): a rem box was 54px at 200 % text, taken from the name.
-            className="inline-flex min-w-[min(1.25rem,24px)] items-center justify-center rounded-full bg-danger-solid px-[min(0.375rem,6px)] py-0.5 text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink"
+            className="inline-flex items-center justify-center rounded-full bg-danger-solid py-0.5 text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink"
+            style={TOTAL_BOX}
           >
             {attention.total > 99 ? "99+" : attention.total}
           </span>
@@ -114,11 +123,12 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
             // One phrase, as an aria-label: hidden spans beside flex items read "Members , 2 …"
             // in Chromium (see `attentionName` in AdminRail). Opens with the words on screen.
             aria-label={switcherName(item, attention)}
+            style={BAR_GAP}
             className={cn(
               // px-2 inside the bar's own px-2 (sm: px-4, lg: px-6) puts the icon on the page gutter (16 / 24 / 32px).
               // Gaps in px, capped (R5 V-16): two rem gaps were 48px at 200 % text, taken from the
               // name, and "HARDWAR / E" and "Repeatin / g" broke mid-word at 320.
-              "no-lift flex min-h-appbar w-full flex-wrap items-center gap-[min(0.75rem,12px)] rounded-lg border border-transparent px-2",
+              "no-lift flex min-h-appbar w-full flex-wrap items-center rounded-lg border border-transparent px-2",
               "transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none",
             )}
           >

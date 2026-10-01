@@ -376,8 +376,8 @@ function QuickLinks({ attention }: { attention: AdminAttention }) {
         className="self-start whitespace-normal [@container(min-width:48rem)]:hidden"
         aria-expanded={open}
         aria-controls={listId}
-        icon={<CaretDown aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", open && "rotate-180")} />}
         onClick={() => setOpen((was) => !was)}
+        icon={<CaretDown aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", open && "rotate-180")} />}
       >
         {open ? CONSOLE_COPY.hide : CONSOLE_COPY.show}
       </Button>

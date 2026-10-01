@@ -73,6 +73,9 @@ const ANY = "__any__";
 
 export type FilterOption = { value: string; label: string };
 
+/** A filter's floor, capped at its bar: an inline style, because the vocabulary keeps arbitrary spacing in `ui/`. */
+const FILTER_FLOOR = { minWidth: "min(10rem, 100%)" } as const;
+
 /** One labelled filter: the design-system Select, never a native `<select>`. */
 export function FilterSelect({ id, label, value, options, onChange, className }: {
   id: string;
@@ -85,7 +88,7 @@ export function FilterSelect({ id, label, value, options, onChange, className }:
   return (
     // R5 X5-11: `min-w-40` is 10rem — 320px at 200 % text, the whole of a 320 phone, and the page
     // scrolled 65px sideways. The floor is capped at the bar's own width.
-    <Field controlId={id} className={cn("min-w-[min(10rem,100%)] flex-[1_1_10rem] sm:flex-none", className)}>
+    <Field controlId={id} className={cn("flex-[1_1_10rem] sm:flex-none", className)} style={FILTER_FLOOR}>
       <FieldLabel>{label}</FieldLabel>
       <Select value={value === "" ? ANY : value} onValueChange={(next) => onChange(next === ANY ? "" : next)}>
         <SelectTrigger className="w-full sm:w-auto sm:min-w-44">
