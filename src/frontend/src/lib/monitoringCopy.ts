@@ -172,9 +172,13 @@ function boxConfirmedLine(lights: ControlBoardLights, believed: string, said: st
   return `The box reported at ${said} and could not say what the lights are doing.`;
 }
 
-/** The server's record is old, and the line says how old rather than what is true. */
+/**
+ * The server's record is old, and the line says how old rather than what is true. It is the
+ * LIGHTS' report that is old (R5 A5-7): the tile's health line says the box itself was heard
+ * seconds ago, and "the box last reported at 18:00" beside it read as a contradiction.
+ */
 function staleRecordLine(believed: string, at: string | null): string {
-  const since = at ? ` The box last reported at ${at}.` : " The box has not reported since.";
+  const since = at ? ` The lights last reported at ${at}.` : " No lights report since.";
   if (believed === "on") return `The club's records say the lights are on, but nothing has confirmed it.${since}`;
   if (believed === "off") return `The club's records say the lights are off, but nothing has confirmed it.${since}`;
   return `Nobody knows what the lights are doing on this court.${since}`;

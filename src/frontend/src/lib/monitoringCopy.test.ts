@@ -153,6 +153,17 @@ describe.each(RUNNER_ZONES)("what the BOX last said, with the reader's browser i
   });
 
   /**
+   * R5 A5-7: the tile's health line already says the BOX was heard seconds ago, so "The box last
+   * reported at 18:00" read as a contradiction. What is old is the LIGHTS' report, and it says so.
+   */
+  it("says it is the lights' report that is old, not the box's", () => {
+    const said = lightsLine({ state: "unknown", stale: true, as_of: ON }, CLUB)!;
+    expect(said).toContain("The lights last reported at 18:00.");
+    expect(said).not.toMatch(/The box last reported/);
+    expect(lightsLine({ state: "on", stale: true }, CLUB)).toContain("No lights report since.");
+  });
+
+  /**
    * The third arm, and the reason it exists. `stale` is absent from an API that has not
    * shipped the field. Reading absent as `false` would print "confirmed by the box" over a
    * reading nothing has confirmed — the screen manufacturing certainty out of a gap.
