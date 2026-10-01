@@ -135,7 +135,6 @@ public static class Seeder
                     CourtNumber = i,
                     Name = $"Court {i}",
                     CourtType = CourtType.Squash,
-                    SlicePriceCredits = 50.00m,
                 });
             }
             await db.SaveChangesAsync();
@@ -209,13 +208,13 @@ public static class Seeder
                     AddedByUserId = adminUserId,
                 });
             }
-            // ZAR 500 opening balance so bookings have funds.
+            // A 500-minute opening balance so bookings have funds.
             db.LedgerEntries.Add(new Domain.LedgerEntry
             {
                 TenantId = tenantId,
                 UserId = user.Id,
                 Type = Domain.LedgerEntryType.AdminAdjustment,
-                AmountCredits = 500m,
+                AmountMinutes = 500,
                 ActorUserId = adminUserId,
                 Reason = "sample seed opening balance",
             });
@@ -307,7 +306,7 @@ public static class Seeder
                     EndsAt = endsAtUtc,
                     SliceMinutes = 30,
                     SliceCount = 1,
-                    AmountChargedCredits = court.SlicePriceCredits,
+                    AmountChargedMinutes = 30, // P13-B2: SliceMinutes × SliceCount
                     Status = Domain.BookingStatus.Booked,
                 };
                 db.Bookings.Add(booking);
@@ -316,7 +315,7 @@ public static class Seeder
                     TenantId = tenantId,
                     UserId = userId,
                     Type = Domain.LedgerEntryType.BookingCharge,
-                    AmountCredits = -court.SlicePriceCredits,
+                    AmountMinutes = -30,
                     RelatedBookingId = booking.Id,
                     ActorUserId = adminUserId,
                     // Club time, exactly as BookingService.SlotLabel writes it for a real

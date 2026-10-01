@@ -271,7 +271,7 @@ public static class ProductionBootstrap
                 CourtNumber = i,
                 Name = $"Court {i}",
                 CourtType = CourtType.Squash,
-                SlicePriceCredits = plan.SlicePriceCredits,
+                // P13-B2: courts carry no price; Bootstrap:SlicePriceCredits and its check go (§2.2).
             });
         }
         await db.SaveChangesAsync();

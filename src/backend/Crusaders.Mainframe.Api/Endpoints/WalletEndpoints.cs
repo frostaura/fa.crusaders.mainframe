@@ -80,15 +80,15 @@ public static class WalletEndpoints
 
             return Results.Ok(new
             {
-                balance_credits = balance,
+                balance_minutes = balance,
                 // D11: shares received as an organiser, held for the partners' possible returns
                 // until the earliest share deadline among them (ShareHolds). Part of the balance,
-                // not spendable — every booking and payment checks spendable_credits.
-                held_credits = held.Held,
-                owed_back_credits = held.OwedBack,
-                spendable_credits = balance - held.Reserved,
+                // not spendable — every booking and payment checks spendable_minutes.
+                held_minutes = held.Held,
+                owed_back_minutes = held.OwedBack,
+                spendable_minutes = balance - held.Reserved,
                 held_until = held.ReleasesAt,
-                // C4: one part per share deadline, soonest first, summing to held_credits; held_until is the first.
+                // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
                 held_parts = held.WireParts(),
                 entries = rows,
                 total_entries = total,
@@ -143,7 +143,7 @@ public static class WalletEndpoints
     /// <para>
     /// <b>Two frames per movement.</b> <see cref="LedgerService"/> publishes the legacy unnamed
     /// <c>data:</c> frame that today's client listens for as <c>message</c>, and a named
-    /// <c>balance</c> frame carrying <c>delta_credits</c> and <c>reason</c> beside it. The
+    /// <c>balance</c> frame carrying <c>delta_minutes</c> and <c>reason</c> beside it. The
     /// stream itself is a transport and does not know the difference: it writes whatever the bus
     /// hands it, so a third frame shape costs nothing here.
     /// </para>
@@ -155,7 +155,7 @@ public static class WalletEndpoints
     /// </summary>
     /// <summary>
     /// The opening frame: the balance, plus (D11) what of it is held for the member's partners
-    /// and until when — additive fields, so a client that reads only <c>balance_credits</c> is
+    /// and until when — additive fields, so a client that reads only <c>balance_minutes</c> is
     /// unchanged.
     /// </summary>
     private static async Task<string> OpeningFrameAsync(LedgerService ledger, Guid userId, CancellationToken ct)
@@ -164,12 +164,12 @@ public static class WalletEndpoints
         var held = await ledger.GetHeldAsync(userId, ct);
         return JsonSerializer.Serialize(new
         {
-            balance_credits = balance,
-            held_credits = held.Held,
-            owed_back_credits = held.OwedBack,
-            spendable_credits = balance - held.Reserved,
+            balance_minutes = balance,
+            held_minutes = held.Held,
+            owed_back_minutes = held.OwedBack,
+            spendable_minutes = balance - held.Reserved,
             held_until = held.ReleasesAt,
-            // C4: one part per share deadline, soonest first, summing to held_credits; held_until is the first.
+            // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
             held_parts = held.WireParts(),
         });
     }
@@ -262,7 +262,7 @@ public static class WalletEndpoints
     /// The largest adjustment the column can hold, and the smallest unit it can express.
     ///
     /// <para>
-    /// <c>ledger_entries.AmountCredits</c> is <c>numeric(10,2)</c>. Neither bound was
+    /// <c>ledger_entries.AmountMinutes</c> is <c>numeric(10,2)</c>. Neither bound was
     /// checked, and both failed badly at opposite ends. A desk typing 999999999999 got a
     /// <b>500</b> with an EF <c>DbUpdateException</c> and a Postgres 22003 numeric overflow
     /// — an unhandled database exception is the wrong failure mode for a money endpoint
@@ -273,14 +273,13 @@ public static class WalletEndpoints
     /// is a typo, and rounding it silently is how the two figures diverge.
     /// </para>
     /// </summary>
-    internal const decimal MaxAdjustmentCredits = 99_999_999.99m;
+    internal const int MaxAdjustmentMinutes = 999_999;
 
-    internal static IResult? RefuseAmount(decimal amountCredits)
+    internal static IResult? RefuseAmount(int amountMinutes)
     {
-        if (Math.Abs(amountCredits) > MaxAdjustmentCredits)
-            return Results.BadRequest(new { error = "amount_out_of_range", max = MaxAdjustmentCredits, max_credits = MaxAdjustmentCredits });
-        if (decimal.Round(amountCredits, 2, MidpointRounding.AwayFromZero) != amountCredits)
-            return Results.BadRequest(new { error = "amount_not_whole_cents" });
+        if (Math.Abs(amountMinutes) > MaxAdjustmentMinutes)
+            return Results.BadRequest(new { error = "amount_out_of_range", max_minutes = MaxAdjustmentMinutes });
+        // P13-B2: an int cannot hold a fraction, so amount_not_whole_cents went; a JSON 1.5 is refused by binding.
         return null;
     }
 
@@ -356,7 +355,7 @@ public static class WalletEndpoints
         Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
             email, logger,
             Crusaders.Mainframe.Api.Email.EmailTemplates.CreditAdjustment(
-                await services.Club.GetAsync(ct), user.Email, entry.AmountCredits, balanceAfter, req.Reason),
+                await services.Club.GetAsync(ct), user.Email, entry.AmountMinutes, balanceAfter, req.Reason),
             $"credit adjustment {entry.Id}");
 
         return AdjustmentResult(entry, kind!.Value, balanceBefore, balanceAfter, user);
@@ -402,7 +401,7 @@ public static class WalletEndpoints
             entry = await ledger.PostAsync(new LedgerPosting(
                 UserId: userId,
                 Type: kind.Type,
-                AmountCredits: req.AmountCredits,
+                AmountMinutes: req.AmountMinutes,
                 ActorUserId: actorId,
                 // Naming the booking is what nets this adjustment, per leg, against a late
                 // box upload's automatic reversal of the same no-show, instead of correcting
@@ -442,12 +441,12 @@ public static class WalletEndpoints
                 user_id = userId,
                 entry_id = entry.Id,
                 entry_type = kind.Type.ToString(),
-                amount_credits = req.AmountCredits,
+                amount_minutes = req.AmountMinutes,
                 reason = req.Reason,
                 reason_code = kind.Code,
                 zar_received = entry.ZarPaid,
-                balance_before_credits = balanceBefore,
-                balance_after_credits = balanceAfter,
+                balance_before_minutes = balanceBefore,
+                balance_after_minutes = balanceAfter,
                 related_booking_id = req.RelatedBookingId,
                 idempotency_key = req.IdempotencyKey,
             }),
@@ -469,11 +468,11 @@ public static class WalletEndpoints
             SubjectId: userId,
             SubjectLabel: PersonNames.Of(userId, await PersonNames.ForAsync(db, [userId], ct)),
             Reason: req.Reason,
-            Before: new { balance_credits = balanceBefore },
+            Before: new { balance_minutes = balanceBefore },
             After: new
             {
-                balance_credits = balanceAfter,
-                amount_credits = req.AmountCredits,
+                balance_minutes = balanceAfter,
+                amount_minutes = req.AmountMinutes,
                 reason_code = kind.Code,
                 zar_received = entry.ZarPaid,
                 entry_id = entry.Id,
@@ -490,7 +489,7 @@ public static class WalletEndpoints
         Guid UserId, AdjustRequest Request, AdminCreditReasons.Kind Kind, string? Reference, HttpContext Http);
 
     /// <summary>A committed by-hand movement and the two balances it moved between.</summary>
-    private sealed record AdjustmentPosted(LedgerEntry Entry, decimal BalanceBefore, decimal BalanceAfter);
+    private sealed record AdjustmentPosted(LedgerEntry Entry, int BalanceBefore, int BalanceAfter);
 
     /// <summary>
     /// Everything that can refuse a by-hand movement before anything is read from the database,
@@ -505,9 +504,9 @@ public static class WalletEndpoints
     private static (IResult? Refusal, AdminCreditReasons.Kind? Kind) RefuseRequest(
         AdjustRequest req, ILogger logger)
     {
-        if (req.AmountCredits == 0) return (Results.BadRequest(new { error = "amount_zero" }), null);
+        if (req.AmountMinutes == 0) return (Results.BadRequest(new { error = "amount_zero" }), null);
         if (string.IsNullOrWhiteSpace(req.Reason)) return (Results.BadRequest(new { error = "reason_required" }), null);
-        if (RefuseAmount(req.AmountCredits) is { } badAmount) return (badAmount, null);
+        if (RefuseAmount(req.AmountMinutes) is { } badAmount) return (badAmount, null);
 
         if (AdminCreditReasons.Resolve(req.ReasonCodeEither, logger) is not { } kind)
         {
@@ -517,7 +516,7 @@ public static class WalletEndpoints
         // A top-up is money the club TOOK. A negative one is a refund or a correction and has
         // codes of its own; mixing signs inside a directional bucket is what makes a per-row
         // listing unreadable and a revenue figure a guess.
-        if (kind.Type == LedgerEntryType.AdminTopUp && req.AmountCredits < 0)
+        if (kind.Type == LedgerEntryType.AdminTopUp && req.AmountMinutes < 0)
         {
             return (Results.BadRequest(new { error = "amount_must_be_positive_for_top_up" }), null);
         }
@@ -548,7 +547,7 @@ public static class WalletEndpoints
     /// <para>
     /// <b>D2-B10.</b> The replay matched on <c>ExternalReference</c> alone and compared nothing
     /// else, so adjusting +11 with key <c>k1</c> and then +110 with <c>k1</c> answered 200 with
-    /// <c>amount_credits: 11</c>. A console that mints one key per FORM SESSION rather than per
+    /// <c>amount_minutes: 11</c>. A console that mints one key per FORM SESSION rather than per
     /// INTENDED MOVEMENT therefore silently discarded a corrected amount — and the admin was
     /// told it had been applied.
     /// </para>
@@ -561,9 +560,9 @@ public static class WalletEndpoints
     /// </para>
     /// </summary>
     private static IResult Replay(
-        LedgerEntry stored, AdjustRequest req, AdminCreditReasons.Kind kind, decimal balanceBefore, Domain.User user)
+        LedgerEntry stored, AdjustRequest req, AdminCreditReasons.Kind kind, int balanceBefore, Domain.User user)
     {
-        var same = stored.AmountCredits == req.AmountCredits
+        var same = stored.AmountMinutes == req.AmountMinutes
                 && stored.Type == kind.Type
                 && stored.RelatedBookingId == req.RelatedBookingId
                 && stored.ZarPaid == (kind.Type == LedgerEntryType.AdminTopUp ? req.ZarReceivedEither : null);
@@ -575,7 +574,7 @@ public static class WalletEndpoints
                 error = "idempotency_key_reused",
                 stored = new
                 {
-                    amount_credits = stored.AmountCredits,
+                    amount_minutes = stored.AmountMinutes,
                     type = stored.Type.ToString(),
                     reason = stored.Reason,
                     at = stored.CreatedAt,
@@ -586,7 +585,7 @@ public static class WalletEndpoints
         // The stored movement already happened, so the balance it left behind is the one before
         // it plus itself — read back rather than recomputed, so a replay quotes the same pair the
         // original did.
-        return AdjustmentResult(stored, kind, balanceBefore - stored.AmountCredits, balanceBefore, user);
+        return AdjustmentResult(stored, kind, balanceBefore - stored.AmountMinutes, balanceBefore, user);
     }
 
     /// <summary>
@@ -629,20 +628,20 @@ public static class WalletEndpoints
     // initialiser as the end of the function and dumps the whole rest of the file into a
     // *global* pseudo-function whose reported length trips `-L 200`. See memory/gotchas.md.
     private static IResult AdjustmentResult(
-        LedgerEntry entry, AdminCreditReasons.Kind kind, decimal balanceBefore, decimal balanceAfter, Domain.User user)
+        LedgerEntry entry, AdminCreditReasons.Kind kind, int balanceBefore, int balanceAfter, Domain.User user)
     {
         return Results.Ok(new
         {
             entry_id = entry.Id,
             type = entry.Type.ToString(),
             reason_code = kind.Code,
-            amount_credits = entry.AmountCredits,
+            amount_minutes = entry.AmountMinutes,
             zar_received = entry.ZarPaid,
             // balance_before is here because the admin has to read back what they just did, and
             // because the console's confirmation ("Priya: 40.00 -> 240.00") must not be composed
             // client-side from a number it fetched separately and may have fetched before.
-            balance_before_credits = balanceBefore,
-            balance_after_credits = balanceAfter,
+            balance_before_minutes = balanceBefore,
+            balance_after_minutes = balanceAfter,
             member = new { user_id = user.Id, email = user.Email },
         });
     }
@@ -775,7 +774,7 @@ public sealed record AdjustServices(
 /// </para>
 /// </param>
 public sealed record AdjustRequest(
-    decimal AmountCredits,
+    int AmountMinutes,
     string Reason,
     Guid? RelatedBookingId = null,
     string? IdempotencyKey = null,

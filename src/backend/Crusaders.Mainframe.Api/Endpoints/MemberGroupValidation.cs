@@ -38,12 +38,12 @@ public static class MemberGroupValidation
             return Bad("group_status_invalid", new { valid = new[] { "active", "archived" } });
         }
 
-        return RefusePricing(req.Pricing) ?? RefuseCaps(req.Caps) ?? RefuseWindows(req.Windows) ?? RefuseTariff(req);
+        return RefuseCaps(req.Caps) ?? RefuseWindows(req.Windows) ?? RefuseTariff(req);
     }
 
     /// <summary>D2's two tariff fields — split out so <see cref="Refuse"/> stays under the complexity gate.</summary>
     private static IResult? RefuseTariff(MemberGroupRequest req)
-        => RefuseRate(req.RateElement) ?? RefusePeak(req.PeakElement);
+        => RefuseDiscount(req.DiscountElement) ?? RefusePeak(req.PeakElement);
 
     /// <summary>
     /// A group's peak say: absent, <c>true</c>, <c>false</c> or JSON <c>null</c> (no say). A string
@@ -56,88 +56,23 @@ public static class MemberGroupValidation
         return Bad("group_peak_priority_invalid", new { valid = new object?[] { true, false, null } });
     }
 
-    /// <summary>The top-up rate a group may carry — D2, the same bounds the old league setting had.</summary>
-    public const decimal MaxCreditsPerZar = 1000m;
-
-    /// <summary>Four decimal places: the column's own precision, so nothing is rounded on the way in.</summary>
-    public const int CreditsPerZarScale = 4;
+    /// <summary>The most a package discount may be: 10 000 basis points is 100% off (P13).</summary>
+    public const int MaxPackageDiscountBps = 10_000;
 
     /// <summary>
-    /// A group's top-up rate: absent, JSON null (inherit the club default), or a number in
-    /// (0, 1000] with at most four decimals. Zero would take a member's money and credit nothing;
-    /// a fifth decimal would be rounded by the column into a rate nobody typed.
+    /// A group's package discount: absent, JSON null (no say), or a whole number of basis points
+    /// in 0..10 000. A fraction is refused, not truncated, because a column of whole basis points
+    /// would round it into a discount nobody typed.
     /// </summary>
-    private static IResult? RefuseRate(System.Text.Json.JsonElement rate)
+    private static IResult? RefuseDiscount(System.Text.Json.JsonElement discount)
     {
-        if (rate.ValueKind is System.Text.Json.JsonValueKind.Undefined or System.Text.Json.JsonValueKind.Null) return null;
-        if (rate.ValueKind != System.Text.Json.JsonValueKind.Number
-            || !rate.TryGetDecimal(out var value)
-            || value <= 0 || value > MaxCreditsPerZar
-            || decimal.Round(value, CreditsPerZarScale) != value)
+        if (discount.ValueKind is System.Text.Json.JsonValueKind.Undefined or System.Text.Json.JsonValueKind.Null) return null;
+        if (discount.ValueKind != System.Text.Json.JsonValueKind.Number
+            || !discount.TryGetInt32(out var value)
+            || value < 0 || value > MaxPackageDiscountBps)
         {
-            return Bad("group_credits_per_zar_invalid", new { min_exclusive = 0, max = MaxCreditsPerZar, decimals = CreditsPerZarScale });
+            return Bad("group_package_discount_invalid", new { min = 0, max = MaxPackageDiscountBps });
         }
-        return null;
-    }
-
-    private static IResult? RefusePricing(GroupPricingRequest? pricing)
-    {
-        if (pricing is null) return null;
-
-        var mode = pricing.Mode?.Trim();
-        if (mode is not ("inherit_court" or "multiplier" or "flat_per_slice"))
-        {
-            return Bad("group_pricing_mode_invalid",
-                new { valid = new[] { "inherit_court", "multiplier", "flat_per_slice" } });
-        }
-
-        return RefuseFieldsNotForMode(pricing, mode) ?? RefusePriceValue(pricing, mode);
-    }
-
-    /// <summary>
-    /// A field the mode does not use is refused rather than ignored.
-    ///
-    /// <para>
-    /// An admin who set a flat price and then switched to <c>inherit_court</c> needs to know the
-    /// price is not in force; silently keeping it is how a group ends up carrying two prices and
-    /// honouring neither, which is a thing nobody can read off the screen afterwards.
-    /// </para>
-    /// </summary>
-    private static IResult? RefuseFieldsNotForMode(GroupPricingRequest pricing, string mode)
-    {
-        if (mode != "multiplier" && pricing.MultiplierBps is not null)
-        {
-            return Bad("group_pricing_field_not_for_mode", new { field = "multiplier_bps", mode });
-        }
-        if (mode != "flat_per_slice" && pricing.FlatSlicePriceCredits is not null)
-        {
-            return Bad("group_pricing_field_not_for_mode", new { field = "flat_slice_price_credits", mode });
-        }
-        return null;
-    }
-
-    /// <summary>The value the chosen mode actually uses, bounded.</summary>
-    private static IResult? RefusePriceValue(GroupPricingRequest pricing, string mode)
-    {
-        if (mode == "multiplier"
-            && (pricing.MultiplierBps is not { } bps
-                || bps < GroupRules.MinMultiplierBps
-                || bps > GroupRules.MaxMultiplierBps))
-        {
-            return Bad("group_multiplier_out_of_range",
-                new { min = GroupRules.MinMultiplierBps, max = GroupRules.MaxMultiplierBps });
-        }
-
-        if (mode == "flat_per_slice"
-            && (pricing.FlatSlicePriceCredits is not { } flat
-                || flat < MoneySettings.MinSlicePriceCredits
-                || flat > MoneySettings.MaxSlicePriceCredits
-                || !MoneySettings.IsWholeCents(flat)))
-        {
-            return Bad("group_flat_price_invalid",
-                new { min = MoneySettings.MinSlicePriceCredits, max = MoneySettings.MaxSlicePriceCredits });
-        }
-
         return null;
     }
 

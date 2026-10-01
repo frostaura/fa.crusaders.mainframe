@@ -87,7 +87,9 @@ public static partial class TopUpEndpoints
             id = p.Id,
             status = p.Status.ToString(),
             amount_zar = p.AmountZar,
-            conversion_rate = p.ConversionRate,
+            // P13-B2: the §3.4 purchase shape (package_id, package_name, minutes, list_price_zar,
+            // discount_bps, expires_at) replaces conversion_rate and counts_until.
+            minutes = p.Minutes,
             // A stable code the client maps to a sentence, never an internal string.
             failure_code = p.FailureReason,
             // M5-2: "a payment you started at 14:05", and until when it holds the member's limit.

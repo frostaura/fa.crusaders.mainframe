@@ -43,13 +43,6 @@ public static class MemberGroupSeeder
     public const string NonLeagueMembers = "Non-league members";
 
     /// <summary>
-    /// The league rate a NEW club's league group starts at: blueprint A.8's R100 → 240 credits,
-    /// the same number <c>credits_per_zar_league</c> defaulted to before D2 moved it here. An
-    /// existing club's league group carries whatever that setting held, by migration.
-    /// </summary>
-    public const decimal DefaultLeagueCreditsPerZar = 2.4m;
-
-    /// <summary>
     /// Ensures both groups exist for one tenant. The league group is found by its system key;
     /// the non-league group by name, case-insensitively, which is the same test the unique index
     /// enforces — so re-running this after an admin has renamed that one creates a second rather
@@ -92,7 +85,6 @@ public static class MemberGroupSeeder
             Description = null,
             Status = MemberGroupStatus.Active,
             SortOrder = sortOrder,
-            PricingMode = GroupPricingMode.InheritCourt,
             // Null caps: inherit the club's own. Not zero, which would mean UNLIMITED and would
             // silently exempt every member of a seeded group from the per-day cap the club has had
             // since it opened.
@@ -101,7 +93,7 @@ public static class MemberGroupSeeder
             AdvanceBookingDays = null,
             IsSystemDefault = true,
             SystemKey = league ? MemberGroupSystemKeys.League : null,
-            CreditsPerZar = league ? DefaultLeagueCreditsPerZar : null,
+            // P13-B2: no package discount on either seeded group — League starts with none (§4.6).
             // The non-league group has no say (null), not "withholds" — a league member who is
             // also put in it must keep the priority the league group grants.
             PeakPriority = league ? true : null,

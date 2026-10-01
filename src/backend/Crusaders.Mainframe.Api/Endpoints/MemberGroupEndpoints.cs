@@ -68,22 +68,17 @@ public static class MemberGroupEndpoints
             .Select(x => new { GroupId = x.Key, Count = x.Count() })
             .ToDictionaryAsync(x => x.GroupId, x => x.Count, ct);
 
-        var s = await settings.GetAsync(ct);
-        var prices = await CourtPrices.ForAsync(db, s, ct);
-
         return Results.Ok(new
         {
-            groups = groups.Select(x => Wire(x, windows, counts, prices)).ToList(),
+            groups = groups.Select(x => Wire(x, windows, counts)).ToList(),
         });
     }
 
     private static object Wire(
         MemberGroup group,
         IReadOnlyList<MemberGroupWindow> windows,
-        IReadOnlyDictionary<Guid, int> counts,
-        CourtPrices prices)
+        IReadOnlyDictionary<Guid, int> counts)
     {
-        var rules = ToRules(group, windows);
         return new
         {
             id = group.Id,
@@ -92,24 +87,13 @@ public static class MemberGroupEndpoints
             status = group.Status.ToString().ToLowerInvariant(),
             sort_order = group.SortOrder,
             is_system_default = group.IsSystemDefault,
-            // D2: the tariff a group carries now that it replaced the member class. A null rate
-            // inherits the club's credits_per_zar_regular; system_key is "league" on the group
-            // that replaced LeagueOrSenior, null on every group an admin made.
+            // D2/P13: the tariff a group carries now that it replaced the member class. A null
+            // discount has no say; system_key is "league" on the group that replaced
+            // LeagueOrSenior, null on every group an admin made. The pricing block is gone (P13):
+            // a booking costs its length in minutes.
             system_key = group.SystemKey,
-            credits_per_zar = group.CreditsPerZar,
+            package_discount_bps = group.PackageDiscountBps,
             peak_priority = group.PeakPriority,
-            pricing = new
-            {
-                mode = ModeName(group.PricingMode),
-                multiplier_bps = group.PriceMultiplierBps,
-                flat_slice_price_credits = group.FlatSlicePriceCredits,
-                // What this group would actually charge — on the club's REAL courts (review round
-                // 1, F3: this used the retired club default, "40 cr instead of 8"). The example is
-                // the cheapest active court; the range and the per-court list say the rest.
-                effective_example_credits = GroupRules.PriceFor(rules, prices.Cheapest),
-                effective_range_credits = prices.RangeFor([rules]),
-                effective_by_court = prices.PerCourt([rules]),
-            },
             caps = new
             {
                 max_slots_per_day = group.MaxSlotsPerDay,
@@ -125,25 +109,6 @@ public static class MemberGroupEndpoints
                     end = BookingService.MinutesToHhmm(w.EndMinute),
                 }).ToList(),
             member_count = counts.GetValueOrDefault(group.Id),
-        };
-    }
-
-    private static MemberGroupRules ToRules(MemberGroup g, IReadOnlyList<MemberGroupWindow> windows)
-        => new(g.Id, g.Name, g.Description, g.PricingMode, g.PriceMultiplierBps, g.FlatSlicePriceCredits,
-            g.MaxSlotsPerDay, g.MaxMinutesPerDay, g.AdvanceBookingDays,
-            HasAnyWindows: windows.Any(w => w.GroupId == g.Id),
-            WindowsForDay: []);
-
-    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
-    // object initialiser as the END of the function and dumps the rest of the file into a
-    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
-    private static string ModeName(GroupPricingMode mode)
-    {
-        return mode switch
-        {
-            GroupPricingMode.Multiplier => "multiplier",
-            GroupPricingMode.FlatPerSlice => "flat_per_slice",
-            _ => "inherit_court",
         };
     }
 
@@ -303,22 +268,10 @@ public static class MemberGroupEndpoints
 
     private static void Apply(MemberGroup group, MemberGroupRequest req)
     {
-        // D2's two tariff fields. Both distinguish ABSENT (unchanged) from an explicit JSON null
-        // (the rate: back to the club's default; peak: no say), because both are things an
-        // admin means.
-        if (req.EffectiveCreditsPerZar is { } rate) group.CreditsPerZar = rate.Value;
+        // The two tariff fields. Both distinguish ABSENT (unchanged) from an explicit JSON null
+        // (the discount: no say; peak: no say), because both are things an admin means.
+        if (req.EffectivePackageDiscountBps is { } discount) group.PackageDiscountBps = discount.Value;
         if (req.EffectivePeakPriority is { } peak) group.PeakPriority = peak.Value;
-        if (req.Pricing is { } pricing)
-        {
-            group.PricingMode = pricing.Mode switch
-            {
-                "multiplier" => GroupPricingMode.Multiplier,
-                "flat_per_slice" => GroupPricingMode.FlatPerSlice,
-                _ => GroupPricingMode.InheritCourt,
-            };
-            group.PriceMultiplierBps = pricing.MultiplierBps ?? 10_000;
-            group.FlatSlicePriceCredits = pricing.FlatSlicePriceCredits;
-        }
         if (req.Caps is { } caps)
         {
             group.MaxSlotsPerDay = caps.MaxSlotsPerDay;
@@ -495,8 +448,8 @@ public static class MemberGroupEndpoints
             MemberGroupAudit.Stage(deps.Db, new MemberGroupMove(
                 deps.Tenant.TenantId, ctx.User.Id() ?? Guid.Empty, userId,
                 Added: move.Joined ? [move.Group] : [], Removed: move.Joined ? [] : [move.Group],
-                Before: MemberTariffs.Resolve(had, s.CreditsPerZarRegular),
-                After: MemberTariffs.Resolve(will, s.CreditsPerZarRegular),
+                Before: MemberTariffs.Resolve(had),
+                After: MemberTariffs.Resolve(will),
                 Reason: null));
         }
     }
@@ -535,13 +488,13 @@ public static class MemberGroupEndpoints
         return Results.Ok(await ResolvedAsync(rules, db, s, userId, d, ct));
     }
 
-    /// <summary>A tariff as the admin reads it — the rate, where it came from, and the peak standing.</summary>
+    /// <summary>A tariff as the admin reads it — the package discount, where it came from, and the peak standing.</summary>
     internal static object TariffWire(MemberTariff tariff)
     {
         return new
         {
-            top_up_credits_per_zar = tariff.TopUpRate,
-            rate_group_id = tariff.RateGroup?.Id,
+            package_discount_bps = tariff.PackageDiscountBps,
+            discount_group_id = tariff.DiscountGroup?.Id,
             peak_priority = tariff.PeakPriority,
             peak_withheld_by = tariff.PeakWithheldBy,
         };
@@ -567,26 +520,26 @@ public static class MemberGroupEndpoints
             .Where(w => proposedIds.Contains(w.GroupId)).ToListAsync(ct);
 
         var proposed = groups.Select(x => new MemberGroupRules(
-            x.Id, x.Name, x.Description, x.PricingMode, x.PriceMultiplierBps, x.FlatSlicePriceCredits,
+            x.Id, x.Name, x.Description,
             x.MaxSlotsPerDay, x.MaxMinutesPerDay, x.AdvanceBookingDays,
             HasAnyWindows: windows.Any(w => w.GroupId == x.Id),
             WindowsForDay: GroupRules.WindowsFor(windows.Where(w => w.GroupId == x.Id), d.DayOfWeek)))
             .ToList();
 
-        // D2: what the proposed set would do to the member's top-up rate and peak standing, by
-        // the same MemberTariffs rule the top-up and the booking path read.
-        var wouldBeTariff = MemberTariffs.Resolve(groups.Select(MemberTariffs.From).ToList(), s.CreditsPerZarRegular);
+        // D2: what the proposed set would do to the member's package discount and peak standing,
+        // by the same MemberTariffs rule the purchase and the booking path read.
+        var wouldBeTariff = MemberTariffs.Resolve(groups.Select(MemberTariffs.From).ToList());
 
-        return Results.Ok(new { current, would_be = Resolved(s, proposed, d, wouldBeTariff, await CourtPrices.ForAsync(db, s, ct)) });
+        return Results.Ok(new { current, would_be = Resolved(s, proposed, d, wouldBeTariff) });
     }
 
     private static async Task<object> ResolvedAsync(
         BookingRules rules, MainframeDbContext db, TenantSettingsView s, Guid userId, DateOnly day, CancellationToken ct)
         => Resolved(s, await rules.GroupsForAsync(userId, day.DayOfWeek, s, ct), day,
-            await MemberTariffs.ForAsync(db, userId, s, ct), await CourtPrices.ForAsync(db, s, ct));
+            await MemberTariffs.ForAsync(db, userId, s, ct));
 
     private static object Resolved(
-        TenantSettingsView s, IReadOnlyList<MemberGroupRules> groups, DateOnly day, MemberTariff tariff, CourtPrices prices)
+        TenantSettingsView s, IReadOnlyList<MemberGroupRules> groups, DateOnly day, MemberTariff tariff)
     {
         var (openMinute, closeMinute) = s.HoursFor(day.DayOfWeek);
         var allowed = GroupRules.AllowedWindows(groups, new MinuteWindow(openMinute, closeMinute));
@@ -600,18 +553,13 @@ public static class MemberGroupEndpoints
                 start = BookingService.MinutesToHhmm(w.Start),
                 end = BookingService.MinutesToHhmm(w.End),
             }).ToList(),
-            // On the club's real courts (review round 1, F3), not the retired club default: the
-            // cheapest active court's price, then the range and each court.
-            slice_price_credits = GroupRules.PriceFor(groups, prices.Cheapest),
-            slice_price_range_credits = prices.RangeFor(groups),
-            slice_prices_by_court = prices.PerCourt(groups),
             max_slots_per_day = GroupRules.SlotCapFor(groups, BookingLimits.MaxSlotsPerDay(s)),
             max_minutes_per_day = GroupRules.MinuteCapFor(groups, BookingLimits.MaxMinutesPerDay(s)),
             advance_booking_days = GroupRules.AdvanceDaysFor(groups, s.AdvanceBookingDays),
             // Named, not implied. An admin about to put somebody into a second group has to be
             // able to see that the result is a member who can book nothing at all.
             empty_window_groups = allowed.Count == 0 ? groups.Select(g => g.Name).ToList() : null,
-            // D2: the top-up rate and peak standing these groups add up to — additive, so every
+            // D2: the package discount and peak standing these groups add up to — additive, so every
             // field above keeps its meaning for the screens already reading them.
             tariff = TariffWire(tariff),
         };
@@ -624,45 +572,44 @@ public static class MemberGroupEndpoints
 /// sent — see <c>MemberGroupEndpoints.StagePatchChangeAsync</c> for why an archive does not yet
 /// demand one.
 /// </param>
-/// <param name="CreditsPerZar">
-/// D2's top-up rate, <c>creditsPerZar</c> or <c>credits_per_zar</c>. A <see cref="JsonElement"/>
-/// rather than a <c>decimal?</c> because the PATCH has to tell three things apart: ABSENT
-/// (unchanged), <c>null</c> (inherit the club's default rate again) and a number.
+/// <param name="PackageDiscountBps">
+/// P13's package discount, <c>packageDiscountBps</c> or <c>package_discount_bps</c>. A
+/// <see cref="JsonElement"/> rather than an <c>int?</c> because the PATCH has to tell three
+/// things apart: ABSENT (unchanged), <c>null</c> (no say) and a number of basis points.
 /// </param>
 /// <param name="PeakPriority">
 /// D2's peak say, <c>peakPriority</c> or <c>peak_priority</c>: <c>true</c> grants, <c>false</c>
 /// withholds, <c>null</c> has no say, ABSENT is unchanged — a <see cref="JsonElement"/> for the
-/// same three-way reason as the rate.
+/// same three-way reason as the discount.
 /// </param>
 public sealed record MemberGroupRequest(
     string? Name = null,
     string? Description = null,
     string? Status = null,
-    GroupPricingRequest? Pricing = null,
     GroupCapsRequest? Caps = null,
     IReadOnlyList<GroupWindowRequest>? Windows = null,
     string? Reason = null,
-    JsonElement CreditsPerZar = default,
-    [property: JsonPropertyName("credits_per_zar")] JsonElement CreditsPerZarSnake = default,
+    JsonElement PackageDiscountBps = default,
+    [property: JsonPropertyName("package_discount_bps")] JsonElement PackageDiscountBpsSnake = default,
     JsonElement PeakPriority = default,
     [property: JsonPropertyName("peak_priority")] JsonElement PeakPrioritySnake = default)
 {
-    /// <summary>The rate element under either spelling; <see cref="JsonValueKind.Undefined"/> when neither was sent.</summary>
-    public JsonElement RateElement
-        => CreditsPerZar.ValueKind != JsonValueKind.Undefined ? CreditsPerZar : CreditsPerZarSnake;
+    /// <summary>The discount element under either spelling; <see cref="JsonValueKind.Undefined"/> when neither was sent.</summary>
+    public JsonElement DiscountElement
+        => PackageDiscountBps.ValueKind != JsonValueKind.Undefined ? PackageDiscountBps : PackageDiscountBpsSnake;
 
     /// <summary>
-    /// The rate to write, or null when the body did not name one; a change whose
-    /// <see cref="RateChange.Value"/> is null clears the rate. Only called after
+    /// The discount to write, or null when the body did not name one; a change whose
+    /// <see cref="DiscountChange.Value"/> is null clears it. Only called after
     /// <see cref="MemberGroupValidation.Refuse"/> has accepted the element.
     /// </summary>
     // Block body: the lizard switch-expression trap in memory/gotchas.md.
-    public RateChange? EffectiveCreditsPerZar
+    public DiscountChange? EffectivePackageDiscountBps
     {
         get
         {
-            if (RateElement.ValueKind == JsonValueKind.Undefined) return null;
-            return RateElement.ValueKind == JsonValueKind.Null ? new RateChange(null) : new RateChange(RateElement.GetDecimal());
+            if (DiscountElement.ValueKind == JsonValueKind.Undefined) return null;
+            return DiscountElement.ValueKind == JsonValueKind.Null ? new DiscountChange(null) : new DiscountChange(DiscountElement.GetInt32());
         }
     }
 
@@ -686,8 +633,8 @@ public sealed record MemberGroupRequest(
     }
 }
 
-/// <summary>A top-up rate the request names: a number, or null for "inherit the club's default".</summary>
-public readonly record struct RateChange(decimal? Value);
+/// <summary>A package discount the request names: basis points, or null for "no say".</summary>
+public readonly record struct DiscountChange(int? Value);
 
 /// <summary>A peak say the request names: true grants, false withholds, null has no say.</summary>
 public readonly record struct PeakChange(bool? Value);
@@ -697,8 +644,6 @@ public readonly record struct PeakChange(bool? Value);
 /// gate caps a signature at six arguments, and recording to the change record added a seventh.
 /// </summary>
 public sealed record GroupDeps(MainframeDbContext Db, ITenantContext Tenant, AdminChangeRecorder Changes);
-
-public sealed record GroupPricingRequest(string Mode, int? MultiplierBps = null, decimal? FlatSlicePriceCredits = null);
 
 public sealed record GroupCapsRequest(int? MaxSlotsPerDay = null, int? MaxMinutesPerDay = null, int? AdvanceBookingDays = null);
 
@@ -710,34 +655,3 @@ public sealed record GroupMembersRequest(IReadOnlyList<Guid>? UserIds);
 internal sealed record GroupMoveSide(MemberGroup Group, IReadOnlyList<Guid> UserIds, bool Joined);
 
 public sealed record PreviewRequest(Guid UserId, DateOnly? Day, IReadOnlyList<Guid>? ProposedGroupIds);
-
-/// <summary>
-/// The club's active courts and their own slice prices (review round 1, F3) — what every group
-/// price is computed on. With no active court, the club default stands in so the figure is never
-/// empty; that is the only place the default is read.
-/// </summary>
-public sealed record CourtPrices(IReadOnlyList<(Guid Id, string Name, decimal Price)> Courts, decimal Fallback)
-{
-    public static async Task<CourtPrices> ForAsync(MainframeDbContext db, TenantSettingsView s, CancellationToken ct)
-    {
-        var courts = await db.Courts.AsNoTracking().Where(c => c.IsActive).OrderBy(c => c.CourtNumber)
-            .Select(c => new { c.Id, c.Name, c.SlicePriceCredits }).ToListAsync(ct);
-        return new CourtPrices([.. courts.Select(c => (c.Id, c.Name, c.SlicePriceCredits))], MoneySettings.SlicePriceCredits(s));
-    }
-
-    /// <summary>The cheapest active court's price, or the fallback.</summary>
-    public decimal Cheapest => Courts.Count == 0 ? Fallback : Courts.Min(c => c.Price);
-
-    /// <summary>The lowest and highest a member in these groups pays across the courts.</summary>
-    public object RangeFor(IReadOnlyList<MemberGroupRules> groups)
-    {
-        var each = Courts.Count == 0 ? [GroupRules.PriceFor(groups, Fallback)] : Courts.Select(c => GroupRules.PriceFor(groups, c.Price)).ToList();
-        return new { min = each.Min(), max = each.Max() };
-    }
-
-    /// <summary>What a member in these groups pays on each active court.</summary>
-    public List<object> PerCourt(IReadOnlyList<MemberGroupRules> groups)
-    {
-        return [.. Courts.Select(c => (object)new { court_id = c.Id, court_name = c.Name, credits = GroupRules.PriceFor(groups, c.Price) })];
-    }
-}

@@ -12,6 +12,13 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 
 public static partial class TopUpEndpoints
 {
+    // P13-B2: transitional stand-ins for the retired settings (topup_block_zar, the cap and
+    // credits_per_zar_regular, at their old defaults) so this amount-based route compiles until
+    // B2 replaces it with POST /api/v1/minutes/purchase and the package shelf. Not economics.
+    private const decimal LegacyBlockZar = 100m;
+    private const decimal LegacyMaxZar = 1000m;
+    private const decimal LegacyRate = 1.6m;
+
     public static IEndpointRouteBuilder MapTopUpEndpoints(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/v1/credit").RequireAuthorization();
@@ -46,19 +53,17 @@ public static partial class TopUpEndpoints
             var already = paid + waiting;
             return Results.Ok(new
             {
-                block_zar = s.TopupBlockZar,
-                min_zar = s.TopupBlockZar,
-                max_zar = s.TopupMaxZarPerMember,
+                block_zar = LegacyBlockZar,
+                min_zar = LegacyBlockZar,
+                max_zar = LegacyMaxZar,
                 already_zar = already,
                 paid_zar = paid,
                 waiting_zar = waiting,
                 open_checkouts = open.Select(OpenWire).ToList(),
-                remaining_zar = Math.Max(s.TopupMaxZarPerMember - already, 0m),
-                presets_zar = Presets(s.TopupBlockZar, s.TopupMaxZarPerMember),
-                conversion_rate = tariff.TopUpRate,
-                // D2: the group the rate comes from, or null for the club's default rate — so
-                // the screen can say "League rate" in the club's own words.
-                rate_group = RateGroupWire(tariff),
+                remaining_zar = Math.Max(LegacyMaxZar - already, 0m),
+                presets_zar = Presets(LegacyBlockZar, LegacyMaxZar),
+                conversion_rate = LegacyRate,
+                rate_group = (object?)null,
                 // Deprecated for one release; derived from the league group. See MemberTariff.
                 member_class = tariff.LegacyMemberClass,
             });
@@ -109,7 +114,7 @@ public static partial class TopUpEndpoints
             // D2: the rate is the member's GROUPS' (the lowest any of them sets, else the club
             // default), and the group it came from is locked beside it.
             var tariff = await MemberTariffs.ForAsync(db, userId, s, ct);
-            var rate = tariff.TopUpRate;
+            var rate = LegacyRate;
 
             // ...and the offer the member is looking at has to still be this one.
             if (RefuseStaleQuote(req.QuotedConversionRate, req.AmountZar, tariff) is { } stale)
@@ -120,8 +125,12 @@ public static partial class TopUpEndpoints
                 TenantId = tenant.TenantId,
                 UserId = userId,
                 AmountZar = req.AmountZar,
-                ConversionRate = rate,
-                GroupId = tariff.RateGroup?.Id,
+                // P13-B2: the purchase lock, filled from the legacy amount until packages exist.
+                PackageId = Guid.Empty,
+                PackageName = "Top-up",
+                Minutes = Convert(req.AmountZar, rate),
+                ListPriceZar = req.AmountZar,
+                GroupId = null,
                 IdempotencyKey = $"tu_{Guid.NewGuid():N}",
                 Status = TopUpStatus.Pending,
             };
@@ -167,7 +176,7 @@ public static partial class TopUpEndpoints
                 checkout_id = register.CheckoutId,
                 redirect_url = register.RedirectUrl,
                 form_fields = register.FormFields.Select(f => new { name = f.Key, value = f.Value }).ToList(),
-                quoted_credits = Convert(pending.AmountZar, rate),
+                quoted_minutes = pending.Minutes,
                 conversion_rate = rate,
             });
         });
@@ -441,33 +450,9 @@ public static partial class TopUpEndpoints
 
         var settings = await c.Settings.GetAsync(ct);
 
-        decimal rate;
-        Guid? rateGroupId = pending.GroupId;
-        if (pending.ConversionRate is { } quoted)
-        {
-            rate = quoted;
-        }
-        else
-        {
-            var live = await MemberTariffs.ForAsync(c.Db, pending.UserId, settings, ct);
-            rate = live.TopUpRate;
-            rateGroupId = live.RateGroup?.Id;
-            c.Logger.LogInformation(
-                "topup {Key} carries no quoted rate (pre-dates the column) — settling at the live rate {Rate}",
-                pending.IdempotencyKey, rate);
-        }
-
-        // Rounded to the column, not by the column.
-        //
-        // ledger_entries.AmountCredits is numeric(10,2), so an unrounded product is
-        // rounded on the way in regardless — but the HTTP response, the
-        // credit.topped_up event and the ledger Reason string all quote the value
-        // this variable holds, so they quoted a figure the database had not stored.
-        // credits_per_zar_* accepts four decimals and admins bypass the block rule,
-        // which is all it takes for the two to diverge. AwayFromZero matches
-        // CreateWalkUpAsync and both penalty computations: the club does not round
-        // in its own favour by accident.
-        var credits = Convert(pending.AmountZar, rate);
+        // The LOCKED minutes on the purchase row, never a live package or rate (P13 invariant 8).
+        var minutes = pending.Minutes;
+        Guid? discountGroupId = pending.GroupId;
 
         // D2-B02. The unique index on ledger_entries.ExternalReference carries no TenantId
         // while every READ of the table is scoped by the tenant query filter.
@@ -489,16 +474,16 @@ public static partial class TopUpEndpoints
             await c.Ledger.PostAsync(new LedgerPosting(
                 UserId: pending.UserId,
                 Type: LedgerEntryType.TopUp,
-                AmountCredits: credits,
+                AmountMinutes: minutes,
                 ZarPaid: pending.AmountZar,
-                ConversionRate: rate,
                 ActorUserId: pending.UserId,
                 // Invariant separators, so the comment reads in the same convention as the
                 // amount column beside it rather than the server's ambient culture.
                 // The club's own money symbol, frozen into the row. A ledger reason is written
                 // once and read for ever: a club that changes its symbol later has not changed
                 // what this member paid, and re-rendering the history would be the lie.
-                Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar, CurrencySymbol.For(settings))} → {EmailTemplates.Cr(credits)} @ {EmailTemplates.Num(rate)})",
+                // P13-B2: becomes "PayFast purchase: {PackageName} ({minutes}) for {rand}" (§3.4).
+                Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar, CurrencySymbol.For(settings))} → {EmailTemplates.Cr(minutes)})",
                 ExternalReference: reference), ct);
 
             await c.Db.SaveChangesAsync(ct);
@@ -530,9 +515,9 @@ public static partial class TopUpEndpoints
                 EmailTemplates.TopUpConfirmation(
                     await c.Club.GetAsync(ct), recipient, new TopUpReceipt(
                         AmountZar: pending.AmountZar,
-                        CreditsAdded: credits,
-                        ConversionRate: rate,
-                        BalanceAfterCredits: balanceAfter,
+                        MinutesAdded: minutes,
+                        ConversionRate: LegacyRate, // P13-B4: PurchaseConfirmation replaces this receipt (§6)
+                        BalanceAfterMinutes: balanceAfter,
                         Reference: interp.PaymentId ?? pending.IdempotencyKey,
                         // The club's own symbol, for the one figure on this receipt that is
                         // money. The three credit figures beside it take none.
@@ -542,26 +527,23 @@ public static partial class TopUpEndpoints
 
         await c.Bus.EmitAsync(new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
-            Type: "credit.topped_up",
+            Type: MinutesEvents.Purchased,
             TenantId: tenantRow.Id, TenantSlug: tenantRow.Slug,
             OccurredAt: DateTimeOffset.UtcNow,
             ActorUserId: pending.UserId, ActorIsAdmin: false, SubjectUserId: pending.UserId,
             Data: new()
             {
-                ["topup_id"] = pending.Id,
+                // P13-B2: add package_id, package_name, list_price_zar and discount_bps (§5).
+                ["purchase_id"] = pending.Id,
                 ["zar_paid"] = pending.AmountZar,
-                ["credits"] = credits,
-                ["conversion_rate"] = rate,
-                // D2: which group's rate was locked at checkout (null: the club default).
-                ["rate_group_id"] = rateGroupId,
+                ["minutes"] = minutes,
+                // The group whose discount was locked at checkout (null: none).
+                ["discount_group_id"] = discountGroupId,
                 ["groups"] = await GroupsWireAsync(c.Db, pending.UserId, ct),
-                // Deprecated for one release: derived from the LOCKED group, so it says what the
-                // column it replaced said — the tariff the member was quoted, not their class now.
-                ["member_class"] = await LegacyClassOfGroupAsync(c.Db, rateGroupId, ct),
                 ["external_reference"] = interp.PaymentId,
             }), ct);
 
-        return Results.Ok(new { ok = true, credits, conversion_rate = rate });
+        return Results.Ok(new { ok = true, minutes, package_id = pending.PackageId });
     }
 
     /// <summary>
@@ -712,13 +694,13 @@ public static partial class TopUpEndpoints
         var paid = await PaidZarAsync(db, userId, ct);
         var waiting = (await OpenCheckoutsAsync(db, userId, ct)).Sum(o => o.AmountZar);
         var already = paid + waiting;
-        var remaining = Math.Max(s.TopupMaxZarPerMember - already, 0m);
+        var remaining = Math.Max(LegacyMaxZar - already, 0m);
         if (amountZar <= remaining) return null;
 
         return Results.BadRequest(new
         {
             error = "amount_exceeds_member_cap",
-            max_zar = s.TopupMaxZarPerMember,
+            max_zar = LegacyMaxZar,
             already_zar = already,
             paid_zar = paid,
             waiting_zar = waiting,
@@ -757,27 +739,27 @@ public static partial class TopUpEndpoints
     /// </remarks>
     internal static IResult? RefuseStaleQuote(decimal? quotedRate, decimal amountZar, MemberTariff tariff)
     {
-        var liveRate = tariff.TopUpRate;
+        var liveRate = LegacyRate;
         if (quotedRate is null || quotedRate.Value == liveRate) return null;
         return Results.Json(new
         {
             error = "topup_rate_changed",
             conversion_rate = liveRate,
-            quoted_credits = Convert(amountZar, liveRate),
+            quoted_minutes = Convert(amountZar, liveRate),
             rate_group = RateGroupWire(tariff),
             // Deprecated for one release — see MemberTariff.LegacyMemberClass.
             member_class = tariff.LegacyMemberClass,
         }, statusCode: StatusCodes.Status409Conflict);
     }
 
-    /// <summary>ZAR → credits at a given rate, rounded the way the column stores it.</summary>
-    internal static decimal Convert(decimal amountZar, decimal rate)
-        => Math.Round(amountZar * rate, 2, MidpointRounding.AwayFromZero);
+    /// <summary>P13-B2: rand → whole minutes at the legacy rate, rounded down. Removed with this route.</summary>
+    internal static int Convert(decimal amountZar, decimal rate)
+        => (int)Math.Floor(amountZar * rate);
 
     /// <summary>The group a rate came from, as the wire names it; null for the club's default rate.</summary>
     internal static object? RateGroupWire(MemberTariff tariff)
     {
-        return tariff.RateGroup is { } g ? new { id = g.Id, name = g.Name, system_key = g.SystemKey } : null;
+        return tariff.DiscountGroup is { } g ? new { id = g.Id, name = g.Name, system_key = g.SystemKey } : null;
     }
 
     /// <summary>A member's active groups for an event payload: id, name and system key only.</summary>
@@ -816,10 +798,10 @@ public static partial class TopUpEndpoints
     {
         if (amountZar <= 0)
             return Results.BadRequest(new { error = "amount_must_be_positive" });
-        if (!isAdmin && s.TopupBlockZar > 0 && amountZar % s.TopupBlockZar != 0m)
-            return Results.BadRequest(new { error = "amount_must_be_multiple_of_block", block_zar = s.TopupBlockZar });
-        if (!isAdmin && amountZar > s.TopupMaxZarPerMember)
-            return Results.BadRequest(new { error = "amount_exceeds_member_cap", max_zar = s.TopupMaxZarPerMember });
+        if (!isAdmin && LegacyBlockZar > 0 && amountZar % LegacyBlockZar != 0m)
+            return Results.BadRequest(new { error = "amount_must_be_multiple_of_block", block_zar = LegacyBlockZar });
+        if (!isAdmin && amountZar > LegacyMaxZar)
+            return Results.BadRequest(new { error = "amount_exceeds_member_cap", max_zar = LegacyMaxZar });
         return null;
     }
 
@@ -933,7 +915,7 @@ public static partial class TopUpEndpoints
 /// The amount a member wants to pay, in <b>rand</b>.
 ///
 /// <para>
-/// The client posted <c>amountCredits</c> against this record for as long as the screen
+/// The client posted <c>amountMinutes</c> against this record for as long as the screen
 /// existed, so <c>AmountZar</c> bound to 0, the first guard fired, and no member could
 /// ever top up — the screen told them the amount was wrong. The field is rand because
 /// PayFast is paid in rand; the credits are what comes back.

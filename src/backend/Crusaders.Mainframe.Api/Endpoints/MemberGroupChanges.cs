@@ -34,15 +34,12 @@ internal static class MemberGroupChanges
             ["name"] = group.Name,
             ["description"] = group.Description,
             ["status"] = group.Status.ToString().ToLowerInvariant(),
-            ["pricing_mode"] = group.PricingMode.ToString(),
-            ["multiplier_bps"] = group.PriceMultiplierBps,
-            ["flat_slice_price_credits"] = group.FlatSlicePriceCredits,
             ["max_slots_per_day"] = group.MaxSlotsPerDay,
             ["max_minutes_per_day"] = group.MaxMinutesPerDay,
             ["advance_booking_days"] = group.AdvanceBookingDays,
-            // D2: a group's top-up rate and peak priority move money and court time for every
-            // member in it, so they are recorded like its price.
-            ["credits_per_zar"] = group.CreditsPerZar,
+            // D2/P13: a group's package discount and peak priority move money and court time for
+            // every member in it, so they are recorded like its caps.
+            ["package_discount_bps"] = group.PackageDiscountBps,
             ["peak_priority"] = group.PeakPriority,
         };
 

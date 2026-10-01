@@ -94,8 +94,7 @@ public static class AdminMemberGroupsEndpoint
             // same rule every reader uses — computed, not re-read, so it flushes with the move.
             var after = MemberTariffs.Resolve(
                 wanted.Select(id => groups[id]).Where(g => g.Status == MemberGroupStatus.Active)
-                    .Select(MemberTariffs.From).ToList(),
-                s.CreditsPerZarRegular);
+                    .Select(MemberTariffs.From).ToList());
             MemberGroupAudit.Stage(db, new MemberGroupMove(
                 deps.Tenant.TenantId, ctx.User.Id() ?? Guid.Empty, userId,
                 added.Select(id => groups[id]).ToList(), removed.Select(r => groups[r.GroupId]).ToList(),
@@ -112,8 +111,8 @@ public static class AdminMemberGroupsEndpoint
             removed = removed.Select(r => r.GroupId).ToList(),
             tariff = new
             {
-                top_up_credits_per_zar = tariff.TopUpRate,
-                rate_group_id = tariff.RateGroup?.Id,
+                package_discount_bps = tariff.PackageDiscountBps,
+                discount_group_id = tariff.DiscountGroup?.Id,
                 peak_priority = tariff.PeakPriority,
                 peak_withheld_by = tariff.PeakWithheldBy,
             },

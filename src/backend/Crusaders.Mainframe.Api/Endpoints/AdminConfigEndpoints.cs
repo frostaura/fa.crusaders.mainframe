@@ -269,32 +269,13 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>
-    /// Bounds on the nine economics keys. Every one of them is a number a member is
-    /// charged by or booked under, so the point is not tidiness — a conversion rate of
-    /// zero makes every top-up worthless, and a negative one credits the member for
-    /// paying. These are the values a form should never be able to submit.
+    /// Bounds on the economics keys. Every one of them is a number a member is booked under,
+    /// so the point is not tidiness — these are the values a form should never be able to
+    /// submit. The slice price, the two conversion rates, the top-up block and the cap are
+    /// retired (P13): bound on the request and ignored, never validated (§3.9).
     /// </summary>
-    /// <summary>The refusal for a PUT that still carries the league rate (D2).</summary>
-    internal const string CreditsPerZarLeagueMoved = "credits_per_zar_league_moved_to_groups";
-
     private static string? ValidateEconomics(UpdateSettingsRequest req)
     {
-        if (req.SlicePriceCredits is { } price && ValidateSlicePrice(price) is { } priceError) return priceError;
-
-        if (req.CreditsPerZarRegular is <= 0 or > 1000) return "credits_per_zar_regular_out_of_range";
-        // D2: the league rate moved onto the league group. Refused rather than ignored — an
-        // admin who typed a new league rate into an old settings screen and was told "saved"
-        // would believe the club was charging it, which is the silent-write failure this
-        // endpoint's whole omitted-means-unchanged contract exists to prevent.
-        if (req.CreditsPerZarLeague is not null) return CreditsPerZarLeagueMoved;
-        if (req.TopupBlockZar is <= 0 or > 100000) return "topup_block_zar_out_of_range";
-        if (req.TopupMaxZarPerMember is not null && req.TopupBlockZar is not null
-            && req.TopupMaxZarPerMember < req.TopupBlockZar)
-        {
-            // A cap below the block size means no top-up is ever legal, which reads to a
-            // member as the payment page being broken.
-            return "topup_max_below_block";
-        }
         if (req.MemberPerDayMaxMinutes is < 0 or > 1440) return "member_per_day_max_minutes_out_of_range";
         if (req.PeakAdvanceHoursForRegular is < 0 or > 336) return "peak_advance_hours_out_of_range";
         if (req.RetentionYears is < 1 or > 50) return "retention_years_out_of_range";
@@ -302,33 +283,6 @@ public static class AdminConfigEndpoints
 
         if (req.PeakHours is not null && !TryParsePeakHours(req.PeakHours)) return "peak_hours_invalid";
         return null;
-    }
-
-    /// <summary>
-    /// Bounds on the default court price.
-    ///
-    /// <para>
-    /// <b>D2-B06.</b> The one money key on this endpoint with NO bound of any kind: required,
-    /// written unconditionally at the bottom of the handler, and touched by none of the five
-    /// validators. <c>slicePriceCredits: -500</c> answered <c>{"saved":true}</c>, and the court
-    /// POST falls back to it when a price is omitted — producing a court on which <b>every
-    /// booking credited the member</b>.
-    /// </para>
-    ///
-    /// <para>
-    /// Whole cents for the same reason the admin adjustment demands them: the ledger column is
-    /// <c>numeric(10,2)</c>, so half a cent is rounded by the database and then disagrees with
-    /// every figure quoted back to the member. Its own method rather than another two branches
-    /// inside <see cref="ValidateEconomics"/>, which is at the gate's ceiling.
-    /// </para>
-    /// </summary>
-    private static string? ValidateSlicePrice(decimal price)
-    {
-        if (price < MoneySettings.MinSlicePriceCredits || price > MoneySettings.MaxSlicePriceCredits)
-        {
-            return "slice_price_credits_out_of_range";
-        }
-        return MoneySettings.IsWholeCents(price) ? null : "slice_price_credits_not_whole_cents";
     }
 
     /// <summary>
@@ -744,7 +698,6 @@ public static class AdminConfigEndpoints
     private static void WriteOptionalBookingKeys(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.SliceMinutes is { } slice) doc["slice_minutes"] = ToElement(slice);
-        if (req.SlicePriceCredits is { } price) doc["slice_price_credits"] = ToElement(price);
         if (req.AdvanceBookingDays is { } advance) doc["advance_booking_days"] = ToElement(advance);
         if (req.DayStartMinute is { } start) doc["day_start_minute"] = ToElement(start);
         if (req.DayEndMinute is { } end) doc["day_end_minute"] = ToElement(end);
@@ -1028,9 +981,6 @@ public static class AdminConfigEndpoints
     /// </summary>
     private static void WriteOptionalEconomics(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
-        if (req.CreditsPerZarRegular is not null) doc["credits_per_zar_regular"] = ToElement(req.CreditsPerZarRegular);
-        if (req.TopupBlockZar is not null) doc["topup_block_zar"] = ToElement(req.TopupBlockZar);
-        if (req.TopupMaxZarPerMember is not null) doc["topup_max_zar_per_member"] = ToElement(req.TopupMaxZarPerMember);
         if (req.MemberPerDayMaxMinutes is not null) doc["member_per_day_max_minutes"] = ToElement(req.MemberPerDayMaxMinutes);
         if (req.PeakHours is not null) doc["peak_hours"] = ToElement(req.PeakHours.Trim());
         if (req.PeakAdvanceHoursForRegular is not null) doc["peak_advance_hours_for_regular"] = ToElement(req.PeakAdvanceHoursForRegular);
@@ -1162,7 +1112,6 @@ public static class AdminConfigEndpoints
             // page opened before somebody else's is refused 409 instead of reverting it.
             version = SettingsDocument.VersionOf(row?.SettingsJson),
             slice_minutes = GetInt(doc, "slice_minutes", defaults.SliceMinutes),
-            slice_price_credits = GetDecimal(doc, "slice_price_credits", defaults.DefaultSlicePriceCredits),   // the default for a NEW court; existing courts carry their own
             advance_booking_days = GetInt(doc, "advance_booking_days", defaults.AdvanceBookingDays),
             day_start_minute = GetInt(doc, "day_start_minute", defaults.DayStartMinute),
             day_end_minute = GetInt(doc, "day_end_minute", defaults.DayEndMinute),
@@ -1185,11 +1134,8 @@ public static class AdminConfigEndpoints
             // and until now the only way to change one was to edit a JSON column in
             // the database by hand — on a live money system, with no audit trail and
             // no validation.
-            credits_per_zar_regular = GetDecimal(doc, "credits_per_zar_regular", defaults.CreditsPerZarRegular),
-            // credits_per_zar_league is gone from this document: the league rate is the
-            // league GROUP's credits_per_zar now (D2), edited on the Groups screen.
-            topup_block_zar = GetDecimal(doc, "topup_block_zar", defaults.TopupBlockZar),
-            topup_max_zar_per_member = GetDecimal(doc, "topup_max_zar_per_member", defaults.TopupMaxZarPerMember),
+            // The slice price, the regular conversion rate, the top-up block and the cap are not
+            // served (P13): a booking costs its length in minutes and packages have no cap.
             member_per_day_max_minutes = GetInt(doc, "member_per_day_max_minutes", defaults.MemberPerDayMaxMinutes),
             peak_hours = GetString(doc, "peak_hours", defaults.PeakHoursRange),
             peak_advance_hours_for_regular = GetInt(doc, "peak_advance_hours_for_regular", defaults.PeakAdvanceHoursForRegular),
@@ -1378,7 +1324,8 @@ public sealed record UpdateSettingsRequest(
     // omitted means unchanged. They were required, so the console had to send the whole page,
     // and a page opened before a colleague's save put the colleague's old values back.
     int? SliceMinutes = null,
-    decimal? SlicePriceCredits = null,
+    /// <summary>RETIRED (P13): bound and ignored whatever it holds — see <see cref="CreditsPerZarRegular"/>.</summary>
+    JsonElement SlicePriceCredits = default,
     int? AdvanceBookingDays = null,
     int? DayStartMinute = null,
     int? DayEndMinute = null,
@@ -1404,15 +1351,18 @@ public sealed record UpdateSettingsRequest(
     // The nine economics keys. All nullable, all optional: omitted means unchanged, so a
     // screen that edits only booking settings cannot revert an economics change made from
     // another one.
-    decimal? CreditsPerZarRegular = null,
     /// <summary>
-    /// Refused with <c>credits_per_zar_league_moved_to_groups</c> whenever it is sent: the
-    /// league rate is the league group's <c>credits_per_zar</c> now (D2). Still bound so an old
-    /// screen that sends it is told, rather than silently ignored.
+    /// RETIRED (P13, "minutes, not credits"), with <see cref="SlicePriceCredits"/>,
+    /// <see cref="CreditsPerZarLeague"/>, <see cref="TopupBlockZar"/> and
+    /// <see cref="TopupMaxZarPerMember"/>. Still bound, and ignored whatever they hold, so an
+    /// older PWA that sends the whole page back saves it instead of being refused for settings
+    /// that no longer exist (<c>memory/decisions-backend-hygiene.md</c>). Delete the bindings
+    /// once no supported PWA build can send them.
     /// </summary>
-    decimal? CreditsPerZarLeague = null,
-    decimal? TopupBlockZar = null,
-    decimal? TopupMaxZarPerMember = null,
+    JsonElement CreditsPerZarRegular = default,
+    JsonElement CreditsPerZarLeague = default,
+    JsonElement TopupBlockZar = default,
+    JsonElement TopupMaxZarPerMember = default,
     int? MemberPerDayMaxMinutes = null,
     string? PeakHours = null,
     int? PeakAdvanceHoursForRegular = null,
@@ -1698,9 +1648,6 @@ public sealed record UpdateSettingsRequest(
     public string? EffectiveClubContactEmail => ClubContactEmail ?? ClubContactEmailSnake;
 }
 
-/// <summary>
-/// A new court. <c>SlicePriceCredits</c> is optional: left out, the court is priced at the
-/// tenant's <c>slice_price_credits</c> default.
-/// </summary>
-public sealed record CreateCourtRequest(string Name, string CourtType, decimal? SlicePriceCredits);
-public sealed record UpdateCourtRequest(string? Name, decimal? SlicePriceCredits, bool? IsActive);
+/// <summary>A new court. No price (P13): a booking costs its length in minutes.</summary>
+public sealed record CreateCourtRequest(string Name, string CourtType);
+public sealed record UpdateCourtRequest(string? Name, bool? IsActive);

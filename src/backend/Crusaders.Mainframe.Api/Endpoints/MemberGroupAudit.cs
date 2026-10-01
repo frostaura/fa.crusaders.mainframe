@@ -50,8 +50,8 @@ internal static class MemberGroupAudit
     {
         return new
         {
-            top_up_credits_per_zar = t.TopUpRate,
-            rate_group_id = t.RateGroup?.Id,
+            package_discount_bps = t.PackageDiscountBps,
+            discount_group_id = t.DiscountGroup?.Id,
             peak_priority = t.PeakPriority,
         };
     }
