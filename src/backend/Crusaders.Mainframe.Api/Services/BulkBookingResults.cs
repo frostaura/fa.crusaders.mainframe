@@ -25,11 +25,11 @@ public readonly record struct BulkBookRequestContext(
 
 /// <summary>One row of a bulk cancel's answer.</summary>
 public sealed record BulkCancelResult(
-    Guid BookingId, string Status, decimal RefundCredits, decimal PenaltyCredits,
+    Guid BookingId, string Status, int RefundMinutes, int PenaltyMinutes,
     string? MemberName, string? CourtName, DateTimeOffset? StartsAt, string? Error, string? BlockLabel = null)
 {
     public static BulkCancelResult Failure(Guid bookingId, string error)
-        => new(bookingId, BulkCancelStatuses.Failed, 0m, 0m, null, null, null, error);
+        => new(bookingId, BulkCancelStatuses.Failed, 0, 0, null, null, null, error);
 
     /// <summary>Whether this outcome is one the admin should read as having worked.</summary>
     public bool Succeeded => Status != BulkCancelStatuses.Failed;
@@ -37,48 +37,48 @@ public sealed record BulkCancelResult(
 
 /// <summary>A whole bulk cancel's answer.</summary>
 public sealed record BulkCancelOutcome(
-    IReadOnlyList<BulkCancelResult> Results, decimal TotalRefundedCredits, decimal TotalPenaltyCredits);
+    IReadOnlyList<BulkCancelResult> Results, int TotalRefundedMinutes, int TotalPenaltyMinutes);
 
 /// <summary>One row of a bulk book's answer.</summary>
 public sealed record BulkBookResult(
     int Index, string Status, Guid? BookingId, string? CourtName,
-    DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, decimal AmountCredits, string? Error)
+    DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, int AmountMinutes, string? Error)
 {
-    public static BulkBookResult Booked(int index, Booking booking, string? courtName, decimal amount)
+    public static BulkBookResult Booked(int index, Booking booking, string? courtName, int amount)
         => new(index, BulkBookStatuses.Booked, booking.Id, courtName,
             booking.StartsAt, booking.EndsAt, amount, null);
 
     public static BulkBookResult Blocked(int index, Booking booking, string? courtName)
         => new(index, BulkBookStatuses.Blocked, booking.Id, courtName,
-            booking.StartsAt, booking.EndsAt, 0m, null);
+            booking.StartsAt, booking.EndsAt, 0, null);
 
     public static BulkBookResult Replay(int index, Booking booking, string? courtName)
         => new(index, BulkBookStatuses.Duplicate, booking.Id, courtName,
-            booking.StartsAt, booking.EndsAt, 0m, null);
+            booking.StartsAt, booking.EndsAt, 0, null);
 
     public static BulkBookResult Failure(int index, string error, string? courtName, DateTimeOffset startsAt)
-        => new(index, BulkBookStatuses.Failed, null, courtName, startsAt, null, 0m, error);
+        => new(index, BulkBookStatuses.Failed, null, courtName, startsAt, null, 0, error);
 
     public bool Succeeded => Status != BulkBookStatuses.Failed;
 }
 
 /// <summary>A whole bulk book's answer.</summary>
 public sealed record BulkBookOutcome(
-    IReadOnlyList<BulkBookResult> Results, decimal TotalChargedCredits, int? HaltedAt, string? HaltedReason);
+    IReadOnlyList<BulkBookResult> Results, int TotalChargedMinutes, int? HaltedAt, string? HaltedReason);
 
 /// <summary>One item of a bulk quote: its price when bookable, or the refusal code it would meet.</summary>
 public sealed record BulkQuoteLine(
-    BulkBookItem Item, string? CourtName, decimal PriceCredits, bool Bookable, string? Reason);
+    BulkBookItem Item, string? CourtName, int PriceMinutes, bool Bookable, string? Reason);
 
 /// <summary>
-/// A whole batch, priced. <paramref name="TotalCredits"/> sums the bookable lines only;
-/// <paramref name="BalanceCredits"/> is the payer's balance now.
+/// A whole batch, priced. <paramref name="TotalMinutes"/> sums the bookable lines only;
+/// <paramref name="BalanceMinutes"/> is the payer's balance now.
 /// </summary>
-/// <param name="BalanceCredits">The payer's raw balance.</param>
-/// <param name="HeldCredits">What of it the payer holds for partners (D11).</param>
-/// <param name="OwedBackCredits">What of it is due back to partners and waiting (D11); the guard is on what is left.</param>
+/// <param name="BalanceMinutes">The payer's raw balance.</param>
+/// <param name="HeldMinutes">What of it the payer holds for partners (D11).</param>
+/// <param name="OwedBackMinutes">What of it is due back to partners and waiting (D11); the guard is on what is left.</param>
 public sealed record BulkQuote(
-    IReadOnlyList<BulkQuoteLine> Lines, decimal TotalCredits, decimal BalanceCredits, decimal HeldCredits = 0m, decimal OwedBackCredits = 0m)
+    IReadOnlyList<BulkQuoteLine> Lines, int TotalMinutes, int BalanceMinutes, int HeldMinutes = 0, int OwedBackMinutes = 0)
 {
-    public decimal SpendableCredits => BalanceCredits - HeldCredits - OwedBackCredits;
+    public int SpendableMinutes => BalanceMinutes - HeldMinutes - OwedBackMinutes;
 }

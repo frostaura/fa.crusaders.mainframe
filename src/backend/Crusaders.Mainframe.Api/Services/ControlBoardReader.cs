@@ -331,7 +331,7 @@ public sealed class ControlBoardReader
             label = booking.BlockLabel,
             booked_by = Person(booking.UserId, data),
             checked_in_at = booking.CheckedInAt,
-            amount_credits = booking.AmountChargedCredits,
+            amount_minutes = booking.AmountChargedMinutes,
             minutes_remaining = Math.Max(0, (int)Math.Ceiling((booking.EndsAt - now).TotalMinutes)),
         };
     }

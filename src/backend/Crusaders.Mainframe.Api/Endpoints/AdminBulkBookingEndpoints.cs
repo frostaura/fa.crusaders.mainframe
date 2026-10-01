@@ -88,7 +88,7 @@ public static class AdminBulkBookingEndpoints
         // Review round 1 (lane F1): what each partner had paid, so each item can say what went
         // back to them and what the organiser keeps — the member cancel's truth, in bulk.
         var split = ctx.RequestServices.GetRequiredService<SplitCancelView>();
-        var paidBefore = new Dictionary<Guid, Dictionary<Guid, decimal>>();
+        var paidBefore = new Dictionary<Guid, Dictionary<Guid, int>>();
         foreach (var item in items) paidBefore[item.BookingId] = await split.PaidByPartnerAsync(item.BookingId, ct);
         var outcome = await bulk.CancelAsync(
             items.Select(i => new BulkCancelItem(i.BookingId, i.WaivePenalty)).ToList(),
@@ -122,8 +122,8 @@ public static class AdminBulkBookingEndpoints
                 requested = outcome.Results.Count,
                 succeeded,
                 failed = outcome.Results.Count - succeeded,
-                total_refunded_credits = outcome.TotalRefundedCredits,
-                total_penalty_credits = outcome.TotalPenaltyCredits,
+                total_refunded_minutes = outcome.TotalRefundedMinutes,
+                total_penalty_minutes = outcome.TotalPenaltyMinutes,
                 booking_ids = outcome.Results.Select(r => r.BookingId).ToList(),
                 bookings = outcome.Results.Select(r => new
                 {
@@ -133,8 +133,8 @@ public static class AdminBulkBookingEndpoints
                     court = r.CourtName,
                     starts_at = r.StartsAt,
                     status = r.Status,
-                    refund_credits = r.RefundCredits,
-                    penalty_credits = r.PenaltyCredits,
+                    refund_minutes = r.RefundMinutes,
+                    penalty_minutes = r.PenaltyMinutes,
                 }).ToList(),
             }), ct);
         await db.SaveChangesAsync(ct);
@@ -144,16 +144,16 @@ public static class AdminBulkBookingEndpoints
             requested = outcome.Results.Count,
             succeeded,
             failed = outcome.Results.Count - succeeded,
-            total_refunded_credits = outcome.TotalRefundedCredits,
-            total_penalty_credits = outcome.TotalPenaltyCredits,
+            total_refunded_minutes = outcome.TotalRefundedMinutes,
+            total_penalty_minutes = outcome.TotalPenaltyMinutes,
             results = outcome.Results.Select(r => new
             {
                 booking_id = r.BookingId,
                 status = r.Status,
-                refund_credits = r.RefundCredits,
-                penalty_credits = r.PenaltyCredits,
+                refund_minutes = r.RefundMinutes,
+                penalty_minutes = r.PenaltyMinutes,
                 // Gross refund less the penalty row less the partners' refunds (M5-7, as the single cancel).
-                net_credits = r.RefundCredits - r.PenaltyCredits - refunds.GetValueOrDefault(r.BookingId, []).Sum(x => x.Credits),
+                net_minutes = r.RefundMinutes - r.PenaltyMinutes - refunds.GetValueOrDefault(r.BookingId, []).Sum(x => x.Minutes),
                 partner_refunds = refunds.GetValueOrDefault(r.BookingId, []),
                 member_name = r.MemberName,
                 court_name = r.CourtName,
@@ -191,13 +191,13 @@ public static class AdminBulkBookingEndpoints
         // The payer as they were before the batch, read once. An admin needs the pair to
         // explain a top-up to the member standing in front of them, and re-reading it per item
         // would report the balance after the last booking as the balance before the first.
-        var before = context.PayerUserId is { } payer ? await ledger.GetBalanceAsync(payer, ct) : (decimal?)null;
+        var before = context.PayerUserId is { } payer ? await ledger.GetBalanceAsync(payer, ct) : (int?)null;
 
         var outcome = await bulk.BookAsync(
             items.Select(i => new BulkBookItem(i.CourtId, i.StartsAt, i.SliceCount)).ToList(),
             context, actorId, ct);
 
-        var after = context.PayerUserId is { } payerAfter ? await ledger.GetBalanceAsync(payerAfter, ct) : (decimal?)null;
+        var after = context.PayerUserId is { } payerAfter ? await ledger.GetBalanceAsync(payerAfter, ct) : (int?)null;
         var succeeded = outcome.Results.Count(r => r.Succeeded);
         var payerName = context.PayerUserId is { } id
             ? PersonNames.Of(id, await PersonNames.ForAsync(db, [id], ct))
@@ -217,7 +217,7 @@ public static class AdminBulkBookingEndpoints
                 requested = outcome.Results.Count,
                 succeeded,
                 failed = outcome.Results.Count - succeeded,
-                total_charged_credits = outcome.TotalChargedCredits,
+                total_charged_minutes = outcome.TotalChargedMinutes,
                 booking_ids = outcome.Results.Where(r => r.BookingId is not null)
                     .Select(r => r.BookingId!.Value).ToList(),
                 bookings = outcome.Results.Select(r => new
@@ -228,7 +228,7 @@ public static class AdminBulkBookingEndpoints
                     starts_at = r.StartsAt,
                     status = r.Status,
                     error = r.Error,
-                    amount_credits = r.AmountCredits,
+                    amount_minutes = r.AmountMinutes,
                 }).ToList(),
             }), ct);
         await db.SaveChangesAsync(ct);
@@ -238,15 +238,15 @@ public static class AdminBulkBookingEndpoints
             requested = outcome.Results.Count,
             succeeded,
             failed = outcome.Results.Count - succeeded,
-            total_charged_credits = outcome.TotalChargedCredits,
+            total_charged_minutes = outcome.TotalChargedMinutes,
             payer = context.PayerUserId is null
                 ? null
                 : (object)new
                 {
                     user_id = context.PayerUserId,
                     name = payerName,
-                    balance_before_credits = before,
-                    balance_after_credits = after,
+                    balance_before_minutes = before,
+                    balance_after_minutes = after,
                 },
             // Present only when the batch stopped early, so a console can tell "these eight
             // are the whole answer" from "these five are as far as we got".
@@ -260,7 +260,7 @@ public static class AdminBulkBookingEndpoints
                 court_name = r.CourtName,
                 starts_at = r.StartsAt,
                 ends_at = r.EndsAt,
-                amount_credits = r.AmountCredits,
+                amount_minutes = r.AmountMinutes,
                 error = r.Error,
             }).ToList(),
         });
@@ -318,16 +318,16 @@ public static class AdminBulkBookingEndpoints
         return Results.Ok(new
         {
             user_id = payerId,
-            total_credits = quote.TotalCredits,
-            balance_credits = quote.BalanceCredits,
-            spendable_credits = quote.SpendableCredits,
-            held_credits = quote.HeldCredits,
-            owed_back_credits = quote.OwedBackCredits,
-            balance_after_credits = quote.BalanceCredits - quote.TotalCredits,
+            total_minutes = quote.TotalMinutes,
+            balance_minutes = quote.BalanceMinutes,
+            spendable_minutes = quote.SpendableMinutes,
+            held_minutes = quote.HeldMinutes,
+            owed_back_minutes = quote.OwedBackMinutes,
+            balance_after_minutes = quote.BalanceMinutes - quote.TotalMinutes,
             // True exactly when the batch sent WITHOUT the flag would halt on
             // insufficient_balance. Prices are never negative, so the running balance first
             // falls short of an item's price iff the balance is below the whole total.
-            overdraws = anyBookable && quote.SpendableCredits < quote.TotalCredits,
+            overdraws = anyBookable && quote.SpendableMinutes < quote.TotalMinutes,
             items = quote.Lines.Select((l, index) => new
             {
                 index,
@@ -335,7 +335,7 @@ public static class AdminBulkBookingEndpoints
                 court_name = l.CourtName,
                 starts_at = l.Item.StartsAt,
                 slices = l.Item.SliceCount,
-                price_credits = l.PriceCredits,
+                price_minutes = l.PriceMinutes,
                 bookable = l.Bookable,
                 reason = l.Reason,
             }).ToList(),

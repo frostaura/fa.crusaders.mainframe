@@ -10,13 +10,13 @@ namespace Crusaders.Mainframe.Api.Services;
 public abstract record ActivationResult
 {
     /// <summary>Charged and checked in. <paramref name="AlreadyActive"/> marks a repeat scan of a live session.</summary>
-    public sealed record Activated(Booking Booking, Guid PayerUserId, decimal AmountCredits, bool AlreadyActive) : ActivationResult;
+    public sealed record Activated(Booking Booking, Guid PayerUserId, int AmountMinutes, bool AlreadyActive) : ActivationResult;
 
     /// <summary>Identified, but with no booking on this court inside the window.</summary>
     public sealed record NoBooking : ActivationResult;
 
     /// <summary>The payer cannot afford it. <b>Nothing was stamped and no lights were cued.</b></summary>
-    public sealed record InsufficientBalance(Guid PayerUserId, decimal Current, decimal Required) : ActivationResult;
+    public sealed record InsufficientBalance(Guid PayerUserId, int Current, int Required) : ActivationResult;
 
     /// <summary>The booking is cancelled, expired or otherwise past charging.</summary>
     public sealed record NotChargeable : ActivationResult;
@@ -379,9 +379,9 @@ public class CourtActivationService
 
         var amount = charge switch
         {
-            ChargeResult.Ok ok => ok.AmountCredits,
-            ChargeResult.AlreadyCharged already => already.AmountCredits,
-            _ => booking.AmountChargedCredits,
+            ChargeResult.Ok ok => ok.AmountMinutes,
+            ChargeResult.AlreadyCharged already => already.AmountMinutes,
+            _ => booking.AmountChargedMinutes,
         };
 
         if (alreadyActive)
@@ -411,7 +411,7 @@ public class CourtActivationService
                 court_number = court.CourtNumber,
                 method,
                 payer_user_id = payerUserId,
-                amount_credits = amount,
+                amount_minutes = amount,
                 occurred_at = occurredAt,
             }),
         });

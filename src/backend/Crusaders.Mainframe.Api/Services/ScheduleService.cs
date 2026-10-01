@@ -96,7 +96,7 @@ public sealed class ScheduleService
                     // for check-in used to return three comments and no rendered field,
                     // because the projection did not carry it at all.
                     CheckedIn: maySeeDetail ? b.CheckedInAt is not null : null,
-                    AmountChargedCredits: maySeeDetail ? b.AmountChargedCredits : null,
+                    AmountChargedMinutes: maySeeDetail ? b.AmountChargedMinutes : null,
                     ScheduleId: b.ScheduleId,
                     ScheduleName: b.ScheduleId is { } sid ? scheduleNames.GetValueOrDefault(sid) : null,
                     Role: role));
@@ -135,11 +135,9 @@ public sealed class ScheduleService
             PeakEndMinute: peak is { } q ? (int)q.end.ToTimeSpan().TotalMinutes : null,
             PeakAdvanceHoursForRegular: settings.PeakAdvanceHoursForRegular,
             ViewerMayBookPeak: viewerMayBookPeak,
-            // The court's OWN price, unchanged — D2 §4.4 keeps `courts` as it is. The price the
-            // member will actually be charged is `rules.slicePriceCredits`, because their groups
-            // may have raised it above the court's and the grid paints free cells from `rules`.
+            // No price on a court (P13): a booking costs its length in minutes.
             Courts: courts.Select(c => new ScheduleCourt(
-                c.Id, c.CourtNumber, c.Name, c.SlicePriceCredits, c.IsActive)).ToList(),
+                c.Id, c.CourtNumber, c.Name, c.IsActive)).ToList(),
             Slots: slots,
             Rules: rules);
     }
@@ -193,18 +191,10 @@ public sealed class ScheduleService
         var clubHours = new MinuteWindow(openMinute, closeMinute);
 
         var allowed = GroupRules.AllowedWindows(groups, clubHours);
-        var courts = await _db.Courts.Where(c => c.IsActive)
-            .OrderBy(c => c.CourtNumber).Select(c => new { c.Id, c.SlicePriceCredits }).ToListAsync(ct);
-        var price = GroupRules.PriceFor(groups, courts.Count > 0 ? courts[0].SlicePriceCredits : settings.DefaultSlicePriceCredits);
-        // Review round 5 (I5-1, asked by lane C): what THIS viewer pays on each court. One figure on
-        // the first court made the grid derive the rest, wrong for a flat-per-slice group on a
-        // dearer court until Confirm. Same arithmetic as the booking (GroupRules.PriceFor).
-        var perCourt = courts.Select(c => new CourtSlicePrice(c.Id, GroupRules.PriceFor(groups, c.SlicePriceCredits))).ToList();
-
         // An admin's grid states that they have no limit rather than showing them a number that
         // does not apply to them: RemainingToday is null, not a figure they would then wonder
         // about.
-        if (viewerIsAdmin) return AdminRules(date, clubHours, price, settings.AdvanceBookingDays) with { SlicePricesByCourt = perCourt };
+        if (viewerIsAdmin) return AdminRules(date, clubHours, settings.AdvanceBookingDays);
 
         var slotCap = GroupRules.SlotCapFor(groups, BookingLimits.MaxSlotsPerDay(settings));
         var minuteCap = GroupRules.MinuteCapFor(groups, BookingLimits.MaxMinutesPerDay(settings));
@@ -229,7 +219,6 @@ public sealed class ScheduleService
             Groups: groups.Select(g => new ScheduleGroup(g.Id, g.Name, g.Description)).ToList(),
             AllowedWindows: allowed.Select(WireWindow.Of).ToList(),
             ClubHours: WireWindow.Of(clubHours),
-            SlicePriceCredits: price,
             MaxSlotsPerDay: slotCap > 0 ? slotCap : null,
             MaxMinutesPerDay: minuteCap > 0 ? minuteCap : null,
             BookedSlotsToday: bookedSlots,
@@ -237,7 +226,6 @@ public sealed class ScheduleService
             RemainingToday: remaining,
             AdvanceBookingDays: GroupRules.AdvanceDaysFor(groups, settings.AdvanceBookingDays),
             AdminExempt: false,
-            SlicePricesByCourt: perCourt,
             // Present ONLY when the intersection is genuinely empty, so the console can say the
             // true sentence in words instead of drawing a grid that reads as "the club is shut".
             EmptyWindowReason: allowed.Count == 0
@@ -246,11 +234,10 @@ public sealed class ScheduleService
     }
 
     /// <summary>An admin's rules: the club's own hours, and no limit of any kind.</summary>
-    private static ScheduleRules AdminRules(DateOnly date, MinuteWindow clubHours, decimal price, int advanceDays)
+    private static ScheduleRules AdminRules(DateOnly date, MinuteWindow clubHours, int advanceDays)
     {
         return new ScheduleRules(
             ClubDay: date, Groups: [], AllowedWindows: [WireWindow.Of(clubHours)], ClubHours: WireWindow.Of(clubHours),
-            SlicePriceCredits: price,
             MaxSlotsPerDay: null, MaxMinutesPerDay: null,
             BookedSlotsToday: 0, BookedMinutesToday: 0, RemainingToday: null,
             AdvanceBookingDays: advanceDays,
@@ -327,13 +314,13 @@ public sealed record ScheduleDay(
 /// product while the no-show sweep went on penalising them. They are rendered inert instead.
 /// </param>
 public sealed record ScheduleCourt(
-    Guid Id, int CourtNumber, string Name, decimal SlicePriceCredits, bool IsActive = true);
+    Guid Id, int CourtNumber, string Name, bool IsActive = true);
 
 /// <summary>One of the viewer's groups, as the grid may show it. Name and description only — never who else is in it.</summary>
 public sealed record ScheduleGroup(Guid Id, string Name, string? Description);
 
 /// <summary>
-/// What this member may book today, what it costs them, and how much of their allowance is left —
+/// What this member may book today and how much of their allowance is left —
 /// the one read the grid needs to be honest.
 /// </summary>
 /// <param name="RemainingToday">
@@ -351,7 +338,6 @@ public sealed record ScheduleRules(
     IReadOnlyList<ScheduleGroup> Groups,
     IReadOnlyList<WireWindow> AllowedWindows,
     WireWindow ClubHours,
-    decimal SlicePriceCredits,
     int? MaxSlotsPerDay,
     int? MaxMinutesPerDay,
     int BookedSlotsToday,
@@ -359,11 +345,7 @@ public sealed record ScheduleRules(
     int? RemainingToday,
     int AdvanceBookingDays,
     bool AdminExempt,
-    EmptyWindowReason? EmptyWindowReason,
-    IReadOnlyList<CourtSlicePrice>? SlicePricesByCourt = null);
-
-/// <summary>What the viewer pays for one slice of one active court (wire: <c>{ courtId, credits }</c>).</summary>
-public sealed record CourtSlicePrice(Guid CourtId, decimal Credits);
+    EmptyWindowReason? EmptyWindowReason);
 
 /// <summary>
 /// One window on the wire, as <c>HH:mm</c> rather than as minutes past midnight.
@@ -396,7 +378,7 @@ public sealed record ScheduleSlot(
     Guid? BookingId,
     string? BlockLabel,
     bool? CheckedIn,
-    decimal? AmountChargedCredits,
+    int? AmountChargedMinutes,
 
     /// <summary>
     /// The repeating schedule that produced this row, when one did — item 14.

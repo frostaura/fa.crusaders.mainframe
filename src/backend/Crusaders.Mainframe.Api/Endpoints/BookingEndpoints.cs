@@ -175,7 +175,7 @@ public static class BookingEndpoints
         // The shape first, price-free, so a malformed players payload is refused even when the
         // slot itself cannot be quoted; then the split against the price the booking will charge.
         var quote = await svc.QuoteAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
-        if (await players.ValidateAsync(payer.UserId, spec, quote.PriceCredits, ct) is { } bad)
+        if (await players.ValidateAsync(payer.UserId, spec, quote.PriceMinutes, ct) is { } bad)
         {
             return PlayersEndpoints.ToResult(bad);
         }
@@ -187,7 +187,7 @@ public static class BookingEndpoints
         return Results.Ok(new
         {
             booking_id = ok.Booking.Id,
-            balance_after_credits = ok.BalanceAfterCredits,
+            balance_after_minutes = ok.BalanceAfterMinutes,
             players = added.IsOk ? added.Body : null,
             players_error = added.IsOk ? null : added.Error,
         });
@@ -245,11 +245,11 @@ public static class BookingEndpoints
     {
         return Results.Ok(new
         {
-            refunded_credits = ok.RefundedCredits,
-            penalty_credits = ok.PenaltyCredits,
-            // R5 (M5-7, D1's ask): RefundedCredits is the GROSS refund; the penalty is its own row.
+            refunded_minutes = ok.RefundedMinutes,
+            penalty_minutes = ok.PenaltyMinutes,
+            // R5 (M5-7, D1's ask): RefundedMinutes is the GROSS refund; the penalty is its own row.
             // The net left out the penalty, so a late split cancel said "25 back" for a ledger +10.
-            net_credits = ok.RefundedCredits - ok.PenaltyCredits - refunds.Sum(r => r.Credits),
+            net_minutes = ok.RefundedMinutes - ok.PenaltyMinutes - refunds.Sum(r => r.Minutes),
             partner_refunds = refunds,
         });
     }
@@ -302,9 +302,9 @@ public static class BookingEndpoints
         // everything.
         var payer = new BookingPayer(payerId, actorId, ActorIsAdmin: ctx.User.IsInRole("admin"));
         var quote = await svc.QuoteAsync(query.CourtId, payer, query.StartsAt, query.Slices, ct);
-        if (quote.PriceCredits is not { } price) return ToHttpResult(quote.Refusal!, ctx);
+        if (quote.PriceMinutes is not { } price) return ToHttpResult(quote.Refusal!, ctx);
 
-        // balance_credits is the raw balance, as everywhere; the guard is on SPENDABLE — shares the
+        // balance_minutes is the raw balance, as everywhere; the guard is on SPENDABLE — shares the
         // member holds for their partners are not the desk's to book against (D11).
         var held = await ledger.GetHeldAsync(payerId, ct);
         var balance = await ledger.GetBalanceAsync(payerId, ct);
@@ -317,12 +317,12 @@ public static class BookingEndpoints
             starts_at = query.StartsAt,
             ends_at = quote.EndsAt,
             slices = query.Slices,
-            price_credits = price,
-            balance_credits = balance,
-            balance_after_credits = balance - price,
-            spendable_credits = spendable,
-            held_credits = held.Held,
-            owed_back_credits = held.OwedBack,
+            price_minutes = price,
+            balance_minutes = balance,
+            balance_after_minutes = balance - price,
+            spendable_minutes = spendable,
+            held_minutes = held.Held,
+            owed_back_minutes = held.OwedBack,
             // Exactly the guard CreateAsync applies, `spendable < totalCost`, so "overdraws" is
             // true precisely when the POST without the flag would answer 402.
             overdraws = spendable < price,
@@ -362,13 +362,13 @@ public static class BookingEndpoints
         var error = BookingRefusals.CodeOf(result);
         return result switch
         {
-            BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
+            BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_minutes = ok.BalanceAfterMinutes }),
             BookingResult.NotFound => Results.NotFound(new { error }),
             BookingResult.PastTime => Results.BadRequest(new { error }),
             BookingResult.TooFarAhead => Results.BadRequest(new { error }),
             BookingResult.SlotTaken => Results.Conflict(new { error }),
             BookingResult.InsufficientBalance ib => Results.Json(
-                new { error, current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
+                new { error, current_minutes = ib.CurrentMinutes, required_minutes = ib.RequiredMinutes }, statusCode: 402),
             // withheld_by_groups (D2): the member's own groups that do not grant peak priority, so
             // the sentence can name the rule that stopped them. Empty when they are in no group.
             BookingResult.PeakHoursPriorityOnly p => Results.Conflict(
@@ -460,7 +460,7 @@ public static class BookingEndpoints
     {
         return result switch
         {
-            CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
+            CancellationResult.Ok ok => Results.Ok(new { refunded_minutes = ok.RefundedMinutes, penalty_minutes = ok.PenaltyMinutes }),
             CancellationResult.NotFound => Results.NotFound(new { error = "booking_not_found" }),
             CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
             _ => Unmapped(result, ctx),
@@ -479,8 +479,8 @@ public static class BookingEndpoints
         if (quote is null) return Results.NotFound(new { error = "booking_not_found" });
 
         var booking = await db.Bookings.AsNoTracking().FirstAsync(b => b.Id == bookingId, ct);
-        var refunds = await split.QuoteAsync(booking, quote.RefundCredits, ct);
-        return Results.Ok(quote with { NetCredits = quote.RefundCredits - refunds.Sum(r => r.Credits), PartnerRefunds = refunds });
+        var refunds = await split.QuoteAsync(booking, quote.RefundMinutes, ct);
+        return Results.Ok(quote with { NetMinutes = quote.RefundMinutes - refunds.Sum(r => r.Minutes), PartnerRefunds = refunds });
     }
 
     /// <summary>

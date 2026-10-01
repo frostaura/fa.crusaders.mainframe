@@ -73,7 +73,7 @@ public sealed class AdminBlockService
             EndsAt = endsAt,
             SliceMinutes = settings.SliceMinutes,
             SliceCount = sliceCount,
-            AmountChargedCredits = 0m,
+            AmountChargedMinutes = 0,
             Status = BookingStatus.AdminBlock,
             BlockLabel = Normalise(label),
         };
@@ -118,7 +118,7 @@ public sealed class AdminBlockService
             return new BookingResult.SlotTaken();
         }
 
-        return new BookingResult.Ok(block, 0m);
+        return new BookingResult.Ok(block, 0);
     }
 
     /// <summary>Lifts a block, saying why (A5-1: the reason is required and recorded). Only a block — a member's booking is cancelled through <see cref="BookingService.CancelAsync"/>, which settles the money.</summary>

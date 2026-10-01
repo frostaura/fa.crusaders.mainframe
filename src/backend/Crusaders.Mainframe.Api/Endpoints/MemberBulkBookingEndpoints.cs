@@ -88,11 +88,11 @@ public static class MemberBulkBookingEndpoints
     }
 
     /// <summary>
-    /// The answer. <c>total_charged_credits</c> is what the booked items cost, replays included, so
-    /// a retried batch answers the same total; <c>charged_now_credits</c> is what THIS request
+    /// The answer. <c>total_charged_minutes</c> is what the booked items cost, replays included, so
+    /// a retried batch answers the same total; <c>charged_now_minutes</c> is what THIS request
     /// debited, which is what the balance pair beside it moved by. Block body for the lizard reason.
     /// </summary>
-    private static object Body(MemberBulkOutcome outcome, decimal before, decimal after, List<object> players)
+    private static object Body(MemberBulkOutcome outcome, int before, int after, List<object> players)
     {
         var booked = outcome.Results.Where(r => r.Status == MemberBulkStatuses.Booked).ToList();
         return new
@@ -100,10 +100,10 @@ public static class MemberBulkBookingEndpoints
             requested = outcome.Results.Count,
             booked = booked.Count,
             refused = outcome.Results.Count - booked.Count,
-            total_charged_credits = booked.Sum(r => r.AmountCredits),
-            charged_now_credits = booked.Where(r => !r.Replayed).Sum(r => r.AmountCredits),
-            balance_before_credits = before,
-            balance_after_credits = after,
+            total_charged_minutes = booked.Sum(r => r.AmountMinutes),
+            charged_now_minutes = booked.Where(r => !r.Replayed).Sum(r => r.AmountMinutes),
+            balance_before_minutes = before,
+            balance_after_minutes = after,
             halted_at = outcome.HaltedAt,
             halted_reason = outcome.HaltedReason,
             results = outcome.Results.Select(Row).ToList(),
@@ -124,7 +124,7 @@ public static class MemberBulkBookingEndpoints
             status = r.Status,
             reason = r.Reason,
             booking_id = r.BookingId,
-            amount_credits = r.AmountCredits,
+            amount_minutes = r.AmountMinutes,
             replayed = r.Replayed,
         };
     }
@@ -144,10 +144,10 @@ public static class MemberBulkBookingEndpoints
         var bookings = ctx.RequestServices.GetRequiredService<BookingService>();
         var payer = new BookingPayer(userId, userId, ActorIsAdmin: ctx.User.IsInRole("admin"));
         // One after another: every quote reads through the request's one DbContext.
-        var checkedPrices = new HashSet<decimal>();
+        var checkedPrices = new HashSet<int>();
         foreach (var item in items)
         {
-            var price = (await bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct)).PriceCredits;
+            var price = (await bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct)).PriceMinutes;
             if (price is not { } p || !checkedPrices.Add(p)) continue;
             if (await players.ValidateAsync(userId, spec, p, ct) is { } bad) return PlayersEndpoints.ToResult(bad);
         }

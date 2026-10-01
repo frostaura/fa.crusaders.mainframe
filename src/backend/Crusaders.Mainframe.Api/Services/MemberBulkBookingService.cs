@@ -172,20 +172,20 @@ public static class MemberBulkStatuses
 /// <summary>One row of a member bulk book's answer.</summary>
 public sealed record MemberBulkResult(
     int Index, Guid CourtId, string? CourtName, DateTimeOffset StartsAt, DateTimeOffset? EndsAt,
-    string Status, string? Reason, Guid? BookingId, decimal AmountCredits, bool Replayed)
+    string Status, string? Reason, Guid? BookingId, int AmountMinutes, bool Replayed)
 {
     public static MemberBulkResult Booked(int index, Booking booking, string? courtName, bool replayed)
     {
         return new MemberBulkResult(
             index, booking.CourtId, courtName, booking.StartsAt, booking.EndsAt,
-            MemberBulkStatuses.Booked, null, booking.Id, booking.AmountChargedCredits, replayed);
+            MemberBulkStatuses.Booked, null, booking.Id, booking.AmountChargedMinutes, replayed);
     }
 
     public static MemberBulkResult Refused(int index, BulkBookItem item, string? courtName, string reason)
     {
         return new MemberBulkResult(
             index, item.CourtId, courtName, item.StartsAt, null,
-            MemberBulkStatuses.Refused, reason, null, 0m, false);
+            MemberBulkStatuses.Refused, reason, null, 0, false);
     }
 }
 

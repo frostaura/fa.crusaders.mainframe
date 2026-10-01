@@ -10,7 +10,7 @@ public sealed record ScheduleConflict(
     DateOnly OccurrenceDate, Guid CourtId, string? CourtName,
     DateTimeOffset StartsAt, DateTimeOffset EndsAt,
     Guid BookingId, string Status, string Kind, string? Label,
-    string? MemberName, decimal AmountCredits, decimal WouldRefundCredits);
+    string? MemberName, int AmountMinutes, int WouldRefundMinutes);
 
 /// <summary>The dry run: what a rule would produce, and what already stands in its way.</summary>
 public sealed record SchedulePreview(

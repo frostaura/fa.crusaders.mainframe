@@ -9,14 +9,11 @@ public readonly record struct MinuteWindow(int Start, int End)
     public bool Contains(int startMinute, int endMinute) => startMinute >= Start && endMinute <= End;
 }
 
-/// <summary>A group as the rule evaluator needs it: its windows for one day, its price, its caps.</summary>
+/// <summary>A group as the rule evaluator needs it: its windows for one day and its caps. No price (P13): a booking costs its length in minutes.</summary>
 public sealed record MemberGroupRules(
     Guid Id,
     string Name,
     string? Description,
-    GroupPricingMode PricingMode,
-    int PriceMultiplierBps,
-    decimal? FlatSlicePriceCredits,
     int? MaxSlotsPerDay,
     int? MaxMinutesPerDay,
     int? AdvanceBookingDays,
@@ -36,17 +33,6 @@ public sealed record MemberGroupRules(
 /// </para>
 ///
 /// <para>
-/// <b>Prices take the MAXIMUM.</b> This is the decision most likely to be argued with, so: "most
-/// restrictive" means the member gets the least favourable of the rules that apply to them, and
-/// for a permission the least favourable is the narrowest window while for a price it is the
-/// highest. Taking the narrowest window and the LOWEST price would be two different meanings of
-/// one word in one sentence. It is also the only direction that is safe under admin error:
-/// adding a member to an extra group can then never make them cheaper by accident. A mis-click
-/// that costs a member a higher price is visible to them before they confirm; the inverse costs
-/// the club revenue nobody ever notices, and this club's admins are volunteers.
-/// </para>
-///
-/// <para>
 /// <b>Caps take the minimum, skipping zeros.</b> Zero means unlimited everywhere in this
 /// codebase, so a naive <c>Math.Min</c> would let one unlimited group either forbid everything or
 /// exempt everything depending on which way the next reader took it. <see cref="BookingLimits.MinOf"/>
@@ -54,7 +40,7 @@ public sealed record MemberGroupRules(
 /// </para>
 ///
 /// <para>
-/// <b>A member in NO group is unrestricted at the club's own rules and the court's own price.</b>
+/// <b>A member in NO group is unrestricted at the club's own rules.</b>
 /// Not refused, and not "the default group's rules". A brand-new member must be able to book
 /// before an admin has classified them, and a club that never opens the groups screen must behave
 /// exactly as it does today — which is what makes installing this feature a no-op for the
@@ -63,12 +49,6 @@ public sealed record MemberGroupRules(
 /// </summary>
 public static class GroupRules
 {
-    /// <summary>0x. A group may price a slice at nothing; it may not price it at less than nothing.</summary>
-    public const int MinMultiplierBps = 0;
-
-    /// <summary>100x. Past this a "multiplier" is a typo, not a tariff.</summary>
-    public const int MaxMultiplierBps = 1_000_000;
-
     /// <summary>Two windows a day is an off-peak club; eight is every reasonable shape of one.</summary>
     public const int MaxWindowsPerDay = 8;
 
@@ -85,54 +65,6 @@ public static class GroupRules
     public const int MinNameLength = 2;
     public const int MaxNameLength = 64;
     public const int MaxDescriptionLength = 256;
-
-    /// <summary>
-    /// What one group charges for one slice on one court.
-    ///
-    /// <para>
-    /// Clamped and floored on the way out, in the <see cref="DoorSettings"/> posture: the database
-    /// CHECK refuses a nonsense configuration, and a hand-edited row that got past it produces a
-    /// sane price rather than a court that pays the member — the lesson of D2-B06.
-    /// </para>
-    ///
-    /// <para>
-    /// <c>AwayFromZero</c> matches the walk-up pro-rata and both penalty computations, so the club
-    /// does not round in its own favour in one place and against itself in another.
-    /// </para>
-    /// </summary>
-    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
-    // object initialiser as the END of the function and dumps the rest of the file into a
-    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
-    public static decimal PriceFor(MemberGroupRules group, decimal courtPrice)
-    {
-        return group.PricingMode switch
-        {
-            GroupPricingMode.Multiplier => Math.Max(0m, decimal.Round(
-                courtPrice * Math.Clamp(group.PriceMultiplierBps, MinMultiplierBps, MaxMultiplierBps) / 10_000m,
-                2, MidpointRounding.AwayFromZero)),
-            GroupPricingMode.FlatPerSlice => Math.Max(0m, decimal.Round(
-                group.FlatSlicePriceCredits ?? courtPrice, 2, MidpointRounding.AwayFromZero)),
-            _ => courtPrice,
-        };
-    }
-
-    /// <summary>
-    /// The price a member actually pays per slice: the highest any of their groups asks for, and
-    /// the court's own price when they are in none.
-    /// </summary>
-    public static decimal PriceFor(IReadOnlyList<MemberGroupRules> groups, decimal courtPrice)
-    {
-        if (groups.Count == 0) return courtPrice;
-        var price = courtPrice;
-        var seen = false;
-        foreach (var group in groups)
-        {
-            var candidate = PriceFor(group, courtPrice);
-            price = seen ? Math.Max(price, candidate) : candidate;
-            seen = true;
-        }
-        return price;
-    }
 
     /// <summary>
     /// The windows a member may book inside on one day: the club's hours intersected with every

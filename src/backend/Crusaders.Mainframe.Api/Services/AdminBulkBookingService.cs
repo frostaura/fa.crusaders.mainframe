@@ -105,15 +105,15 @@ public sealed class AdminBulkBookingService
     {
         var context = await ContextForAsync(items.Select(i => i.BookingId).ToList(), ct);
         var results = new List<BulkCancelResult>(items.Count);
-        var refunded = 0m;
-        var penalty = 0m;
+        var refunded = 0;
+        var penalty = 0;
 
         foreach (var item in items)
         {
             var result = await CancelOneAsync(
                 item, new BulkCancelBatch(idempotencyKey, reason, waivePenaltyDefault, actorId), context, ct);
-            refunded += result.RefundCredits;
-            penalty += result.PenaltyCredits;
+            refunded += result.RefundMinutes;
+            penalty += result.PenaltyMinutes;
             results.Add(result);
         }
 
@@ -176,8 +176,8 @@ public sealed class AdminBulkBookingService
             CancellationResult.Ok ok => label with
             {
                 Status = BulkCancelStatuses.Cancelled,
-                RefundCredits = ok.RefundedCredits,
-                PenaltyCredits = ok.PenaltyCredits,
+                RefundMinutes = ok.RefundedMinutes,
+                PenaltyMinutes = ok.PenaltyMinutes,
             },
 
             // The row was Booked when we read it and is not now — somebody else decided it
@@ -211,7 +211,7 @@ public sealed class AdminBulkBookingService
             .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
 
         var results = new List<BulkBookResult>(items.Count);
-        var charged = 0m;
+        var charged = 0;
         int? haltedAt = null;
         string? haltedReason = null;
 
@@ -222,7 +222,7 @@ public sealed class AdminBulkBookingService
 
             var result = await BookOneAsync(item, index, courtName, request, actorId, ct);
             results.Add(result);
-            charged += result.AmountCredits;
+            charged += result.AmountMinutes;
 
             if (result.Error == BookingRefusals.InsufficientBalance)
             {
@@ -280,7 +280,7 @@ public sealed class AdminBulkBookingService
                 await _db.SaveChangesAsync(ct);
             }
 
-            return BulkBookResult.Booked(index, ok.Booking, courtName, ok.Booking.AmountChargedCredits);
+            return BulkBookResult.Booked(index, ok.Booking, courtName, ok.Booking.AmountChargedMinutes);
         }
 
         // A free court posts no debit (I10), so a retried item finds nothing under its
@@ -366,9 +366,9 @@ public sealed class AdminBulkBookingService
         foreach (var item in items)
         {
             var quote = await _bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct);
-            if (quote.PriceCredits is not { } price)
+            if (quote.PriceMinutes is not { } price)
             {
-                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, BookingRefusals.CodeOf(quote.Refusal!)));
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0, false, BookingRefusals.CodeOf(quote.Refusal!)));
                 continue;
             }
 
@@ -377,7 +377,7 @@ public sealed class AdminBulkBookingService
                 a.CourtId == item.CourtId && a.StartsAt < endsAt && a.EndsAt > item.StartsAt);
             if (clashes)
             {
-                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, BookingRefusals.SlotTaken));
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0, false, BookingRefusals.SlotTaken));
                 continue;
             }
 
@@ -385,7 +385,7 @@ public sealed class AdminBulkBookingService
             lines.Add(new BulkQuoteLine(item, quote.CourtName, price, true, null));
         }
 
-        var total = lines.Where(l => l.Bookable).Sum(l => l.PriceCredits);
+        var total = lines.Where(l => l.Bookable).Sum(l => l.PriceMinutes);
         // The raw balance and the hold beside it: the quote's `overdraws` is on SPENDABLE, for the
         // reason CommitAsync gives — shares a member holds for their partners are not the desk's to
         // book against (D11, ShareHolds) — so it is the POST's refusal exactly.
@@ -415,8 +415,8 @@ public sealed class AdminBulkBookingService
         public BulkCancelResult Describe(Booking booking) => new(
             BookingId: booking.Id,
             Status: BulkCancelStatuses.Failed,
-            RefundCredits: 0m,
-            PenaltyCredits: 0m,
+            RefundMinutes: 0,
+            PenaltyMinutes: 0,
             MemberName: PersonNames.Of(booking.UserId, Names),
             CourtName: Courts.TryGetValue(booking.CourtId, out var name) ? name : null,
             StartsAt: booking.StartsAt,

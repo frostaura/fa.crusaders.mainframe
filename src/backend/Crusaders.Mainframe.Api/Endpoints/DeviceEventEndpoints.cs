@@ -1722,7 +1722,7 @@ public static class DeviceEventEndpoints
         await ok.SendConfirmationAsync!(ct);
 
         return Results.Ok(Grant(
-            ok.Booking, live.AmountCredits, ok.BalanceAfterCredits, replayed: false,
+            ok.Booking, live.AmountMinutes, ok.BalanceAfterMinutes, replayed: false,
             display: await MemberDisplay.ForAsync(db, userId, ct)));
     }
 
@@ -1862,7 +1862,7 @@ public static class DeviceEventEndpoints
         // the member what they have, and a movement between the two attempts is real.
         var balance = await ledger.GetBalanceAsync(entry.UserId, ct);
         return Results.Ok(Grant(
-            booking, -entry.AmountCredits, balance, replayed: true, now,
+            booking, -entry.AmountMinutes, balance, replayed: true, now,
             await MemberDisplay.ForAsync(db, entry.UserId, ct)));
     }
 
@@ -1880,7 +1880,7 @@ public static class DeviceEventEndpoints
     /// </para>
     /// </summary>
     private static object Grant(
-        Booking booking, decimal amountCredits, decimal balanceAfterCredits, bool replayed,
+        Booking booking, int amountMinutes, int balanceAfterMinutes, bool replayed,
         DateTimeOffset? now = null, string? display = null)
     {
         // A fresh purchase is granted what was sold; a replay what is left of it, rounded
@@ -1893,8 +1893,8 @@ public static class DeviceEventEndpoints
         {
             booking_id = booking.Id,
             granted_minutes = granted,
-            amount_credits = amountCredits,
-            balance_after_credits = balanceAfterCredits,
+            amount_minutes = amountMinutes,
+            balance_after_minutes = balanceAfterMinutes,
             replayed,
             member_display = display,
         };
@@ -1920,8 +1920,8 @@ public static class DeviceEventEndpoints
             BookingResult.InsufficientBalance ib => Results.Json(new
             {
                 error = "insufficient_balance",
-                current_credits = ib.CurrentCredits,
-                required_credits = ib.RequiredCredits,
+                current_minutes = ib.CurrentMinutes,
+                required_minutes = ib.RequiredMinutes,
             }, statusCode: StatusCodes.Status402PaymentRequired),
 
             // Distinct from slot_taken: the court is free and the next player is simply

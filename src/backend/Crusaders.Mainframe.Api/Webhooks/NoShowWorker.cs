@@ -91,10 +91,11 @@ public sealed class NoShowWorker : BackgroundService
     /// complexity gate.
     /// </para>
     /// </summary>
-    private static decimal PenaltyFor(Booking b, TenantSettingsView settings, bool wasCharged, bool courtWasDark)
+    private static int PenaltyFor(Booking b, TenantSettingsView settings, bool wasCharged, bool courtWasDark)
         => wasCharged && !courtWasDark
-            ? Math.Round(b.AmountChargedCredits * settings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero)
-            : 0m;
+            // P13-B1: floor(charged × penalty_pct ÷ 100) — rounded down, in favour of the member.
+            ? (int)Math.Floor(b.AmountChargedMinutes * settings.PenaltyPct / 100m)
+            : 0;
 
     /// <summary>
     /// What the member is told — §6a's "players in the affected window get an email explaining
@@ -116,7 +117,7 @@ public sealed class NoShowWorker : BackgroundService
     /// </para>
     ///
     /// <para>
-    /// <paramref name="refundedCredits"/> is the <b>gross</b> <c>CancellationRefund</c> leg, not
+    /// <paramref name="refundedMinutes"/> is the <b>gross</b> <c>CancellationRefund</c> leg, not
     /// that leg less the penalty. This used to pass the net figure into the cancellation
     /// template's gross slot, so a member whose ledger held <c>+50.00</c> and <c>-15.00</c> — the
     /// two rows I11 requires — was mailed "Refunded 35.00 credits", a number that appears nowhere
@@ -128,20 +129,20 @@ public sealed class NoShowWorker : BackgroundService
     // file into a *global* pseudo-function the length of the file, failing `-L 200` with a warning
     // that names no real function. See memory/gotchas.md.
     private static EmailMessage Notice(
-        ClubIdentity club, string to, string courtName, decimal refundedCredits, decimal penalty,
+        ClubIdentity club, string to, string courtName, int refundedMinutes, int penalty,
         CourtDarkness darkness)
     {
         if (darkness == CourtDarkness.Unreachable)
         {
-            return EmailTemplates.BookingRefundedForOutage(club, to, courtName, refundedCredits);
+            return EmailTemplates.BookingRefundedForOutage(club, to, courtName, refundedMinutes);
         }
 
         if (darkness == CourtDarkness.OutOfService)
         {
-            return EmailTemplates.BookingRefundedForOutOfServiceBox(club, to, courtName, refundedCredits);
+            return EmailTemplates.BookingRefundedForOutOfServiceBox(club, to, courtName, refundedMinutes);
         }
 
-        return EmailTemplates.BookingNoShow(club, to, courtName, refundedCredits, penalty);
+        return EmailTemplates.BookingNoShow(club, to, courtName, refundedMinutes, penalty);
     }
 
     /// <summary>
@@ -177,7 +178,7 @@ public sealed class NoShowWorker : BackgroundService
         //
         // The guard is not therefore redundant. A reservation carrying no debit still
         // reaches this sweep, and refunding one credits a player for a slot nobody
-        // paid for. That was live once: the refund ran on AmountChargedCredits > 0
+        // paid for. That was live once: the refund ran on AmountChargedMinutes > 0
         // alone, so under the old charge-on-activation model — where a no-show by
         // definition never checked in and so was never charged — failing to turn up
         // paid out 70% of the booking value.
@@ -220,10 +221,10 @@ public sealed class NoShowWorker : BackgroundService
         var penalty = PenaltyFor(b, tSettings, wasCharged, courtWasDark);
 
         var postings = new List<LedgerPosting>(2);
-        if (wasCharged && b.AmountChargedCredits > 0)
+        if (wasCharged && b.AmountChargedMinutes > 0)
         {
             postings.Add(new LedgerPosting(
-                UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountCredits: b.AmountChargedCredits,
+                UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountMinutes: b.AmountChargedMinutes,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: "No-show — booking refunded"));
         }
 
@@ -233,9 +234,9 @@ public sealed class NoShowWorker : BackgroundService
         if (penalty > 0)
         {
             postings.Add(new LedgerPosting(
-                UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountCredits: -penalty,
+                UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountMinutes: -penalty,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
-                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Cr(b.AmountChargedCredits)})"));
+                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Cr(b.AmountChargedMinutes)})"));
         }
 
         // Status FIRST, then one save carrying it and both movements together.
@@ -318,7 +319,7 @@ public sealed class NoShowWorker : BackgroundService
         // on /wallet. Subtracting the penalty here produced a third number that exists
         // nowhere — "Refunded 35.00" against a +50.00 row — and, beside the penalty line,
         // read as though the 15 came off twice.
-        var refundedCredits = wasCharged ? b.AmountChargedCredits : 0m;
+        var refundedMinutes = wasCharged ? b.AmountChargedMinutes : 0;
         var courtName = court?.Name ?? "a court";
         if (user is null)
         {
@@ -330,7 +331,7 @@ public sealed class NoShowWorker : BackgroundService
             try
             {
                 await email.SendAsync(
-                    Notice(sweep.Club, user.Email, courtName, refundedCredits, penalty, darkness), ct);
+                    Notice(sweep.Club, user.Email, courtName, refundedMinutes, penalty, darkness), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show email failed for {BookingId}", b.Id); }
         }
@@ -346,8 +347,8 @@ public sealed class NoShowWorker : BackgroundService
                 ["court_id"] = b.CourtId,
                 ["court_number"] = court?.CourtNumber,
                 ["user_id"] = b.UserId,
-                ["penalty_credits"] = penalty,
-                ["refund_credits"] = refundedCredits,
+                ["penalty_minutes"] = penalty,
+                ["refund_minutes"] = refundedMinutes,
                 // True when the penalty was waived because the court's box was unreachable
                 // (§6a). A club reconciling its no-show revenue needs to tell the two apart.
                 ["peripheral_outage"] = courtWasDark,

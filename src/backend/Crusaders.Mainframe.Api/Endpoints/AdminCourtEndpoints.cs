@@ -42,7 +42,6 @@ public static class AdminCourtEndpoints
             court_number = c.CourtNumber,
             name = c.Name,
             court_type = c.CourtType.ToString(),
-            slice_price_credits = c.SlicePriceCredits,
             is_active = c.IsActive,
         }));
     }
@@ -52,17 +51,8 @@ public static class AdminCourtEndpoints
     {
         var (db, tenant) = (deps.Db, deps.Tenant);
         if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new { error = "name_required" });
-        if (req.SlicePriceCredits < 0) return Results.BadRequest(new { error = "price_negative" });
-
-        // The tenant's slice_price_credits is the default for a new court, and until now
-        // it was the default for nothing at all: every charge in the system reads
-        // court.SlicePriceCredits, and the setting was only ever read back to render the
-        // settings screen and written straight out again. The seed ships the setting at
-        // 8.00 and the courts at 50.00, so an admin looking at that number was looking at
-        // a price 6.25x away from what members actually pay, and editing it changed
-        // nobody's bill. Giving it one real job is what makes it honest.
-        var settings = await deps.Settings.GetAsync(ct);
-        var priceCredits = req.SlicePriceCredits ?? settings.DefaultSlicePriceCredits;
+        // No price on a court (P13): a booking costs its length in minutes. An old console's
+        // slicePriceCredits is an unknown member now, and ignored rather than refused.
 
         var maxNo = await db.Courts.IgnoreQueryFilters().Where(c => c.TenantId == tenant.TenantId).MaxAsync(c => (int?)c.CourtNumber, ct) ?? 0;
         var court = new Court
@@ -71,7 +61,6 @@ public static class AdminCourtEndpoints
             CourtNumber = maxNo + 1,
             Name = req.Name.Trim(),
             CourtType = Enum.TryParse<CourtType>(req.CourtType, true, out var t) ? t : CourtType.Squash,
-            SlicePriceCredits = priceCredits,
             IsActive = true,
         };
         db.Courts.Add(court);
@@ -86,11 +75,8 @@ public static class AdminCourtEndpoints
         var db = deps.Db;
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (court is null) return Results.NotFound();
-        if (req.SlicePriceCredits < 0) return Results.BadRequest(new { error = "price_negative" });
-
         var before = Snapshot(court);
         if (req.Name is not null) court.Name = req.Name.Trim();
-        if (req.SlicePriceCredits is not null) court.SlicePriceCredits = req.SlicePriceCredits.Value;
         if (req.IsActive is not null) court.IsActive = req.IsActive.Value;
 
         var (was, now) = AdminChangeFields.Changed(before, Snapshot(court));
@@ -134,7 +120,6 @@ public static class AdminCourtEndpoints
             ["name"] = court.Name,
             ["court_number"] = court.CourtNumber,
             ["court_type"] = court.CourtType.ToString(),
-            ["slice_price_credits"] = court.SlicePriceCredits,
             ["is_active"] = court.IsActive,
         };
     }

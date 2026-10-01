@@ -44,13 +44,12 @@ public readonly record struct RuleSlot(
     DateTimeOffset StartsAt,
     DateTimeOffset EndsAt,
     int SliceCount,
-    decimal CourtSlicePriceCredits,
     bool IsWalkUp);
 
-/// <summary>Allowed, at a price — or refused, with every figure the refusal's sentence needs.</summary>
+/// <summary>Allowed — or refused, with every figure the refusal's sentence needs. No price (P13): a booking costs its length in minutes.</summary>
 public abstract record RuleVerdict
 {
-    public sealed record Allowed(decimal SlicePriceCredits) : RuleVerdict;
+    public sealed record Allowed : RuleVerdict;
 
     public sealed record Refused(BookingResult Result) : RuleVerdict;
 }
@@ -123,7 +122,6 @@ public sealed class BookingRules
 
         return groups.Select(g => new MemberGroupRules(
             g.Id, g.Name, g.Description,
-            g.PricingMode, g.PriceMultiplierBps, g.FlatSlicePriceCredits,
             g.MaxSlotsPerDay, g.MaxMinutesPerDay, g.AdvanceBookingDays,
             HasAnyWindows: windows.Any(w => w.GroupId == g.Id),
             WindowsForDay: GroupRules.WindowsFor(windows.Where(w => w.GroupId == g.Id), day)))
@@ -131,7 +129,7 @@ public sealed class BookingRules
     }
 
     /// <summary>
-    /// The whole decision: hours, group windows, peak, both per-day caps, and the price.
+    /// The whole decision: hours, group windows, peak and both per-day caps.
     ///
     /// <para>
     /// Order matters and is the order a member would ask the questions in — is the club open, may
@@ -142,8 +140,6 @@ public sealed class BookingRules
     public async Task<RuleVerdict> EvaluateAsync(
         RuleSubject subject, RuleSlot slot, TenantSettingsView settings, CancellationToken ct)
     {
-        var price = GroupRules.PriceFor(subject.Groups, slot.CourtSlicePriceCredits);
-
         // An admin booking for themselves has no limits at all, and their grid says so rather
         // than showing them a number that does not apply. An admin booking ON BEHALF of a member
         // is a different question and is handled below: the club's ACCESS rules still hold,
@@ -151,7 +147,7 @@ public sealed class BookingRules
         // exempting.
         if (subject.ActorIsAdmin && subject.ActorUserId == subject.UserId)
         {
-            return new RuleVerdict.Allowed(price);
+            return new RuleVerdict.Allowed();
         }
 
         var onBehalf = subject.ActorIsAdmin;
@@ -171,12 +167,12 @@ public sealed class BookingRules
         // club has asked otherwise. A walk-up always COUNTS toward the cap either way.
         if (onBehalf || (slot.IsWalkUp && !settings.WalkUpHonoursDayCap))
         {
-            return new RuleVerdict.Allowed(price);
+            return new RuleVerdict.Allowed();
         }
 
         return await CapRefusalAsync(subject, slot, settings, day, ct) is { } cap
             ? Refuse(cap)
-            : new RuleVerdict.Allowed(price);
+            : new RuleVerdict.Allowed();
     }
 
     private static RuleVerdict Refuse(BookingResult result) => new RuleVerdict.Refused(result);
@@ -397,7 +393,7 @@ public sealed class BookingRules
             await GroupsForAsync(partnerId, day.DayOfWeek, settings, ct));
         var slot = new RuleSlot(
             booking.CourtId, booking.StartsAt, BookingService.OriginalEndsAt(booking), booking.SliceCount,
-            0m, IsWalkUp: false);
+            IsWalkUp: false);
         return await CapRefusalAsync(subject, slot, settings, day, ct);
     }
 

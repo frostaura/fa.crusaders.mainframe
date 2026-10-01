@@ -581,8 +581,8 @@ public static class AdminScheduleEndpoints
             kind = c.Kind,
             label = c.Label,
             member_name = c.MemberName,
-            amount_credits = c.AmountCredits,
-            would_refund_credits = c.WouldRefundCredits,
+            amount_minutes = c.AmountMinutes,
+            would_refund_minutes = c.WouldRefundMinutes,
         };
     }
 

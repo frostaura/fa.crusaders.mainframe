@@ -50,7 +50,7 @@ internal static class BulkReplay
                  && b.CourtId == item.CourtId
                  && b.StartsAt == startsAt
                  && b.Status == BookingStatus.Booked
-                 && b.AmountChargedCredits == 0m, ct);
+                 && b.AmountChargedMinutes == 0, ct);
     }
 
     /// <summary>

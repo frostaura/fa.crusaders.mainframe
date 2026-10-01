@@ -207,7 +207,7 @@ public sealed class LightsCueWorker : BackgroundService
                 ["starts_at"] = b.StartsAt,
                 ["ends_at"] = b.EndsAt,
                 ["checked_in_at"] = b.CheckedInAt,
-                ["amount_charged_credits"] = b.AmountChargedCredits,
+                ["amount_charged_minutes"] = b.AmountChargedMinutes,
             }), ct);
     }
 

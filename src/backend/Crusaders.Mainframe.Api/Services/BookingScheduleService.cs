@@ -139,7 +139,7 @@ public sealed class BookingScheduleService
     /// One conflict, with the figure the cancellation will actually pay.
     ///
     /// <para>
-    /// <c>would_refund_credits</c> comes from <see cref="BookingService.QuoteCancellationAsync"/>
+    /// <c>would_refund_minutes</c> comes from <see cref="BookingService.QuoteCancellationAsync"/>
     /// and not from arithmetic here — the same quote-then-settle discipline the member's own
     /// cancellation modal uses. An admin deciding whether to clear a league night has to read
     /// the number the club will really pay out, not an estimate that ignores the penalty window.
@@ -164,12 +164,12 @@ public sealed class BookingScheduleService
             Kind: clash.ScheduleId is not null ? "schedule" : isBlock ? "block" : "booking",
             Label: clash.ScheduleId is { } sid ? labels.GetValueOrDefault(sid) : clash.BlockLabel,
             MemberName: PersonNames.Of(clash.UserId, names),
-            AmountCredits: clash.AmountChargedCredits,
+            AmountMinutes: clash.AmountChargedMinutes,
 
             // A quote is null when the row is not cancellable through the money path — a block,
             // or a booking somebody has already checked into. Zero is the truth there: lifting a
             // block refunds nothing, and nothing is owed once the lights have been on.
-            WouldRefundCredits: quote is null ? 0m : quote.RefundCredits);
+            WouldRefundMinutes: quote is null ? 0 : quote.RefundMinutes);
     }
 
     private async Task<Dictionary<Guid, string>> ScheduleLabelsAsync(
@@ -339,7 +339,7 @@ public sealed class BookingScheduleService
                 EndsAt = endsAt,
                 SliceMinutes = slice,
                 SliceCount = Math.Max(minutes / slice, 1),
-                AmountChargedCredits = 0m,
+                AmountChargedMinutes = 0,
                 Status = BookingStatus.AdminBlock,
                 BlockLabel = schedule.Label,
                 ScheduleId = schedule.Id,

@@ -39,7 +39,7 @@ internal static class AdminCancelRecord
         var (bookingId, actorId, reason) = (what.BookingId, what.ActorId, what.Reason);
         var booking = await db.Bookings.AsNoTracking()
             .Where(b => b.Id == bookingId && b.Status == BookingStatus.Booked && b.UserId != null)
-            .Select(b => new { b.Id, b.UserId, b.CourtId, b.StartsAt, b.SliceMinutes, b.SliceCount, b.AmountChargedCredits })
+            .Select(b => new { b.Id, b.UserId, b.CourtId, b.StartsAt, b.SliceMinutes, b.SliceCount, b.AmountChargedMinutes })
             .FirstOrDefaultAsync(ct);
         if (booking is null) return null;
 
@@ -53,7 +53,7 @@ internal static class AdminCancelRecord
             SubjectId: booking.UserId,
             SubjectLabel: label,
             Reason: reason,
-            Before: Facts(booking.Id, court, booking.StartsAt, booking.SliceMinutes * booking.SliceCount, booking.AmountChargedCredits),
+            Before: Facts(booking.Id, court, booking.StartsAt, booking.SliceMinutes * booking.SliceCount, booking.AmountChargedMinutes),
             After: what.PartOfBatch ? new { status = "cancelled", part_of_batch = true } : new { status = "cancelled" }), ct);
     }
 
@@ -68,7 +68,7 @@ internal static class AdminCancelRecord
         db.Entry(row).State = EntityState.Detached;
     }
 
-    private static object Facts(Guid bookingId, string? court, DateTimeOffset startsAt, int minutes, decimal charged)
+    private static object Facts(Guid bookingId, string? court, DateTimeOffset startsAt, int minutes, int charged)
     {
         return new
         {
@@ -76,7 +76,7 @@ internal static class AdminCancelRecord
             court,
             starts_at = startsAt,
             minutes,
-            amount_credits = charged,
+            amount_minutes = charged,
             status = "booked",
         };
     }

@@ -212,7 +212,7 @@ public sealed class BookingService
             EndsAt = endsAt,
             SliceMinutes = settings.SliceMinutes,
             SliceCount = sliceCount,
-            AmountChargedCredits = totalCost,
+            AmountChargedMinutes = totalCost,
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };
@@ -304,14 +304,13 @@ public sealed class BookingService
         // lock. Two tabs beat a rule that is only read here — that is D2-B12, and it is why the
         // cap has to be re-asked where the money is decided.
         var subject = await SubjectAsync(payer, startsAt, settings, ct);
-        var slot = new RuleSlot(courtId, startsAt, endsAt, sliceCount, court.SlicePriceCredits, IsWalkUp: false);
+        var slot = new RuleSlot(courtId, startsAt, endsAt, sliceCount, IsWalkUp: false);
 
         var verdict = await _rules.EvaluateAsync(subject, slot, settings, ct);
         if (verdict is RuleVerdict.Refused fastRefusal) return (null, fastRefusal.Result);
 
-        // The member's own price, which their groups may have raised above the court's (GOAL
-        // item 3, most-restrictive = highest).
-        var totalCost = ((RuleVerdict.Allowed)verdict).SlicePriceCredits * sliceCount;
+        // P13-B1: a booking costs exactly its length in minutes — no court or group price.
+        var totalCost = settings.SliceMinutes * sliceCount;
         return (new PricedSlot(court, settings, endsAt, (subject, slot), totalCost), null);
     }
 
@@ -388,17 +387,13 @@ public sealed class BookingService
         // default because the member is standing at a court that is about to go unlit.
         var walkUpSubject = await SubjectAsync(
             new BookingPayer(userId, actorId), now, settings, ct);
-        var walkUpSlot = new RuleSlot(courtId, now, endsAt, 1, court.SlicePriceCredits, IsWalkUp: true);
+        var walkUpSlot = new RuleSlot(courtId, now, endsAt, 1, IsWalkUp: true);
 
         var walkUpVerdict = await _rules.EvaluateAsync(walkUpSubject, walkUpSlot, settings, ct);
         if (walkUpVerdict is RuleVerdict.Refused walkUpRefusal) return walkUpRefusal.Result;
 
-        // Pro rata, rounded to the ledger's own scale. Away-from-zero matches the penalty
-        // arithmetic in CancelAsync; the club does not round in its own favour by accident
-        // in one place and against itself in another.
-        var totalCost = Math.Round(
-            ((RuleVerdict.Allowed)walkUpVerdict).SlicePriceCredits * grantedMinutes / settings.SliceMinutes,
-            2, MidpointRounding.AwayFromZero);
+        // P13-B1: the granted minutes, already whole (floored above) — the member keeps the part-minute.
+        var totalCost = grantedMinutes;
 
         var balance = await _ledger.GetSpendableAsync(userId, ct);
         if (balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
@@ -415,7 +410,7 @@ public sealed class BookingService
             EndsAt = endsAt,
             SliceMinutes = grantedMinutes,
             SliceCount = 1,
-            AmountChargedCredits = totalCost,
+            AmountChargedMinutes = totalCost,
             Status = BookingStatus.Booked,
             ChargedAt = now,
         };
@@ -520,7 +515,7 @@ public sealed class BookingService
         // a different request from the purchase, so there is nothing in scope to trust.
         var details = new Email.BookingConfirmationDetails(
             court.Name, startsAtLocal, $"{minutes} min",
-            booking.AmountChargedCredits, await _ledger.GetBalanceAsync(userId, ct),
+            booking.AmountChargedMinutes, await _ledger.GetBalanceAsync(userId, ct),
             settings.PenaltyWindowMinutes, settings.PenaltyPct,
             IsWalkUp: true);
 
@@ -586,7 +581,7 @@ public sealed class BookingService
             {
                 booking_id = booking.Id,
                 court = court.Name,
-                refunded = booking.AmountChargedCredits,
+                refunded = booking.AmountChargedMinutes,
                 reason = "activation_refused",
             }),
         });
@@ -597,14 +592,14 @@ public sealed class BookingService
             // it would move nothing and burn the reference the real posting would need. The
             // slot is still released, because a booking left standing on the court is the
             // other half of the defect and costs money whatever the court is priced at.
-            if (booking.AmountChargedCredits > 0m)
+            if (booking.AmountChargedMinutes > 0)
             {
                 // Carries the status change with it: LedgerService.PostAsync saves through
                 // this tracked context, so the released slot and the money back are one write.
                 await _ledger.PostAsync(new LedgerPosting(
                     UserId: payerUserId,
                     Type: LedgerEntryType.LightsPurchase,
-                    AmountCredits: booking.AmountChargedCredits,
+                    AmountMinutes: booking.AmountChargedMinutes,
                     ActorUserId: booking.ActorUserId,
                     RelatedBookingId: booking.Id,
                     Reason: $"Walk-up refused at {court.Name}",
@@ -634,7 +629,7 @@ public sealed class BookingService
 
         var user = await _db.Users.FirstAsync(u => u.Id == booking.UserId, ct);
         SendEmailInBackground(
-            EmailTemplates.WalkUpNotStarted(await _club.GetAsync(ct), user.Email, court.Name, booking.AmountChargedCredits),
+            EmailTemplates.WalkUpNotStarted(await _club.GetAsync(ct), user.Email, court.Name, booking.AmountChargedMinutes),
             $"walk-up void for {booking.Id}");
 
         return true;
@@ -702,7 +697,7 @@ public sealed class BookingService
     /// </param>
     private sealed record NewBooking(
         Booking Row, Court Court, TenantSettingsView Settings,
-        decimal TotalCost, string DurationLabel, bool IsWalkUp,
+        int TotalCost, string DurationLabel, bool IsWalkUp,
         string? ExternalReference = null,
         bool AllowNegativeBalance = false,
         bool DeferConfirmation = false,
@@ -726,7 +721,7 @@ public sealed class BookingService
     /// </summary>
     private sealed record PricedSlot(
         Court Court, TenantSettingsView Settings, DateTimeOffset EndsAt,
-        (RuleSubject Subject, RuleSlot Slot) Rules, decimal TotalCost);
+        (RuleSubject Subject, RuleSlot Slot) Rules, int TotalCost);
 
     private async Task<BookingResult> CommitAsync(NewBooking spec, CancellationToken ct)
     {
@@ -837,7 +832,7 @@ public sealed class BookingService
             // court a member or admin bulk-booked, a phantom line on the statement that the
             // single booking of the same court never shows. A bulk replay finds a free court
             // through the booking row instead (BulkReplay.FindAsync).
-            if (spec.TotalCost == 0m && !(spec.IsWalkUp && spec.ExternalReference is not null))
+            if (spec.TotalCost == 0 && !(spec.IsWalkUp && spec.ExternalReference is not null))
             {
                 await _db.SaveChangesAsync(ct);
             }
@@ -851,7 +846,7 @@ public sealed class BookingService
                     // Where(Type == LightsPurchase) report was guaranteed to be empty. Both
                     // are in LedgerEntryTypes.Spend, so no bucket total moves.
                     Type: spec.IsWalkUp ? LedgerEntryType.LightsPurchase : LedgerEntryType.BookingCharge,
-                    AmountCredits: -spec.TotalCost,
+                    AmountMinutes: -spec.TotalCost,
                     ActorUserId: actorId,
                     RelatedBookingId: booking.Id,
                     Reason: $"Booking {court.Name} · {SlotLabel(booking, settings)}",
@@ -908,9 +903,9 @@ public sealed class BookingService
                 starts_at = booking.StartsAt,
                 slice_count = booking.SliceCount,
                 minutes = booking.SliceMinutes * booking.SliceCount,
-                amount_credits = spec.TotalCost,
-                balance_before_credits = openingBalance,
-                balance_after_credits = openingBalance - spec.TotalCost,
+                amount_minutes = spec.TotalCost,
+                balance_before_minutes = openingBalance,
+                balance_after_minutes = openingBalance - spec.TotalCost,
                 overdrawn,
             }),
         });
@@ -945,7 +940,7 @@ public sealed class BookingService
         // starts the instant it is bought and the same request lights the court, so the shared
         // template's "cancelling early costs 30%" told a member already under the lights they
         // would get 70% back; S4 returns nothing once a session has started, and the server's
-        // own cancellation quote for these bookings answers refundCredits 0.
+        // own cancellation quote for these bookings answers refundMinutes 0.
         var details = new Email.BookingConfirmationDetails(
             court.Name, startsAtLocal, spec.DurationLabel,
             spec.TotalCost, balance,
@@ -980,8 +975,8 @@ public sealed class BookingService
                 ["ends_at"] = booking.EndsAt,
                 ["slice_count"] = booking.SliceCount,
                 ["minutes"] = booking.SliceMinutes * booking.SliceCount,
-                ["amount_credits"] = spec.TotalCost,
-                ["balance_after_credits"] = balance,
+                ["amount_minutes"] = spec.TotalCost,
+                ["balance_after_minutes"] = balance,
                 ["walk_up"] = spec.IsWalkUp,
             }), ct);
 
@@ -1049,7 +1044,7 @@ public sealed class BookingService
             court = spec.Court.Name,
             starts_at = booking.StartsAt,
             minutes = booking.SliceMinutes * booking.SliceCount,
-            amount_credits = spec.TotalCost,
+            amount_minutes = spec.TotalCost,
         };
 
         if (spec.RecordOnBehalf)
@@ -1066,7 +1061,7 @@ public sealed class BookingService
                     what.court,
                     what.starts_at,
                     what.minutes,
-                    what.amount_credits,
+                    what.amount_minutes,
                     part_of_batch = spec.PartOfBatch,
                 }), ct);
         }
@@ -1084,15 +1079,15 @@ public sealed class BookingService
                 // on what the member may SPEND — the balance less the shares held for partners —
                 // and that is the figure the desk's confirm step and the other admins' email
                 // state. The raw balance stays beside it so the ledger still reconciles.
-                Before: new { balance_credits = openingBalance, spendable_credits = opening.Spendable },
+                Before: new { balance_minutes = openingBalance, spendable_minutes = opening.Spendable },
                 After: new
                 {
-                    balance_credits = openingBalance - spec.TotalCost,
-                    spendable_credits = opening.Spendable - spec.TotalCost,
+                    balance_minutes = openingBalance - spec.TotalCost,
+                    spendable_minutes = opening.Spendable - spec.TotalCost,
                     what.booking_id,
                     what.court,
                     what.starts_at,
-                    what.amount_credits,
+                    what.amount_minutes,
                     self = actorId == booking.UserId,
                 }), ct);
         }
@@ -1119,9 +1114,9 @@ public sealed class BookingService
             Self: actorId == booking.UserId,
             CourtName: spec.Court.Name,
             StartsAtLocal: await StartsAtLocalAsync(booking.StartsAt, ct),
-            AmountCredits: spec.TotalCost,
-            BalanceAfterCredits: openingBalance - spec.TotalCost,
-            HeldCredits: opening.Held);
+            AmountMinutes: spec.TotalCost,
+            BalanceAfterMinutes: openingBalance - spec.TotalCost,
+            HeldMinutes: opening.Held);
         AdminNotices.Stage(_db, _tenant.TenantId,
             AdminNotices.OverdraftAuthorised(booking.Id, actorId, booking.UserId ?? actorId, payload));
     }
@@ -1173,17 +1168,18 @@ public sealed class BookingService
     /// job.
     /// </para>
     /// </summary>
-    private static (decimal Refund, decimal Penalty) SettleCancellation(
+    private static (int Refund, int Penalty) SettleCancellation(
         Booking booking, TenantSettingsView settings, bool insidePenaltyWindow, bool waivePenalty)
     {
         var lightsHaveBeenOn = booking.CheckedInAt is not null;
-        if (lightsHaveBeenOn) return (0m, 0m);
+        if (lightsHaveBeenOn) return (0, 0);
 
         var penalty = insidePenaltyWindow && !waivePenalty
-            ? Math.Round(booking.AmountChargedCredits * settings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero)
-            : 0m;
+            // P13-B1: floor(charged × penalty_pct ÷ 100) — rounded down, in favour of the member who pays.
+            ? (int)Math.Floor(booking.AmountChargedMinutes * settings.PenaltyPct / 100m)
+            : 0;
 
-        return (booking.AmountChargedCredits, penalty);
+        return (booking.AmountChargedMinutes, penalty);
     }
 
     /// <summary>
@@ -1228,9 +1224,9 @@ public sealed class BookingService
 
         return new CancellationQuote(
             BookingId: booking.Id,
-            AmountChargedCredits: booking.AmountChargedCredits,
-            RefundCredits: refund - penalty,
-            PenaltyCredits: penalty,
+            AmountChargedMinutes: booking.AmountChargedMinutes,
+            RefundMinutes: refund - penalty,
+            PenaltyMinutes: penalty,
             PenaltyPct: settings.PenaltyPct,
             PenaltyWindowMinutes: settings.PenaltyWindowMinutes,
             InsidePenaltyWindow: insidePenaltyWindow,
@@ -1388,7 +1384,7 @@ public sealed class BookingService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.CancellationRefund,
-                AmountCredits: refundAmount,
+                AmountMinutes: refundAmount,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
                 Reason: "Cancellation refund",
@@ -1399,7 +1395,7 @@ public sealed class BookingService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.LateCancellationPenalty,
-                AmountCredits: -penaltyAmount,
+                AmountMinutes: -penaltyAmount,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
                 Reason: $"Late-cancellation penalty {MoneyFormat.Number(settings.PenaltyPct)}%",
@@ -1475,8 +1471,8 @@ public sealed class BookingService
                 ["court_id"] = court.Id,
                 ["court_number"] = court.CourtNumber,
                 ["user_id"] = booking.UserId,
-                ["refund_credits"] = refundAmount,
-                ["penalty_credits"] = penaltyAmount,
+                ["refund_minutes"] = refundAmount,
+                ["penalty_minutes"] = penaltyAmount,
                 ["was_charged"] = booking.ChargedAt is not null,
             }), ct);
 
@@ -1639,8 +1635,8 @@ public sealed class BookingService
     /// </para>
     /// </summary>
     private sealed record SettledLegs(
-        decimal Refunded, decimal Penalised, decimal RefundBack, decimal PenaltyBack,
-        List<Guid> Compensation, decimal CompensatedCredits, List<LedgerPosting> Postings);
+        int Refunded, int Penalised, int RefundBack, int PenaltyBack,
+        List<Guid> Compensation, int CompensatedMinutes, List<LedgerPosting> Postings);
 
     /// <summary>
     /// Settles the reversal's two legs, netting any manual compensation <b>per leg</b>.
@@ -1695,19 +1691,19 @@ public sealed class BookingService
                         && l.ActorUserId == Guid.Empty
                         && (l.Type == LedgerEntryType.CancellationRefund || l.Type == LedgerEntryType.NoShowPenalty))
             .ToListAsync(ct);
-        var refunded = settled.Where(l => l.Type == LedgerEntryType.CancellationRefund).Sum(l => l.AmountCredits);
-        var penalised = -settled.Where(l => l.Type == LedgerEntryType.NoShowPenalty).Sum(l => l.AmountCredits);
+        var refunded = settled.Where(l => l.Type == LedgerEntryType.CancellationRefund).Sum(l => l.AmountMinutes);
+        var penalised = -settled.Where(l => l.Type == LedgerEntryType.NoShowPenalty).Sum(l => l.AmountMinutes);
 
         var compensation = await _db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId == booking.Id
                         && l.UserId == payerUserId
                         && l.Type == LedgerEntryType.AdminAdjustment)
-            .Select(l => new { l.Id, l.AmountCredits })
+            .Select(l => new { l.Id, l.AmountMinutes })
             .ToListAsync(ct);
-        var givenBack = compensation.Where(c => c.AmountCredits > 0).Sum(c => c.AmountCredits);
-        var takenBack = -compensation.Where(c => c.AmountCredits < 0).Sum(c => c.AmountCredits);
-        var penaltyBack = Math.Max(0m, penalised - givenBack);
-        var refundBack = Math.Max(0m, refunded - takenBack);
+        var givenBack = compensation.Where(c => c.AmountMinutes > 0).Sum(c => c.AmountMinutes);
+        var takenBack = -compensation.Where(c => c.AmountMinutes < 0).Sum(c => c.AmountMinutes);
+        var penaltyBack = Math.Max(0, penalised - givenBack);
+        var refundBack = Math.Max(0, refunded - takenBack);
 
         var postings = new List<LedgerPosting>(2);
         if (refundBack > 0)
@@ -1715,7 +1711,7 @@ public sealed class BookingService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.CancellationRefund,
-                AmountCredits: -refundBack,
+                AmountMinutes: -refundBack,
                 ActorUserId: actorUserId,
                 RelatedBookingId: booking.Id,
                 Reason: takenBack > 0
@@ -1728,7 +1724,7 @@ public sealed class BookingService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.NoShowPenalty,
-                AmountCredits: penaltyBack,
+                AmountMinutes: penaltyBack,
                 ActorUserId: actorUserId,
                 RelatedBookingId: booking.Id,
                 Reason: givenBack > 0
@@ -1750,7 +1746,7 @@ public sealed class BookingService
     private sealed record Displacement(
         DateTimeOffset OriginalEndsAt, DateTimeOffset ProvisionalEnd,
         List<Booking> Overlaps, List<Booking> Displaced, List<Booking> Survivors,
-        Dictionary<Guid, decimal> Amounts, List<LedgerPosting> Postings);
+        Dictionary<Guid, int> Amounts, List<LedgerPosting> Postings);
 
     /// <summary>
     /// The tail the sweep released, reconciled against the window the lights are believed to
@@ -1853,13 +1849,13 @@ public sealed class BookingService
             {
                 booking_id = booking.Id,
                 attended_at = attendedAt,
-                refund_reversed_credits = legs.RefundBack,
-                penalty_reversed_credits = legs.PenaltyBack,
-                refund_settled_credits = legs.Refunded,
-                penalty_settled_credits = legs.Penalised,
+                refund_reversed_minutes = legs.RefundBack,
+                penalty_reversed_minutes = legs.PenaltyBack,
+                refund_settled_minutes = legs.Refunded,
+                penalty_settled_minutes = legs.Penalised,
                 payer_user_id = payerUserId,
                 manual_compensation = legs.Compensation.Count > 0 ? legs.Compensation : null,
-                manual_compensation_credits = legs.CompensatedCredits,
+                manual_compensation_minutes = legs.CompensatedMinutes,
                 ends_at = booking.EndsAt,
                 original_ends_at = tail.OriginalEndsAt,
                 provisional_lit_end = tail.ProvisionalEnd,
@@ -1869,7 +1865,7 @@ public sealed class BookingService
         };
     }
 
-    private AuditLog DisplacedAudit(Booking booking, Booking other, decimal refund, Guid actorUserId)
+    private AuditLog DisplacedAudit(Booking booking, Booking other, int refund, Guid actorUserId)
     {
         return new AuditLog
         {
@@ -1881,7 +1877,7 @@ public sealed class BookingService
             {
                 booking_id = other.Id,
                 displaced_by_booking_id = booking.Id,
-                refund_credits = refund,
+                refund_minutes = refund,
                 reason = ResoldTailRefunded,
             }),
         };
@@ -1908,19 +1904,19 @@ public sealed class BookingService
     }
 
     /// <summary>What a displaced <c>Booked</c> row gets back: its whole charge. A swept row was refunded at the sweep and gets its penalty back instead.</summary>
-    private static decimal DisplacedAmount(Booking other) => other.Status == BookingStatus.NoShow
-        ? 0m
-        : other.ChargedAt is not null ? other.AmountChargedCredits : 0m;
+    private static int DisplacedAmount(Booking other) => other.Status == BookingStatus.NoShow
+        ? 0
+        : other.ChargedAt is not null ? other.AmountChargedMinutes : 0;
 
     /// <summary>The net no-show penalty still standing against each swept row in <paramref name="displaced"/>, off the ledger.</summary>
-    private async Task<Dictionary<Guid, decimal>> NoShowPenaltiesTakenAsync(List<Booking> displaced, CancellationToken ct)
+    private async Task<Dictionary<Guid, int>> NoShowPenaltiesTakenAsync(List<Booking> displaced, CancellationToken ct)
     {
         var swept = displaced.Where(b => b.Status == BookingStatus.NoShow).Select(b => b.Id).ToList();
         if (swept.Count == 0) return [];
         var rows = await _db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId != null && swept.Contains(l.RelatedBookingId.Value) && l.Type == LedgerEntryType.NoShowPenalty)
             .ToListAsync(ct);
-        return rows.GroupBy(l => l.RelatedBookingId!.Value).ToDictionary(g => g.Key, g => -g.Sum(l => l.AmountCredits));
+        return rows.GroupBy(l => l.RelatedBookingId!.Value).ToDictionary(g => g.Key, g => -g.Sum(l => l.AmountMinutes));
     }
 
     /// <summary>
@@ -1928,7 +1924,7 @@ public sealed class BookingService
     /// in full; a row the sweep already settled gets its penalty back (the refund was paid
     /// at the sweep). The same types as the rows they answer, so the buckets net to truth.
     /// </summary>
-    private static LedgerPosting DisplacedPosting(Booking reversed, Booking other, decimal penaltyTaken, Guid actorUserId)
+    private static LedgerPosting DisplacedPosting(Booking reversed, Booking other, int penaltyTaken, Guid actorUserId)
     {
         var payer = other.PaidByUserId ?? other.UserId ?? other.BookedByUserId ?? Guid.Empty;
         var reference = DisplacedReference(reversed.Id, other.Id);
@@ -1938,7 +1934,7 @@ public sealed class BookingService
             return new LedgerPosting(
                 UserId: payer,
                 Type: LedgerEntryType.NoShowPenalty,
-                AmountCredits: penalty,
+                AmountMinutes: penalty,
                 ActorUserId: actorUserId,
                 RelatedBookingId: other.Id,
                 Reason: $"{ResoldTailRefunded} — no-show penalty returned: the court was already in use by an earlier booking whose attendance arrived late",
@@ -1948,7 +1944,7 @@ public sealed class BookingService
         return new LedgerPosting(
             UserId: payer,
             Type: LedgerEntryType.CancellationRefund,
-            AmountCredits: DisplacedAmount(other),
+            AmountMinutes: DisplacedAmount(other),
             ActorUserId: actorUserId,
             RelatedBookingId: other.Id,
             Reason: $"{ResoldTailRefunded} — refunded in full: the court was already in use by an earlier booking whose attendance arrived late",
@@ -2014,7 +2010,7 @@ public sealed class BookingService
     /// accounts for the whole price.
     /// </para>
     /// </summary>
-    private async Task<(int Minutes, decimal Amount, Court Court)?> PriceLitTimeAsync(
+    private async Task<(int Minutes, int Amount, Court Court)?> PriceLitTimeAsync(
         Booking booking, Guid payerUserId, int litMinutes, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);
@@ -2024,9 +2020,10 @@ public sealed class BookingService
         var minutes = Math.Clamp(litMinutes, 0, Math.Min(soldMinutes, RelayHardCap.Minutes));
         if (minutes <= 0) return null;
 
-        var gross = Math.Round(court.SlicePriceCredits * minutes / settings.SliceMinutes, 2, MidpointRounding.AwayFromZero);
+        // P13-B1: one lit minute costs one minute; B1 owns floor-vs-ceiling of litMinutes (contract §12.6).
+        var gross = minutes;
         var retained = await RetainedPenaltyAsync(booking, payerUserId, ct);
-        var amount = Math.Min(gross, booking.AmountChargedCredits - retained);
+        var amount = Math.Min(gross, booking.AmountChargedMinutes - retained);
         return amount <= 0 ? null : (minutes, amount, court);
     }
 
@@ -2034,14 +2031,14 @@ public sealed class BookingService
     /// The late-cancellation penalty still standing against this booking for this payer, net
     /// of anything that reversed it. Positive, because the rows themselves are debits.
     /// </summary>
-    private async Task<decimal> RetainedPenaltyAsync(Booking booking, Guid payerUserId, CancellationToken ct)
+    private async Task<int> RetainedPenaltyAsync(Booking booking, Guid payerUserId, CancellationToken ct)
     {
         var sum = await _db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId == booking.Id
                         && l.UserId == payerUserId
                         && l.Type == LedgerEntryType.LateCancellationPenalty)
-            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
-        return Math.Max(0m, -sum);
+            .SumAsync(l => (int?)l.AmountMinutes, ct) ?? 0;
+        return Math.Max(0, -sum);
     }
 
     /// <summary>
@@ -2086,7 +2083,7 @@ public sealed class BookingService
             await _ledger.PostAsync(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.LightsPurchase,
-                AmountCredits: -amount,
+                AmountMinutes: -amount,
                 ActorUserId: Guid.Empty,
                 RelatedBookingId: booking.Id,
                 Reason: $"Lights ran {minutes} min on cancelled booking {court.Name} · {await SlotLabelAsync(booking, ct)} — charged pro rata",
@@ -2109,9 +2106,9 @@ public sealed class BookingService
                 booking_id = booking.Id,
                 occurred_at = occurredAt,
                 lit_minutes = minutes,
-                amount_credits = amount,
+                amount_minutes = amount,
                 payer_user_id = payerUserId,
-                original_price_credits = booking.AmountChargedCredits,
+                original_price_minutes = booking.AmountChargedMinutes,
                 sold_minutes = booking.SliceMinutes * booking.SliceCount,
             }),
         });
@@ -2140,7 +2137,7 @@ public sealed class BookingService
                 ["court_number"] = court.CourtNumber,
                 ["user_id"] = booking.UserId,
                 ["lit_minutes"] = minutes,
-                ["amount_credits"] = amount,
+                ["amount_minutes"] = amount,
                 ["occurred_at"] = occurredAt,
             }), ct);
 
@@ -2204,12 +2201,12 @@ public sealed class BookingService
             .Where(l => l.RelatedBookingId == booking.Id
                         && l.UserId == payerUserId
                         && l.Type == LedgerEntryType.LightsPurchase)
-            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
+            .SumAsync(l => (int?)l.AmountMinutes, ct) ?? 0;
         var charged = -posted;
         if (charged <= 0) return ReleaseSettlement.NotApplicable;
 
         var priced = await PriceLitTimeAsync(booking, payerUserId, litMinutes, ct);
-        var back = charged - (priced?.Amount ?? 0m);
+        var back = charged - (priced?.Amount ?? 0);
         if (back <= 0) return ReleaseSettlement.NotApplicable;
 
         _db.AuditLogs.Add(new AuditLog
@@ -2221,9 +2218,10 @@ public sealed class BookingService
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 booking_id = booking.Id,
-                charged_credits = charged,
-                measured_credits = priced?.Amount ?? 0m,
-                returned_credits = back,
+                charged_minutes = charged,
+                // P13-B0: was measured_credits; renamed apart from measured_minutes (the lit time) below.
+                measured_charge_minutes = priced?.Amount ?? 0,
+                returned_minutes = back,
                 measured_minutes = litMinutes,
                 payer_user_id = payerUserId,
             }),
@@ -2234,13 +2232,11 @@ public sealed class BookingService
             await _ledger.PostAsync(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.LightsPurchase,
-                AmountCredits: back,
+                AmountMinutes: back,
                 ActorUserId: Guid.Empty,
                 RelatedBookingId: booking.Id,
-                // MoneyFormat rather than a {back:0.00} interpolation: that takes the HOST's
-                // culture, and on the club's own en-ZA it wrote "8,00 credits" onto a statement
-                // whose every other row said "8.00 credits".
-                Reason: $"Lights ran {litMinutes} min, not the granted window — {MoneyFormat.Credits(back)} returned",
+                // MoneyFormat rather than an interpolation: one rendering of minutes in prose.
+                Reason: $"Lights ran {litMinutes} min, not the granted window — {MoneyFormat.Minutes(back)} returned",
                 ExternalReference: CancelledLightsReleaseReference(booking.Id)), ct);
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -2304,7 +2300,7 @@ public sealed class BookingService
             if (await ReinstateAsync(booking, other, actorUserId, ct)) reinstated.Add(other.Id);
         }
 
-        return new ReleaseSettlement("window_narrowed", 0m, reinstated);
+        return new ReleaseSettlement("window_narrowed", 0, reinstated);
     }
 
     /// <summary>
@@ -2341,16 +2337,16 @@ public sealed class BookingService
             {
                 booking_id = other.Id,
                 displaced_by_booking_id = reversed.Id,
-                recharged_credits = refund?.AmountCredits ?? 0m,
+                recharged_minutes = refund?.AmountMinutes ?? 0,
             }),
         });
 
-        var postings = refund is null || refund.AmountCredits <= 0
+        var postings = refund is null || refund.AmountMinutes <= 0
             ? new List<LedgerPosting>()
             : [new LedgerPosting(
                 UserId: refund.UserId,
                 Type: LedgerEntryType.CancellationRefund,
-                AmountCredits: -refund.AmountCredits,
+                AmountMinutes: -refund.AmountMinutes,
                 ActorUserId: actorUserId,
                 RelatedBookingId: other.Id,
                 Reason: "Booking reinstated — the earlier court went dark before your slot",
@@ -2412,7 +2408,7 @@ public sealed class BookingService
     /// <c>users</c> row is logged and skipped, and a failed send is logged and swallowed.
     /// </summary>
     private async Task NotifyNoShowReversedAsync(
-        Booking booking, decimal refunded, decimal penalised, DateTimeOffset attendedAt, CancellationToken ct)
+        Booking booking, int refunded, int penalised, DateTimeOffset attendedAt, CancellationToken ct)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == booking.UserId, ct);
         var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
@@ -2443,8 +2439,8 @@ public sealed class BookingService
                 ["court_id"] = booking.CourtId,
                 ["court_number"] = court?.CourtNumber,
                 ["user_id"] = booking.UserId,
-                ["penalty_credits"] = penalised,
-                ["refund_credits"] = refunded,
+                ["penalty_minutes"] = penalised,
+                ["refund_minutes"] = refunded,
                 ["attended_at"] = attendedAt,
             }), ct);
     }
@@ -2487,7 +2483,7 @@ public sealed class BookingService
             // Nobody volunteered, or the volunteer is already the payer. Idempotent.
             if (reassignTo is null || reassignTo == currentPayer)
             {
-                return new ChargeResult.AlreadyCharged(booking.AmountChargedCredits);
+                return new ChargeResult.AlreadyCharged(booking.AmountChargedMinutes);
             }
 
             // The volunteer is about to be debited, so the volunteer is who is locked —
@@ -2501,12 +2497,12 @@ public sealed class BookingService
             await using var volunteerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, reassignTo.Value, _outbox, ct);
 
             var volunteerBalance = await _ledger.GetSpendableAsync(reassignTo.Value, ct);
-            if (volunteerBalance < booking.AmountChargedCredits)
+            if (volunteerBalance < booking.AmountChargedMinutes)
             {
                 // Refuse rather than half-apply. Refunding the booker first and then
                 // discovering the volunteer cannot pay would leave the court unpaid for.
                 return new ChargeResult.InsufficientBalance(
-                    reassignTo.Value, volunteerBalance, booking.AmountChargedCredits);
+                    reassignTo.Value, volunteerBalance, booking.AmountChargedMinutes);
             }
 
             booking.PaidByUserId = reassignTo.Value;
@@ -2522,7 +2518,7 @@ public sealed class BookingService
                     booking_id = booking.Id,
                     from_user_id = currentPayer,
                     to_user_id = reassignTo.Value,
-                    amount_credits = booking.AmountChargedCredits,
+                    amount_minutes = booking.AmountChargedMinutes,
                 }),
             });
 
@@ -2553,14 +2549,14 @@ public sealed class BookingService
                     new LedgerPosting(
                         UserId: currentPayer,
                         Type: LedgerEntryType.CancellationRefund,
-                        AmountCredits: booking.AmountChargedCredits,
+                        AmountMinutes: booking.AmountChargedMinutes,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
                         Reason: $"Payer changed at court — refunded, {court.Name} · {slotLabel}"),
                     new LedgerPosting(
                         UserId: reassignTo.Value,
                         Type: LedgerEntryType.BookingCharge,
-                        AmountCredits: -booking.AmountChargedCredits,
+                        AmountMinutes: -booking.AmountChargedMinutes,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
                         Reason: $"Paid at court on behalf of another member — {court.Name} · {slotLabel}"),
@@ -2574,7 +2570,7 @@ public sealed class BookingService
             }
 
             await volunteerLock.CommitAsync(ct);
-            return new ChargeResult.Ok(booking, reassignTo.Value, booking.AmountChargedCredits);
+            return new ChargeResult.Ok(booking, reassignTo.Value, booking.AmountChargedMinutes);
         }
 
         // Never charged: a walk-up, or a booking predating charge-at-booking.
@@ -2588,13 +2584,13 @@ public sealed class BookingService
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
 
         var balance = await _ledger.GetSpendableAsync(payerUserId, ct);
-        if (balance < booking.AmountChargedCredits)
-            return new ChargeResult.InsufficientBalance(payerUserId, balance, booking.AmountChargedCredits);
+        if (balance < booking.AmountChargedMinutes)
+            return new ChargeResult.InsufficientBalance(payerUserId, balance, booking.AmountChargedMinutes);
 
         await _ledger.PostAsync(new LedgerPosting(
             UserId: payerUserId,
             Type: LedgerEntryType.BookingCharge,
-            AmountCredits: -booking.AmountChargedCredits,
+            AmountMinutes: -booking.AmountChargedMinutes,
             ActorUserId: actorUserId,
             RelatedBookingId: booking.Id,
             Reason: $"Booking {court.Name} · {await SlotLabelAsync(booking, ct)}"), ct);
@@ -2608,12 +2604,12 @@ public sealed class BookingService
             ActorUserId = actorUserId,
             SubjectUserId = payerUserId,
             Action = payerOverrideUserId is not null ? "booking.charged_by_payer_override" : "booking.charged",
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id, payer_user_id = payerUserId, amount_credits = booking.AmountChargedCredits }),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id, payer_user_id = payerUserId, amount_minutes = booking.AmountChargedMinutes }),
         });
 
         await _db.SaveChangesAsync(ct);
         await payerLock.CommitAsync(ct);
-        return new ChargeResult.Ok(booking, payerUserId, booking.AmountChargedCredits);
+        return new ChargeResult.Ok(booking, payerUserId, booking.AmountChargedMinutes);
     }
 
     // ---- helpers ----
@@ -2724,8 +2720,8 @@ public sealed class BookingService
                 courtName: details.CourtName,
                 startsAtLocal: details.StartsAtLocal,
                 duration: details.Duration,
-                amountCredits: details.AmountCredits,
-                balanceAfterCredits: details.BalanceAfterCredits,
+                amountMinutes: details.AmountMinutes,
+                balanceAfterMinutes: details.BalanceAfterMinutes,
                 issuedAtLocal: IssuedAtLocal(await _settings.GetAsync(ct)));
 
             return new Email.EmailAttachment($"receipt-{bookingId:N}.pdf", "application/pdf", pdf);
@@ -2841,12 +2837,12 @@ public readonly record struct BookingPayer(
 
 /// <summary>
 /// What a booking would cost, or why it would be refused — see <c>BookingService.QuoteAsync</c>.
-/// Exactly one of <paramref name="PriceCredits"/> and <paramref name="Refusal"/> is set.
+/// Exactly one of <paramref name="PriceMinutes"/> and <paramref name="Refusal"/> is set.
 /// </summary>
 /// <param name="CourtName">The court's name, for a quote line an admin can read.</param>
 /// <param name="EndsAt">When the booking would end, so a batch can see two items overlap.</param>
 public sealed record BookingQuote(
-    decimal? PriceCredits, string? CourtName, DateTimeOffset? EndsAt, BookingResult? Refusal);
+    int? PriceMinutes, string? CourtName, DateTimeOffset? EndsAt, BookingResult? Refusal);
 
 public abstract record BookingResult
 {
@@ -2873,13 +2869,13 @@ public abstract record BookingResult
     /// </param>
     public sealed record Ok(
         Booking Booking,
-        decimal BalanceAfterCredits,
+        int BalanceAfterMinutes,
         Func<CancellationToken, Task>? SendConfirmationAsync = null) : BookingResult;
     public sealed record NotFound : BookingResult;
     public sealed record PastTime : BookingResult;
     public sealed record TooFarAhead : BookingResult;
     public sealed record SlotTaken : BookingResult;
-    public sealed record InsufficientBalance(decimal CurrentCredits, decimal RequiredCredits) : BookingResult;
+    public sealed record InsufficientBalance(int CurrentMinutes, int RequiredMinutes) : BookingResult;
     /// <summary>
     /// Blueprint A.12's refusal. Wire code <c>peak_hours_league_only</c>, kept although the
     /// league class is gone (D2) because refusal codes are a stable contract; the rule is now
@@ -3018,14 +3014,14 @@ public abstract record BookingResult
 /// What a cancellation would cost right now, in figures, so the member reads the number
 /// before they tap rather than the ledger afterwards.
 /// </summary>
-/// <param name="RefundCredits">What actually lands back in the wallet — the refund NET of the penalty, which is the only figure a member can check against their balance.</param>
-/// <param name="PenaltyCredits">What is kept. Reported separately because the ledger posts it as its own row and a dispute asks for it by name.</param>
-/// <param name="CheckedIn">The lights have been on. Nothing comes back; <paramref name="RefundCredits"/> is zero and the copy must say why.</param>
+/// <param name="RefundMinutes">What actually lands back in the wallet — the refund NET of the penalty, which is the only figure a member can check against their balance.</param>
+/// <param name="PenaltyMinutes">What is kept. Reported separately because the ledger posts it as its own row and a dispute asks for it by name.</param>
+/// <param name="CheckedIn">The lights have been on. Nothing comes back; <paramref name="RefundMinutes"/> is zero and the copy must say why.</param>
 public sealed record CancellationQuote(
     Guid BookingId,
-    decimal AmountChargedCredits,
-    decimal RefundCredits,
-    decimal PenaltyCredits,
+    int AmountChargedMinutes,
+    int RefundMinutes,
+    int PenaltyMinutes,
     decimal PenaltyPct,
     int PenaltyWindowMinutes,
     bool InsidePenaltyWindow,
@@ -3034,12 +3030,12 @@ public sealed record CancellationQuote(
 {
     /// <summary>
     /// What the organiser keeps once each partner's share has followed the refund back to them
-    /// (review round 1, B3) — <see cref="RefundCredits"/> less <see cref="PartnerRefunds"/>.
-    /// Equal to <see cref="RefundCredits"/> on a booking with no paying partners.
+    /// (review round 1, B3) — <see cref="RefundMinutes"/> less <see cref="PartnerRefunds"/>.
+    /// Equal to <see cref="RefundMinutes"/> on a booking with no paying partners.
     /// </summary>
     /// <remarks>Named on the wire as the round-1 contract names it; the record's older fields are camelCase.</remarks>
-    [System.Text.Json.Serialization.JsonPropertyName("net_credits")]
-    public decimal NetCredits { get; init; } = RefundCredits;
+    [System.Text.Json.Serialization.JsonPropertyName("net_minutes")]
+    public int NetMinutes { get; init; } = RefundMinutes;
 
     /// <summary>Each partner's share that goes back to them. Empty on a booking with no paying partners.</summary>
     [System.Text.Json.Serialization.JsonPropertyName("partner_refunds")]
@@ -3048,7 +3044,7 @@ public sealed record CancellationQuote(
 
 public abstract record CancellationResult
 {
-    public sealed record Ok(decimal RefundedCredits, decimal PenaltyCredits) : CancellationResult;
+    public sealed record Ok(int RefundedMinutes, int PenaltyMinutes) : CancellationResult;
     public sealed record NotFound : CancellationResult;
     public sealed record AlreadyStarted : CancellationResult;
 }
@@ -3063,7 +3059,7 @@ public abstract record NoShowReversalResult
     /// is not moved twice. <see cref="DisplacedBookingIds"/> names the later bookings on
     /// the released tail that were cancelled and refunded to make room.
     /// </summary>
-    public sealed record Ok(decimal RefundReversedCredits, decimal PenaltyReversedCredits) : NoShowReversalResult
+    public sealed record Ok(int RefundReversedMinutes, int PenaltyReversedMinutes) : NoShowReversalResult
     {
         public IReadOnlyList<Guid> DisplacedBookingIds { get; init; } = [];
         public bool ManuallyCompensated { get; init; }
@@ -3080,17 +3076,17 @@ public abstract record NoShowReversalResult
 /// What a box's <c>release</c> event changed. See <c>BookingService.SettleReleaseAsync</c>.
 /// <c>Code</c> lands on the event's audit row so the desk can see the measurement arriving.
 /// </summary>
-public sealed record ReleaseSettlement(string Code, decimal AmountCredits, IReadOnlyList<Guid> ReinstatedBookingIds)
+public sealed record ReleaseSettlement(string Code, int AmountMinutes, IReadOnlyList<Guid> ReinstatedBookingIds)
 {
     /// <summary>Nothing to correct: an ordinary booking, or a measurement that agrees with the grant.</summary>
-    public static readonly ReleaseSettlement NotApplicable = new("not_applicable", 0m, []);
+    public static readonly ReleaseSettlement NotApplicable = new("not_applicable", 0, []);
 }
 
 /// <summary>What became of the lit time on a cancelled booking. See <c>BookingService.ChargeLitCancelledBookingAsync</c>.</summary>
 public abstract record CancelledLightsResult
 {
     /// <summary>A pro-rata <c>LightsPurchase</c> posted for the lit minutes.</summary>
-    public sealed record Charged(decimal AmountCredits, int Minutes) : CancelledLightsResult;
+    public sealed record Charged(int AmountMinutes, int Minutes) : CancelledLightsResult;
 
     /// <summary>This booking's lit time was already charged by an earlier event.</summary>
     public sealed record AlreadyCharged : CancelledLightsResult;
@@ -3109,11 +3105,11 @@ public abstract record CancelledLightsResult
 
 public abstract record ChargeResult
 {
-    public sealed record Ok(Booking Booking, Guid ChargedUserId, decimal AmountCredits) : ChargeResult;
+    public sealed record Ok(Booking Booking, Guid ChargedUserId, int AmountMinutes) : ChargeResult;
     public sealed record NotFound : ChargeResult;
     public sealed record NotChargeable : ChargeResult;
-    public sealed record AlreadyCharged(decimal AmountCredits) : ChargeResult;
-    public sealed record InsufficientBalance(Guid PayerUserId, decimal Current, decimal Required) : ChargeResult;
+    public sealed record AlreadyCharged(int AmountMinutes) : ChargeResult;
+    public sealed record InsufficientBalance(Guid PayerUserId, int Current, int Required) : ChargeResult;
 }
 
 /// <summary>
@@ -3121,7 +3117,7 @@ public abstract record ChargeResult
 /// part of it held for their partners' shares (D11). What they may spend is the difference, and
 /// that is the figure an overdraft is decided — and reported — on (review round 3, A-8).
 /// </summary>
-internal readonly record struct OpeningFigures(decimal Balance, decimal Held)
+internal readonly record struct OpeningFigures(int Balance, int Held)
 {
-    public decimal Spendable => Balance - Held;
+    public int Spendable => Balance - Held;
 }
