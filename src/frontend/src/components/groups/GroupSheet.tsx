@@ -7,16 +7,17 @@ import {
 } from "../ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { useIsSmUp } from "../ui/use-media-query";
-import type { MemberGroup, MemberGroupBody } from "../../lib/adminApi";
+import type { MemberGroup } from "../../lib/adminApi";
 import { GROUP_SHEET, SYSTEM_GROUP } from "../../lib/groupsCopy";
 import { GroupEditorSections } from "./GroupEditor";
-import { bodyFrom, draftProblems, useGroupDraft, type ClubContext } from "./groupDraft";
+import { bodyFrom, draftProblems, useGroupDraft, type ClubContext, type GroupSaveBody } from "./groupDraft";
 
 export type GroupSheetTab = "settings" | "members";
 
 /**
  * One group, in a sheet: its settings and its members, as two tabs (D2, R21 — "where do admins
- * configure groups, allowed times and pricing"; this is the one place).
+ * configure groups, allowed times and pricing"; this is the one place — and, since P13, its
+ * package discount and its own packages, read-only).
  *
  * <p>
  * <b>A sheet, not a card under the list.</b> The editor used to open below every group card, so
@@ -39,7 +40,7 @@ export function GroupSheet(props: {
   context: ClubContext;
   saving: boolean;
   error: unknown;
-  onSave: (body: MemberGroupBody) => void;
+  onSave: (body: GroupSaveBody) => void;
   onClose: () => void;
   members: ReactNode;
 }) {
@@ -53,7 +54,7 @@ export function GroupSheet(props: {
   const save = () => {
     setPressed(true);
     if (Object.keys(draftProblems(draft)).length > 0) return;
-    onSave(bodyFrom(draft));
+    onSave(bodyFrom(draft, group));
   };
 
   return (
@@ -87,7 +88,7 @@ export function GroupSheet(props: {
           </div>
           <TabsContent value="settings" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
             <SheetBody className="pt-4">
-              <GroupEditorSections draft={draft} set={set} context={context} error={error} showProblems={pressed} />
+              <GroupEditorSections groupId={group.id} draft={draft} set={set} context={context} error={error} showProblems={pressed} />
             </SheetBody>
             <SheetFooter className="border-t border-border pt-4">
               <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>

@@ -29,7 +29,7 @@ import type { GroupAddResult, MemberGroup } from "../../lib/adminApi";
  * <b>The action is named with the number and the group.</b> "Add selected" on a page with four
  * groups on it is a control an admin presses to find out what it does. Each person in the group
  * links to their own page, and "Change groups" opens the same GroupAssign the member's page uses,
- * so a move between groups states its effect on their rate before it is saved.
+ * so a move between groups states its effect on their package discount before it is saved.
  * </p>
  */
 

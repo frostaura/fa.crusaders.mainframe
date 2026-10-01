@@ -11,12 +11,12 @@ import { MemberCombobox } from "../components/ui/member-combobox";
 import { useToast } from "../components/Toast";
 import { GroupCard } from "../components/groups/GroupCard";
 import { clubWeek } from "../components/groups/weekGrid";
-import { courtPricesOf, type ClubContext } from "../components/groups/groupDraft";
+import type { ClubContext, GroupSaveBody, PackagesRead } from "../components/groups/groupDraft";
 import { GroupMembers, type ClubMember, type GroupMemberRow } from "../components/groups/GroupMembers";
 import { GroupWeekPreview, MemberPreview } from "../components/groups/GroupPreview";
 import { GroupSheet, type GroupSheetTab } from "../components/groups/GroupSheet";
 import { GroupAssign } from "../components/members/GroupAssign";
-import { ApiError, endpoints, type AdminCourt } from "../lib/api";
+import { ApiError, endpoints } from "../lib/api";
 import {
   adminEndpoints, type GroupAddResult, type MemberBookingRules, type MemberGroup,
   type GroupWindow, type MemberGroupBody, type Weekday,
@@ -30,29 +30,30 @@ import { LOST_REPLY } from "../lib/lostReplyCopy";
 import { typography } from "../lib/typography";
 
 /**
- * Groups — the one place a club decides what each kind of member pays, when they may book, how
- * much, what a top-up buys them and whether they get peak hours early (D2, R21: "where do admins
- * configure class groups, allowed times and pricing per class" — "Groups instead please. Class
- * doesn't make sense").
+ * Groups — the one place a club decides each kind of member's package discount, when they may
+ * book, how much, and whether they get peak hours early (D2, R21: "Groups instead please. Class
+ * doesn't make sense"; P13: no court or group prices — a booking costs its minutes, and a group's
+ * only money is a discount on the club's packages, in rand).
  *
  * <p>
  * <b>A card per group, a sheet per edit.</b> Each card carries the facts an admin opens the page
- * for — rate, peak say, court price, times, limits — so the rule doing the thing somebody
- * complained about is readable without opening anything. Edit and Members open ONE sheet with two
- * tabs, where the list stays behind it.
+ * for — discount, peak say, the group's own packages, times, limits — so the rule doing the thing
+ * somebody complained about is readable without opening anything. Edit and Members open ONE sheet
+ * with two tabs, where the list stays behind it.
  * </p>
  *
  * <p>
- * <b>Three reads, and a failure in one does not take the others down.</b> The groups, the club's
- * settings and the club's members are separate facts: a members list that could not be read must
- * not make the page claim the club has no groups.
+ * <b>Four reads, and a failure in one does not take the others down.</b> The groups, the club's
+ * settings, its members and its packages are separate facts: a members list that could not be read
+ * must not make the page claim the club has no groups, and a packages read that failed is said
+ * beside each group ("couldn't read packages"), never as "no packages".
  * </p>
  *
  * <p>
  * <b>Deleting is refused rather than cascaded; archiving asks why; the built-in group does
  * neither.</b> A cascade silently changes what every member of that group may book and what they
  * pay. The two 409s are rendered as sentences that name archiving, which is reversible and is the
- * designed way out — and the league group, which carries the club's rates, is refused both.
+ * designed way out — and the league group, which the club's own rules rely on, is refused both.
  * </p>
  */
 
@@ -66,12 +67,11 @@ const BLANK: MemberGroup = {
   description: null,
   status: "active",
   is_system_default: false,
-  pricing: { mode: "inherit_court", multiplier_bps: 10_000, flat_slice_price_credits: null },
   caps: { max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null },
   windows: [],
   member_count: 0,
   system_key: null,
-  credits_per_zar: null,
+  package_discount_bps: null,
   peak_priority: null,
 };
 
@@ -85,48 +85,48 @@ const BLANK: MemberGroup = {
  * </p>
  */
 function clubContextFrom(
-  settings: Record<string, unknown> | null, club: ClubContext["club"], courts: AdminCourt[] | null,
+  settings: Record<string, unknown> | null, club: ClubContext["club"], packages: PackagesRead,
 ): ClubContext & { timezone?: string } {
   const numberOr = <T,>(key: string, fallback: T) =>
     typeof settings?.[key] === "number" ? (settings[key] as number) : fallback;
   return {
     club,
     sliceMinutes: numberOr("slice_minutes", 15),
-    // Each court's own price (F3.3) — never the club-wide `slice_price_credits`, which is only
-    // the default a NEW court starts at.
-    courtPrices: courtPricesOf(courts),
     clubCaps: {
       slotCap: numberOr("member_max_slots_per_day", null),
       minuteCap: numberOr("member_per_day_max_minutes", null),
       advanceDays: numberOr("advance_booking_days", null),
     },
-    clubRate: numberOr("credits_per_zar_regular", undefined),
-    blockZar: numberOr("topup_block_zar", undefined),
     peakHours: settings?.peak_hours,
     peakAdvanceHours: settings?.peak_advance_hours_for_regular,
     timezone: typeof settings?.timezone === "string" ? settings.timezone : undefined,
+    packages,
   };
 }
 
-/** The page's three reads, each failing on its own. */
+/** The page's four reads, each failing on its own. */
 function usePageReads() {
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [groups, setGroups] = useState<MemberGroup[] | null>(null);
   const [clubMembers, setClubMembers] = useState<ClubMember[] | null>(null);
-  const [courts, setCourts] = useState<AdminCourt[] | null>(null);
+  const [packages, setPackages] = useState<PackagesRead>({ status: "loading" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [readAt, setReadAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [groupsRead, settingsRead, membersRead, courtsRead] = await Promise.allSettled([
+    const [groupsRead, settingsRead, membersRead, packagesRead] = await Promise.allSettled([
       adminEndpoints.memberGroups(),
       endpoints.adminSettingsGet(),
       endpoints.adminMembers(),
-      endpoints.adminCourtsList(),
+      // ONE read for the page, never one per card; each card filters it by its group (P13 §3.5).
+      adminEndpoints.packages("active"),
     ]);
-    if (courtsRead.status === "fulfilled") setCourts(courtsRead.value);
+    // A re-read that fails keeps the packages already on screen (a failed refresh is a fact about
+    // the request, not the club); only a failed FIRST read is "couldn't read packages".
+    if (packagesRead.status === "fulfilled") setPackages({ status: "ready", items: packagesRead.value.packages ?? [] });
+    else setPackages((was) => (was.status === "ready" ? was : { status: "failed" }));
     if (groupsRead.status === "fulfilled") {
       setGroups(groupsRead.value.groups);
       setError(null);
@@ -145,7 +145,7 @@ function usePageReads() {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
   useEffect(() => { void load(); }, [load]);
 
-  return { settings, groups, clubMembers, courts, loading, error, readAt, load };
+  return { settings, groups, clubMembers, packages, loading, error, readAt, load };
 }
 
 /**
@@ -182,7 +182,7 @@ async function addedAccordingToGroup(groupId: string, asked: string[], before: S
  * A group save whose reply was lost, answered from the list (R4 carry-over): an edit is saved when
  * the group now reads as sent; a create when a group of this name is listed that was not before.
  */
-async function savedAccordingToList(id: string, body: MemberGroupBody, known: ReadonlySet<string>): Promise<object | null> {
+async function savedAccordingToList(id: string, body: GroupSaveBody, known: ReadonlySet<string>): Promise<object | null> {
   const { groups } = await adminEndpoints.memberGroups();
   const same = (g: MemberGroup) => g.name.trim().toLowerCase() === body.name.trim().toLowerCase();
   if (id === "") return groups.some((g) => !known.has(g.id) && same(g)) ? {} : null;
@@ -190,17 +190,26 @@ async function savedAccordingToList(id: string, body: MemberGroupBody, known: Re
   return now && groupReadsAs(now, body) ? {} : null;
 }
 
-/** Whether a listed group carries what a save sent: name, description, pricing mode, caps and times. */
-function groupReadsAs(g: MemberGroup, body: MemberGroupBody): boolean {
+/**
+ * Whether a listed group carries what a save sent: name, description, package discount (when the
+ * save sent one — absent means "unchanged", so there is nothing to compare), caps and times.
+ */
+function groupReadsAs(g: MemberGroup, body: GroupSaveBody): boolean {
   const times = (w: GroupWindow[] | undefined) => (w ?? []).map((x) => `${x.day} ${x.start}-${x.end}`).sort().join("|");
-  const cap = (v: number | null | undefined) => v ?? null;
+  const discountSent = body.packageDiscountBps !== undefined;
   return g.name === body.name
     && (g.description ?? null) === (body.description ?? null)
-    && g.pricing?.mode === body.pricing.mode
-    && cap(g.caps?.max_slots_per_day) === cap(body.caps.maxSlotsPerDay)
-    && cap(g.caps?.max_minutes_per_day) === cap(body.caps.maxMinutesPerDay)
-    && cap(g.caps?.advance_booking_days) === cap(body.caps.advanceBookingDays)
+    && (!discountSent || (g.package_discount_bps ?? null) === body.packageDiscountBps)
+    && capsReadAs(g, body)
     && times(g.windows) === times(body.windows);
+}
+
+/** The three caps, absent and null read alike (the list sends null for "the club's limit"). */
+function capsReadAs(g: MemberGroup, body: GroupSaveBody): boolean {
+  const cap = (v: number | null | undefined) => v ?? null;
+  return cap(g.caps?.max_slots_per_day) === cap(body.caps.maxSlotsPerDay)
+    && cap(g.caps?.max_minutes_per_day) === cap(body.caps.maxMinutesPerDay)
+    && cap(g.caps?.advance_booking_days) === cap(body.caps.advanceBookingDays);
 }
 
 /** A success sentence, with the reply-lost note when the list had to be asked. */
@@ -216,7 +225,7 @@ function useGroupWrites(
   const [saveError, setSaveError] = useState<unknown>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
 
-  const save = async (id: string, body: MemberGroupBody) => {
+  const save = async (id: string, body: GroupSaveBody) => {
     setSaving(true);
     setSaveError(null);
     // The groups on screen at the press: a group with this name that was already listed is not
@@ -225,7 +234,9 @@ function useGroupWrites(
     try {
       const { proven } = await writeOrReadBack(
         async () => {
-          if (id === "") await adminEndpoints.memberGroupCreate(body);
+          // until the integrator drops pricing (P13 ask F3→integrator): `MemberGroupBody.pricing` is
+          // still typed as required, and the console must not send it (contract §3.3).
+          if (id === "") await adminEndpoints.memberGroupCreate(body as MemberGroupBody);
           else await adminEndpoints.memberGroupUpdate(id, body);
           return {};
         },
@@ -302,7 +313,7 @@ function useGroupWrites(
 
 export function AdminGroupsPage() {
   const reads = usePageReads();
-  const { settings, groups, courts, loading, error, load } = reads;
+  const { settings, groups, packages, loading, error, load } = reads;
   const [sheet, setSheet] = useState<SheetState>(null);
   const [draftKey, setDraftKey] = useState(0);
   const [weekPreviewId, setWeekPreviewId] = useState<string | null>(null);
@@ -310,7 +321,7 @@ export function AdminGroupsPage() {
   const writes = useGroupWrites(load, setSheet, () => groups);
 
   const club = useMemo(() => clubWeek(settings ?? {}), [settings]);
-  const context = clubContextFrom(settings, club, courts);
+  const context = clubContextFrom(settings, club, packages);
 
   /*
    * The club's hours as they were when the open preview was computed. Settings are edited on
@@ -335,7 +346,7 @@ export function AdminGroupsPage() {
     <PageShell width="full">
       <PageHeader
         title="Groups"
-        description={"What each kind of member pays for a slot and a top-up, when they may book, how much, and "
+        description={"Each kind of member's discount on the club's packages, when they may book, how much, and "
           + "whether they get peak hours early. Put members in groups from here or from their own page."}
         actions={<RefreshButton label="Refresh groups" onRefresh={() => void load()} loading={loading} />}
         freshness={<Freshness at={reads.readAt} />}
@@ -529,9 +540,7 @@ function Cards(props: Parameters<typeof GroupList>[0] & { groups: MemberGroup[] 
           group={group}
           club={context.club}
           sliceMinutes={context.sliceMinutes}
-          courtPrices={context.courtPrices}
-          clubRate={context.clubRate}
-          blockZar={context.blockZar}
+          packages={context.packages}
           onEdit={() => onOpen(group.id, "settings")}
           onMembers={() => onOpen(group.id, "members")}
           onPreview={() => onPreview(group.id)}
@@ -699,8 +708,8 @@ function MemberPreviewPanel({ clubMembers, groups, sliceMinutes, onClose, club }
       consequence={member && proposedRules
         ? groupChangeConsequence({
           name: member.full_name,
-          sliceBefore: rules?.slice_price_credits,
-          sliceAfter: proposedRules.slice_price_credits,
+          discountBefore: rules?.tariff ? rules.tariff.package_discount_bps : undefined,
+          discountAfter: proposedRules.tariff ? proposedRules.tariff.package_discount_bps : undefined,
         })
         : []}
     >

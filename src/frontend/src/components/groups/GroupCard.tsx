@@ -7,34 +7,36 @@ import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader,
 import { Field, FieldDescription, FieldLabel } from "../ui/field";
 import { REQUIRED_MARK } from "../../lib/confirmDialogCopy";
 import {
-  Archive, ArrowCounterClockwise, CalendarDots, Clock, Coins, Lightning, Lock, PencilSimple, SlidersHorizontal, Tag, Trash, Users,
+  Archive, ArrowCounterClockwise, CalendarDots, Clock, HourglassMedium, Lightning, Lock, PencilSimple, SlidersHorizontal, Tag,
+  Trash, Users,
 } from "../ui/icons";
 import { Textarea } from "../ui/textarea";
-import { priceForGroup } from "../../lib/groupRules";
 import {
-  ARCHIVE_COPY, GROUP_ACTIONS, GROUP_LOST, GROUP_REFUSAL_CODES, SYSTEM_GROUP, capsSummary, creditsRange, memberCountLine,
-  paintedWeekSentence, peakChip, rateChip, ratePreviewLine, slicePriceLine, type PaintedWeek,
+  ARCHIVE_COPY, GROUP_ACTIONS, GROUP_LOST, GROUP_PACKAGES, GROUP_REFUSAL_CODES, SYSTEM_GROUP, capsSummary, discountChip,
+  memberCountLine, paintedWeekSentence, peakChip, type PaintedWeek,
 } from "../../lib/groupsCopy";
 import { unsureSentence } from "../../lib/lostReply";
 import { windowsToPainted } from "./weekGrid";
+import { GroupPackages } from "./GroupPackages";
+import type { PackagesRead } from "./groupDraft";
 import type { MemberGroup } from "../../lib/adminApi";
 
 /**
- * One group, summarised in the facts an admin opens this page for — what a slot costs, what a
- * top-up buys, whether it touches peak hours, when it may book, and its limits.
+ * One group, summarised in the facts an admin opens this page for — its package discount and its
+ * own packages, whether it touches peak hours, when it may book, and its limits.
  *
  * <p>
  * <b>What it costs and when it applies are on the CARD, not behind the editor.</b> A list of
  * group names tells an admin nothing they did not already know; the reason to come here is to
  * find out which rule is doing the thing somebody has complained about, and that answer has to
- * be readable without opening anything. The rate and the peak say are chips (icon + words, never
- * colour alone) because they are the two things D2 moved here from the member class.
+ * be readable without opening anything. The discount and the peak say are chips (icon + words,
+ * never colour alone) because they are the two things a group decides about money and peak hours.
  * </p>
  *
  * <p>
  * <b>Archive asks why; the built-in group offers neither archive nor delete — absent, not
  * disabled.</b> An archive changes what every member of the group pays and may book, so it
- * needs words for the change record. The league group carries the club's rates and the server
+ * needs words for the change record. The league group carries the club's own rules and the server
  * refuses both (409 `group_is_system_default`); a disabled control invites an admin to work out
  * how to enable it, and this one never can be — the sentence under the card says why.
  * </p>
@@ -43,10 +45,8 @@ export function GroupCard(props: {
   group: MemberGroup;
   club: PaintedWeek;
   sliceMinutes: number;
-  /** The distinct prices of the courts in use; null while unread (F3.3). */
-  courtPrices: readonly number[] | null;
-  clubRate: number | null | undefined;
-  blockZar: number | null | undefined;
+  /** The club's packages, read once for the page (P13 §3.5); this card lists the group's own. */
+  packages: PackagesRead;
   onEdit: () => void;
   onMembers: () => void;
   onPreview: () => void;
@@ -109,7 +109,7 @@ export function GroupCard(props: {
           actions sit on the same line in both (VIS F3-15: they were at different heights). */}
       <CardContent className="flex flex-1 flex-col gap-4 text-sm">
         <ul aria-label={`${group.name} at a glance`} className="flex flex-wrap gap-1.5">
-          <li><Badge tone={group.credits_per_zar == null ? "neutral" : "info"} icon={<Coins size={14} weight="bold" aria-hidden="true" />}>{rateChip(group.credits_per_zar)}</Badge></li>
+          <li><Badge tone={group.package_discount_bps == null ? "neutral" : "info"} icon={<Tag size={14} weight="bold" aria-hidden="true" />}>{discountChip(group.package_discount_bps)}</Badge></li>
           <li><Badge tone={group.peak_priority === true ? "success" : group.peak_priority === false ? "warning" : "neutral"} icon={<Lightning size={14} weight="bold" aria-hidden="true" />}>{peakChip(group.peak_priority)}</Badge></li>
         </ul>
         <GroupFacts {...props} />
@@ -141,31 +141,13 @@ export function GroupCard(props: {
   );
 }
 
-/** The four rules, one line each, with an icon beside each heading so a column of cards scans. */
+/** The group's packages and its two rules, one fact each, with an icon so a column of cards scans. */
 function GroupFacts(props: Parameters<typeof GroupCard>[0]) {
-  const { group, club, sliceMinutes, courtPrices, clubRate, blockZar } = props;
-  const mode = group.pricing?.mode ?? "inherit_court";
-  // Flat needs no court price; the other two are worked out once per court price.
-  const each = mode === "flat_per_slice" ? [priceForGroup(group, 0)] : (courtPrices ?? []).map((p) => priceForGroup(group, p));
-  const unknown = each.some((p) => p === null);
-  const prices = each.filter((p): p is number => p !== null);
-  const positive = prices.filter((p) => p > 0);
-  const rate = typeof group.credits_per_zar === "number" ? group.credits_per_zar : clubRate;
+  const { group, club, sliceMinutes, packages } = props;
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
-      <Fact icon={<Tag size={16} aria-hidden="true" />} term="Court price">
-        {slicePriceLine({
-          mode,
-          credits: prices,
-          courtPrices,
-          multiplierBps: group.pricing?.multiplier_bps,
-          unknown,
-        })}
-      </Fact>
-      <Fact icon={<Coins size={16} aria-hidden="true" />} term="Top-up">
-        {typeof rate === "number"
-          ? `${ratePreviewLine(rate, blockZar)}${!unknown && positive.length > 0 ? ` · ${creditsRange(positive)} cr a slot` : ""}`
-          : "The club's system hasn't said what a top-up buys."}
+      <Fact icon={<HourglassMedium size={16} aria-hidden="true" />} term={GROUP_PACKAGES.title} wide>
+        <GroupPackages groupId={group.id} packages={packages} />
       </Fact>
       <Fact icon={<Clock size={16} aria-hidden="true" />} term="Booking times">
         {paintedWeekSentence(windowsToPainted(group.windows), club, sliceMinutes)}
@@ -177,11 +159,11 @@ function GroupFacts(props: Parameters<typeof GroupCard>[0]) {
   );
 }
 
-function Fact({ icon, term, children }: { icon: ReactNode; term: string; children: ReactNode }) {
+function Fact({ icon, term, wide, children }: { icon: ReactNode; term: string; wide?: boolean; children: ReactNode }) {
   return (
     // dt and dd are the wrapper's DIRECT children (F3.22): a <dl> may group each pair in one
     // <div>, and nothing deeper — the icon lives inside the term, the value is indented under it.
-    <div className="flex min-w-0 flex-col gap-0.5">
+    <div className={wide ? "flex min-w-0 flex-col gap-0.5 sm:col-span-2" : "flex min-w-0 flex-col gap-0.5"}>
       <dt className="flex items-center gap-2.5 text-xs font-medium uppercase tracking-overline text-text-muted">
         <span className="shrink-0">{icon}</span>
         {term}

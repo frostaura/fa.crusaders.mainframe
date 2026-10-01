@@ -3,9 +3,9 @@ import {
   GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultHeading, addResultLine, addRowFailed,
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
-  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine, COURTS_UNREAD, rulesChangeLines, membersOf,
-  ASSIGN_COPY, capsSummary, explainAssignRefusal, peakChangeLine, peakChip, peakChoiceOf, peakSayOf,
-  rateChangeLine, rateChip, ratePreviewLine, rateProblemSentence, tariffLine, yourRateLine,
+  misalignedWindowNote, previewSummary, rulesChangeLines, membersOf,
+  ASSIGN_COPY, DISCOUNT_COPY, capsSummary, discountChangeLine, discountChip, explainAssignRefusal, peakChangeLine, peakChip,
+  peakChoiceOf, peakSayOf, percentFace, tariffLine, yourRateLine,
 } from "./groupsCopy";
 import { UNLIMITED, capOverrideIsInert } from "./groupRules";
 import { ApiError } from "./api";
@@ -225,93 +225,50 @@ describe("the per-day ceiling, said where it is set — item 19", () => {
   });
 });
 
-describe("what a slot costs, in the club's own units", () => {
-  it("says the court's own price for a group that inherits", () => {
-    expect(slicePriceLine({ mode: "inherit_court", credits: [8], courtPrices: [8] }))
-      .toBe("One slot costs what the court costs — 8 credits.");
+describe("the package discount, in the admin's own words (P13 §3.8)", () => {
+  it("says basis points as the percentage that was typed, never with trailing zeros", () => {
+    expect(percentFace(1000)).toBe("10%");
+    expect(percentFace(1250)).toBe("12.5%");
+    expect(percentFace(1)).toBe("0.01%");
+    expect(percentFace(0)).toBe("0%");
+    expect(percentFace(10_000)).toBe("100%");
   });
 
-  it("says the multiplier AND the figure it produces", () => {
-    expect(slicePriceLine({ mode: "multiplier", credits: [6], courtPrices: [8], multiplierBps: 7_500 }))
-      .toBe("One slot costs 6 credits — 0.75× the court's 8.");
+  it("says each of the three states the console can be told, and an absent one as absent", () => {
+    expect(discountChip(1000)).toBe("10% off packages");
+    expect(discountChip(0)).toBe("0% off packages");
+    expect(discountChip(null)).toBe("No say on package prices");
+    expect(discountChip(undefined)).toBe("Package discount not sent");
   });
 
-  it("says a flat price is flat, because that is the part an admin misreads", () => {
-    expect(slicePriceLine({ mode: "flat_per_slice", credits: [12], courtPrices: [8] }))
-      .toBe("One slot costs 12 credits, whatever the court charges.");
+  it("says what the figure on screen means for the group's members", () => {
+    expect(DISCOUNT_COPY.preview(1000)).toBe("10% off every club package for this group's members.");
+    expect(DISCOUNT_COPY.preview(0)).toMatch(/full package prices/);
+    expect(DISCOUNT_COPY.preview(null)).toMatch(/^No say/);
   });
 
-  it("will not print a price the club's system has not sent", () => {
-    expect(slicePriceLine({ mode: "flat_per_slice", credits: [], courtPrices: [8], unknown: true }))
-      .toBe("The club's system hasn't said what one slot costs under this choice yet.");
-  });
-
-  /**
-   * D3 §6.2: R100 is the club's actual top-up block, and "1.6" means nothing to a volunteer.
-   *
-   * The figure now comes through `formatMoney`, so it carries the club's own symbol and the
-   * two decimals the top-up screen already shows for this very setting. The sentence and the
-   * screen it is about used to name `topup_block_zar` two different ways.
-   */
-  it("puts the rate in top-up blocks, with what that actually buys", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [50] }))
-      .toBe("R100.00 buys 160 credits — about 3 slots at today's prices.");
-  });
-
-  it("says one slot in the singular and none in words", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [160] }))
-      .toContain("about 1 slot");
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [400] }))
-      .toBe("R100.00 buys 160 credits — not enough for a single slot at today's prices.");
-  });
-
-  it("does not divide by a free court", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [0] }))
-      .toBe("R100.00 buys 160 credits. Courts cost nothing at the moment, so that buys any number of slots.");
-  });
-
-  /** F3.3: each court carries its own price, and a club whose courts differ reads a range. */
-  it("quotes the courts' own prices, as a range when they differ", () => {
-    expect(slicePriceLine({ mode: "inherit_court", credits: [40, 60], courtPrices: [40, 60] }))
-      .toBe("One slot costs what the court costs — 40–60 credits, depending on the court.");
-    expect(slicePriceLine({ mode: "multiplier", credits: [30, 45], courtPrices: [40, 60], multiplierBps: 7_500 }))
-      .toBe("One slot costs 30–45 credits, depending on the court — 0.75× the court's 40–60.");
-    expect(ratePerBlockSentence({ creditsPerZar: 2.4, blockZar: 100, slicePrices: [40, 60] }))
-      .toBe("R100.00 buys 240 credits — about 4–6 slots at today's prices, depending on the court.");
-  });
-
-  it("names no price at all while the courts are unread, and no slot count for a blank flat price", () => {
-    expect(slicePriceLine({ mode: "inherit_court", credits: [], courtPrices: null })).toBe(COURTS_UNREAD);
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: null }))
-      .toBe("R100.00 buys 160 credits.");
-  });
-
-  it("says nothing it does not know", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: null, blockZar: 100, slicePrices: [50] }))
-      .toBe("The club's system hasn't said what a top-up buys.");
+  it("never names the retired unit, a rate or a court price", () => {
+    const words = [DISCOUNT_COPY.noSay, DISCOUNT_COPY.noSayHelp, DISCOUNT_COPY.field, DISCOUNT_COPY.fieldHelp,
+      DISCOUNT_COPY.combine, ...Object.values(DISCOUNT_COPY.problems)].join(" ");
+    expect(words).not.toMatch(/cr[e]dit|\bcr\b|\brate\b|court price/i);
   });
 });
 
 describe("the consequence of moving somebody between groups, stated BEFORE saving", () => {
-  it("says what their next top-up buys and what their existing credit does", () => {
-    expect(groupChangeConsequence({
-      name: "Daniel", creditsPerBlockBefore: 160, creditsPerBlockAfter: 240, blockZar: 100,
-    })).toContain("Daniel's next top-up will buy 240 credits per R100.00 instead of 160. "
-      + "Credit he already has does not change.");
+  it("says the discount they will get and that minutes they have do not move", () => {
+    expect(groupChangeConsequence({ name: "Daniel", discountBefore: null, discountAfter: 1000 }))
+      .toEqual(["Daniel will get 10% off club packages instead of no package discount. Minutes they already have don't change."]);
   });
 
-  it("says what a slot will cost them, which is the half a group actually changes", () => {
-    const said = groupChangeConsequence({ name: "Daniel", sliceBefore: 8, sliceAfter: 12 });
-    expect(said).toContain("A slot will cost Daniel 12 credits instead of 8.");
-  });
-
-  it("says plainly when nothing about their money changes", () => {
-    expect(groupChangeConsequence({ name: "Daniel", sliceBefore: 8, sliceAfter: 8 }))
-      .toEqual(["Nothing Daniel pays changes. Which times he may book still might — check the preview."]);
+  it("says plainly when nothing about their money changes — 0% and no say are the same to a member", () => {
+    expect(groupChangeConsequence({ name: "Daniel", discountBefore: 0, discountAfter: null }))
+      .toEqual(["Nothing Daniel pays changes. Which times they may book still might — check the preview."]);
   });
 
   it("does not invent a consequence out of figures it was not given", () => {
     expect(groupChangeConsequence({ name: "Daniel" }))
+      .toEqual(["The club's system hasn't said what this changes for Daniel. Open the preview before saving."]);
+    expect(groupChangeConsequence({ name: "Daniel", discountBefore: null }))
       .toEqual(["The club's system hasn't said what this changes for Daniel. Open the preview before saving."]);
   });
 });
@@ -320,8 +277,7 @@ describe("refusals, as sentences — every code in D2 §4.5's table", () => {
   it("has a sentence for every code the wire can send", () => {
     for (const code of [
       "group_name_invalid", "group_name_taken", "group_description_too_long",
-      "group_pricing_mode_invalid", "group_multiplier_out_of_range", "group_flat_price_invalid",
-      "group_pricing_field_not_for_mode", "group_max_slots_out_of_range",
+      "group_package_discount_invalid", "group_max_slots_out_of_range",
       "group_max_minutes_out_of_range", "group_advance_days_out_of_range",
       "group_window_day_invalid", "group_window_range_invalid", "group_windows_too_many",
       "group_windows_overlap", "group_limit_reached", "group_has_members",
@@ -443,14 +399,7 @@ describe("the preview summary — every rule that bit, with its count", () => {
 // D2 — the rate, the peak say, GroupAssign and the member's top-up line
 // ---------------------------------------------------------------------------------------
 
-describe("the rate and peak chips — absent is never the club's rate", () => {
-  it("says a rate in the unit it is typed in, and inheriting as the club's", () => {
-    expect(rateChip(2.4)).toBe("2.4 cr per R1");
-    expect(rateChip(1.6667)).toBe("1.6667 cr per R1");
-    expect(rateChip(null)).toBe("Club rate");
-    expect(rateChip(undefined)).toBe("Top-up rate not sent");
-  });
-
+describe("the peak chip — absent is never a say", () => {
   it("says all three peak says, and a missing one as missing", () => {
     expect(peakChip(true)).toBe("Grants peak");
     expect(peakChip(false)).toBe("Withholds peak");
@@ -464,17 +413,6 @@ describe("the rate and peak chips — absent is never the club's rate", () => {
   });
 });
 
-describe("ratePreviewLine — what one block buys, as the figure is typed", () => {
-  it("uses the club's block, whole money without trailing zeros", () => {
-    expect(ratePreviewLine(2.4, 100)).toBe("R100 → 240 cr");
-    expect(ratePreviewLine(1.6667, 50)).toBe("R50 → 83.34 cr");
-  });
-
-  it("falls back to R100 as the example when the block is unknown", () => {
-    expect(ratePreviewLine(2.4, undefined)).toBe("R100 → 240 cr");
-  });
-});
-
 describe("capsSummary", () => {
   it("names the group's own caps and hands the rest to the club", () => {
     expect(capsSummary({ max_slots_per_day: 2, max_minutes_per_day: null, advance_booking_days: 7 }))
@@ -485,19 +423,14 @@ describe("capsSummary", () => {
   });
 });
 
-describe("rateProblemSentence", () => {
-  it("says every refusal in the admin's words", () => {
-    expect(rateProblemSentence("too_precise")).toBe("Use at most 4 decimal places.");
-    expect(rateProblemSentence("too_high")).toBe("A rate can be at most 1000.");
-    expect(rateProblemSentence("empty")).toMatch(/Use the club's rate/);
-  });
-});
-
 describe("GroupAssign's preview lines", () => {
-  it("says a rate move with where the new rate comes from, and that bought credit stays", () => {
-    expect(rateChangeLine(1.6, 2.4, "League")).toBe("Top-up rate 1.6 → 2.4 cr per R1 (from League). Credit they already have doesn't change.");
-    expect(rateChangeLine(2.4, 2.4, "League")).toBe("Top-up rate stays 2.4 cr per R1 (from League).");
-    expect(rateChangeLine(2.4, 1.6, null)).toMatch(/\(the club's rate\)/);
+  it("says a discount move with where the new one comes from, and that minutes already had stay", () => {
+    expect(discountChangeLine(null, 1000, "League"))
+      .toBe("10% off club packages (from League) instead of no package discount. Minutes they already have don't change.");
+    expect(discountChangeLine(1000, 1000, "League")).toBe("Still 10% off club packages (from League).");
+    expect(discountChangeLine(1000, null, null))
+      .toBe("No package discount instead of 10% off club packages. Minutes they already have don't change.");
+    expect(discountChangeLine(0, null, "Juniors"), "0% and no say are the same to the member").toBe("Still no package discount.");
   });
 
   it("names the group that withholds peak priority", () => {
@@ -507,10 +440,12 @@ describe("GroupAssign's preview lines", () => {
   });
 
   it("says the member's standing in one line", () => {
-    expect(tariffLine({ top_up_credits_per_zar: 2.4, peak_priority: true }, "League"))
-      .toBe("Tops up at 2.4 cr per R1 (League) · peak priority");
-    expect(tariffLine({ top_up_credits_per_zar: 1.6, peak_priority: false, peak_withheld_by: ["Probation"] }, null))
-      .toBe("Tops up at 1.6 cr per R1 (club rate) · no peak priority (withheld by Probation)");
+    expect(tariffLine({ package_discount_bps: 1000, peak_priority: true }, "League"))
+      .toBe("10% off club packages (from League) · peak priority");
+    expect(tariffLine({ package_discount_bps: null, peak_priority: false, peak_withheld_by: ["Probation"] }, null))
+      .toBe("No package discount · no peak priority (withheld by Probation)");
+    // A stale group name beside no discount is not said.
+    expect(tariffLine({ package_discount_bps: 0, peak_priority: true }, "League")).toBe("No package discount · peak priority");
   });
 
   it("names the save by its outcome", () => {
@@ -526,19 +461,21 @@ describe("GroupAssign's preview lines", () => {
   });
 });
 
-describe("yourRateLine — the member's top-up screen", () => {
-  it("names the group the rate comes from, in the club's words", () => {
-    expect(yourRateLine(2.4, { name: "League" })).toBe("Your rate: League — 2.4 cr per R1");
-    expect(yourRateLine(1.6, null)).toBe("Your rate: the club's standard rate — 1.6 cr per R1");
-    // An API that predates D2 sends no rate_group at all: say only what is known.
-    expect(yourRateLine(1.6, undefined)).toBe("Your rate: 1.6 cr per R1");
+describe("yourRateLine — the member's buy screen (name and call shape kept for it)", () => {
+  it("names the group the discount comes from, in the club's words", () => {
+    expect(yourRateLine(1000, { name: "League" })).toBe("Your discount: 10% off club packages (from League)");
+    expect(yourRateLine(1250, null)).toBe("Your discount: 12.5% off club packages");
+    expect(yourRateLine(1000, undefined)).toBe("Your discount: 10% off club packages");
+    expect(yourRateLine(0, { name: "League" })).toBe("No package discount");
   });
 });
 
-describe("the D2 refusals the group endpoints add", () => {
-  it("says the rate's bounds with the server's own figures", () => {
-    expect(explainGroupRefusal(new ApiError(400, { error: "group_credits_per_zar_invalid", min_exclusive: 0, max: 1000, decimals: 4 })))
-      .toBe("A top-up rate has to be more than 0 and at most 1000, with at most 4 decimal places.");
+describe("the P13 refusal the group endpoints add", () => {
+  it("says the discount's bounds as percentages, from the server's basis points", () => {
+    expect(explainGroupRefusal(new ApiError(400, { error: "group_package_discount_invalid", min: 0, max: 10000 })))
+      .toBe("A package discount has to be between 0% and 100%, with at most 2 decimal places.");
+    expect(explainGroupRefusal(new ApiError(400, { error: "group_package_discount_invalid" })))
+      .toBe(GROUP_REFUSAL_CODES.group_package_discount_invalid);
     expect(explainGroupRefusal(new ApiError(400, { error: "group_peak_priority_invalid" })))
       .toMatch(/grants, withholds or no say/);
   });

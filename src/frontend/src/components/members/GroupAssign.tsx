@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
-import { CaretDown, Check, Coins, Lightning, Plus, X } from "@/components/ui/icons";
+import { CaretDown, Check, Lightning, Plus, Tag, X } from "@/components/ui/icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,7 +20,7 @@ import {
   adminEndpoints, type MemberGroup, type MemberGroupChip, type MemberGroupPreview, type MemberGroupsSetResult,
 } from "@/lib/adminApi";
 import {
-  ASSIGN_COPY, explainAssignRefusal, peakChangeLine, peakChip, rateChangeLine, rateChip, rulesChangeLines, tariffLine,
+  ASSIGN_COPY, discountChangeLine, discountChip, explainAssignRefusal, peakChangeLine, peakChip, rulesChangeLines, tariffLine,
 } from "@/lib/groupsCopy";
 import { memberDetailEndpoints } from "@/lib/memberDetailApi";
 import { writeOrReadBack } from "@/lib/lostReply";
@@ -32,12 +32,13 @@ import { cn } from "@/lib/utils";
  * please. Class doesn't make sense").
  *
  * <p>
- * <b>Why this replaced the rate class.</b> A member's groups now decide what a slot costs them,
- * when they may book, the rate a top-up converts at, and whether they get peak hours early. So a
- * change of groups is a change of money, and it is shown BEFORE it is saved: the dialog asks the
- * club (`POST /admin/member-groups/preview`, nothing written) what the new set would resolve to and
- * says it in words — "Top-up rate 1.6 → 2.4 cr per R1 (from League)", "Gains peak priority". The
- * rule is the server's; this screen never re-derives a rate a top-up could then disagree with.
+ * <b>Why this replaced the rate class.</b> A member's groups now decide when they may book, how
+ * much, their discount on the club's packages (P13 §3.8), and whether they get peak hours early.
+ * So a change of groups is a change of money, and it is shown BEFORE it is saved: the dialog asks
+ * the club (`POST /admin/member-groups/preview`, nothing written) what the new set would resolve to
+ * and says it in words — "10% off club packages (from League) instead of no package discount",
+ * "Gains peak priority". The rule is the server's (lowest discount wins); this screen never
+ * re-derives a discount the member's shelf could then disagree with.
  * </p>
  *
  * <p>
@@ -164,8 +165,8 @@ function useAssignState({ userId, name, current, onSaved, onClose }: GroupAssign
         () => adminEndpoints.memberGroupsSet(userId, { groupIds: selected, reason }),
         () => groupsAccordingToMember(userId, selected),
       );
-      const rateGroup = result.groups.find((g) => g.id === result.tariff?.rate_group_id)?.name ?? null;
-      const said = `${ASSIGN_COPY.saved(name, result.groups.length)}${result.tariff ? ` ${tariffLine(result.tariff, rateGroup)}.` : ""}`;
+      const discountGroup = result.groups.find((g) => g.id === result.tariff?.discount_group_id)?.name ?? null;
+      const said = `${ASSIGN_COPY.saved(name, result.groups.length)}${result.tariff ? ` ${tariffLine(result.tariff, discountGroup)}.` : ""}`;
       toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said) : said });
       onSaved(result);
       onClose();
@@ -334,7 +335,7 @@ function GroupOptions({ groups, selected, onToggle }: { groups: MemberGroup[]; s
   );
 }
 
-/** One group in the picker: a toggle with a check, its rate and its peak say under the name. */
+/** One group in the picker: a toggle with a check, its package discount and its peak say under the name. */
 function GroupOption({ group, on, onToggle }: { group: MemberGroup; on: boolean; onToggle: (id: string) => void }) {
   return (
     <CommandItem
@@ -348,7 +349,7 @@ function GroupOption({ group, on, onToggle }: { group: MemberGroup; on: boolean;
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium text-text-primary">{group.name}</span>
         <span className="flex flex-wrap items-center gap-x-3 text-xs text-text-muted">
-          <span className="inline-flex items-center gap-1"><Coins size={12} aria-hidden="true" />{rateChip(group.credits_per_zar)}</span>
+          <span className="inline-flex items-center gap-1"><Tag size={12} aria-hidden="true" />{discountChip(group.package_discount_bps)}</span>
           <span className="inline-flex items-center gap-1"><Lightning size={12} aria-hidden="true" />{peakChip(group.peak_priority)}</span>
           {group.status === "archived" ? <span>{ASSIGN_COPY.archivedHint}</span> : null}
         </span>
@@ -384,15 +385,9 @@ function PreviewLines({ preview, groups }: { preview: MemberGroupPreview; groups
   const after = preview.would_be.tariff;
   const lines: string[] = [];
   if (before && after) {
-    const afterGroup = groups.find((g) => g.id === after.rate_group_id)?.name ?? null;
-    // P13-F3: no rate on the tariff wire any more (contract §3.8) — say the package discount instead.
-    lines.push(rateChangeLine(before.top_up_credits_per_zar ?? 0, after.top_up_credits_per_zar ?? 0, afterGroup));
+    const afterGroup = groups.find((g) => g.id === after.discount_group_id)?.name ?? null;
+    lines.push(discountChangeLine(before.package_discount_bps ?? null, after.package_discount_bps ?? null, afterGroup));
     lines.push(peakChangeLine(before.peak_priority, after.peak_priority, after.peak_withheld_by ?? []));
-  }
-  const sliceBefore = preview.current.slice_price_credits;
-  const sliceAfter = preview.would_be.slice_price_credits;
-  if (typeof sliceBefore === "number" && typeof sliceAfter === "number" && sliceBefore !== sliceAfter) {
-    lines.push(`A slot costs ${sliceAfter} cr instead of ${sliceBefore}.`);
   }
   lines.push(...rulesChangeLines(preview.current, preview.would_be));
   const stranded = preview.would_be.empty_window_groups;

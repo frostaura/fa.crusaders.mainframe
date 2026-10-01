@@ -9,32 +9,28 @@ import { Textarea } from "../ui/textarea";
 import { typography } from "../../lib/typography";
 import { cn } from "../../lib/utils";
 import { WeekPainter } from "./WeekPainter";
-import { CAPS, draftProblems, pricesOf, type ClubContext, type Draft, type SetDraft } from "./groupDraft";
-import { GROUP_PRICING_MODES, type GroupPricingMode } from "../../lib/adminApi";
-import { rateProblem } from "../../lib/groupRules";
+import { GroupPackages } from "./GroupPackages";
+import { CAPS, bpsFromText, draftProblems, type ClubContext, type Draft, type SetDraft } from "./groupDraft";
 import {
-  GROUP_SECTIONS, GROUP_SHEET, PEAK_COMBINE, PEAK_OPTIONS, RATE_COPY, capResolutionSentence,
-  explainGroupRefusal, membersOf, peakWindowLine, ratePerBlockSentence, ratePreviewLine, slicePriceLine,
-  type PeakChoice,
+  DISCOUNT_COPY, GROUP_PACKAGES, GROUP_SECTIONS, GROUP_SHEET, PEAK_COMBINE, PEAK_OPTIONS, capResolutionSentence,
+  explainGroupRefusal, membersOf, peakWindowLine, type PeakChoice,
 } from "../../lib/groupsCopy";
 
 /**
- * The group editor's sections — Basics, Court price, Top-up rate, Peak hours, Booking times,
- * Limits (D2: "the one place for pricing, times, caps, peak and the top-up rate").
+ * The group editor's sections — Basics, Package discount, Peak hours, Booking times, Limits
+ * (D2 + P13: "the one place for times, caps, peak and the package discount"; groups carry no
+ * prices any more — a booking costs its minutes, contract §1.1).
  *
  * <p>
- * <b>Every choice states its consequence beside itself.</b> Three radio buttons with no figure
- * next to them are three buttons a volunteer admin guesses at; a rate field with no "R100 → 240 cr"
- * under it is a number whose effect is invisible until a member tops up. The consequence
- * sentences all come from `groupsCopy`, so the editor and the card cannot describe one rule two
- * ways.
+ * <b>Every choice states its consequence beside itself.</b> A percentage with no sentence under it
+ * is a number whose effect is invisible until a member buys a package. The consequence sentences
+ * all come from `groupsCopy`, so the editor and the card cannot describe one rule two ways.
  * </p>
  *
  * <p>
- * <b>Both D2 fields are tri-state on the wire, and the draft keeps them so.</b> A rate is
- * "inherit the club's" (null) or a figure; a peak say is grants / withholds / no say. The body
- * always sends both — the PATCH distinguishes absent from null, and a draft that dropped an
- * unchanged field would be indistinguishable from one that meant "unchanged" by accident.
+ * <b>The discount is tri-state on the wire, and the draft keeps it so.</b> "No say" (null) or a
+ * percentage, where 0% is a real say (lowest wins, so it takes another group's discount away).
+ * A figure the club would refuse is refused at the field as it is typed, never sent.
  * </p>
  *
  * <p>
@@ -43,12 +39,6 @@ import {
  * failure it would otherwise produce is the one nobody ever finds: a save that reports success.
  * </p>
  */
-
-const MODE_LABEL: Record<GroupPricingMode, string> = {
-  inherit_court: "The court's own price",
-  multiplier: "A multiple of the court's price",
-  flat_per_slice: "A flat price per slot",
-};
 
 /** One titled part of the sheet: an h3, a line saying what it decides, then its controls. */
 function Section({ id, title, lead, children }: { id: string; title: string; lead?: ReactNode; children: ReactNode }) {
@@ -64,6 +54,8 @@ function Section({ id, title, lead, children }: { id: string; title: string; lea
 }
 
 export function GroupEditorSections(props: {
+  /** The group being edited; `""` for a new one, which has no packages of its own yet. */
+  groupId: string;
   draft: Draft;
   set: SetDraft;
   context: ClubContext;
@@ -71,19 +63,24 @@ export function GroupEditorSections(props: {
   /** Show field problems — after the first Save press, never while the admin is still typing. */
   showProblems: boolean;
 }) {
-  const { draft, set, context, error, showProblems } = props;
+  const { groupId, draft, set, context, error, showProblems } = props;
   const problems = showProblems ? draftProblems(draft) : {};
+  // A typed figure the club would refuse is said as it is typed; an EMPTY one only after a press.
+  const typed = (draft.discount ?? "").trim() !== "";
+  const discountProblem = showProblems || typed ? draftProblems(draft).discount : undefined;
   return (
     <div className="flex flex-col gap-6 pb-2" data-group-editor="">
       {error != null && <Alert tone="danger" live="assertive">{explainGroupRefusal(error)}</Alert>}
       <Basics draft={draft} set={set} problem={problems.name} />
       <Separator />
-      <Section id="group-price" title={GROUP_SECTIONS.price}>
-        <PricingChoice draft={draft} set={set} context={context} />
-      </Section>
-      <Separator />
-      <Section id="group-rate" title={GROUP_SECTIONS.rate} lead={RATE_COPY.combine}>
-        <RateChoice draft={draft} set={set} context={context} problem={problems.rate} />
+      <Section id="group-discount" title={GROUP_SECTIONS.discount} lead={DISCOUNT_COPY.combine}>
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          <DiscountChoice draft={draft} set={set} problem={discountProblem} />
+          <div className="flex flex-col gap-1.5 rounded-lg border border-border p-3 text-sm text-text-secondary">
+            <h4 className="font-medium text-text-primary">{GROUP_PACKAGES.title}</h4>
+            {groupId ? <GroupPackages groupId={groupId} packages={context.packages} /> : <p>{GROUP_PACKAGES.newGroup}</p>}
+          </div>
+        </div>
       </Section>
       <Separator />
       <Section id="group-peak" title={GROUP_SECTIONS.peak} lead={peakWindowLine(context.peakHours, context.peakAdvanceHours)}>
@@ -131,100 +128,46 @@ function Basics({ draft, set, problem }: { draft: Draft; set: SetDraft; problem?
   );
 }
 
-/** What a slot costs: three cards, the figure for the choice on screen stated under them. */
-function PricingChoice({ draft, set, context }: { draft: Draft; set: SetDraft; context: ClubContext }) {
-  const price = pricesOf(draft, context.courtPrices);
-  return (
-    <div className="flex flex-col gap-3">
-      <RadioGroup
-        value={draft.mode}
-        onValueChange={(mode) => set("mode", mode as GroupPricingMode)}
-        className="grid gap-2 md:grid-cols-3"
-        aria-label="What does a slot cost this group?"
-      >
-        {GROUP_PRICING_MODES.map((mode) => <RadioCard key={mode} value={mode} title={MODE_LABEL[mode]} />)}
-      </RadioGroup>
-      {draft.mode === "multiplier" && (
-        <Field className="max-w-xs">
-          <FieldLabel>Multiplier (× the court&apos;s price)</FieldLabel>
-          <Input inputMode="decimal" value={draft.multiplier} onChange={(e) => set("multiplier", e.target.value)} />
-        </Field>
-      )}
-      {draft.mode === "flat_per_slice" && (
-        <Field className="max-w-xs">
-          <FieldLabel>Credits per slot</FieldLabel>
-          <Input inputMode="decimal" value={draft.flatPrice} onChange={(e) => set("flatPrice", e.target.value)} />
-        </Field>
-      )}
-      <Consequence>
-        <p className="font-medium text-text-primary">
-          {slicePriceLine({
-            mode: draft.mode,
-            credits: price.credits,
-            courtPrices: context.courtPrices,
-            multiplierBps: Math.round(Number(draft.multiplier) * 10_000),
-            unknown: price.unknown,
-          })}
-        </p>
-      </Consequence>
-    </div>
-  );
-}
-
-/** The prices a top-up block is divided by — null when any of them is not known yet. */
-function blockPrices(draft: Draft, context: ClubContext): number[] | null {
-  const price = pricesOf(draft, context.courtPrices);
-  return price.unknown || price.credits.length === 0 ? null : price.credits;
-}
-
 /** The shaded "what this means" panel under a choice. */
 function Consequence({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("flex flex-col gap-1 rounded-lg bg-bg-muted px-3 py-2.5 text-sm", className)}>{children}</div>;
 }
 
 /**
- * The top-up rate: inherit the club's (the switch), or a figure — with what one block buys at it,
- * live, as the figure is typed. The switch is the control and the number is what it reveals,
- * because inheriting is what nearly every group should do.
+ * The package discount: "no say" (the switch), or a percentage — with what it means for the
+ * group's members under it, live, as the figure is typed. The switch is the control and the number
+ * is what it reveals, because having no say is what nearly every group should do.
  */
-function RateChoice(props: { draft: Draft; set: SetDraft; context: ClubContext; problem?: string }) {
-  const { draft, set, context, problem } = props;
-  const inherits = draft.rate === null;
-  const typed = draft.rate === null ? null : rateProblem(draft.rate) === null ? Number(draft.rate.trim()) : null;
-  const effective = inherits ? context.clubRate : typed;
+function DiscountChoice(props: { draft: Draft; set: SetDraft; problem?: string }) {
+  const { draft, set, problem } = props;
+  const noSay = draft.discount === null;
+  const bps = noSay ? null : bpsFromText(draft.discount ?? "");
   return (
     <div className="flex flex-col gap-3">
       <Field className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <FieldLabel>{RATE_COPY.inherit}</FieldLabel>
-          <FieldDescription>{RATE_COPY.inheritHelp(context.clubRate)}</FieldDescription>
+          <FieldLabel>{DISCOUNT_COPY.noSay}</FieldLabel>
+          <FieldDescription>{DISCOUNT_COPY.noSayHelp}</FieldDescription>
         </div>
-        <Switch
-          checked={inherits}
-          onCheckedChange={(on) => set("rate", on ? null : String(context.clubRate ?? ""))}
-        />
+        <Switch checked={noSay} onCheckedChange={(on) => set("discount", on ? null : "")} />
       </Field>
-      {!inherits && (
+      {!noSay && (
         <Field invalid={Boolean(problem)} className="max-w-xs">
-          <FieldLabel>{RATE_COPY.field()}</FieldLabel>
+          <FieldLabel>{DISCOUNT_COPY.field}</FieldLabel>
           <Input
             inputMode="decimal"
             autoComplete="off"
-            value={draft.rate ?? ""}
-            onChange={(e) => set("rate", e.target.value)}
+            value={draft.discount ?? ""}
+            onChange={(e) => set("discount", e.target.value)}
             className="font-semibold tabular-nums"
           />
+          <FieldDescription>{DISCOUNT_COPY.fieldHelp}</FieldDescription>
           <FieldError>{problem}</FieldError>
         </Field>
       )}
-      {typeof effective === "number" ? (
+      {noSay || bps !== null ? (
         <Consequence>
-          <p className="text-lg font-semibold tabular-nums text-accent-strong" data-rate-preview="">
-            {ratePreviewLine(effective, context.blockZar)}
-          </p>
-          <p className="text-text-secondary">
-            {ratePerBlockSentence({ creditsPerZar: effective, blockZar: context.blockZar ?? 100, slicePrices: blockPrices(draft, context) })}
-          </p>
+          <p className="font-semibold text-accent-strong" data-discount-preview="">{DISCOUNT_COPY.preview(bps)}</p>
         </Consequence>
       ) : null}
     </div>

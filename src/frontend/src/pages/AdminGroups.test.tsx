@@ -5,9 +5,13 @@ import { SETTINGS_FIXTURE, memberFixture, refuse, renderPage, signIn, stubFetch,
 import {
   bookingRulesFixture, groupAddResponse, groupFixture, groupMemberFixture, restrictedGroupFixture, weekdayWindows,
 } from "../test/groupFixtures";
-import type { MemberGroup } from "../lib/adminApi";
+import { adminPackage } from "../test/adminResponseFixtures";
+import type { AdminPackage, MemberGroup, MemberTariff } from "../lib/adminApi";
 import { CONFIRM_NOT_READY } from "../lib/confirmDialogCopy";
-import { ADD_LOST, ARCHIVED_HEADING, ARCHIVE_COPY, ASSIGN_COPY, GROUP_ACTIONS, GROUP_SHEET, RATE_COPY } from "../lib/groupsCopy";
+import {
+  ADD_LOST, ARCHIVED_HEADING, ARCHIVE_COPY, ASSIGN_COPY, DISCOUNT_COPY, GROUP_ACTIONS, GROUP_PACKAGES, GROUP_SECTIONS, GROUP_SHEET,
+} from "../lib/groupsCopy";
+import { PACKAGES_ROUTE } from "../components/groups/GroupPackages";
 
 /**
  * A card's consequential actions live behind its ⋯ menu and a confirm dialog (P3 — they were
@@ -94,13 +98,21 @@ const ROUTES = (
   settingsRoute,
   { path: "/api/v1/admin/members/", body: [memberFixture(), memberFixture({ user_id: "u2", full_name: "Thandi Nkosi", membership_number: "CR-0002" })] },
   ...(groups ? [{ path: "/api/v1/admin/member-groups", body: { groups } } as StubRoute] : []),
-  // F3.3: slot prices come from the courts, not the club's retired `slice_price_credits`.
-  ...(extra.some((r) => r.path === "/api/v1/admin/courts/") ? [] : [{ path: "/api/v1/admin/courts/", body: [court(8)] } as StubRoute]),
+  // P13 §3.5: the club's packages, read ONCE for the page; a test about them supplies its own.
+  ...(extra.some((r) => r.path === PACKAGES_PATH) ? [] : [{ path: PACKAGES_PATH, body: { packages: [] } } as StubRoute]),
   ...extra,
 ];
 
-function court(price: number, n = 1) {
-  return { id: `c${n}`, court_number: n, name: `Court ${n}`, court_type: "Squash", slice_price_credits: price, is_active: true };
+const PACKAGES_PATH = "/api/v1/admin/packages";
+
+/** A package made for one group (P13 §2.3 — `group` is fixed at creation). */
+function groupPackage(over: Partial<AdminPackage> = {}): AdminPackage {
+  return adminPackage({ id: "p-offpeak", name: "Off-peak 5 hours", minutes: 300, price_zar: 450, group: { id: "g-offpeak", name: "Off-peak" }, ...over });
+}
+
+/** The tariff a booking-rules read or a preview carries (P13 §3.8). */
+function tariff(over: Partial<MemberTariff> = {}): MemberTariff {
+  return { package_discount_bps: null, discount_group_id: null, peak_priority: false, peak_withheld_by: [], ...over };
 }
 
 const OFF_PEAK = restrictedGroupFixture({
@@ -168,20 +180,51 @@ describe("the standing statement and the three honest reads", () => {
     expect(await screen.findByRole("heading", { name: "Off-peak" })).toBeInTheDocument();
     expect(screen.getByText("37 members")).toBeInTheDocument();
     expect(screen.getByText(/Mondays to Fridays 06:00–16:00/)).toBeInTheDocument();
-    expect(screen.getByText(/One slot costs what the court costs — 8 credits/)).toBeInTheDocument();
+    // P13: no slot price on a group any more — a booking costs its minutes.
+    expect(screen.queryByText(/One slot costs|a slot/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Off-peak at a glance" })).getByText("No say on package prices")).toBeInTheDocument();
   });
 
-  it("prices a slot from the courts themselves, never the club's retired default (F3.3)", async () => {
-    // The club default says 8; the courts say 40 and 60. Only the courts are true.
-    open([groupFixture()], [{ path: "/api/v1/admin/courts/", body: [court(40, 1), court(60, 2), { ...court(5, 3), is_active: false }] }]);
-    expect(await screen.findByText(/One slot costs what the court costs — 40–60 credits, depending on the court/)).toBeInTheDocument();
-    expect(screen.getByText(/40–60 cr a slot/)).toBeInTheDocument();
-    expect(screen.queryByText(/— 8 credits/)).not.toBeInTheDocument();
+  /**
+   * P13 §3.5: a group's own packages are on its card, read-only, from ONE read of the club's
+   * packages — never one per card — with the way to the page they are made on.
+   */
+  it("lists each group's own packages from one read, and links to where they are made", async () => {
+    const stub = open([OFF_PEAK, groupFixture()], [{
+      path: PACKAGES_PATH,
+      body: { packages: [groupPackage(), adminPackage({ id: "p-club", name: "5 hours", group: null })] },
+    }]);
+    const card = (await screen.findByRole("heading", { name: "Off-peak" })).closest("[data-group-card]") as HTMLElement;
+    const list = await within(card).findByRole("list", { name: GROUP_PACKAGES.title });
+    expect(within(list).getByText("Off-peak 5 hours")).toBeInTheDocument();
+    // The minutes through <Minutes>: "5 h" to the eye, "5 hours" to a screen reader.
+    expect(within(list).getByText("5 h")).toHaveAttribute("aria-hidden", "true");
+    expect(within(list).getByText("5 hours")).toHaveClass("sr-only");
+    expect(within(list).getByText("R450.00")).toBeInTheDocument();
+    // The club's own package is nobody's group package.
+    expect(within(card).queryByText("5 hours", { selector: ".font-medium" })).not.toBeInTheDocument();
+    expect(within(card).getByRole("link", { name: GROUP_PACKAGES.manage })).toHaveAttribute("href", PACKAGES_ROUTE);
+    // Regular has none of its own, and says so rather than showing nothing.
+    const regular = screen.getByRole("heading", { name: "Regular" }).closest("[data-group-card]") as HTMLElement;
+    expect(within(regular).getByText(GROUP_PACKAGES.none)).toBeInTheDocument();
+    const reads = stub.calls.filter((c) => c.path.startsWith(PACKAGES_PATH));
+    expect(reads).toHaveLength(1);
+    expect(reads[0].path).toContain("status=active");
+  });
+
+  /** A failed packages read is said beside each group, and never takes the groups down. */
+  it("says it couldn't read packages, inline, and still shows every group", async () => {
+    open([OFF_PEAK], [{ path: PACKAGES_PATH, status: 500, body: { error: "boom" } }]);
+    const card = (await screen.findByRole("heading", { name: "Off-peak" })).closest("[data-group-card]") as HTMLElement;
+    expect(await within(card).findByText(GROUP_PACKAGES.failed)).toBeInTheDocument();
+    expect(within(card).queryByText(GROUP_PACKAGES.none), "a failed read is never “no packages”").not.toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't read the club's groups/)).not.toBeInTheDocument();
+    expect(within(card).getByText(/Mondays to Fridays 06:00–16:00/)).toBeInTheDocument();
   });
 
   it("builds each card's facts as a valid description list (F3.22)", async () => {
     open([groupFixture()]);
-    await screen.findByText(/One slot costs what the court costs/);
+    await screen.findByText(GROUP_PACKAGES.none);
     const terms = [...document.querySelectorAll("dt")];
     expect(terms.length).toBeGreaterThan(0);
     for (const dt of terms) {
@@ -191,11 +234,6 @@ describe("the standing statement and the three honest reads", () => {
     }
   });
 
-  it("says what a top-up block buys, because “1.6” means nothing to a volunteer", async () => {
-    open([groupFixture()]);
-    // A group that inherits is quoted at the club's rate: one R100 block, 160 credits.
-    expect(await screen.findByText(/R100 → 160 cr/)).toBeInTheDocument();
-  });
 });
 
 describe("the editor", () => {
@@ -207,12 +245,14 @@ describe("the editor", () => {
     return stub;
   };
 
-  it("shows what one slot will cost under the choice being made, as it is made", async () => {
-    await edit([OFF_PEAK]);
-    fireEvent.click(await screen.findByRole("radio", { name: /A multiple of the court's price/ }));
-    fireEvent.change(screen.getByLabelText(/Multiplier/), { target: { value: "0.75" } });
-    // Three radio buttons with no figure beside them are three buttons an admin guesses at.
-    expect(await screen.findByText(/One slot costs 6 credits — 0.75× the court's 8/)).toBeInTheDocument();
+  it("offers no slot price at all, and shows the group's own packages read-only in the sheet", async () => {
+    await edit([OFF_PEAK], [{ path: PACKAGES_PATH, body: { packages: [groupPackage()] } }]);
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).queryByRole("radio", { name: /court's price|flat price/i })).not.toBeInTheDocument();
+    expect(within(sheet).getByRole("heading", { name: GROUP_SECTIONS.discount })).toBeInTheDocument();
+    const list = await within(sheet).findByRole("list", { name: GROUP_PACKAGES.title });
+    expect(within(list).getByText("Off-peak 5 hours")).toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: GROUP_PACKAGES.manage })).toHaveAttribute("href", PACKAGES_ROUTE);
   });
 
   it("keeps each cap behind “use the club's limit”, and says what the club's is", async () => {
@@ -434,14 +474,14 @@ describe("the previews, which are the answer to “most restrictive” being an 
     const stub = open([OFF_PEAK, groupFixture({ id: "g-regular", name: "Regular" })], [
       {
         path: "/api/v1/admin/members/44444444-4444-4444-4444-444444444444/booking-rules",
-        body: bookingRulesFixture({ slice_price_credits: 8 }),
+        body: bookingRulesFixture({ tariff: tariff() }),
       },
       {
         method: "POST",
         path: "/api/v1/admin/member-groups/preview",
         body: bookingRulesFixture({
           groups: [{ id: "g-regular", name: "Regular" }, { id: "g-offpeak", name: "Off-peak" }],
-          slice_price_credits: 12,
+          tariff: tariff({ package_discount_bps: 1000, discount_group_id: "g-offpeak" }),
         }),
       },
     ]);
@@ -456,8 +496,8 @@ describe("the previews, which are the answer to “most restrictive” being an 
       return call!.body as Record<string, unknown>;
     });
     expect(sent.proposedGroupIds).toEqual(["g-regular", "g-offpeak"]);
-    expect(await screen.findByText(/A slot will cost Ada Lovelace 12 credits instead of 8\./))
-      .toBeInTheDocument();
+    expect(await screen.findByText("Ada Lovelace will get 10% off club packages instead of no package discount. "
+      + "Minutes they already have don't change.")).toBeInTheDocument();
     // Nothing has been written, and the screen has to say so or an admin walks away believing
     // they have made the change.
     expect(screen.getByText(/Nothing here is saved/)).toBeInTheDocument();
@@ -514,29 +554,30 @@ describe("the previews, which are the answer to “most restrictive” being an 
 });
 
 /**
- * D2 — the group carries the top-up rate and the peak say the member class used to, so this page
- * is the one place both are set. Both are tri-state on the wire and the page has to keep them so:
- * a rate is inherited (null) or a figure; a peak say grants, withholds, or has none.
+ * D2 + P13 — the group carries the package discount and the peak say, so this page is the one
+ * place both are set. Both are tri-state on the wire and the page has to keep them so: a discount
+ * is "no say" (null) or a percentage sent as basis points; a peak say grants, withholds, or has none.
+ * The discount travels only when it changed (absent = unchanged, null clears it).
  */
-describe("the top-up rate and peak hours (D2: groups replaced the class)", () => {
+describe("the package discount and peak hours (D2 + P13 §3.8)", () => {
   beforeEach(() => { signIn({ isAdmin: true }); });
 
   const LEAGUE = groupFixture({
     id: "g-league", name: "League", is_system_default: false, system_key: "league",
-    credits_per_zar: 2.4, peak_priority: true, member_count: 12,
+    package_discount_bps: 1000, peak_priority: true, member_count: 12,
   });
-  const JUNIORS = restrictedGroupFixture({ id: "g-juniors", name: "Juniors", credits_per_zar: null, peak_priority: false });
+  const JUNIORS = restrictedGroupFixture({ id: "g-juniors", name: "Juniors", package_discount_bps: null, peak_priority: false });
 
-  it("says each group's rate and peak say on its card, in words beside an icon", async () => {
-    open([LEAGUE, JUNIORS]);
+  it("says each group's discount as a percentage and its peak say, in words beside an icon", async () => {
+    open([LEAGUE, JUNIORS, restrictedGroupFixture({ id: "g-half", name: "Half", package_discount_bps: 1250 })]);
     const league = await screen.findByRole("list", { name: "League at a glance" });
-    expect(within(league).getByText("2.4 cr per R1")).toBeInTheDocument();
+    expect(within(league).getByText("10% off packages")).toBeInTheDocument();
     expect(within(league).getByText("Grants peak")).toBeInTheDocument();
     const juniors = screen.getByRole("list", { name: "Juniors at a glance" });
-    expect(within(juniors).getByText("Club rate")).toBeInTheDocument();
+    expect(within(juniors).getByText("No say on package prices")).toBeInTheDocument();
     expect(within(juniors).getByText("Withholds peak")).toBeInTheDocument();
-    // What a block buys at the group's OWN rate, not the club's.
-    expect(screen.getByText(/R100 → 240 cr/)).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Half at a glance" })).getByText("12.5% off packages")).toBeInTheDocument();
+    expect(screen.queryByText(/\bcr\b|per R1/)).not.toBeInTheDocument();
   });
 
   /**
@@ -554,45 +595,87 @@ describe("the top-up rate and peak hours (D2: groups replaced the class)", () =>
     expect(screen.queryByRole("menuitem", { name: GROUP_ACTIONS.remove })).not.toBeInTheDocument();
   });
 
-  it("previews what a block buys at the rate being typed, and sends the rate and the peak say", async () => {
+  it("sets a discount typed as a percentage, sent as whole basis points, with the peak say", async () => {
     const stub = open([JUNIORS], [{ method: "PATCH", path: "/api/v1/admin/member-groups/g-juniors", body: JUNIORS }]);
     fireEvent.click(await screen.findByRole("button", { name: /Edit Juniors/ }));
 
-    const inherit = await screen.findByRole("switch", { name: RATE_COPY.inherit });
-    expect(inherit, "a group with no rate of its own inherits the club's").toBeChecked();
-    fireEvent.click(inherit);
-    fireEvent.change(screen.getByLabelText(RATE_COPY.field()), { target: { value: "2.4" } });
-    expect(await screen.findByText("R100 → 240 cr")).toBeInTheDocument();
+    const noSay = await screen.findByRole("switch", { name: DISCOUNT_COPY.noSay });
+    expect(noSay, "a group with no discount of its own has no say").toBeChecked();
+    fireEvent.click(noSay);
+    fireEvent.change(screen.getByLabelText(DISCOUNT_COPY.field), { target: { value: "12.5" } });
+    expect(await screen.findByText(DISCOUNT_COPY.preview(1250))).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "Grants peak priority" }));
     fireEvent.click(screen.getByRole("button", SAVE("Juniors")));
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
     const sent = stub.calls.find((c) => c.method === "PATCH")!.body as Record<string, unknown>;
-    expect(sent.creditsPerZar).toBe(2.4);
+    expect(sent.packageDiscountBps).toBe(1250);
     expect(sent.peakPriority).toBe(true);
+    // The retired fields are never sent (P13 §3.3).
+    expect(Object.keys(sent).filter((key) => /pricing|perzar/i.test(key))).toEqual([]);
   });
 
-  it("sends null for an inherited rate and for “no say”, never an absent field", async () => {
+  it("clears a discount with null when the group goes back to “no say”", async () => {
     const stub = open([LEAGUE], [{ method: "PATCH", path: "/api/v1/admin/member-groups/g-league", body: LEAGUE }]);
     fireEvent.click(await screen.findByRole("button", { name: /Edit League/ }));
-    fireEvent.click(await screen.findByRole("switch", { name: RATE_COPY.inherit }));
+    const noSay = await screen.findByRole("switch", { name: DISCOUNT_COPY.noSay });
+    expect(noSay).not.toBeChecked();
+    expect(screen.getByLabelText(DISCOUNT_COPY.field)).toHaveValue("10");
+    fireEvent.click(noSay);
     fireEvent.click(screen.getByRole("radio", { name: "No say" }));
     fireEvent.click(screen.getByRole("button", SAVE("League")));
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
     const sent = stub.calls.find((c) => c.method === "PATCH")!.body as Record<string, unknown>;
-    expect(sent).toHaveProperty("creditsPerZar", null);
+    expect(sent).toHaveProperty("packageDiscountBps", null);
     expect(sent).toHaveProperty("peakPriority", null);
   });
 
-  /** The server's own bounds, said at the field — never a save that the club then refuses. */
-  it("refuses a rate the club would refuse, at the field, and sends nothing", async () => {
+  /** Absent = unchanged (P13 §3.8): a rename never re-asserts a discount somebody else set since. */
+  it("leaves the discount out of the PATCH when it did not change", async () => {
+    const stub = open([LEAGUE], [{ method: "PATCH", path: "/api/v1/admin/member-groups/g-league", body: LEAGUE }]);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit League/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: "League players" } });
+    // Typed differently, the same figure: 10.00 % is still 1000 bps, so still unchanged.
+    fireEvent.change(within(dialog).getByLabelText(DISCOUNT_COPY.field), { target: { value: "10.00" } });
+    fireEvent.click(within(dialog).getByRole("button", SAVE("League")));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
+    const sent = stub.calls.find((c) => c.method === "PATCH")!.body as Record<string, unknown>;
+    expect(sent.name).toBe("League players");
+    expect(sent).not.toHaveProperty("packageDiscountBps");
+  });
+
+  /** The server's own bounds, said at the field as it is typed — never a save the club then refuses. */
+  it("refuses a discount the club would refuse, at the field, and sends nothing", async () => {
     const stub = open([JUNIORS]);
     fireEvent.click(await screen.findByRole("button", { name: /Edit Juniors/ }));
-    fireEvent.click(await screen.findByRole("switch", { name: RATE_COPY.inherit }));
-    fireEvent.change(screen.getByLabelText(RATE_COPY.field()), { target: { value: "2.12345" } });
+    fireEvent.click(await screen.findByRole("switch", { name: DISCOUNT_COPY.noSay }));
+    const field = screen.getByLabelText(DISCOUNT_COPY.field);
+    fireEvent.change(field, { target: { value: "150" } });
+    // Said as it is typed, before any press.
+    expect(await screen.findByText(DISCOUNT_COPY.problems.out_of_range)).toBeInTheDocument();
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(field, { target: { value: "12.345" } });
+    expect(await screen.findByText(DISCOUNT_COPY.problems.too_precise)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", SAVE("Juniors")));
-    expect(await screen.findByText("Use at most 4 decimal places.")).toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "" } });
+    expect(await screen.findByText(DISCOUNT_COPY.problems.empty)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", SAVE("Juniors")));
     expect(stub.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("words the club's refusal of a discount in percentages, never as a code", async () => {
+    open([JUNIORS], [{
+      method: "PATCH", path: "/api/v1/admin/member-groups/g-juniors",
+      status: 400, body: { error: "group_package_discount_invalid", min: 0, max: 10000 },
+    }]);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit Juniors/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: DISCOUNT_COPY.noSay }));
+    fireEvent.change(screen.getByLabelText(DISCOUNT_COPY.field), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", SAVE("Juniors")));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("A package discount has to be between 0% and 100%");
+    expect(alert).not.toHaveTextContent(/group_package_discount_invalid|10000/);
   });
 
   it("explains how several groups combine for peak hours, beside the choice", async () => {
@@ -772,6 +855,47 @@ describe("a group write whose reply was lost", () => {
   it("says nothing changed, in the sheet, when the list does not read as sent", async () => {
     open(null, lostSave(false));
     const dialog = await renameOffPeak();
+    expect(await within(dialog).findByText(/we checked: the group is as it was — nothing changed/)).toBeInTheDocument();
+  });
+
+  /**
+   * P13: the read-back compares the package discount the save sent (it used to compare the pricing
+   * mode, which the wire no longer carries — so every lost save read as "nothing changed").
+   */
+  function lostDiscountSave(landed: boolean): StubRoute[] {
+    let groups: MemberGroup[] = [OFF_PEAK];
+    return [
+      { path: "/api/v1/admin/member-groups", respond: () => ({ groups }) },
+      {
+        method: "PATCH", path: "/api/v1/admin/member-groups/g-offpeak",
+        respond: (req) => {
+          // A landed save stores what was sent; one that did not land leaves the old discount.
+          if (landed) groups = [{ ...OFF_PEAK, package_discount_bps: (req.body as { packageDiscountBps: number }).packageDiscountBps }];
+          return refuse(504, { error: "gateway_timeout" });
+        },
+      },
+    ];
+  }
+
+  async function discountOffPeak(percent: string) {
+    fireEvent.click(await screen.findByRole("button", { name: /Edit Off-peak/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("switch", { name: DISCOUNT_COPY.noSay }));
+    fireEvent.change(within(dialog).getByLabelText(DISCOUNT_COPY.field), { target: { value: percent } });
+    fireEvent.click(within(dialog).getByRole("button", SAVE("Off-peak")));
+    return dialog;
+  }
+
+  it("says a lost discount save landed when the list carries the discount sent", async () => {
+    open(null, lostDiscountSave(true));
+    await discountOffPeak("15");
+    expect(await screen.findByText(`${GROUP_SHEET.saved("Off-peak")} The club's reply didn't arrive, so we checked its record.`))
+      .toBeInTheDocument();
+  });
+
+  it("says a lost discount save did not land when the list still has the old discount", async () => {
+    open(null, lostDiscountSave(false));
+    const dialog = await discountOffPeak("15");
     expect(await within(dialog).findByText(/we checked: the group is as it was — nothing changed/)).toBeInTheDocument();
   });
 

@@ -2,13 +2,10 @@ import { ApiError } from "./api";
 import { unsureWords } from "./lostReplyCopy";
 import { unsureSentence } from "./lostReply";
 import { describeFailure } from "./errors";
-import type { GroupAddResult, GroupAddRow, GroupPricingMode, Weekday } from "./adminApi";
+import type { GroupAddResult, GroupAddRow, Weekday } from "./adminApi";
 import {
-  CREDITS_PER_ZAR_DECIMALS, MAX_CREDITS_PER_ZAR, UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert,
-  countSlots, creditsFor, formatClock, intersect, type Interval, type RateProblem,
+  UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert, countSlots, formatClock, intersect, type Interval,
 } from "./groupRules";
-import { clubCurrencySymbol } from "./currency";
-import { formatRate, formatMoney } from "./utils";
 
 /**
  * Every sentence the groups surface says — GOAL items 3 + 19.
@@ -54,7 +51,7 @@ export const MOST_RESTRICTIVE_STANDING
 export const GROUPS_READ_FAILED = "Couldn't read the club's groups. Nothing has changed.";
 
 export const GROUPS_EMPTY_TITLE
-  = "No groups yet. Everyone can book any open slot at the club's standard rate.";
+  = "No groups yet. Everyone can book any open slot and buys the club's packages at full price.";
 
 export const STALE_PREVIEW
   = "Someone changed the club's opening hours while this was open, so the preview below is "
@@ -291,111 +288,20 @@ export function capResolutionSentence(
 }
 
 // ---------------------------------------------------------------------------------------
-// Price
+// The package discount (P13 §3.8) — rand only, never minutes
 // ---------------------------------------------------------------------------------------
 
-/** A multiplier written the way it was typed — 7500 bps is "0.75×", not "7500". */
-function multiplierFace(bps: number): string {
-  return String(Number((bps / 10_000).toFixed(4)));
-}
-
-/** Credits with no trailing noise: 8, 8.5, 8.25 — never "8.00" and never "8.2500000001". */
-export function creditsFace(credits: number): string {
-  return String(Number(credits.toFixed(2)));
-}
-
 /**
- * A spread of credit figures as one face: "8" when every court agrees, "8–12" when they differ.
- *
- * <p>
- * <b>Review round 1, F3.3.</b> Every figure on the Groups page used to be worked out from the
- * club's retired `slice_price_credits` setting — 8 cr — while each court now carries its own
- * price. "R100 buys 240 credits — about 30 slots" was arithmetic on a number no court charged.
- * The page now reads the courts, and where they differ it says the range rather than picking one.
- * </p>
+ * A discount in basis points as a person reads it: 1000 → "10%", 1250 → "12.5%", 1 → "0.01%".
+ * Never "10.00%": the figure is typed the same way, so it reads back the way it went in.
  */
-export function creditsRange(values: readonly number[]): string {
-  if (values.length === 0) return "?";
-  const low = Math.min(...values);
-  const high = Math.max(...values);
-  return low === high ? creditsFace(low) : `${creditsFace(low)}–${creditsFace(high)}`;
+export function percentFace(bps: number): string {
+  return `${Number((bps / 100).toFixed(2))}%`;
 }
 
-/** Said instead of a price while the courts have not been read — never a figure invented. */
-export const COURTS_UNREAD = "The club's courts haven't been read yet, so what a slot costs isn't known.";
-
-/**
- * What one slice costs under this pricing choice, shown beside the choice.
- *
- * A mode picked with no figure beside it is three radio buttons an admin guesses at; the
- * consequence is what makes the choice readable. `credits` holds one figure per distinct court
- * price (F3.3), so a club whose courts differ reads a range, never one court's price.
- */
-export function slicePriceLine(input: {
-  mode: GroupPricingMode;
-  credits: readonly number[];
-  /** The distinct prices of the club's courts in use; null while they have not been read. */
-  courtPrices: readonly number[] | null;
-  multiplierBps?: number | null;
-  unknown?: boolean;
-}): string {
-  if (input.unknown) return "The club's system hasn't said what one slot costs under this choice yet.";
-  if (input.mode === "flat_per_slice") {
-    return `One slot costs ${creditsRange(input.credits)} credits, whatever the court charges.`;
-  }
-  if (!input.courtPrices || input.courtPrices.length === 0) return COURTS_UNREAD;
-  const depends = input.courtPrices.length > 1 ? ", depending on the court" : "";
-  if (input.mode === "inherit_court") {
-    return `One slot costs what the court costs — ${creditsRange(input.courtPrices)} credits${depends}.`;
-  }
-  const face = typeof input.multiplierBps === "number" ? multiplierFace(input.multiplierBps) : "?";
-  return `One slot costs ${creditsRange(input.credits)} credits${depends} — ${face}× the court's `
-    + `${creditsRange(input.courtPrices)}.`;
-}
-
-/** "about 3 slots" / "about 3–5 slots" / "not enough for a single slot" — from a price spread. */
-function slotsBought(credits: number, prices: readonly number[]): string {
-  const fewest = Math.floor(credits / Math.max(...prices));
-  const most = Math.floor(credits / Math.min(...prices));
-  if (most === 0) return " — not enough for a single slot at today's prices.";
-  if (fewest === most) return ` — about ${slotsWord(most)} at today's prices.`;
-  if (fewest === 0) return ` — up to ${slotsWord(most)} at today's prices, depending on the court.`;
-  return ` — about ${fewest}–${slotsWord(most)} at today's prices, depending on the court.`;
-}
-
-/**
- * The club's top-up rate in the block it actually sells — D3 §6.2.
- *
- * <p>
- * R100 rather than per rand, because `topup_block_zar` is what a member hands over and "1.6"
- * means nothing to a volunteer. The consequence clause is the point: a number of credits is
- * only meaningful against what a court costs, and that is the arithmetic nobody should be doing
- * standing at a desk. `slicePrices` is one figure per court price (F3.3); null when the price
- * is not known — the courts unread, or a flat price not yet typed — and then no slot count is
- * claimed at all (a blank flat price used to read "Courts cost nothing at the moment").
- * </p>
- */
-export function ratePerBlockSentence(input: {
-  creditsPerZar: number | null | undefined;
-  blockZar: number | null | undefined;
-  slicePrices: readonly number[] | null;
-}): string {
-  if (typeof input.creditsPerZar !== "number" || typeof input.blockZar !== "number") {
-    // No amount invented here. The branch is reached when the BLOCK is unknown as well as
-    // the rate, so naming a figure would be naming one this club may not use — and now that
-    // the symbol is the club's too, the old literal named a currency it may not take either.
-    return "The club's system hasn't said what a top-up buys.";
-  }
-  const credits = Number((input.creditsPerZar * input.blockZar).toFixed(2));
-  // Through the one formatter, so this sentence and the top-up screen — which quotes the
-  // same `topup_block_zar` — cannot name the club's money two different ways.
-  const head = `${formatMoney(input.blockZar)} buys ${creditsFace(credits)} credits`;
-  if (!input.slicePrices || input.slicePrices.length === 0) return `${head}.`;
-  const priced = input.slicePrices.filter((p) => p > 0);
-  if (priced.length === 0) {
-    return `${head}. Courts cost nothing at the moment, so that buys any number of slots.`;
-  }
-  return `${head}${slotsBought(credits, priced)}`;
+/** What a discount gives a member, in words — no discount and 0% are the same thing to them. */
+function discountWords(bps: number | null | undefined): string {
+  return typeof bps === "number" && bps > 0 ? `${percentFace(bps)} off club packages` : "no package discount";
 }
 
 // ---------------------------------------------------------------------------------------
@@ -406,44 +312,34 @@ export function ratePerBlockSentence(input: {
  * What changes for one named person, said BEFORE the save rather than after it.
  *
  * <p>
- * Every arm names the person, because a consequence written as "their next top-up" is one an
+ * Every arm names the person, because a consequence written as "their next purchase" is one an
  * admin reads about the row they are looking at, and the row they are looking at is not always
  * the row they clicked.
  * </p>
  *
  * <p>
- * The top-up clause is grounded: the rate is locked onto the top-up row at purchase
- * (`LockTopUpConversionRate`), so credit already bought genuinely does not move. Saying so is
- * not reassurance, it is the difference between an admin making the change and an admin
- * refusing to.
+ * The discount is the only money a group changes (P13: no court or group prices any more), and
+ * it applies to rand, never minutes — and a checkout already open keeps the price it was locked
+ * at (the purchase lock, contract §4.4). So minutes a member already has genuinely do not move,
+ * and saying so is the difference between an admin making the change and refusing to.
+ * `undefined` on either side is a figure the club's system did not send, never "no discount".
  * </p>
  */
 export function groupChangeConsequence(input: {
   name: string;
-  sliceBefore?: number | null;
-  sliceAfter?: number | null;
-  creditsPerBlockBefore?: number | null;
-  creditsPerBlockAfter?: number | null;
-  blockZar?: number | null;
+  discountBefore?: number | null;
+  discountAfter?: number | null;
 }): string[] {
-  const out: string[] = [];
-  const { name } = input;
-  if (typeof input.creditsPerBlockBefore === "number" && typeof input.creditsPerBlockAfter === "number"
-    && input.creditsPerBlockBefore !== input.creditsPerBlockAfter) {
-    out.push(`${name}'s next top-up will buy ${creditsFace(input.creditsPerBlockAfter)} credits per `
-      + `${formatMoney(input.blockZar ?? 100)} instead of ${creditsFace(input.creditsPerBlockBefore)}. `
-      + "Credit he already has does not change.");
+  const { name, discountBefore, discountAfter } = input;
+  if (discountBefore === undefined || discountAfter === undefined) {
+    return [`The club's system hasn't said what this changes for ${name}. Open the preview before saving.`];
   }
-  if (typeof input.sliceBefore === "number" && typeof input.sliceAfter === "number"
-    && input.sliceBefore !== input.sliceAfter) {
-    out.push(`A slot will cost ${name} ${creditsFace(input.sliceAfter)} credits instead of `
-      + `${creditsFace(input.sliceBefore)}.`);
+  const before = discountWords(discountBefore);
+  const after = discountWords(discountAfter);
+  if (before === after) {
+    return [`Nothing ${name} pays changes. Which times they may book still might — check the preview.`];
   }
-  if (out.length > 0) return out;
-  const knewSomething = typeof input.sliceBefore === "number" || typeof input.creditsPerBlockBefore === "number";
-  return knewSomething
-    ? [`Nothing ${name} pays changes. Which times he may book still might — check the preview.`]
-    : [`The club's system hasn't said what this changes for ${name}. Open the preview before saving.`];
+  return [`${name} will get ${after} instead of ${before}. Minutes they already have don't change.`];
 }
 
 // ---------------------------------------------------------------------------------------
@@ -465,12 +361,6 @@ export const GROUP_REFUSAL_CODES: Record<string, string> = {
     + "admin reading the wrong rule — give this one a different name.",
   group_description_too_long: "The description has to be 256 characters or fewer. It is shown to "
     + "members on the booking grid, so shorter is better anyway.",
-  group_pricing_mode_invalid: "That is not one of the three ways a group can be priced.",
-  group_multiplier_out_of_range: "The multiplier has to be between 0 and 100 times the court's own "
-    + "price.",
-  group_flat_price_invalid: "A flat price has to be a whole number of cents, zero or more.",
-  group_pricing_field_not_for_mode: "That figure belongs to a different way of pricing. Clear it, "
-    + "or change how this group is priced.",
   group_max_slots_out_of_range: "Slots a day has to be a whole number between 0 and 96, where 0 "
     + "means no limit.",
   group_max_minutes_out_of_range: "Minutes a day has to be a whole number between 0 and 1440, "
@@ -490,11 +380,11 @@ export const GROUP_REFUSAL_CODES: Record<string, string> = {
     + "longer use.",
   group_has_members: "This group still has members, so it cannot be deleted. Archive it instead.",
   group_is_system_default: "This is one of the club's built-in groups. It can be renamed and edited, "
-    + "and it cannot be deleted — and the league group, which carries the club's rates, cannot be "
+    + "and it cannot be deleted — and the league group, which the club's own rules rely on, cannot be "
     + "archived either.",
   too_many_members: "That is more than 500 members in one go. Do it in smaller batches.",
-  group_credits_per_zar_invalid: "A top-up rate has to be more than 0 and at most 1000, with at most "
-    + "4 decimal places.",
+  group_package_discount_invalid: "A package discount has to be between 0% and 100%, with at most 2 "
+    + "decimal places.",
   group_peak_priority_invalid: "Peak hours has to be one of the three choices: grants, withholds or no say.",
 };
 
@@ -531,18 +421,13 @@ export function explainGroupRefusal(err: unknown, action = "save this group"): s
         return `${base.replace(/^One of the painted|^Two painted/, (m) => m)} The day is ${DAY_NAME[day]}.`;
       }
     }
-    if (code === "group_credits_per_zar_invalid") {
-      const max = figure(err, "max");
-      const decimals = figure(err, "decimals");
-      if (max && decimals) {
-        return `A top-up rate has to be more than 0 and at most ${max}, with at most ${decimals} `
-          + "decimal places.";
-      }
-    }
-    if (code === "group_pricing_field_not_for_mode") {
-      const field = figure(err, "field");
-      if (field) {
-        return `${GROUP_REFUSAL_CODES[code]} The figure is the one called “${field}”.`;
+    if (code === "group_package_discount_invalid") {
+      // The server's bounds are basis points (`{min: 0, max: 10000}`); the admin typed a percentage.
+      const min = Number(err.detail("min"));
+      const max = Number(err.detail("max"));
+      if (Number.isFinite(min) && Number.isFinite(max) && err.detail("max") != null) {
+        return `A package discount has to be between ${percentFace(min)} and ${percentFace(max)}, with at `
+          + "most 2 decimal places.";
       }
     }
   }
@@ -706,31 +591,17 @@ export const GROUP_ACTIONS = {
 } as const;
 
 // ---------------------------------------------------------------------------------------
-// D2 — groups carry the top-up rate and the peak say (the member class is gone)
+// D2 + P13 — groups carry the package discount and the peak say (the member class is gone)
 // ---------------------------------------------------------------------------------------
 
-/** "R1" — one unit of the club's money, as a rate is quoted against it. */
-function oneUnit(): string {
-  return `${clubCurrencySymbol()}1`;
-}
-
-/** "R100", not "R100.00", where the amount is whole — a block is always whole in practice. */
-export function wholeMoney(amount: number): string {
-  return Number.isInteger(amount) ? `${clubCurrencySymbol()}${amount}` : formatMoney(amount);
-}
-
-/** "2.4 cr per R1" — a rate, in the unit it is typed in. */
-export function rateFace(rate: number): string {
-  return `${formatRate(rate)} cr per ${oneUnit()}`;
-}
-
 /**
- * A group's top-up rate as its card's chip says it. Absent (an API that predates D2) is not
- * "the club's rate" — that is the claim a volunteer would act on — so it has its own words.
+ * A group's package discount as its card's chip says it. Null is "no say" — the group leaves the
+ * price to the member's other groups — and absent (an API that predates P13) is neither, so it
+ * has its own words rather than a claim a volunteer would act on.
  */
-export function rateChip(rate: number | null | undefined): string {
-  if (rate === undefined) return "Top-up rate not sent";
-  return rate === null ? "Club rate" : rateFace(rate);
+export function discountChip(bps: number | null | undefined): string {
+  if (bps === undefined) return "Package discount not sent";
+  return bps === null ? "No say on package prices" : `${percentFace(bps)} off packages`;
 }
 
 /** A group's say on the peak window, as its card's chip says it. */
@@ -764,14 +635,13 @@ export const SYSTEM_GROUP = {
   badge: "Built in",
   note: (name: string) =>
     `${name} replaced the league / over-65 member class. It can be renamed and edited, and it can't `
-    + "be archived or deleted — the club's rates rely on it.",
+    + "be archived or deleted — the club's own rules rely on it.",
 } as const;
 
 /** The editor's sections, in the order the sheet lays them out. */
 export const GROUP_SECTIONS = {
   basics: "Basics",
-  price: "Court price",
-  rate: "Top-up rate",
+  discount: "Package discount",
   peak: "Peak hours",
   times: "Booking times",
   limits: "Limits",
@@ -780,7 +650,7 @@ export const GROUP_SECTIONS = {
 export const GROUP_SHEET = {
   newTitle: "New group",
   editTitle: (name: string) => `Edit ${name}`,
-  description: "What this group pays, when it may book and how much. Members in several groups get the strictest rule.",
+  description: "This group's package discount, when it may book and how much. Members in several groups get the strictest rule.",
   settingsTab: "Settings",
   membersTab: "Members",
   membersAfterCreate: "Save the group first, then add its members.",
@@ -794,37 +664,43 @@ export const GROUP_SHEET = {
   nameRequired: "Give the group a name.",
 } as const;
 
-// --- Top-up rate -------------------------------------------------------------------------
+// --- Package discount ---------------------------------------------------------------------
 
-export const RATE_COPY = {
-  inherit: "Use the club's rate",
-  inheritHelp: (clubRate: number | null | undefined) => (typeof clubRate === "number"
-    ? `The club's rate is ${rateFace(clubRate)}, set under Settings → Credits. A group that uses it has no say in anybody's rate.`
-    : "The club's rate is set under Settings → Credits. A group that uses it has no say in anybody's rate."),
-  field: () => `Credits per ${oneUnit()}`,
-  combine: "A member in several groups tops up at the lowest rate any of their groups sets. Credit a member already has never changes.",
+/** Why a typed discount cannot be sent yet — decided in `groupDraft.discountProblem`. */
+export type DiscountProblem = "empty" | "not_a_number" | "out_of_range" | "too_precise";
+
+export const DISCOUNT_COPY = {
+  noSay: "No say on package prices",
+  noSayHelp: "Leaves package prices to the member's other groups. Switch it off to give this group's "
+    + "members a discount on the club's packages.",
+  field: "Discount on club packages (%)",
+  fieldHelp: "0 to 100, with at most 2 decimal places. It takes rand off the price; a package's minutes never change.",
+  combine: "A member in several groups gets the LOWEST discount any of them sets, so 0% here takes away a "
+    + "discount another group gives. Packages made for one group are never discounted on top, and minutes a "
+    + "member already has never change.",
+  /** The consequence panel under the field, for the figure on screen. */
+  preview: (bps: number | null) => (bps === null
+    ? "No say: this group's members pay what their other groups' discounts give them."
+    : bps === 0
+      ? "0% — members pay the club's full package prices, whatever their other groups give."
+      : `${percentFace(bps)} off every club package for this group's members.`),
+  problems: {
+    empty: `Enter a percentage, or switch on "No say on package prices".`,
+    not_a_number: "That isn't a number — enter a percentage like 10 or 12.5.",
+    out_of_range: "A discount has to be between 0% and 100%.",
+    too_precise: "Use at most 2 decimal places.",
+  } satisfies Record<DiscountProblem, string>,
 } as const;
 
-/** What a typed rate would be refused for, in the admin's words — the server's figures, not ours. */
-export function rateProblemSentence(problem: RateProblem): string {
-  switch (problem) {
-    case "empty": return `Enter a rate, or switch on "${RATE_COPY.inherit}".`;
-    case "not_a_number": return "That isn't a number — enter a rate like 2.4.";
-    case "not_positive": return "A rate has to be more than 0.";
-    case "too_high": return `A rate can be at most ${MAX_CREDITS_PER_ZAR}.`;
-    case "too_precise": return `Use at most ${CREDITS_PER_ZAR_DECIMALS} decimal places.`;
-  }
-}
-
-/**
- * "R100 → 240 cr" — what one top-up block buys at the rate on screen, as it is typed.
- * The block is the club's `topup_block_zar`; without it, R100 is said as an example, and says so.
- */
-export function ratePreviewLine(rate: number, blockZar: number | null | undefined): string {
-  const block = typeof blockZar === "number" && blockZar > 0 ? blockZar : 100;
-  const credits = creditsFor(block, rate);
-  return `${wholeMoney(block)} → ${Number(credits.toFixed(2))} cr`;
-}
+/** The group's own packages, read-only on its card and in its sheet (P13 §3.5 — made on Packages). */
+export const GROUP_PACKAGES = {
+  title: "Packages for this group",
+  manage: "Manage packages",
+  none: "No packages of its own. Its members see the club's packages.",
+  failed: "Couldn't read packages. The rest of this page is current.",
+  reading: "Reading packages",
+  newGroup: "Save the group first. Its own packages are made on the Packages page.",
+} as const;
 
 // --- Peak hours --------------------------------------------------------------------------
 
@@ -883,7 +759,7 @@ export const ARCHIVE_COPY = {
   title: (name: string) => `Archive ${name}?`,
   body: (name: string, members: number | null | undefined) => {
     const who = typeof members === "number" && members > 0
-      ? `its ${members === 1 ? "member" : `${members} members`} go back to their other groups' rules and the club's rate`
+      ? `its ${members === 1 ? "member" : `${members} members`} go back to their other groups' rules and the club's own package prices`
       : "nobody is in it, so nothing changes for anybody today";
     return `${name} stops applying — ${who}. Nothing is deleted, and it can be brought back.`;
   },
@@ -915,12 +791,12 @@ export const ARCHIVED_HEADING = "Archived";
 
 export const ASSIGN_COPY = {
   title: (name: string) => `Groups for ${name}`,
-  description: "Their groups decide what a slot costs them, when they may book, their top-up rate and peak hours.",
+  description: "Their groups decide when they may book, how much, their package discount and peak hours.",
   label: "Groups",
   add: "Add a group",
   search: "Search groups",
   empty: "No groups match",
-  none: "In no group — the club's standard rules and rate apply.",
+  none: "In no group — the club's standard rules and package prices apply.",
   remove: (group: string) => `Take out of ${group}`,
   archived: "Archived",
   archivedHint: "Archived — can be kept, not joined",
@@ -928,7 +804,7 @@ export const ASSIGN_COPY = {
   whatChanges: "What changes",
   previewing: "Working out what changes…",
   previewFailed: "Couldn't work out what this changes. Saving still works, and the result will say.",
-  nothingChanges: "Nothing about their rate or peak hours changes.",
+  nothingChanges: "Nothing about their package discount or peak hours changes.",
   reasonLabel: "Why? (optional)",
   reasonHelp: "Goes on the change record.",
   change: "Change groups",
@@ -942,13 +818,18 @@ export const ASSIGN_COPY = {
   unchanged: "Nothing to change.",
 } as const;
 
-/** "1.6 → 2.4 cr per R1, from League" — a rate before and after, with where the new one comes from. */
-export function rateChangeLine(
-  before: number, after: number, afterGroup: string | null, clubWord = "the club's rate",
+/**
+ * "10% off club packages (from League) instead of no package discount" — a discount before and
+ * after, with the group the new one comes from (the tariff's `discount_group_id`).
+ */
+export function discountChangeLine(
+  before: number | null, after: number | null, afterGroup: string | null,
 ): string {
-  const source = afterGroup ? `from ${afterGroup}` : clubWord;
-  if (before === after) return `Top-up rate stays ${rateFace(after)} (${source}).`;
-  return `Top-up rate ${formatRate(before)} → ${rateFace(after)} (${source}). Credit they already have doesn't change.`;
+  const source = afterGroup && after !== null && after > 0 ? ` (from ${afterGroup})` : "";
+  const was = discountWords(before);
+  const will = discountWords(after);
+  if (was === will) return `Still ${will}${source}.`;
+  return `${will[0].toUpperCase()}${will.slice(1)}${source} instead of ${was}. Minutes they already have don't change.`;
 }
 
 /** Peak before and after, naming the group that withholds it when one does. */
@@ -958,19 +839,24 @@ export function peakChangeLine(before: boolean, after: boolean, withheldBy: stri
   return after ? "Gains peak priority." : `Loses peak priority${by}.`;
 }
 
-/** The member's standing, in one line under their groups: rate and peak. */
+/**
+ * The member's standing, in one line under their groups: package discount and peak — "10% off
+ * club packages (from League) · peak priority", or "No package discount · no peak priority".
+ * The second argument is the name of the tariff's `discount_group_id`, null when none.
+ */
 export function tariffLine(tariff: {
-  // P13-F3: the tariff wire no longer carries a rate (contract §3.8) — reword for package_discount_bps.
-  top_up_credits_per_zar?: number;
+  package_discount_bps?: number | null;
   peak_priority: boolean;
   peak_withheld_by?: string[];
-}, rateGroupName: string | null): string {
-  const rate = `Tops up at ${rateFace(tariff.top_up_credits_per_zar ?? 0)}${rateGroupName ? ` (${rateGroupName})` : " (club rate)"}`;
-  if (tariff.peak_priority) return `${rate} · peak priority`;
+}, discountGroupName: string | null): string {
+  const words = discountWords(tariff.package_discount_bps);
+  const from = discountGroupName && words !== "no package discount" ? ` (from ${discountGroupName})` : "";
+  const discount = `${words[0].toUpperCase()}${words.slice(1)}${from}`;
+  if (tariff.peak_priority) return `${discount} · peak priority`;
   const by = tariff.peak_withheld_by && tariff.peak_withheld_by.length > 0
     ? ` (withheld by ${listOf(tariff.peak_withheld_by)})`
     : "";
-  return `${rate} · no peak priority${by}`;
+  return `${discount} · no peak priority${by}`;
 }
 
 /** PUT `/admin/members/{id}/groups` refusals, as sentences. */
@@ -999,18 +885,19 @@ export function explainAssignRefusal(err: unknown): string {
 }
 
 // ---------------------------------------------------------------------------------------
-// The member's top-up screen
+// The member's buy screen
 // ---------------------------------------------------------------------------------------
 
 /**
- * "Your rate: League — 2.4 cr per R1" — the rate the member is quoted, and the group it comes
- * from in the club's own words. No group is the club's standard rate, said as such; an API that
- * predates D2 sends no `rate_group` at all, and then the line names only the rate.
+ * "Your discount: 10% off club packages (from League)" — the discount the member's shelf is
+ * priced at (`GET /minutes/packages` → `discount`), and the group it comes from in the club's own
+ * words. No discount is said as such; an absent group (`undefined`) names only the figure. The
+ * name and the call shape are kept from the D2 rate line, because the buy screen calls it.
  */
-export function yourRateLine(rate: number, rateGroup: { name: string } | null | undefined): string {
-  if (rateGroup === undefined) return `Your rate: ${rateFace(rate)}`;
-  if (rateGroup === null) return `Your rate: the club's standard rate — ${rateFace(rate)}`;
-  return `Your rate: ${rateGroup.name} — ${rateFace(rate)}`;
+export function yourRateLine(bps: number, discountGroup: { name: string } | null | undefined): string {
+  if (!(bps > 0)) return "No package discount";
+  const from = discountGroup ? ` (from ${discountGroup.name})` : "";
+  return `Your discount: ${percentFace(bps)} off club packages${from}`;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1038,7 +925,7 @@ function capFace(value: number | null | undefined, unit: (n: number) => string):
 
 /**
  * The booking times and daily limits a change of groups changes — the preview named only the
- * rate, the peak say and the slot price, so an admin could move somebody into a group that halved
+ * money and the peak say, so an admin could move somebody into a group that halved
  * what they may book and read "nothing else changes". Only the lines that DIFFER are returned,
  * and a figure the server did not send on either side is not compared.
  */
