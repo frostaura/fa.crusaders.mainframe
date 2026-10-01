@@ -455,6 +455,28 @@ export function ruleInForce<T extends RuleSpanWords>(rules: readonly T[] | undef
 }
 
 /**
+ * The words of a series as it holds NOW — the rule in force where the read carries the rules, else
+ * the row's own (latest) rule. The list row and the detail header both say it (R5 A5-4).
+ */
+export function ruleWordsNow(row: {
+  courts?: ReadonlyArray<{ name: string }>; days?: readonly Weekday[]; start?: string; end?: string; label: string;
+  start_date?: string; end_date?: string | null; interval_weeks?: number; rules?: readonly (RuleSpanWords & { from: string })[];
+}): RuleWords {
+  const now = ruleInForce(row.rules);
+  const rule = now ?? { days: row.days ?? [], start: row.start ?? "", end: row.end ?? "", interval_weeks: row.interval_weeks };
+  return {
+    courtNames: (row.courts ?? []).map((c) => c.name),
+    days: rule.days,
+    start: rule.start,
+    end: rule.end,
+    label: row.label,
+    startDate: row.start_date ?? "",
+    endDate: row.end_date,
+    intervalWeeks: rule.interval_weeks,
+  };
+}
+
+/**
  * "From Sun 1 Nov it holds Sundays, 18:00 to 20:00, instead." — one line per rule still to come,
  * so the header says what holds NOW and what changes from when (R5 A5-4: it described only the
  * latest rule, and "Next on" and the End count followed it).

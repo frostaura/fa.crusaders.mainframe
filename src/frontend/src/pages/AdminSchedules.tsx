@@ -13,8 +13,8 @@ import { CardListSkeleton } from "../components/monitoring/parts";
 import { ScheduleEditor } from "../components/schedules/ScheduleEditor";
 import { adminEndpoints, type ScheduleRow } from "../lib/adminApi";
 import {
-  LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_HINT, LIST_EMPTY_TITLE, LIST_FAILED_CAVEAT, laterRuleLines, nextOccurrenceLine, ruleInForce,
-  ruleSentence,
+  LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_HINT, LIST_EMPTY_TITLE, LIST_FAILED_CAVEAT, laterRuleLines, nextOccurrenceLine, ruleSentence,
+  ruleWordsNow,
   scheduleCodes,
 } from "../lib/scheduleCopy";
 
@@ -51,17 +51,7 @@ type Status = typeof STATUSES[number]["value"];
 function ScheduleListRow({ row, timezone }: { row: ScheduleRow; timezone?: string }) {
   // The rule in force NOW, then any change still to come (R5 A5-4): the top-level days and hours
   // are the LATEST rule, and the list said "Sundays" over a series still on Saturdays.
-  const now = ruleInForce(row.rules);
-  const sentence = ruleSentence({
-    courtNames: (row.courts ?? []).map((c) => c.name),
-    days: now?.days ?? row.days ?? [],
-    start: now?.start ?? row.start ?? "",
-    end: now?.end ?? row.end ?? "",
-    label: row.label,
-    startDate: row.start_date ?? "",
-    endDate: row.end_date,
-    intervalWeeks: now?.interval_weeks ?? row.interval_weeks,
-  });
+  const sentence = ruleSentence(ruleWordsNow(row));
   const later = laterRuleLines(row.rules);
   return (
     <li className="flex">

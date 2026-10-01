@@ -291,24 +291,37 @@ type BatchItem = {
   amount_credits?: number | null;
 };
 
+/** "Court 2, Sat 3 Oct, 18:00". */
+function batchItemWhere(item: BatchItem, timezone?: string): string {
+  const when = typeof item.starts_at === "string" && Number.isFinite(Date.parse(item.starts_at))
+    ? clubDayAndClock(item.starts_at, timezone) : null;
+  return [item.court != null ? `Court ${item.court}` : null, when].filter(Boolean).join(", ");
+}
+
+/** "cancelled", "hold lifted", "not booked (Slot taken)". A bulk book's items carry an amount. */
+function batchItemOutcome(item: BatchItem): string {
+  const status = item.status ?? "";
+  if (status === "refused" || status === "failed") {
+    const verb = item.amount_credits !== undefined ? "not booked" : "not cancelled";
+    return item.error ? `${verb} (${inWords(item.error)})` : verb;
+  }
+  return BATCH_ITEM_WORDS[status] ?? (status ? inWords(status).toLowerCase() : "");
+}
+
+/** "50.00 cr back", "15.00 cr penalty", or a booked item's price. */
+function batchItemMoney(item: BatchItem): string[] {
+  const money: string[] = [];
+  if (item.status === "booked" && item.amount_credits) money.push(formatCredits(item.amount_credits));
+  if (item.refund_credits) money.push(`${formatCredits(item.refund_credits)} back`);
+  if (item.penalty_credits) money.push(`${formatCredits(item.penalty_credits)} penalty`);
+  return money;
+}
+
 /** "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50.00 cr back". */
 function batchItemInWords(item: BatchItem, timezone?: string): string {
   const who = item.member_name ?? (item.block_label ? `${item.block_label} (club hold)` : null);
-  const when = typeof item.starts_at === "string" && Number.isFinite(Date.parse(item.starts_at))
-    ? clubDayAndClock(item.starts_at, timezone) : null;
-  const where = [item.court != null ? `Court ${item.court}` : null, when].filter(Boolean).join(", ");
-  const status = item.status ?? "";
-  let outcome = BATCH_ITEM_WORDS[status] ?? (status ? inWords(status).toLowerCase() : "");
-  if (status === "refused" || status === "failed") {
-    const verb = item.amount_credits !== undefined ? "not booked" : "not cancelled";
-    outcome = item.error ? `${verb} (${inWords(item.error)})` : verb;
-  }
-  const money: string[] = [];
-  if (status === "booked" && item.amount_credits) money.push(formatCredits(item.amount_credits));
-  if (item.refund_credits) money.push(`${formatCredits(item.refund_credits)} back`);
-  if (item.penalty_credits) money.push(`${formatCredits(item.penalty_credits)} penalty`);
-  const end = [outcome, ...money].filter(Boolean).join(", ");
-  return [who, where, end].filter(Boolean).join(" — ");
+  const end = [batchItemOutcome(item), ...batchItemMoney(item)].filter(Boolean).join(", ");
+  return [who, batchItemWhere(item, timezone), end].filter(Boolean).join(" — ");
 }
 
 /** A batch's `bookings` — the server's JSON text of one object per item — one line each. */

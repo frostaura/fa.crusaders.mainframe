@@ -24,7 +24,7 @@ import { LOST_REPLY } from "../lib/lostReplyCopy";
 import { endCheck, hoursCheck, skipCheck, type ScheduleCheck } from "../lib/scheduleReadBack";
 import {
   DATES_EMPTY, clampedNotice, clubDateShort, endConsequence, hoursFromLine, laterRuleLines, nextHeldDate, nextHeldOccurrence,
-  nextOccurrenceLine, occurrenceHours, occurrenceStatusWord, ruleInForce,
+  nextOccurrenceLine, occurrenceHours, occurrenceStatusWord, ruleWordsNow,
   partialMaterialisation, ruleSentence, scheduleCodes, skipChipLabel, skipConsequence,
 } from "../lib/scheduleCopy";
 import { slotsPerOccurrence } from "../lib/scheduleRules";
@@ -221,7 +221,6 @@ function ScheduleHeadline({ row, days, partial, occurrences, timezone }: {
   const next = nextHeldOccurrence(row.next_occurrence, occurrences);
   // R5 A5-4: the rule in force NOW, and one line per rule still to come — the top-level days and
   // hours are the LATEST rule, and the header said "Sundays" over a series still on Saturdays.
-  const now = ruleInForce(row.rules);
   const later = laterRuleLines(row.rules);
   // The R4 "these hours apply from" line answers the same question for an hours-only change on an
   // API without rules; with the rules in hand, the later-rule lines say it.
@@ -236,16 +235,7 @@ function ScheduleHeadline({ row, days, partial, occurrences, timezone }: {
         description={(
           <>
             <span className="block text-base text-text-secondary">
-              {ruleSentence({
-                courtNames: (row.courts ?? []).map((c) => c.name),
-                days: now?.days ?? days,
-                start: now?.start ?? row.start ?? "",
-                end: now?.end ?? row.end ?? "",
-                label: row.label,
-                startDate: row.start_date ?? "",
-                endDate: row.end_date,
-                intervalWeeks: now?.interval_weeks ?? row.interval_weeks,
-              })}
+              {ruleSentence(ruleWordsNow({ ...row, days }))}
             </span>
             {later.map((line) => <span key={line} className="mt-1 block text-text-secondary" data-rule-change="">{line}</span>)}
             <span className="mt-1 block text-text-muted">{nextOccurrenceLine(next, row.status, timezone, heldNext?.ends_at)}</span>

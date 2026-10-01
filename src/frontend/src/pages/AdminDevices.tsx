@@ -554,12 +554,12 @@ function ActivityBody({ entries, loading, error, gate, now }: {
  * </p>
  */
 /**
- * A board's own trail, opened on demand: the toggle and the panel are drawn apart (R5 §3.16) — the
+ * A board's own trail, read on demand. The toggle and the panel are drawn apart (R5 §3.16) — the
  * toggle joins the row's action strip and the panel opens under it, which took a 56px line off
- * every board on a phone (234 → ~180px; 17,031px for the review club's boards at 390).
+ * every board on a phone (234 → 186px; 17,031px for the review club's boards at 390). So the read
+ * is a hook, and the two halves are components that take what it holds.
  */
-function useDeviceActivity(device: AdminDevice, now: number) {
-  const gate = isGate(device);
+function useDeviceActivity(device: AdminDevice) {
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<DeviceActivityEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -580,24 +580,33 @@ function useDeviceActivity(device: AdminDevice, now: number) {
     }
   }
 
-  const toggleButton = (
+  return { open, entries, loading, error, toggle };
+}
+
+type DeviceActivity = ReturnType<typeof useDeviceActivity>;
+
+function ActivityToggle({ device, activity }: { device: AdminDevice; activity: DeviceActivity }) {
+  return (
     <Button
       variant="ghost"
       size="sm"
       className={WRAPS}
-      aria-expanded={open}
-      onClick={() => void toggle()}
-      icon={<CaretDown aria-hidden="true" className={open ? "rotate-180" : undefined} />}
+      aria-expanded={activity.open}
+      onClick={() => void activity.toggle()}
+      icon={<CaretDown aria-hidden="true" className={activity.open ? "rotate-180" : undefined} />}
     >
-      {activityPanelTitle(gate)}
+      {activityPanelTitle(isGate(device))}
     </Button>
   );
-  const panel = open ? (
+}
+
+function ActivityPanel({ device, activity, now }: { device: AdminDevice; activity: DeviceActivity; now: number }) {
+  if (!activity.open) return null;
+  return (
     <div className="rounded-lg border border-border bg-bg-muted p-3">
-      <ActivityBody entries={entries} loading={loading} error={error} gate={gate} now={now} />
+      <ActivityBody entries={activity.entries} loading={activity.loading} error={activity.error} gate={isGate(device)} now={now} />
     </div>
-  ) : null;
-  return { toggleButton, panel };
+  );
 }
 
 /**
@@ -656,7 +665,7 @@ function DeviceRow({
   const [editing, setEditing] = useState<"details" | "buttons" | null>(null);
   // Presence-gated: an API that does not send the field gets no editor for it.
   const hasOwnMapField = device.button_map !== undefined;
-  const activity = useDeviceActivity(device, now);
+  const activity = useDeviceActivity(device);
 
   return (
     <div data-board-card="" className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
@@ -744,10 +753,10 @@ function DeviceRow({
 
         {/* Last in the strip: the one control on this row that reads rather than writes. Its panel
             opens under the strip. */}
-        {activity.toggleButton}
+        <ActivityToggle device={device} activity={activity} />
       </div>
 
-      {activity.panel}
+      <ActivityPanel device={device} activity={activity} now={now} />
     </div>
   );
 }
