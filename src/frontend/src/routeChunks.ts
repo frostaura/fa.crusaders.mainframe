@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { whenApiQuiet } from "./lib/api";
+import { prefetchMyInvites } from "./lib/earlyInvites";
 import { prefetchRouteData } from "./lib/offline/memberReads";
 
 /**
@@ -107,7 +108,9 @@ export function preloadRouteChunk(pathname: string): boolean {
  *
  * <p>
  * R4: each page after Bookings waits until the club's reads this tab has in flight have come back
- * (`quiet`) — a hint must not queue in front of the open page's own reads.
+ * (`quiet`) — a hint must not queue in front of the open page's own reads. P5-4 (review round 5):
+ * Bookings too — its ~25 files started beside a cold /wallet's own reads made Wallet usable at
+ * 8.3 s on Fast 3G. From My Code, Bookings is asked for earlier still (`preloadAtSessionCheck`).
  * </p>
  */
 export function prefetchNavChunks(delayMs = 500, admin = false, quiet: () => Promise<void> = whenApiQuiet): () => void {
@@ -119,7 +122,7 @@ export function prefetchNavChunks(delayMs = 500, admin = false, quiet: () => Pro
     // member's own next tap on HTTP/1.1's six connections (measured: 1.2 s → 2.2 s).
     const run = async () => {
       for (const name of NAV_CHUNKS) {
-        if (name !== "schedule") await quiet();
+        await quiet();
         if (cancelled || !worthFetching()) return;
         await routeChunks[name]().catch(() => undefined);
       }
@@ -147,7 +150,12 @@ export function routeIntent(to: string): void {
   const url = new URL(to, "http://intent.local");
   preloadRouteChunk(url.pathname);
   prefetchRouteData(url.pathname, url.search);
+  // Review round 5 — the invites badge's read with the code, not one more round trip after it.
+  if (INVITES_READERS.test(url.pathname)) prefetchMyInvites();
 }
+
+/** The pages whose first render reads `/me/invites` (`useMyInvites`): Bookings' badge, Invites, Inbox. */
+const INVITES_READERS = /^\/(bookings|bookings\/invites|inbox)\/?$/;
 
 /** {@link routeIntent} as a link's props: pressed, hovered or focused. */
 export function intentProps(to: string) {

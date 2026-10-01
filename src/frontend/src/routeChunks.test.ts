@@ -53,23 +53,24 @@ describe("prefetchNavChunks — the tab bar's pages, once idle", () => {
     expect(order).toEqual(["schedule", "wallet", "profile"]);
   });
 
-  it("fetches Bookings, Wallet and Profile after the delay, and nothing if cancelled first", () => {
+  it("fetches Bookings, Wallet and Profile after the delay, and nothing if cancelled first", async () => {
     vi.useFakeTimers();
     const spies = watch();
-    const cancel = prefetchNavChunks(1_000);
-    vi.advanceTimersByTime(999);
+    const cancel = prefetchNavChunks(1_000, false, async () => undefined);
+    await vi.advanceTimersByTimeAsync(999);
     expect(spies.schedule).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     vi.runOnlyPendingTimers();
+    await vi.advanceTimersByTimeAsync(0);
     // One at a time, Bookings first: Wallet waits for Bookings' code.
     expect(spies.schedule).toHaveBeenCalledTimes(1);
     expect(spies.wallet).not.toHaveBeenCalled();
     expect(spies.inbox).not.toHaveBeenCalled();
     cancel();
 
-    const cancelled = prefetchNavChunks(1_000);
+    const cancelled = prefetchNavChunks(1_000, false, async () => undefined);
     cancelled();
-    vi.advanceTimersByTime(5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(spies.schedule).toHaveBeenCalledTimes(1);
   });
 });
@@ -118,7 +119,23 @@ describe("preloadAtSessionCheck — the opened page, then Bookings once the page
   });
 });
 
-describe("prefetchNavChunks — Wallet and Profile wait for the open page's reads", () => {
+describe("prefetchNavChunks — every page waits for the open page's reads", () => {
+  it("does not start Bookings' ~25 files while the open page's reads are in flight (P5-4)", async () => {
+    // Review round 5: a cold /wallet on Fast 3G was usable at 8.3 s — the Schedule group started
+    // beside the wallet's own reads, on HTTP/1.1's six connections.
+    vi.useFakeTimers();
+    const spies = watch();
+    let quietNow: () => void = () => undefined;
+    const quiet = vi.fn(() => new Promise<void>((r) => { quietNow = r; }));
+    prefetchNavChunks(10, false, quiet);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(quiet).toHaveBeenCalled();
+    expect(spies.schedule).not.toHaveBeenCalled();
+    quietNow();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(spies.schedule).toHaveBeenCalledTimes(1);
+  });
+
   it("fetches nothing after Bookings until the club's reads are back", async () => {
     vi.useFakeTimers();
     const order: string[] = [];
@@ -129,6 +146,9 @@ describe("prefetchNavChunks — Wallet and Profile wait for the open page's read
     const quiet = vi.fn(() => new Promise<void>((r) => { quietNow = r; }));
     prefetchNavChunks(10, false, quiet);
     await vi.advanceTimersByTimeAsync(20);
+    expect(order).toEqual([]);
+    quietNow();
+    await vi.advanceTimersByTimeAsync(1);
     expect(order).toEqual(["schedule"]);
     quietNow();
     await vi.advanceTimersByTimeAsync(1);
