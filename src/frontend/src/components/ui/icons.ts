@@ -138,3 +138,6 @@ export { PauseIcon, PauseIcon as Pause } from "@phosphor-icons/react/dist/csr/Pa
 export { SunHorizonIcon, SunHorizonIcon as SunHorizon } from "@phosphor-icons/react/dist/csr/SunHorizon";
 export { MoonStarsIcon, MoonStarsIcon as MoonStars } from "@phosphor-icons/react/dist/csr/MoonStars";
 export { CalendarCheckIcon, CalendarCheckIcon as CalendarCheck } from "@phosphor-icons/react/dist/csr/CalendarCheck";
+// P13 — minutes are the unit of account: the hourglass marks an AMOUNT of time (a balance, a
+// package), so it is never confused with `Clock`, which marks a time of day.
+export { HourglassMediumIcon, HourglassMediumIcon as HourglassMedium } from "@phosphor-icons/react/dist/csr/HourglassMedium";
