@@ -3,16 +3,15 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
 import { ASSIGN_COPY } from "../lib/groupsCopy";
 import { ledgerRowFixture, memberFixture, refuse, renderPage, stubFetch, type StubRoute } from "../test/harness";
-import { LIVE_SAID, LOST_REPLY } from "../lib/topUpCopy";
+import { ADJUST_SHEET, LIVE_SAID, LOST_REPLY, TAKE_BACK_LINK } from "../lib/deskMinutesCopy";
 import { CONFIRM_NOT_READY, REQUIRED_MARK } from "../lib/confirmDialogCopy";
 import {
-  OUTCOMES, PASSWORD_DIALOG, RELATED_BOOKING, REJECT_DIALOG, RESET_DIALOG, ROW_ACTIONS, SUSPEND_DIALOG,
-  TOP_UP_SHEET, UNVERIFIED,
+  OUTCOMES, PASSWORD_DIALOG, RELATED_BOOKING, REJECT_DIALOG, RESET_DIALOG, ROW_ACTIONS, SUSPEND_DIALOG, UNVERIFIED,
 } from "../lib/membersCopy";
 
 /**
  * <b>This file's cases need longer than the 5-second default, and the reason is the fix.</b>
- * Credit moves through three steps (D3-B08), each a render of a table that already holds every
+ * An adjustment moves through three steps (D3-B08), each a render of a table that already holds every
  * row in the club; in jsdom that is seconds. Raised here, not globally, so the cost is this file's.
  */
 vi.setConfig({ testTimeout: 20_000 });
@@ -20,7 +19,7 @@ vi.setConfig({ testTimeout: 20_000 });
 /** A Radix trigger opens on pointerdown, the way a pointer opens it; options exist only while open. */
 const POINTER = { button: 0, ctrlKey: false, pointerType: "mouse" } as const;
 
-/** Open a row's ⋯ menu and pick one of its items. (P5: row actions = Top up + ⋯.) */
+/** Open a row's ⋯ menu and pick one of its items. (P5: row actions = Sell package + ⋯.) */
 async function fromMenu(item: string, member = "Ada Lovelace") {
   fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more(member) }), POINTER);
   fireEvent.click(await screen.findByRole("menuitem", { name: item }));
@@ -68,7 +67,7 @@ describe("AdminMembers — the temporary password an admin issues", () => {
 });
 
 /**
- * The credit sheet — the booking an adjustment names, and the copy that explains why.
+ * The Adjust minutes sheet (P13 §3.7) — the booking an adjustment names, and the copy that explains why.
  *
  * <p>
  * An admin adjustment can name the booking it compensates for (`relatedBookingId`). The no-show
@@ -79,7 +78,7 @@ describe("AdminMembers — the temporary password an admin issues", () => {
  * reversal always runs and the hand adjustment is netted into it one leg at a time.
  * </p>
  */
-describe("AdminMembers — adjust credit", () => {
+describe("AdminMembers — adjust minutes", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const USER = "44444444-4444-4444-4444-444444444444";
@@ -93,7 +92,7 @@ describe("AdminMembers — adjust credit", () => {
       // Three rows, two bookings' worth: the penalty and the charge are the same booking, and a
       // top-up is not a booking at all. One option, then.
       body: [
-        ledgerRowFixture({ id: "1", type: "NoShowPenalty", amountMinutes: 7.2, signedAmountMinutes: -7.2, relatedBookingId: BOOKING, at: "2026-09-02T18:00:00Z" }),
+        ledgerRowFixture({ id: "1", type: "NoShowPenalty", amountMinutes: 7, signedAmountMinutes: -7, relatedBookingId: BOOKING, at: "2026-09-02T18:00:00Z" }),
         ledgerRowFixture({ id: "2", type: "BookingCharge", amountMinutes: 24, signedAmountMinutes: -24, relatedBookingId: BOOKING, at: "2026-09-01T10:00:00Z" }),
         ledgerRowFixture({ id: "3", type: "TopUp", amountMinutes: 160, signedAmountMinutes: 160, relatedBookingId: null }),
       ],
@@ -103,21 +102,21 @@ describe("AdminMembers — adjust credit", () => {
 
   /**
    * Drive the sheet to the reason step and fill it. <b>There is no sign anywhere in this flow</b>:
-   * taking credit back is its own path, reached by name, because a sign is a character somebody
+   * taking minutes back is its own path, reached by name, because a sign is a character somebody
    * types and not a decision they make.
    */
   async function openAdjustAndFill(amount: string, reason: string, opts: { takeBack?: boolean } = {}) {
-    fireEvent.click(await screen.findByRole("button", { name: ROW_ACTIONS.topUp }));
-    if (opts.takeBack) fireEvent.click(await screen.findByRole("button", { name: "Take credit back instead" }));
-    fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: amount } });
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
-    await choose(TOP_UP_SHEET.reasonLabel, opts.takeBack ? "Correcting a mistake" : "Goodwill — something went wrong");
-    fireEvent.change(screen.getByLabelText(TOP_UP_SHEET.detailLabel), { target: { value: reason } });
+    await fromMenu(ROW_ACTIONS.adjust);
+    if (opts.takeBack) fireEvent.click(await screen.findByRole("button", { name: TAKE_BACK_LINK }));
+    fireEvent.change(await screen.findByLabelText(ADJUST_SHEET.amountLabel), { target: { value: amount } });
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.next }));
+    await choose(ADJUST_SHEET.reasonLabel, opts.takeBack ? "Correcting a mistake" : "Goodwill — something went wrong");
+    fireEvent.change(screen.getByLabelText(ADJUST_SHEET.detailLabel), { target: { value: reason } });
   }
 
   /** Step 2 → step 3. */
   async function toCheck() {
-    fireEvent.click(await screen.findByRole("button", { name: TOP_UP_SHEET.next }));
+    fireEvent.click(await screen.findByRole("button", { name: ADJUST_SHEET.next }));
   }
 
   /** The confirm: arm it, then fire it. There is no bare "Apply". */
@@ -139,13 +138,13 @@ describe("AdminMembers — adjust credit", () => {
 
     fireEvent.pointerDown(screen.getByRole("combobox", { name: RELATED_BOOKING.label }), POINTER);
     // One option per booking — the charge row for the same booking does not repeat it.
-    expect(await screen.findByRole("option", { name: /No-show penalty 7\.20 cr · aaaaaaaa/ })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /No-show penalty 7 min · aaaaaaaa/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Booking charge/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: /No-show penalty/ }));
 
     await toCheck();
     // The three figures, before the press. This is the whole of what D3-B08 was missing.
-    expect(screen.getByText(TOP_UP_SHEET.balanceAfter)).toBeInTheDocument();
+    expect(screen.getByText(ADJUST_SHEET.balanceAfter)).toBeInTheDocument();
     await apply();
 
     await waitFor(() => {
@@ -159,8 +158,8 @@ describe("AdminMembers — adjust credit", () => {
     });
     // The receipt STAYS on screen — money deserves more than four seconds — and the row's balance
     // follows the API's answer.
-    expect(await screen.findByText(/Done\. Ada Lovelace now has 144\.00 cr\./)).toBeInTheDocument();
-    expect(screen.getByText("144.00 cr")).toBeInTheDocument();
+    expect(await screen.findByText("Done. Ada Lovelace now has 2 h 24 min.")).toBeInTheDocument();
+    expect(screen.getByText("2 h 24 min")).toBeInTheDocument();
   });
 
   it("sends no relatedBookingId key at all when the adjustment is not for a booking", async () => {
@@ -225,14 +224,14 @@ describe("AdminMembers — adjust credit", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/No booking with that ID exists at this club/);
     expect(alert).toHaveTextContent(/pick one from the list/);
-    expect(screen.queryByText("Credit adjustment failed.")).not.toBeInTheDocument();
+    expect(screen.queryByText(ADJUST_SHEET.failed)).not.toBeInTheDocument();
 
     // The sheet stays on the check step with the figures intact — nothing to re-type, no second POST.
-    expect(screen.getByText(TOP_UP_SHEET.balanceAfter)).toBeInTheDocument();
+    expect(screen.getByText(ADJUST_SHEET.balanceAfter)).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1);
 
     // Choosing a different booking clears the verdict; it was about the old one.
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
     await choose(RELATED_BOOKING.label, RELATED_BOOKING.none);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -273,7 +272,7 @@ describe("AdminMembers — adjust credit", () => {
     const other = "12345678-1234-4123-8123-123456789abc";
     // Back to step 2: P5 keeps the field showing what is about to be sent — the typed id, under
     // "Another booking" — so correcting a mistyped id is one edit, not a re-choice.
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
     expect(await screen.findByLabelText(RELATED_BOOKING.idLabel)).toHaveValue("last tuesday");
     fireEvent.change(await screen.findByLabelText(RELATED_BOOKING.idLabel), { target: { value: other } });
     await toCheck();
@@ -289,8 +288,8 @@ describe("AdminMembers — adjust credit", () => {
  *
  * <p>
  * A normal impatient double-click posted the adjustment twice: two identical rows, a member moved
- * 444 → 458 where 7 credits were typed, and on a slow connection four clicks granted 44 credits
- * where 11 were typed. A synchronous ref stops the second click; an idempotency key naming this
+ * 444 → 458 where 7 were typed, and on a slow connection four clicks granted 44 where 11 were
+ * typed. A synchronous ref stops the second click; an idempotency key naming this
  * one movement is what the server uses to answer a retry with the row it already wrote.
  * </p>
  */
@@ -308,12 +307,12 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   ];
 
   async function fill(amount: string, reason: string) {
-    fireEvent.click(await screen.findByRole("button", { name: ROW_ACTIONS.topUp }));
-    fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: amount } });
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
-    await choose(TOP_UP_SHEET.reasonLabel, "Goodwill — something went wrong");
-    fireEvent.change(screen.getByLabelText(TOP_UP_SHEET.detailLabel), { target: { value: reason } });
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
+    await fromMenu(ROW_ACTIONS.adjust);
+    fireEvent.change(await screen.findByLabelText(ADJUST_SHEET.amountLabel), { target: { value: amount } });
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.next }));
+    await choose(ADJUST_SHEET.reasonLabel, "Goodwill — something went wrong");
+    fireEvent.change(screen.getByLabelText(ADJUST_SHEET.detailLabel), { target: { value: reason } });
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.next }));
   }
 
   /** Arm the confirm and return the FIRED control, so a case can press it twice. */
@@ -331,7 +330,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     fireEvent.click(fire);
     fireEvent.click(fire);
 
-    await waitFor(() => expect(screen.getByText(/Done\. Ada Lovelace now has 127\.00 cr\./)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Done. Ada Lovelace now has 2 h 7 min.")).toBeInTheDocument());
     const posts = stub.calls.filter((c) => c.method === "POST" && c.path === ADJUST);
     expect(posts).toHaveLength(1);
     const body = posts[0].body as Record<string, unknown>;
@@ -344,7 +343,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     const stub = stubFetch(routes({ status: 500, body: { error: "boom" } }));
     renderPage(<AdminMembersPage />);
 
-    await fill("7", "coaching credit");
+    await fill("7", "coaching session");
     fireEvent.click(await armed());
     // A 500 is NOT a refusal, so the ledger is asked; it shows nothing, and the toast says so.
     expect(await screen.findByText(LOST_REPLY.absent)).toBeInTheDocument();
@@ -358,12 +357,12 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   });
 
   /**
-   * Review round 2 (F3-2): the credit LANDED and the reply was lost. The sheet said "That didn't
+   * Review round 2 (F3-2): the movement LANDED and the reply was lost. The sheet said "That didn't
    * go through", and an admin who then changed the amount re-sent it under the same key — a 409
    * the sheet also called "didn't go through". The stubs below perform the movement and then
    * fail the reply, exactly as the lost reply did.
    */
-  describe("a reply lost after the credit landed", () => {
+  describe("a reply lost after the movement landed", () => {
     const DETAIL = `/api/v1/admin/members/${USER}`;
     function landedThenLost(ledgerStatus = 200) {
       const ledger: Array<ReturnType<typeof ledgerRowFixture>> = [];
@@ -396,9 +395,9 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
       await fill("7", "lost reply probe");
       fireEvent.click(await armed());
 
-      expect(await screen.findByText("Done. Ada Lovelace now has 127.00 cr.")).toBeInTheDocument();
+      expect(await screen.findByText("Done. Ada Lovelace now has 2 h 7 min.")).toBeInTheDocument();
       expect(screen.getByText(LOST_REPLY.landed)).toBeInTheDocument();
-      expect(screen.queryByText(TOP_UP_SHEET.failed)).not.toBeInTheDocument();
+      expect(screen.queryByText(ADJUST_SHEET.failed)).not.toBeInTheDocument();
       expect(stub.calls.some((c) => c.method === "GET" && c.path.startsWith(`/api/v1/admin/ledger/?`)
         && c.path.includes(`userId=${USER}`))).toBe(true);
       expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1);
@@ -421,11 +420,11 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
       await fill("7", "lost reply probe");
       fireEvent.click(await armed());
       await screen.findByText(LOST_REPLY.unknown("Ada Lovelace"));
-      fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
-      fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
-      fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: "9" } });
-      fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
-      fireEvent.click(await screen.findByRole("button", { name: TOP_UP_SHEET.next }));
+      fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
+      fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
+      fireEvent.change(await screen.findByLabelText(ADJUST_SHEET.amountLabel), { target: { value: "9" } });
+      fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.next }));
+      fireEvent.click(await screen.findByRole("button", { name: ADJUST_SHEET.next }));
       fireEvent.click(await armed());
 
       await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(2));
@@ -438,15 +437,15 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   it("names what already landed when the server answers idempotency_key_reused", async () => {
     stubFetch(routes({
       status: 409,
-      body: { error: "idempotency_key_reused", stored: { amount_minutes: 7, type: "AdminAdjustment", reason: "coaching credit", at: "2026-09-30T08:00:00Z" } },
+      body: { error: "idempotency_key_reused", stored: { amount_minutes: 7, type: "AdminAdjustment", reason: "coaching session", at: "2026-09-30T08:00:00Z" } },
     }));
     renderPage(<AdminMembersPage />);
 
-    await fill("9", "coaching credit");
+    await fill("9", "coaching session");
     fireEvent.click(await armed());
 
     expect(await screen.findByText(
-      "An earlier press already went through: +7.00 cr (“coaching credit”). Nothing more was added — check the ledger before adding anything else.",
+      "An earlier press already went through: +7 min (“coaching session”). Nothing more was added — check the ledger before adding anything else.",
     )).toBeInTheDocument();
   });
 
@@ -462,33 +461,33 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
       { path: "/api/v1/admin/ledger/", body: [] },
       {
         method: "POST", path: ADJUST, status: 409,
-        body: { error: "idempotency_key_reused", stored: { amount_minutes: 7, type: "AdminAdjustment", reason: "coaching credit" } },
+        body: { error: "idempotency_key_reused", stored: { amount_minutes: 7, type: "AdminAdjustment", reason: "coaching session" } },
       },
     ]);
     renderPage(<AdminMembersPage />);
 
-    await fill("9", "coaching credit");
+    await fill("9", "coaching session");
     fireEvent.click(await armed());
 
-    await screen.findByText(/An earlier press already went through: \+7\.00 cr/);
-    expect(await screen.findByText("136.00 cr")).toBeInTheDocument();
+    await screen.findByText(/An earlier press already went through: \+7 min/);
+    expect(await screen.findByText("2 h 16 min")).toBeInTheDocument();
     const live = document.querySelector("[data-confirm-group] > [aria-live='polite']");
     expect(live).toHaveTextContent(LIVE_SAID.reused);
     expect(live).not.toHaveTextContent(/didn't go through/);
   });
 
   it("gives a CHANGED amount its own key once the first press was refused outright", async () => {
-    const stub = stubFetch(routes({ status: [400, 200], body: { error: "amount_not_whole_cents" } }));
+    const stub = stubFetch(routes({ status: [400, 200], body: { error: "amount_out_of_range", max_minutes: 8 } }));
     renderPage(<AdminMembersPage />);
 
-    await fill("7", "coaching credit");
+    await fill("7", "coaching session");
     fireEvent.click(await armed());
-    await screen.findByText(/Credits go to two decimal places/);
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
-    fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: "9" } });
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
-    fireEvent.click(await screen.findByRole("button", { name: TOP_UP_SHEET.next }));
+    await screen.findByText(/the most is 8 min/);
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
+    fireEvent.change(await screen.findByLabelText(ADJUST_SHEET.amountLabel), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.next }));
+    fireEvent.click(await screen.findByRole("button", { name: ADJUST_SHEET.next }));
     fireEvent.click(await armed());
 
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(2));
@@ -501,14 +500,14 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminMembersPage />);
 
-    await fill("7", "coaching credit");
+    await fill("7", "coaching session");
     fireEvent.click(await armed());
-    await waitFor(() => expect(screen.getByText(/Done\. Ada Lovelace now has 127\.00 cr\./)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Done. Ada Lovelace now has 2 h 7 min.")).toBeInTheDocument());
     // The receipt stays until it is closed — P5 names that button "Done" (every sheet also has
     // its own close ×, named "Close").
-    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.done }));
+    fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.done }));
 
-    await fill("7", "coaching credit");
+    await fill("7", "coaching session");
     fireEvent.click(await armed());
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST").length).toBe(2));
     const [first, second] = stub.calls.filter((c) => c.method === "POST");
@@ -519,7 +518,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
 
 /**
  * The member's groups — D2 deleted the rate class (`POST /admin/members/{id}/class` is gone) and
- * groups carry the top-up rate and the peak say now. "Change groups" in the row's ⋯ menu opens
+ * groups carry the package discount (P13) and the peak say now. "Change groups" in the row's ⋯ menu opens
  * GroupAssign: chips, a preview of what the move does to their money BEFORE it is saved, and one
  * `PUT /admin/members/{userId}/groups` with the whole set.
  */
@@ -539,10 +538,10 @@ describe("AdminMembers — groups (D2 retired the class)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const USER = "44444444-4444-4444-4444-444444444444";
-  const LEAGUE = { id: "g-league", name: "League", status: "active", system_key: "league", credits_per_zar: 2.4, peak_priority: true, member_count: 3 };
-  const JUNIORS = { id: "g-juniors", name: "Juniors", status: "active", system_key: null, credits_per_zar: null, peak_priority: false, member_count: 5 };
-  const TARIFF_NOW = { top_up_credits_per_zar: 1.6, rate_group_id: null, peak_priority: false, peak_withheld_by: [] };
-  const TARIFF_LEAGUE = { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: true, peak_withheld_by: [] };
+  const LEAGUE = { id: "g-league", name: "League", status: "active", system_key: "league", package_discount_bps: 1000, peak_priority: true, member_count: 3 };
+  const JUNIORS = { id: "g-juniors", name: "Juniors", status: "active", system_key: null, package_discount_bps: null, peak_priority: false, member_count: 5 };
+  const TARIFF_NOW = { package_discount_bps: null, discount_group_id: null, peak_priority: false, peak_withheld_by: [] };
+  const TARIFF_LEAGUE = { package_discount_bps: 1000, discount_group_id: "g-league", peak_priority: true, peak_withheld_by: [] };
 
   const routes = (extra: StubRoute[] = []): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture({ member_class: undefined, groups: [] })] },
@@ -551,12 +550,12 @@ describe("AdminMembers — groups (D2 retired the class)", () => {
     {
       method: "POST",
       path: "/api/v1/admin/member-groups/preview",
-      body: { current: { tariff: TARIFF_NOW, slice_price_credits: 8 }, would_be: { tariff: TARIFF_LEAGUE, slice_price_credits: 8 } },
+      body: { current: { tariff: TARIFF_NOW }, would_be: { tariff: TARIFF_LEAGUE } },
     },
     ...extra,
   ];
 
-  it("shows what the move does to their rate before saving, then saves the whole set", async () => {
+  it("shows what the move does to their package discount before saving, then saves the whole set", async () => {
     const stub = stubFetch(routes([{
       method: "PUT",
       path: `/api/v1/admin/members/${USER}/groups`,
@@ -571,7 +570,7 @@ describe("AdminMembers — groups (D2 retired the class)", () => {
     await pickGroup(dialog, /League/);
 
     // Before anything is saved: the club's own answer to "what would this do", in words.
-    expect(await within(dialog).findByText(/Top-up rate 1\.6 → 2\.4 cr per R1 \(from League\)/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/10% off club packages \(from League\) instead of no package discount/)).toBeInTheDocument();
     expect(within(dialog).getByText("Gains peak priority.")).toBeInTheDocument();
     const preview = stub.calls.find((c) => c.path.endsWith("/member-groups/preview"));
     expect(preview?.body).toEqual({ userId: USER, proposedGroupIds: ["g-league"] });
@@ -579,7 +578,7 @@ describe("AdminMembers — groups (D2 retired the class)", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: ASSIGN_COPY.saveLabel("Ada", 1) }));
     await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT")?.body).toEqual({ groupIds: ["g-league"] }));
-    expect(await screen.findByText(/Ada Lovelace is in 1 group now\. Tops up at 2\.4 cr per R1 \(League\) · peak priority\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Ada Lovelace is in 1 group now\. 10% off club packages \(from League\) · peak priority\./)).toBeInTheDocument();
     // The row takes the saved set at once.
     const row = document.querySelector(`[data-member-row="${USER}"]`) as HTMLElement;
     await waitFor(() => expect(within(row).getByText("League")).toBeInTheDocument());
@@ -651,7 +650,8 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     expect(await within(dialog).findByText(CONFIRM_NOT_READY)).toBeInTheDocument();
     expect(document.activeElement).toBe(within(dialog).getByPlaceholderText(/Membership dues unpaid/));
     expect(stub.calls.some((c) => c.path.endsWith("/suspend"))).toBe(false);
-    expect(dialog).toHaveTextContent(/credit balance/);
+    expect(dialog).toHaveTextContent(/Their minutes and any bookings/);
+    expect(dialog).not.toHaveTextContent(/credit/i);
     expect(dialog).toHaveTextContent(/reactivating restores/);
 
     fireEvent.change(within(dialog).getByPlaceholderText(/Membership dues unpaid/), { target: { value: "Dues unpaid since March." } });
@@ -690,10 +690,10 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     ]));
     renderPage(<AdminMembersPage />);
 
-    // A suspended member is not bookable, so offering to top up or enrol a finger would be
+    // A suspended member is not bookable, so offering to sell, adjust or enrol a finger would be
     // offering an action the box will refuse.
     await screen.findByText("Ada Lovelace");
-    expect(screen.queryByRole("button", { name: ROW_ACTIONS.topUp })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: ROW_ACTIONS.sell })).not.toBeInTheDocument();
     fireEvent.pointerDown(screen.getByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") }), POINTER);
     const menu = await screen.findByRole("menu");
     expect(within(menu).queryByRole("menuitem", { name: ROW_ACTIONS.suspend })).not.toBeInTheDocument();

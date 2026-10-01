@@ -3,19 +3,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { TopUpSheet } from "../TopUpSheet";
 import { renderPage } from "../../../test/harness";
-import { LIVE_SAID, REASON_MISSING, ZAR_RECEIVED } from "../../../lib/topUpCopy";
+import { ADJUST_SHEET, LIVE_SAID, NOT_REVENUE, REASON_MISSING, TAKE_BACK_LINK } from "../../../lib/deskMinutesCopy";
 import { AMOUNT_COPY } from "../../../lib/amountCopy";
-import { TOP_UP_SHEET } from "../../../lib/membersCopy";
 
 /**
- * The desk top-up sheet — review round 1: F3.4 (rand received), F3.5 (frozen receipt),
- * F3.17 (a ceiling at the field), F3.18 (the shared parser).
+ * The desk's "Adjust minutes" sheet (P13 §3.7) — goodwill and corrections only: whole minutes,
+ * no rand (a desk SALE is `SellPackageSheet`), two paths, never one signed field. Carries the
+ * review-round pins: F3.5 (frozen receipt), F3.17 (a ceiling at the field), F3.18 (the shared
+ * parser), R3 A-4 / I-6, R5 I5-3.
  */
 afterEach(() => vi.unstubAllGlobals());
 
 const POINTER = { button: 0, ctrlKey: false, pointerType: "mouse" } as const;
 
-type Apply = (amount: number, code: string, reason: string, zar?: number) => Promise<{ balanceAfterCredits: number } | null>;
+type Apply = (amount: number, code: string, reason: string) => Promise<{ balanceAfterMinutes: number } | null>;
 
 /** The sheet as its callers mount it: the balance prop follows the server's answer. */
 function Harness({ apply }: { apply: Apply }) {
@@ -28,7 +29,7 @@ function Harness({ apply }: { apply: Apply }) {
       bookingError={null}
       onApply={async (...args) => {
         const r = await apply(...(args as Parameters<Apply>));
-        if (r) setBalance(r.balanceAfterCredits);
+        if (r) setBalance(r.balanceAfterMinutes);
         return r;
       }}
       onClose={() => {}}
@@ -37,14 +38,14 @@ function Harness({ apply }: { apply: Apply }) {
 }
 
 function typeAmount(text: string) {
-  fireEvent.change(screen.getByLabelText("Another amount"), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText(ADJUST_SHEET.amountLabel), { target: { value: text } });
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
 }
 
 async function chooseReason(label: string) {
   fireEvent.pointerDown(screen.getByRole("combobox"), POINTER);
   fireEvent.click(await screen.findByRole("option", { name: label }));
-  fireEvent.change(screen.getByLabelText("And why this one?"), { target: { value: "Receipt 0412" } });
+  fireEvent.change(screen.getByLabelText(ADJUST_SHEET.detailLabel), { target: { value: "Lights failed" } });
 }
 
 async function confirm() {
@@ -52,141 +53,138 @@ async function confirm() {
   fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!, { detail: 1 });
 }
 
-describe("the amount, through the shared parser", () => {
-  it("refuses 1e3 as not a number and takes 1,5 as one and a half", async () => {
+describe("the amount, in whole minutes through the shared parser", () => {
+  it("refuses 1e3 as not a number, and a fraction of a minute as too precise", async () => {
     renderPage(<Harness apply={vi.fn()} />);
     typeAmount("1e3");
-    expect(await screen.findByText(AMOUNT_COPY.notANumber("credits"))).toBeInTheDocument();
+    expect(await screen.findByText(AMOUNT_COPY.notANumber("minutes"))).toBeInTheDocument();
     typeAmount("1,5");
-    expect(await screen.findByLabelText("And why this one?")).toBeInTheDocument();
+    expect(await screen.findByText(AMOUNT_COPY.tooPrecise("minutes"))).toBeInTheDocument();
   });
 
   it("stops 99999999999 at the field and names the ceiling", async () => {
     renderPage(<Harness apply={vi.fn()} />);
     typeAmount("99999999999");
-    expect(await screen.findByText(/The most this can be is 99999999\.99 cr/)).toBeInTheDocument();
+    expect(await screen.findByText(/^The most this can be is /)).toBeInTheDocument();
+  });
+
+  it("says typed minutes back as an amount, so 90 is seen to be an hour and a half", () => {
+    renderPage(<Harness apply={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(ADJUST_SHEET.amountLabel), { target: { value: "90" } });
+    expect(screen.getByText(ADJUST_SHEET.amountEcho(90))).toHaveTextContent("= 1 h 30 min");
   });
 });
 
-describe("a top-up that counts as revenue asks what money was received (F3.4)", () => {
-  it("requires the rand, shows it on the check, and sends it", async () => {
-    const apply = vi.fn<Apply>().mockResolvedValue({ balanceAfterCredits: 440 });
-    renderPage(<Harness apply={apply} />);
-    typeAmount("240");
-    await chooseReason("Cash paid at the desk");
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText(AMOUNT_COPY.empty("rand"))).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText(ZAR_RECEIVED.label), { target: { value: "150" } });
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText(ZAR_RECEIVED.row)).toBeInTheDocument();
-    expect(screen.getByText(/R150\.00 counts as money the club took/)).toBeInTheDocument();
-
-    await confirm();
-    await waitFor(() => expect(apply).toHaveBeenCalledWith(240, "top_up_cash", "Receipt 0412", 150));
+describe("an adjustment is not money taken (P13 §3.7)", () => {
+  it("offers only the four adjustment reasons — never a desk payment — and asks no rand", async () => {
+    renderPage(<Harness apply={vi.fn()} />);
+    typeAmount("30");
+    fireEvent.pointerDown(screen.getByRole("combobox"), POINTER);
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(options).toEqual(["Goodwill — something went wrong", "Correcting a mistake", "Something else"]);
+    expect(screen.queryByText(/Cash paid|EFT|Card paid/)).toBeNull();
+    expect(screen.queryByLabelText(/money/i)).toBeNull();
   });
 
-  it("asks nothing and promises no revenue for goodwill", async () => {
-    const apply = vi.fn<Apply>().mockResolvedValue({ balanceAfterCredits: 250 });
+  it("sends the signed whole minutes, the code and the reason — and promises no revenue", async () => {
+    const apply = vi.fn<Apply>().mockResolvedValue({ balanceAfterMinutes: 230 });
     renderPage(<Harness apply={apply} />);
-    typeAmount("50");
+    typeAmount("30");
     await chooseReason("Goodwill — something went wrong");
-    expect(screen.queryByLabelText(ZAR_RECEIVED.label)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText(/stays out of the club's revenue/)).toBeInTheDocument();
+    expect(await screen.findByText(NOT_REVENUE)).toBeInTheDocument();
     await confirm();
-    await waitFor(() => expect(apply).toHaveBeenCalledWith(50, "goodwill", "Receipt 0412", undefined));
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(30, "goodwill", "Lights failed"));
+  });
+
+  it("takes minutes back as a negative movement, with its own reasons", async () => {
+    const apply = vi.fn<Apply>().mockResolvedValue({ balanceAfterMinutes: 155 });
+    renderPage(<Harness apply={apply} />);
+    fireEvent.click(screen.getByRole("button", { name: TAKE_BACK_LINK }));
+    typeAmount("45");
+    await chooseReason("Refunded outside the system");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Take back 45 min/ }), { detail: 1 });
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!, { detail: 1 });
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(-45, "refund_outside_system", "Lights failed"));
   });
 });
 
 describe("the receipt is frozen at the press (F3.5)", () => {
-  it("says what the balance WAS and became, not a sum on the new balance", async () => {
-    const apply = vi.fn<Apply>().mockResolvedValue({ balanceAfterCredits: 250 });
+  it("says what the balance WAS and became, in minutes, not a sum on the new balance", async () => {
+    const apply = vi.fn<Apply>().mockResolvedValue({ balanceAfterMinutes: 230 });
     renderPage(<Harness apply={apply} />);
-    typeAmount("50");
+    typeAmount("30");
     await chooseReason("Goodwill — something went wrong");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await confirm();
 
-    expect(await screen.findByText("Done. Sam now has 250.00 cr.", { selector: "[role='status']" })).toBeInTheDocument();
-    expect(screen.getByText("Sam had 200.00 cr. +50.00 cr → 250.00 cr.")).toBeInTheDocument();
-    expect(screen.queryByText(/After \+50\.00 cr: 300\.00 cr/)).not.toBeInTheDocument();
+    expect(await screen.findByText("Done. Sam now has 3 h 50 min.", { selector: "[role='status']" })).toBeInTheDocument();
+    expect(screen.getByText("Sam had 3 h 20 min. +30 min → 3 h 50 min.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\bcr\b|\.00|credit/i);
   });
 });
 
-/**
- * Review round 2 — A11Y F3-17 (its screenshot is the MEMBER top-up page; the desk's quick amounts
- * already chose on arrow, and this pins that they still do) and VIS F3-15 on the amount step.
- */
+/** Review round 2 — A11Y F3-17 and VIS F3-15 on the amount step. */
 describe("the quick amounts are radios that choose as the arrows move", () => {
   it("selects the amount the arrow key moves to", async () => {
     renderPage(<Harness apply={vi.fn()} />);
-    const first = screen.getByRole("radio", { name: "+50.00 cr" });
+    const first = screen.getByRole("radio", { name: "+15 min" });
     fireEvent.click(first);
     expect(first).toHaveAttribute("aria-checked", "true");
     first.focus();
     fireEvent.keyDown(first, { key: "ArrowRight" });
 
-    const second = screen.getByRole("radio", { name: "+100.00 cr" });
+    const second = screen.getByRole("radio", { name: "+30 min" });
     await waitFor(() => expect(second).toHaveAttribute("aria-checked", "true"));
-    expect(screen.getByLabelText("Another amount")).toHaveValue("100");
+    expect(screen.getByLabelText(ADJUST_SHEET.amountLabel)).toHaveValue("30");
+    expect(screen.getByRole("radio", { name: "+1 h" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "+2 h" })).toBeInTheDocument();
   });
 
-  it("offers taking credit back as a real button, not a line of text", () => {
+  it("offers taking minutes back as a real button, not a line of text", () => {
     renderPage(<Harness apply={vi.fn()} />);
-    const flip = screen.getByRole("button", { name: "Take credit back instead" });
-    // The outline look — a bordered surface — rather than the borderless ghost it was.
+    const flip = screen.getByRole("button", { name: TAKE_BACK_LINK });
     expect(flip.className).toMatch(/border-control/);
     expect(flip.querySelector("svg")).not.toBeNull();
   });
 });
 
-/**
- * Review round 3, A-4: with a revenue code chosen and the "why" left empty, the "why this one?"
- * complaint was rendered under the RAND field — aria-invalid on the wrong input — and focus
- * stayed on Next. Each field now says its own complaint, and focus goes to the first of them.
- */
+/** Review round 3, A-4: each field says its own complaint, and focus goes to the first. */
 describe("each field says its own complaint (R3 A-4)", () => {
-  it("puts the missing reason under the reason and the missing rand under the rand, focusing the first", async () => {
+  it("puts the missing reason under the reason, focusing it", async () => {
     renderPage(<Harness apply={vi.fn()} />);
-    typeAmount("240");
+    typeAmount("30");
     fireEvent.pointerDown(screen.getByRole("combobox"), POINTER);
-    fireEvent.click(await screen.findByRole("option", { name: "Cash paid at the desk" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Correcting a mistake" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-    const detail = screen.getByLabelText("And why this one?");
-    const zar = screen.getByLabelText(ZAR_RECEIVED.label);
+    const detail = screen.getByLabelText(ADJUST_SHEET.detailLabel);
     expect(detail).toHaveAttribute("aria-invalid", "true");
     expect(detail).toHaveAccessibleDescription(expect.stringContaining(REASON_MISSING.detail));
-    expect(zar).toHaveAttribute("aria-invalid", "true");
-    expect(zar).toHaveAccessibleDescription(expect.stringContaining(AMOUNT_COPY.empty("rand")));
-    expect(zar).not.toHaveAccessibleDescription(expect.stringContaining(REASON_MISSING.detail));
     await waitFor(() => expect(detail).toHaveFocus());
   });
 
   it("names a missing reason code at the code, and focuses it", async () => {
     renderPage(<Harness apply={vi.fn()} />);
-    typeAmount("50");
-    fireEvent.change(screen.getByLabelText("And why this one?"), { target: { value: "Receipt 0412" } });
+    typeAmount("30");
+    fireEvent.change(screen.getByLabelText(ADJUST_SHEET.detailLabel), { target: { value: "Lights failed" } });
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     const code = screen.getByRole("combobox");
     expect(code).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByLabelText("And why this one?")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText(ADJUST_SHEET.detailLabel)).not.toHaveAttribute("aria-invalid");
     await waitFor(() => expect(code).toHaveFocus());
   });
 });
 
-/**
- * Review round 3, I-6: the confirm's live region said "That didn't go through." whatever the
- * caller reported — over an outcome not known yet, and over a 409 proving the movement landed.
- */
+/** Review round 3, I-6: the confirm's live region says what the caller found. */
 describe("the confirm says what the caller found (R3 I-6)", () => {
   it("speaks the caller's line, never 'didn't go through', when no receipt came", async () => {
     renderPage(
       <TopUpSheet name="Sam" balance={200} busy={false} bookingError={null} onClose={() => {}}
         onApply={async () => ({ said: LIVE_SAID.unknown })} />,
     );
-    typeAmount("50");
+    typeAmount("30");
     await chooseReason("Goodwill — something went wrong");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await confirm();
@@ -197,26 +195,23 @@ describe("the confirm says what the caller found (R3 I-6)", () => {
 
   it("stretches the confirm across the sheet beside a full-width Back (R3 V-3, A-15)", async () => {
     renderPage(<Harness apply={vi.fn()} />);
-    typeAmount("50");
+    typeAmount("30");
     await chooseReason("Goodwill — something went wrong");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByRole("button", { name: /^Add 50\.00 cr/ })).toHaveClass("w-full");
+    expect(await screen.findByRole("button", { name: /^Add 30 min/ })).toHaveClass("w-full");
   });
 });
 
-/**
- * Review round 5, I5-3: Escape, the × and the scrim closed the sheet while the credit was on its
- * way — the landing was silent — and a sheet reopened meanwhile showed Add disabled with no reason.
- */
-describe("the sheet stays open while the credit is on its way (R5 I5-3)", () => {
-  it("refuses Escape mid-credit and says it is waiting, again on the refusal", async () => {
+/** Review round 5, I5-3: the sheet stays open while the movement is on its way. */
+describe("the sheet stays open while the movement is on its way (R5 I5-3)", () => {
+  it("refuses Escape mid-movement and says it is waiting, again on the refusal", async () => {
     const onClose = vi.fn();
-    let land: (r: { balanceAfterCredits: number }) => void = () => {};
+    let land: (r: { balanceAfterMinutes: number }) => void = () => {};
     renderPage(
       <TopUpSheet name="Sam" balance={200} busy={false} bookingError={null} onClose={onClose}
         onApply={() => new Promise((resolve) => { land = resolve; })} />,
     );
-    typeAmount("50");
+    typeAmount("30");
     await chooseReason("Goodwill — something went wrong");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await confirm();
@@ -224,14 +219,14 @@ describe("the sheet stays open while the credit is on its way (R5 I5-3)", () => 
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     expect(onClose).not.toHaveBeenCalled();
     expect(document.querySelector("[data-sheet='top-up']")).toBeInTheDocument();
-    land({ balanceAfterCredits: 250 });
-    expect(await screen.findByText("Done. Sam now has 250.00 cr.", { selector: "[role='status']" })).toBeInTheDocument();
+    land({ balanceAfterMinutes: 230 });
+    expect(await screen.findByText("Done. Sam now has 3 h 50 min.", { selector: "[role='status']" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(onClose).toHaveBeenCalled();
   });
 
   it("says why Add waits when it opens over a movement still in flight", () => {
     renderPage(<TopUpSheet name="Sam" balance={200} busy bookingError={null} onClose={() => {}} onApply={vi.fn()} />);
-    expect(document.querySelector("[data-sending-note]")).toHaveTextContent(TOP_UP_SHEET.sending("Sam"));
+    expect(document.querySelector("[data-sending-note]")).toHaveTextContent(ADJUST_SHEET.sending("Sam"));
   });
 });

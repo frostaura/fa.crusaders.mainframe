@@ -83,8 +83,8 @@ export type MemberDetailContext = MemberDetailState & {
   detail: MemberDetail;
   /** The member's display name, never "undefined" — see {@link displayName}. */
   name: string;
-  /** Opens the Top up sheet the header owns, so every tab tops up through one idempotent path. */
-  openTopUp: () => void;
+  /** Opens the Sell package sheet the header owns, so every tab sells through one idempotent path. */
+  openSell: () => void;
 };
 
 export function useMemberDetail(): MemberDetailContext {

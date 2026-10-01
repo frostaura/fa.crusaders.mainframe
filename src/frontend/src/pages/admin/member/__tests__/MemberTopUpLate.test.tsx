@@ -3,13 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { renderPage } from "../../../../test/harness";
 import { useMemberTopUp } from "../useMemberTopUp";
-import { useCreditAdjust } from "../../../../components/members/useCreditAdjust";
-import { doneSentence } from "../../../../lib/topUpCopy";
+import { useMinutesAdjust } from "../../../../components/members/useMinutesAdjust";
+import { doneSentence } from "../../../../lib/deskMinutesCopy";
 import type { MemberRow } from "../../../../components/members/membersModel";
 
 /**
- * Review round 5, I5-3: the desk credit hooks reset their in-flight ref and key when the sheet
- * closed mid-credit, and a credit landing after its page had gone was said nowhere.
+ * Review round 5, I5-3: the desk adjustment hooks reset their in-flight ref and key when the sheet
+ * closed mid-movement, and a movement landing after its page had gone was said nowhere.
  */
 afterEach(() => vi.unstubAllGlobals());
 
@@ -48,8 +48,8 @@ function Host({ children }: { children: React.ReactNode }) {
   );
 }
 
-describe("the member page's desk credit (R5 I5-3)", () => {
-  it("will not close mid-credit, and says a landing after the page has gone", async () => {
+describe("the member page's desk adjustment (R5 I5-3)", () => {
+  it("will not close mid-movement, and says a landing after the page has gone", async () => {
     const { fetch, land } = heldFetch();
     renderPage(<Host><DetailProbe /></Host>);
     fireEvent.click(screen.getByText("open"));
@@ -67,7 +67,7 @@ describe("the member page's desk credit (R5 I5-3)", () => {
 const ROW = { user_id: "u-1", full_name: "Sam", email: "sam@x.test", balance_minutes: 200 } as unknown as MemberRow;
 
 function ListProbe() {
-  const credit = useCreditAdjust(() => {});
+  const credit = useMinutesAdjust(() => {});
   return (
     <>
       <button onClick={() => credit.open(ROW)}>open</button>
@@ -78,8 +78,8 @@ function ListProbe() {
   );
 }
 
-describe("the members list's desk credit (R5 I5-3)", () => {
-  it("will not close mid-credit, and says a landing after the list has gone", async () => {
+describe("the members list's desk adjustment (R5 I5-3)", () => {
+  it("will not close mid-movement, and says a landing after the list has gone", async () => {
     const { land } = heldFetch();
     renderPage(<Host><ListProbe /></Host>);
     fireEvent.click(screen.getByText("open"));

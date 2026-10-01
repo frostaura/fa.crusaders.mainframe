@@ -8,6 +8,7 @@ import { Envelope, Fingerprint, Key, Password, Trash } from "@/components/ui/ico
 import { Section } from "@/components/ui/page-shell";
 import { clubDate } from "@/lib/clubClock";
 import { endpoints } from "@/lib/api";
+import { FEATURES } from "@/lib/features";
 import type { AdminRoleResult, FingerprintEnrolment, MemberDetail } from "@/lib/memberDetailApi";
 import { ACCESS_COPY as COPY, ACTIONS_COPY, fingerLabel } from "@/lib/memberDetailCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
@@ -18,7 +19,9 @@ import { useMemberDetail } from "./useMemberDetail";
 
 /**
  * Sign-in & biometrics — how this person gets in: admin rights (R20), passkeys, their email
- * verification and password, and the fingerprints the court boxes hold for them.
+ * verification and password, and — while `FEATURES.fingerprintEnrolment` is on (P13 §9) — the
+ * fingerprints the court boxes hold for them. The box does not read fingerprints yet, so the
+ * section is not drawn and no enrolment can be reached; the backend keeps its endpoints.
  *
  * <p>
  * Every control here changes what a person can DO, so each one is a confirm dialog or a flow
@@ -49,13 +52,15 @@ export function MemberAccess() {
       <Section title={COPY.signInTitle} description={COPY.signInDescription}>
         <SignIn detail={detail} name={name} />
       </Section>
-      <Section
-        title={COPY.fingerprintsTitle}
-        description={COPY.fingerprintsDescription}
-        actions={<EnrolFingerDialog userId={userId} name={name} used={detail.fingerprints.enrolments} onEnrolled={reload} />}
-      >
-        <Fingerprints enrolments={detail.fingerprints.enrolments} onRemoved={reload} />
-      </Section>
+      {FEATURES.fingerprintEnrolment ? (
+        <Section
+          title={COPY.fingerprintsTitle}
+          description={COPY.fingerprintsDescription}
+          actions={<EnrolFingerDialog userId={userId} name={name} used={detail.fingerprints.enrolments} onEnrolled={reload} />}
+        >
+          <Fingerprints enrolments={detail.fingerprints.enrolments} onRemoved={reload} />
+        </Section>
+      ) : null}
     </div>
   );
 }

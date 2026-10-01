@@ -1,17 +1,17 @@
 import { ApiError, endpoints } from "@/lib/api";
 import { rateLimitedSentence } from "@/lib/errors";
-import { adminEndpoints, type AdjustReasonCode } from "@/lib/adminApi";
+import { adminEndpoints, type AdjustmentReasonCode } from "@/lib/adminApi";
 import { newIdempotencyKey, relatedBookingRefusal } from "@/lib/creditAdjustment";
 import { memberDetailEndpoints } from "@/lib/memberDetailApi";
-import { LIVE_SAID, LOST_REPLY, adjustRefusal } from "@/lib/topUpCopy";
+import { LIVE_SAID, LOST_REPLY, adjustRefusal } from "@/lib/deskMinutesCopy";
 
 /**
- * One press of the desk's "Add / Take back" — posted, and when its reply is lost, FOUND.
+ * One press of the desk's "Add / Take back" minutes (§3.7 `/adjust`) — posted, and when its reply is lost, FOUND.
  *
  * <p>
- * Shared by the members list (`useCreditAdjust`) and the member's page (`useMemberTopUp`), which
+ * Shared by the members list (`useMinutesAdjust`) and the member's page (`useMemberTopUp`), which
  * carried the same machinery twice and the same defect twice (review round 2, F3-2): a reply lost
- * after the credit landed read "That didn't go through", and an admin who then corrected the
+ * after the movement landed read "That didn't go through", and an admin who then corrected the
  * amount re-sent it under the same key and was told "didn't go through" again over a 409.
  * </p>
  *
@@ -37,16 +37,15 @@ export type AdjustmentKey = { key: string; fingerprint: string; unresolved: bool
 export type AdjustmentInput = {
   userId: string;
   amount: number;
-  reasonCode: AdjustReasonCode;
+  reasonCode: AdjustmentReasonCode;
   reason: string;
   bookingId?: string;
-  zarReceived?: number;
   /** Whose ledger to point at when the outcome cannot be found out. */
   name: string;
 };
 
 export type AdjustmentOutcome =
-  | { kind: "applied"; balanceAfterCredits: number | null; recovered: boolean }
+  | { kind: "applied"; balanceAfterMinutes: number | null; recovered: boolean }
   | { kind: "booking"; message: string }
   | {
     kind: "failed"; message: string; unchanged: boolean;
@@ -60,12 +59,12 @@ export type AdjustmentOutcome =
     balanceNow?: number | null;
   };
 
-const ADJUSTMENT_TYPES = new Set(["AdminAdjustment", "AdminTopUp"]);
+const ADJUSTMENT_TYPES = new Set(["AdminAdjustment"]);
 /** How far before the press a row may be dated and still be this press's — client/server skew. */
 const SKEW_MS = 2 * 60_000;
 
 function fingerprintOf(input: AdjustmentInput): string {
-  return JSON.stringify([input.amount, input.reasonCode, input.reason, input.bookingId ?? null, input.zarReceived ?? null]);
+  return JSON.stringify([input.amount, input.reasonCode, input.reason, input.bookingId ?? null]);
 }
 
 /** The key this press travels under, per the rule in the header. */
@@ -76,12 +75,12 @@ export function keyForPress(current: AdjustmentKey, input: AdjustmentInput): Adj
 }
 
 /** A reply that says the server decided: any 4xx. Everything else might have landed. */
-function refusedOutright(err: unknown): boolean {
+export function refusedOutright(err: unknown): boolean {
   return err instanceof ApiError && err.status >= 400 && err.status < 500;
 }
 
 /** The rate limit's sentence, with the wait the club named, or null for anything else. */
-function rateLimited(err: unknown): string | null {
+export function rateLimited(err: unknown): string | null {
   if (!(err instanceof ApiError) || err.status !== 429) return null;
   return `${rateLimitedSentence(Number(err.detail("retry_after_seconds")) || null)} Nothing was changed.`;
 }
@@ -105,7 +104,7 @@ async function lookFor(input: AdjustmentInput, pressedAt: number): Promise<Found
 }
 
 /** The balance now, or null — never a zero standing in for a read that failed. */
-async function balanceNow(userId: string): Promise<number | null> {
+export async function balanceNow(userId: string): Promise<number | null> {
   try {
     const detail = await memberDetailEndpoints.detail(userId);
     return typeof detail?.balance_minutes === "number" ? detail.balance_minutes : null;
@@ -118,7 +117,7 @@ async function afterLostReply(input: AdjustmentInput, pressedAt: number, keyRef:
   const found = await lookFor(input, pressedAt);
   if (found === "landed") {
     keyRef.current = null;
-    return { kind: "applied", balanceAfterCredits: await balanceNow(input.userId), recovered: true };
+    return { kind: "applied", balanceAfterMinutes: await balanceNow(input.userId), recovered: true };
   }
   if (keyRef.current) keyRef.current = { ...keyRef.current, unresolved: found === "unknown" };
   return found === "absent"
@@ -137,11 +136,10 @@ export async function attemptAdjustment(
       reasonCode: input.reasonCode,
       reason: input.reason,
       ...(input.bookingId ? { relatedBookingId: input.bookingId } : {}),
-      ...(input.zarReceived !== undefined ? { zarReceived: input.zarReceived } : {}),
       idempotencyKey: keyRef.current!.key,
     });
     keyRef.current = null;
-    return { kind: "applied", balanceAfterCredits: r.balance_after_minutes, recovered: false };
+    return { kind: "applied", balanceAfterMinutes: r.balance_after_minutes, recovered: false };
   } catch (err) {
     const booking = relatedBookingRefusal(err);
     if (booking) return { kind: "booking", message: booking };

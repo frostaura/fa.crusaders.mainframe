@@ -5,11 +5,13 @@ import { ScrollArea } from "@/components/ScrollArea";
 import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
 import { GroupAssign } from "@/components/members/GroupAssign";
 import { RelatedBookingField } from "@/components/members/RelatedBookingField";
+import { SellPackageSheet } from "@/components/members/SellPackageSheet";
 import { TopUpSheet } from "@/components/members/TopUpSheet";
+import { Minutes } from "@/components/Minutes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CalendarBlank, Lock, PencilSimple, Plus, ShieldCheck, UserFocus, UsersThree } from "@/components/ui/icons";
+import { CalendarBlank, HourglassMedium, Lock, PencilSimple, Plus, ShieldCheck, UserFocus, UsersThree } from "@/components/ui/icons";
 import { PageHeader, PageShell } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,7 +23,7 @@ import type { AdminRoleResult, MemberDetail } from "@/lib/memberDetailApi";
 import { MEMBER_COPY, MEMBER_TABS, STATUS_WORD, statusTone } from "@/lib/memberDetailCopy";
 import { heldLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { typography } from "@/lib/typography";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { useMembersSplit } from "@/components/members/membersSplit";
 import { MemberActions, MemberDecision } from "./MemberActions";
 import { zoneNow } from "./memberTime";
@@ -34,8 +36,8 @@ import { useMemberTopUp } from "./useMemberTopUp";
  *
  * <p>
  * <b>Header, then tabs, then the tab.</b> The header is who they are and what they hold — photo,
- * name, status, admin, groups, balance — with the two everyday actions beside the balance (Top
- * up, Book for member) and everything consequential behind one ⋯. Each tab is its own ROUTE
+ * name, status, admin, groups, balance — with the everyday actions beside the balance (Sell
+ * package, Adjust minutes, Book for member) and everything consequential behind one ⋯. Each tab is its own ROUTE
  * (`/admin/members/:userId/wallet` …), so a tab is a link that can be shared, reloaded and
  * reached with Back, and the active one carries `aria-current="page"`.
  * </p>
@@ -57,17 +59,19 @@ export default function MemberDetailLayout() {
     [patch, reload],
   );
   const topUp = useMemberTopUp(userId, detail ? displayName(detail) : "this member", onApplied);
+  const [selling, setSelling] = useState(false);
+  const openSell = useCallback(() => setSelling(true), []);
 
   const context = useMemo<MemberDetailContext | null>(
-    () => (detail ? { ...state, detail, name: displayName(detail), openTopUp: topUp.show } : null),
-    [state, detail, topUp.show],
+    () => (detail ? { ...state, detail, name: displayName(detail), openSell } : null),
+    [state, detail, openSell],
   );
 
   if (!context) return <MemberPending state={state} />;
 
   return (
     <RecordFrame>
-      <MemberHeader state={state} detail={context.detail} name={context.name} onTopUp={topUp.show} />
+      <MemberHeader state={state} detail={context.detail} name={context.name} onSell={openSell} onAdjust={topUp.show} />
       <div className="flex min-w-0 flex-col gap-6">
         <MemberTabs userId={userId} />
         <Outlet context={context} />
@@ -83,6 +87,15 @@ export default function MemberDetailLayout() {
           renderBookingField={() => (
             <RelatedBookingField userId={userId} value={topUp.booking} error={null} onChange={topUp.setBooking} />
           )}
+        />
+      ) : null}
+      {selling ? (
+        <SellPackageSheet
+          userId={userId}
+          name={context.name}
+          balance={context.detail.balance_minutes}
+          onClose={() => setSelling(false)}
+          onSold={onApplied}
         />
       ) : null}
     </RecordFrame>
@@ -155,10 +168,10 @@ function MemberSkeleton() {
 
 /* ─────────────────────────────── the header ─────────────────────────────── */
 
-type HeaderProps = { state: MemberDetailState; detail: MemberDetail; name: string; onTopUp: () => void };
+type HeaderProps = { state: MemberDetailState; detail: MemberDetail; name: string; onSell: () => void; onAdjust: () => void };
 
 function MemberHeader(props: HeaderProps) {
-  const { state, detail, name, onTopUp } = props;
+  const { state, detail, name, onSell, onAdjust } = props;
   const back = useBackTo();
   // An address may break after its "@" and before each "." (R4 V4-9: at 320 with 200% text the
   // one-word address ran 58px off the screen).
@@ -201,7 +214,7 @@ function MemberHeader(props: HeaderProps) {
         className="flex flex-col gap-4 rounded-xl border border-border bg-bg-surface p-4 shadow-xs [container-type:inline-size] sm:gap-5 sm:p-6 md:flex-row md:flex-wrap md:items-center md:justify-between"
       >
         <Identity detail={detail} name={name} state={state} />
-        <BalancePanel detail={detail} name={name} onTopUp={onTopUp} />
+        <BalancePanel detail={detail} name={name} onSell={onSell} onAdjust={onAdjust} />
       </section>
     </>
   );
@@ -248,13 +261,13 @@ function Identity({ detail, name, state }: { detail: MemberDetail; name: string;
 }
 
 /**
- * The member's groups, editable in place (P6, D2): chips, the rate and peak standing they add up
+ * The member's groups, editable in place (P6, D2): chips, the package discount and peak standing they add up
  * to, and "Change groups", which opens GroupAssign — the change's effect on their money is shown
  * before it is saved, and the header takes the saved set straight away, then re-reads.
  */
 function MemberGroups({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
   const [open, setOpen] = useState(false);
-  const rateGroup = detail.tariff ? detail.groups.find((g) => g.id === detail.tariff?.rate_group_id)?.name ?? null : null;
+  const discountGroup = detail.tariff ? detail.groups.find((g) => g.id === detail.tariff?.discount_group_id)?.name ?? null : null;
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -275,7 +288,7 @@ function MemberGroups({ detail, name, state }: { detail: MemberDetail; name: str
           <span className="sr-only">{`for ${name}`}</span>
         </Button>
       </div>
-      {detail.tariff ? <p className="text-xs text-text-secondary" data-testid="member-tariff">{tariffLine(detail.tariff, rateGroup)}</p> : null}
+      {detail.tariff ? <p className="text-xs text-text-secondary" data-testid="member-tariff">{tariffLine(detail.tariff, discountGroup)}</p> : null}
       {open ? (
         <GroupAssign
           userId={detail.user_id}
@@ -328,7 +341,9 @@ function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) 
  */
 const GROWS = "!h-auto min-h-touch min-w-0 flex-[1_1_auto] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
 
-function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: string; onTopUp: () => void }) {
+type BalancePanelProps = { detail: MemberDetail; name: string; onSell: () => void; onAdjust: () => void };
+
+function BalancePanel({ detail, name, onSell, onAdjust }: BalancePanelProps) {
   const overdrawn = detail.balance_minutes < 0;
   const canBook = detail.status === "Active";
   return (
@@ -338,23 +353,28 @@ function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: s
         <dt className={typography({ variant: "overline" })}>{MEMBER_COPY.balance}</dt>
         <dd
           data-testid="member-balance"
-          // May wrap before "cr" (R4 V4-9): nowrap ran the figure off a 320 phone at 200% text.
+          // May wrap between its parts (R4 V4-9): nowrap ran the figure off a 320 phone at 200% text.
           className={cn(typography({ variant: "display" }), "min-w-0 break-words text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
         >
-          {formatCredits(detail.balance_minutes)}
+          <Minutes value={detail.balance_minutes} />
         </dd>
         {overdrawn ? <dd className="basis-full text-xs text-danger-strong">{MEMBER_COPY.balanceOverdrawn}</dd> : null}
         <BalanceParts detail={detail} name={name} />
       </dl>
       <div className="flex min-w-0 flex-wrap gap-2">
-        {/* Only an active member is topped up (F3.10) — the members list offers no Top up
-            to anybody else, and a turned-down applicant was offered one here. */}
+        {/* Only an active member is sold to or adjusted (F3.10) — the members list offers neither
+            to anybody else, and a turned-down applicant was once offered one here. */}
         {canBook ? (
-          <Button onClick={onTopUp} icon={<Plus weight="bold" aria-hidden="true" />} className={GROWS}>
-            {MEMBER_COPY.topUp}
-          </Button>
+          <>
+            <Button onClick={onSell} icon={<Plus weight="bold" aria-hidden="true" />} className={GROWS}>
+              {MEMBER_COPY.sell}
+            </Button>
+            <Button variant="outline" onClick={onAdjust} icon={<HourglassMedium aria-hidden="true" />} className={GROWS}>
+              {MEMBER_COPY.adjust}
+            </Button>
+          </>
         ) : (
-          <p className="max-w-xs text-sm text-text-muted">{MEMBER_COPY.noTopUp[detail.status ?? "none"] ?? MEMBER_COPY.noTopUp.none}</p>
+          <p className="max-w-xs text-sm text-text-muted">{MEMBER_COPY.noSell[detail.status ?? "none"] ?? MEMBER_COPY.noSell.none}</p>
         )}
         {canBook ? (
           <Button asChild variant="outline" className={GROWS}>

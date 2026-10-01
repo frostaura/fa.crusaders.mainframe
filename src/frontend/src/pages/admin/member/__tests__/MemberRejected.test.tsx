@@ -6,20 +6,21 @@ import { BASE, baseRoutes, bookingRow, detailFixture, renderMember, serve } from
 
 /**
  * Review round 1, F3.10: a turned-down applicant's page read "Rejected" in the header beside
- * "Account: active" below, never said why, and offered Top up. One state, said once.
+ * "Account: active" below, never said why, and offered Top up (now Sell package). One state, said once.
  */
 describe("member detail — a turned-down application", () => {
   beforeEach(() => { signOut(); });
 
-  it("says it was turned down and why, with no contradicting account line and no Top up", async () => {
+  it("says it was turned down and why, with no contradicting account line and nothing to sell or adjust", async () => {
     serve(baseRoutes(detailFixture({ status: "Rejected", account_status: "active", rejection_reason: "Not a club member" })));
     renderMember();
     await screen.findByTestId("member-balance");
 
     expect(screen.getByText(OVERVIEW_COPY.turnedDownBecause("Not a club member"))).toBeInTheDocument();
     expect(screen.queryByText(OVERVIEW_COPY.accountStatus, { selector: "dt" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: MEMBER_COPY.topUp })).not.toBeInTheDocument();
-    expect(screen.getByText(MEMBER_COPY.noTopUp.Rejected)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: MEMBER_COPY.sell })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: MEMBER_COPY.adjust })).not.toBeInTheDocument();
+    expect(screen.getByText(MEMBER_COPY.noSell.Rejected)).toBeInTheDocument();
   });
 
   it("puts no block element inside a paragraph on the overview (F3.23)", async () => {
@@ -29,10 +30,11 @@ describe("member detail — a turned-down application", () => {
     expect(document.querySelectorAll("p div")).toHaveLength(0);
   });
 
-  it("still offers Top up to an active member", async () => {
+  it("still offers Sell package and Adjust minutes to an active member", async () => {
     serve(baseRoutes(detailFixture()));
     renderMember();
-    expect(await screen.findByRole("button", { name: MEMBER_COPY.topUp })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: MEMBER_COPY.sell })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: MEMBER_COPY.adjust })).toBeInTheDocument();
   });
 });
 
@@ -86,6 +88,6 @@ describe("member detail — approving a turned-down application (R3 A-2)", () =>
 
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path === approve)).toBe(true));
     expect(await screen.findByText(ACTIONS_COPY.approved("Thandi Mokoena"))).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: MEMBER_COPY.topUp })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: MEMBER_COPY.sell })).toBeInTheDocument();
   });
 });

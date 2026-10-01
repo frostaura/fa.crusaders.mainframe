@@ -12,7 +12,9 @@ import {
   ADMIN_BADGE, COLUMNS, GROUPS_COPY, MEMBERS_PAGE, UNVERIFIED, joinedOn, lastSeen, lastSeenTitle,
   memberHref, statusLabel, statusTone,
 } from "@/lib/membersCopy";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { minutesCompact } from "@/lib/minutes";
+import { Minutes } from "@/components/Minutes";
 import { initialsOf, type GroupChip, type MemberRow, type Sort, type SortKey } from "./membersModel";
 import { EmailWithBreaks } from "./EmailWithBreaks";
 import { RowActions, type RowActionHandlers } from "./RowActions";
@@ -49,7 +51,7 @@ import { RowActions, type RowActionHandlers } from "./RowActions";
  * <b>Balance and Actions are pinned, and the two numbers are one decision.</b> Balance sits at
  * `right-64` and Actions is `w-64` — a pin whose offset no longer equals the width it clears puts
  * the balance straight back under the actions, and a balance partly covered once read
- * `123456.78 cr` as `12345`. Fixed layout means there is no overflow for the pins to hide
+ * `85 d 17 h 36 min` as `85 d 17`. Fixed layout means there is no overflow for the pins to hide
  * anything in; they stay as the belt to that brace.
  * </p>
  *
@@ -140,7 +142,7 @@ const APPLICATION_ACTIONS = "col-span-3 col-start-1 row-span-1 row-start-3";
  * <p>
  * R4 V-14: at 1280 the actions column (18rem) held Top up and ⋯ in half its width and the balance
  * (9rem) a figure a third of it, while member emails wrapped over two lines. Actions are 16rem —
- * Approve, Reject and ⋯ side by side — and groups 9rem; the balance keeps 9rem, which is what "98765432.19 cr"
+ * Approve, Reject and ⋯ side by side — and groups 9rem; the balance keeps 9rem, which is what "694 d 10 h 39 min"
  * needs whole (admin-members-layout.spec); the member column takes the rest — 64px more than
  * before, at the same column thresholds (which now leave it more than its 13rem floor).
  * </p>
@@ -269,11 +271,8 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
       ) : null}
       <DateCell row={row} dateColumn={dateColumn} now={now} />
       <td data-label={COLUMNS.balance} className={COL.balance}>
-        <span
-          title={formatCredits(row.balance_minutes)}
-          className={cn("block truncate font-semibold tabular-nums", row.balance_minutes < 0 ? "text-danger-strong" : "text-text-primary")}
-        >
-          {formatCredits(row.balance_minutes)}
+        <span title={minutesCompact(row.balance_minutes)} className="block truncate font-semibold text-text-primary">
+          <Minutes value={row.balance_minutes} />
         </span>
       </td>
       {/* An application's Approve and Reject take the card's third line (the queue's two words). */}

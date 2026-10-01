@@ -1,6 +1,5 @@
 import { clubInstant } from "./clubClock";
 import { clubZone } from "./clubZone";
-import { formatCredits } from "./utils";
 import { clubShortDate } from "./clubClock";
 
 /**
@@ -22,7 +21,7 @@ import { clubShortDate } from "./clubClock";
 
 export const MEMBERS_PAGE = {
   title: "Members",
-  description: "Approve applicants, top up credit, and open anyone's record — their bookings, doors and night.",
+  description: "Approve applicants, sell packages at the desk, and open anyone's record — their bookings, doors and night.",
   searchLabel: "Search members",
   // R3 V-15: "membership number" was clipped at 320; "member no." fits the narrowest phone.
   searchPlaceholder: "Name, email or member no.",
@@ -212,7 +211,10 @@ export function lastSeenTitle(iso: string | null | undefined): string {
 export const ROW_ACTIONS = {
   approve: "Approve",
   reject: "Reject",
-  topUp: "Top up",
+  /** P13 §3.7: the desk takes money by selling a package off the member's own shelf. */
+  sell: "Sell package",
+  /** Goodwill and corrections, in whole minutes — no money changes hands. */
+  adjust: "Adjust minutes",
   more: (name: string) => `More actions for ${name}`,
   view: "View member",
   book: "Book for member",
@@ -276,7 +278,7 @@ export const REJECT_DIALOG = {
 export const SUSPEND_DIALOG = {
   title: (name: string) => `Suspend ${name}?`,
   description:
-    "They won’t be able to sign in, book a court, or open a court at the box. Their credit balance and any bookings they already have are left exactly as they are, and reactivating restores everything. The reason is emailed to them.",
+    "They won’t be able to sign in, book a court, or open a court at the box. Their minutes and any bookings they already have are left exactly as they are, and reactivating restores everything. The reason is emailed to them.",
   reasonLabel: "Reason (visible to the member)",
   reasonPlaceholder: "e.g. Membership dues unpaid since March.",
   confirm: "Suspend member",
@@ -351,40 +353,6 @@ export const FINGERPRINTS = {
   allRemoveFailed: "Couldn't remove every fingerprint.",
 } as const;
 
-// ---------------------------------------------------------------------------------------
-// Top-up sheet (the words not already in lib/topUpCopy)
-// ---------------------------------------------------------------------------------------
-
-export const TOP_UP_SHEET = {
-  steps: ["Amount", "Reason", "Check"] as const,
-  quickLabel: "Quick amounts",
-  amountLabel: "Another amount",
-  amountPlaceholder: "e.g. 150",
-  reasonLabel: "Reason",
-  reasonDescription: "The member sees this on their wallet.",
-  reasonPlaceholder: "Choose a reason",
-  detailLabel: "And why this one?",
-  detailPlaceholder: "e.g. R200 cash at the desk, receipt 0412",
-  next: "Next",
-  back: "Back",
-  cancel: "Cancel",
-  done: "Done",
-  balanceNow: "Balance now",
-  thisMovement: "This",
-  balanceAfter: "Balance after",
-  unreadable: "Couldn't read it",
-  serverWorksItOut: "the club's system works it out",
-  reasonLine: (label: string, text: string) => `Reason: ${label} — “${text}”`,
-  failed: "That didn't go through.",
-  /** R5 I5-3: said while a movement is on its way — and again on each refused way out. */
-  sending: (name: string) => `Waiting for the club to answer about ${name}'s credit. This stays open until it does.`,
-} as const;
-
-/** "+100.00 cr" / "−100.00 cr" — the direction carries the sign, never a typed character. */
-export function signedAmount(direction: "add" | "take_back", amount: number): string {
-  return `${direction === "add" ? "+" : "−"}${formatCredits(amount)}`;
-}
-
 export const RELATED_BOOKING = {
   label: "For booking (optional)",
   none: "Not for a specific booking",
@@ -396,6 +364,6 @@ export const RELATED_BOOKING = {
   short: "Name it only when this movement makes up for that booking.",
   moreLabel: "naming a booking",
   more:
-    "Only for a credit or debit that genuinely compensates this member for that booking. It does not stand in for the automatic reversal: when the court box reports the member did attend, the refund and the penalty are reversed on their own, and what you post here is netted against that reversal one leg at a time — a positive adjustment reduces the penalty the reversal gives back, a negative one reduces the refund it takes away. Netting stops at zero per leg, so anything beyond what a leg is worth stands as posted and is not clawed back.",
+    "Only for a movement that genuinely compensates this member for that booking. It does not stand in for the automatic reversal: when the court box reports the member did attend, the refund and the penalty are reversed on their own, and what you post here is netted against that reversal one leg at a time — a positive adjustment reduces the penalty the reversal gives back, a negative one reduces the refund it takes away. Netting stops at zero per leg, so anything beyond what a leg is worth stands as posted and is not clawed back.",
   notAGuid: "That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank.",
 } as const;

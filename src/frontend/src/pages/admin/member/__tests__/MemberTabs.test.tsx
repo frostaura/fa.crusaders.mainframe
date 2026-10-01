@@ -164,32 +164,17 @@ describe("member detail — door history (D9)", () => {
 describe("member detail — sign-in & biometrics", () => {
   beforeEach(() => { signOut(); });
 
-  it("removes a fingerprint only after a confirm that says what it does", async () => {
-    const stub = serve(baseRoutes(detailFixture(), [
-      { method: "DELETE", path: "/api/v1/admin/biometric/templates/t1", status: 204, body: null },
-    ]));
+  /**
+   * P13 §9: the court box does not read fingerprints yet — the section, its enrolment and its list
+   * are not drawn while `FEATURES.fingerprintEnrolment` is off. With it on: MemberFingerprints.test.
+   */
+  it("draws no court-box fingerprints while enrolment is switched off", async () => {
+    serve(baseRoutes(detailFixture()));
     renderMember(at("access"));
-    fireEvent.click(await screen.findByRole("button", { name: ACCESS_COPY.remove("Right index") }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(ACCESS_COPY.removeBody)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: ACCESS_COPY.removeConfirm }));
-    await waitFor(() => expect(stub.calls.some((c) => c.method === "DELETE" && c.path.endsWith("/templates/t1"))).toBe(true));
-  });
-
-  it("asks for consent before a capture, and enrols the first finger not yet held", async () => {
-    const stub = serve(baseRoutes(detailFixture(), [
-      { method: "POST", path: "/api/v1/admin/biometric/enroll", body: { template_id: "t2" } },
-    ]));
-    renderMember(at("access"));
-    fireEvent.click(await screen.findByRole("button", { name: ACCESS_COPY.enrol }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(ACCESS_COPY.consent)).toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: ACCESS_COPY.capture })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: ACCESS_COPY.consentGiven }));
-    fireEvent.click(within(dialog).getByRole("button", { name: ACCESS_COPY.capture }));
-    await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/admin/biometric/enroll")).toBe(true));
-    expect(stub.calls.find((c) => c.path === "/api/v1/admin/biometric/enroll")?.body)
-      .toMatchObject({ userId: MEMBER_ID, fingerLabel: "right-middle", consentReceiptHash: "v1" });
+    await screen.findByRole("heading", { name: ACCESS_COPY.signInTitle });
+    expect(screen.queryByRole("heading", { name: ACCESS_COPY.fingerprintsTitle })).toBeNull();
+    expect(screen.queryByRole("button", { name: ACCESS_COPY.enrol })).toBeNull();
+    expect(screen.queryByRole("button", { name: ACCESS_COPY.remove("Right index") })).toBeNull();
   });
 
   it("resets a password and shows the temporary one once, in a dialog", async () => {

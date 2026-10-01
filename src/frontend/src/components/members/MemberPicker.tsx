@@ -3,7 +3,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MEMBERS_PAGE as COPY, memberHref, membersCount, statusLabel, statusTone } from "@/lib/membersCopy";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
 import { initialsOf, type MemberRow } from "./membersModel";
 
 /**
@@ -77,7 +78,7 @@ function PickerRow({ row }: { row: MemberRow }) {
         </span>
       </span>
       <span className={cn("shrink-0 text-right text-sm font-semibold tabular-nums", overdrawn ? "text-danger-strong" : "text-text-primary")}>
-        {formatCredits(row.balance_minutes)}
+        <Minutes value={row.balance_minutes} />
       </span>
     </NavLink>
   );

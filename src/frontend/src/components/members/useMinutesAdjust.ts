@@ -1,21 +1,21 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useToast } from "@/components/Toast";
-import { type AdjustReasonCode } from "@/lib/adminApi";
+import { type AdjustmentReasonCode } from "@/lib/adminApi";
 import { isGuid } from "@/lib/creditAdjustment";
 import { RELATED_BOOKING } from "@/lib/membersCopy";
-import { doneSentence } from "@/lib/topUpCopy";
+import { doneSentence } from "@/lib/deskMinutesCopy";
 import { useLateLanding } from "@/components/bookings/useSendingGuard";
 import { attemptAdjustment, type AdjustmentKey } from "./adjustmentAttempt";
 import { patchRow, type MemberRow } from "./membersModel";
 import type { ApplyResult } from "./TopUpSheet";
 
 /**
- * One hand movement of credit from the members list.
+ * One hand adjustment of a member's minutes from the members list (goodwill, corrections — §3.7).
  *
  * <p>
  * <b>The idempotency machinery is moved here from the page, not changed.</b> It has a paid-for
  * bug history — a double-click posted +7 twice and moved a member 444 → 458, and four clicks on a
- * slow connection granted 44 credits where 11 were typed — and money is ledger-only, so a
+ * slow connection granted four times what was typed — and money is ledger-only, so a
  * duplicated row IS the wrong balance with nothing on the ledger to say which of the two was the
  * mistake.
  * </p>
@@ -28,7 +28,7 @@ import type { ApplyResult } from "./TopUpSheet";
  * movement succeeds, so the server answers a repeat with the row it already wrote.
  * </p>
  */
-export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] | null>>) {
+export function useMinutesAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] | null>>) {
   const toast = useToast();
   const [target, setTarget] = useState<MemberRow | null>(null);
   const [booking, setBookingState] = useState("");
@@ -52,7 +52,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
 
   /**
    * R5 I5-3: refused while a movement is in flight. It used to reset the ref and the key mid-
-   * flight, so a reopened sheet could post the same credit again under a NEW key.
+   * flight, so a reopened sheet could post the same movement again under a NEW key.
    */
   const close = useCallback(() => {
     if (inFlight.current) return;
@@ -74,7 +74,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
    * the ledger before anything is said (`adjustmentAttempt`, review round 2 F3-2).
    */
   const apply = useCallback(async (
-    amount: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
+    amount: number, reasonCode: AdjustmentReasonCode, reason: string,
   ): Promise<ApplyResult> => {
     if (!target || inFlight.current) return null;
     const bookingId = booking.trim();
@@ -87,7 +87,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
     setBookingError(null);
     try {
       const outcome = await attemptAdjustment({
-        userId: target.user_id, amount, reasonCode, reason, zarReceived, name: target.full_name ?? target.email,
+        userId: target.user_id, amount, reasonCode, reason, name: target.full_name ?? target.email,
         ...(bookingId ? { bookingId } : {}),
       }, key);
       const name = target.full_name ?? target.email;
@@ -107,10 +107,10 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
         return { said: outcome.said };
       }
       // The row follows the server's answer at once — no refetch that would re-sort the table.
-      const after = outcome.balanceAfterCredits;
+      const after = outcome.balanceAfterMinutes;
       if (after !== null) setMembers((rows) => patchRow(rows, target.user_id, { balance_minutes: after }));
       sayIfGone("success", () => doneSentence(name, after));
-      return { balanceAfterCredits: after, recovered: outcome.recovered };
+      return { balanceAfterMinutes: after, recovered: outcome.recovered };
     } finally {
       inFlight.current = false;
       setBusy(false);

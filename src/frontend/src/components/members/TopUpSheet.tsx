@@ -13,19 +13,20 @@ import {
 } from "@/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useIsSmUp } from "@/components/ui/use-media-query";
-import { type AdjustReasonCode } from "@/lib/adminApi";
-import { TOP_UP_SHEET as COPY, signedAmount } from "@/lib/membersCopy";
+import { Minutes } from "@/components/Minutes";
+import { type AdjustmentReasonCode } from "@/lib/adminApi";
 import {
-  ADD_LINK, LIVE_PUSH_NOTE, LIVE_SAID, LOST_REPLY, MINUS_REFUSED, TAKE_BACK_CONSEQUENCE, TAKE_BACK_LINK,
-  ZAR_RECEIVED, balanceSentence, confirmConsequence, countsAsRevenue, doneSentence, overdraftWarning,
-  parseCredits, parseZar, reasonChoicesFor, reasonComplaints, reasonLabel, receiptHeader, revenueNote, sheetTitle,
-  validateAmount, validateZar, type CreditDirection,
-} from "@/lib/topUpCopy";
-import { cn, formatCredits, formatMoney } from "@/lib/utils";
+  ADD_LINK, ADJUST_SHEET as COPY, LIVE_PUSH_NOTE, LIVE_SAID, LOST_REPLY, MINUS_REFUSED, NOT_REVENUE, TAKE_BACK_CONSEQUENCE,
+  TAKE_BACK_LINK, balanceSentence, confirmConsequence, doneSentence, overdraftWarning, parseMinutes, reasonChoicesFor,
+  reasonComplaints, reasonLabel, receiptHeader, sheetTitle, signedAmount, validateAmount, type MinutesDirection,
+} from "@/lib/deskMinutesCopy";
+import { cn } from "@/lib/utils";
 import { Minus, Plus } from "@/components/ui/icons";
 
 /**
- * Add credit to a member, or take it back — two flows, never one signed field. (D3-B08, P5)
+ * Adjust a member's minutes — goodwill and corrections (P13 §3.7, `/adjust`): add minutes or take
+ * them back, two flows, never one signed field (D3-B08, P5). Money taken at the desk is NOT this:
+ * that is a package sale (`SellPackageSheet`), so nothing here asks for rand.
  *
  * <p>
  * <b>Three steps because money is three questions:</b> how much · why · is this right. The third
@@ -47,17 +48,17 @@ import { Minus, Plus } from "@/components/ui/icons";
  * <b>Nothing here touches the idempotency machinery.</b> The key, the in-flight ref and the
  * double-click guard live with the caller (`useCreditAdjust`) and this component calls into them
  * rather than around them — a double-click once posted +7 twice, and four clicks on a slow
- * connection granted 44 credits where 11 were typed.
+ * connection granted four times what was typed.
  * </p>
  */
 type Applied = AppliedAdjustment;
 
 /**
- * What a press settled on. `balanceAfterCredits` is null only where a lost reply was found on the
+ * What a press settled on. `balanceAfterMinutes` is null only where a lost reply was found on the
  * ledger and the balance could not be re-read; `recovered` says the reply was lost and the ledger
  * answered instead (review round 2, F3-2), so the receipt can say how it knows.
  */
-export type AppliedAdjustment = { balanceAfterCredits: number | null; recovered?: boolean };
+export type AppliedAdjustment = { balanceAfterMinutes: number | null; recovered?: boolean };
 
 /**
  * What a press came to: a receipt, or `{ said }` — the line the confirm's live region speaks when
@@ -67,7 +68,7 @@ export type AppliedAdjustment = { balanceAfterCredits: number | null; recovered?
 export type ApplyResult = AppliedAdjustment | { said: string } | null;
 
 /** One complaint per field, so each is said at its own field (review round 3, A-4). */
-type Complaints = { amount?: string; code?: string; detail?: string; zar?: string };
+type Complaints = { amount?: string; code?: string; detail?: string };
 
 /**
  * The receipt, frozen at the press (F3.5): the balance BEFORE and the movement as they were when
@@ -84,33 +85,28 @@ export type TopUpSheetProps = {
   /** The one refusal that belongs at a field rather than in a banner. */
   bookingError: string | null;
   /** Signed: this component decides the sign from the DIRECTION — no field in the flow carries one. */
-  onApply: (
-    amountMinutes: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
-  ) => Promise<ApplyResult>;
+  onApply: (amountMinutes: number, reasonCode: AdjustmentReasonCode, reason: string) => Promise<ApplyResult>;
   onClose: () => void;
   /** The "for a booking" field, rendered on the reason step. */
   renderBookingField?: () => ReactNode;
 };
 
-const QUICK = [50, 100, 200, 500];
+const QUICK = COPY.quick;
 
 type Flow = ReturnType<typeof useTopUpFlow>;
 
 function useTopUpFlow() {
-  const [direction, setDirection] = useState<CreditDirection>("add");
+  const [direction, setDirection] = useState<MinutesDirection>("add");
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [amountText, setAmountText] = useState("");
-  const [reasonCode, setReasonCode] = useState<AdjustReasonCode | null>(null);
+  const [reasonCode, setReasonCode] = useState<AdjustmentReasonCode | null>(null);
   const [reasonText, setReasonText] = useState("");
-  const [zarText, setZarText] = useState("");
   const [complaints, setComplaints] = useState<Complaints>({});
   // Bumped by a Next that found a problem: the sheet then focuses the first invalid field.
   const [refused, setRefused] = useState(0);
   const [done, setDone] = useState<Receipted | null>(null);
 
-  const valid = parseCredits(amountText);
-  const asksZar = direction === "add" && reasonCode !== null && countsAsRevenue(reasonCode);
-  const zar = asksZar ? parseZar(zarText) : null;
+  const valid = parseMinutes(amountText);
 
   /**
    * Switching direction resets the amount and the reason, deliberately: carrying "100" across
@@ -121,7 +117,6 @@ function useTopUpFlow() {
     setAmountText("");
     setReasonCode(null);
     setReasonText("");
-    setZarText("");
     setComplaints({});
     setStep(1);
   };
@@ -143,22 +138,19 @@ function useTopUpFlow() {
   const toReason = () => settle({ amount: validateAmount(amountText) ?? undefined }, 2);
 
   /** Every field's own complaint at once, each at its own field — not the first one under the last field. */
-  const toCheck = () => settle({
-    ...reasonComplaints(reasonCode, reasonText),
-    zar: asksZar ? validateZar(zarText) ?? undefined : undefined,
-  }, 3);
+  const toCheck = () => settle(reasonComplaints(reasonCode, reasonText), 3);
 
   const back = (to: 1 | 2) => { setComplaints({}); setStep(to); };
 
   return {
     direction, step, back, amountText, typeAmount, reasonCode, setReasonCode, reasonText, setReasonText,
-    zarText, setZarText, asksZar, zar, complaints, clear, refused, done, setDone, valid, flip, toReason, toCheck,
+    complaints, clear, refused, done, setDone, valid, flip, toReason, toCheck,
   };
 }
 
 /**
  * R5 I5-3: every way out — ×, Escape, the scrim, Cancel — asks the sending guard first, so the
- * sheet cannot close while a credit is on its way; the footer says it is waiting, again on each
+ * sheet cannot close while a movement is on its way; the footer says it is waiting, again on each
  * refused close. A sheet opened while an earlier movement is still in flight (`busy` from the
  * caller) says why its Add waits rather than showing a disabled button with no reason.
  */
@@ -184,7 +176,7 @@ export function TopUpSheet(props: TopUpSheetProps) {
           <StepBody flow={flow} {...props} />
         </SheetBody>
         {/* The check step stacks on every width (F3-14): beside Back, the armed confirm — a
-            sentence over two buttons — had a third of a narrow sheet and "Add 200.00 cr" wrapped.
+            sentence over two buttons — had a third of a narrow sheet and its label wrapped.
             Stacked, BOTH rows run the sheet's width (R3 V-3): the primary was left at its own
             width under a full-width Back. */}
         <SheetFooter className={cn("sm:items-end", flow.step === 3 && !flow.done && "sm:flex-col sm:items-stretch")}>
@@ -231,12 +223,14 @@ function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
       <Field>
         <FieldLabel>{COPY.amountLabel}</FieldLabel>
         <Input
-          inputMode="decimal"
+          inputMode="numeric"
           autoComplete="off"
           value={flow.amountText}
           placeholder={COPY.amountPlaceholder}
           onChange={(e) => flow.typeAmount(e.target.value)}
         />
+        {/* The typed minutes said back as an amount, so "90" is seen to be an hour and a half. */}
+        {flow.valid !== null && flow.valid >= 60 ? <FieldDescription>{COPY.amountEcho(flow.valid)}</FieldDescription> : null}
         <FieldError>{flow.complaints.amount}</FieldError>
       </Field>
       {warning ? <Alert tone="warning" live="polite">{warning}</Alert> : null}
@@ -258,7 +252,7 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
         <FieldLabel>{COPY.reasonLabel}</FieldLabel>
         <Select
           value={flow.reasonCode ?? ""}
-          onValueChange={(code) => { flow.setReasonCode(code as AdjustReasonCode); flow.clear("code"); }}
+          onValueChange={(code) => { flow.setReasonCode(code as AdjustmentReasonCode); flow.clear("code"); }}
         >
           <SelectTrigger>
             <SelectValue placeholder={COPY.reasonPlaceholder} />
@@ -269,9 +263,7 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
             ))}
           </SelectContent>
         </Select>
-        <FieldDescription>
-          {flow.reasonCode ? `${COPY.reasonDescription} ${revenueNote(flow.reasonCode, flow.zar)}` : COPY.reasonDescription}
-        </FieldDescription>
+        <FieldDescription>{flow.reasonCode ? `${COPY.reasonDescription} ${NOT_REVENUE}` : COPY.reasonDescription}</FieldDescription>
         <FieldError>{complaints.code}</FieldError>
       </Field>
       <Field>
@@ -284,20 +276,6 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
         />
         <FieldError>{complaints.detail}</FieldError>
       </Field>
-      {flow.asksZar ? (
-        <Field>
-          <FieldLabel>{ZAR_RECEIVED.label}</FieldLabel>
-          <Input
-            inputMode="decimal"
-            autoComplete="off"
-            value={flow.zarText}
-            placeholder={ZAR_RECEIVED.placeholder}
-            onChange={(e) => { flow.setZarText(e.target.value); flow.clear("zar"); }}
-          />
-          <FieldDescription>{ZAR_RECEIVED.help}</FieldDescription>
-          <FieldError>{complaints.zar}</FieldError>
-        </Field>
-      ) : null}
       {renderBookingField?.()}
       {bookingError ? <Alert tone="danger">{bookingError}</Alert> : null}
     </>
@@ -311,23 +289,17 @@ function CheckStep({ flow, balance, bookingError }: { flow: Flow; balance: numbe
     <>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border bg-bg-muted p-4 text-sm">
         <dt className="text-text-secondary">{COPY.balanceNow}</dt>
-        <dd className="text-right tabular-nums text-text-primary">{balance === null ? COPY.unreadable : formatCredits(balance)}</dd>
+        <dd className="text-right text-text-primary">{balance === null ? COPY.unreadable : <Minutes value={balance} />}</dd>
         <dt className="text-text-secondary">{COPY.thisMovement}</dt>
         <dd className="text-right font-semibold tabular-nums text-text-primary">{signedAmount(flow.direction, flow.valid)}</dd>
         <div aria-hidden="true" className="col-span-2 my-1 h-px bg-border" />
         <dt className="font-semibold text-text-primary">{COPY.balanceAfter}</dt>
-        <dd className="text-right font-semibold tabular-nums text-text-primary">
-          {balance === null ? COPY.serverWorksItOut : formatCredits(balance + signed)}
+        <dd className="text-right font-semibold text-text-primary">
+          {balance === null ? COPY.serverWorksItOut : <Minutes value={balance + signed} />}
         </dd>
-        {flow.zar !== null ? (
-          <>
-            <dt className="text-text-secondary">{ZAR_RECEIVED.row}</dt>
-            <dd className="text-right tabular-nums text-text-primary">{formatMoney(flow.zar)}</dd>
-          </>
-        ) : null}
       </dl>
       <p className="text-sm text-text-secondary">{COPY.reasonLine(reasonLabel(flow.reasonCode), flow.reasonText.trim())}</p>
-      <p className="text-sm text-text-muted">{revenueNote(flow.reasonCode, flow.zar)}</p>
+      <p className="text-sm text-text-muted">{NOT_REVENUE}</p>
       {flow.direction === "take_back" ? <p className="text-sm text-warning-strong">{TAKE_BACK_CONSEQUENCE}</p> : null}
       <p className="text-sm text-text-muted">{LIVE_PUSH_NOTE}</p>
       {bookingError ? <Alert tone="danger">{bookingError}</Alert> : null}
@@ -340,7 +312,7 @@ function Receipt({ name, done }: { name: string; done: Applied }) {
   return (
     <div className="flex flex-col items-center gap-3 py-4 text-center">
       <AnimatedCheck size={48} className="text-success-strong" />
-      <p className="text-lg font-semibold text-success-strong" role="status">{doneSentence(name, done.balanceAfterCredits)}</p>
+      <p className="text-lg font-semibold text-success-strong" role="status">{doneSentence(name, done.balanceAfterMinutes)}</p>
       {done.recovered ? <p className="max-w-prose text-sm text-text-secondary">{LOST_REPLY.landed}</p> : null}
       <p className="max-w-prose text-sm text-text-secondary">{LIVE_PUSH_NOTE}</p>
     </div>
@@ -376,40 +348,38 @@ function ApplyControls({ flow, guard, name, balance, busy, onApply }: FooterProp
   if (valid === null || reasonCode === null) return null;
   return (
     <>
-      {/* Back while the credit is on its way would drop the receipt it lands on (R5 I5-3). */}
+      {/* Back while the movement is on its way would drop the receipt it lands on (R5 I5-3). */}
       <Button variant="outline" disabled={busy} onClick={() => flow.back(2)}>{COPY.back}</Button>
       {/* Its own full-width row (F3.23, F3-14): armed, the confirm is a sentence over two buttons.
-          `w-full` on the idle button too (R3 V-3, A-15): at its own width "Add 50.00 cr" wrapped. */}
+          `w-full` on the idle button too (R3 V-3, A-15): at its own width the label wrapped. */}
       <div className="min-w-0">
         <ConfirmButton
-          idleLabel={direction === "add" ? `Add ${formatCredits(valid)}` : `Take back ${formatCredits(valid)}`}
+          idleLabel={direction === "add" ? COPY.idleAdd(valid) : COPY.idleTakeBack(valid)}
           cancelLabel={COPY.cancel}
           confirmLabel={confirmConsequence(name, balance, valid, direction)}
-          // `ariaLabel` is what the ACTION is about ("Add 24.00 cr — Thandi Mokoena — choose again
+          // `ariaLabel` is what the ACTION is about ("Add 30 min — Thandi Mokoena — choose again
           // to confirm"); `subject` is what the way OUT names ("Cancel — Thandi Mokoena").
           ariaLabel={name}
           subject={name}
           tone={direction === "add" ? "info" : "danger"}
-          // The one primary on the sheet: taking credit back keeps the danger-soft look.
+          // The one primary on the sheet: taking minutes back keeps the danger-soft look.
           idleClassName={direction === "add" ? buttonVariants({ variant: "primary" }) : undefined}
           disabled={busy}
           onConfirm={async () => {
             const before = balance;
             // Set here, at the press, not from `busy`: that prop commits a render later, and an
-            // Escape in between closed the sheet over a credit already sent (R5 I5-3).
+            // Escape in between closed the sheet over a movement already sent (R5 I5-3).
             guard.setSending(true);
             let applied: ApplyResult;
             try {
-              applied = await onApply(
-                direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim(), flow.zar ?? undefined,
-              );
+              applied = await onApply(direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim());
             } finally {
               guard.setSending(false);
             }
             if (!applied) return LIVE_SAID.refused;
             if ("said" in applied) return applied.said;
             flow.setDone({ ...applied, before, amount: valid });
-            return doneSentence(name, applied.balanceAfterCredits);
+            return doneSentence(name, applied.balanceAfterMinutes);
           }}
           className="min-h-touch w-full"
         />

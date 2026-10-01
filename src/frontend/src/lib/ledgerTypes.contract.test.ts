@@ -19,7 +19,8 @@ describe("the admin's ledger types are the server's", () => {
   it("names every one of them in words", () => {
     expect(Object.keys(LEDGER_TYPE_LABEL).sort()).toEqual([...server].sort());
     for (const type of server) expect(ledgerTypeLabel(type)).not.toBe(type);
-    expect(ledgerTypeLabel("AdminTopUp")).toBe("Desk top-up");
+    expect(ledgerTypeLabel("AdminTopUp")).toBe("Package sold at the desk");
+    expect(ledgerTypeLabel("TopUp")).toBe("Package bought in the app");
   });
 
   it("is the wire union too — `LedgerEntryType` and its filter list carry every server member", () => {

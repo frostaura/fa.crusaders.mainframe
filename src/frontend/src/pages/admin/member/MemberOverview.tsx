@@ -15,6 +15,7 @@ import { BookingLine, StatTile } from "./parts";
 import { zoneNow } from "./memberTime";
 import { useMemberDetail } from "./useMemberDetail";
 import { useOthersOnCourt, type OthersState } from "./useOthersOnCourt";
+import { FEATURES } from "@/lib/features";
 
 /**
  * Overview — what a desk needs to know at a glance: when they are next on court, how the last
@@ -117,7 +118,10 @@ function AccountFacts({ detail }: { detail: MemberDetail }) {
         <Fact term={COPY.accountStatus}>{detail.account_status}</Fact>
       )}
       <Fact term={COPY.passkeys}>{countOf(detail.passkey_count, "passkey", "passkeys")}</Fact>
-      <Fact term={COPY.fingerprints}>{countOf(detail.fingerprints.count, "finger enrolled", "fingers enrolled")}</Fact>
+      {/* P13 §9: no court-box fingerprints while enrolment is switched off. */}
+      {FEATURES.fingerprintEnrolment ? (
+        <Fact term={COPY.fingerprints}>{countOf(detail.fingerprints.count, "finger enrolled", "fingers enrolled")}</Fact>
+      ) : null}
     </dl>
   );
 }

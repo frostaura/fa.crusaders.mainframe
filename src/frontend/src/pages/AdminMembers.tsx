@@ -9,11 +9,12 @@ import { MembersSplitContext } from "../components/members/membersSplit";
 import { useMembersFilters } from "../components/members/useMembersFilters";
 import { RelatedBookingField } from "../components/members/RelatedBookingField";
 import type { RowActionHandlers } from "../components/members/RowActions";
+import { SellPackageSheet } from "../components/members/SellPackageSheet";
 import { TopUpSheet } from "../components/members/TopUpSheet";
 import {
   DEFAULT_SORT, listSends, nextSort, patchRow, statusCounts, visibleRows, type MemberRow, type Sort, type SortKey,
 } from "../components/members/membersModel";
-import { useCreditAdjust } from "../components/members/useCreditAdjust";
+import { useMinutesAdjust } from "../components/members/useMinutesAdjust";
 import { useMemberLifecycle } from "../components/members/useMemberLifecycle";
 import { useFingerprints, useGroupMemberships, useMembersList, type GroupsState } from "../components/members/useMembersData";
 import { Alert } from "../components/Alert";
@@ -27,6 +28,7 @@ import { StateBlock } from "../components/ui/state-block";
 import {
   GROUPS_COPY, MEMBERS_PAGE as COPY, MEMBERS_PAGE_SIZE, membersCount, type StatusFilter,
 } from "../lib/membersCopy";
+import { FEATURES } from "../lib/features";
 import { typography } from "../lib/typography";
 import { describeFailure } from "../lib/errors";
 
@@ -64,9 +66,11 @@ export default function AdminMembersPage() {
   // R5 P5: beside (or instead of) a member's record the list is the dense picker — no groups, no
   // ⋯ menu — so a deep link no longer reads every group's members and every enrolment for it.
   const groups = useGroupMemberships(listSends(list.members, "groups"), record === null);
-  const prints = useFingerprints(record === null);
+  // P13 §9: with fingerprint enrolment switched off the list asks the club nothing about it.
+  const prints = useFingerprints(record === null && FEATURES.fingerprintEnrolment);
   const lifecycle = useMemberLifecycle({ load: list.load, setMembers: list.setMembers });
-  const credit = useCreditAdjust(list.setMembers);
+  const adjust = useMinutesAdjust(list.setMembers);
+  const [selling, setSelling] = useState<MemberRow | null>(null);
 
   const counts = useMemo(() => statusCounts(list.members), [list.members]);
   const rows = useMemo(() => visibleRows(list.members ?? [], status, query, sort), [list.members, status, query, sort]);
@@ -75,7 +79,8 @@ export default function AdminMembersPage() {
   const handlers: RowActionHandlers = {
     approve: lifecycle.approve,
     reject: (member) => setDialog({ kind: "reject", member }),
-    topUp: credit.open,
+    sell: setSelling,
+    adjust: adjust.open,
     fingerprints: (member) => setDialog({ kind: "fingerprints", member }),
     reset: (member) => setDialog({ kind: "reset", member }),
     resetCode: (member) => setDialog({ kind: "resetCode", member }),
@@ -107,7 +112,9 @@ export default function AdminMembersPage() {
       setAssigning={setAssigning}
       list={list}
       groups={groups}
-      credit={credit}
+      adjust={adjust}
+      selling={selling}
+      setSelling={setSelling}
     />
   );
 
@@ -181,12 +188,14 @@ type OverlayProps = {
   setAssigning: (row: MemberRow | null) => void;
   list: ReturnType<typeof useMembersList>;
   groups: { state: GroupsState; retry: () => Promise<void> };
-  credit: ReturnType<typeof useCreditAdjust>;
+  adjust: ReturnType<typeof useMinutesAdjust>;
+  selling: MemberRow | null;
+  setSelling: (row: MemberRow | null) => void;
 };
 
 /** The list's dialogs and sheets — the same whichever shape the page is in. */
 function MemberOverlays(props: OverlayProps) {
-  const { dialog, setDialog, lifecycle, prints, assigning, setAssigning, list, groups, credit } = props;
+  const { dialog, setDialog, lifecycle, prints, assigning, setAssigning, list, groups, adjust, selling, setSelling } = props;
   return (
     <>
       <MemberDialogs
@@ -211,19 +220,29 @@ function MemberOverlays(props: OverlayProps) {
           }}
         />
       ) : null}
-      {credit.target ? (
+      {adjust.target ? (
         <TopUpSheet
-          name={credit.target.full_name}
+          name={adjust.target.full_name}
           // NOT zero where the row has no figure: a balance the console could not read is a
           // balance it must not do arithmetic on.
-          balance={typeof credit.target.balance_minutes === "number" ? credit.target.balance_minutes : null}
-          busy={credit.busy}
-          bookingError={credit.bookingError}
-          onApply={credit.apply}
-          onClose={credit.close}
+          balance={typeof adjust.target.balance_minutes === "number" ? adjust.target.balance_minutes : null}
+          busy={adjust.busy}
+          bookingError={adjust.bookingError}
+          onApply={adjust.apply}
+          onClose={adjust.close}
           renderBookingField={() => (
-            <RelatedBookingField userId={credit.target!.user_id} value={credit.booking} error={null} onChange={credit.setBooking} />
+            <RelatedBookingField userId={adjust.target!.user_id} value={adjust.booking} error={null} onChange={adjust.setBooking} />
           )}
+        />
+      ) : null}
+      {selling ? (
+        <SellPackageSheet
+          userId={selling.user_id}
+          name={selling.full_name}
+          balance={typeof selling.balance_minutes === "number" ? selling.balance_minutes : null}
+          onClose={() => setSelling(null)}
+          // The row follows the server's answer at once — no refetch that would re-sort the table.
+          onSold={(after) => { if (after !== null) list.setMembers((rows) => patchRow(rows, selling.user_id, { balance_minutes: after })); }}
         />
       ) : null}
     </>

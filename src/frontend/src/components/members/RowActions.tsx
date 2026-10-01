@@ -4,8 +4,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ArrowCounterClockwise, CalendarBlank, CheckCircle, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, Key, Prohibit, QrCode,
-  Lock, Plus, ShieldCheck, ShieldWarning, UserCircle, UsersThree,
+  ArrowCounterClockwise, CalendarBlank, CheckCircle, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, HourglassMedium, Key,
+  Prohibit, QrCode, Lock, Plus, ShieldCheck, ShieldWarning, UserCircle, UsersThree,
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
 import { ASSIGN_COPY } from "@/lib/groupsCopy";
@@ -13,6 +13,7 @@ import { ACTIONS_COPY, ADMIN_ROLE_COPY } from "@/lib/memberDetailCopy";
 import {
   ROW_ACTIONS as COPY, SUSPENDED_NOTE, bookForHref, memberHref, nightHref,
 } from "@/lib/membersCopy";
+import { FEATURES } from "@/lib/features";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { cn } from "@/lib/utils";
 import { rowAdminRoleOffer } from "./adminRoleOffer";
@@ -24,23 +25,27 @@ import type { MemberRow } from "./membersModel";
  * <p>
  * The founder called the old row "atrocious": four unlabelled 32px icons, a native class select
  * and a Top up of a different height, no two rows the same shape. Now a row carries at most two
- * worded buttons of one size — Approve / Reject on an application, Top up on an active member —
+ * worded buttons of one size — Approve / Reject on an application, Sell package on an active member —
  * and one ⋯ menu whose first three entries are LINKS (open the member, book for them, their night),
  * because navigation is a link and an action is a button. A suspended row says in words why it has
- * no Top up. Every button that starts work shows it working (`useAsyncAction`), and a second press
+ * no Sell package. "Adjust minutes" (goodwill, corrections — P13 §3.7) is in the ⋯ on every width. Every button that starts work shows it working (`useAsyncAction`), and a second press
  * while it works is ignored.
  * </p>
  */
 export type RowActionHandlers = {
   approve: (m: MemberRow) => Promise<unknown>;
   reject: (m: MemberRow) => void;
-  topUp: (m: MemberRow) => void;
+  /** P13 §3.7: sell a package off the member's own shelf — how the desk takes money. */
+  sell: (m: MemberRow) => void;
+  /** P13 §3.7: add minutes or take them back — goodwill and corrections, no money. */
+  adjust: (m: MemberRow) => void;
+  /** Offered only while `FEATURES.fingerprintEnrolment` is on (P13 §9). */
   fingerprints: (m: MemberRow) => void;
   reset: (m: MemberRow) => void;
   /** D8 — the member code reset, the same confirm the member's own page opens. */
   resetCode: (m: MemberRow) => void;
   resend: (m: MemberRow) => Promise<unknown>;
-  /** Opens GroupAssign — the member's groups carry their rate and peak say now (D2). */
+  /** Opens GroupAssign — the member's groups carry their package discount and peak say (D2, P13). */
   changeGroups: (m: MemberRow) => void;
   suspend: (m: MemberRow) => void;
   reactivate: (m: MemberRow) => void;
@@ -56,7 +61,7 @@ export type RowActionHandlers = {
 /** One label for the reset, wherever it is offered (D8). */
 const RESET_CODE_LABEL = ACTIONS_COPY.resetCode;
 
-/** Below a 48rem table box the card's Top up is drawn in the ⋯ (SPEC §4.3), not beside it. */
+/** Below a 48rem table box the card's Sell package is drawn in the ⋯ (SPEC §4.3), not beside it. */
 const TABLE_ONLY = "[@container(max-width:47.99rem)]:hidden";
 
 export function RowActions({ row, handlers, compact = false }: { row: MemberRow; handlers: RowActionHandlers; compact?: boolean }) {
@@ -70,7 +75,7 @@ export function RowActions({ row, handlers, compact = false }: { row: MemberRow;
         </>
       ) : null}
       {row.status === "Active" ? (
-        <Button size="sm" variant="outline" className={TABLE_ONLY} onClick={() => handlers.topUp(row)}>{COPY.topUp}</Button>
+        <Button size="sm" variant="outline" className={TABLE_ONLY} onClick={() => handlers.sell(row)}>{COPY.sell}</Button>
       ) : null}
       {row.status === "Suspended" ? (
         <span className={cn("min-w-0 text-right text-xs text-text-muted", TABLE_ONLY)}>{SUSPENDED_NOTE}</span>
@@ -92,17 +97,22 @@ function MemberMenu({ row, handlers, compact }: { row: MemberRow; handlers: RowA
         </IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
-        {active && compact ? (
+        {active ? (
           <>
-            <DropdownMenuItem onSelect={() => handlers.topUp(row)}>
-              <Plus size={16} aria-hidden="true" />{COPY.topUp}
+            {compact ? (
+              <DropdownMenuItem onSelect={() => handlers.sell(row)}>
+                <Plus size={16} aria-hidden="true" />{COPY.sell}
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem onSelect={() => handlers.adjust(row)}>
+              <HourglassMedium size={16} aria-hidden="true" />{COPY.adjust}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
         ) : null}
         <NavigationItems row={row} />
         <DropdownMenuSeparator />
-        {active ? (
+        {active && FEATURES.fingerprintEnrolment ? (
           <DropdownMenuItem onSelect={() => handlers.fingerprints(row)}>
             <Fingerprint size={16} aria-hidden="true" />{COPY.fingerprints(handlers.fingerprintCount(row))}
           </DropdownMenuItem>

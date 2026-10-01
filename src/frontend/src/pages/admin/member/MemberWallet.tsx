@@ -17,7 +17,7 @@ import { useRead } from "@/lib/useRead";
 import { useMemberDetail } from "./useMemberDetail";
 
 /**
- * Wallet & ledger — this member's movements, and the one way to move their credit by hand.
+ * Wallet & ledger — this member's movements of minutes.
  *
  * <p>
  * <b>Top up goes through the header's sheet</b>, not a second copy of it here: one idempotency key
@@ -25,21 +25,21 @@ import { useMemberDetail } from "./useMemberDetail";
  * </p>
  *
  * <p>
- * <b>The ledger re-reads whenever the balance changes</b> — a top-up from this tab or the header,
+ * <b>The ledger re-reads whenever the balance changes</b> — a sale from this tab or the header,
  * or a Refresh — so the rows under the figure are always the rows that sum to it. It is keyed on
  * the balance and the read instant rather than refetched by a callback, because a callback that
  * somebody forgets to call is how a wallet shows a balance its own ledger does not add up to.
  * </p>
  */
 export function MemberWallet() {
-  const { detail, name, userId, readAt, openTopUp } = useMemberDetail();
+  const { detail, name, userId, readAt, openSell } = useMemberDetail();
   const load = useCallback(() => endpoints.adminLedger({ userId, limit: LEDGER_LIMIT }), [userId]);
   const [ledger, retry] = useRead(`${userId}:${detail.balance_minutes}:${readAt ?? 0}`, load);
   const rows = ledger.data ?? [];
   const [opened, setOpened] = useState<LedgerRow | null>(null);
 
   return (
-    // Top up lives on the header right above this tab, once; a second copy here would be two
+    // Sell package lives on the header right above this tab, once; a second copy here would be two
     // buttons for one action. An EMPTY ledger offers it again, where it is the next step.
     <Section title={COPY.title} description={COPY.description}>
       <StateBlock
@@ -52,7 +52,7 @@ export function MemberWallet() {
         emptyIcon={Receipt}
         emptyTitle={COPY.empty}
         emptyHint={COPY.emptyHint}
-        emptyAction={detail.status !== "Active" ? undefined : <Button onClick={openTopUp} icon={<Plus weight="bold" aria-hidden="true" />}>{MEMBER_COPY.topUp}</Button>}
+        emptyAction={detail.status !== "Active" ? undefined : <Button onClick={openSell} icon={<Plus weight="bold" aria-hidden="true" />}>{MEMBER_COPY.sell}</Button>}
         skeleton={<TableSkeleton rows={5} />}
       >
         <div className="overflow-clip rounded-xl border border-border bg-bg-surface">

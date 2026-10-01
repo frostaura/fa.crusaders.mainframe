@@ -13,22 +13,22 @@ import { BASE, MEMBER_ID, baseRoutes, detailFixture, renderMember, serve } from 
 describe("member detail — groups in the header", () => {
   beforeEach(() => { signOut(); });
 
-  const LEAGUE = { id: "g-league", name: "League", status: "active", system_key: "league", credits_per_zar: 2.4, peak_priority: true };
-  const JUNIORS = { id: "g-juniors", name: "Juniors", status: "active", system_key: null, credits_per_zar: null, peak_priority: false };
+  const LEAGUE = { id: "g-league", name: "League", status: "active", system_key: "league", package_discount_bps: 1000, peak_priority: true };
+  const JUNIORS = { id: "g-juniors", name: "Juniors", status: "active", system_key: null, package_discount_bps: null, peak_priority: false };
   const withTariff = (overrides: Record<string, unknown> = {}) => detailFixture({
     groups: [{ id: "g-league", name: "League", system_key: "league" }],
-    tariff: { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: true, peak_withheld_by: [] },
+    tariff: { package_discount_bps: 1000, discount_group_id: "g-league", peak_priority: true, peak_withheld_by: [] },
     ...overrides,
   } as unknown as Partial<MemberDetail>);
 
-  it("says the rate and peak standing their groups add up to", async () => {
+  it("says the package discount and peak standing their groups add up to", async () => {
     serve(baseRoutes(withTariff()));
     renderMember();
-    expect(await screen.findByTestId("member-tariff")).toHaveTextContent("Tops up at 2.4 cr per R1 (League) · peak priority");
+    expect(await screen.findByTestId("member-tariff")).toHaveTextContent("10% off club packages (from League) · peak priority");
   });
 
   it("changes their groups from the header, and the header takes the saved set", async () => {
-    const saved = { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: false, peak_withheld_by: ["Juniors"] };
+    const saved = { package_discount_bps: 1000, discount_group_id: "g-league", peak_priority: false, peak_withheld_by: ["Juniors"] };
     // The detail is read twice: on arrival, and again after the save (the header re-reads).
     const after = withTariff({ groups: [LEAGUE, JUNIORS], tariff: saved });
     const stub = serve([
@@ -40,7 +40,7 @@ describe("member detail — groups in the header", () => {
         path: "/api/v1/admin/member-groups/preview",
         body: {
           current: {
-            tariff: { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: true, peak_withheld_by: [] },
+            tariff: { package_discount_bps: 1000, discount_group_id: "g-league", peak_priority: true, peak_withheld_by: [] },
             allowed_windows: [{ start: "06:00", end: "22:00" }], max_slots_per_day: 4, advance_booking_days: 14,
           },
           would_be: {
@@ -89,8 +89,8 @@ describe("member detail — groups in the header", () => {
 describe("member detail — a groups save whose reply was lost", () => {
   beforeEach(() => { signOut(); });
 
-  const LEAGUE = { id: "g-league", name: "League", status: "active", system_key: "league", credits_per_zar: 2.4, peak_priority: true };
-  const JUNIORS = { id: "g-juniors", name: "Juniors", status: "active", system_key: null, credits_per_zar: null, peak_priority: false };
+  const LEAGUE = { id: "g-league", name: "League", status: "active", system_key: "league", package_discount_bps: 1000, peak_priority: true };
+  const JUNIORS = { id: "g-juniors", name: "Juniors", status: "active", system_key: null, package_discount_bps: null, peak_priority: false };
   const TARIFF = { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: true, peak_withheld_by: [] };
 
   function lost(landed: boolean, readable = true) {

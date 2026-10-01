@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { clubClock } from "@/lib/clubClock";
 import type { MemberBookingRow } from "@/lib/memberDetailApi";
 import { BOOKING_STATUS, BOOKINGS_TAB_COPY as COPY } from "@/lib/memberDetailCopy";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { bookingWhen, dayParts } from "./memberTime";
 
 /**
@@ -75,7 +75,7 @@ export function BookingLine({ row, zone, action, people }: {
         {partner ? <Badge tone="info">{COPY.partnerBadge}</Badge> : null}
         <Badge tone={status.tone}>{status.word}</Badge>
         {/* The charge on a partner's row is the ORGANISER's, not what this member paid — no figure. */}
-        {partner ? null : <span className="whitespace-nowrap text-sm tabular-nums text-text-secondary">{formatCredits(row.charged_minutes)}</span>}
+        {partner ? null : <span className="whitespace-nowrap text-sm tabular-nums text-text-secondary">{COPY.charged(row.charged_minutes)}</span>}
         {action ? <div className="ml-auto sm:ml-0">{action}</div> : null}
       </div>
     </li>

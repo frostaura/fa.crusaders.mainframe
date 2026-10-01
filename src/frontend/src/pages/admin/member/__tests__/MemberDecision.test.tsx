@@ -55,7 +55,7 @@ describe("member detail — the decision on an application", () => {
 
     serve(baseRoutes(detailFixture()));
     renderMember();
-    await screen.findByRole("button", { name: MEMBER_COPY.topUp });
+    await screen.findByRole("button", { name: MEMBER_COPY.sell });
     expect(screen.queryByRole("button", { name: ACTIONS_COPY.approve })).toBeNull();
   });
 });

@@ -26,7 +26,11 @@ describe("member detail — header and tabs", () => {
     expect(within(summary).getByText("Active")).toBeInTheDocument();
     expect(within(summary).getByText(MEMBER_COPY.adminBadge)).toBeInTheDocument();
     expect(within(summary).getByRole("list", { name: MEMBER_COPY.groupsLabel })).toHaveTextContent("League");
-    expect(within(summary).getByTestId("member-balance")).toHaveTextContent("120.00 cr");
+    // Whole minutes, said the way every amount is (P13): 120 → "2 h", heard as "2 hours".
+    const balance = within(summary).getByTestId("member-balance");
+    expect(balance.querySelector("[aria-hidden='true']")).toHaveTextContent(/^2 h$/);
+    expect(balance.querySelector(".sr-only")).toHaveTextContent("2 hours");
+    expect(balance).not.toHaveTextContent(/\.00|\bcr\b/);
   });
 
   it("says a config admin's rights come from the server, not from a grant", async () => {
@@ -39,7 +43,7 @@ describe("member detail — header and tabs", () => {
     serve(baseRoutes(detailFixture({ balance_minutes: -16 })));
     renderMember();
     const balance = await screen.findByTestId("member-balance");
-    expect(balance).toHaveTextContent("−16.00 cr");
+    expect(balance.querySelector("[aria-hidden='true']")).toHaveTextContent(/^−16 min$/);
     expect(balance.className).toMatch(/text-danger-strong/);
     expect(screen.getByText(MEMBER_COPY.balanceOverdrawn)).toBeInTheDocument();
   });
@@ -47,7 +51,7 @@ describe("member detail — header and tabs", () => {
   it("D9 — says under the balance what is held for partners and what is owed back", async () => {
     serve(baseRoutes(detailFixture({ balance_minutes: 170, held_minutes: 20, held_until: null, owed_back_minutes: 5 })));
     renderMember();
-    expect(await screen.findByTestId("member-balance")).toHaveTextContent("170.00 cr");
+    expect((await screen.findByTestId("member-balance")).querySelector("[aria-hidden='true']")).toHaveTextContent(/^2 h 50 min$/);
     expect(screen.getByText(heldLine(20, null))).toBeInTheDocument();
     expect(screen.getByText(owedBackQuoteLine(5, "Thandi Mokoena"))).toBeInTheDocument();
   });
@@ -119,7 +123,7 @@ describe("member detail — header and tabs", () => {
     await screen.findByTestId("member-balance");
     fireEvent.click(screen.getByRole("button", { name: MEMBER_COPY.refresh }));
     expect(await screen.findByText(MEMBER_COPY.refreshFailed)).toBeInTheDocument();
-    expect(screen.getByTestId("member-balance")).toHaveTextContent("120.00 cr");
+    expect(screen.getByTestId("member-balance").querySelector("[aria-hidden='true']")).toHaveTextContent(/^2 h$/);
   });
 });
 

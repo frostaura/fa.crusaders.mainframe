@@ -1,4 +1,4 @@
-import { formatCredits } from "./utils";
+import { minutesCompact } from "./minutes";
 
 /**
  * Every word the member-detail screen says — its header, its six tabs and the admin-role switch.
@@ -31,14 +31,17 @@ export const MEMBER_COPY = {
   notFoundHint: "This club has no member with that link. They may have been removed, or the link belongs to another club.",
   notFoundAction: "Back to members",
   balance: "Balance",
-  balanceOverdrawn: "Overdrawn — the next top-up pays this back first.",
-  topUp: "Top up",
-  /** Why there is no Top up beside the balance (F3.10) — the members list already says the same. */
-  noTopUp: {
-    Suspended: "No top-ups until reactivated.",
-    Rejected: "Turned down — approve the application from ⋯ before topping up.",
-    PendingApproval: "Approve the application before topping up.",
-    none: "No membership, so no wallet to top up.",
+  balanceOverdrawn: "Overdrawn — the next package they buy pays this back first.",
+  /** P13 §3.7: the desk takes money by selling a package off the member's own shelf. */
+  sell: "Sell package",
+  /** Goodwill and corrections, in whole minutes — no money changes hands. */
+  adjust: "Adjust minutes",
+  /** Why there is no Sell package beside the balance (F3.10) — the members list already says the same. */
+  noSell: {
+    Suspended: "No packages or adjustments until reactivated.",
+    Rejected: "Turned down — approve the application from ⋯ before selling them anything.",
+    PendingApproval: "Approve the application before selling them a package.",
+    none: "No membership, so no minutes to sell or adjust.",
   } as Record<string, string>,
   bookFor: "Book for member",
   bookForHint: (name: string) => `Opens Bookings with ${name} already chosen as the player.`,
@@ -87,7 +90,7 @@ export const TOP_UP_COPY = {
 export const ACTIONS_COPY = {
   approve: "Approve application",
   approveTitle: (name: string) => `Approve ${name}?`,
-  approveBody: "They become an active member straight away and are emailed to say so. They can then book and top up.",
+  approveBody: "They become an active member straight away and are emailed to say so. They can then buy minutes and book.",
   approveConfirm: "Approve member",
   approveAction: "approve this application",
   approved: (name: string) => `${name} is now an active member.`,
@@ -108,7 +111,7 @@ export const ACTIONS_COPY = {
   suspend: "Suspend membership",
   suspendTitle: (name: string) => `Suspend ${name}?`,
   suspendBody:
-    "They can't book, top up or open the doors until reactivated. Their credit and existing bookings are kept, and they are emailed the reason below.",
+    "They can't book, buy minutes or open the doors until reactivated. Their minutes and existing bookings are kept, and they are emailed the reason below.",
   suspendConfirm: "Suspend membership",
   suspendAction: "suspend this member",
   suspended: (name: string) => `${name} is suspended.`,
@@ -117,7 +120,7 @@ export const ACTIONS_COPY = {
 
   reactivate: "Reactivate membership",
   reactivateTitle: (name: string) => `Reactivate ${name}?`,
-  reactivateBody: "Everything they had comes back exactly as it was — credit, bookings and door access. They are emailed to say so.",
+  reactivateBody: "Everything they had comes back exactly as it was — minutes, bookings and door access. They are emailed to say so.",
   reactivateConfirm: "Reactivate membership",
   reactivateAction: "reactivate this member",
   reactivated: (name: string) => `${name} is active again.`,
@@ -226,7 +229,7 @@ export const BOOKINGS_TAB_COPY = {
   partnerOf: (name: string | null) => (name ? `Playing as ${name}'s partner` : "Playing as a partner"),
   partnerBadge: "Partner",
   checkedIn: "Checked in",
-  charged: (credits: number) => formatCredits(credits),
+  charged: (minutes: number) => minutesCompact(minutes),
   unknownCourt: "A court",
 } as const;
 
@@ -241,12 +244,12 @@ export const BOOKING_STATUS: Record<string, { word: string; tone: "success" | "i
 
 export const WALLET_TAB_COPY = {
   title: "Ledger",
-  description: "Every movement of this member's credit, newest first. The balance is the sum of these rows — nothing else.",
+  description: "Every movement of this member's minutes, newest first. The balance is the sum of these rows — nothing else.",
   label: (name: string) => `${name}'s ledger`,
   loadAction: "read this member's ledger",
   failedCaveat: "That does not mean nothing has moved.",
   empty: "No movements yet",
-  emptyHint: "Top-ups, bookings, refunds and penalties appear here as they happen.",
+  emptyHint: "Packages bought, bookings, refunds and penalties appear here as they happen.",
   showingLatest: (n: number) => `Showing the latest ${n} movements.`,
   seeAll: "Open in Transactions",
 } as const;
@@ -397,7 +400,7 @@ export const ADMIN_ROLE_COPY = {
   menuNotActive: "Only an active member can be made an administrator.",
   grantTitle: (name: string) => `Make ${name} an administrator?`,
   grantBody: (name: string) =>
-    `${name} will be able to manage members, move credit, book courts for members even past what their balance covers, open doors and change settings. They and every other admin are emailed the reason.`,
+    `${name} will be able to manage members, sell and adjust minutes, book courts for members even past what their balance covers, open doors and change settings. They and every other admin are emailed the reason.`,
   grantConfirm: "Make administrator",
   grantAction: "grant admin rights",
   granted: (name: string) => `${name} is now an administrator.`,

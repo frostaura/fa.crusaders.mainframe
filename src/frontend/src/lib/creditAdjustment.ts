@@ -1,9 +1,9 @@
 import { ApiError, type LedgerEntryType, type LedgerRow } from "./api";
-import { formatCredits } from "./utils";
+import { minutesCompact } from "./minutes";
 import { clubShortDate } from "./clubClock";
 
 /**
- * The pure logic behind the admin console's "adjust credit" form.
+ * The pure logic behind the desk's "Adjust minutes" and "Sell package" sheets (P13 §3.7).
  *
  * <p>
  * It lives in a `.ts` module rather than beside the screen it serves, and that is a
@@ -16,7 +16,7 @@ import { clubShortDate } from "./clubClock";
  */
 
 /**
- * A name for one intended credit movement.
+ * A name for one intended movement of minutes — an adjustment or a sale.
  *
  * <p>
  * `crypto.randomUUID` needs a secure context and is absent under plain HTTP on a LAN
@@ -37,7 +37,7 @@ export function newIdempotencyKey(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-// --- "for booking" on a credit adjustment --------------------------------------
+// --- "for booking" on an adjustment of minutes -------------------------------------
 
 export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function isGuid(value: string) { return GUID.test(value); }
@@ -104,8 +104,8 @@ export type AdminLedgerType = LedgerEntryType;
  * up unlabelled.
  */
 export const LEDGER_TYPE_LABEL: Record<AdminLedgerType, string> = {
-  TopUp: "Wallet top-up",
-  AdminTopUp: "Desk top-up",
+  TopUp: "Package bought in the app",
+  AdminTopUp: "Package sold at the desk",
   BookingCharge: "Booking charge",
   CancellationRefund: "Cancellation refund",
   NoShowPenalty: "No-show penalty",
@@ -148,7 +148,7 @@ export function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
     seen.add(id);
     // The one short club date, in the club's calendar ("Thu 1 Oct 2026", never "01 Oct").
     const when = clubShortDate(row.at, undefined, { year: true });
-    out.push({ id, label: `${when} · ${ledgerTypeLabel(row.type)} ${formatCredits(row.amountMinutes)} · ${id.slice(0, 8)}` });
+    out.push({ id, label: `${when} · ${ledgerTypeLabel(row.type)} ${minutesCompact(row.amountMinutes)} · ${id.slice(0, 8)}` });
   }
   return out;
 }

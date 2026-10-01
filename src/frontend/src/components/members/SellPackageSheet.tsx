@@ -1,0 +1,384 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { ConfirmButton } from "@/components/ConfirmButton";
+import { Minutes } from "@/components/Minutes";
+import { SendingNote, Stepper } from "@/components/bookings/SheetParts";
+import { useSendingGuard, type SendingGuard } from "@/components/bookings/useSendingGuard";
+import { useToast } from "@/components/Toast";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { AnimatedCheck } from "@/components/ui/feedback-marks";
+import { HourglassMedium } from "@/components/ui/icons";
+import { Input } from "@/components/ui/input";
+import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle,
+} from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StateBlock } from "@/components/ui/state-block";
+import { useIsSmUp } from "@/components/ui/use-media-query";
+import type { MemberShelf, ShelfPackage } from "@/lib/api";
+import { adminEndpoints, type SellReasonCode } from "@/lib/adminApi";
+import {
+  LIVE_PUSH_NOTE, LIVE_SAID, LOST_REPLY, PAYMENT_CHOICES, REASON_MISSING, SELL_COPY as COPY, doneSentence,
+  parseZar, percentOfBps, reasonLabel, validateZar, zarField,
+} from "@/lib/deskMinutesCopy";
+import { formatMoney } from "@/lib/utils";
+import type { AdjustmentKey } from "./adjustmentAttempt";
+import { attemptSale } from "./sellAttempt";
+
+/**
+ * Sell a member a package at the desk (P13 §3.7) — how the club takes cash, EFT or a card
+ * offline. Three steps, because money is three questions: which package · how was it paid ·
+ * is this right.
+ *
+ * <p>
+ * <b>The member's own shelf, read for them</b> (`GET /admin/minutes/{id}/packages`): their groups'
+ * packages and the club's at their discount, priced exactly as the app would price them, so the
+ * desk can never sell something the member could not have bought. The money received defaults to
+ * that price and may differ (a regular rounding to a note) — the revenue report shows what the
+ * desk says it took.
+ * </p>
+ *
+ * <p>
+ * <b>The same press discipline as an adjustment</b>: a ref stops the double-click, a key names the
+ * sale so a retry replays rather than sells twice, a lost reply is looked up on the ledger
+ * (`sellAttempt`), and the sheet cannot close while a sale is on its way (R5 I5-3).
+ * </p>
+ */
+export type SellPackageSheetProps = {
+  userId: string;
+  name: string;
+  /** What the member has now, or null where the read failed. Null is NOT zero. */
+  balance: number | null;
+  onClose: () => void;
+  /** The server's balance after a sale, or null where a lost reply's re-read failed too. */
+  onSold: (balanceAfter: number | null) => void;
+};
+
+type ShelfState = { status: "loading" } | { status: "failed"; error: unknown } | { status: "ready"; shelf: MemberShelf };
+type Complaints = { pkg?: string; code?: string; detail?: string; zar?: string };
+type Receipt = { pkg: ShelfPackage; balanceAfter: number | null; recovered: boolean };
+
+function useShelf(userId: string) {
+  const [state, setState] = useState<ShelfState>({ status: "loading" });
+  const read = useCallback(async () => {
+    setState({ status: "loading" });
+    try {
+      setState({ status: "ready", shelf: await adminEndpoints.memberShelf(userId) });
+    } catch (error) {
+      setState({ status: "failed", error });
+    }
+  }, [userId]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
+  useEffect(() => { void read(); }, [read]);
+  return { state, read };
+}
+
+function useSaleFlow(shelf: ShelfState) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [pkgId, setPkgId] = useState<string | null>(null);
+  const [code, setCode] = useState<SellReasonCode | null>(null);
+  const [detail, setDetail] = useState("");
+  const [zarText, setZarText] = useState("");
+  const [complaints, setComplaints] = useState<Complaints>({});
+  const [done, setDone] = useState<Receipt | null>(null);
+  const pkg = shelf.status === "ready" ? shelf.shelf.packages.find((p) => p.id === pkgId) ?? null : null;
+
+  /** Choosing a package starts the money received at its price for THIS member. */
+  const choose = (id: string) => {
+    setPkgId(id);
+    const chosen = shelf.status === "ready" ? shelf.shelf.packages.find((p) => p.id === id) : undefined;
+    if (chosen) setZarText(zarField(chosen.price_zar));
+    setComplaints({});
+  };
+  const settle = (found: Complaints, next: 2 | 3) => {
+    setComplaints(found);
+    if (!Object.values(found).some(Boolean)) setStep(next);
+  };
+  const toPayment = () => settle({ pkg: pkg ? undefined : COPY.pickPackage }, 2);
+  const toCheck = () => settle({
+    code: code === null ? REASON_MISSING.code : undefined,
+    detail: detail.trim() ? undefined : REASON_MISSING.detail,
+    zar: validateZar(zarText) ?? undefined,
+  }, 3);
+  /** Back to the shelf after a refusal said it changed: nothing chosen survives a re-read. */
+  const restart = () => { setPkgId(null); setStep(1); setComplaints({}); };
+  return {
+    step, setStep, pkg, choose, code, setCode, detail, setDetail, zarText, setZarText, complaints, setComplaints,
+    done, setDone, toPayment, toCheck, restart, zar: parseZar(zarText),
+  };
+}
+
+type Flow = ReturnType<typeof useSaleFlow>;
+
+/** The press: one in flight at a time, under a key that names this sale. */
+function useSalePress(props: SellPackageSheetProps, flow: Flow, rereadShelf: () => Promise<void>) {
+  const toast = useToast();
+  const key = useRef<AdjustmentKey>(null);
+  const inFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const press = async (): Promise<string> => {
+    const { pkg, code, zar } = flow;
+    if (!pkg || code === null || inFlight.current) return LIVE_SAID.refused;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      // The price as the shelf said it is the server's default: send rand only when it differs.
+      const zarReceived = zar !== null && zar !== pkg.price_zar ? zar : undefined;
+      const outcome = await attemptSale({
+        userId: props.userId, pkg, reasonCode: code, reason: flow.detail, zarReceived, name: props.name,
+      }, key);
+      return settleOutcome(outcome, { props, flow, toast, rereadShelf });
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+  return { busy, press };
+}
+
+type Settle = {
+  props: SellPackageSheetProps; flow: Flow; toast: ReturnType<typeof useToast>; rereadShelf: () => Promise<void>;
+};
+
+function settleOutcome(outcome: Awaited<ReturnType<typeof attemptSale>>, ctx: Settle): string {
+  const { props, flow, toast, rereadShelf } = ctx;
+  if (outcome.kind === "unavailable") {
+    toast.push({ tone: "danger", text: outcome.message, unchanged: true, durationMs: 8000 });
+    flow.restart();
+    void rereadShelf();
+    return outcome.message;
+  }
+  if (outcome.kind === "failed") {
+    toast.push({ tone: "danger", text: outcome.message, unchanged: outcome.unchanged, durationMs: 8000 });
+    if (outcome.balanceNow !== undefined) props.onSold(outcome.balanceNow);
+    return outcome.said;
+  }
+  props.onSold(outcome.balanceAfterMinutes);
+  flow.setDone({ pkg: flow.pkg!, balanceAfter: outcome.balanceAfterMinutes, recovered: outcome.recovered });
+  return doneSentence(props.name, outcome.balanceAfterMinutes);
+}
+
+export function SellPackageSheet(props: SellPackageSheetProps) {
+  const { name, onClose } = props;
+  const wide = useIsSmUp();
+  const shelf = useShelf(props.userId);
+  const flow = useSaleFlow(shelf.state);
+  const sale = useSalePress(props, flow, shelf.read);
+  const guard = useSendingGuard((open) => { if (!open) onClose(); });
+  return (
+    <Sheet open onOpenChange={guard.onOpenChange}>
+      <SheetContent side={wide ? "right" : "bottom"} data-sheet="sell-package">
+        <SheetHeader>
+          <SheetTitle>{COPY.title(name)}</SheetTitle>
+          <SheetDescription>{shelfLine(shelf.state)}</SheetDescription>
+          {flow.done ? null : <Stepper names={COPY.steps} current={flow.step - 1} />}
+        </SheetHeader>
+        <SheetBody className="flex flex-col gap-4 pb-4">
+          <SaleBody flow={flow} shelf={shelf} balance={props.balance} name={name} />
+        </SheetBody>
+        <SheetFooter className="sm:items-end">
+          <SendingNote text={sale.busy ? COPY.sending(name) : null} refused={guard.refused} />
+          <SaleFooter flow={flow} guard={guard} sale={sale} shelf={shelf.state} name={name} />
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** The member's discount, said once under the title: it is why the prices below are what they are. */
+function shelfLine(state: ShelfState): string {
+  if (state.status !== "ready" || !state.shelf.discount) return COPY.shelfHint;
+  const { bps, group } = state.shelf.discount;
+  return `${COPY.shelfHint} ${COPY.discountLine(percentOfBps(bps), group.name)}`;
+}
+
+type BodyProps = { flow: Flow; shelf: ReturnType<typeof useShelf>; balance: number | null; name: string };
+
+function SaleBody({ flow, shelf, balance, name }: BodyProps) {
+  if (flow.done) return <SaleReceipt name={name} done={flow.done} />;
+  if (flow.step === 2 && flow.pkg) return <PaymentStep flow={flow} pkg={flow.pkg} />;
+  if (flow.step === 3 && flow.pkg) return <SaleCheck flow={flow} pkg={flow.pkg} balance={balance} />;
+  const state = shelf.state;
+  return (
+    <StateBlock
+      loading={state.status === "loading"}
+      error={state.status === "failed" ? state.error : null}
+      action={COPY.shelfAction}
+      onRetry={() => void shelf.read()}
+      empty={state.status === "ready" && state.shelf.packages.length === 0}
+      emptyTitle={COPY.shelfEmptyTitle}
+      emptyHint={COPY.shelfEmptyHint}
+      emptyIcon={HourglassMedium}
+      emptyAction={<Link className={buttonVariants({ variant: "outline" })} to="/admin/packages">{COPY.shelfEmptyAction}</Link>}
+      skeleton={<ShelfSkeleton />}
+    >
+      {state.status === "ready" ? <ShelfChoice flow={flow} packages={state.shelf.packages} name={name} /> : null}
+    </StateBlock>
+  );
+}
+
+function ShelfSkeleton() {
+  return (
+    <div className="flex flex-col gap-3" aria-hidden="true">
+      {[0, 1, 2].map((row) => <Skeleton key={row} className="h-16 w-full" />)}
+    </div>
+  );
+}
+
+/** Each package a card: its name, its minutes, what THIS member pays, and what it saves. */
+function ShelfChoice({ flow, packages, name }: { flow: Flow; packages: ShelfPackage[]; name: string }) {
+  return (
+    <Field>
+      <FieldLabel>{COPY.shelfLabel(name)}</FieldLabel>
+      <RadioGroup value={flow.pkg?.id ?? ""} onValueChange={flow.choose} aria-label={COPY.shelfLabel(name)}>
+        {packages.map((p) => (
+          <RadioCard key={p.id} value={p.id} title={<PackageTitle pkg={p} />} description={<PackageLine pkg={p} />} />
+        ))}
+      </RadioGroup>
+      <FieldError>{flow.complaints.pkg}</FieldError>
+    </Field>
+  );
+}
+
+function PackageTitle({ pkg }: { pkg: ShelfPackage }) {
+  return (
+    <span className="flex flex-wrap items-baseline justify-between gap-x-3">
+      <span>{pkg.name}</span>
+      <span className="font-semibold tabular-nums">{formatMoney(pkg.price_zar)}</span>
+    </span>
+  );
+}
+
+function PackageLine({ pkg }: { pkg: ShelfPackage }) {
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <Minutes value={pkg.minutes} />
+      {pkg.discount_bps > 0 ? <span className="tabular-nums line-through">{COPY.listPrice(formatMoney(pkg.list_price_zar))}</span> : null}
+      {pkg.saving_zar ? <Badge tone="success">{COPY.saving(formatMoney(pkg.saving_zar), pkg.saving_pct)}</Badge> : null}
+      {pkg.group ? <Badge tone="neutral">{COPY.fromGroup(pkg.group.name)}</Badge> : null}
+    </span>
+  );
+}
+
+function PaymentStep({ flow, pkg }: { flow: Flow; pkg: ShelfPackage }) {
+  const { complaints } = flow;
+  const differs = flow.zar !== null && flow.zar !== pkg.price_zar;
+  return (
+    <>
+      <Field>
+        <FieldLabel>{COPY.paymentLabel}</FieldLabel>
+        <Select value={flow.code ?? ""} onValueChange={(c) => { flow.setCode(c as SellReasonCode); flow.setComplaints((x) => ({ ...x, code: undefined })); }}>
+          <SelectTrigger><SelectValue placeholder={COPY.paymentPlaceholder} /></SelectTrigger>
+          <SelectContent>
+            {PAYMENT_CHOICES.map((c) => <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <FieldError>{complaints.code}</FieldError>
+      </Field>
+      <Field>
+        <FieldLabel>{COPY.zarLabel}</FieldLabel>
+        <Input inputMode="decimal" autoComplete="off" value={flow.zarText} className="tabular-nums" onChange={(e) => flow.setZarText(e.target.value)} />
+        <FieldDescription>{differs ? COPY.zarDiffers(formatMoney(pkg.price_zar)) : COPY.zarHelp(formatMoney(pkg.price_zar))}</FieldDescription>
+        <FieldError>{complaints.zar}</FieldError>
+      </Field>
+      <Field>
+        <FieldLabel>{COPY.detailLabel}</FieldLabel>
+        <Input autoComplete="off" value={flow.detail} placeholder={COPY.detailPlaceholder} onChange={(e) => flow.setDetail(e.target.value)} />
+        <FieldDescription>{COPY.detailHint}</FieldDescription>
+        <FieldError>{complaints.detail}</FieldError>
+      </Field>
+    </>
+  );
+}
+
+function SaleCheck({ flow, pkg, balance }: { flow: Flow; pkg: ShelfPackage; balance: number | null }) {
+  const zar = flow.zar ?? pkg.price_zar;
+  return (
+    <>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border bg-bg-muted p-4 text-sm">
+        <dt className="text-text-secondary">{COPY.balanceNow}</dt>
+        <dd className="text-right text-text-primary">{balance === null ? "—" : <Minutes value={balance} />}</dd>
+        <dt className="text-text-secondary">{COPY.adds}</dt>
+        <dd className="text-right font-semibold text-text-primary">{pkg.name} · <Minutes value={pkg.minutes} signed /></dd>
+        <div aria-hidden="true" className="col-span-2 my-1 h-px bg-border" />
+        <dt className="font-semibold text-text-primary">{COPY.balanceAfter}</dt>
+        <dd className="text-right font-semibold text-text-primary">{balance === null ? "—" : <Minutes value={balance + pkg.minutes} />}</dd>
+        <dt className="text-text-secondary">{COPY.zarRow}</dt>
+        <dd className="text-right tabular-nums text-text-primary">{formatMoney(zar)}</dd>
+      </dl>
+      <p className="text-sm text-text-secondary">{`${reasonLabel(flow.code ?? "")} — “${flow.detail.trim()}”`}</p>
+      <p className="text-sm text-text-muted">{COPY.revenue(formatMoney(zar))}</p>
+      <p className="text-sm text-text-muted">{LIVE_PUSH_NOTE}</p>
+    </>
+  );
+}
+
+/** The receipt STAYS: money deserves more than a toast. */
+function SaleReceipt({ name, done }: { name: string; done: Receipt }) {
+  return (
+    <div className="flex flex-col items-center gap-3 py-4 text-center">
+      <AnimatedCheck size={48} className="text-success-strong" />
+      <p className="text-lg font-semibold text-success-strong" role="status">{doneSentence(name, done.balanceAfter)}</p>
+      <p className="max-w-prose text-sm text-text-secondary">{COPY.receipt(name, done.pkg.name, done.pkg.minutes)}</p>
+      {done.recovered ? <p className="max-w-prose text-sm text-text-secondary">{LOST_REPLY.landed}</p> : null}
+      <p className="max-w-prose text-sm text-text-secondary">{LIVE_PUSH_NOTE}</p>
+    </div>
+  );
+}
+
+type FooterProps = {
+  flow: Flow; guard: SendingGuard; sale: ReturnType<typeof useSalePress>; shelf: ShelfState; name: string;
+};
+
+function SaleFooter({ flow, guard, sale, shelf, name }: FooterProps) {
+  const leave = () => guard.onOpenChange(false);
+  if (flow.done) return <Button onClick={leave}>{COPY.done}</Button>;
+  if (flow.step === 1) {
+    return (
+      <>
+        <Button variant="outline" onClick={leave}>{COPY.cancel}</Button>
+        <Button onClick={flow.toPayment} disabled={shelf.status !== "ready"}>{COPY.next}</Button>
+      </>
+    );
+  }
+  if (flow.step === 2) {
+    return (
+      <>
+        <Button variant="outline" onClick={() => flow.setStep(1)}>{COPY.back}</Button>
+        <Button onClick={flow.toCheck}>{COPY.next}</Button>
+      </>
+    );
+  }
+  const pkg = flow.pkg;
+  if (!pkg) return null;
+  return (
+    <>
+      <Button variant="outline" disabled={sale.busy} onClick={() => flow.setStep(2)}>{COPY.back}</Button>
+      <div className="min-w-0">
+        <ConfirmButton
+          idleLabel={COPY.idle(pkg.minutes)}
+          cancelLabel={COPY.cancel}
+          confirmLabel={COPY.confirm(name, pkg.name, formatMoney(flow.zar ?? pkg.price_zar))}
+          ariaLabel={name}
+          subject={name}
+          tone="info"
+          idleClassName={buttonVariants({ variant: "primary" })}
+          disabled={sale.busy}
+          onConfirm={async () => {
+            guard.setSending(true);
+            try {
+              return await sale.press();
+            } finally {
+              guard.setSending(false);
+            }
+          }}
+          className="min-h-touch w-full"
+        />
+      </div>
+    </>
+  );
+}

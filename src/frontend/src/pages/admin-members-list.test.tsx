@@ -5,6 +5,7 @@ import AdminMembersPage from "./AdminMembers";
 import { memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 import { ADMIN_BADGE, COLUMNS, GROUPS_COPY, MEMBERS_PAGE, ROW_ACTIONS } from "../lib/membersCopy";
 import { ACTIONS_COPY } from "../lib/memberDetailCopy";
+import { SELL_COPY } from "../lib/deskMinutesCopy";
 
 /**
  * The members list as a way INTO a member (P5) — the founder's "a person's night should be
@@ -56,10 +57,10 @@ describe("the row is the way into a member", () => {
     expect(where()).toBe(`/admin/members/${ADA.user_id}`);
   });
 
-  it("leaves the row's own buttons alone — Top up opens the sheet, it does not navigate", async () => {
+  it("leaves the row's own buttons alone — Sell package opens the sheet, it does not navigate", async () => {
     render();
-    fireEvent.click(await screen.findByRole("button", { name: ROW_ACTIONS.topUp }));
-    expect(await screen.findByRole("dialog", { name: "Top up Ada Lovelace" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: ROW_ACTIONS.sell }));
+    expect(await screen.findByRole("dialog", { name: SELL_COPY.title("Ada Lovelace") })).toBeInTheDocument();
     expect(where()).toBe("/admin/members");
   });
 
@@ -178,9 +179,11 @@ describe("the status filter and the search", () => {
 describe("what a row says about the member", () => {
   it("shows a negative balance in the danger ink, whole", async () => {
     render();
-    const balance = await screen.findByText("−30.00 cr");
-    expect(balance.className).toContain("text-danger-strong");
-    expect(balance).toHaveAttribute("title", "−30.00 cr");
+    // Whole minutes (P13): the figure wears the danger ink, and its cell's title says it whole.
+    const minutes = (await screen.findByText("−30 min")).parentElement!;
+    expect(minutes.className).toContain("text-danger-strong");
+    expect(minutes.parentElement).toHaveAttribute("title", "−30 min");
+    expect(minutes).toHaveTextContent("minus 30 minutes");
   });
 
   it("marks an admin, and says when the role comes from the server's configuration", async () => {

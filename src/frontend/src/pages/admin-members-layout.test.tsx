@@ -72,7 +72,7 @@ describe("the admin members table", () => {
 
   it("lays the row actions along the row, not down it", async () => {
     renderMembers();
-    const actions = (await screen.findByRole("button", { name: ROW_ACTIONS.topUp })).parentElement!;
+    const actions = (await screen.findByRole("button", { name: ROW_ACTIONS.sell })).parentElement!;
     // Wrapping lets the table squeeze this column and the buttons stack — measured at 92.5-136.5px
     // rows against 60.5-69px on one line. Wrapping is the cause of the tall row, not the cure.
     expect(actions.className).toContain("flex-row");
@@ -82,7 +82,7 @@ describe("the admin members table", () => {
 
   it("pins the actions column so the buttons do not start off-screen", async () => {
     renderMembers();
-    const cell = (await screen.findByRole("button", { name: ROW_ACTIONS.topUp })).closest("td")!;
+    const cell = (await screen.findByRole("button", { name: ROW_ACTIONS.sell })).closest("td")!;
     const header = screen.getByRole("columnheader", { name: COLUMNS.actions });
     expect(cell.className).toContain(`${TABLE}:sticky`);
     expect(cell.className).toContain(`${TABLE}:right-0`);
@@ -194,13 +194,13 @@ describe("the members table's own controls", () => {
    * D3-B18: two controls vanishing from a suspended row with nothing saying why reads as a
    * rendering fault. In the row, not in a tooltip — a title is invisible on a phone.
    */
-  it("says why a suspended member's row has no Top up", async () => {
+  it("says why a suspended member's row has no Sell package", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
     const said = await screen.findByText(SUSPENDED_NOTE);
     const row = said.closest("tr")!;
     expect(within(row).getByText("Grace Hopper")).toBeInTheDocument();
-    expect(within(row).queryByRole("button", { name: ROW_ACTIONS.topUp })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: ROW_ACTIONS.sell })).not.toBeInTheDocument();
     expect(within(row).getByRole("button", { name: ROW_ACTIONS.more("Grace Hopper") })).toBeInTheDocument();
   });
 });

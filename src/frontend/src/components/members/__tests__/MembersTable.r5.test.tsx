@@ -22,7 +22,7 @@ function row(i: number, groups: { id: string; name: string }[] = []): MemberRow 
 
 function handlers(): RowActionHandlers {
   return {
-    approve: vi.fn(), reject: vi.fn(), topUp: vi.fn(), fingerprints: vi.fn(), reset: vi.fn(), resetCode: vi.fn(),
+    approve: vi.fn(), reject: vi.fn(), sell: vi.fn(), adjust: vi.fn(), fingerprints: vi.fn(), reset: vi.fn(), resetCode: vi.fn(),
     resend: vi.fn(), changeGroups: vi.fn(), suspend: vi.fn(), reactivate: vi.fn(), adminRole: vi.fn(), fingerprintCount: () => 0,
   };
 }
@@ -36,11 +36,29 @@ function draw(rows: MemberRow[], h = handlers()) {
 }
 
 describe("the members table, round 5", () => {
-  it("offers Top up from the ⋯ on a card (§4.3)", async () => {
+  it("offers Sell package from the ⋯ on a card (§4.3)", async () => {
     const h = draw([row(1)]);
     fireEvent.pointerDown(screen.getByRole("button", { name: ROW_ACTIONS.more("Member 1") }), POINTER);
-    fireEvent.click(await screen.findByRole("menuitem", { name: ROW_ACTIONS.topUp }));
-    expect(h.topUp).toHaveBeenCalledWith(expect.objectContaining({ user_id: "u-1" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: ROW_ACTIONS.sell }));
+    expect(h.sell).toHaveBeenCalledWith(expect.objectContaining({ user_id: "u-1" }));
+  });
+
+  /** P13 §3.7: goodwill and corrections are a separate act from taking money, on every width. */
+  it("offers Adjust minutes from the ⋯, apart from the sale", async () => {
+    const h = draw([row(1)]);
+    fireEvent.pointerDown(screen.getByRole("button", { name: ROW_ACTIONS.more("Member 1") }), POINTER);
+    fireEvent.click(await screen.findByRole("menuitem", { name: ROW_ACTIONS.adjust }));
+    expect(h.adjust).toHaveBeenCalledWith(expect.objectContaining({ user_id: "u-1" }));
+    expect(h.sell).not.toHaveBeenCalled();
+  });
+
+  /** P13 §9: the court box does not read fingerprints yet, so the row offers no enrolment. */
+  it("offers no fingerprint enrolment while the switch is off", async () => {
+    draw([row(1)]);
+    fireEvent.pointerDown(screen.getByRole("button", { name: ROW_ACTIONS.more("Member 1") }), POINTER);
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: ROW_ACTIONS.fingerprints(0) })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /fingerprint/i })).toBeNull();
   });
 
   it("draws no Groups column when nobody on the page is in a group, and one when somebody is (V-14)", () => {
