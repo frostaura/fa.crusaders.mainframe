@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { AdminDialogs, AdminSection } from "@/components/players/admin/AdminPanel";
 import { useAdminHands } from "@/components/players/admin/useAdminHands";
 import { AdminSeatMenu } from "@/components/players/admin/AdminSeatMenu";
 import { Attendance, CancelPanel } from "@/components/players/detail/AttendanceAndCancel";
 import { DetailSkeleton } from "@/components/players/detail/DetailSkeleton";
+import { NotOnGame } from "@/components/players/detail/GoneFromGame";
 import { MoneyPanel } from "@/components/players/detail/MoneyPanel";
 import {
   ChangeSplitButton, InviteButton, OrganiserDialogs, OrganiserSeatButtons,
@@ -19,10 +20,8 @@ import {
   adminActs, canNudge, canRemove, canShareLink, detailTitle, isCancelled, organiserName, showsResult,
 } from "@/components/players/detail/detailModel";
 import { ResultCard } from "@/components/play/ResultCard";
-import { Button } from "@/components/ui/button";
 import { ContextBar } from "@/components/ui/context-bar";
 import { useMediaQuery } from "@/components/ui/use-media-query";
-import { CalendarBlank } from "@/components/ui/icons";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
@@ -58,6 +57,8 @@ export default function BookingDetailPage() {
   // slow poll while the game is live and nobody is in yet.
   useDetailLiveness(read.data, read.readAt, read.reload);
   const { shown, setNotice } = useDetailNotice(read.data);
+  // R5 M5-8 — the member's own seat, when the link that opened the page names it.
+  const seatId = new URLSearchParams(useLocation().search).get("seat");
   return (
     // R4 form factor (SPEC 3.3): `content` to xl, `wide` from it, where the money stands in a rail.
     <PageShell width="content" className="xl:max-w-wide">
@@ -69,7 +70,7 @@ export default function BookingDetailPage() {
         freshness={<Freshness at={read.readAt} />}
       />
       {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice="">{shown.text}</Alert> : null}
-      <DetailBody read={read} say={setNotice} earlyResult={earlyResult} />
+      <DetailBody read={read} say={setNotice} earlyResult={earlyResult} bookingId={bookingId} seatId={seatId} />
     </PageShell>
   );
 }
@@ -99,7 +100,7 @@ function useDetailNotice(detail: BookingDetail | null) {
  * liveness, writes and dialogs — under an h2 instead of the page's h1, with the way to the full
  * page. It is its own `@container/page`, so the body lays itself out by the PANE's width.
  */
-export function BookingDetailPanel({ bookingId }: { bookingId: string }) {
+export function BookingDetailPanel({ bookingId, seatId = null }: { bookingId: string; seatId?: string | null }) {
   const read = useBookingDetail(bookingId);
   useDetailLiveness(read.data, read.readAt, read.reload);
   const { shown, setNotice } = useDetailNotice(read.data);
@@ -117,7 +118,7 @@ export function BookingDetailPanel({ bookingId }: { bookingId: string }) {
         </div>
       </div>
       {shown ? <Alert tone={shown.tone} live="polite" data-detail-notice="">{shown.text}</Alert> : null}
-      <DetailBody read={read} say={setNotice} earlyResult={null} />
+      <DetailBody read={read} say={setNotice} earlyResult={null} bookingId={bookingId} seatId={seatId} />
     </section>
   );
 }
@@ -156,18 +157,14 @@ function headerLine(d: BookingDetail): string {
   return status ? `${by} · ${status}` : by;
 }
 
-function DetailBody({ read, say, earlyResult }: { read: DetailRead; say: (notice: Notice) => void; earlyResult: EarlyResult | null }) {
-  if (read.notFound) {
-    return (
-      <StateBlock
-        empty
-        emptyIcon={CalendarBlank}
-        emptyTitle={DETAIL_COPY.notFoundTitle}
-        emptyHint={PLAYERS_REFUSAL.booking_not_found}
-        emptyAction={<Button asChild variant="outline"><Link to="/bookings">{DETAIL_COPY.backToBookings}</Link></Button>}
-      />
-    );
-  }
+type BodyProps = {
+  read: DetailRead; say: (notice: Notice) => void; earlyResult: EarlyResult | null;
+  /** R5 M5-8 — the viewer's own seat, named by the link that opened the page (`?seat=`). */
+  bookingId: string; seatId: string | null;
+};
+
+function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
+  if (read.notFound) return <NotOnGame bookingId={bookingId} seatId={seatId} />;
   if (!read.data) {
     return (
       <StateBlock

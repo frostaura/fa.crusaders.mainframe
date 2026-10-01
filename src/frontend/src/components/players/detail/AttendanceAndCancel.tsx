@@ -7,8 +7,8 @@ import { Section } from "@/components/ui/page-shell";
 import { useBalance } from "@/lib/balance";
 import { clubClock } from "@/lib/clubClock";
 import type { BookingDetail } from "@/lib/playersApi";
-import { DETAIL_ATTENDANCE, DETAIL_CANCEL } from "@/lib/playersCopy";
-import { liveCount } from "./detailModel";
+import { DETAIL_ATTENDANCE, DETAIL_CANCEL, DETAIL_NO_SHOW } from "@/lib/playersCopy";
+import { isNoShow, liveCount } from "./detailModel";
 import { gridBookingOf, rereadAsDay } from "./gridBooking";
 import type { Notice } from "./useOrganiserHands";
 
@@ -21,7 +21,8 @@ export function Attendance({ detail }: { detail: BookingDetail }) {
       <div className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <p className={at ? "inline-flex items-center gap-2 font-semibold text-success-strong" : "inline-flex items-center gap-2 text-text-secondary"}>
           {at ? <CheckCircle size={16} weight="bold" aria-hidden="true" /> : <Clock size={16} aria-hidden="true" />}
-          {at ? DETAIL_ATTENDANCE.checkedInAt(clubClock(at)) : DETAIL_ATTENDANCE.notYet}
+          {/* R5 M5-3 — a settled no-show is not waiting for anybody: no "yet". */}
+          {at ? DETAIL_ATTENDANCE.checkedInAt(clubClock(at)) : isNoShow(detail) ? DETAIL_NO_SHOW.attendance : DETAIL_ATTENDANCE.notYet}
         </p>
         <p className="text-text-secondary">{DETAIL_ATTENDANCE.count(detail.attendance.players_checked_in, players)}</p>
       </div>

@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
+import { ContextBar } from "@/components/ui/context-bar";
+import { useMediaQuery } from "@/components/ui/use-media-query";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -11,9 +13,9 @@ import { useBalance } from "@/lib/balance";
 import { formatCredits } from "@/lib/utils";
 import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
 import { UnsureOutcome } from "@/lib/lostReply";
-import { DETAIL_CANCELLED, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal, playersWhen } from "@/lib/playersCopy";
+import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_NO_SHOW, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal, playersWhen } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { isCancelled, mySeat } from "./detailModel";
+import { isCancelled, isNoShow, keepAmounts, mySeat } from "./detailModel";
 import { leaveOrProve } from "./detailReadBack";
 import type { Notice } from "./useOrganiserHands";
 
@@ -26,26 +28,40 @@ type Props = { detail: BookingDetail; reload: () => void; say: (notice: Notice) 
 
 type Leave = "withdraw" | "decline";
 
+/** Where the organiser's Invite moves inline (BookingDetail's `LG_UP`): the same switch for the invitee's answer. */
+const LG_UP = "(min-width: 1024px)";
+
 export function PlayerPanel({ detail, reload, say }: Props) {
   const seat = mySeat(detail);
   const [asking, setAsking] = useState<Leave | null>(null);
+  // R5 F5 — the invitee's answer (review the share, decline) is docked in thumb reach on a phone,
+  // like the organiser's Invite; inline from lg. One place each, chosen in JS (a CSS-hidden twin
+  // is still a second button to a screen reader).
+  const wide = useMediaQuery(LG_UP);
   if (!seat || detail.viewer.role !== "player") return null;
   if (isCancelled(detail)) return <CancelledShare seat={seat} />;
+  if (isNoShow(detail)) return <NoShowShare seat={seat} />;
   const { permissions } = detail;
+  const review = permissions.can_accept ? (
+    <Button asChild><Link to={`/invites/${seat.participant_id}`}>{DETAIL_PLAYER.review}</Link></Button>
+  ) : null;
+  const decline = permissions.can_decline ? (
+    <Button variant="outline" onClick={() => setAsking("decline")}>{DETAIL_PLAYER.decline}</Button>
+  ) : null;
+  const docked = !wide && (review !== null || decline !== null);
   return (
     <Section title={DETAIL_PLAYER.title}>
       <ShareFigures seat={seat} />
       <div className="flex flex-wrap items-center gap-3">
-        {permissions.can_accept ? (
-          <Button asChild><Link to={`/invites/${seat.participant_id}`}>{DETAIL_PLAYER.review}</Link></Button>
-        ) : null}
-        {permissions.can_decline ? (
-          <Button variant="outline" onClick={() => setAsking("decline")}>{DETAIL_PLAYER.decline}</Button>
-        ) : null}
+        {docked ? null : review}
+        {docked ? null : decline}
         {permissions.can_withdraw ? (
           <Button variant="danger-soft" onClick={() => setAsking("withdraw")}>{DETAIL_PLAYER.withdraw}</Button>
         ) : null}
       </div>
+      {docked ? (
+        <ContextBar position="bottom" until="lg" label={DETAIL_COPY.answerLabel} actions={decline} primary={review} />
+      ) : null}
       <WithdrawLine detail={detail} seat={seat} />
       {asking ? (
         <LeaveDialog kind={asking} detail={detail} seat={seat} onClose={() => setAsking(null)} reload={reload} say={say} />
@@ -59,8 +75,25 @@ function CancelledShare({ seat }: { seat: DetailPlayer }) {
   return (
     <Section title={DETAIL_PLAYER.title}>
       <p className="text-sm text-text-secondary" data-cancelled-share="">
-        {seat.paid_credits > 0 ? DETAIL_CANCELLED.partnerPaid(formatCredits(seat.paid_credits)) : DETAIL_CANCELLED.partnerNothing}
+        {seat.paid_credits > 0 ? keepAmounts(DETAIL_CANCELLED.partnerPaid(formatCredits(seat.paid_credits))) : DETAIL_CANCELLED.partnerNothing}
       </p>
+    </Section>
+  );
+}
+
+/**
+ * R5 M5-3 — nobody checked in: the share came down with the no-show penalty and the rest came
+ * back. Nothing is asked any more — no "Still to pay", no "all paid up", no Review.
+ */
+function NoShowShare({ seat }: { seat: DetailPlayer }) {
+  const back = seat.returned_credits ?? 0;
+  const paidIn = seat.paid_credits + back;
+  let words: string = DETAIL_NO_SHOW.partnerNothing;
+  if (back > 0) words = DETAIL_NO_SHOW.partnerBack(formatCredits(paidIn), formatCredits(back), formatCredits(seat.paid_credits));
+  else if (paidIn > 0) words = DETAIL_NO_SHOW.partnerPaid(formatCredits(paidIn));
+  return (
+    <Section title={DETAIL_PLAYER.title}>
+      <p className="text-sm text-text-secondary" data-no-show-share="">{keepAmounts(words)}</p>
     </Section>
   );
 }
@@ -73,7 +106,7 @@ function ShareFigures({ seat }: { seat: DetailPlayer }) {
         <Figure term={DETAIL_PLAYER.paid} value={seat.paid_credits} />
         <Figure term={DETAIL_PLAYER.toPay} value={seat.unpaid_credits} strong />
       </dl>
-      {seat.needs_consent ? <Alert tone="warning" live="polite">{DETAIL_PLAYER.askedAgain(formatCredits(seat.share_credits))}</Alert> : null}
+      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(DETAIL_PLAYER.askedAgain(formatCredits(seat.share_credits)))}</Alert> : null}
       {seat.status === "accepted" && seat.unpaid_credits <= 0 && !seat.needs_consent ? (
         <p className="text-sm text-success-strong">{DETAIL_PLAYER.paidAll}</p>
       ) : null}
@@ -81,11 +114,16 @@ function ShareFigures({ seat }: { seat: DetailPlayer }) {
   );
 }
 
+/**
+ * R5 V5-7 — the term and its figure share a row while they fit; the figure wraps under the term as
+ * a whole when they do not (390 / 200 %), never "100.00 / cr" split across two lines.
+ */
 function Figure({ term, value, strong = false }: { term: string; value: number; strong?: boolean }) {
+  const pair = "flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5";
   return (
-    <div className={strong ? "flex justify-between gap-4 border-t border-border pt-2 font-semibold text-text-primary" : "flex justify-between gap-4 text-text-secondary"}>
-      <dt>{term}</dt>
-      <dd className="tabular-nums">{formatCredits(value)}</dd>
+    <div className={strong ? `${pair} border-t border-border pt-2 font-semibold text-text-primary` : `${pair} text-text-secondary`}>
+      <dt className="min-w-0 break-words">{term}</dt>
+      <dd className="ml-auto whitespace-nowrap tabular-nums">{formatCredits(value)}</dd>
     </div>
   );
 }

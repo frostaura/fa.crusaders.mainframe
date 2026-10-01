@@ -414,6 +414,8 @@ export const DETAIL_COPY = {
   title: "Booking",
   /** R4 form factor — the docked bar that holds the organiser's one verb on a phone. */
   actionsLabel: "Booking actions",
+  /** R5 F5 — the invitee's answer docked above the tab bar on a phone. */
+  answerLabel: "Your answer",
   /** R4 form factor — from a panel showing the booking inside another page (the Inbox). */
   openPage: "Open the booking",
   back: "Bookings",
@@ -616,6 +618,57 @@ export const DETAIL_CANCELLED = {
   returnedRow: (returned: string) => `${returned} back`,
   partnerNothing: "The game was cancelled, so there's nothing for you to pay — any share you'd paid went back to you.",
   partnerPaid: (paid: string) => `The game was cancelled after check-in, so the ${paid} you paid stands.`,
+  /**
+   * R5 M5-7 — a late cancellation says its penalty on the booking as the sheet did, as the ledger's
+   * own two rows: the refund in full, then the penalty kept from it.
+   */
+  penalty: "Late-cancellation penalty",
+  splitRefundPenaltyNote: (who: string | null, penalty: string) => who
+    ? `${who} got back what they paid for the court less the ${penalty} late-cancellation penalty, and less the shares partners had paid them — those went straight back to the partners.`
+    : `You got back what you paid for the court less the ${penalty} late-cancellation penalty, and less the shares your partners had paid you — those went straight back to them.`,
+} as const;
+
+/**
+ * R5 M5-8 — the booking page for a member who is no longer on the game (the API's 404), when the
+ * link that opened it named their seat ("You were taken off Court 4…"): what became of them, read
+ * off their own seat, instead of "Booking not found".
+ */
+export const DETAIL_GONE = {
+  removedTitle: "You were taken off this game",
+  removedBody: (organiser: string, game: string) =>
+    `${organiser} took you off ${game}. Anything you'd paid for it is refunded — your wallet shows it.`,
+  leftTitle: "You're no longer on this game",
+  declinedBody: (game: string) => `You declined ${game}.`,
+  withdrawnBody: (game: string) => `You pulled out of ${game}. Anything you'd paid for it is refunded — your wallet shows it.`,
+  lapsedBody: (game: string) => `Your invite to ${game} lapsed.`,
+  /** "Court 4, Thu 1 Oct, 18:00" — the game as the sentence names it. */
+  game: (court: string, when: string) => `${court}, ${when}`,
+  someone: "The organiser",
+  wallet: "Open your wallet",
+} as const;
+
+/**
+ * R5 M5-3 — a game nobody checked in on (a no-show): the court was refunded and the club kept the
+ * no-show penalty from it; each partner's share came down with it. Said as the ledger's rows: what
+ * was paid at booking, the refund, the penalty — never "paid at booking 15.00" for a 50.00 court.
+ */
+export const DETAIL_NO_SHOW = {
+  moneyNote: (split: boolean) => split
+    ? "Nobody checked in, so the court was refunded less the no-show penalty — and partners' shares came down with it."
+    : "Nobody checked in, so the court was refunded less the no-show penalty.",
+  moneyNoteFree: "Nobody checked in. The court was refunded in full, with no penalty.",
+  refunded: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
+  penalty: "No-show penalty",
+  /** A partner's row: everything they paid in, and what came back after the no-show. */
+  paidBackRow: (paid: string, back: string) => `Paid ${paid} · ${back} came back`,
+  paidRow: (paid: string) => `Paid ${paid}`,
+  nothingRow: "Nothing paid",
+  /** The viewer's own share on a no-show. */
+  partnerBack: (paid: string, back: string, net: string) =>
+    `Nobody checked in. You paid ${paid} and ${back} came back to you — ${net} in the end.`,
+  partnerPaid: (paid: string) => `Nobody checked in. You paid ${paid}.`,
+  partnerNothing: "Nobody checked in, and there's nothing for you to pay.",
+  attendance: "Nobody checked in.",
 } as const;
 
 /** A player's own share and their hand: withdraw, decline, review. */

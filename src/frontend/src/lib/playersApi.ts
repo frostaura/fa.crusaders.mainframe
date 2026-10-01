@@ -163,6 +163,13 @@ export type BookingDetail = {
     unpaid_credits: number;
     share_deadline: string;
     is_split: boolean;
+    /**
+     * R5 M5-3 / M5-7 — on a cancelled or no-show game, the refund and the penalty rows posted on
+     * the payer's wallet for it. Optional: until the API sends them they are read off the ledger's
+     * shape (a refund of the whole charge, the penalty what the payer is left paying).
+     */
+    refunded_credits?: number;
+    penalty_credits?: number;
   };
   attendance: { checked_in_at: string | null; players_checked_in: number };
   permissions: {

@@ -21,6 +21,32 @@ export function isCancelled(d: Pick<BookingDetail, "status">): boolean {
   return d.status === "cancelled";
 }
 
+/** R5 M5-3 — a game nobody checked in on: settled by the sweep (refund less the no-show penalty). */
+export function isNoShow(d: Pick<BookingDetail, "status">): boolean {
+  return d.status === "no_show";
+}
+
+/**
+ * R5 M5-3 / M5-7 — a cancelled or no-show game's settlement as the payer's ledger posted it: the
+ * refund (the whole charge, unless the lights had been on) and the penalty kept from it. Taken from
+ * the API's own figures when it sends them; until then from the ledger's shape — a refund of the
+ * whole charge and a penalty row, so what the payer is left paying (`organiser_owed_credits`) IS
+ * the penalty. After a check-in nothing was refunded and nothing is a penalty.
+ */
+export function settlementOf(d: BookingDetail): { refunded: number; penalty: number } {
+  const { money } = d;
+  if (d.attendance.checked_in_at) return { refunded: money.refunded_credits ?? 0, penalty: money.penalty_credits ?? 0 };
+  return {
+    refunded: money.refunded_credits ?? money.price_credits,
+    penalty: money.penalty_credits ?? money.organiser_owed_credits,
+  };
+}
+
+/** R5 M5-3 — the end a no-show was SOLD with: the sweep truncates `ends_at` to its own clock. */
+export function soldEnd(d: BookingDetail): string {
+  return isNoShow(d) ? d.sold_ends_at ?? d.ends_at : d.ends_at;
+}
+
 /**
  * The STATUS_WORD key a chip shows — always a word, never colour alone. On a cancelled game a
  * live seat was in (or its invite closed): "In" and "Invited" would say the game is still on.
@@ -112,7 +138,7 @@ export function mySeat(d: BookingDetail): DetailPlayer | null {
 
 /** "Court 1 · Tue 30 Sep, 18:00–18:45", in the club's zone. */
 export function detailTitle(d: BookingDetail): string {
-  return DETAIL_COPY.when(d.court_name ?? DETAIL_COPY.someCourt, playersWhen(d.starts_at), clubClock(d.ends_at));
+  return DETAIL_COPY.when(d.court_name ?? DETAIL_COPY.someCourt, playersWhen(d.starts_at), clubClock(soldEnd(d)));
 }
 
 /** The organiser's first name as the viewer reads it — null when the viewer IS the organiser. */
@@ -161,4 +187,12 @@ export function adminActs(p: DetailPlayer): AdminAct[] {
   if (collectable(p) > 0) acts.push("collect");
   if (isLive(p)) acts.push("remove");
   return acts;
+}
+
+/**
+ * R5 V5-7 — a figure never breaks mid-value ("100.00 / cr" at 390 / 200 %): a lone figure does not
+ * wrap at all, and inside a sentence each "N cr" is held together by a no-break space.
+ */
+export function keepAmounts(text: string): string {
+  return text.replace(/(\d) cr\b/g, "$1\u00a0cr");
 }
