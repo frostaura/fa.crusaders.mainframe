@@ -374,6 +374,8 @@ function endLocally(): void {
   // C1 — first, so an exchange whose reply lands after this line is discarded, in every tab.
   endSessionGeneration(true);
   tokenStore.clear();
+  // Every cache but the offline shell (M5-1): the shell is no member's, and with it gone the next
+  // person could not open the app offline at all.
   void clearOfflineCache();
   // R4 wave B — the member's reads kept on the phone (`lib/offline`): sign-out and "sign out
   // everywhere" leave nothing of them, in memory or in IndexedDB.
@@ -389,7 +391,7 @@ function endLocally(): void {
  * <b>Only an explicit sign-out wipes the member code's key.</b> A member whose session lapses is
  * still that member, standing at a door; the key on the phone still makes their code, and wiping
  * it turned "signed out after a while" into "locked out until you find signal and sign in". So
- * this drops the token and the offline caches and KEEPS the confirmed identity, the key, the
+ * this drops the token and the risky caches (never the offline shell — M5-1) and KEEPS the confirmed identity, the key, the
  * last-known door facts and the club's zone — which is what lets `/my-code` go on showing the
  * code signed out. A different member signing in on this phone still wipes all of it
  * (`rememberIdentity`), and the sign-out buttons still call {@link endLocally}.
@@ -398,6 +400,8 @@ function endLocally(): void {
 function endTakenAway(): void {
   endSessionGeneration(false);
   tokenStore.clear();
+  // M5-1 (review round 5) — every cache BUT the shell and the build: a lapsed member's code is
+  // drawn from the key kept above, and that needs the app to open with no signal at the door.
   void clearOfflineCache();
   // R4 wave B — the member's kept reads go with the offline caches. Unlike the code's key they
   // open no door, and a phone left signed out must not keep showing a wallet to whoever holds it.

@@ -170,7 +170,12 @@ export type SwSandbox = {
   networkCalls: SwRequest[];
   /** The `init` each of those was sent with (P4-2: how it asked the HTTP cache). */
   networkInits: (RequestInit | undefined)[];
-  dispatchFetch(request: SwRequest): Promise<FakeFetchEvent>;
+  /**
+   * Dispatches a fetch and waits for the worker's answer and its `waitUntil` work. `settle: false`
+   * returns as soon as the listener has run — for a network that never answers (P5-1), whose
+   * background revalidation would never let the event settle.
+   */
+  dispatchFetch(request: SwRequest, options?: { settle?: boolean }): Promise<FakeFetchEvent>;
   dispatchMessage(data: unknown): Promise<FakeMessageEvent>;
   /** Runs the worker's `install` handler to completion (precache included). */
   install(): Promise<void>;
@@ -185,7 +190,7 @@ export type SwSandbox = {
  *               answers 200 with its own name as the body, which is enough for identity
  *               assertions ("whose wallet came back?").
  */
-export function loadServiceWorker(routes: Record<string, () => Response> = {}, options: { build?: string } = {}): SwSandbox {
+export function loadServiceWorker(routes: Record<string, () => Response | Promise<Response>> = {}, options: { build?: string } = {}): SwSandbox {
   const shipped = readFileSync(resolve(__dirname, "../../public/sw.js"), "utf8");
   // P4-3: the build writes its id into the worker it ships; a test names the build it is running.
   const source = options.build ? stampServiceWorker(shipped, options.build) : shipped;
@@ -225,6 +230,9 @@ export function loadServiceWorker(routes: Record<string, () => Response> = {}, o
     Response,
     Headers,
     console,
+    // Looked up at call time, so a test's `vi.useFakeTimers()` drives the worker's timers too.
+    setTimeout: (fn: () => void, ms?: number) => globalThis.setTimeout(fn, ms),
+    clearTimeout: (id: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(id),
   });
   vm.runInContext(source, context, { filename: "sw.js" });
 
@@ -238,8 +246,12 @@ export function loadServiceWorker(routes: Record<string, () => Response> = {}, o
     caches: cacheStorage,
     networkCalls,
     networkInits,
-    async dispatchFetch(request) {
+    async dispatchFetch(request, { settle = true } = {}) {
       const event = new FakeFetchEvent(request);
+      if (!settle) {
+        for (const listener of listeners.get("fetch") ?? []) (listener as (e: FakeFetchEvent) => void)(event);
+        return event;
+      }
       await dispatch("fetch", event);
       // The worker's own cache writes happen inside the respondWith promise.
       await event.response().catch(() => null);

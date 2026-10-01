@@ -15,7 +15,18 @@ const SW_URL = "/sw.js";
 /** Matches `public/sw.js`. Every cache the worker has ever owned carries this prefix. */
 const CACHE_PREFIX = "crusaders-";
 
-/** The message the worker answers by emptying everything it holds. */
+/**
+ * The offline shell's caches (any build's — the worker's own activate sweep retires an earlier
+ * build's). Matches `public/sw.js`'s `SHELL_CACHE` / `ASSET_CACHE` names and its `KEEP_ON_END`.
+ */
+const SHELL_CACHE_PREFIXES = ["crusaders-shell-", "crusaders-assets-"];
+
+/** A cache a session ending deletes: this app's, and not the shell. */
+function droppedOnEnd(name: string): boolean {
+  return name.startsWith(CACHE_PREFIX) && !SHELL_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/** The message the worker answers by deleting every cache of this app's that is not the shell. */
 export const CLEAR_CACHES = "CLEAR_CACHES";
 
 export function isServiceWorkerSupported(): boolean {
@@ -37,7 +48,7 @@ export function registerServiceWorker(): void {
 }
 
 /**
- * Empties the browser's cache storage of everything this app put there.
+ * Empties the browser's cache storage of everything this app put there except the shell.
  *
  * <p>
  * Done from the page rather than only by messaging the worker, because the message has a hole
@@ -51,7 +62,7 @@ async function purgeCacheStorage(): Promise<void> {
   if (typeof caches === "undefined") return;
   try {
     const names = await caches.keys();
-    await Promise.all(names.filter((n) => n.startsWith(CACHE_PREFIX)).map((n) => caches.delete(n)));
+    await Promise.all(names.filter(droppedOnEnd).map((n) => caches.delete(n)));
   } catch {
     // A browser with CacheStorage disabled (private mode on some engines) throws on keys().
     // There is then nothing cached to clear, so there is nothing to do.
@@ -59,15 +70,25 @@ async function purgeCacheStorage(): Promise<void> {
 }
 
 /**
- * Drops everything the offline shell holds. Called on EVERY route by which a session ends —
- * the deliberate sign-out, an expiry, a revocation, an admin password reset, any 401 — not
- * only on the sign-out button.
+ * Drops every cache of this app's that is NOT the offline shell. Called on EVERY route by which a
+ * session ends — the deliberate sign-out, an expiry, a revocation, an admin password reset, any
+ * 401 — not only on the sign-out button.
  *
  * <p>
  * The worker caches no member data (see `public/sw.js` for why the API cache was removed), so
  * this is the second line rather than the first. It exists because a club-desk tablet is a
  * shared device and the next person to sign in must inherit nothing from the last one — and
- * because the first line has to be able to change without this one being forgotten.
+ * because the first line has to be able to change without this one being forgotten. What it
+ * deletes is everything the shell is not: the leaking worker's `crusaders-api-v1` on a device that
+ * ran it, and any cache under the prefix nobody has decided is safe.
+ * </p>
+ *
+ * <p>
+ * <b>The shell and the build's assets stay (M5-1, review round 5).</b> They hold no member data —
+ * the index.html every visitor gets and content-hashed code — and deleting them meant a phone
+ * whose session lapsed could not open the app at all with no signal, My Code included, until it
+ * found signal and reloaded: the lapse screen's "your code still works from this phone" was false
+ * at the door. A member's kept reads live in IndexedDB and are wiped separately (`wipeMemberData`).
  * </p>
  */
 export async function clearOfflineCache(): Promise<void> {

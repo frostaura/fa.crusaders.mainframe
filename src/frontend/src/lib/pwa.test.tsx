@@ -7,7 +7,8 @@ import { clearOfflineCache } from "./pwa";
 import { stubFetch } from "../test/harness";
 
 /**
- * E-F06, the page's half: a session ending has to take the offline caches with it.
+ * E-F06, the page's half: a session ending has to take anything that could hold a member's data
+ * out of the browser's caches — and (M5-1, review round 5) leave the offline shell where it is.
  *
  * <p>
  * The shipped version cleared the cache from ONE place — the Sign-out button. On a club-desk
@@ -21,6 +22,15 @@ import { stubFetch } from "../test/harness";
  * `navigator.serviceWorker.controller` is null on the load that installed the worker, after a
  * hard reload, and whenever the worker has been terminated for idleness — so the message goes
  * nowhere and reports success on exactly the loads where it matters.
+ * </p>
+ *
+ * <p>
+ * M5-1 (review round 5): the purge used to take the shell and the build's assets too — "belt and
+ * braces", since neither holds member data. The cost was the door: after a lapse or a sign-out the
+ * app could not open at all with no signal (ERR_FAILED, My Code included) until an online reload,
+ * while the lapse screen promised "your code still works from this phone". Member data lives in
+ * IndexedDB and is wiped by its own call (`wipeMemberData`); the Cache API now loses only what is
+ * not this app's shell — the leaking worker's `crusaders-api-v1` above all.
  * </p>
  */
 
@@ -60,29 +70,33 @@ afterEach(() => {
   tokenStore.clear();
 });
 
+/** The offline shell: no member data in either, and without them the app cannot open offline. */
+const SHELL_CACHES = ["crusaders-shell-0123456789abcdef", "crusaders-assets-0123456789abcdef"];
+
 describe("clearing the offline caches", () => {
-  it("deletes every cache this app owns, and nothing else", async () => {
+  it("deletes every cache of this app's that is not the shell, and nothing else", async () => {
     const caches = fakeCaches([
-      "crusaders-shell-v2",
-      "crusaders-assets-v2",
+      ...SHELL_CACHES,
       // Left behind by the leaking worker on devices that already ran it.
       "crusaders-api-v1",
+      // Anything else under the app's prefix that is not the shell is not known to be safe.
+      "crusaders-something-new",
       // Somebody else's, on a browser profile this app does not own alone.
       "workbox-precache-v2-https://other.example/",
     ]);
 
     await clearOfflineCache();
 
-    expect(caches.names()).toEqual(["workbox-precache-v2-https://other.example/"]);
+    expect(caches.names()).toEqual([...SHELL_CACHES, "workbox-precache-v2-https://other.example/"]);
   });
 
   it("works with no controlling worker, which is when the message would be lost", async () => {
-    const caches = fakeCaches(["crusaders-shell-v2"]);
+    const caches = fakeCaches([...SHELL_CACHES, "crusaders-api-v1"]);
     vi.stubGlobal("navigator", { ...navigator, serviceWorker: { controller: null, register: vi.fn() } });
 
     await clearOfflineCache();
 
-    expect(caches.names()).toEqual([]);
+    expect(caches.names()).toEqual(SHELL_CACHES);
   });
 
   it("also tells a controlling worker, so nothing in flight is written back behind the purge", async () => {
@@ -138,30 +152,30 @@ const SIGNED_IN = {
  */
 const NO_COOKIE = { method: "POST", path: "/api/v1/auth/refresh", status: 401, body: { error: "session_ended" } };
 
-describe("every way a session ends drops the caches, not just the sign-out button", () => {
+describe("every way a session ends drops the risky caches and keeps the shell, not just the sign-out button", () => {
   it("clears them when the club refuses the stored token at bootstrap", async () => {
     // An expiry, a revocation, an admin password reset: the token is present and no longer
     // valid. This is `endSession`, and it used to clear nothing.
-    const caches = fakeCaches(["crusaders-shell-v2", "crusaders-api-v1"]);
+    const caches = fakeCaches([...SHELL_CACHES, "crusaders-api-v1"]);
     stubFetch([{ method: "GET", path: "/api/v1/whoami", status: 401, body: { error: "unauthorized" } }, NO_COOKIE]);
     tokenStore.set("expired.token.value");
 
     renderSession();
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
-    await waitFor(() => expect(caches.names()).toEqual([]));
+    await waitFor(() => expect(caches.names()).toEqual(SHELL_CACHES));
   });
 
   it("clears them when the server says the token is no longer recognised", async () => {
     // The other endSession path: a 200 that answers is_authenticated: false.
-    const caches = fakeCaches(["crusaders-assets-v2", "crusaders-api-v1"]);
+    const caches = fakeCaches([...SHELL_CACHES, "crusaders-api-v1"]);
     stubFetch([{ method: "GET", path: "/api/v1/whoami", body: { is_authenticated: false } }, NO_COOKIE]);
     tokenStore.set("stale.token.value");
 
     renderSession();
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
-    await waitFor(() => expect(caches.names()).toEqual([]));
+    await waitFor(() => expect(caches.names()).toEqual(SHELL_CACHES));
   });
 
   it("clears them when the member presses Sign out", async () => {
@@ -169,7 +183,7 @@ describe("every way a session ends drops the caches, not just the sign-out butto
     // `clearOfflineCache()` occurrences in auth.tsx, which a rearrangement defeats: a refuter
     // deleted this call, left a dead one behind to keep the count at three, and the whole suite
     // stayed green. This asserts the caches, not the source text.
-    const caches = fakeCaches(["crusaders-shell-v2", "crusaders-assets-v2"]);
+    const caches = fakeCaches([...SHELL_CACHES, "crusaders-api-v1"]);
     stubFetch([
       { method: "GET", path: "/api/v1/whoami", body: SIGNED_IN },
       { method: "POST", path: "/api/v1/auth/logout", status: 204, body: null },
@@ -182,14 +196,14 @@ describe("every way a session ends drops the caches, not just the sign-out butto
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
-    await waitFor(() => expect(caches.names()).toEqual([]));
+    await waitFor(() => expect(caches.names()).toEqual(SHELL_CACHES));
   });
 
   it("clears them when the club refuses a request mid-session with a 401", async () => {
     // The third route, and the one a member never chooses: the session is revoked or expires
     // while the app is open, and the next read comes back 401. The api client drops the token
     // and calls the handler AuthProvider registered; that handler owns this purge.
-    const caches = fakeCaches(["crusaders-shell-v2", "crusaders-api-v1"]);
+    const caches = fakeCaches([...SHELL_CACHES, "crusaders-api-v1"]);
     stubFetch([
       { method: "GET", path: "/api/v1/whoami", body: SIGNED_IN },
       { method: "GET", path: "/api/v1/wallet", status: 401, body: { error: "unauthorized" } },
@@ -203,13 +217,13 @@ describe("every way a session ends drops the caches, not just the sign-out butto
     fireEvent.click(screen.getByRole("button", { name: "Read wallet" }));
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
-    await waitFor(() => expect(caches.names()).toEqual([]));
+    await waitFor(() => expect(caches.names()).toEqual(SHELL_CACHES));
   });
 
   it("leaves them alone while the session is healthy", async () => {
     // The negative half: a fix that cleared on every render would be indistinguishable from
     // this one in the tests above, and would delete the offline shell on every page load.
-    const caches = fakeCaches(["crusaders-shell-v2"]);
+    const caches = fakeCaches([...SHELL_CACHES, "crusaders-api-v1"]);
     stubFetch([{
       method: "GET", path: "/api/v1/whoami",
       body: {
@@ -222,7 +236,7 @@ describe("every way a session ends drops the caches, not just the sign-out butto
     renderSession();
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
-    expect(caches.names()).toEqual(["crusaders-shell-v2"]);
+    expect(caches.names()).toEqual([...SHELL_CACHES, "crusaders-api-v1"]);
     expect(caches.delete).not.toHaveBeenCalled();
   });
 });

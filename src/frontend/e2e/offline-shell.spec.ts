@@ -55,6 +55,24 @@ const TYPES: Record<string, string> = {
 let server: Server;
 let origin: string;
 
+/**
+ * How the dist server answers, switched by a test. `api`: "down" is the default 503 for every
+ * API path; "signed-in" answers a token's whoami as a member; "lapsed" refuses the token and the
+ * refresh cookie (an expiry nothing could rescue — `endTakenAway`). `stallNavigations` holds every
+ * document request open without answering: one bar of signal (P5-1).
+ */
+const mode = { api: "down" as "down" | "signed-in" | "lapsed", stallNavigations: false };
+/** The requests held open by `stallNavigations`, ended when the test is done with them. */
+const stalled: import("node:http").ServerResponse[] = [];
+
+const MEMBER = {
+  tenant_slug: "crusaders",
+  tenant_id: "00000000-0000-0000-0000-0000000000cc",
+  user_id: "44444444-4444-4444-4444-444444444444",
+  is_authenticated: true,
+  is_admin: false,
+};
+
 /** The newest mtime anywhere under a path — the sources this build is made of. */
 function newestUnder(path: string): number {
   const stat = statSync(path);
@@ -129,8 +147,21 @@ test.beforeAll(async () => {
     // Nothing here answers the API. Offline or not, the worker must never reach for it and the
     // page must cope — which is what `lib/lastKnown` and the offline-capable route are for.
     if (url.pathname.startsWith("/api/")) {
-      res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "offline_probe" }));
+      const json = (status: number, body: unknown) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+      };
+      const bearer = Boolean(req.headers.authorization);
+      if (url.pathname === "/api/v1/whoami" && bearer && mode.api === "signed-in") return json(200, MEMBER);
+      if (url.pathname === "/api/v1/whoami" && bearer && mode.api === "lapsed") return json(401, { error: "unauthorized" });
+      if (url.pathname === "/api/v1/auth/refresh" && mode.api === "lapsed") return json(401, { error: "session_ended" });
+      return json(503, { error: "offline_probe" });
+    }
+
+    // P5-1 — a document request that is never answered and never refused.
+    const isDocument = !extname(url.pathname) || url.pathname.endsWith(".html");
+    if (mode.stallNavigations && isDocument) {
+      stalled.push(res);
       return;
     }
 
@@ -151,6 +182,8 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (!server) return;
+  for (const res of stalled.splice(0)) res.destroy();
+  server.closeAllConnections();
   await new Promise<void>((done) => server.close(() => done()));
 });
 
@@ -232,26 +265,76 @@ test("caches the shell and the build, and nothing that belongs to a member", asy
 });
 
 /**
- * And a shared device is left with nothing readable. (E-F06)
+ * And a shared device is left with nothing readable (E-F06) — while the app still opens with no
+ * signal after the session is gone (M5-1, review round 5).
  *
  * <p>
- * The worker holds no member data, so this is the second line rather than the first — but the
- * first line has to be able to change without this one being forgotten, and a club-desk tablet
- * is one browser profile passed between people.
+ * A lapse used to purge every cache this app owns, the shell and the build included. Neither holds
+ * member data, and with them gone the next cold start with no signal was the browser's own
+ * ERR_FAILED — My Code included, on a phone whose lapse screen had just promised "your code still
+ * works from this phone". This drives the real ending in the built app: the club refuses the token
+ * and the refresh cookie, `endTakenAway` runs, and the leaking worker's API cache goes while the
+ * shell stays.
  * </p>
  */
-test("a sign-out leaves nothing of this app in the browser's caches", async ({ page }) => {
+test("a lapsed session drops what could be a member's, keeps the shell, and My Code still opens offline", async ({ page, context }) => {
+  mode.api = "signed-in";
+  try {
+    await page.goto(`${origin}/`);
+    await workerHasControl(page);
+    // A device that ran the leaking worker: its API cache is still here.
+    await page.evaluate(async () => {
+      const legacy = await caches.open("crusaders-api-v1");
+      await legacy.put("/api/v1/wallet", new Response("someone's wallet"));
+      localStorage.setItem("crusaders.mainframe.token", "a.member.token");
+    });
+    await page.goto(`${origin}/my-code`);
+    await expect(page).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 15_000 });
+
+    // The session lapses: the next check is refused, and so is the refresh cookie.
+    mode.api = "lapsed";
+    await page.reload();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("crusaders.mainframe.token")), { timeout: 15_000 }).toBeNull();
+    await expect.poll(async () => (await page.evaluate(() => caches.keys())).includes("crusaders-api-v1"), { timeout: 15_000 }).toBe(false);
+
+    const names = await page.evaluate(() => caches.keys());
+    expect(names.some((n) => n.startsWith("crusaders-shell-")), `the shell went with the session: ${JSON.stringify(names)}`).toBe(true);
+    expect(names.some((n) => n.startsWith("crusaders-assets-")), `the build went with the session: ${JSON.stringify(names)}`).toBe(true);
+    expect((await cachedPaths(page)).filter((path) => path.startsWith("/api/"))).toEqual([]);
+
+    await context.setOffline(true);
+    try {
+      const cold = await context.newPage();
+      await cold.goto(`${origin}/my-code`);
+      await expect(cold).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 15_000 });
+      await cold.close();
+    } finally {
+      await context.setOffline(false);
+    }
+  } finally {
+    mode.api = "down";
+  }
+});
+
+/**
+ * P5-1 (review round 5) — one bar of signal STALLS a request rather than failing it. The worker
+ * raced nothing: a cold My Code drew nothing for 20 s+ (measured 20,386 ms) though the shell was
+ * on the phone. It now serves the cached shell once the network has said nothing for ~2 s.
+ */
+test("a navigation the network never answers opens from the cached shell in a few seconds", async ({ page, context }) => {
   await page.goto(`${origin}/`);
   await workerHasControl(page);
-  expect(await cachedPaths(page)).not.toEqual([]);
 
-  // What `lib/pwa.clearOfflineCache` does, through the same public entry point the sign-out
-  // path uses. Imported from the built bundle is not possible, so this is the page's half of
-  // it — the purge that runs whatever the worker's state is.
-  await page.evaluate(async () => {
-    const names = await caches.keys();
-    await Promise.all(names.filter((n) => n.startsWith("crusaders-")).map((n) => caches.delete(n)));
-  });
-
-  expect(await cachedPaths(page)).toEqual([]);
+  mode.stallNavigations = true;
+  try {
+    const cold = await context.newPage();
+    const started = Date.now();
+    await cold.goto(`${origin}/my-code`, { waitUntil: "commit", timeout: 10_000 });
+    await expect(cold).toHaveTitle(/— Crusaders Mainframe$/, { timeout: 10_000 });
+    expect(Date.now() - started, "the stalled navigation waited on the network").toBeLessThan(8_000);
+    await cold.close();
+  } finally {
+    mode.stallNavigations = false;
+    for (const res of stalled.splice(0)) res.destroy();
+  }
 });

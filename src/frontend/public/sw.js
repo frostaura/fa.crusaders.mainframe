@@ -48,9 +48,10 @@
  *      longer names. The ones `index.html` names AND every chunk the build lists in
  *      `/precache.json` (F4.3) are fetched at INSTALL time; see `precacheBuild` and
  *      `buildChunks` for why waiting for first use is not good enough.
- *   2. Navigations — network-first with the cached shell as the fallback. Network-first because
- *      a stale index.html pointing at deleted asset hashes is a white screen, and a white
- *      screen is worse than a slow one.
+ *   2. Navigations — network-first with the cached shell as the fallback, when the network fails
+ *      OR has not answered within NAV_WAIT_MS (P5-1: one bar of signal stalls rather than fails).
+ *      Network-first because a stale index.html pointing at deleted asset hashes is a white
+ *      screen; the cached shell is this worker's own build, whose assets it holds.
  *   3. The shell files and icons named below.
  *
  * Everything under /api/ goes straight to the network, is never intercepted and is never
@@ -77,6 +78,13 @@ const ASSET_CACHE = `crusaders-assets-${BUILD}`;
 const OWNED = [SHELL_CACHE, ASSET_CACHE];
 /** Earlier builds' asset caches, read (never written) at install for files this build still names. */
 const ASSET_PREFIX = "crusaders-assets-";
+/**
+ * What a session ending leaves (M5-1, review round 5): the shell and the build's assets, of any
+ * build — the activate sweep retires an earlier build's. They hold no member data, and without
+ * them a phone whose session lapsed could not open the app at all with no signal, My Code
+ * included. Matches `lib/pwa`'s page half.
+ */
+const KEEP_ON_END = ["crusaders-shell-", ASSET_PREFIX];
 
 /**
  * Every cache this worker has ever owned starts with this prefix, including `crusaders-api-v1`
@@ -133,12 +141,8 @@ async function cachePut(cacheName, request, response) {
   return true;
 }
 
-/** Moves on every purge; a precache that started before one stores nothing after it. */
-let cacheGeneration = 0;
-
-/** Deletes every cache this worker owns. Sign-out, and the sweep on activate, both use it. */
+/** Deletes every cache this worker owns but `keep`. Sign-out, and the sweep on activate, both use it. */
 async function purgeOwnedCaches(keep = []) {
-  if (keep.length === 0) cacheGeneration += 1;
   const names = await caches.keys();
   await Promise.all(
     names.filter((n) => n.startsWith(CACHE_PREFIX) && !keep.includes(n)).map((n) => caches.delete(n)),
@@ -173,7 +177,6 @@ async function purgeOwnedCaches(keep = []) {
  * page. They land in the cache on first use like anything else once this worker is in control.
  */
 async function precacheBuild() {
-  const generation = cacheGeneration;
   try {
     const response = await fetch("/index.html", { cache: "no-cache" });
     if (!response.ok) return;
@@ -188,7 +191,7 @@ async function precacheBuild() {
     // All ~110 at once queued the page's own reads behind them on a phone's six connections, on
     // the very visit that installs this — and an install that fetched all of them two at a time
     // left the member's first visits uncontrolled (no offline) for that much longer.
-    await fetchInto(firstUrls, 4, generation);
+    await fetchInto(firstUrls, 4);
   } catch {
     // Installed with no network, or behind a captive portal. There is nothing to precache and
     // nothing to be done about it; first use will fill the cache instead.
@@ -228,13 +231,12 @@ async function buildChunks() {
  * this worker is in control. Still every chunk on the phone (F4.3), just not ahead of the page.
  */
 async function precacheRest() {
-  const generation = cacheGeneration;
   try {
     const listed = await buildChunks();
     const cache = await caches.open(ASSET_CACHE);
     const missing = [];
     for (const url of listed.all) if (!(await cache.match(url))) missing.push(url);
-    await fetchInto(missing, 2, generation, true);
+    await fetchInto(missing, 2, true);
   } catch {
     // Offline after install: first use fills the cache instead.
   }
@@ -251,11 +253,12 @@ async function fromEarlierBuild(url) {
 }
 
 /** Fetches and stores `urls`, `lanes` at a time. One asset that will not fetch costs only itself. */
-async function fetchInto(urls, lanes, generation = cacheGeneration, cacheMustExist = false) {
+async function fetchInto(urls, lanes, cacheMustExist = false) {
   const queue = [...urls];
-  // A sign-out's purge after `generation` was read — by this worker, or by the page deleting the
-  // caches itself (`cacheMustExist`: the cache is gone) — must not be undone by fetches still going.
-  const wanted = async () => generation === cacheGeneration && (!cacheMustExist || (await caches.has(ASSET_CACHE)));
+  // Caches deleted under a precache still going (`cacheMustExist`: the asset cache is gone — the
+  // browser cleared site data, or the page did) must not be refilled behind that deletion. A
+  // session ending no longer deletes them (M5-1), so it no longer stops a precache.
+  const wanted = async () => !cacheMustExist || (await caches.has(ASSET_CACHE));
   const lane = async () => {
     while (queue.length > 0 && (await wanted())) {
       // Checked AFTER the await: every lane passed the length check before any of them took a
@@ -312,16 +315,21 @@ self.addEventListener("activate", (event) => {
 });
 
 /**
- * Sign-out, session expiry, revocation and any 401 all send this. It empties everything the
- * worker holds — the shell and the assets included. They carry no member data, so this is
+ * Sign-out, session expiry, revocation and any 401 all send this. It deletes every cache of this
+ * app's that is not the shell — `crusaders-api-v1` from the leaking version above all. This is
  * belt-and-braces rather than the defence; the defence is that member data was never stored.
- * The cost is one shell re-fetch on the next load, which on a shared club device is the right
- * trade.
+ *
+ * It used to empty the shell and the assets too, at the cost of "one shell re-fetch on the next
+ * load". That cost was the door (M5-1, review round 5): the next load with no signal had nothing
+ * to start from, and a lapsed member's code — which the phone can still make — never drew. The
+ * shell is the same for every visitor and the assets are content-hashed code; neither is a
+ * member's, so neither is the next person's to be protected from.
  */
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "CLEAR_CACHES") {
     event.waitUntil((async () => {
-      await purgeOwnedCaches();
+      const names = await caches.keys();
+      await purgeOwnedCaches(names.filter((n) => KEEP_ON_END.some((prefix) => n.startsWith(prefix))));
       const source = event.source;
       if (source && typeof source.postMessage === "function") {
         source.postMessage({ type: "CACHES_CLEARED" });
@@ -339,23 +347,58 @@ async function cacheFirst(request, cacheName) {
   return response;
 }
 
-async function networkFirstShell(request) {
-  try {
+/**
+ * How long a navigation waits on the network before the cached shell is served instead (P5-1,
+ * review round 5). On one bar of signal ("LiE-Fi") a request neither answers nor fails: network-
+ * first waited on it, and a cold My Code drew nothing for 20 s+ while its shell and its kept data
+ * were on the phone. Two seconds is past a healthy round trip on a slow 4G link and well short of
+ * a member giving up at a door.
+ */
+const NAV_WAIT_MS = 2_000;
+
+/** The shell this worker holds, or undefined before install has cached one. */
+function cachedShell() {
+  return caches.match("/index.html", { cacheName: SHELL_CACHE });
+}
+
+/**
+ * Network-first with a deadline. The network's answer, when it comes within {@link NAV_WAIT_MS};
+ * the cached shell when it fails or has said nothing by then; and the network anyway when there
+ * is no shell to fall back to. A late answer still refreshes the cached shell (`waitUntil`), so
+ * the next start is the newest build the phone could reach.
+ */
+function networkFirstShell(event) {
+  const { request } = event;
+  const network = (async () => {
     // P4-2 (R4): revalidated with the server every time — the document names this build's files,
     // and a copy the HTTP cache kept past a deploy is a page asking for files that are gone.
     const response = await fetch(request, { cache: "no-cache" });
     // Keyed on /index.html rather than on the navigated URL, so every route falls back to the
-    // one shell. `cachePut` still gets the real request, so its rules still apply.
+    // one shell. `mayCache` still gets the real request, so its rules still apply.
     if (mayCache(request, response)) {
       const cache = await caches.open(SHELL_CACHE);
       await cache.put("/index.html", response.clone());
     }
     return response;
-  } catch (err) {
-    const cached = await caches.match("/index.html", { cacheName: SHELL_CACHE });
-    if (cached) return cached;
-    throw err;
-  }
+  })();
+  // A navigation answered from the cache keeps the worker alive until the network has settled.
+  event.waitUntil(network.catch(() => undefined));
+
+  return (async () => {
+    let timer = null;
+    const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(null), NAV_WAIT_MS); });
+    try {
+      const first = await Promise.race([network, deadline]);
+      if (first) return first;
+      return (await cachedShell()) || (await network);
+    } catch (err) {
+      const cached = await cachedShell();
+      if (cached) return cached;
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
 }
 
 self.addEventListener("fetch", (event) => {
@@ -378,7 +421,7 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirstShell(request));
+    event.respondWith(networkFirstShell(event));
     return;
   }
   if (url.pathname.startsWith("/assets/")) {

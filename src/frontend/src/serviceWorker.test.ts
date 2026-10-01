@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ORIGIN, loadServiceWorker, swRequest, type SwSandbox } from "./test/swHarness";
@@ -124,23 +124,44 @@ describe("no member data is ever cached", () => {
   });
 });
 
-describe("a session ending takes the caches with it", () => {
-  it("empties every cache the worker owns when the app says the session is over", async () => {
-    const sw = loadServiceWorker();
+describe("a session ending takes the caches with it — all but the shell (M5-1)", () => {
+  it("deletes every cache that is not the shell when the app says the session is over", async () => {
+    const sw = loadServiceWorker({}, { build: "0123456789abcdef" });
+    await sw.install();
     await sw.dispatchFetch(swRequest("/icon-192.png"));
+    await sw.dispatchFetch(swRequest("/assets/index-abc123.js"));
     // Whatever an older worker left behind is included: this is the cache that leaked.
     const legacy = await sw.caches.open("crusaders-api-v1");
     await legacy.put(`${ORIGIN}/api/v1/wallet`, new Response("alice", { status: 200 }));
-    expect(sw.caches.storedUrls().length).toBeGreaterThan(0);
 
     const event = await sw.dispatchMessage({ type: "CLEAR_CACHES" });
 
-    expect(await sw.caches.keys()).toEqual([]);
-    expect(sw.caches.storedUrls()).toEqual([]);
+    expect((await sw.caches.keys()).sort()).toEqual(["crusaders-assets-0123456789abcdef", "crusaders-shell-0123456789abcdef"]);
+    expect(sw.caches.storedUrls().filter((url) => url.includes("/api/"))).toEqual([]);
     expect(event.delivered).toEqual([{ type: "CACHES_CLEARED" }]);
   });
 
-  it("stores nothing more once a sign-out has emptied the caches, even mid-precache (perf round)", async () => {
+  it("still opens offline after a session has ended: the shell is served with no signal (M5-1)", async () => {
+    // A lapse or a sign-out used to empty the shell too, and the next cold start with no signal
+    // was the browser's own ERR_FAILED — My Code included, at the door.
+    let online = true;
+    const sw = loadServiceWorker({
+      "/my-code": () => {
+        if (!online) throw new TypeError("Failed to fetch");
+        return new Response("<!doctype html><title>Crusaders</title>", { status: 200 });
+      },
+    });
+    await sw.install();
+    await sw.dispatchFetch(swRequest("/my-code", { mode: "navigate" }));
+
+    await sw.dispatchMessage({ type: "CLEAR_CACHES" });
+    online = false;
+    const cold = await sw.dispatchFetch(swRequest("/my-code", { mode: "navigate" }));
+
+    expect(await (await cold.response())!.text()).toContain("Crusaders");
+  });
+
+  it("lets a precache in flight finish when a session ends: the shell holds no member data", async () => {
     let signedOut: Promise<unknown> | null = null;
     const sw: ReturnType<typeof loadServiceWorker> = loadServiceWorker({
       "/index.html": () => new Response('<script type="module" src="/assets/index-AAAA.js"></script>', { status: 200 }),
@@ -156,7 +177,7 @@ describe("a session ending takes the caches with it", () => {
     await sw.install();
     await sw.activate();
     await signedOut;
-    expect(sw.caches.storedUrls().filter((u) => u.includes("/assets/Admin"))).toEqual([]);
+    expect(sw.caches.storedUrls().filter((u) => u.includes("/assets/Admin"))).toHaveLength(12);
   });
 
   it("stores nothing more once the page itself has deleted the caches mid-precache (perf round)", async () => {
@@ -221,6 +242,76 @@ describe("the offline shell survives the fix", () => {
 
     expect(offline.responded).toBe(true);
     expect(await (await offline.response())!.text()).toContain("Crusaders");
+  });
+});
+
+/**
+ * P5-1 (review round 5) — a navigation that STALLS, not fails. On one bar of signal (LiE-Fi) the
+ * request neither answers nor errors, and network-first waited for it: My Code drew nothing for
+ * 20 s+ while its shell and data sat on the phone. The worker now races the network against
+ * {@link NAV_WAIT_MS} and serves the cached shell when the network has not answered by then.
+ */
+const NAV_WAIT_MS = 2_000;
+
+describe("a stalled navigation falls back to the cached shell (P5-1)", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("serves the shell it holds once the network has said nothing for ~2 s, and keeps listening", async () => {
+    let stalled = false;
+    let answer: ((response: Response) => void) | null = null;
+    const sw = loadServiceWorker({
+      "/my-code": () => (stalled
+        ? new Promise<Response>((resolve) => { answer = resolve; })
+        : new Response("<!doctype html><title>shell v1</title>", { status: 200 })),
+    });
+    await sw.dispatchFetch(swRequest("/my-code", { mode: "navigate" }));
+
+    vi.useFakeTimers();
+    stalled = true;
+    const event = await sw.dispatchFetch(swRequest("/my-code", { mode: "navigate" }), { settle: false });
+    let served: Response | null = null;
+    void event.response().then((response) => { served = response; });
+
+    await vi.advanceTimersByTimeAsync(NAV_WAIT_MS - 100);
+    expect(served, "it gave up on the network too early").toBeNull();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(served, "the stalled navigation was still waiting on the network").not.toBeNull();
+    expect(await served!.text()).toContain("shell v1");
+
+    // The network answering late still refreshes the shell for the next start.
+    answer!(new Response("<!doctype html><title>shell v2</title>", { status: 200 }));
+    await event.settle();
+    vi.useRealTimers();
+    stalled = false;
+    const cached = await sw.caches.match("/index.html");
+    expect(await cached!.text()).toContain("shell v2");
+  });
+
+  it("waits for the network when it has no shell to fall back to", async () => {
+    vi.useFakeTimers();
+    let answer: ((response: Response) => void) | null = null;
+    const sw = loadServiceWorker({
+      "/my-code": () => new Promise<Response>((resolve) => { answer = resolve; }),
+    });
+    const event = await sw.dispatchFetch(swRequest("/my-code", { mode: "navigate" }), { settle: false });
+    let served: Response | null = null;
+    void event.response().then((response) => { served = response; });
+    await vi.advanceTimersByTimeAsync(NAV_WAIT_MS * 3);
+    expect(served).toBeNull();
+    answer!(new Response("<!doctype html><title>late</title>", { status: 200 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await served!.text()).toContain("late");
+  });
+
+  it("serves the network's answer when it comes in time, with no timer left behind", async () => {
+    vi.useFakeTimers();
+    const sw = loadServiceWorker({
+      "/my-code": () => new Response("<!doctype html><title>fresh</title>", { status: 200 }),
+    });
+    const event = await sw.dispatchFetch(swRequest("/my-code", { mode: "navigate" }), { settle: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await (await event.response())!.text()).toContain("fresh");
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
