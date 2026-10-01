@@ -146,9 +146,9 @@ public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
     [Fact]
     public void A_purchase_that_did_not_complete_is_denominated_in_the_clubs_own_currency()
     {
-        var mail = EmailTemplates.PurchaseNotCompleted(
-            Club, "member@test.local", packageName: "10 hours", minutes: 600, amountZar: 250m, failureReason: null,
-            reference: "1089251", currencySymbol: "R$");
+        var mail = EmailTemplates.PurchaseNotCompleted(Club, "member@test.local", new PackagePurchaseAttempt(
+            PackageName: "10 hours", Minutes: 600, AmountZar: 250m, FailureReason: null,
+            Reference: "1089251", CurrencySymbol: "R$"));
 
         Assert.Contains("10 hours", mail.Subject);
         Assert.Contains("R$250.00", mail.HtmlBody);

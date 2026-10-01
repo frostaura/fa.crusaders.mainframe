@@ -82,6 +82,32 @@ public sealed record PackagePurchaseReceipt(
     string CurrencySymbol);
 
 /// <summary>
+/// A package purchase that ended without minutes, for <see cref="EmailTemplates.PurchaseNotCompleted(ClubIdentity, string, PackagePurchaseAttempt)"/>.
+/// A record for the reason <see cref="PackagePurchaseReceipt"/> is one: the complexity gate's six
+/// parameters. <see cref="CurrencySymbol"/> denominates <see cref="AmountZar"/> only.
+/// </summary>
+/// <param name="FailureReason">The stored failure code (<c>cancelled</c>, <c>declined</c>, <c>amount_mismatch</c>, …); never shown.</param>
+public sealed record PackagePurchaseAttempt(
+    string PackageName,
+    int Minutes,
+    decimal AmountZar,
+    string? FailureReason,
+    string Reference,
+    string CurrencySymbol);
+
+/// <summary>
+/// A package the desk sold, for <see cref="EmailTemplates.PackageSoldAtDesk(ClubIdentity, string, DeskPackageSale)"/>.
+/// <see cref="CurrencySymbol"/> denominates <see cref="ZarReceived"/> only.
+/// </summary>
+/// <param name="ZarReceived">What the desk took — which may differ from the shelf price (contract §3.7).</param>
+public sealed record DeskPackageSale(
+    string PackageName,
+    int Minutes,
+    decimal ZarReceived,
+    int BalanceAfterMinutes,
+    string CurrencySymbol);
+
+/// <summary>
 /// A court box, for the two alerts about one. The club is no longer a field here: it arrives
 /// as the <see cref="ClubIdentity"/> every template takes, and two places to read a club's name
 /// from is how one of them ends up stale.
@@ -774,26 +800,24 @@ public static partial class EmailTemplates
     /// The club's own, from <see cref="Services.CurrencySymbol.For"/>. The only figure it
     /// denominates is the amount; "Minutes added: 0 minutes" takes no symbol.
     /// </param>
-    public static EmailMessage PurchaseNotCompleted(
-        ClubIdentity club, string to, string packageName, int minutes, decimal amountZar, string? failureReason,
-        string reference, string currencySymbol) =>
+    public static EmailMessage PurchaseNotCompleted(ClubIdentity club, string to, PackagePurchaseAttempt a) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: failureReason == "cancelled"
-                ? $"Purchase cancelled — {packageName}"
-                : $"Purchase didn't go through — {packageName}",
-            Preheader: failureReason == "amount_mismatch"
+            Subject: a.FailureReason == "cancelled"
+                ? $"Purchase cancelled — {a.PackageName}"
+                : $"Purchase didn't go through — {a.PackageName}",
+            Preheader: a.FailureReason == "amount_mismatch"
                 ? "No minutes were added. Send the club the reference if money left your account."
                 : "Nothing was charged and your balance has not changed.",
-            Heading: failureReason == "cancelled" ? "Your purchase was cancelled" : "Your purchase didn't go through",
+            Heading: a.FailureReason == "cancelled" ? "Your purchase was cancelled" : "Your purchase didn't go through",
             Blocks:
             [
-                new Paragraph(PurchaseFailureSentence(failureReason)),
+                new Paragraph(PurchaseFailureSentence(a.FailureReason)),
                 new Facts(
                 [
-                    new FactRow("Package", $"{packageName} ({Min(minutes)})"),
-                    new FactRow("Amount", Zar(amountZar, currencySymbol)),
+                    new FactRow("Package", $"{a.PackageName} ({Min(a.Minutes)})"),
+                    new FactRow("Amount", Zar(a.AmountZar, a.CurrencySymbol)),
                     new FactRow("Minutes added", Min(0)),
-                    new FactRow("Reference", reference),
+                    new FactRow("Reference", a.Reference),
                 ]),
                 new Callout(CalloutTone.Info, "Your wallet balance has not changed."),
             ],
@@ -841,22 +865,20 @@ public static partial class EmailTemplates
     /// (contract §3.7) — this mail states what was received, not what the shelf says, because
     /// the member's own memory of the counter is what they will check it against.
     /// </remarks>
-    public static EmailMessage PackageSoldAtDesk(
-        ClubIdentity club, string to, string packageName, int minutes, decimal zarReceived, int balanceAfterMinutes,
-        string currencySymbol) =>
+    public static EmailMessage PackageSoldAtDesk(ClubIdentity club, string to, DeskPackageSale sale) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"Minutes bought at the desk — {packageName}",
-            Preheader: $"{Min(minutes)} added. Your balance is now {Min(balanceAfterMinutes)}.",
+            Subject: $"Minutes bought at the desk — {sale.PackageName}",
+            Preheader: $"{Min(sale.Minutes)} added. Your balance is now {Min(sale.BalanceAfterMinutes)}.",
             Heading: "Your minutes are in",
             Blocks:
             [
                 new Paragraph($"The desk at {club.Name} has sold you a package and the minutes are in your wallet. You can book a court now."),
                 new Facts(
                 [
-                    new FactRow("Package", packageName),
-                    new FactRow("Minutes added", Min(minutes)),
-                    new FactRow("Amount received", Zar(zarReceived, currencySymbol)),
-                    new FactRow("Balance after", Min(balanceAfterMinutes)),
+                    new FactRow("Package", sale.PackageName),
+                    new FactRow("Minutes added", Min(sale.Minutes)),
+                    new FactRow("Amount received", Zar(sale.ZarReceived, sale.CurrencySymbol)),
+                    new FactRow("Balance after", Min(sale.BalanceAfterMinutes)),
                 ]),
                 new Paragraph("If that doesn't match what you paid at the club, reply to this email or speak to the desk."),
             ],

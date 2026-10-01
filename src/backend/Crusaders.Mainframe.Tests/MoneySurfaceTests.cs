@@ -300,7 +300,7 @@ public class MoneySurfaceTests
     [Fact]
     public void A_package_sold_at_the_desk_states_what_was_received_and_what_it_bought()
     {
-        var mail = EmailTemplates.PackageSoldAtDesk(Club, "member@test.local", "10 hours", 600, 900m, 645, "R");
+        var mail = EmailTemplates.PackageSoldAtDesk(Club, "member@test.local", new DeskPackageSale("10 hours", 600, 900m, 645, "R"));
 
         foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
         {
