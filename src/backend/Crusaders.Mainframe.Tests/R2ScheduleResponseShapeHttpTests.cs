@@ -22,6 +22,8 @@ public sealed class R2ScheduleResponseShapeHttpTests(PostgresFixture pg) : IClas
     [
         "id", "name", "label", "days", "start", "end", "start_date", "end_date", "interval_weeks", "status", "courts",
         "next_occurrence", "materialised_through", "created_by_name", "created_at",
+        // R5 A5-4: every rule in the schedule's history, so the console can say what changes when.
+        "rules",
     ];
 
     private TestWebAppFactory CreateFactory() => pg.SharedHost;
