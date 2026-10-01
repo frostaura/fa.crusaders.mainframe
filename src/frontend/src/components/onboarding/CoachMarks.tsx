@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { X } from "@/components/ui/icons";
@@ -144,16 +144,42 @@ function bottomChrome(): number {
   return (Number.isFinite(value) ? value : 0) + 8;
 }
 
+/**
+ * Whether the popover has more below what it shows — measured on scroll and whenever it or what is
+ * in it changes size, so the foot's edge is a true cue, not decoration. Keyed on the ELEMENT (a
+ * callback ref): the content mounts in a portal, after the first effect would have looked.
+ */
+function useMoreBelow() {
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [below, setBelow] = useState(false);
+  const measure = useCallback(() => {
+    if (el) setBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 1);
+  }, [el]);
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    // The box AND what is in it: the box stops growing at its cap while the words go on growing.
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    for (const child of el.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [el, measure]);
+  return { below, measure, ref: setEl };
+}
+
 function MarkContent(props: MarkContentProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { mark, position, labels, onMove, onFinish } = props;
   const titleId = useId();
   const bodyId = useId();
-  const box = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement | null>(null);
+  const more = useMoreBelow();
+  const { ref: moreRef } = more;
+  // Stable, so React does not detach and re-attach it (null, then the node) on every render.
+  const setBox = useCallback((node: HTMLDivElement | null) => { box.current = node; moreRef(node); }, [moreRef]);
 
   return (
     <PopoverContent
-      ref={box}
+      ref={setBox}
       data-coachmark={mark.id}
       side={position.anchored ? mark.side ?? "right" : "bottom"}
       align="start"
@@ -165,8 +191,13 @@ function MarkContent(props: MarkContentProps) {
       onOpenAutoFocus={(event) => { event.preventDefault(); box.current?.focus(); }}
       onEscapeKeyDown={() => onFinish("skipped")}
       onInteractOutside={(event) => event.preventDefault()}
+      onScroll={more.measure}
     >
-      <div className="flex items-start gap-2">
+      {/* R5 X5-8 / V4-5: at 390 / 200 % text the popover scrolls (R4), and Close sat scrolled out
+          of it while focused, and Next below its foot. The head and the foot are pinned inside the
+          scroller — only the words between them scroll — and the foot draws an edge while there is
+          more below. The negative margins meet the popover's own `p-4`. */}
+      <div className="sticky -top-4 z-10 -mx-4 -mt-4 flex items-start gap-2 bg-bg-raised px-4 pt-4">
         <div className="min-w-0 flex-1">
           <p className={typography({ variant: "overline" })}>{labels.stepOf(position.index + 1, position.total)}</p>
           <h2 id={titleId} className={cn(typography({ variant: "h3" }), "break-words")}>{mark.title}</h2>
@@ -179,7 +210,14 @@ function MarkContent(props: MarkContentProps) {
         <p>{mark.body}</p>
         {mark.hint ? <p className="text-text-muted">{mark.hint}</p> : null}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        data-coachmark-foot=""
+        data-more={more.below ? "true" : "false"}
+        className={cn(
+          "sticky -bottom-4 z-10 -mx-4 -mb-4 flex flex-wrap items-center gap-2 border-t border-transparent bg-bg-raised px-4 pb-4 pt-2",
+          more.below && "border-border shadow-[0_-6px_8px_-6px_rgb(0_0_0/0.25)]",
+        )}
+      >
         <Button variant="ghost" size="sm" className="mr-auto" onClick={() => onFinish("skipped")}>{labels.skip}</Button>
         {position.index > 0 ? <Button variant="outline" size="sm" onClick={() => onMove(-1)}>{labels.back}</Button> : null}
         {position.last ? (

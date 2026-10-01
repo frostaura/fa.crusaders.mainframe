@@ -4,6 +4,7 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./
 import { memberShellRoutes } from "./playersKit";
 import { deviceErrorFixture, deviceErrorPageFixture } from "../src/test/monitoringFixtures";
 import { ADMIN_NAV_ITEMS } from "../src/components/admin/adminNav";
+import { ADMIN_TOUR } from "../src/lib/onboardingCopy";
 
 // A cold dev server compiles the admin frame on first ask, and the machine is shared: room to do so.
 test.describe.configure({ timeout: 90_000 });
@@ -232,5 +233,52 @@ test.describe("R5 X5-5 — email alert switches at 390 / 200 %", () => {
     await page.evaluate(() => document.fonts.ready);
     await noWordBroken(page, "[data-alert-kind] label, [data-alert-kind] [data-slot='field-description']");
     expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("R5 X5-8 / V4-5 — the admin tour at 390 / 200 %", () => {
+  test("keeps Close and Next in view, and says there is more below", async ({ page }) => {
+    const prefs = {
+      theme: "system", member_onboarding_completed_at: null, member_onboarding_dismissed_at: "2026-09-01T10:00:00Z",
+      member_onboarding_last_step: null, admin_onboarding_completed_at: null, onboarding_version: 1, current_onboarding_version: 1,
+    };
+    await page.setViewportSize({ width: 390, height: 700 });
+    await signIn(page);
+    await serveApi(page, adminRoutes([
+      {
+        path: "/api/v1/me/profile",
+        body: {
+          user_id: SESSION_ADMIN.user_id, email: "admin@review.test", is_admin: true, tenant_slug: "crusaders",
+          full_name: "Thandi Probe", membership_number: "M-9", photo_url: null, status: "active", preferences: prefs,
+        },
+      },
+      { path: "/api/v1/me/preferences", body: { ...prefs, findable: false, show_in_leaderboards: false } },
+    ]));
+    await page.addInitScript(() => {
+      const style = document.createElement("style");
+      style.textContent = "html { font-size: 32px; }";
+      document.addEventListener("DOMContentLoaded", () => document.head.appendChild(style));
+    });
+    await page.goto("/admin");
+    const mark = page.locator("[data-coachmark]");
+    await expect(mark).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(400);
+    const box = (await mark.boundingBox())!;
+    const inside = async (name: string | RegExp) => {
+      const b = (await mark.getByRole("button", { name, exact: typeof name === "string" }).boundingBox())!;
+      return b.y >= box.y - 1 && b.y + b.height <= box.y + box.height + 1 && b.y + b.height <= 700;
+    };
+    expect(await inside(ADMIN_TOUR.next), "Next is in view").toBe(true);
+    expect(await inside(ADMIN_TOUR.close), "Close is in view").toBe(true);
+    // The popover scrolls: its foot says so while there is more below.
+    const scrolls = await mark.evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+    if (scrolls) await expect(mark.locator("[data-coachmark-foot]")).toHaveAttribute("data-more", "true");
+
+    if (process.env.E2_SHOTS) await page.screenshot({ path: `${process.env.E2_SHOTS}/tour-390-200.png` });
+    // X5-8: Tab to Close from the popover — focused, and in view.
+    await mark.focus();
+    await page.keyboard.press("Tab");
+    await expect(mark.getByRole("button", { name: ADMIN_TOUR.close, exact: true })).toBeFocused();
+    expect(await inside(ADMIN_TOUR.close), "the focused Close is in view").toBe(true);
   });
 });
