@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 /**
@@ -33,18 +33,36 @@ export function useSheetHistory(open: boolean, close: () => boolean | void, tag:
   const seen = useRef(false);
   const latestClose = useRef(close);
   useEffect(() => { latestClose.current = close; });
+  // Back can land before React has drawn the sheet's own entry (a slow phone, a quick thumb): the
+  // router then renders straight from the entry under the sheet to... the entry under the sheet,
+  // nothing this effect watches changes, and the sheet stayed open (CI, F1.19). A popstate while
+  // our entry is pushed says it was taken off whether or not a render ever showed it.
+  const popped = useRef(false);
+  const [popTick, bumpPop] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPop = () => {
+      if (!pushed.current) return;
+      popped.current = true;
+      bumpPop();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [open]);
 
   useEffect(() => {
     if (marked) seen.current = true;
     if (open && !pushed.current) {
       pushed.current = true;
       seen.current = marked;
+      popped.current = false;
       if (!marked) {
         navigate(`${location.pathname}${location.search}`, { state: { ...(location.state as object | null), sheet: tag } });
       }
       return;
     }
-    if (open && pushed.current && seen.current && !marked) {
+    if (open && pushed.current && (seen.current || popped.current) && !marked) {
+      popped.current = false;
       // Back (or anything else) took the sheet's entry away: the sheet goes with it — unless it
       // refuses, and then the entry goes back on.
       if (latestClose.current() === false) {
@@ -59,7 +77,8 @@ export function useSheetHistory(open: boolean, close: () => boolean | void, tag:
       // Closed from inside: take our entry back off, so Back next leaves the page as it would have.
       pushed.current = false;
       seen.current = false;
+      popped.current = false;
       if (marked) navigate(-1);
     }
-  }, [open, marked, navigate, location.pathname, location.search, location.state, tag]);
+  }, [open, marked, navigate, location.pathname, location.search, location.state, tag, popTick]);
 }
