@@ -152,7 +152,8 @@ public static class AdminBulkBookingEndpoints
                 status = r.Status,
                 refund_credits = r.RefundCredits,
                 penalty_credits = r.PenaltyCredits,
-                net_credits = r.RefundCredits - refunds.GetValueOrDefault(r.BookingId, []).Sum(x => x.Credits),
+                // Gross refund less the penalty row less the partners' refunds (M5-7, as the single cancel).
+                net_credits = r.RefundCredits - r.PenaltyCredits - refunds.GetValueOrDefault(r.BookingId, []).Sum(x => x.Credits),
                 partner_refunds = refunds.GetValueOrDefault(r.BookingId, []),
                 member_name = r.MemberName,
                 court_name = r.CourtName,

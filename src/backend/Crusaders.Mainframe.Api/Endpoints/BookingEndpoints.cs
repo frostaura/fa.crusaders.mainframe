@@ -247,7 +247,9 @@ public static class BookingEndpoints
         {
             refunded_credits = ok.RefundedCredits,
             penalty_credits = ok.PenaltyCredits,
-            net_credits = ok.RefundedCredits - refunds.Sum(r => r.Credits),
+            // R5 (M5-7, D1's ask): RefundedCredits is the GROSS refund; the penalty is its own row.
+            // The net left out the penalty, so a late split cancel said "25 back" for a ledger +10.
+            net_credits = ok.RefundedCredits - ok.PenaltyCredits - refunds.Sum(r => r.Credits),
             partner_refunds = refunds,
         });
     }

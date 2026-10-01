@@ -121,6 +121,53 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Assert.Equal(samBefore + 10m, await PlayersClub.BalanceAsync(f, club.Sam));
     }
 
+    /// <summary>
+    /// Review round 5 (M5-7, lane D1's ask): a LATE split cancel's <c>net_credits</c> is what the
+    /// organiser's wallet actually moved — the gross refund less the penalty row less the partners'
+    /// refunds. It left the penalty out, so the toast said "25 back" for a ledger that moved +10.
+    /// Pinned on the member's cancel, the desk's and the desk's bulk cancel.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_late_split_cancels_net_is_what_the_organisers_wallet_moved()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var late = PlayersClub.Settings.Replace("\"penalty_window_minutes\":15", "\"penalty_window_minutes\":4320");
+        var club = await PlayersClub.SeedAsync(f, "r5latenet", late);
+        await club.CreditAsync(f, club.Organiser, 300m);
+        await club.CreditAsync(f, club.Sam, 100m);
+        var admin = club.Client(f, club.Admin, admin: true);
+
+        async Task<Guid> SplitGameAsync(int hour)
+        {
+            var (id, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }], at: PlayersClub.Tomorrow(hour));
+            await AcceptAsync(club, f, club.Sam, id, PlayersClub.SeatOf(body, 2));
+            return id;
+        }
+
+        async Task CheckAsync(Func<Guid, Task<JsonElement>> cancel, int hour)
+        {
+            var id = await SplitGameAsync(hour);
+            var before = await PlayersClub.BalanceAsync(f, club.Organiser);
+            var answer = await cancel(id);
+            var moved = await PlayersClub.BalanceAsync(f, club.Organiser) - before;
+            Assert.True(answer.GetProperty("penalty_credits").GetDecimal() > 0m, "the cancel must be late");
+            Assert.Equal(moved, answer.GetProperty("net_credits").GetDecimal());
+        }
+
+        var member = club.Client(f, club.Organiser);
+        await CheckAsync(async id => await JsonAsync(await member.PostAsync($"/api/v1/bookings/{id}/cancel", null)), 8);
+        await CheckAsync(async id => await JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/bookings/{id}/cancel", new { reason = "Leak" })), 10);
+        await CheckAsync(async id =>
+        {
+            var bulk = await JsonAsync(await admin.PostAsJsonAsync("/api/v1/admin/bookings/bulk-cancel", new
+            {
+                idempotencyKey = $"r5-late-{id:N}", reason = "Leak", items = new[] { new { bookingId = id } },
+            }));
+            return Assert.Single(bulk.GetProperty("results").EnumerateArray());
+        }, 12);
+    }
+
     /// <summary>Lane F1's ask: the desk's cancel and bulk cancel answer the same split truth.</summary>
     [SkippableFact]
     public async Task The_desks_cancel_and_bulk_cancel_name_the_partner_refunds_and_the_net()
