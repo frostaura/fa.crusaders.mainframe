@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { api, type ScheduleDay } from "./api";
+import { endpoints, type ScheduleDay } from "./api";
 import { describeBookingError, provesStaleGrid } from "./bookingErrors";
 import { goneFrom, outcomeUnknown } from "./bookingOutcome";
 
@@ -46,15 +46,6 @@ async function readBack(blockId: string, reconcile: Args["reconcile"]): Promise<
   return { lifted: false, text: HOLD_LIFT_UNANSWERED };
 }
 
-/**
- * R5 A5-1 — the lift carries the admin's reason, which the club records (`?reason=`, lane F's
- * shape; a blank one is refused 400 reason_required). Called here rather than through
- * `endpoints.adminUnblock`, whose signature has no reason yet (integrator-owned `lib/api.ts`).
- */
-function unblock(blockId: string, reason: string): Promise<void> {
-  return api.del<void>(`/api/v1/admin/blocks/${encodeURIComponent(blockId)}?reason=${encodeURIComponent(reason)}`);
-}
-
 export function useHoldLift({ day, setDay, reconcile, toast }: Args) {
   return useCallback(async (blockId: string, reason: string) => {
     const removed = day?.slots.filter((s) => s.bookingId === blockId) ?? [];
@@ -65,7 +56,8 @@ export function useHoldLift({ day, setDay, reconcile, toast }: Args) {
     }
     setDay((d) => (d ? { ...d, slots: d.slots.filter((s) => s.bookingId !== blockId) } : d));
     try {
-      await unblock(blockId, reason);
+      // R5 A5-1 — the reason goes on the club's change record (`?reason=`; blank is refused).
+      await endpoints.adminUnblock(blockId, reason);
       toast.push({ tone: "success", text: HOLD_LIFTED });
       void reconcile();
     } catch (err) {
