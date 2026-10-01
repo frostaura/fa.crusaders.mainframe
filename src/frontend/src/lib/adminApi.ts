@@ -607,9 +607,25 @@ export type ScheduleRow = {
   status?: "active" | "ended";
   courts?: Array<{ id: string; name: string }>;
   next_occurrence?: string | null;
+  /**
+   * Every rule the series has had, oldest first (R5 A5-4). The top-level days and hours are the
+   * LATEST rule; `in_force` marks the one governing today. Absent from an older API.
+   */
+  rules?: ScheduleRuleSpan[];
   materialised_through?: string | null;
   created_by_name?: string | null;
   created_at?: string;
+};
+
+/** One rule and the dates it governs: `from` inclusive, `until` exclusive (null = open-ended). */
+export type ScheduleRuleSpan = {
+  from: string;
+  until: string | null;
+  days: Weekday[];
+  start: string;
+  end: string;
+  interval_weeks: number;
+  in_force: boolean;
 };
 
 /*

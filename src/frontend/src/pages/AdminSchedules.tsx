@@ -13,7 +13,8 @@ import { CardListSkeleton } from "../components/monitoring/parts";
 import { ScheduleEditor } from "../components/schedules/ScheduleEditor";
 import { adminEndpoints, type ScheduleRow } from "../lib/adminApi";
 import {
-  LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_HINT, LIST_EMPTY_TITLE, LIST_FAILED_CAVEAT, nextOccurrenceLine, ruleSentence,
+  LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_HINT, LIST_EMPTY_TITLE, LIST_FAILED_CAVEAT, laterRuleLines, nextOccurrenceLine, ruleInForce,
+  ruleSentence,
   scheduleCodes,
 } from "../lib/scheduleCopy";
 
@@ -48,16 +49,20 @@ type Status = typeof STATUSES[number]["value"];
 
 /** One row: the sentence, what it holds next, and the way into it. */
 function ScheduleListRow({ row, timezone }: { row: ScheduleRow; timezone?: string }) {
+  // The rule in force NOW, then any change still to come (R5 A5-4): the top-level days and hours
+  // are the LATEST rule, and the list said "Sundays" over a series still on Saturdays.
+  const now = ruleInForce(row.rules);
   const sentence = ruleSentence({
     courtNames: (row.courts ?? []).map((c) => c.name),
-    days: row.days ?? [],
-    start: row.start ?? "",
-    end: row.end ?? "",
+    days: now?.days ?? row.days ?? [],
+    start: now?.start ?? row.start ?? "",
+    end: now?.end ?? row.end ?? "",
     label: row.label,
     startDate: row.start_date ?? "",
     endDate: row.end_date,
-    intervalWeeks: row.interval_weeks,
+    intervalWeeks: now?.interval_weeks ?? row.interval_weeks,
   });
+  const later = laterRuleLines(row.rules);
   return (
     <li className="flex">
       {/* A card (R4 form factor, SPEC §3.14): the rows sat in one 1,500px list at 1920. */}
@@ -69,6 +74,7 @@ function ScheduleListRow({ row, timezone }: { row: ScheduleRow; timezone?: strin
             {row.status === "ended" && <Badge tone="neutral">Ended</Badge>}
           </div>
           <p className="text-sm text-text-secondary">{sentence}</p>
+          {later.map((line) => <p key={line} className="text-sm text-text-secondary" data-rule-change="">{line}</p>)}
           <p className="text-sm text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status, timezone)}</p>
         </div>
         {/* Named by the thing it opens, because a column of links all reading "Open" says

@@ -1,14 +1,16 @@
 import { useId, useState } from "react";
 import { Alert } from "../Alert";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Field, FieldLabel } from "../ui/field";
 import { Input } from "../ui/input";
 import { RadioCard, RadioGroup } from "../ui/radio-group";
 import { TimeSelect } from "../ui/time-select";
 import { TIME_TRIGGER_FIX } from "./SentenceParts";
 import {
-  clubDateShort, editScopeOptions, editScopeQuestion, pastNeverChanges,
+  clubDateShort, daysFromLegend, daysPhrase, editScopeOptions, editScopeQuestion, pastNeverChanges, weekdayName,
 } from "../../lib/scheduleCopy";
+import { WEEKDAYS, type Weekday } from "../../lib/adminApi";
 import { parseHhMm } from "../../lib/scheduleRules";
 
 /**
@@ -40,34 +42,43 @@ import { parseHhMm } from "../../lib/scheduleRules";
 
 export type EditScope = "only" | "future";
 
-export function OccurrenceChange({
-  date, start, end, busy, error, onCancel, onSubmit,
-}: {
+export function OccurrenceChange(props: {
   /** The occurrence this change is anchored on, club-local `YYYY-MM-DD`. */
   date: string;
   /** The rule's current hours, as the starting value. */
   start: string;
   end: string;
+  /** The rule's current days — "from this date on" may change them (R5 A5-4). */
+  days?: readonly Weekday[];
   busy: boolean;
   /** Rendered above the controls: a refusal, or a notice that the date was clamped. */
   error?: React.ReactNode;
   onCancel: () => void;
-  onSubmit: (choice: { scope: EditScope; start: string; end: string; reason: string }) => void;
+  onSubmit: (choice: { scope: EditScope; start: string; end: string; reason: string; days?: Weekday[] }) => void;
 }) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { date, start, end, days, busy, error, onCancel, onSubmit } = props;
   const groupId = useId();
   const [scope, setScope] = useState<EditScope>("only");
   const [newStart, setNewStart] = useState(start);
   const [newEnd, setNewEnd] = useState(end);
+  const [newDays, setNewDays] = useState<Weekday[]>([...(days ?? [])]);
   const [reason, setReason] = useState("");
 
   const options = editScopeOptions(date);
   const startMinute = parseHhMm(newStart);
   const endMinute = parseHhMm(newEnd);
   const rangeValid = startMinute !== null && endMinute !== null && endMinute > startMinute;
+  // Days change only from a date on: one date moved to another weekday is a different date.
+  const daysChanged = scope === "future" && days !== undefined && !sameDays(newDays, days);
+  const daysValid = scope === "only" || newDays.length > 0;
   const chosen = scope === "only" ? options.only : options.future;
   // "Change just Tue 13 Oct to 19:00–21:30" — the whole action in the label, so the last
   // thing read before the press is what will happen.
-  const submitLabel = `Change ${scope === "only" ? `just ${clubDateShort(date)}` : chosen} to ${newStart}–${newEnd}`;
+  const to = daysChanged ? `${daysPhrase(newDays)}, ${newStart}–${newEnd}` : `${newStart}–${newEnd}`;
+  const submitLabel = `Change ${scope === "only" ? `just ${clubDateShort(date)}` : chosen} to ${to}`;
+  const toggleDay = (day: Weekday, on: boolean) =>
+    setNewDays((was) => (on ? WEEKDAYS.filter((d) => d === day || was.includes(d)) : was.filter((d) => d !== day)));
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-4">
@@ -90,6 +101,21 @@ export function OccurrenceChange({
         <p className="text-sm text-text-secondary">{pastNeverChanges(date)}</p>
       </div>
 
+      {scope === "future" && days !== undefined && (
+        <fieldset className="flex flex-col gap-2">
+          {/* The fieldset is the group, named by its legend. */}
+          <legend className="text-sm font-semibold text-text-primary">{daysFromLegend(date)}</legend>
+          <div className="flex flex-wrap gap-x-4">
+            {WEEKDAYS.map((day) => (
+              <label key={day} className="flex min-h-touch cursor-pointer items-center gap-2 text-sm text-text-primary">
+                <Checkbox checked={newDays.includes(day)} onCheckedChange={(next) => toggleDay(day, next === true)} />
+                {weekdayName(day)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
       {/* Slice-aligned times only (P3, R7 — never free-typed). */}
       <div className="flex flex-wrap gap-4">
         <Field className="w-40">
@@ -101,6 +127,12 @@ export function OccurrenceChange({
           <TimeSelect start={DAY_START} end={DAY_END} stepMinutes={STEP} includeEnd value={newEnd} onChange={setNewEnd} className={TIME_TRIGGER_FIX} />
         </Field>
       </div>
+
+      {!daysValid && (
+        <Alert tone="warning" live="polite" announceKey="occurrence-days">
+          Choose at least one day.
+        </Alert>
+      )}
 
       {!rangeValid && (
         <Alert tone="warning" live="polite" announceKey="occurrence-range">
@@ -116,9 +148,11 @@ export function OccurrenceChange({
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" onClick={onCancel}>Cancel</Button>
         <Button
-          disabled={!rangeValid && !busy}
+          disabled={(!rangeValid || !daysValid) && !busy}
           pending={busy}
-          onClick={() => onSubmit({ scope, start: newStart, end: newEnd, reason: reason.trim() })}
+          onClick={() => onSubmit({
+            scope, start: newStart, end: newEnd, reason: reason.trim(), ...(daysChanged ? { days: newDays } : {}),
+          })}
         >
           {submitLabel}
         </Button>
@@ -135,3 +169,7 @@ export function OccurrenceChange({
 const DAY_START = "05:00";
 const DAY_END = "24:00";
 const STEP = 15;
+
+function sameDays(a: readonly Weekday[], b: readonly Weekday[]): boolean {
+  return a.length === b.length && a.every((d) => b.includes(d));
+}

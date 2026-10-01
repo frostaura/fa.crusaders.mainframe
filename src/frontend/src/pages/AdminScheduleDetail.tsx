@@ -16,15 +16,15 @@ import { OccurrenceChange, type EditScope } from "../components/schedules/Occurr
 import { ScheduleChangeList } from "../components/schedules/ScheduleChangeList";
 import {
   adminEndpoints, scheduleBodyOf, type AdminChangePage, type ScheduleDetailResponse,
-  type ScheduleOccurrence, type ScheduleOccurrencesResponse, type ScheduleRow,
+  type ScheduleOccurrence, type ScheduleOccurrencesResponse, type ScheduleRow, type Weekday,
 } from "../lib/adminApi";
 import { describeFailure } from "../lib/errors";
 import { UnsureOutcome, unsureSentence, writeOrReadBack, type UnsureWords } from "../lib/lostReply";
 import { LOST_REPLY } from "../lib/lostReplyCopy";
 import { endCheck, hoursCheck, skipCheck, type ScheduleCheck } from "../lib/scheduleReadBack";
 import {
-  DATES_EMPTY, clampedNotice, clubDateShort, endConsequence, hoursFromLine, nextHeldDate, nextHeldOccurrence, nextOccurrenceLine,
-  occurrenceHours, occurrenceStatusWord,
+  DATES_EMPTY, clampedNotice, clubDateShort, endConsequence, hoursFromLine, laterRuleLines, nextHeldDate, nextHeldOccurrence,
+  nextOccurrenceLine, occurrenceHours, occurrenceStatusWord, ruleInForce,
   partialMaterialisation, ruleSentence, scheduleCodes, skipChipLabel, skipConsequence,
 } from "../lib/scheduleCopy";
 import { slotsPerOccurrence } from "../lib/scheduleRules";
@@ -129,6 +129,7 @@ function OccurrenceRow({
                 date={occurrence.date}
                 start={row.start ?? ""}
                 end={row.end ?? ""}
+                days={row.days}
                 busy={busy}
                 error={notice}
                 onCancel={onCancelChange}
@@ -218,7 +219,13 @@ function ScheduleHeadline({ row, days, partial, occurrences, timezone }: {
   // The next date really held — past any skipped one (R3 A-6) — at its OWN hours (R4 A-4-3).
   const heldNext = nextHeldDate(occurrences);
   const next = nextHeldOccurrence(row.next_occurrence, occurrences);
-  const from = hoursFromLine(row, occurrences, timezone);
+  // R5 A5-4: the rule in force NOW, and one line per rule still to come — the top-level days and
+  // hours are the LATEST rule, and the header said "Sundays" over a series still on Saturdays.
+  const now = ruleInForce(row.rules);
+  const later = laterRuleLines(row.rules);
+  // The R4 "these hours apply from" line answers the same question for an hours-only change on an
+  // API without rules; with the rules in hand, the later-rule lines say it.
+  const from = later.length > 0 ? null : hoursFromLine(row, occurrences, timezone);
   return (
     <>
       <PageHeader
@@ -231,15 +238,16 @@ function ScheduleHeadline({ row, days, partial, occurrences, timezone }: {
             <span className="block text-base text-text-secondary">
               {ruleSentence({
                 courtNames: (row.courts ?? []).map((c) => c.name),
-                days,
-                start: row.start ?? "",
-                end: row.end ?? "",
+                days: now?.days ?? days,
+                start: now?.start ?? row.start ?? "",
+                end: now?.end ?? row.end ?? "",
                 label: row.label,
                 startDate: row.start_date ?? "",
                 endDate: row.end_date,
-                intervalWeeks: row.interval_weeks,
+                intervalWeeks: now?.interval_weeks ?? row.interval_weeks,
               })}
             </span>
+            {later.map((line) => <span key={line} className="mt-1 block text-text-secondary" data-rule-change="">{line}</span>)}
             <span className="mt-1 block text-text-muted">{nextOccurrenceLine(next, row.status, timezone, heldNext?.ends_at)}</span>
             {from ? <span className="mt-1 block text-text-secondary" data-hours-from="">{from}</span> : null}
           </>
@@ -386,10 +394,11 @@ export function AdminScheduleDetailPage() {
     }
   }
 
-  function submitChange(date: string, choice: { scope: EditScope; start: string; end: string; reason: string }) {
+  function submitChange(date: string, choice: { scope: EditScope; start: string; end: string; reason: string; days?: Weekday[] }) {
     if (!row) return;
     const { start, end, reason } = choice;
-    const body = { ...scheduleBodyOf(row), start, end, effectiveFrom: date, reason };
+    // A day-of-week change from a date (R5 A5-4) rides the same PATCH as an hours change.
+    const body = { ...scheduleBodyOf(row), start, end, effectiveFrom: date, reason, ...(choice.days ? { days: choice.days } : {}) };
     const work = choice.scope === "only"
       ? () => adminEndpoints.scheduleOccurrenceUpdate(id, date, { start, end, reason })
       : () => adminEndpoints.scheduleUpdate(id, body);
@@ -504,6 +513,8 @@ export function AdminScheduleDetailPage() {
             days,
             slots: remainingSlots,
             refundCredits: 0,
+            // Counted by each date's own weekday (R5 A5-4), not the latest rule's.
+            dates: remaining.map((o) => o.date),
           })}
           focusAfter={focusHeading}
           onEnd={() => runWrite(() => adminEndpoints.scheduleEnd(id, { reason: endReason.trim() }), endCheck(id))}

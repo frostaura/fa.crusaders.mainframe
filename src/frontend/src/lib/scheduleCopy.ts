@@ -379,6 +379,8 @@ export type EndWords = {
   slots: number | null;
   /** A hold charges nobody, so this is 0 for every hold. Stated rather than left to inference. */
   refundCredits: number;
+  /** The dates still ahead (club-local), so they are counted by their own weekdays (R5 A5-4). */
+  dates?: readonly string[];
 };
 
 /** "Tuesday" / "date" — the noun without its count, for a sentence that supplies its own. */
@@ -390,20 +392,80 @@ function pluralNoun(days: readonly Weekday[]): string {
   return days.length === 1 ? weekdayPlural(days[0]) : "dates";
 }
 
-export function endConsequence({ remaining, days, slots, refundCredits }: EndWords): string {
+/**
+ * "5 more dates (1 Saturday and 4 Sundays)" — the dates still ahead counted by their OWN
+ * weekdays (R5 A5-4): a series changing from Saturdays to Sundays said "5 more Saturdays" from its
+ * latest rule when four of them were Sundays. One weekday reads as before ("4 more Sundays").
+ */
+function remainingPhrase(remaining: number, days: readonly Weekday[], dates?: readonly string[]): string {
+  const counts = new Map<Weekday, number>();
+  for (const date of dates ?? []) {
+    const day = weekdayOf(date);
+    if (day) counts.set(day, (counts.get(day) ?? 0) + 1);
+  }
+  if (counts.size === 1) {
+    const [day] = [...counts.keys()];
+    return `${remaining} more ${remaining === 1 ? weekdayName(day) : weekdayPlural(day)}`;
+  }
+  if (counts.size > 1) {
+    // In the order the dates come (a Map keeps it): the Saturday before the Sundays it turns into.
+    const parts = [...counts].map(([d, n]) => `${n} ${n === 1 ? weekdayName(d) : weekdayPlural(d)}`);
+    return `${remaining} more dates (${joinWords(parts)})`;
+  }
+  return `${remaining} more ${remaining === 1 ? singularNoun(days) : pluralNoun(days)}`;
+}
+
+export function endConsequence({ remaining, days, slots, refundCredits, dates }: EndWords): string {
   const stops = remaining === null
     ? "Ending this stops every date still ahead"
-    : `Ending this stops ${remaining} more ${remaining === 1 ? singularNoun(days) : pluralNoun(days)}`;
+    : `Ending this stops ${remainingPhrase(remaining, days, dates)}`;
   const release = slots === null
     ? `${stops}, and the slots it was holding can be booked again.`
     : `${stops} and releases ${slots} held slot${slots === 1 ? "" : "s"}, which members can then book.`;
   const money = refundCredits > 0
     ? `${formatCredits(refundCredits)} goes back to the members who paid.`
     : "Nobody is refunded — nobody was charged for a hold.";
-  const past = days.length === 1
+  const past = days.length === 1 && !mixedWeekdays(dates)
     ? `${weekdayPlural(days[0])} that have already happened stay exactly as they are.`
     : "Dates that have already happened stay exactly as they are.";
   return `${release} ${money} ${past}`;
+}
+
+function mixedWeekdays(dates?: readonly string[]): boolean {
+  return new Set((dates ?? []).map(weekdayOf).filter(Boolean)).size > 1;
+}
+
+/** The day chooser of a "from this date on" change (R5 A5-4). */
+export function daysFromLegend(date: string): string {
+  return `Days from ${clubDateShort(date)} on`;
+}
+
+// ---------------------------------------------------------------------------------------
+// Earlier and later rules (R5 A5-4)
+// ---------------------------------------------------------------------------------------
+
+type RuleSpanWords = {
+  from: string; days: readonly Weekday[]; start: string; end: string; interval_weeks: number; in_force: boolean;
+};
+
+/** The rule governing today: the one marked in force, else the earliest (an older API: none). */
+export function ruleInForce<T extends RuleSpanWords>(rules: readonly T[] | undefined): T | null {
+  if (!rules || rules.length === 0) return null;
+  return rules.find((r) => r.in_force) ?? rules[0];
+}
+
+/**
+ * "From Sun 1 Nov it holds Sundays, 18:00 to 20:00, instead." — one line per rule still to come,
+ * so the header says what holds NOW and what changes from when (R5 A5-4: it described only the
+ * latest rule, and "Next on" and the End count followed it).
+ */
+export function laterRuleLines(rules: readonly RuleSpanWords[] | undefined): string[] {
+  const now = ruleInForce(rules);
+  if (!rules || !now) return [];
+  return rules.slice(rules.indexOf(now) + 1).map((rule) => {
+    const every = rule.interval_weeks > 1 ? ` every ${rule.interval_weeks} weeks` : "";
+    return `From ${clubDateShort(rule.from)} it holds ${daysPhrase(rule.days)}${every}, ${rule.start} to ${rule.end}, instead.`;
+  });
 }
 
 // ---------------------------------------------------------------------------------------

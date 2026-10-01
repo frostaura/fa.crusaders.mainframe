@@ -87,6 +87,7 @@ export function fullScheduleRowFixture(): Required<ScheduleRow> {
     status: "active",
     courts: [{ id: COURT_IDS.one, name: "Court 1" }],
     next_occurrence: "2026-10-06T16:00:00.000Z",
+    rules: [{ from: "2026-10-06", until: null, days: ["tue"], start: "18:00", end: "21:00", interval_weeks: 1, in_force: true }],
     materialised_through: "2026-11-03",
     created_by_name: "Review Admin",
     created_at: "2026-09-21T18:31:00.000Z",

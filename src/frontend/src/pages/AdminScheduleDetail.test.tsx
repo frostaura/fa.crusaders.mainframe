@@ -504,3 +504,64 @@ describe("a schedule write whose reply was lost", () => {
     expect(await screen.findByText(/can't tell whether Tue 13 Oct was skipped/)).toBeInTheDocument();
   });
 });
+
+/**
+ * Review round 5, A5-4: a series changed from Saturdays to Sundays from 1 Nov was described only by
+ * its LATEST rule — "Holds … on Sundays" while it still held Saturdays — and the End dialog counted
+ * "5 more Saturdays" when four of them were Sundays. The read now carries every rule (lane F).
+ */
+describe("a schedule whose days change from a date on (R5 A5-4)", () => {
+  const RULES = [
+    { from: "2026-10-03", until: "2026-11-01", days: ["sat" as const], start: "18:00", end: "20:00", interval_weeks: 1, in_force: true },
+    { from: "2026-11-01", until: null, days: ["sun" as const], start: "18:00", end: "20:00", interval_weeks: 1, in_force: false },
+  ];
+  const SERIES = scheduleRowFixture({
+    days: ["sun"], start: "18:00", end: "20:00", start_date: "2026-10-03", end_date: null, rules: RULES,
+    next_occurrence: "2026-10-31T16:00:00.000Z",
+  });
+  const DATES = scheduleOccurrencesResponse([
+    occurrenceFixture("2026-10-24", { status: "past", starts_at: "2026-10-24T16:00:00.000Z", ends_at: "2026-10-24T18:00:00.000Z" }),
+    ...["2026-10-31", "2026-11-01", "2026-11-08", "2026-11-15", "2026-11-22"].map((d) =>
+      occurrenceFixture(d, { starts_at: `${d}T16:00:00.000Z`, ends_at: `${d}T18:00:00.000Z` })),
+  ]);
+
+  it("says what holds now, and what it changes to from when", async () => {
+    stubFetch(detailRoutes({ schedule: SERIES, occurrences: DATES }));
+    renderDetail();
+    await screen.findByRole("heading", { name: "Tuesday league", level: 1 });
+    expect(screen.getByText(/Holds Courts 1, 2 and 3 on Saturdays from 18:00 to 20:00/)).toBeInTheDocument();
+    expect(screen.getByText("From Sun 1 Nov it holds Sundays, 18:00 to 20:00, instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Next on Sat 31 Oct, 18:00–20:00.")).toBeInTheDocument();
+  });
+
+  it("counts the dates the End stops by their own weekdays", async () => {
+    stubFetch(detailRoutes({ schedule: SERIES, occurrences: DATES }));
+    renderDetail();
+    // The dates are read: the count comes from them.
+    await screen.findByRole("button", { name: "Skip Sun 22 Nov" });
+    await userEvent.click(screen.getByRole("button", { name: "End Tuesday league" }));
+    expect(screen.getAllByText(/Ending this stops 5 more dates \(1 Saturday and 4 Sundays\)/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/5 more Saturdays|5 more Sundays/)).not.toBeInTheDocument();
+  });
+
+  it("changes the days from a date on, through the schedule route", async () => {
+    const stub = stubFetch([
+      ...detailRoutes(),
+      { method: "PATCH", path: BASE, body: scheduleUpdateResponse(scheduleRowFixture({ days: ["thu"] })) },
+    ]);
+    renderDetail();
+    await userEvent.click(await screen.findByRole("button", { name: "Change the hours of Tue 13 Oct" }));
+    // Only "from this date on" can change the days: one date moved to another weekday is a new date.
+    expect(screen.queryByRole("group", { name: /Days from Tue 13 Oct on/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: "Tue 13 Oct and every Tuesday after it" }));
+    const days = screen.getByRole("group", { name: /Days from Tue 13 Oct on/ });
+    fireEvent.click(within(days).getByRole("checkbox", { name: "Tuesday" }));
+    fireEvent.click(within(days).getByRole("checkbox", { name: "Thursday" }));
+    fireEvent.change(screen.getByLabelText("Reason (kept in the change record)"), { target: { value: "League moves to Thursdays" } });
+    await userEvent.click(screen.getByRole("button", {
+      name: "Change Tue 13 Oct and every Tuesday after it to Thursdays, 18:00–21:00",
+    }));
+    const call = stub.calls.find((c) => c.method === "PATCH" && c.path === BASE);
+    expect(call?.body).toMatchObject({ days: ["thu"], start: "18:00", end: "21:00", effectiveFrom: "2026-10-13" });
+  });
+});

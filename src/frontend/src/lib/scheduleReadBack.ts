@@ -44,7 +44,7 @@ export function endCheck(id: string): ScheduleCheck {
 
 /** New hours for one date (`only`) or for that date and every one after it. */
 export function hoursCheck(
-  id: string, date: string, choice: { scope: "only" | "future"; start: string; end: string }, timezone?: string,
+  id: string, date: string, choice: { scope: "only" | "future"; start: string; end: string; days?: readonly string[] }, timezone?: string,
 ): ScheduleCheck {
   const readBack = choice.scope === "only"
     ? async () => {
@@ -55,7 +55,8 @@ export function hoursCheck(
     }
     : async () => {
       const { schedule } = await adminEndpoints.schedule(id);
-      return schedule.start === choice.start && schedule.end === choice.end ? {} : null;
+      const daysLanded = !choice.days || (schedule.days ?? []).join() === [...choice.days].join();
+      return schedule.start === choice.start && schedule.end === choice.end && daysLanded ? {} : null;
     };
   return { readBack, words: unsureWords(SCHEDULE_LOST.hoursUnchanged(date), SCHEDULE_LOST.whetherHours(date), LOOK_AT) };
 }

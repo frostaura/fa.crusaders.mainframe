@@ -78,6 +78,28 @@ describe("the list", () => {
     );
   });
 
+  /** R5 A5-4: the list described a series by its LATEST rule — "Sundays" while it still held Saturdays. */
+  it("says what holds now, and the change still to come", async () => {
+    stubFetch([
+      ...sessionRoutes(),
+      {
+        path: SCHEDULES,
+        body: {
+          schedules: [scheduleRowFixture({
+            days: ["sun"], start: "18:00", end: "20:00", start_date: "2026-10-03", end_date: null,
+            rules: [
+              { from: "2026-10-03", until: "2026-11-01", days: ["sat"], start: "18:00", end: "20:00", interval_weeks: 1, in_force: true },
+              { from: "2026-11-01", until: null, days: ["sun"], start: "18:00", end: "20:00", interval_weeks: 1, in_force: false },
+            ],
+          })],
+        },
+      },
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    expect(await screen.findByText(/^Holds Courts 1, 2 and 3 on Saturdays from 18:00 to 20:00/)).toBeInTheDocument();
+    expect(screen.getByText("From Sun 1 Nov it holds Sundays, 18:00 to 20:00, instead.")).toBeInTheDocument();
+  });
+
   it("teaches the feature when the club genuinely has none", async () => {
     stubFetch([...sessionRoutes(), { path: SCHEDULES, body: { schedules: [] } }]);
     renderPage(<AdminSchedulesPage />);
