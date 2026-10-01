@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  dropQuery, fetchQuery, getDataOwner, peekQuery, prefetchQuery, primeQuery, resetQueryCacheForTests,
+  dropQuery, fetchQuery, getDataOwner, pastDay, peekQuery, prefetchQuery, primeQuery, resetQueryCacheForTests,
   setDataOwner, setPersistGuard, updateQuery, wipeMemberData,
 } from "./queryCache";
 
@@ -121,5 +121,16 @@ describe("a write's answer", () => {
     await fetchQuery(ANA, "booking:b1", () => Promise.resolve("detail"));
     dropQuery(ANA, "booking:b1");
     expect(peekQuery(ANA, "booking:b1")).toBeUndefined();
+  });
+});
+
+describe("what the phone stops keeping", () => {
+  it("a day grid from before yesterday; never today's, a future day's, or any other read", () => {
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    expect(pastDay(`schedule:${day(-3)}`)).toBe(true);
+    expect(pastDay(`schedule:${day(0)}`)).toBe(false);
+    expect(pastDay(`schedule:${day(5)}`)).toBe(false);
+    expect(pastDay("schedule:last")).toBe(false);
+    expect(pastDay("wallet:page")).toBe(false);
   });
 });

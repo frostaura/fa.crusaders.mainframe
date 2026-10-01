@@ -97,7 +97,7 @@ export function wipeMemberData(): Promise<void> {
 }
 
 /** A kept day grid from before yesterday (UTC): nothing a member could open, offline or not. */
-function pastDay(key: string): boolean {
+export function pastDay(key: string): boolean {
   const day = /^schedule:(\d{4}-\d{2}-\d{2})$/.exec(key)?.[1];
   return day !== undefined && Date.parse(`${day}T00:00:00Z`) < Date.now() - 2 * 86_400_000;
 }
