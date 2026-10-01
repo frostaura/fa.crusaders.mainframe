@@ -25,7 +25,7 @@ public sealed record MemberNotice(
 
     /// <summary>
     /// The inbox line is born read (review round 3, I-9): a receipt of the member's OWN action —
-    /// "You paid Olive 10.00 credits" at their own accept — tells them nothing new, and counting it
+    /// "You paid Olive 10 minutes" at their own accept — tells them nothing new, and counting it
     /// unread put a number on the bell with nothing to do. The mail, when there is one, still goes.
     /// </summary>
     public bool BornRead { get; init; }

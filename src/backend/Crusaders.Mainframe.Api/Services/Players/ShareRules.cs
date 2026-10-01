@@ -41,13 +41,14 @@ public sealed record ShareFacts(
 ///   <item><term>settled outside the app</term><description>0 — the club was told it was paid by hand</description></item>
 ///   <item><term>displaced</term><description>0 — <c>Owed = 0</c> (settlement model S8)</description></item>
 ///   <item><term>cancelled before anybody checked in</term><description>0 — the organiser cancelled, so any late-cancel penalty (and any lit time after it) is theirs alone</description></item>
-///   <item><term>otherwise</term><description><c>min(consented, ⌊Owed × share / P⌋₂)</c> — a no-show's penalty is shared pro rata; a played or live court is shared in full</description></item>
+///   <item><term>otherwise</term><description><c>min(consented, ⌊Owed × share / P⌋)</c> in whole minutes — a no-show's penalty is shared pro rata; a played or live court is shared in full</description></item>
 ///   <item><term>closed (lapsed, or past the share deadline)</term><description>the above, but never more than already paid — a return is still owed, a collection never is</description></item>
 /// </list>
 ///
 /// <para>
-/// <b>Rounded DOWN to the cent</b>, so the partners' targets never sum past <c>Owed</c> and a
-/// partner is never charged a fraction of a credit more than their exact share. <b>Capped at the
+/// <b>Rounded DOWN to the whole minute</b>, so the partners' targets never sum past <c>Owed</c>,
+/// a partner is never charged a part-minute more than their exact share, and the organiser keeps
+/// the remainder (P13 §1.2). <b>Capped at the
 /// consent</b>, so raising a share after somebody accepted collects nothing until they accept the
 /// new figure — and lowering one refunds at the next reconcile.
 /// </para>
@@ -62,7 +63,8 @@ public static class ShareRules
         if (f.Price <= 0 || f.ShareMinutes <= 0) return 0;
 
         var owed = Math.Clamp(f.Owed, 0, f.Price);
-        // P13-B3: floor(owed × share ÷ price) in whole minutes; the organiser keeps the remainder.
+        // ⌊owed × share ÷ price⌋ in whole minutes (§1.2): both factors are ≥ 0, so integer division
+        // is the floor, and the organiser keeps whatever the partners' floors leave over.
         var fraction = (int)((long)owed * f.ShareMinutes / f.Price);
         var target = Math.Max(0, Math.Min(fraction, f.ConsentedMinutes));
 

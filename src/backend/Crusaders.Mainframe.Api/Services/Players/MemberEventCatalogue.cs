@@ -32,7 +32,7 @@ public sealed record ReminderPayload(
 public sealed record LapsedPayload(
     Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, int UnpaidMinutes, bool ToOrganiser, Guid? SeatId = null);
 
-/// <summary>A return of a paid share that waits for the organiser's credits to cover it (review round 2).</summary>
+/// <summary>A return of a paid share that waits for the organiser's minutes to cover it (review round 2).</summary>
 public sealed record ReturnWaitingPayload(
     Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes, bool ToOrganiser, Guid? SeatId = null);
 
@@ -81,7 +81,7 @@ public static class MemberEventCatalogue
     public const string ClubSeat = "players.club_seat";
 
     /// <summary>
-    /// Money due back to a partner waits because the organiser's credits do not cover it — told
+    /// Minutes due back to a partner wait because the organiser's balance does not cover them — told
     /// ONCE to each side when it starts waiting (the seat's <c>ReturnPendingSince</c> stamp), never
     /// on every sweep that finds it still waiting. Not urgent. The wording owes nobody anything.
     /// </summary>

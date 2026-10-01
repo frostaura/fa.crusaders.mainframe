@@ -103,7 +103,7 @@ public sealed class PlayersWaitingStampRaceHttpTests(PostgresFixture pg) : IClas
         Assert.True(gate.AtLedgerRead.Task.IsCompleted, "the racing reconcile never read the ledger");
 
         // The top-up's credit hook pays the waiting 4 and clears stamp one.
-        await DeskAsync(club, f, 20, null, "top_up_cash");
+        await DeskAsync(club, f, 20, null, "goodwill");
         Assert.Null(await StampOfAsync(club, f, x, sam));
         Assert.Equal(38, await PlayersClub.BalanceAsync(f, club.Sam));
 
@@ -126,13 +126,13 @@ public sealed class PlayersWaitingStampRaceHttpTests(PostgresFixture pg) : IClas
         Assert.Equal(second, await StampOfAsync(club, f, x, sam));
         var wallet = await club.Client(f, club.Organiser).GetFromJsonAsync<System.Text.Json.JsonElement>("/api/v1/wallet");
         // An S4 game's hold IS its pending returns, so the 4 is set aside as held, not again as owed back.
-        Assert.Equal(4m, wallet.GetProperty("held_minutes").GetDecimal() + wallet.GetProperty("owed_back_minutes").GetDecimal());
+        Assert.Equal(4, wallet.GetProperty("held_minutes").GetInt32() + wallet.GetProperty("owed_back_minutes").GetInt32());
     }
 
     private static async Task DeskAsync(PlayersClub club, WebApplicationFactory<Program> f, decimal amount, Guid? booking, string code)
     {
-        var response = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-            new { amountMinutes = amount, reason = "stamp race", reasonCode = code, relatedBookingId = booking, zarReceived = 10m });
+        var response = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust",
+            new { amountMinutes = (int)amount, reason = "stamp race", reasonCode = code, relatedBookingId = booking });
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
     }
 

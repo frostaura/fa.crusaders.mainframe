@@ -167,7 +167,7 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
         // The wallet says so, and says until when.
         var wallet = await JsonAsync(await club.Client(f, club.Organiser).GetAsync("/api/v1/wallet"));
         Assert.Equal(received, wallet.GetProperty("held_minutes").GetDecimal());
-        Assert.Equal(0m, wallet.GetProperty("spendable_minutes").GetDecimal());
+        Assert.Equal(0, wallet.GetProperty("spendable_minutes").GetInt32());
         Assert.NotEqual(JsonValueKind.Null, wallet.GetProperty("held_until").ValueKind);
 
         // The organiser tries to spend what came in.
@@ -233,7 +233,7 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
         var collect = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync(
             $"/api/v1/admin/bookings/{bookingId}/players/{seat}/collect", new { reason = "Agreed at the desk", allowNegativeBalance = true });
         Assert.Equal(HttpStatusCode.OK, collect.StatusCode);
-        Assert.Equal(16m, (await JsonAsync(collect)).GetProperty("collected_minutes").GetDecimal());
+        Assert.Equal(16, (await JsonAsync(collect)).GetProperty("collected_minutes").GetInt32());
         Assert.Equal(34, await PlayersClub.BalanceAsync(f, club.Sam));
     }
 
@@ -264,7 +264,7 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
         var refusal = await JsonAsync(stale);
         Assert.Equal(PlayerErrors.ShareChanged, Error(refusal));
-        Assert.Equal(20m, refusal.GetProperty("share_minutes").GetDecimal());
+        Assert.Equal(20, refusal.GetProperty("share_minutes").GetInt32());
         Assert.Equal(ParticipantStatus.Invited, (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == sam).Status);
         Assert.Empty(await club.SharesAsync(f, bookingId));
 
@@ -391,7 +391,6 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
         Dictionary<string, object?> Body(int value) => new()
         {
             ["sliceMinutes"] = shown.GetProperty("slice_minutes").GetInt32(),
-            ["slicePriceCredits"] = shown.GetProperty("slice_price_credits").GetDecimal(),
             ["advanceBookingDays"] = shown.GetProperty("advance_booking_days").GetInt32(),
             ["dayStartMinute"] = shown.GetProperty("day_start_minute").GetInt32(),
             ["dayEndMinute"] = shown.GetProperty("day_end_minute").GetInt32(),
@@ -548,7 +547,7 @@ public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<P
         });
         Assert.Equal(-16, await PlayersClub.BalanceAsync(f, club.Sam));
 
-        var adjust = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust", new
+        var adjust = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust", new
         {
             amountMinutes = 32, reason = "Court was flooded", relatedBookingId = bookingId, reasonCode = "goodwill",
         });

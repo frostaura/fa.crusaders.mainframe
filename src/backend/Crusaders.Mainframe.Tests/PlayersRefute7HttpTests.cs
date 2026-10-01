@@ -67,8 +67,8 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
 
         await using (await ShareSabotage.InstallAsync(f, sams))
         {
-            var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-                new { amountMinutes = 32, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
+            var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust",
+                new { amountMinutes = 32, reason = "Cash at the desk", reasonCode = "goodwill" });
             Assert.True(topUp.IsSuccessStatusCode, await topUp.Content.ReadAsStringAsync());
         }
 
@@ -147,8 +147,8 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Equal(34, await PlayersClub.BalanceAsync(f, club.Sam));
         Assert.Equal(46, await PlayersClub.BalanceAsync(f, club.Jo));
 
-        var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-            new { amountMinutes = 4, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
+        var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust",
+            new { amountMinutes = 4, reason = "Cash at the desk", reasonCode = "goodwill" });
         Assert.True(topUp.IsSuccessStatusCode, await topUp.Content.ReadAsStringAsync());
 
         Assert.Equal(46, await PlayersClub.BalanceAsync(f, club.Jo));

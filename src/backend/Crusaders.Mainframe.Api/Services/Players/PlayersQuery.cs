@@ -234,7 +234,7 @@ public sealed partial class PlayersQuery
     }
 
     /// <summary>One seat's money: paid (net of returns), its target, what is still open, and what came back.</summary>
-    private sealed record SeatMoney(decimal Paid, decimal Target, decimal Unpaid, decimal Returned);
+    private sealed record SeatMoney(int Paid, int Target, int Unpaid, int Returned);
 
     private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, SeatMoney money)
     {
@@ -256,7 +256,7 @@ public sealed partial class PlayersQuery
             paid_minutes = paid,
             target_minutes = target,
             unpaid_minutes = unpaid,
-            // F2-4: share credits that came BACK to this seat — paid_minutes nets them out, so a
+            // F2-4: share minutes that came BACK to this seat — paid_minutes nets them out, so a
             // cancelled game read "paid 0" with no word of the refund.
             returned_minutes = money.Returned,
             needs_consent = s.IsPartner && s.Status == ParticipantStatus.Accepted && s.ShareMinutes > s.ConsentedMinutes,

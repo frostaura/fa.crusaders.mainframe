@@ -33,13 +33,13 @@ public sealed class R2ReturnedMinutesHttpTests(PostgresFixture pg) : IClassFixtu
 
         var before = await (await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}")).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(shown, Seat(before, sam).GetProperty("paid_minutes").GetDecimal());
-        Assert.Equal(0m, Seat(before, sam).GetProperty("returned_minutes").GetDecimal());
+        Assert.Equal(0, Seat(before, sam).GetProperty("returned_minutes").GetInt32());
 
         Assert.Equal(HttpStatusCode.OK, (await club.Client(f, club.Organiser).PostAsync($"/api/v1/bookings/{bookingId}/cancel", null)).StatusCode);
 
         var after = await (await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}")).Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(0m, Seat(after, sam).GetProperty("paid_minutes").GetDecimal());
+        Assert.Equal(0, Seat(after, sam).GetProperty("paid_minutes").GetInt32());
         Assert.Equal(shown, Seat(after, sam).GetProperty("returned_minutes").GetDecimal());
-        Assert.Equal(0m, Seat(after, alex).GetProperty("returned_minutes").GetDecimal());   // never paid, nothing back
+        Assert.Equal(0, Seat(after, alex).GetProperty("returned_minutes").GetInt32());   // never paid, nothing back
     }
 }

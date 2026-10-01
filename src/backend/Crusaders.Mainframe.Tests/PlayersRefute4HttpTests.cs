@@ -112,8 +112,8 @@ public sealed class PlayersRefute4HttpTests(PostgresFixture pg) : IClassFixture<
         var (joBooking, joSeat) = await ReturnDueAsync(club, f, club.Jo, daysAgo: 11);   // another day: one court
         Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Organiser));
 
-        var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-            new { amountMinutes = 16, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
+        var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust",
+            new { amountMinutes = 16, reason = "Cash at the desk", reasonCode = "goodwill" });
 
         Assert.True(topUp.IsSuccessStatusCode);
         Assert.Equal(16, await PlayersClub.BalanceAsync(f, club.Sam));
@@ -198,6 +198,6 @@ public sealed class PlayersRefute4HttpTests(PostgresFixture pg) : IClassFixture<
         var frames = new List<RealtimeMessage>();
         while (channel.Reader.TryRead(out var frame)) frames.Add(frame);
         var balance = Assert.Single(frames, m => m.Event == LedgerService.BalanceEvent);
-        Assert.Equal(16m, JsonDocument.Parse(balance.JsonPayload).RootElement.GetProperty("owed_back_minutes").GetDecimal());
+        Assert.Equal(16, JsonDocument.Parse(balance.JsonPayload).RootElement.GetProperty("owed_back_minutes").GetInt32());
     }
 }

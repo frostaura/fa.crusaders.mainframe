@@ -38,7 +38,7 @@ public sealed class ShareHook
     }
 
     /// <summary>
-    /// After a member RECEIVED credit (a top-up, a desk adjustment, a refund): reconcile every
+    /// After a member RECEIVED minutes (a purchase, a desk sale or adjustment, a refund): reconcile every
     /// booking they pay for on which a return is waiting on them (<c>ReturnPendingSince</c>), so
     /// the partner is paid back the moment the organiser can cover it (review round 2, M1). One
     /// indexed read when nothing waits, which is almost always. Never throws.
@@ -63,13 +63,13 @@ public sealed class ShareHook
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Finding waiting share returns after a credit failed; the sweep will retry");
+            _logger.LogError(ex, "Finding waiting share returns after minutes arrived failed; the sweep will retry");
             return;
         }
 
         // One booking at a time, as the settlement hook does (review round 7): one that throws is
         // logged and marked due for the sweep, and the returns behind it are still retried.
-        foreach (var id in waiting) await SettleOneAsync(tenantId, tenantSlug, id, "after a credit", ct);
+        foreach (var id in waiting) await SettleOneAsync(tenantId, tenantSlug, id, "after minutes arrived", ct);
     }
 
     /// <summary>Reconciles one booking in its own scope; a failure is logged and marks it due. Never throws.</summary>

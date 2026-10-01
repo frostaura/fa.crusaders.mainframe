@@ -34,9 +34,9 @@ public sealed class R3GameListsHttpTests(PostgresFixture pg) : IClassFixture<Pos
 
         // Nobody has accepted: the organiser has paid 32 and, as things stand, carries all of it.
         var before = await ItemAsync(club, f, club.Organiser, bookingId);
-        Assert.Equal(32m, before.GetProperty("my_share_minutes").GetDecimal());
-        Assert.Equal(32m, before.GetProperty("my_paid_minutes").GetDecimal());
-        Assert.Equal(0m, before.GetProperty("my_owing_minutes").GetDecimal());
+        Assert.Equal(32, before.GetProperty("my_share_minutes").GetInt32());
+        Assert.Equal(32, before.GetProperty("my_paid_minutes").GetInt32());
+        Assert.Equal(0, before.GetProperty("my_owing_minutes").GetInt32());
 
         var seat = PlayersClub.SeatOf(body, 2);
         var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareMinutes;
@@ -47,15 +47,15 @@ public sealed class R3GameListsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         // Sam accepted and paid his 10: the organiser has paid 22 net and carries 22; Alex's
         // invitation reduces nothing until he says yes.
         var organiser = await ItemAsync(club, f, club.Organiser, bookingId);
-        Assert.Equal(22m, organiser.GetProperty("my_share_minutes").GetDecimal());
-        Assert.Equal(22m, organiser.GetProperty("my_paid_minutes").GetDecimal());
-        Assert.Equal(0m, organiser.GetProperty("my_owing_minutes").GetDecimal());
+        Assert.Equal(22, organiser.GetProperty("my_share_minutes").GetInt32());
+        Assert.Equal(22, organiser.GetProperty("my_paid_minutes").GetInt32());
+        Assert.Equal(0, organiser.GetProperty("my_owing_minutes").GetInt32());
         var statuses = organiser.GetProperty("players").EnumerateArray().Select(p => p.GetProperty("status").GetString()).ToList();
         Assert.Equal(["accepted", "accepted", "invited"], statuses);
 
         var sam = await ItemAsync(club, f, club.Sam, bookingId);
-        Assert.Equal(10m, sam.GetProperty("my_share_minutes").GetDecimal());
-        Assert.Equal(10m, sam.GetProperty("my_paid_minutes").GetDecimal());
-        Assert.Equal(0m, sam.GetProperty("my_owing_minutes").GetDecimal());
+        Assert.Equal(10, sam.GetProperty("my_share_minutes").GetInt32());
+        Assert.Equal(10, sam.GetProperty("my_paid_minutes").GetInt32());
+        Assert.Equal(0, sam.GetProperty("my_owing_minutes").GetInt32());
     }
 }

@@ -136,7 +136,7 @@ public sealed class PlayersRefuteHttpTests(PostgresFixture pg) : IClassFixture<P
         var organiser = club.Client(f, club.Organiser);
         var add = await organiser.PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players", new { players = new object[] { new { userId = club.Sam } } });
         Assert.True(add.IsSuccessStatusCode, await add.Content.ReadAsStringAsync());
-        var deadline = start.AddMinutes(60).AddHours(48);
+        var deadline = start.AddMinutes(32).AddHours(48);   // the sold end (4 × 8-minute slices) + 48 h
 
         await club.WriteAsync(f, db => db.TenantSettings.IgnoreQueryFilters().First(s => s.TenantId == club.TenantId).SettingsJson =
             With(PlayersClub.Settings, "\"share_lapse_hours\":1"));
@@ -214,15 +214,15 @@ public sealed class PlayersRefuteHttpTests(PostgresFixture pg) : IClassFixture<P
         var b = (await JsonAsync(alexBooks)).GetProperty("booking_id").GetGuid();
 
         var invite = (await JsonAsync(await club.Client(f, club.Organiser).GetAsync("/api/v1/me/invites"))).GetProperty("items")[0];
-        Assert.Equal(84m, invite.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(68m, invite.GetProperty("spendable_minutes").GetDecimal());
-        Assert.Equal(16m, invite.GetProperty("held_minutes").GetDecimal());
+        Assert.Equal(84, invite.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(68, invite.GetProperty("spendable_minutes").GetInt32());
+        Assert.Equal(16, invite.GetProperty("held_minutes").GetInt32());
 
         var seat = invite.GetProperty("participant_id").GetGuid();
         var accepted = await JsonAsync(await AcceptAsync(club, f, club.Organiser, b, seat, 16));
-        Assert.Equal(68m, accepted.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(52m, accepted.GetProperty("spendable_minutes").GetDecimal());
-        Assert.Equal(16m, accepted.GetProperty("held_minutes").GetDecimal());
+        Assert.Equal(68, accepted.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(52, accepted.GetProperty("spendable_minutes").GetInt32());
+        Assert.Equal(16, accepted.GetProperty("held_minutes").GetInt32());
     }
 
     // ------------------------------------------------------------------ (c) a collapsed invite with no reminder behind it

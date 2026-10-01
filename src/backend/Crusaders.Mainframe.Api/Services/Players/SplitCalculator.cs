@@ -104,7 +104,8 @@ public static class SplitCalculator
                 partners.Add(new SplitShare(s.Seat, 0, 0));
                 continue;
             }
-            // P13-B3: a partner's amount is a whole number of minutes ≥ 0, else split_amount_invalid.
+            // A partner's amount is a whole number of minutes ≥ 0 (§1.2): a fraction is refused by
+            // code, never truncated, so "7.5" cannot quietly become 7 and hand the half to nobody.
             if (s.Amount < 0 || decimal.Truncate(s.Amount) != s.Amount || s.Amount > int.MaxValue) return SplitResult.Refuse(InvalidAmount);
             partners.Add(new SplitShare(s.Seat, (int)s.Amount, 0));
         }

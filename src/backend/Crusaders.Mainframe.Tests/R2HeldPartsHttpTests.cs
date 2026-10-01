@@ -23,17 +23,17 @@ public sealed class R2HeldPartsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         Assert.True(accept.IsSuccessStatusCode, await accept.Content.ReadAsStringAsync());
     }
 
-    private static void AssertParts(JsonElement body, params (int Credits, DateTimeOffset Until)[] expected)
+    private static void AssertParts(JsonElement body, params (int Minutes, DateTimeOffset Until)[] expected)
     {
         var parts = body.GetProperty("held_parts").EnumerateArray()
             .Select(p => (p.GetProperty("minutes").GetInt32(), p.GetProperty("until").GetDateTimeOffset())).ToList();
         Assert.Equal(expected.Length, parts.Count);
         for (var i = 0; i < parts.Count; i++)
         {
-            Assert.Equal(expected[i].Credits, parts[i].Item1);
+            Assert.Equal(expected[i].Minutes, parts[i].Item1);
             Assert.Equal(expected[i].Until, parts[i].Item2, TimeSpan.FromSeconds(1));
         }
-        Assert.Equal(body.GetProperty("held_minutes").GetDecimal(), parts.Sum(p => p.Item1));
+        Assert.Equal(body.GetProperty("held_minutes").GetInt32(), parts.Sum(p => p.Item1));
         Assert.Equal(parts[0].Item2, body.GetProperty("held_until").GetDateTimeOffset(), TimeSpan.FromSeconds(1));
     }
 
@@ -54,8 +54,8 @@ public sealed class R2HeldPartsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         await AcceptAsync(club, f, later, PlayersClub.SeatOf(laterBody, 2));
         await AcceptAsync(club, f, sooner, PlayersClub.SeatOf(soonerBody, 2));
 
-        // Sold end + 48 h (the default share_lapse_hours) — 4 slices for the later game, 2 for the sooner.
-        var expected = new[] { (8, soonerAt.AddMinutes(30).AddHours(48)), (16, laterAt.AddMinutes(60).AddHours(48)) };
+        // Sold end + 48 h (the default share_lapse_hours) — 4 eight-minute slices for the later game, 2 for the sooner.
+        var expected = new[] { (8, soonerAt.AddMinutes(16).AddHours(48)), (16, laterAt.AddMinutes(32).AddHours(48)) };
         var organiser = club.Client(f, club.Organiser);
         AssertParts(await (await organiser.GetAsync("/api/v1/wallet")).Content.ReadFromJsonAsync<JsonElement>(), expected);
         AssertParts(await (await organiser.GetAsync("/api/v1/me/profile")).Content.ReadFromJsonAsync<JsonElement>(), expected);

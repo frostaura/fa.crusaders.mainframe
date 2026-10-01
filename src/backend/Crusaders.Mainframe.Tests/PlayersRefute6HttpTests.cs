@@ -83,7 +83,7 @@ public sealed class PlayersRefute6HttpTests(PostgresFixture pg) : IClassFixture<
         var club = await PlayersClub.SeedAsync(f, "r6goodwill");
         var (x, sam) = await SpentS4Async(club, f, 24);
 
-        var credit = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
+        var credit = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust",
             new { amountMinutes = 32, reason = "Court flooded", relatedBookingId = x, reasonCode = "goodwill" });
 
         Assert.True(credit.IsSuccessStatusCode, await credit.Content.ReadAsStringAsync());

@@ -49,7 +49,7 @@ public sealed record ClubReceipt(bool Collected, int? BalanceAfter, string? Reas
 /// <b>A pair, in one save, under the DEBITED member's lock.</b> A collection debits the partner
 /// and locks them, so their balance check is the one that counts (the <see cref="PayerLock"/>
 /// argument, unchanged); a return debits the organiser and locks them. Nobody else is locked:
-/// credit never overspends. The pair's references — <c>share:{participant}:{seq}:out</c> and
+/// a member whose balance only rises never overspends. The pair's references — <c>share:{participant}:{seq}:out</c> and
 /// <c>:in</c> — are unique in the ledger, so two reconciles racing to post the same pair lose on
 /// the index rather than paying twice, and the loser re-reads and finds nothing to do.
 /// </para>
@@ -87,7 +87,7 @@ public sealed class ShareLedger
     /// <summary>What every share reference starts with, before the seat id.</summary>
     private const string SharePrefix = "share:";
 
-    /// <summary>One leg's reference: <c>out</c> is the debited member's row, <c>in</c> the credited one's.</summary>
+    /// <summary>One leg's reference: <c>out</c> is the debited member's row, <c>in</c> the receiving one's.</summary>
     public static string Reference(Guid participantId, int seq, string leg)
     {
         return $"{Prefix(participantId)}{seq}:{leg}";
@@ -333,7 +333,7 @@ public sealed class ShareLedger
         // free after every hold and every return that started waiting EARLIER. So an ordinary
         // return always is, and waiting returns are paid first come first served; one that is not — a hold released at the deadline and spent, or a share a cancellation
         // after check-in let them spend — WAITS: stamped, both sides told once, retried by the
-        // sweep (however old) and by any credit the organiser receives. Never a silent overdraft:
+        // sweep (however old) and by any minutes the organiser receives. Never a silent overdraft:
         // only the desk's named overdraft (OverdraftSeatId) posts it regardless.
         if (!collecting && options.OverdraftSeatId != seatId
             && await _ledger.GetCoverageAsync(debited, bookingId, seatId, ct) < -now.Delta)
@@ -500,14 +500,14 @@ public sealed class ShareLedger
     }
 
     /// <summary>
-    /// The two legs. A collection debits the partner (<c>out</c>) and credits the organiser
-    /// (<c>in</c>); a return debits the organiser and credits the partner. Same type, opposite
+    /// The two legs. A collection debits the partner (<c>out</c>) and pays the organiser
+    /// (<c>in</c>); a return debits the organiser and pays the partner. Same type, opposite
     /// signs, both naming the booking — so every per-booking sum and every club total is unmoved.
     /// </summary>
     public static IReadOnlyList<LedgerPosting> Pair(Booking booking, ShareMove move, Guid actorUserId)
     {
         var amount = Math.Abs(move.Delta);
-        var (debited, credited) = move.Delta > 0
+        var (debited, received) = move.Delta > 0
             ? (move.PartnerUserId, move.OrganiserUserId)
             : (move.OrganiserUserId, move.PartnerUserId);
         var reason = move.Delta > 0 ? "Share of a split booking" : "Share of a split booking returned";
@@ -515,7 +515,7 @@ public sealed class ShareLedger
         [
             new LedgerPosting(debited, LedgerEntryType.ShareTransfer, -amount, actorUserId, booking.Id, reason,
                 Reference(move.ParticipantId, move.Seq, "out")),
-            new LedgerPosting(credited, LedgerEntryType.ShareTransfer, amount, actorUserId, booking.Id, reason,
+            new LedgerPosting(received, LedgerEntryType.ShareTransfer, amount, actorUserId, booking.Id, reason,
                 Reference(move.ParticipantId, move.Seq, "in")),
         ];
     }
@@ -579,15 +579,15 @@ public sealed class ShareLedger
 
     private static string ShareHeadline(ShareDirection d, string other, int amount, bool byClub = false)
     {
-        var cr = MoneyFormat.Minutes(amount);
-        if (byClub && d == ShareDirection.Paid) return $"The club collected {cr} for your share";
-        if (byClub && d == ShareDirection.Received) return $"The club collected {other}'s share: {cr}";
+        var minutes = MoneyFormat.Minutes(amount);
+        if (byClub && d == ShareDirection.Paid) return $"The club collected {minutes} for your share";
+        if (byClub && d == ShareDirection.Received) return $"The club collected {other}'s share: {minutes}";
         switch (d)
         {
-            case ShareDirection.Paid: return $"You paid {other} {cr}";
-            case ShareDirection.Received: return $"{other} paid you {cr}";
-            case ShareDirection.Refunded: return $"{cr} of your share came back";
-            default: return $"{cr} went back to {other}";
+            case ShareDirection.Paid: return $"You paid {other} {minutes}";
+            case ShareDirection.Received: return $"{other} paid you {minutes}";
+            case ShareDirection.Refunded: return $"{minutes} of your share came back";
+            default: return $"{minutes} went back to {other}";
         }
     }
 

@@ -139,7 +139,7 @@ public sealed class UpcomingGames
 
         // Paid: the caller's own wallet on this game, net — the charge less refunds and shares
         // received for the organiser, the share transfers for a partner. A share settled outside
-        // the app moved no credits, so it is counted as paid from both ends (M-3).
+        // the app moved no minutes, so it is counted as paid from both ends (M-3).
         var paid = Math.Max(0, -context.MyNet.GetValueOrDefault(b.Id));
         int myShare;
         var owing = 0;

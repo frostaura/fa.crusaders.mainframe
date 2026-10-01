@@ -13,7 +13,7 @@ public class SplitCalculatorTests
         seats.Select(s => new SplitSeat(s.Seat, s.Guest, s.Weight, s.Amount)).ToList();
 
     [Fact]
-    public void Equal_split_rounds_partners_down_to_whole_credits_and_the_organiser_takes_the_rest()
+    public void Equal_split_rounds_partners_down_to_whole_minutes_and_the_organiser_takes_the_rest()
     {
         var result = SplitCalculator.Split(32, SplitModes.Equal, Seats((1, false, 1, 0), (2, false, 1, 0), (3, false, 1, 0)));
 
@@ -24,11 +24,25 @@ public class SplitCalculatorTests
         Assert.Equal(12, shares[1]);
     }
 
-    [Fact]
-    public void A_fractional_price_leaves_the_fraction_with_the_organiser()
+    /// <summary>
+    /// The organiser keeps every remainder (§1.2): 61 minutes four ways is 15 for each partner and
+    /// 16 for the organiser, and a ratio of 1:1:1 on 100 is 33, 33 and 34 — never a 33.33.
+    /// </summary>
+    [Theory]
+    [InlineData(61, "equal", new[] { 1, 1, 1, 1 }, new[] { 16, 15, 15, 15 })]
+    [InlineData(100, "ratio", new[] { 1, 1, 1 }, new[] { 34, 33, 33 })]
+    [InlineData(45, "ratio", new[] { 1, 2 }, new[] { 15, 30 })]
+    [InlineData(7, "ratio", new[] { 3, 2, 2 }, new[] { 3, 2, 2 })]
+    [InlineData(1, "equal", new[] { 1, 1 }, new[] { 1, 0 })]
+    public void The_remainder_of_a_split_stays_with_the_organiser(int price, string mode, int[] weights, int[] expected)
     {
-        // P13-B3: a price is whole minutes; a fractional price cannot exist (§1.1)
-        Assert.Fail($"P13-B3: a price is whole minutes; a fractional price cannot exist (§1.1)");
+        var seats = weights.Select((w, i) => new SplitSeat(i + 1, false, w)).ToList();
+
+        var result = SplitCalculator.Split(price, mode, seats);
+
+        Assert.Null(result.Error);
+        Assert.Equal(expected, result.Shares!.OrderBy(s => s.Seat).Select(s => s.ShareMinutes));
+        Assert.Equal(price, result.Shares!.Sum(s => s.ShareMinutes));
     }
 
     [Fact]
@@ -53,11 +67,41 @@ public class SplitCalculatorTests
     [Fact]
     public void An_amount_split_takes_the_partners_figures_and_gives_the_organiser_the_remainder()
     {
-        var result = SplitCalculator.Split(32, SplitModes.Amount, Seats((1, false, 0, 0), (2, false, 0, 7.5m), (3, false, 0, 10)));
+        var result = SplitCalculator.Split(32, SplitModes.Amount, Seats((1, false, 0, 0), (2, false, 0, 7), (3, false, 0, 10)));
         var shares = result.Shares!.ToDictionary(s => s.Seat, s => s.ShareMinutes);
-        Assert.Equal(7.5m, shares[2]);
+        Assert.Equal(7, shares[2]);
         Assert.Equal(10, shares[3]);
-        Assert.Equal(14.5m, shares[1]);
+        Assert.Equal(15, shares[1]);
+    }
+
+    /// <summary>An amount is whole minutes (§1.2): a fraction is refused by code, never truncated or rounded.</summary>
+    [Theory]
+    [InlineData(7.5)]
+    [InlineData(0.5)]
+    [InlineData(10.01)]
+    [InlineData(-0.5)]
+    public void An_amount_that_is_not_whole_minutes_is_refused(double amount)
+    {
+        var result = SplitCalculator.Split(32, SplitModes.Amount, Seats((1, false, 0, 0), (2, false, 0, (decimal)amount)));
+
+        Assert.Equal(SplitCalculator.InvalidAmount, result.Error);
+        Assert.Null(result.Shares);
+    }
+
+    [Fact]
+    public void A_whole_amount_written_with_a_zero_fraction_is_whole()
+    {
+        var result = SplitCalculator.Split(32, SplitModes.Amount, Seats((1, false, 0, 0), (2, false, 0, 10.0m)));
+
+        Assert.Null(result.Error);
+        Assert.Equal(22, result.Shares!.Single(s => s.Seat == 1).ShareMinutes);
+    }
+
+    [Fact]
+    public void An_amount_past_the_largest_whole_number_is_refused_rather_than_overflowing()
+    {
+        Assert.Equal(SplitCalculator.InvalidAmount,
+            SplitCalculator.Split(32, SplitModes.Amount, Seats((1, false, 0, 0), (2, false, 0, (decimal)int.MaxValue + 1))).Error);
     }
 
     [Theory]
@@ -72,7 +116,7 @@ public class SplitCalculatorTests
     }
 
     [Fact]
-    public void An_amount_with_more_than_two_decimal_places_is_refused()
+    public void An_amount_with_any_decimal_places_is_refused()
     {
         Assert.Equal(SplitCalculator.InvalidAmount,
             SplitCalculator.Split(32, SplitModes.Amount, Seats((1, false, 0, 0), (2, false, 0, 1.005m))).Error);
@@ -94,7 +138,7 @@ public class SplitCalculatorTests
     /// <summary>
     /// The property: for every generated price, mode and seat set that the calculator accepts,
     /// the shares sum to the price exactly, no share is negative, every partner share under an
-    /// equal or ratio split is a whole number no larger than the exact fraction, and a guest pays 0.
+    /// equal or ratio split is its exact fraction rounded down, and a guest pays 0.
     /// </summary>
     [Fact]
     public void Shares_always_sum_to_the_price_exactly()
@@ -126,10 +170,10 @@ public class SplitCalculatorTests
                 if (input.IsGuest) Assert.Equal(0, share.ShareMinutes);
                 if (mode == SplitModes.Amount || input.IsGuest) continue;
 
-                Assert.Equal(decimal.Floor(share.ShareMinutes), share.ShareMinutes);
                 var weights = mode == SplitModes.Equal ? seats.Count(s => !s.IsGuest) : seats.Where(s => !s.IsGuest).Sum(s => s.Weight);
                 var weight = mode == SplitModes.Equal ? 1 : input.Weight;
-                Assert.True(share.ShareMinutes <= price * weight / weights, $"a partner asked for more than their fraction in case {i}");
+                // Exactly the exact fraction rounded DOWN — not nearest, not up (§1.2, §1.4).
+                Assert.True(share.ShareMinutes == (long)price * weight / weights, $"a partner's share is not ⌊price × weight ÷ total⌋ in case {i}");
             }
         }
         Assert.True(accepted > 3000, $"only {accepted} generated cases were accepted — the generator is not exercising the calculator");

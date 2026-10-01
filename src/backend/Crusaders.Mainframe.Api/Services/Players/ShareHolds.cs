@@ -8,7 +8,7 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <summary>
 /// What a member has set aside for their partners right now: <see cref="Held"/>, shares received
 /// that may still have to go back (released at the deadline, <see cref="ReleasesAt"/> the earliest),
-/// and <see cref="OwedBack"/>, returns already due that are WAITING for their credits to cover them
+/// and <see cref="OwedBack"/>, returns already due that are WAITING for their minutes to cover them
 /// (review round 3). Neither is spendable: <see cref="Reserved"/> is what every spend check takes
 /// off the balance. The balance itself is untouched — both are derived, neither is a ledger row.
 /// </summary>
@@ -37,7 +37,7 @@ public sealed record HeldMinutes(int Held, DateTimeOffset? ReleasesAt, int OwedB
 public sealed record HeldPart(int Minutes, DateTimeOffset Until);
 
 /// <summary>
-/// Credits an organiser received as shares that are not theirs to spend yet (D11, decision of
+/// Minutes an organiser received as shares that are not theirs to spend yet (D11, decision of
 /// 2026-09-28 in <c>memory/decisions-players.md</c>).
 ///
 /// <para>
@@ -52,7 +52,7 @@ public sealed record HeldPart(int Minutes, DateTimeOffset Until);
 /// <b>What is held.</b> Per booking the member is the payer of, the net of the share rows on
 /// their wallet (what came in less what went back), until that booking's share deadline — the
 /// SOLD end plus <c>share_lapse_hours</c>, after which no seat can change and no return can be
-/// asked of them except by a fall in what they owe, which credits them first. A CANCELLED
+/// asked of them except by a fall in what they owe, which pays them first. A CANCELLED
 /// booking holds only the returns still to be posted, so a cancellation that has been settled
 /// frees at once. <b>Derived, never stored</b>: no ledger row moves; every member spend check
 /// asks <see cref="LedgerService.GetSpendableAsync"/>, which is the balance less this.

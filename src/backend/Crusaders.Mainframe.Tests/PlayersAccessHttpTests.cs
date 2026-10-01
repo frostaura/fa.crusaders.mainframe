@@ -54,10 +54,10 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(["organiser", "member", "guest"], players.Select(p => p.GetProperty("kind").GetString()));
         Assert.Equal(["A", "A", "B"], players.Select(p => p.GetProperty("team").GetString()));
         Assert.Equal("Uncle Bob", players[2].GetProperty("name").GetString());
-        Assert.Equal(0m, players[2].GetProperty("share_minutes").GetDecimal());
-        Assert.Equal(16m, players[1].GetProperty("share_minutes").GetDecimal());
+        Assert.Equal(0, players[2].GetProperty("share_minutes").GetInt32());
+        Assert.Equal(16, players[1].GetProperty("share_minutes").GetInt32());
         Assert.True(organiser.GetProperty("permissions").GetProperty("can_invite").GetBoolean());
-        Assert.Equal(32m, organiser.GetProperty("money").GetProperty("price_minutes").GetDecimal());
+        Assert.Equal(32, organiser.GetProperty("money").GetProperty("price_minutes").GetInt32());
 
         // Photo and name only: nothing that identifies a member beyond what the grid shows.
         var member = players[1].EnumerateObject().Select(p => p.Name).ToList();
@@ -89,7 +89,7 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         var players = view.GetProperty("players").EnumerateArray().ToList();
         var only = Assert.Single(players);
         Assert.Equal("organiser", only.GetProperty("kind").GetString());
-        Assert.Equal(32m, only.GetProperty("share_minutes").GetDecimal());
+        Assert.Equal(32, only.GetProperty("share_minutes").GetInt32());
         Assert.False(view.GetProperty("money").GetProperty("is_split").GetBoolean());
         Assert.Empty(await club.SeatsAsync(f, bookingId));
     }
@@ -475,7 +475,6 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         Dictionary<string, object?> Body(string key, int value) => new()
         {
             ["sliceMinutes"] = shown.GetProperty("slice_minutes").GetInt32(),
-            ["slicePriceCredits"] = shown.GetProperty("slice_price_credits").GetDecimal(),
             ["advanceBookingDays"] = shown.GetProperty("advance_booking_days").GetInt32(),
             ["dayStartMinute"] = shown.GetProperty("day_start_minute").GetInt32(),
             ["dayEndMinute"] = shown.GetProperty("day_end_minute").GetInt32(),

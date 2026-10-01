@@ -5,7 +5,8 @@ namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
 /// D11's target rule, row by row: what a partner should have paid the organiser for one booking,
-/// given the seat and the organiser's <c>Owed</c>. A 32-credit court, a 10-credit share.
+/// given the seat and the organiser's <c>Owed</c>. A 32-minute court, a 10-minute share; every
+/// target is <c>⌊Owed × share ÷ price⌋</c> in whole minutes, the organiser keeping the rest (§1.2).
 /// </summary>
 public class ShareRulesTests
 {
@@ -15,7 +16,7 @@ public class ShareRulesTests
         bool checkedIn = false, bool displaced = false, int owed = 32, int paid = 0, bool closed = false) =>
         new(status, partner, outside, share, consent, booking, checkedIn, displaced, 32, owed, paid, closed);
 
-    public static TheoryData<string, ShareFacts, decimal> Table => new()
+    public static TheoryData<string, ShareFacts, int> Table => new()
     {
         { "a live game is shared in full", Facts(), 10 },
         { "a played game is shared in full", Facts(booking: BookingStatus.Completed, checkedIn: true), 10 },
@@ -26,10 +27,11 @@ public class ShareRulesTests
         { "a removed seat is refunded", Facts(ParticipantStatus.Removed), 0 },
         { "a lapsed seat pays nothing", Facts(ParticipantStatus.Lapsed), 0 },
         { "a share settled outside the app is not collected", Facts(outside: true), 0 },
-        // P13-B3: the rows below with a fractional Owed (9.6) or a cent-rounded target (3.12) were
-        // removed for compile; restate them in whole minutes (floor, §1.2):
-        //   cancelled game refunds every partner (owed 9.6 → 0) · no-show penalty pro rata (owed 9.6 → 3)
-        //   fraction rounds DOWN (owed 10, share 10 → 3.12) · lapsed seat return (owed 9.6, paid 10, closed → 3)
+        { "a cancelled game refunds every partner", Facts(booking: BookingStatus.Cancelled, owed: 9), 0 },
+        { "a no-show's penalty is shared pro rata, rounded down", Facts(booking: BookingStatus.NoShow, owed: 9), 2 },
+        { "a fraction rounds DOWN, never to nearest", Facts(owed: 10), 3 },
+        { "a fraction just under a whole minute still rounds down", Facts(owed: 31), 9 },
+        { "a lapsed seat's return follows Owed down, rounded down", Facts(booking: BookingStatus.NoShow, owed: 9, paid: 10, closed: true), 2 },
         { "a game cancelled after check-in is still shared", Facts(booking: BookingStatus.Cancelled, checkedIn: true), 10 },
         { "a no-show with no penalty (S5a) is free for everybody", Facts(booking: BookingStatus.NoShow, owed: 0), 0 },
         { "a displaced game is free", Facts(booking: BookingStatus.Cancelled, displaced: true, owed: 0), 0 },
@@ -45,7 +47,7 @@ public class ShareRulesTests
 
     [Theory]
     [MemberData(nameof(Table))]
-    public void The_target_rule(string because, ShareFacts facts, decimal expected)
+    public void The_target_rule(string because, ShareFacts facts, int expected)
     {
         Assert.True(expected == ShareRules.TargetFor(facts), because);
     }

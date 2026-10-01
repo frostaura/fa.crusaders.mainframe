@@ -126,7 +126,7 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
 
         var detail = await (await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}")).Content.ReadFromJsonAsync<JsonElement>();
         var sam = detail.GetProperty("players").EnumerateArray().Single(p => p.GetProperty("participant_id").GetString() == samSeat.ToString());
-        Assert.Equal(10m, sam.GetProperty("returned_minutes").GetDecimal());
+        Assert.Equal(10, sam.GetProperty("returned_minutes").GetInt32());
     }
 
     // ---- M4-5: an unanswered invitee is not mailed a cancellation -----------------------------

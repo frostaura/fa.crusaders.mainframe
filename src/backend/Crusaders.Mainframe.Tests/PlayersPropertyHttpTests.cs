@@ -213,7 +213,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             // LIVENESS at the end: top up to exactly every earmark plus every pending return, and
             // nothing may be left pending.
             var short_ = pre.Earmarked + pre.Seats.Sum(s => s.Pending) - pre.Balance;
-            if (short_ > 0) await DeskAsync(short_, null, "top_up_cash");
+            if (short_ > 0) await DeskAsync(short_, null, "goodwill");
             await SweepAsync();
             var end = await CheckAsync($"topped up by {Math.Max(0, short_)}", pre);
             Assert.True(end.Seats.All(s => s.Pending == 0 && s.Seat.ReturnPendingSince is null),
@@ -296,7 +296,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 // served says it still waits. (Round 7: the shape that catches the FCFS mutant.)
                 _script.Enqueue(LateWithdrawAsync(biggest: true));
                 _script.Enqueue(LateWithdrawAsync(biggest: false));
-                _script.Enqueue(() => DeskAsync(4, null, "top_up_cash"));
+                _script.Enqueue(() => DeskAsync(4, null, "goodwill"));
                 return await DeskAsync(-await ThinDebitAsync(), null, "correction");
             }
             var game = _games[_rng.Next(_games.Count)];
@@ -331,7 +331,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 case 5:
                     return await DeskAsync(_rng.Next(1, 11) * 4, _rng.NextDouble() < 0.5 ? game.Id : null, "goodwill");
                 case 6:
-                    return await DeskAsync(_debt ? _rng.Next(1, 3) * 4 : _rng.Next(1, 7) * 4, null, "top_up_cash");
+                    return await DeskAsync(_debt ? _rng.Next(1, 3) * 4 : _rng.Next(1, 7) * 4, null, "goodwill");
                 case 7:
                     return await DeskAsync(-(_debt ? await ThinDebitAsync() : _rng.Next(1, 11) * 4), null, "correction");
                 case 8:
@@ -392,7 +392,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 if (first is null) return "old squeeze: nothing waits";
                 var free = now.Balance - now.Earmarked;
                 var topUp = first.Pending - now.EarmarkOf(young.Id) - free;
-                return topUp > 0 ? await DeskAsync(topUp, null, "top_up_cash") : "old squeeze: no top-up needed";
+                return topUp > 0 ? await DeskAsync(topUp, null, "goodwill") : "old squeeze: no top-up needed";
             });
             _script.Enqueue(async () =>
             {
@@ -476,8 +476,8 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             var work = new List<Task>();
             work.AddRange(_games.Select(g => (Task)_club.InClubAsync(f, sp => sp.GetRequiredService<ShareLedger>().ReconcileAsync(g.Id, default))));
             work.Add(SweepAsync());
-            var credit = Admin.PostAsJsonAsync($"/api/v1/admin/credit/{_club.Organiser}/adjust",
-                new { amountMinutes = _rng.Next(1, 6) * 4m, reason = "property step", reasonCode = "top_up_cash", zarReceived = 10m });
+            var credit = Admin.PostAsJsonAsync($"/api/v1/admin/minutes/{_club.Organiser}/adjust",
+                new { amountMinutes = _rng.Next(1, 6) * 4, reason = "property step", reasonCode = "goodwill" });
             var remove = Admin.PostAsJsonAsync($"/api/v1/admin/bookings/{game.Id}/players/{seat}/remove", new { reason = "property step" });
             work.Add(credit);
             work.Add(remove);
@@ -498,8 +498,8 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
 
         private async Task<string> DeskAsync(decimal amount, Guid? booking, string code)
         {
-            var response = await Admin.PostAsJsonAsync($"/api/v1/admin/credit/{_club.Organiser}/adjust",
-                new { amountMinutes = amount, reason = "property step", reasonCode = code, relatedBookingId = booking, zarReceived = 10m });
+            var response = await Admin.PostAsJsonAsync($"/api/v1/admin/minutes/{_club.Organiser}/adjust",
+                new { amountMinutes = (int)amount, reason = "property step", reasonCode = code, relatedBookingId = booking });
             Assert.True(response.IsSuccessStatusCode, $"desk {amount}: {await response.Content.ReadAsStringAsync()}");
             if (amount < 0) _organiserFloor = Math.Min(_organiserFloor, await PlayersClub.BalanceAsync(f, _club.Organiser));
             return $"desk {code} {amount}{(booking is null ? "" : $" naming {booking}")}";

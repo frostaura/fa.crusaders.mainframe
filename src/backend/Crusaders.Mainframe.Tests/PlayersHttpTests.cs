@@ -24,8 +24,8 @@ namespace Crusaders.Mainframe.Tests;
 /// </para>
 ///
 /// <para>
-/// The club's court is 8 credits a slice; the standard game is four slices — 32 credits — split
-/// equally three ways: Sam and Alex 10 each (whole credits, rounded down), the organiser 12.
+/// The club's slices are 8 minutes long; the standard game is four slices — 32 minutes, which is
+/// its price (§1.1) — split equally three ways: Sam and Alex 10 each (rounded down), the organiser 12.
 /// </para>
 /// </summary>
 public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
@@ -61,7 +61,7 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
 
         var (bookingId, body) = await club.BookWithPlayersAsync(f, SamAndAlex(club));
 
-        Assert.Equal(68m, body.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(68, body.GetProperty("balance_after_minutes").GetInt32());
         var seats = await club.SeatsAsync(f, bookingId);
         Assert.Equal([1, 2, 3], seats.Select(s => s.Seat));
         Assert.Equal([12, 10, 10], seats.Select(s => s.ShareMinutes));
@@ -140,7 +140,7 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-        Assert.Equal(10m, (await JsonAsync(second)).GetProperty("paid_minutes").GetDecimal());
+        Assert.Equal(10, (await JsonAsync(second)).GetProperty("paid_minutes").GetInt32());
 
         var pair = await club.SharesAsync(f, bookingId);
         Assert.Equal(2, pair.Count);
@@ -188,7 +188,7 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         // Opening the link shows the game, priced for whoever opened it.
         var view = await JsonAsync(await club.Client(f, club.Sam).GetAsync($"/api/v1/invites/{token}"));
         Assert.True(view.GetProperty("open_link").GetBoolean());
-        Assert.Equal(16m, view.GetProperty("to_pay_minutes").GetDecimal());
+        Assert.Equal(16, view.GetProperty("to_pay_minutes").GetInt32());
 
         var answers = await Task.WhenAll(
             club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/invites/{token}/accept", new { expectedShareMinutes = 16 }),
@@ -220,8 +220,8 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
         var refusal = await JsonAsync(response);
         Assert.Equal(PlayerErrors.InsufficientBalance, refusal.GetProperty("error").GetString());
-        Assert.Equal(10m, refusal.GetProperty("required_minutes").GetDecimal());
-        Assert.Equal(4m, refusal.GetProperty("current_minutes").GetDecimal());
+        Assert.Equal(10, refusal.GetProperty("required_minutes").GetInt32());
+        Assert.Equal(4, refusal.GetProperty("current_minutes").GetInt32());
         Assert.Equal(ParticipantStatus.Invited, (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == samSeat).Status);
         Assert.Empty(await club.SharesAsync(f, bookingId));
     }
@@ -291,8 +291,9 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
 
         Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
         Assert.Equal(50, await PlayersClub.BalanceAsync(f, club.Sam));
-        // 0 after the charge, +16 from Sam, +32 refund, −9.60 penalty, −16 back to Sam.
-        Assert.Equal(22.4m, await PlayersClub.BalanceAsync(f, club.Organiser));
+        // 0 after the charge, +16 from Sam, +32 refund, −9 penalty (⌊30% of 32⌋, the member keeps
+        // the part-minute, §1.2), −16 back to Sam.
+        Assert.Equal(23, await PlayersClub.BalanceAsync(f, club.Organiser));
     }
 
     /// <summary>A no-show's penalty is shared pro rata; the rest of each share comes back.</summary>
@@ -314,9 +315,10 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
 
         var booking = await PlayersClub.ReadAsync(f, db => db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == bookingId));
         Assert.Equal(BookingStatus.NoShow, booking.Status);
-        // Owed = 30% of 32 = 9.60; Sam's 16 of 32 is half of it: 4.80 — so 11.20 came back to him.
-        Assert.Equal(50 - 4.8m, await PlayersClub.BalanceAsync(f, club.Sam));
-        Assert.Equal(32 - 9.6m + 4.8m, await PlayersClub.BalanceAsync(f, club.Organiser));
+        // Owed = ⌊30% of 32⌋ = 9; Sam's 16 of 32 is half of it, rounded down: ⌊4.5⌋ = 4 — so 12 came
+        // back to him and the organiser keeps the odd minute of the penalty (§1.2).
+        Assert.Equal(50 - 4, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(32 - 9 + 4, await PlayersClub.BalanceAsync(f, club.Organiser));
 
         // Late evidence reverses the no-show: the court was played, so the share is the full 16 again.
         await club.InClubAsync(f, async sp =>
@@ -336,11 +338,41 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
     /// reconcile does NOT take them below zero — the rest is unpaid, theirs to pay until the deadline.
     /// </summary>
     [SkippableFact]
-    public Task A_share_the_partner_cannot_cover_is_left_unpaid_never_overdrawn()
+    public async Task A_share_the_partner_cannot_cover_is_left_unpaid_never_overdrawn()
     {
-        // P13-B3: the fixture spends a fraction of a minute (11.2); shares are whole minutes (§1.2)
-        Assert.Fail($"P13-B3: the fixture spends a fraction of a minute (11.2); shares are whole minutes (§1.2)");
-        return Task.CompletedTask;
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await PlayersClub.SeedAsync(f, "plnodebt");
+        await club.CreditAsync(f, club.Sam, 16);
+        var start = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var bookingId = await club.InsertBookingAsync(f, start);
+        await club.CreditAsync(f, club.Organiser, 32);
+        var seat = await AddPartnerAsync(club, f, bookingId, club.Sam);
+        Assert.Equal(HttpStatusCode.OK, (await AcceptAsync(club, f, club.Sam, bookingId, seat)).StatusCode);
+        Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Sam));
+
+        await new NoShowWorker(f.Services, f.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance)
+            .TickAsync(DateTimeOffset.UtcNow, default);
+        // Owed = ⌊30% of 32⌋ = 9; Sam's half of it is ⌊4.5⌋ = 4, so 12 of his 16 came back.
+        Assert.Equal(12, await PlayersClub.BalanceAsync(f, club.Sam));
+        // Sam spends the refund elsewhere.
+        await club.WriteAsync(f, db => db.LedgerEntries.Add(new LedgerEntry
+        {
+            TenantId = club.TenantId, UserId = club.Sam, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = -12, ActorUserId = club.Admin,
+        }));
+
+        await club.InClubAsync(f, async sp =>
+        {
+            var row = await sp.GetRequiredService<MainframeDbContext>().Bookings.FirstAsync(b => b.Id == bookingId);
+            return await sp.GetRequiredService<BookingService>().ReverseNoShowAsync(row, start.AddMinutes(1), Guid.Empty, default);
+        });
+        await SettleAsync(club, f, bookingId);
+
+        Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Sam));
+        var view = await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}"));
+        var unpaid = view.GetProperty("money").GetProperty("unpaid_minutes");
+        Assert.Equal(JsonValueKind.Number, unpaid.ValueKind);
+        Assert.Equal("12", unpaid.GetRawText());
     }
 
     /// <summary>A displaced booking owes nothing (S8), so neither does any partner on it.</summary>
@@ -431,7 +463,7 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         var seat = await club.InsertSeatAsync(f, bookingId, 2, club.Sam, ParticipantStatus.Invited, 16, start.AddDays(-1));
 
         // Before the deadline it may still be paid...
-        var deadline = start.AddMinutes(60).AddHours(48);
+        var deadline = start.AddMinutes(32).AddHours(48);   // the sold end (4 × 8-minute slices) + 48 h
         var worker = f.Services.GetRequiredService<ShareWorker>();
         await worker.TickAsync(deadline.AddMinutes(-1), default);
         Assert.Equal(ParticipantStatus.Invited, (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).Status);

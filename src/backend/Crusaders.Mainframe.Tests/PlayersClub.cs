@@ -20,7 +20,7 @@ namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
 /// A club for the players-and-splits suites (D11–D13): an admin, an organiser, three partners and
-/// a bystander, one 8-credit court, a UTC day that runs round the clock, and quiet hours switched
+/// a bystander, one court on 8-minute slices (so the standard four-slice game costs 32 minutes, §1.1), a UTC day that runs round the clock, and quiet hours switched
 /// OFF so a mail's timing is never the hour the suite happens to run at (the quiet-hours test turns
 /// them on itself). Every address is <c>*.review.test</c>.
 ///
@@ -34,7 +34,7 @@ public sealed class PlayersClub
     public const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 
     public const string Settings =
-        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"penalty_window_minutes":15,"penalty_pct":30,"timezone":"UTC","member_quiet_start_minute":0,"member_quiet_end_minute":0}""";
+        """{"slice_minutes":8,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"penalty_window_minutes":15,"penalty_pct":30,"timezone":"UTC","member_quiet_start_minute":0,"member_quiet_end_minute":0}""";
 
     public Guid TenantId { get; private init; }
     public string Slug { get; private init; } = "";
@@ -121,16 +121,16 @@ public sealed class PlayersClub
 
     // ------------------------------------------------------------------ money and rows
 
-    public async Task CreditAsync(WebApplicationFactory<Program> factory, Guid userId, int credits)
+    public async Task CreditAsync(WebApplicationFactory<Program> factory, Guid userId, int minutes)
     {
         await WriteAsync(factory, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = TenantId, UserId = userId, Type = LedgerEntryType.TopUp, AmountMinutes = credits,
+            TenantId = TenantId, UserId = userId, Type = LedgerEntryType.TopUp, AmountMinutes = minutes,
             ActorUserId = Guid.Empty, Reason = "fixture float",
         }));
     }
 
-    public static async Task<decimal> BalanceAsync(WebApplicationFactory<Program> factory, Guid userId) =>
+    public static async Task<int> BalanceAsync(WebApplicationFactory<Program> factory, Guid userId) =>
         await ReadAsync(factory, db => db.LedgerEntries.IgnoreQueryFilters().Where(l => l.UserId == userId).SumAsync(l => l.AmountMinutes));
 
     public async Task<List<LedgerEntry>> SharesAsync(WebApplicationFactory<Program> factory, Guid bookingId) =>
@@ -153,7 +153,7 @@ public sealed class PlayersClub
         {
             TenantId = TenantId, CourtId = CourtId, UserId = organiser ?? Organiser, BookedByUserId = organiser ?? Organiser,
             PaidByUserId = organiser ?? Organiser, ActorUserId = organiser ?? Organiser, StartsAt = startsAt,
-            EndsAt = startsAt.AddMinutes(15 * slices), SliceMinutes = 15, SliceCount = slices,
+            EndsAt = startsAt.AddMinutes(8 * slices), SliceMinutes = 8, SliceCount = slices,
             AmountChargedMinutes = 8 * slices, Status = BookingStatus.Booked, ChargedAt = startsAt.AddDays(-1),
         };
         await WriteAsync(factory, db =>

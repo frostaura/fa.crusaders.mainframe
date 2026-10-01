@@ -58,8 +58,8 @@ public sealed class PlayersRefute3HttpTests(PostgresFixture pg) : IClassFixture<
     }
 
     private static Task<HttpResponseMessage> TopUpAsync(PlayersClub club, TestWebAppFactory f, decimal credits) =>
-        club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-            new { amountMinutes = credits, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
+        club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/minutes/{club.Organiser}/adjust",
+            new { amountMinutes = credits, reason = "Cash at the desk", reasonCode = "goodwill" });
 
     // ------------------------------------------------------------------ M. a waiting return is set aside
 
@@ -79,9 +79,9 @@ public sealed class PlayersRefute3HttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Sam));
 
         var wallet = await JsonAsync(await club.Client(f, club.Organiser).GetAsync("/api/v1/wallet"));
-        Assert.Equal(10m, wallet.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(16m, wallet.GetProperty("owed_back_minutes").GetDecimal());
-        Assert.Equal(-6m, wallet.GetProperty("spendable_minutes").GetDecimal());
+        Assert.Equal(10, wallet.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(16, wallet.GetProperty("owed_back_minutes").GetInt32());
+        Assert.Equal(-6, wallet.GetProperty("spendable_minutes").GetInt32());
 
         var spend = await club.Client(f, club.Organiser).PostAsJsonAsync("/api/v1/bookings",
             new { courtId = club.CourtId, startsAt = PlayersClub.Tomorrow(8).AddDays(1), sliceCount = 1 });
@@ -216,7 +216,7 @@ public sealed class PlayersRefute3HttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
         var answer = await JsonAsync(removed);
         Assert.True(answer.GetProperty("return_waiting").GetBoolean(), answer.ToString());
-        Assert.Equal(16m, answer.GetProperty("return_minutes").GetDecimal());
+        Assert.Equal(16, answer.GetProperty("return_minutes").GetInt32());
         Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Organiser));
     }
 }
