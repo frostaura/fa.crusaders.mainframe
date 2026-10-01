@@ -184,7 +184,7 @@ describe("the chrome's touch targets", () => {
     const nav = await screen.findByRole("navigation", { name: "Main" });
     for (const tab of within(nav).getAllByRole("link")) {
       expect(tab.className).toContain("min-h-tabbar");
-      expect(tab.className).toContain("md:min-h-touch");
+      expect(tab.className).toContain("@[44rem]/appbar:min-h-touch");
       expect(tab.className).not.toMatch(/\bh-11\b/);
     }
 
