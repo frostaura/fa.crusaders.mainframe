@@ -33,16 +33,14 @@ public partial class MainframeDbContext
                 t.HasCheckConstraint("ck_booking_participants_status", "\"Status\" BETWEEN 0 AND 5");
                 t.HasCheckConstraint(
                     "ck_booking_participants_money",
-                    "\"ShareCredits\" >= 0 AND \"ConsentedCredits\" >= 0 AND \"ShareWeight\" >= 0");
+                    "\"ShareMinutes\" >= 0 AND \"ConsentedMinutes\" >= 0 AND \"ShareWeight\" >= 0");
                 // A guest pays nothing and is nobody's account.
                 t.HasCheckConstraint(
                     "ck_booking_participants_guest",
-                    "\"GuestName\" IS NULL OR (\"UserId\" IS NULL AND \"ShareCredits\" = 0)");
+                    "\"GuestName\" IS NULL OR (\"UserId\" IS NULL AND \"ShareMinutes\" = 0)");
             });
             e.HasKey(p => p.Id);
             e.Property(p => p.Status).HasConversion<int>();
-            e.Property(p => p.ShareCredits).HasColumnType("numeric(10,2)");
-            e.Property(p => p.ConsentedCredits).HasColumnType("numeric(10,2)");
             e.Property(p => p.GuestName).HasMaxLength(BookingParticipant.GuestNameMaxLength);
             e.Property(p => p.SplitMode).HasMaxLength(BookingParticipant.SplitModeMaxLength);
             e.Property(p => p.InviteTokenHash).HasMaxLength(BookingParticipant.TokenHashLength);

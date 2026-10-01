@@ -23,7 +23,7 @@ public enum LedgerEntryType
     LightsPurchase = 7,
 
     /// <summary>
-    /// Money the club took by hand and converted to credits — cash at the desk, an EFT that
+    /// Money the club took by hand for a minutes package — cash at the desk, an EFT that
     /// cleared, a card taken offline.
     ///
     /// <para>
@@ -37,14 +37,14 @@ public enum LedgerEntryType
     ///
     /// <para>
     /// <b>Strictly positive</b>, and refused otherwise. Mixing signs inside a directional
-    /// bucket is what makes a per-row listing unreadable; a goodwill credit or a book
+    /// bucket is what makes a per-row listing unreadable; a goodwill grant or a book
     /// correction is an <see cref="AdminAdjustment"/> and says so.
     /// </para>
     ///
     /// <para>
     /// <i>Rejected:</i> counting <c>AdminAdjustment &gt; 0</c> as revenue. A signed type netted
     /// into a directional bucket is exactly the "field that mixes two things" the repo forbids,
-    /// and it would silently reclassify every goodwill credit ever issued as money the club took.
+    /// and it would silently reclassify every goodwill grant ever issued as money the club took.
     /// </para>
     /// </summary>
     AdminTopUp = 8,
@@ -54,7 +54,7 @@ public enum LedgerEntryType
     ///
     /// <para>
     /// <b>Always a pair, and the pair nets to zero club-wide</b> — one row debits one member and
-    /// the other credits another, under <c>share:{participant}:{seq}:out</c> and <c>:in</c>,
+    /// the other pays another, under <c>share:{participant}:{seq}:out</c> and <c>:in</c>,
     /// posted in one save. So no club total moves: revenue, spend, refunds and penalties are
     /// exactly what they were, and a per-booking sum (<c>Owed</c>, the utilisation report) is
     /// unchanged because both legs name the same booking. What moves is who, between the
@@ -78,7 +78,7 @@ public enum LedgerEntryType
 /// <b>This exists because adding an enum member used to be silently dangerous.</b> There
 /// is no database CHECK constraint on the column, no TypeScript union, and
 /// <c>LedgerService.PostAsync</c> is type-blind — so a new member moved balances correctly
-/// and appeared in <c>net_credits</c>, while being invisible in fifteen
+/// and appeared in <c>net_minutes</c>, while being invisible in fifteen
 /// <c>Where(Type == X)</c> bucket sums across two endpoint files. Nothing failed to
 /// compile. No test failed. The numbers just quietly stopped adding up.
 /// </para>
@@ -116,14 +116,14 @@ public static class LedgerEntryTypes
     public static readonly LedgerEntryType[] Penalty =
         [LedgerEntryType.NoShowPenalty, LedgerEntryType.LateCancellationPenalty];
 
-    /// <summary>An admin moving credits by hand, in either direction.</summary>
+    /// <summary>An admin moving minutes by hand, in either direction.</summary>
     public static readonly LedgerEntryType[] Adjustment = [LedgerEntryType.AdminAdjustment];
 
     /// <summary>A payment clawed back after the fact.</summary>
     public static readonly LedgerEntryType[] Reversal = [LedgerEntryType.PaymentReversal];
 
     /// <summary>
-    /// Credits moving between two members for one split booking (D11). Nets to zero across the
+    /// Minutes moving between two members for one split booking (D11). Nets to zero across the
     /// club by construction, which is why no club report reads it.
     /// </summary>
     public static readonly LedgerEntryType[] Transfer = [LedgerEntryType.ShareTransfer];
@@ -143,14 +143,12 @@ public static class LedgerEntryTypes
 
 /// <summary>
 /// Immutable ledger row. Balance is the sum of these for a given user — never a stored field.
-/// Every credit movement is one of these entries; rows are append-only.
+/// Every money movement is one of these entries; rows are append-only.
 /// <para>
-/// Per the Crusaders client blueprint Rev 2 (A.8), the ledger unit is <b>credits</b>, not ZAR.
-/// The legacy column name <see cref="AmountCredits"/> is preserved for migration stability — read it as
-/// "the unit of account, which Crusaders has fixed at credits". On <see cref="LedgerEntryType.TopUp"/>
-/// rows, <see cref="ZarPaid"/> and <see cref="ConversionRate"/> capture the ZAR amount that funded
-/// the top-up and the class-specific rate used (160 or 240 credits per rand), so the conversion is
-/// auditable forever.
+/// The ledger unit is <b>whole minutes</b> of court time (P13, deviation D-3 from blueprint A.8),
+/// never rand and never a fraction. On <see cref="LedgerEntryType.TopUp"/> and
+/// <see cref="LedgerEntryType.AdminTopUp"/> rows, <see cref="ZarPaid"/> captures the rand that
+/// bought the package, so what the club took for the minutes is auditable forever.
 /// </para>
 /// </summary>
 public sealed class LedgerEntry : ITenantScoped
@@ -161,14 +159,11 @@ public sealed class LedgerEntry : ITenantScoped
 
     public LedgerEntryType Type { get; set; }
 
-    /// <summary>Signed amount in the unit of account (credits for Crusaders). Positive credits the user, negative debits.</summary>
-    public decimal AmountCredits { get; set; }
+    /// <summary>Signed amount in whole minutes, the unit of account. Positive pays the user in, negative debits.</summary>
+    public int AmountMinutes { get; set; }
 
     /// <summary>For <see cref="LedgerEntryType.TopUp"/> + <see cref="LedgerEntryType.PaymentReversal"/>: the ZAR amount that moved. Null on internal entries.</summary>
     public decimal? ZarPaid { get; set; }
-
-    /// <summary>Credits-per-rand at the moment of conversion. Null on non-top-up rows. Stored so historic entries don't re-derive.</summary>
-    public decimal? ConversionRate { get; set; }
 
     public Guid? RelatedBookingId { get; set; }
     public Guid ActorUserId { get; set; }

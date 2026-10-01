@@ -44,8 +44,8 @@ public enum ParticipantStatus
 /// </para>
 ///
 /// <para>
-/// <b>Money is never stored here.</b> <see cref="ShareCredits"/> is what the organiser ASKED
-/// for and <see cref="ConsentedCredits"/> the most the partner AGREED to; what has actually moved
+/// <b>Money is never stored here.</b> <see cref="ShareMinutes"/> is what the organiser ASKED
+/// for and <see cref="ConsentedMinutes"/> the most the partner AGREED to; what has actually moved
 /// is read off the ledger by reference, never kept as a column.
 /// </para>
 ///
@@ -78,15 +78,15 @@ public sealed class BookingParticipant : ITenantScoped
 
     public ParticipantStatus Status { get; set; } = ParticipantStatus.Invited;
 
-    /// <summary>What the organiser has asked this seat to pay, in credits. Always 0 for a guest.</summary>
-    public decimal ShareCredits { get; set; }
+    /// <summary>What the organiser has asked this seat to pay, in whole minutes. Always 0 for a guest.</summary>
+    public int ShareMinutes { get; set; }
 
     /// <summary>
-    /// The most this partner has agreed to pay, in credits — stamped by the partner's own accept.
+    /// The most this partner has agreed to pay, in whole minutes — stamped by the partner's own accept.
     /// A share raised above it is not collected until they accept again; an admin's accept on
     /// their behalf leaves it at 0, which is why that never debits them.
     /// </summary>
-    public decimal ConsentedCredits { get; set; }
+    public int ConsentedMinutes { get; set; }
 
     /// <summary>The ratio weight this seat was split with. 1 under an equal split, 0 under an amount split.</summary>
     public int ShareWeight { get; set; }
@@ -111,11 +111,11 @@ public sealed class BookingParticipant : ITenantScoped
     public DateTimeOffset? LapsedAt { get; set; }
 
     /// <summary>
-    /// Since when this seat's partner is due money BACK that the organiser's spendable credits do
+    /// Since when this seat's partner is due money BACK that the organiser's spendable minutes do
     /// not cover, so the return waits (D11, review round 2). Stamped when a reconcile first finds it
     /// uncovered — the moment both sides are told once — and cleared when it posts or is no longer
     /// due. The minute sweep selects on it (indexed), however old the booking, so a waiting
-    /// return is never stranded; any credit to the organiser retries it at once.
+    /// return is never stranded; any money in to the organiser retries it at once.
     /// </summary>
     public DateTimeOffset? ReturnPendingSince { get; set; }
 

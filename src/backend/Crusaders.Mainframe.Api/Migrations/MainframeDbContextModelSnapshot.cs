@@ -388,8 +388,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<decimal>("AmountChargedCredits")
-                        .HasColumnType("numeric(10,2)");
+                    b.Property<int>("AmountChargedMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<string>("BlockLabel")
                         .HasMaxLength(128)
@@ -513,8 +513,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("CheckedInAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<decimal>("ConsentedCredits")
-                        .HasColumnType("numeric(10,2)");
+                    b.Property<int>("ConsentedMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -560,8 +560,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("SettledOutsideAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<decimal>("ShareCredits")
-                        .HasColumnType("numeric(10,2)");
+                    b.Property<int>("ShareMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<int>("ShareWeight")
                         .HasColumnType("integer");
@@ -613,9 +613,9 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.ToTable("booking_participants", null, t =>
                         {
-                            t.HasCheckConstraint("ck_booking_participants_guest", "\"GuestName\" IS NULL OR (\"UserId\" IS NULL AND \"ShareCredits\" = 0)");
+                            t.HasCheckConstraint("ck_booking_participants_guest", "\"GuestName\" IS NULL OR (\"UserId\" IS NULL AND \"ShareMinutes\" = 0)");
 
-                            t.HasCheckConstraint("ck_booking_participants_money", "\"ShareCredits\" >= 0 AND \"ConsentedCredits\" >= 0 AND \"ShareWeight\" >= 0");
+                            t.HasCheckConstraint("ck_booking_participants_money", "\"ShareMinutes\" >= 0 AND \"ConsentedMinutes\" >= 0 AND \"ShareWeight\" >= 0");
 
                             t.HasCheckConstraint("ck_booking_participants_seat", "\"Seat\" BETWEEN 1 AND 4");
 
@@ -779,9 +779,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
-
-                    b.Property<decimal>("SlicePriceCredits")
-                        .HasColumnType("numeric(10,2)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
@@ -1143,16 +1140,16 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<decimal>("AmountCredits")
-                        .HasColumnType("numeric(10,2)");
-
                     b.Property<string>("AmountLabel")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
-                    b.Property<decimal>("BalanceAfterCredits")
-                        .HasColumnType("numeric(10,2)");
+                    b.Property<int>("AmountMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BalanceAfterMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<Guid>("BookingId")
                         .HasColumnType("uuid");
@@ -1277,11 +1274,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid>("ActorUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<decimal>("AmountCredits")
-                        .HasColumnType("numeric(10,2)");
-
-                    b.Property<decimal?>("ConversionRate")
-                        .HasColumnType("numeric(8,4)");
+                    b.Property<int>("AmountMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1649,15 +1643,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid>("CreatedByUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<decimal?>("CreditsPerZar")
-                        .HasColumnType("numeric(8,4)");
-
                     b.Property<string>("Description")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
-
-                    b.Property<decimal?>("FlatSlicePriceCredits")
-                        .HasColumnType("numeric(10,2)");
 
                     b.Property<bool>("IsSystemDefault")
                         .HasColumnType("boolean");
@@ -1673,14 +1661,11 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<int?>("PackageDiscountBps")
+                        .HasColumnType("integer");
+
                     b.Property<bool?>("PeakPriority")
                         .HasColumnType("boolean");
-
-                    b.Property<int>("PriceMultiplierBps")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("PricingMode")
-                        .HasColumnType("integer");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
@@ -1708,9 +1693,7 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.ToTable("member_groups", null, t =>
                         {
-                            t.HasCheckConstraint("ck_member_groups_credits_per_zar", "\"CreditsPerZar\" IS NULL OR (\"CreditsPerZar\" > 0 AND \"CreditsPerZar\" <= 1000)");
-
-                            t.HasCheckConstraint("ck_member_groups_pricing", "(\"PricingMode\" = 0) OR (\"PricingMode\" = 1 AND \"PriceMultiplierBps\" BETWEEN 0 AND 1000000) OR (\"PricingMode\" = 2 AND \"FlatSlicePriceCredits\" IS NOT NULL AND \"FlatSlicePriceCredits\" >= 0)");
+                            t.HasCheckConstraint("ck_member_groups_package_discount", "\"PackageDiscountBps\" IS NULL OR \"PackageDiscountBps\" BETWEEN 0 AND 10000");
                         });
                 });
 
@@ -1956,6 +1939,72 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("memberships", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MinutePackage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Minutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal>("PriceZar")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("TenantId", "GroupId");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.HasIndex("TenantId", "GroupId", "Name")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 0");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "GroupId", "Name"), false);
+
+                    b.ToTable("minute_packages", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_minute_packages_minutes", "\"Minutes\" BETWEEN 1 AND 60000");
+
+                            t.HasCheckConstraint("ck_minute_packages_price", "\"PriceZar\" > 0 AND \"PriceZar\" <= 100000");
+
+                            t.HasCheckConstraint("ck_minute_packages_status", "\"Status\" IN (0, 1)");
+                        });
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.PartnerFavourite", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1997,11 +2046,13 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<decimal?>("ConversionRate")
-                        .HasColumnType("numeric(8,4)");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DiscountBps")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<string>("ExternalReference")
                         .HasMaxLength(255)
@@ -2019,6 +2070,20 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal>("ListPriceZar")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<int>("Minutes")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("PackageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PackageName")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -2043,7 +2108,12 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "UserId", "CreatedAt");
 
-                    b.ToTable("pending_topups", (string)null);
+                    b.ToTable("pending_topups", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_pending_topups_discount", "\"DiscountBps\" BETWEEN 0 AND 10000");
+
+                            t.HasCheckConstraint("ck_pending_topups_minutes", "\"Minutes\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.PlayCelebration", b =>
@@ -2536,6 +2606,14 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MinutePackage", b =>
+                {
+                    b.HasOne("Crusaders.Mainframe.Api.Domain.MemberGroup", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MatchResult", b =>

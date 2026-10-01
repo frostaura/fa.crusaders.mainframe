@@ -51,7 +51,7 @@ public interface ITenantScoped
 }
 
 /// <summary>
-/// Per-tenant configuration JSON: court_count, slice_minutes, slice_price_credits, penalty_pct,
+/// Per-tenant configuration JSON: court_count, slice_minutes, penalty_pct,
 /// grace_window_minutes, etc. See docs/specs/multi-tenancy.md.
 /// </summary>
 public sealed class TenantSettings : ITenantScoped

@@ -120,14 +120,14 @@ public sealed class DevicePayFor : ITenantScoped
 
     public int CourtNumber { get; set; }
 
-    /// <summary>Credits, the unit of account. What the payer took over.</summary>
-    public decimal AmountCredits { get; set; }
+    /// <summary>Minutes, the unit of account. What the payer took over.</summary>
+    public int AmountMinutes { get; set; }
 
-    /// <summary>The server's rendering of <see cref="AmountCredits"/> the glass showed.</summary>
+    /// <summary>The server's rendering of <see cref="AmountMinutes"/> the glass showed: 1–4 digits.</summary>
     public required string AmountLabel { get; set; }
 
-    /// <summary>Credits. The payer's balance straight after — the first answer's figure.</summary>
-    public decimal BalanceAfterCredits { get; set; }
+    /// <summary>Minutes. The payer's balance straight after — the first answer's figure.</summary>
+    public int BalanceAfterMinutes { get; set; }
 
     /// <summary>Seconds the first answer lit the court for; zero when the booking was already started.</summary>
     public int GrantedSeconds { get; set; }

@@ -17,19 +17,6 @@ public static class MemberGroupSystemKeys
     public const string RegularClassName = "Regular";
 }
 
-/// <summary>How a group prices a slice, relative to the court's own price.</summary>
-public enum GroupPricingMode
-{
-    /// <summary>The court's price, unchanged. What both seeded groups start on.</summary>
-    InheritCourt = 0,
-
-    /// <summary>The court's price times a factor in basis points. 10 000 is 1.00x.</summary>
-    Multiplier = 1,
-
-    /// <summary>A flat price per slice, whatever the court charges.</summary>
-    FlatPerSlice = 2,
-}
-
 /// <summary>
 /// Whether a group still applies. Archiving rather than deleting is how a club removes a rule
 /// without silently changing what every one of its members may book and pay.
@@ -47,12 +34,12 @@ public enum MemberGroupStatus
 /// <para>
 /// <b>The ONE configurable concept (decision D2, 2026-09-23).</b> A group used to be a second axis
 /// beside a two-value member class that drove the top-up rate and blueprint A.12's peak rule.
-/// The class is gone: a group now also carries the top-up conversion rate
-/// (<see cref="CreditsPerZar"/>) and the peak priority (<see cref="PeakPriority"/>), and what was
+/// The class is gone: a group now also carries the package discount
+/// (<see cref="PackageDiscountBps"/>, P13) and the peak priority (<see cref="PeakPriority"/>), and what was
 /// "LeagueOrSenior" is membership of the system group whose <see cref="SystemKey"/> is
 /// <see cref="MemberGroupSystemKeys.League"/>. How several groups combine is
-/// <see cref="Services.MemberTariffs"/>' question for the rate and the peak, and
-/// <see cref="Services.GroupRules"/>' for windows, prices and caps.
+/// <see cref="Services.MemberTariffs"/>' question for the discount and the peak, and
+/// <see cref="Services.GroupRules"/>' for windows and caps.
 /// </para>
 ///
 /// <para>
@@ -75,14 +62,6 @@ public sealed class MemberGroup : ITenantScoped
     public MemberGroupStatus Status { get; set; } = MemberGroupStatus.Active;
     public int SortOrder { get; set; }
 
-    public GroupPricingMode PricingMode { get; set; } = GroupPricingMode.InheritCourt;
-
-    /// <summary>Basis points, so a 0.75x rate is 7 500 and no decimal rounding happens in configuration.</summary>
-    public int PriceMultiplierBps { get; set; } = 10_000;
-
-    /// <summary>Same precision as <c>courts.SlicePriceCredits</c>; a narrower column would round a price the ledger then quotes.</summary>
-    public decimal? FlatSlicePriceCredits { get; set; }
-
     /// <summary>Null inherits the tenant setting. 0 means unlimited, as it does everywhere in this codebase.</summary>
     public int? MaxSlotsPerDay { get; set; }
 
@@ -93,17 +72,17 @@ public sealed class MemberGroup : ITenantScoped
     public int? AdvanceBookingDays { get; set; }
 
     /// <summary>
-    /// Credits per one unit of the club's currency on a top-up, for members of this group. Null
-    /// inherits the tenant's <c>credits_per_zar_regular</c>. Same precision as the ledger's own
-    /// <c>ConversionRate</c> column, because the rate is copied onto the top-up row and then the
-    /// ledger row verbatim and a narrower column here would round the offer.
+    /// The discount, in basis points (0–10 000), this group's members get on the club's minutes
+    /// packages (P13). Null means the group has no say. When several of a member's groups set
+    /// one, the LOWEST wins (<see cref="Services.MemberTariffs"/>). It discounts rand only — a
+    /// package's minutes are the same for everybody.
     /// </summary>
-    public decimal? CreditsPerZar { get; set; }
+    public int? PackageDiscountBps { get; set; }
 
     /// <summary>
     /// What this group says about booking inside the club's peak window at any time (blueprint
     /// A.12): <c>true</c> grants it, <c>false</c> withholds it, <c>null</c> has no say — the same
-    /// "no opinion" state <see cref="CreditsPerZar"/> has. A member has the priority when at
+    /// "no opinion" state <see cref="PackageDiscountBps"/> has. A member has the priority when at
     /// least one of their active groups grants it and none withholds it — see
     /// <see cref="Services.MemberTariffs"/>. Null is what every group that existed before D2
     /// carries, because none of them had any say in peak priority then.
@@ -139,7 +118,7 @@ public sealed class MemberGroup : ITenantScoped
 ///
 /// <para>
 /// <b>A group with no window rows at all is unrestricted</b>, not shut. Without that clause,
-/// creating a group merely to hold a PRICE would silently forbid its members from booking at
+/// creating a group merely to hold a DISCOUNT would silently forbid its members from booking at
 /// any time, which is the opposite of what the admin asked for and would show up as an empty
 /// grid rather than as an error.
 /// </para>

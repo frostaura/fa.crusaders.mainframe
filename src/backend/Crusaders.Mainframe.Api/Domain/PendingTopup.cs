@@ -18,33 +18,34 @@ public sealed class PendingTopup : ITenantScoped
     public Guid TenantId { get; set; }
     public Guid UserId { get; set; }
 
+    /// <summary>What PayFast is asked for: the package price after the locked discount.</summary>
     public decimal AmountZar { get; set; }
 
     /// <summary>
-    /// The credits-per-rand quoted to the member at the moment they were sent to PayFast.
-    ///
-    /// <para>
-    /// <b>Load-bearing, and the reason this column exists.</b> The callback used to
-    /// re-resolve the rate from live <c>tenant_settings</c>, so an admin who changed
-    /// <c>credits_per_zar_*</c> while a member sat on PayFast's card page changed what that
-    /// member received for money they had already paid. Two identical R100 payments minutes
-    /// apart credited 100 and 240; in the damaging direction a member quoted 320 credits for
-    /// R200 was credited 200. The rate is part of the offer, so it is captured with the
-    /// offer and honoured on settlement.
-    /// </para>
-    ///
-    /// <para>
-    /// Nullable only for rows written before this column existed; the callback falls back to
-    /// the live rate for those and nothing else.
-    /// </para>
+    /// The purchase lock (P13): what the member was sold, frozen at checkout. The callback adds
+    /// <see cref="Minutes"/> from this row and never re-reads <see cref="MinutePackage"/>, so an
+    /// admin editing or archiving the package while the member sits on PayFast's card page cannot
+    /// change what money already paid buys. A reference, not a foreign key, like
+    /// <see cref="GroupId"/>.
     /// </summary>
-    public decimal? ConversionRate { get; set; }
+    public Guid PackageId { get; set; }
+
+    /// <summary>A copy of the package's name at checkout, for the receipt and the ledger reason.</summary>
+    public string PackageName { get; set; } = "";
+
+    /// <summary>The whole minutes the callback adds to the balance. Strictly positive.</summary>
+    public int Minutes { get; set; }
+
+    /// <summary>The package price before any group discount. <see cref="AmountZar"/> is after it.</summary>
+    public decimal ListPriceZar { get; set; }
+
+    /// <summary>The group discount applied, in basis points; 0 when none.</summary>
+    public int DiscountBps { get; set; }
 
     /// <summary>
-    /// The group whose <see cref="MemberGroup.CreditsPerZar"/> the rate above was quoted from, or
-    /// null when it was the tenant's default rate — recorded so a reconciliation can see which
-    /// tariff applied. It replaced the member-class column (D2); a row written before that
-    /// carries the league group's id when it was quoted at the league rate.
+    /// The group whose <see cref="MemberGroup.PackageDiscountBps"/> was locked into this purchase,
+    /// or null when no discount applied — recorded so a reconciliation can see which tariff
+    /// applied.
     ///
     /// <para>
     /// A reference, not a foreign key: an empty group may be deleted, and a top-up row is

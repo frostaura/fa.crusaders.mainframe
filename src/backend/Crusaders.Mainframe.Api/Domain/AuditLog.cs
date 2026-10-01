@@ -2,7 +2,7 @@ namespace Crusaders.Mainframe.Api.Domain;
 
 /// <summary>
 /// Append-only audit log. Every admin action — approve, reject, book-on-behalf,
-/// adjust-credit, impersonate — writes a row here. Members have a right to see who
+/// adjust-minutes, impersonate — writes a row here. Members have a right to see who
 /// has touched their data (out of scope for v1 UI but the data is captured).
 /// </summary>
 public sealed class AuditLog : ITenantScoped

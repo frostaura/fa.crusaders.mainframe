@@ -20,7 +20,6 @@ public sealed class Court : ITenantScoped
     public int CourtNumber { get; set; }
     public required string Name { get; set; }
     public CourtType CourtType { get; set; } = CourtType.Squash;
-    public decimal SlicePriceCredits { get; set; }
     public bool IsActive { get; set; } = true;
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

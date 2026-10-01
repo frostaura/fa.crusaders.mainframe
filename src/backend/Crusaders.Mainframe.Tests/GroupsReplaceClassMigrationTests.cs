@@ -153,7 +153,10 @@ public sealed class GroupsReplaceClassMigrationTests : IClassFixture<PostgresFix
 
     /// <summary>
     /// The point of the whole migration: every member's top-up rate and peak standing is what
-    /// their class gave them, read through the same <see cref="MemberTariffs"/> the API uses.
+    /// their class gave them. Read in raw SQL against the schema AT this migration, by the rule
+    /// D2's <c>MemberTariffs</c> applied then (lowest rate any active group sets, else the club's
+    /// <c>credits_per_zar_regular</c>; peak when one active group grants and none withholds) —
+    /// the current model has no rate since P13 (<c>MinutesReplaceCredits</c>), so it cannot read it.
     /// </summary>
     private static async Task AssertRatesUnchangedAsync(string conn)
     {
@@ -168,12 +171,16 @@ public sealed class GroupsReplaceClassMigrationTests : IClassFixture<PostgresFix
 
         foreach (var (tenant, user, rate, peak) in expected)
         {
-            await using var db = Context(conn, tenant);
-            var settings = await new TenantSettingsAccessor(db, TenantOf(tenant)).GetAsync(default);
-            var tariff = await MemberTariffs.ForAsync(db, user, settings, default);
-            Assert.True(rate == tariff.TopUpRate, $"{user}: rate {tariff.TopUpRate}, expected {rate}");
-            Assert.True(peak == tariff.PeakPriority,
-                $"{user}: peak {tariff.PeakPriority}, expected {peak}, withheld by [{string.Join(",", tariff.PeakWithheldBy)}]");
+            var active = $"FROM member_group_members m JOIN member_groups g ON g.\"Id\" = m.\"GroupId\" " +
+                $"WHERE m.\"UserId\" = '{user}' AND g.\"TenantId\" = '{tenant}' AND g.\"Status\" = 0";
+            var actualRate = decimal.Parse(await ScalarAsync(conn,
+                $"SELECT coalesce((SELECT min(g.\"CreditsPerZar\") {active} AND g.\"CreditsPerZar\" IS NOT NULL), " +
+                $"(SELECT (\"SettingsJson\"->>'credits_per_zar_regular')::numeric FROM tenant_settings WHERE \"TenantId\" = '{tenant}'), 1.6)::text"),
+                System.Globalization.CultureInfo.InvariantCulture);
+            var actualPeak = bool.Parse(await ScalarAsync(conn,
+                $"SELECT (coalesce(bool_or(g.\"PeakPriority\" = true), false) AND NOT coalesce(bool_or(g.\"PeakPriority\" = false), false))::text {active}"));
+            Assert.True(rate == actualRate, $"{user}: rate {actualRate}, expected {rate}");
+            Assert.True(peak == actualPeak, $"{user}: peak {actualPeak}, expected {peak}");
         }
     }
 

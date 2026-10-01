@@ -11,7 +11,7 @@ public enum BookingStatus
 
 /// <summary>
 /// A reservation of a court for a slice of time. Per the Crusaders client blueprint Rev 2 (A.9), a
-/// booking is a <b>hold</b> — it reserves the slot and verifies the player has enough credits, but
+/// booking is a <b>hold</b> — it reserves the slot and verifies the player has enough minutes, but
 /// the ledger debit (<see cref="LedgerEntryType.BookingCharge"/>) only fires when the player is
 /// identified at the courtside touchpad ("charge on lights-on"). See BiometricService.MatchAtCourtAsync.
 /// </summary>
@@ -42,8 +42,8 @@ public sealed class Booking : ITenantScoped
     public int SliceMinutes { get; set; }
     public int SliceCount { get; set; } = 1;
 
-    /// <summary>The price quoted to the player at booking time, locked in until cancellation. In credits (legacy column name kept for migration stability).</summary>
-    public decimal AmountChargedCredits { get; set; }
+    /// <summary>The price charged at booking time, locked in until cancellation: whole minutes, <c>SliceMinutes × SliceCount</c>.</summary>
+    public int AmountChargedMinutes { get; set; }
 
     public BookingStatus Status { get; set; } = BookingStatus.Booked;
 
@@ -119,7 +119,7 @@ public sealed class Booking : ITenantScoped
     ///
     /// <list type="bullet">
     ///   <item>A double-tap on the PWA's cancel button had both requests load a
-    ///   <c>Booked</c> row and both post a full refund, so a 200-credit booking paid back 400.</item>
+    ///   <c>Booked</c> row and both post a full refund, so a 200-minute booking paid back 400.</item>
     ///   <item>The no-show sweep materialises its due list once per tick and never re-reads
     ///   <c>CheckedInAt</c>. With a blocking email send per booking in between, a member who
     ///   identified at the pad seconds after the tick began was refunded and penalised for a

@@ -74,7 +74,6 @@ public partial class MainframeDbContext : DbContext
     public DbSet<MemberGroup> MemberGroups => Set<MemberGroup>();
     public DbSet<MemberGroupWindow> MemberGroupWindows => Set<MemberGroupWindow>();
     public DbSet<MemberGroupMember> MemberGroupMembers => Set<MemberGroupMember>();
-
     /// <summary>One row per person who has changed a default. See <see cref="UserPreferences"/>.</summary>
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
 
@@ -103,7 +102,7 @@ public partial class MainframeDbContext : DbContext
     /// It used to read <c>u.TenantId == _tenant.TenantId || u.IsPlatformAdmin</c> — the only
     /// disjunction in the model — which put every platform-admin row in the deployment inside
     /// every tenant's <c>db.Users</c>. That was reachable, not theoretical: the existence
-    /// check in <c>POST /api/v1/admin/credit/{userId}/adjust</c> passed on a foreign row, so a
+    /// check in <c>POST /api/v1/admin/minutes/{userId}/adjust</c> passed on a foreign row, so a
     /// tenant admin could post ledger entries in their own tenant against a user who was not
     /// in it, and those entries then counted in that tenant's revenue report.
     /// </para>
@@ -175,6 +174,7 @@ public partial class MainframeDbContext : DbContext
 
         ConfigureDevices(modelBuilder);
         ConfigureMemberGroups(modelBuilder);
+        ConfigureMinutePackages(modelBuilder);
         ConfigureAccessCodes(modelBuilder);
         ConfigureCourtLightState(modelBuilder);
         ConfigureDeviceErrors(modelBuilder);
@@ -192,7 +192,6 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(c => new { c.TenantId, c.CourtNumber }).IsUnique();
             e.Property(c => c.Name).HasMaxLength(128).IsRequired();
             e.Property(c => c.CourtType).HasConversion<int>();
-            e.Property(c => c.SlicePriceCredits).HasColumnType("numeric(10,2)");
             e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
         });
 
@@ -282,7 +281,7 @@ public partial class MainframeDbContext : DbContext
             // tenant-blind — the same defect D2-B02 names on ledger_entries — so two clubs on
             // one merchant account, or any two sandboxes with small repeating ids, collided
             // here: the second club's completion raised 23505 on a table the caller was not
-            // even looking at, and the member was never credited for money PayFast took. Found
+            // even looking at, and the member never received the minutes PayFast took money for. Found
             // by the cross-tenant fixture for D2-B02, which the ledger-side fix alone did not
             // turn green.
             //
@@ -294,9 +293,15 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(p => new { p.TenantId, p.ExternalReference })
                 .IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             e.Property(p => p.AmountZar).HasColumnType("numeric(10,2)");
-            // Same precision as ledger_entries.ConversionRate — the two hold the same number
-            // and a narrower column here would silently round the rate the ledger then quotes.
-            e.Property(p => p.ConversionRate).HasColumnType("numeric(8,4)");
+            // The purchase lock (P13): the callback honours these, never the live package.
+            e.Property(p => p.PackageName).HasMaxLength(MinutePackage.NameMaxLength).IsRequired();
+            e.Property(p => p.ListPriceZar).HasColumnType("numeric(10,2)");
+            e.Property(p => p.DiscountBps).HasDefaultValue(0);
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_pending_topups_minutes", "\"Minutes\" > 0");
+                t.HasCheckConstraint("ck_pending_topups_discount", "\"DiscountBps\" BETWEEN 0 AND 10000");
+            });
             e.Property(p => p.IdempotencyKey).HasMaxLength(64).IsRequired();
             e.Property(p => p.GatewayCheckoutId).HasMaxLength(128);
             e.Property(p => p.ExternalReference).HasMaxLength(255);
@@ -320,32 +325,18 @@ public partial class MainframeDbContext : DbContext
             e.Property(g => g.Name).HasMaxLength(GroupRules.MaxNameLength).IsRequired();
             e.Property(g => g.Description).HasMaxLength(GroupRules.MaxDescriptionLength);
             e.Property(g => g.Status).HasConversion<int>();
-            e.Property(g => g.PricingMode).HasConversion<int>();
-            // Same precision as courts.SlicePriceCredits: the two hold the same kind of number,
-            // and a narrower column here would round a price the ledger then quotes.
-            e.Property(g => g.FlatSlicePriceCredits).HasColumnType("numeric(10,2)");
             e.HasIndex(g => new { g.TenantId, g.Status });
-            // Same precision as ledger_entries.ConversionRate and pending_topups.ConversionRate:
-            // the rate is copied onto both verbatim, so a narrower column here would round the offer.
-            e.Property(g => g.CreditsPerZar).HasColumnType("numeric(8,4)");
             e.Property(g => g.SystemKey).HasMaxLength(32);
             // One league group per club: the deprecated member_class field, the seeder and the
             // migration all find it by this key, so two of them would be two answers.
             e.HasIndex(g => new { g.TenantId, g.SystemKey })
                 .IsUnique().HasFilter("\"SystemKey\" IS NOT NULL");
-            // A top-up rate of zero would take a member's money and credit nothing; the API
-            // refuses it and the database has the last word, as it does on the price (D2-B06).
+            // Basis points of the club-package price (P13). Null is "no say"; the API refuses
+            // anything else outside 0..10000 and the database has the last word, as it does on
+            // every money column (D2-B06).
             e.ToTable(t => t.HasCheckConstraint(
-                "ck_member_groups_credits_per_zar",
-                "\"CreditsPerZar\" IS NULL OR (\"CreditsPerZar\" > 0 AND \"CreditsPerZar\" <= 1000)"));
-            // The database is the last place a nonsense price can be refused, which is the whole
-            // lesson of D2-B06: the settings PUT was not the only way a negative one got in.
-            e.ToTable(t => t.HasCheckConstraint(
-                "ck_member_groups_pricing",
-                "(\"PricingMode\" = 0) "
-                + "OR (\"PricingMode\" = 1 AND \"PriceMultiplierBps\" BETWEEN 0 AND 1000000) "
-                + "OR (\"PricingMode\" = 2 AND \"FlatSlicePriceCredits\" IS NOT NULL "
-                + "AND \"FlatSlicePriceCredits\" >= 0)"));
+                "ck_member_groups_package_discount",
+                "\"PackageDiscountBps\" IS NULL OR \"PackageDiscountBps\" BETWEEN 0 AND 10000"));
             e.HasQueryFilter(g => g.TenantId == _tenant.TenantId);
         });
 
@@ -494,8 +485,6 @@ public partial class MainframeDbContext : DbContext
             e.HasKey(p => p.Id);
             e.Property(p => p.Nonce).HasMaxLength(32).IsRequired();
             e.Property(p => p.AmountLabel).HasMaxLength(16).IsRequired();
-            e.Property(p => p.AmountCredits).HasColumnType("numeric(10,2)");
-            e.Property(p => p.BalanceAfterCredits).HasColumnType("numeric(10,2)");
             e.HasIndex(p => new { p.TenantId, p.DeviceId, p.Nonce }).IsUnique();
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
         });
@@ -677,7 +666,6 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(b => new { b.TenantId, b.ShareReconcileDueAt }).HasFilter("\"ShareReconcileDueAt\" IS NOT NULL");
             // D14: the play recompute markers a change staged — a handful, drained without a scan.
             e.HasIndex(b => new { b.TenantId, b.PlayRecomputeDueAt }).HasFilter("\"PlayRecomputeDueAt\" IS NOT NULL");
-            e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
             e.Property(b => b.Status).HasConversion<int>();
             // How "edit this and future" finds an occurrence's rows, and how the grid learns
             // which league night a block belongs to. StartsAt last so the index also serves
@@ -698,20 +686,18 @@ public partial class MainframeDbContext : DbContext
 
             // The night trace asks "what did this person do" in BOTH directions — as the
             // subject of a movement and as the actor of one — because an admin adjusting
-            // somebody's credits belongs on that member's night AND on the admin's own. The
+            // somebody's minutes belongs on that member's night AND on the admin's own. The
             // subject half is served by the index above; without this one the actor half is a
             // sequential scan of the club's entire ledger.
             e.HasIndex(l => new { l.TenantId, l.ActorUserId, l.CreatedAt });
 
             e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
-            e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
-            e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
             e.Property(l => l.Type).HasConversion<int>();
 
             // A CHECK constraint on the enum's range. The column is a plain integer, so
             // without this a bad write — a bug, a bad migration, a hand-run UPDATE —
-            // persists a value no code can interpret, and it lands in net_credits while
+            // persists a value no code can interpret, and it lands in net_minutes while
             // matching no bucket. The database is the last place that can refuse it.
             //
             // Widen this when the enum grows: LedgerEntryTypeCoverageTests pins the count,

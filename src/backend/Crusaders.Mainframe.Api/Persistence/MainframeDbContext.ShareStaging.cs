@@ -13,7 +13,7 @@ namespace Crusaders.Mainframe.Api.Persistence;
 ///
 /// <para>
 /// So every save that may move a booking's <c>Owed</c> — a ledger row naming the booking (a refund,
-/// a penalty, a desk credit or debit; share transfers excepted, they are the follow-up itself), or
+/// a penalty, a desk grant or debit; share transfers excepted, they are the follow-up itself), or
 /// a change to its status or check-in — stages the durable "reconcile due" marker on that booking
 /// IN THE SAME TRANSACTION, when it has partner seats. Crash-safe by construction: the money and
 /// the marker commit together or not at all. The hook's reconcile, starting after the commit,
