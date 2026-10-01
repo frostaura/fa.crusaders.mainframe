@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
   DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Desktop, HandWaving, MapTrifold, Moon, Question, SignOut, Sun, UserCircle, Wallet, type Icon } from "@/components/ui/icons";
+import { ArrowCounterClockwise, Compass, Desktop, Moon, Question, SignOut, Sun, UserCircle, Wallet, type Icon } from "@/components/ui/icons";
 import { walletHref } from "@/lib/balance";
 import { formatCredits } from "@/lib/utils";
 import { useChipBalance } from "./chipBalance";
@@ -145,7 +145,9 @@ export function AccountMenu() {
         {member ? (
           <DropdownMenuItem asChild onSelect={going}>
             <Link to={`${GET_STARTED_PATH}?replay=1`}>
-              <HandWaving size={16} aria-hidden="true" className="text-text-muted" />
+              {/* P5-7 (R5): glyphs the first load already carries — HandWaving and MapTrifold were
+                  5.4 kB raw in every member's entry chunk for two menu items. */}
+              <ArrowCounterClockwise size={16} aria-hidden="true" className="text-text-muted" />
               {REPLAY_WELCOME}
             </Link>
           </DropdownMenuItem>
@@ -153,7 +155,7 @@ export function AccountMenu() {
         {admin ? (
           <DropdownMenuItem asChild onSelect={going}>
             <Link to={ADMIN_TOUR_PATH}>
-              <MapTrifold size={16} aria-hidden="true" className="text-text-muted" />
+              <Compass size={16} aria-hidden="true" className="text-text-muted" />
               {REPLAY_ADMIN_TOUR}
             </Link>
           </DropdownMenuItem>

@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { useSyncExternalStore, type ComponentType } from "react";
 import { whenApiQuiet } from "./lib/api";
 import { prefetchMyInvites } from "./lib/earlyInvites";
 import { prefetchRouteData } from "./lib/offline/memberReads";
@@ -21,16 +21,16 @@ import { prefetchRouteData } from "./lib/offline/memberReads";
  * one), and neither runs offline or when the phone asks to save data.
  * </p>
  */
-export const routeChunks: Record<"schedule" | "wallet" | "profile" | "bookingDetail" | "invites" | "inbox", () => Promise<{ default: ComponentType }>> = {
-  schedule: () => import("./pages/Schedule"),
-  wallet: () => import("./pages/Wallet"),
-  profile: () => import("./pages/Profile"),
-  bookingDetail: () => import("./pages/BookingDetail"),
-  invites: () => import("./pages/Invites"),
-  inbox: () => import("./pages/Inbox"),
-};
+type ChunkName = "schedule" | "wallet" | "profile" | "bookingDetail" | "invites" | "inbox";
 
-type ChunkName = keyof typeof routeChunks;
+export const routeChunks: Record<ChunkName, () => Promise<{ default: ComponentType }>> = {
+  schedule: () => noteChunk("schedule", import("./pages/Schedule")),
+  wallet: () => noteChunk("wallet", import("./pages/Wallet")),
+  profile: () => noteChunk("profile", import("./pages/Profile")),
+  bookingDetail: () => noteChunk("bookingDetail", import("./pages/BookingDetail")),
+  invites: () => noteChunk("invites", import("./pages/Invites")),
+  inbox: () => noteChunk("inbox", import("./pages/Inbox")),
+};
 
 /** Most specific first: `/bookings/invites` is its own page, not a booking id. */
 const BY_PATH: readonly [RegExp, ChunkName][] = [
@@ -161,4 +161,72 @@ const INVITES_READERS = /^\/(bookings|bookings\/invites|inbox)\/?$/;
 export function intentProps(to: string) {
   const go = () => routeIntent(to);
   return { onPointerDown: go, onMouseEnter: go, onFocus: go };
+}
+
+/*
+ * P5-3 (review round 5) — a navigation waiting on a page's code says so at once.
+ *
+ * On a first session (no worker yet, so no chunk on the phone) a tap on a booking card left the
+ * old page standing, with nothing to say the tap had landed, for as long as the detail's code took
+ * (0.5 s on slow 4G, 1.5–1.8 s on Fast 3G): the router moves in a transition, so a page under the
+ * same Suspense boundary is kept rather than replaced by its skeleton. The tap is seen here instead
+ * (`components/shell/RoutePending` marks a click on a link to a page whose code has not arrived),
+ * and the shell draws a pending cue until that code has arrived — or failed, or 20 s have passed.
+ */
+
+const loaded = new Set<ChunkName>();
+let pendingPath: string | null = null;
+let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingListeners = new Set<() => void>();
+const PENDING_CAP_MS = 20_000;
+
+function setPending(path: string | null) {
+  if (pendingTimer !== null) { clearTimeout(pendingTimer); pendingTimer = null; }
+  if (path !== null) pendingTimer = setTimeout(() => setPending(null), PENDING_CAP_MS);
+  if (pendingPath === path) return;
+  pendingPath = path;
+  for (const listener of [...pendingListeners]) listener();
+}
+
+function chunkFor(pathname: string): ChunkName | null {
+  return BY_PATH.find(([pattern]) => pattern.test(pathname))?.[1] ?? null;
+}
+
+/** Records a page's code arriving (or failing): a navigation waiting on it is no longer pending. */
+export function noteChunk<T>(name: ChunkName, load: Promise<T>): Promise<T> {
+  const settle = () => {
+    if (pendingPath !== null && chunkFor(pendingPath) === name) setPending(null);
+  };
+  load.then(() => { loaded.add(name); settle(); }, settle);
+  return load;
+}
+
+/** A link to `pathname` was followed: pending while its page's code has not arrived. */
+export function markNavigationPending(pathname: string): boolean {
+  const name = chunkFor(pathname);
+  if (name === null || loaded.has(name)) return false;
+  setPending(pathname);
+  return true;
+}
+
+/** The navigation landed (the shell's location moved): nothing is pending any more. */
+export function clearNavigationPending(): void {
+  setPending(null);
+}
+
+export function isNavigationPending(): boolean {
+  return pendingPath !== null;
+}
+
+export function subscribeNavigationPending(listener: () => void): () => void {
+  pendingListeners.add(listener);
+  return () => { pendingListeners.delete(listener); };
+}
+
+/**
+ * Whether a followed link is waiting on its page's code. The shell draws `RoutePendingBar` under
+ * the top bar and marks `<main>` busy while it is.
+ */
+export function useNavigationPending(): boolean {
+  return useSyncExternalStore(subscribeNavigationPending, isNavigationPending, () => false);
 }

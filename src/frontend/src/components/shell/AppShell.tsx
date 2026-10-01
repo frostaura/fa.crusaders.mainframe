@@ -5,6 +5,7 @@ import { tokenStore } from "@/lib/api";
 import { useAdminAttention } from "@/lib/adminAttention";
 import { useAuth } from "@/lib/auth";
 import { useDataOwner } from "@/lib/offline/useCachedRead";
+import { useNavigationPending } from "@/routeChunks";
 import { cn } from "@/lib/utils";
 import { CelebrationOverlay } from "../play/CelebrationOverlay";
 import { ShutDoorsBanner } from "../doors/ShutDoorsBanner";
@@ -16,6 +17,7 @@ import { LANDING_PATH } from "./nav";
 import { NotificationBell } from "./NotificationBell";
 import { PageErrorBoundary } from "./PageErrorBoundary";
 import { PrimaryNav } from "./PrimaryNav";
+import { RoutePendingBar } from "./RoutePending";
 import { SkipLink } from "./SkipLink";
 
 /**
@@ -121,6 +123,8 @@ export default function AppShell() {
   const attention = useAdminAttention({ enabled: isAdmin });
   const doors = useDoorsChrome(isAdmin, location.pathname);
   const headerRef = useRef<HTMLElement>(null);
+  // P5-3 — a followed link waiting on its page's code (first session: nothing on the phone yet).
+  const navigationPending = useNavigationPending();
 
   const headerless = HEADERLESS.test(location.pathname);
   /**
@@ -201,6 +205,7 @@ export default function AppShell() {
             ) : null}
           </div>
         </div>
+        <RoutePendingBar />
       </header>
       {/*
         `relative` (F4-3): <main> is the scroller, so it must also be the containing block of
@@ -215,6 +220,7 @@ export default function AppShell() {
       <main
         id="main-content"
         tabIndex={-1}
+        aria-busy={navigationPending || undefined}
         className="relative flex min-h-0 flex-1 flex-col overflow-auto"
         style={{
           paddingBottom: "calc(var(--app-bottom-bar-height, 0px) + var(--context-bar-height, 0px))",

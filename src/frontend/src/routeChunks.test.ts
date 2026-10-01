@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { prefetchNavChunks, preloadAtSessionCheck, preloadRouteChunk, routeChunks } from "./routeChunks";
+import {
+  clearNavigationPending, isNavigationPending, markNavigationPending, noteChunk, prefetchNavChunks, preloadAtSessionCheck,
+  preloadRouteChunk, routeChunks,
+} from "./routeChunks";
 
 /** Perf lane (2026-09-30) — a page's code fetched before it is opened, as a hint and nothing more. */
 const never = () => new Promise<never>(() => {});
@@ -156,5 +159,44 @@ describe("prefetchNavChunks — every page waits for the open page's reads", () 
     quietNow();
     await vi.advanceTimersByTimeAsync(1);
     expect(order).toEqual(["schedule", "wallet", "profile"]);
+  });
+});
+
+/**
+ * P5-3 (review round 5) — a followed link waiting on its page's code is pending until the code
+ * has arrived (or failed), and a page whose code is on the phone is never pending.
+ */
+describe("a navigation waiting on its page's code", () => {
+  it("is pending from the tap until the code arrives, and never again once it has", async () => {
+    let arrive: (m: { default: () => null }) => void = () => undefined;
+    const code = new Promise<{ default: () => null }>((resolve) => { arrive = resolve; });
+
+    expect(markNavigationPending("/bookings/b0000000-0000-0000-0000-000000000001")).toBe(true);
+    expect(isNavigationPending()).toBe(true);
+    noteChunk("bookingDetail", code);
+    arrive({ default: () => null });
+    await code;
+    await Promise.resolve();
+    expect(isNavigationPending()).toBe(false);
+    expect(markNavigationPending("/bookings/b0000000-0000-0000-0000-000000000002"), "its code is here now").toBe(false);
+  });
+
+  it("clears on a failed load, on landing, and after 20 s at most; a page in the entry is never pending", async () => {
+    vi.useFakeTimers();
+    expect(markNavigationPending("/my-code")).toBe(false);
+
+    const failed = Promise.reject(new Error("chunk 404"));
+    markNavigationPending("/inbox");
+    noteChunk("inbox", failed).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(isNavigationPending()).toBe(false);
+
+    markNavigationPending("/wallet");
+    clearNavigationPending();
+    expect(isNavigationPending()).toBe(false);
+
+    markNavigationPending("/profile");
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(isNavigationPending()).toBe(false);
   });
 });

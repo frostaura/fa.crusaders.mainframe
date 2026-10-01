@@ -602,3 +602,28 @@ test.describe("V5-3 — the top bar at 200 % text from md", () => {
     await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
   });
 });
+
+/**
+ * P5-3 (review round 5) — first session, no worker yet: a tap on a page whose code has not arrived
+ * left the old page standing with nothing to say the tap had landed (0.5 s on slow 4G, up to 1.8 s
+ * on Fast 3G). The router moves in a transition, so Wallet stays drawn until Bookings' code is
+ * here; the cue under the top bar (and `<main aria-busy>`) is what answers the tap at once.
+ */
+test("P5-3 — a tap on a page whose code has not arrived is answered at once", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  // Bookings' code is held until the test lets it through — the prefetch's ask included.
+  await page.route(/\/src\/pages\/Schedule\.tsx/, async (route) => { await held; await route.continue(); });
+  await openMember(page, "/wallet");
+  await expect(page.locator("#main-content h1")).toBeVisible();
+
+  await mainNav(page).getByRole("link", { name: "Bookings" }).click();
+  await expect(page.locator("[data-route-pending]")).toBeVisible({ timeout: 300 });
+  await expect(page.locator("#main-content")).toHaveAttribute("aria-busy", "true");
+
+  release();
+  await expect(page).toHaveURL(/\/bookings$/);
+  await expect(page.locator("[data-route-pending]")).toHaveCount(0);
+  await expect(page.locator("#main-content")).not.toHaveAttribute("aria-busy", "true");
+});
