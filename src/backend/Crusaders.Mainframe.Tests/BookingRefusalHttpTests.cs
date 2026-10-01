@@ -517,7 +517,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         using var createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
         var blockId = createdBody.RootElement.GetProperty("booking_id").GetGuid();
 
-        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/v1/admin/blocks/{blockId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/v1/admin/blocks/{blockId}?reason=Coaching%20moved")).StatusCode);
 
         var (status, _) = await PostBookingAsync(ClientFor(factory, s, s.MemberUserId), s.CourtId, startsAt);
         Assert.Equal(HttpStatusCode.OK, status);

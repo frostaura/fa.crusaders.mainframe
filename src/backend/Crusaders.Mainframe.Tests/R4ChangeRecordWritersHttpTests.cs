@@ -141,8 +141,8 @@ public sealed class R4ChangeRecordWritersHttpTests(PostgresFixture pg) : IClassF
             blockId = await db.Bookings.IgnoreQueryFilters()
                 .Where(b => b.TenantId == club.TenantId && b.Status == BookingStatus.AdminBlock).Select(b => b.Id).SingleAsync();
         }
-        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/v1/admin/blocks/{blockId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await admin.DeleteAsync($"/api/v1/admin/blocks/{blockId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/v1/admin/blocks/{blockId}?reason=Coaching%20moved")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.DeleteAsync($"/api/v1/admin/blocks/{blockId}?reason=Coaching%20moved")).StatusCode);
         var lifted = Assert.Single(await RowsAsync(club.TenantId, AdminChangeActions.BookingBlockLifted));
         Assert.Equal("Coaching", Diff(lifted)["label"].Before);
         Assert.Null(lifted.AfterJson);

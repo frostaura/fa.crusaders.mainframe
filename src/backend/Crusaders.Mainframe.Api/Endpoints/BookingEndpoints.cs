@@ -112,15 +112,45 @@ public static class BookingEndpoints
             return ToHttpResult(result, ctx);
         });
 
-        blocks.MapDelete("/{blockId:guid}", async (Guid blockId, HttpContext ctx, AdminBlockService svc, CancellationToken ct) =>
-        {
-            var actorId = ctx.User.Id() ?? Guid.Empty;
-            return await svc.RemoveAsync(blockId, actorId, ct)
-                ? Results.NoContent()
-                : Results.NotFound(new { error = "block_not_found" });
-        });
+        blocks.MapDelete("/{blockId:guid}", LiftBlockAsync);
 
         return app;
+    }
+
+    /// <summary>
+    /// Lifting a club hold (review round 5, A5-1): one tap on the grid DELETEd it with no reason,
+    /// so the record said a block went and never why. The reason is required like a desk cancel's
+    /// and lands on the <c>booking.block_lifted</c> row. A query parameter, because the console's
+    /// DELETE carries no body; a JSON body <c>{ reason }</c> is read when the query has none.
+    /// Refused before the lookup, so a blank reason is <c>reason_required</c> whatever the id.
+    /// </summary>
+    private static async Task<IResult> LiftBlockAsync(
+        Guid blockId, string? reason, HttpContext ctx, AdminBlockService svc, CancellationToken ct)
+    {
+        var said = (string.IsNullOrWhiteSpace(reason) ? await BodyReasonAsync(ctx, ct) : reason)?.Trim();
+        if (string.IsNullOrEmpty(said)) return Results.BadRequest(new { error = "reason_required" });
+        if (said.Length > BulkSettings.MaxReasonLength)
+            return Results.BadRequest(new { error = "reason_too_long", max = BulkSettings.MaxReasonLength });
+
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        return await svc.RemoveAsync(blockId, actorId, said, ct)
+            ? Results.NoContent()
+            : Results.NotFound(new { error = "block_not_found" });
+    }
+
+    /// <summary>The <c>reason</c> of an optional JSON body, or null for none or anything unreadable.</summary>
+    private static async Task<string?> BodyReasonAsync(HttpContext ctx, CancellationToken ct)
+    {
+        if (!ctx.Request.HasJsonContentType()) return null;
+        try
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<LiftBlockRequest>(ct);
+            return body?.Reason;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -481,6 +511,9 @@ public static class BookingEndpoints
 }
 
 public sealed record CreateBlockRequest(Guid CourtId, DateTimeOffset StartsAt, int SliceCount, string? Label);
+
+/// <summary>The optional body of a block lift (A5-1); the query's <c>reason</c> wins.</summary>
+public sealed record LiftBlockRequest(string? Reason);
 /// <summary>
 /// A member's booking. <paramref name="Players"/>, <paramref name="SplitMode"/> and
 /// <paramref name="OrganiserWeight"/> are D11's optional players payload — omitted, the booking is

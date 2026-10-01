@@ -121,8 +121,8 @@ public sealed class AdminBlockService
         return new BookingResult.Ok(block, 0m);
     }
 
-    /// <summary>Lifts a block. Only a block — a member's booking is cancelled through <see cref="BookingService.CancelAsync"/>, which settles the money.</summary>
-    public async Task<bool> RemoveAsync(Guid blockId, Guid actorId, CancellationToken ct)
+    /// <summary>Lifts a block, saying why (A5-1: the reason is required and recorded). Only a block — a member's booking is cancelled through <see cref="BookingService.CancelAsync"/>, which settles the money.</summary>
+    public async Task<bool> RemoveAsync(Guid blockId, Guid actorId, string reason, CancellationToken ct)
     {
         var block = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == blockId && b.Status == BookingStatus.AdminBlock, ct);
         if (block is null) return false;
@@ -138,6 +138,7 @@ public sealed class AdminBlockService
                 booking_id = block.Id,
                 starts_at = block.StartsAt,
                 label = block.BlockLabel,
+                reason,
             }),
         });
 
@@ -148,6 +149,7 @@ public sealed class AdminBlockService
             SubjectKind: AdminChangeSubjects.Court,
             SubjectId: block.CourtId,
             SubjectLabel: court?.Name,
+            Reason: reason,
             Before: BlockFacts(block)), ct);
 
         // Cancelled rather than deleted. The exclusion constraint ignores Cancelled rows,

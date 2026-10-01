@@ -209,7 +209,7 @@ public static class AdminChangeActions
     /// </summary>
     public static readonly string[] ReasonRequired =
     [
-        BookingsBulkCancelled, BookingCancelledByAdmin, ScheduleEnded, ScheduleOccurrenceSkipped,
+        BookingsBulkCancelled, BookingCancelledByAdmin, BookingBlockLifted, ScheduleEnded, ScheduleOccurrenceSkipped,
         CreditAdjusted, CreditToppedUp, GroupArchived, MemberSuspended, MemberRejected, CourtDeactivated,
         DeviceDeleted, MemberAdminRevoked, MemberAdminGranted, MemberCodeReset,
         BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
