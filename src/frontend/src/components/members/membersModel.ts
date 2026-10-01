@@ -68,7 +68,7 @@ export function matchesSearch(row: MemberRow, query: string): boolean {
 export function visibleRows(rows: MemberRow[], status: StatusFilter, query: string, sort: Sort): MemberRow[] {
   const sign = sort.dir === "asc" ? 1 : -1;
   return rows
-    .filter((row) => status === "all" || row.status === status)
+    .filter((row) => status === "all" || (status === "admins" ? row.is_admin === true : row.status === status))
     .filter((row) => matchesSearch(row, query))
     .sort((a, b) => compare(a, b, sort.key) * sign);
 }
@@ -76,14 +76,15 @@ export function visibleRows(rows: MemberRow[], status: StatusFilter, query: stri
 export type StatusCounts = Record<StatusFilter, number>;
 
 /**
- * What each filter chip counts. Null when the list has not been read — zero is a claim about the
+ * What each filter chip counts (Admins by role, R5 G — a row whose `is_admin` is unsent counts as none). Null when the list has not been read — zero is a claim about the
  * club, and "0 pending" on a failed read once sent an admin home with applications waiting.
  */
 export function statusCounts(rows: MemberRow[] | null): StatusCounts | null {
   if (!rows) return null;
-  const counts: StatusCounts = { all: rows.length, PendingApproval: 0, Active: 0, Suspended: 0, Rejected: 0 };
+  const counts: StatusCounts = { all: rows.length, PendingApproval: 0, Active: 0, Suspended: 0, Rejected: 0, admins: 0 };
   for (const row of rows) {
-    if (row.status in counts && row.status !== "all") counts[row.status as keyof StatusCounts] += 1;
+    if (row.status in counts && row.status !== "all" && row.status !== "admins") counts[row.status as keyof StatusCounts] += 1;
+    if (row.is_admin === true) counts.admins += 1;
   }
   return counts;
 }

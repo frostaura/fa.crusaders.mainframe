@@ -14,7 +14,15 @@ const CLUB: MemberRow[] = [
 describe("the members list's rules", () => {
   it("counts every status, and says nothing at all before the list is read", () => {
     expect(statusCounts(null)).toBeNull();
-    expect(statusCounts(CLUB)).toEqual({ all: 3, PendingApproval: 1, Active: 1, Suspended: 1, Rejected: 0 });
+    expect(statusCounts(CLUB)).toEqual({ all: 3, PendingApproval: 1, Active: 1, Suspended: 1, Rejected: 0, admins: 0 });
+  });
+
+  it("R5 G — the Admins chip counts and shows the club's administrators, whatever their status", () => {
+    const club = [...CLUB, row({ user_id: "d", full_name: "Desk Admin", status: "Active", is_admin: true, admin_source: "granted" }),
+      row({ user_id: "e", full_name: "Ops Admin", status: "Suspended", is_admin: true, admin_source: "config" })];
+    expect(statusCounts(club)?.admins).toBe(2);
+    expect(visibleRows(club, "admins", "", { key: "full_name", dir: "asc" }).map((r) => r.user_id)).toEqual(["d", "e"]);
+    expect(statusFilterFrom("admins")).toBe("admins");
   });
 
   it("filters by status and by name, email or number, case-insensitively", () => {

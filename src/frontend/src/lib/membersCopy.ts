@@ -74,7 +74,8 @@ export function membersCount(shown: number, total: number): string {
 // ---------------------------------------------------------------------------------------
 
 export type MemberStatus = "PendingApproval" | "Active" | "Suspended" | "Rejected";
-export type StatusFilter = "all" | MemberStatus;
+/** A status — or "admins" (R5 G), the one chip that is a ROLE: who can use this console, whatever their status. */
+export type StatusFilter = "all" | MemberStatus | "admins";
 
 /** The filter chips, in the order an admin works through them: the queue first. */
 export const STATUS_FILTERS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
@@ -83,6 +84,7 @@ export const STATUS_FILTERS: ReadonlyArray<{ value: StatusFilter; label: string 
   { value: "Active", label: "Active" },
   { value: "Suspended", label: "Suspended" },
   { value: "Rejected", label: "Rejected" },
+  { value: "admins", label: "Admins" },
 ];
 
 /** Anything in the URL that is not a status is "all" — unknown is never one of the others. */
