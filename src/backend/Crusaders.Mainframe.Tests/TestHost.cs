@@ -585,7 +585,10 @@ public sealed class StubEmailService : IEmailService
     /// This is the one place it belongs, next to the thing being polled.
     /// </para>
     /// </summary>
-    public async Task<EmailMessage?> WaitFor(Func<EmailMessage, bool> match, int timeoutMs = 5000)
+    // 15 s, not 5: it returns the moment the mail lands, so the budget only matters on a loaded CI
+    // runner, where the fast job's 1,500 in-memory tests share the cores (R4: a reset-mail test
+    // timed out there once and passed 15/15 under local stress).
+    public async Task<EmailMessage?> WaitFor(Func<EmailMessage, bool> match, int timeoutMs = 15000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         while (DateTime.UtcNow < deadline)
