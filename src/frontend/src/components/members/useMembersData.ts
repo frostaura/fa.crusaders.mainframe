@@ -61,7 +61,7 @@ export function useMembersList() {
       // is re-read. Notifying from the loader rather than from Approve/Reject is what keeps the
       // chrome's badge and this screen's Pending count incapable of disagreeing — including when
       // an approval the server committed was reported as failed (see lib/pendingApplications).
-      notifyPendingApplicationsChanged();
+      notifyPendingApplicationsChanged(rows.filter((row) => row.status === "PendingApproval").length);
     } catch (err) {
       if (mine !== seq.current) return;
       // State only, no toast: the panel says it for as long as the screen is wrong. A club read
@@ -117,10 +117,11 @@ async function readMemberships(): Promise<Map<string, GroupChip[]>> {
 
 /**
  * Which groups each member is in — from the list when it sends them, otherwise from the groups'
- * own member lists. A failure is its own state: the column is hidden and the page says why,
+ * own member lists. `enabled` false (a member's record is open, R5 P5) reads nothing: only the
+ * table draws groups, and a deep link to one member read every group's member list for it. A failure is its own state: the column is hidden and the page says why,
  * because a blank Groups cell reads as "in no group".
  */
-export function useGroupMemberships(inline: boolean) {
+export function useGroupMemberships(inline: boolean, enabled = true) {
   const [state, setState] = useState<GroupsState>({ status: "loading" });
   const seq = useRef(0);
 
@@ -137,18 +138,18 @@ export function useGroupMemberships(inline: boolean) {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; its sync loading flag is the house idiom
-    if (!inline) void read();
-  }, [inline, read]);
+    if (!inline && enabled) void read();
+  }, [inline, enabled, read]);
 
   const shown: GroupsState = inline ? { status: "inline" } : state;
   return { state: shown, retry: read };
 }
 
 /**
- * Fingerprint enrolments by member. Best effort: the count only decides a menu item's wording, and
+ * Fingerprint enrolments by member — only while the table is drawn (`enabled`, R5 P5). Best effort: the count only decides a menu item's wording, and
  * the dialog that manages them re-reads on every change.
  */
-export function useFingerprints() {
+export function useFingerprints(enabled = true) {
   const [byUser, setByUser] = useState<Record<string, BiometricEnrollmentRow>>({});
   const read = useCallback(async () => {
     try {
@@ -159,6 +160,6 @@ export function useFingerprints() {
     } catch { /* non-blocking */ }
   }, []);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount; the state is set when the read answers
-  useEffect(() => { void read(); }, [read]);
+  useEffect(() => { if (enabled) void read(); }, [enabled, read]);
   return { byUser, read };
 }

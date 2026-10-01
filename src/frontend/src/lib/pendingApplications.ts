@@ -23,6 +23,8 @@ type Listener = () => void;
 
 const listeners = new Set<Listener>();
 let version = 0;
+/** What the last members read counted, and when — the count the badge adopts instead of re-asking. */
+let known: { count: number; at: number } | null = null;
 
 /** Subscribe to "something changed"; returns the unsubscribe, as `useSyncExternalStore` wants. */
 export function subscribePendingApplications(listener: Listener): () => void {
@@ -36,7 +38,7 @@ export function pendingApplicationsVersion(): number {
 }
 
 /**
- * Call when the pending set has been re-read from the server — that is, from the members
+ * Call with the pending count when the pending set has been re-read from the server — that is, from the members
  * list loader, and from nowhere else.
  *
  * <p>
@@ -56,7 +58,17 @@ export function pendingApplicationsVersion(): number {
  * transition the server committed and the console was told had failed.
  * </p>
  */
-export function notifyPendingApplicationsChanged(): void {
+export function notifyPendingApplicationsChanged(count?: number): void {
+  known = typeof count === "number" ? { count, at: Date.now() } : null;
   version += 1;
   for (const l of [...listeners]) l();
+}
+
+/**
+ * The pending count the members list just read from the server, or null (R5 P5). That read IS the
+ * server's answer, not an optimistic patch — so the badge takes it rather than asking the same
+ * question again a moment later: a cold Members page read the count three times.
+ */
+export function pendingApplicationsKnown(): { count: number; at: number } | null {
+  return known;
 }

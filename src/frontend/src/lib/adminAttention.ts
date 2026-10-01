@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { endpoints } from "./api";
 import { adminEndpoints, type DeviceErrorCounts } from "./adminApi";
 import { useAuth } from "./auth";
-import { pendingApplicationsVersion, subscribePendingApplications } from "./pendingApplications";
+import { pendingApplicationsKnown, pendingApplicationsVersion, subscribePendingApplications } from "./pendingApplications";
 import { playEndpoints } from "./playApi";
 import { disputesAttentionLabel } from "./playCopy";
 import { refreshDoorsView, useDoorsStore } from "../components/doors/useDoorsChrome";
@@ -221,10 +221,20 @@ function settle<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { ok: 
   return promise.then((value) => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
 }
 
+/** The pending count after a read: its answer, unless the members list adopted a newer one meanwhile. */
+function pendingAfter(
+  pending: { ok: true; value: unknown[] } | { ok: false; error: unknown }, startedAt: number, now: number,
+): Counted {
+  if (!pending.ok) return { ...state.pending, error: pending.error };
+  if ((state.pending.readAt ?? 0) > startedAt) return state.pending;
+  return { value: pending.value.length, error: null, readAt: now };
+}
+
 /** Read both counts now, or join the read already going. Never rejects. */
 export function refreshAttentionCounts(): Promise<void> {
   if (current) return current;
   const mine = generation;
+  const startedAt = Date.now();
   publish({ ...state, inFlight: true });
   current = Promise.all([
     settle(endpoints.adminMembers("PendingApproval")),
@@ -236,9 +246,7 @@ export function refreshAttentionCounts(): Promise<void> {
     publish({
       loading: false,
       inFlight: false,
-      pending: pending.ok
-        ? { value: pending.value.length, error: null, readAt: now }
-        : { ...state.pending, error: pending.error },
+      pending: pendingAfter(pending, startedAt, now),
       faults: summary.ok
         ? { value: openFaultCount(summary.value.open), error: null, readAt: now, breakdown: summary.value.open ?? {} }
         : { ...state.faults, error: summary.error },
@@ -250,6 +258,15 @@ export function refreshAttentionCounts(): Promise<void> {
     if (mine === generation) current = null;
   });
   return current;
+}
+
+/**
+ * R5 P5: the members list re-read the club and counted the applications itself — the server's
+ * answer, so the badge takes it rather than asking again. Faults and disputes are not touched.
+ */
+function adoptPending(count: number, at: number) {
+  if ((state.pending.readAt ?? 0) >= at) return;
+  publish({ ...state, loading: state.loading && state.faults.readAt === null, pending: { value: count, error: null, readAt: at } });
 }
 
 /** How old the counts may be before a move between admin sections re-reads them (R4 perf). */
@@ -271,8 +288,16 @@ function useCountsStore(enabled: boolean, routeKey: string): CountsState {
   // On arrival and on every application change; NOT on every admin route change (R4 perf): the
   // console re-read all three counts on each click between sections. A route change re-reads
   // only counts older than the fresh window; the minute poll and a return to the tab do the rest.
+  // R5 P5: arrival is the fresh-window effect below — every instance (the shell's tab, the rail,
+  // the Overview) arriving re-read counts a moment old, and the cold Members page read them three
+  // times. An application change re-reads, or adopts the count the members list just read.
+  const seen = useRef(changeVersion);
   useEffect(() => {
-    if (enabled) void refreshAttentionCounts();
+    if (!enabled || seen.current === changeVersion) return;
+    seen.current = changeVersion;
+    const known = pendingApplicationsKnown();
+    if (known) adoptPending(known.count, known.at);
+    else void refreshAttentionCounts();
   }, [enabled, changeVersion]);
 
   useEffect(() => {

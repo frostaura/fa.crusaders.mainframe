@@ -61,8 +61,10 @@ export default function AdminMembersPage() {
   const paging = usePaging(`${status}|${query}|${sort.key}|${sort.dir}`);
   const [dialog, setDialog] = useState<MemberDialogState>(null);
   const [assigning, setAssigning] = useState<MemberRow | null>(null);
-  const groups = useGroupMemberships(listSends(list.members, "groups"));
-  const prints = useFingerprints();
+  // R5 P5: beside (or instead of) a member's record the list is the dense picker — no groups, no
+  // ⋯ menu — so a deep link no longer reads every group's members and every enrolment for it.
+  const groups = useGroupMemberships(listSends(list.members, "groups"), record === null);
+  const prints = useFingerprints(record === null);
   const lifecycle = useMemberLifecycle({ load: list.load, setMembers: list.setMembers });
   const credit = useCreditAdjust(list.setMembers);
 
