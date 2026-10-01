@@ -30,16 +30,18 @@ describe("WalletGlance", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows the SPENDABLE figure and the way to top up", () => {
+  it("shows the SPENDABLE figure, in minutes, and the way to buy more", () => {
     Object.assign(state, { balance: 120, loading: false, held: { spendable: 80 } });
     view();
     const group = screen.getByRole("group", { name: MY_CODE.wallet.label });
-    expect(group).toHaveTextContent("80.00 cr");
-    expect(screen.getByRole("link", { name: TOP_UP_LABEL.fine })).toHaveAttribute("href", "/wallet/topup");
+    expect(group).toHaveTextContent("1 h 20 min");
+    expect(group).toHaveTextContent("1 hour 20 minutes");
+    expect(group.textContent).not.toMatch(/credit|\bcr\b|\.\d/);
+    expect(screen.getByRole("link", { name: TOP_UP_LABEL.fine })).toHaveAttribute("href", "/wallet/buy");
     expect(screen.getByRole("link", { name: new RegExp(MY_CODE.wallet.open) })).toHaveAttribute("href", "/wallet");
   });
 
-  it("makes top-up the primary errand at zero", () => {
+  it("makes buying minutes the primary errand at zero", () => {
     Object.assign(state, { balance: 0, loading: false, held: null });
     view();
     expect(screen.getByRole("link", { name: TOP_UP_LABEL.zero })).toBeInTheDocument();

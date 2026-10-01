@@ -26,12 +26,10 @@ import { useBalance } from "../../lib/balance";
 export type LiveState = "loading" | "live" | "degraded" | "unavailable";
 
 /**
- * Two movements a hundredth of a credit apart are the same movement, and neither is one.
- *
- * `toFixed(2)` is what the whole product renders money at, so a change that cannot show up
- * in two decimal places has not happened as far as a member is concerned.
+ * Two figures less than a whole minute apart are the same figure (P13: the ledger holds whole
+ * minutes, and `lib/minutes` paints whole minutes), so neither is a movement.
  */
-const EPSILON = 0.005;
+const EPSILON = 0.5;
 
 export type WalletLive = {
   /** The server's figure, from the stream. Null until the provider has one. */
@@ -98,8 +96,8 @@ export type BalanceDelta = {
  * </p>
  *
  * <p>
- * A count that scales without a ceiling makes a big top-up feel slow, so the duration is
- * clamped: five credits takes 350 ms and four hundred takes 900. Eased on the VALUE, because
+ * A count that scales without a ceiling makes a big purchase feel slow, so the duration is
+ * clamped: five minutes takes 350 ms and five hours takes 900. Eased on the VALUE, because
  * linear counting reads mechanical. A second movement mid-tween restarts from what is on
  * screen, never from the old target, so two quick movements can never make the number jump
  * backwards.
@@ -141,7 +139,8 @@ export function useCountUp(target: number | null): number | null {
       const t = Math.min(1, Math.max(0, (now - began) / duration));
       // easeOutCubic on the value.
       const eased = 1 - Math.pow(1 - t, 3);
-      const value = start + (target - start) * eased;
+      // Whole minutes on every frame (P13) — the tween eases, the paint rounds.
+      const value = Math.round(start + (target - start) * eased);
       setDisplayed(value);
       from.current = value;
       if (t < 1) frame.current = requestAnimationFrame(step);

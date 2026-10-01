@@ -94,7 +94,7 @@ export const PIN_HEAD = "[[data-scrolls]_&]:z-sticky-corner [[data-scrolls]_&]:b
 export const PIN_RIGHT_EDGE = "[[data-scrolls]_&]:right-0";
 export const PIN_BESIDE_DETAILS = "[[data-scrolls]_&]:right-touch";
 
-/** Credit in is the success ink; credit out the primary ink, never the warning one. */
+/** Minutes in wear the success ink; minutes out the primary ink, never the warning one. */
 export function amountInk(signed: number): string {
   return signed >= 0 ? "text-success-strong" : "text-text-primary";
 }

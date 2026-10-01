@@ -5,7 +5,7 @@ import { summariseBooking } from "@/components/wallet/useShareBookings";
 
 /**
  * D4 — a share that moved while the member was not the one moving it, said with the names in it:
- * "Sam paid you 20.00 cr for their share of Court 1" on the organiser's side, "20.00 cr of your
+ * "Sam paid you 20 min for their share of Court 1" on the organiser's side, "20 min of your
  * share of Court 1 came back from Olivia" on a partner's.
  *
  * <p>
@@ -18,7 +18,7 @@ import { summariseBooking } from "@/components/wallet/useShareBookings";
 export async function namedShareMovement(amount: number, me: string | null): Promise<string | null> {
   const wallet = await endpoints.wallet(5, 0);
   const row = wallet.entries.find((e) =>
-    e.type === "ShareTransfer" && e.relatedBookingId && Math.abs(e.signedAmountMinutes - amount) < 0.005);
+    e.type === "ShareTransfer" && e.relatedBookingId && e.signedAmountMinutes === amount);
   if (!row?.relatedBookingId) return null;
   const booking = summariseBooking(await playersEndpoints.detail(row.relatedBookingId));
   const side = booking.organiserId === me ? "organiser" : "partner";

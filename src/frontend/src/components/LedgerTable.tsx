@@ -175,8 +175,8 @@ function nextSort(current: Sort, key: Column): Sort {
  * </p>
  *
  * <p>
- * <b>Money reads by sign, twice.</b> Credit in is the success ink with a "+", credit out is the
- * primary ink with a real U+2212 minus — never the warning ink: spending your own credit on a
+ * <b>Minutes read by sign, twice.</b> Minutes in wear the success ink with a "+", minutes out the
+ * primary ink with a real U+2212 minus — never the warning ink: spending your own minutes on a
  * court is the product working, not something to look at. The sign is the non-colour cue.
  * </p>
  */
@@ -277,7 +277,7 @@ function LedgerLine(props: {
             // measured) — the button's name is its aria-label either way.
             className={cn("min-h-touch min-w-touch", CLEAR_HEADS)}
             // Named by kind and time, not by amount: the amount is its own cell's name, and
-            // repeating it here made "+160.00 cr" match two cells in the row.
+            // repeating it here made "+2 h 40 min" match two cells in the row.
             aria-label={LEDGER_COPY.openRow(`${ledgerCategory(row)}, ${clubDayAndClock(row.at)}`)}
             onClick={(e) => { e.stopPropagation(); onOpen(row); }}
             icon={<CaretRight aria-hidden="true" />}

@@ -7,14 +7,14 @@ import { heldPartsLine, spendableLine } from "@/lib/walletCopy";
  *
  * <p>
  * Shares partners paid an organiser are held until 48 hours after each game in case one comes
- * back. The card's big figure is the whole balance, so without this line a member with 120 on
- * the card is refused a 110 booking and cannot see why. Nothing at all when nothing is held —
- * a "0.00 cr held" line on every wallet would be noise about a feature most members never use.
+ * back. The card's big figure is the whole balance, so without this line a member with 2 h on
+ * the card is refused a 1 h 50 min booking and cannot see why. Nothing at all when nothing is
+ * held — a "0 min held" line on every wallet would be noise about a feature most members never use.
  * </p>
  *
  * <p>
  * <b>P11 — owed back.</b> A partner's return the organiser's balance could not cover waits on
- * that balance, and incoming credit pays it first. It has no date, so it is its own line; and
+ * that balance, and incoming minutes pay it first. It has no date, so it is its own line; and
  * because it can push spendable below zero, the spendable sentence never shows a negative.
  * </p>
  */

@@ -3,14 +3,14 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import WalletPage from "../../pages/Wallet";
 import { renderPage, stubFetch } from "../../test/harness";
 import {
-  BALANCE_SENTENCE, creditArrivedSentence, creditLeftSentence,
+  BALANCE_SENTENCE, minutesArrivedSentence, minutesLeftSentence,
 } from "../../lib/walletCopy";
 
 /**
  * The wallet — items 8 and D4's §2.6.
  *
  * <p>
- * Two rules carry most of this file. <b>Zero is not "running low"</b>: a member with 0.00
+ * Two rules carry most of this file. <b>Zero is not "running low"</b>: a member with 0 min
  * cannot book anything at all, and the product was telling them, in the same amber it uses
  * for 49.99, that their balance was getting on. And <b>a number changing in a corner is not
  * an event anybody notices</b> — least of all a screen-reader user, for whom a re-rendered
@@ -43,8 +43,8 @@ describe("zero is a different thing from low", () => {
   /*
     The rule itself moved. It is now `walletTone` in `lib/balance` — one function for the chip,
     the wallet page and the grid's empty-wallet banner, which each used to decide separately
-    and disagreed at 0.004 credits. `lib/wallet-tone.test.ts` holds the table of balances and
-    the 0.004 case against that one function; what stays here is what this PAGE does with the
+    and disagreed at the edge of empty. `lib/wallet-tone.test.ts` holds the table of balances and
+    the edge cases against that one function; what stays here is what this PAGE does with the
     answer.
   */
 
@@ -55,7 +55,7 @@ describe("zero is a different thing from low", () => {
     expect(await screen.findByText(BALANCE_SENTENCE.zero)).toBeInTheDocument();
     expect(screen.queryByText(/running low/i)).toBeNull();
     // And the one control that helps is the primary one, named for the errand.
-    expect(screen.getByRole("link", { name: /Top up to start booking/ })).toHaveAttribute("href", "/wallet/topup");
+    expect(screen.getByRole("link", { name: /Buy minutes to start booking/ })).toHaveAttribute("href", "/wallet/buy");
   });
 
   it("keeps the caution for a balance that really is running down", async () => {
@@ -71,29 +71,30 @@ describe("zero is a different thing from low", () => {
     renderPage(<WalletPage />);
 
     expect(await screen.findByText(BALANCE_SENTENCE.fine)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Top up" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Buy minutes" })).toBeInTheDocument();
   });
 });
 
 describe("what a member sees when the club tops them up while they watch", () => {
   /**
-   * The sentence is read off the ledger row, never assumed. "The club added 200 credits" is
+   * The sentence is read off the ledger row, never assumed. "The club added 3 h 20 min" is
    * false if a partner cancelled a court in another tab, and the row is the only thing that
    * can tell them apart.
    */
   it.each([
-    ["AdminAdjustment", "Sipho at the desk added 200.00 credits to your wallet."],
-    ["TopUp", "Your top-up landed: 200.00 credits are in your wallet."],
-    ["CancellationRefund", "A cancelled booking put 200.00 credits back in your wallet."],
-    ["PaymentReversal", "A payment was reversed: 200.00 credits are back in your wallet."],
+    ["AdminAdjustment", "Sipho at the desk added 3 h 20 min to your wallet."],
+    ["AdminTopUp", "Your package from the desk landed: 3 h 20 min added to your wallet."],
+    ["TopUp", "Your purchase landed: 3 h 20 min added to your wallet."],
+    ["CancellationRefund", "A cancelled booking put 3 h 20 min back in your wallet."],
+    ["PaymentReversal", "A payment was reversed: 3 h 20 min back in your wallet."],
   ] as const)("names a %s for what it was", (type, sentence) => {
-    expect(creditArrivedSentence(200, type, "Sipho at the desk")).toBe(sentence);
+    expect(minutesArrivedSentence(200, type, "Sipho at the desk")).toBe(sentence);
   });
 
   /** No row to match, or an actor who is the member themselves: the neutral, true sentence. */
   it("falls back to a sentence that is true whoever caused it", () => {
-    expect(creditArrivedSentence(200, null, null)).toBe("Your wallet went up by 200.00 credits.");
-    expect(creditArrivedSentence(200, "AdminAdjustment", null)).toBe("The club added 200.00 credits to your wallet.");
+    expect(minutesArrivedSentence(200, null, null)).toBe("Your wallet went up by 3 h 20 min.");
+    expect(minutesArrivedSentence(200, "AdminAdjustment", null)).toBe("The club added 3 h 20 min to your wallet.");
   });
 
   /**
@@ -101,10 +102,10 @@ describe("what a member sees when the club tops them up while they watch", () =>
    * product working, and a red alarm over it is the app telling a member off for using it.
    */
   it("words money going out plainly, and never as a failure", () => {
-    expect(creditLeftSentence(50, "BookingCharge")).toBe("50.00 credits went on a court booking.");
-    expect(creditLeftSentence(50, null)).toBe("50.00 credits left your wallet.");
+    expect(minutesLeftSentence(50, "BookingCharge")).toBe("50 min went on a court booking.");
+    expect(minutesLeftSentence(50, null)).toBe("50 min left your wallet.");
     for (const type of ["BookingCharge", "LightsPurchase", "NoShowPenalty", null] as const) {
-      expect(creditLeftSentence(50, type)).not.toMatch(/fail|error|wrong/i);
+      expect(minutesLeftSentence(50, type)).not.toMatch(/fail|error|wrong/i);
     }
   });
 
@@ -131,10 +132,10 @@ describe("what a member sees when the club tops them up while they watch", () =>
     */
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Refresh" })); });
 
-    await screen.findByText(/added 200\.00 credits to your wallet/);
+    await screen.findByText(/added 3 h 20 min to your wallet/);
     // ONE announcement. The toast carries role="status" per instance and the viewport
     // deliberately carries none.
-    expect(within(document.body).queryAllByText(/added 200\.00 credits/)).toHaveLength(1);
+    expect(within(document.body).queryAllByText(/added 3 h 20 min/)).toHaveLength(1);
     expect(document.querySelectorAll("[role=alert]")).toHaveLength(0);
   });
 
@@ -144,7 +145,7 @@ describe("what a member sees when the club tops them up while they watch", () =>
     renderPage(<WalletPage />);
     await screen.findByText(BALANCE_SENTENCE.fine);
 
-    const figure = screen.getByText(/500\.00/).closest("p")!;
+    const figure = screen.getByText("8 h 20 min").closest("p")!;
     expect(figure.getAttribute("aria-live")).toBeNull();
     expect(figure.getAttribute("role")).toBeNull();
     // And it is tabular, so a count-up cannot reflow the card on every frame.
@@ -190,9 +191,9 @@ describe("a wallet that will not load", () => {
 
     expect(await screen.findByText(/Couldn't load your wallet/)).toBeInTheDocument();
     // Three states, not two: a failed read is not an empty wallet, and must not be dressed as
-    // one — "you can't book until you top up" over a read that never landed is a lie.
+    // one — "you can't book until you buy minutes" over a read that never landed is a lie.
     expect(screen.queryByText(BALANCE_SENTENCE.zero)).toBeNull();
-    await waitFor(() => expect(screen.queryByText("0.00")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("0 min")).toBeNull());
     cleanup();
   });
 });

@@ -3,7 +3,8 @@ import { endpoints, type DailyMePoint, type WalletReport } from "../lib/api";
 import { memberReads, type WalletActivity } from "../lib/offline/memberReads";
 import { useKeptReport } from "../lib/offline/useKeptReport";
 import { StaleNotice } from "../components/shell/StaleNotice";
-import { cn, formatCredits, formatMinutes, formatSignedCredits } from "../lib/utils";
+import { cn, formatMinutes } from "../lib/utils";
+import { MinutesFigure } from "../components/wallet/MinutesFigure";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
@@ -19,7 +20,7 @@ import { useMediaQuery } from "../components/ui/use-media-query";
 import { useStickyTop } from "../components/ui/use-sticky-top";
 import { REPORT_SHARES_COPY } from "../lib/playersCopy";
 import {
-  Cell, ChartsCard, NetCredits, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
+  Cell, ChartsCard, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
   type Tile,
 } from "../components/reports/ReportParts";
 import { dayMarkers, prettyDay, useReportRange, type ReportRange } from "../components/reports/range";
@@ -45,7 +46,7 @@ function LazyChart({ children }: { children: ReactNode }) {
  * This is the member half of the old `/reports`, which forked on `isAdmin` and showed an admin
  * their own permanently-empty wallet in the middle of the club's figures. The split (R16) gives
  * each reader one page with one subject. It sits beside the balance as the wallet's second view
- * (`WalletNav`), because "where did my credit go?" is asked from the wallet.
+ * (`WalletNav`), because "where did my minutes go?" is asked from the wallet.
  * </p>
  */
 /**
@@ -123,9 +124,9 @@ export default function WalletActivityPage() {
 function ActivityBody({ data }: { data: WalletActivity }) {
   const { wallet, days } = data;
   const tiles: Tile[] = [
-    { label: "Top-ups", value: formatCredits(wallet.top_ups_minutes), tone: "success" },
-    { label: "Spent", value: formatCredits(wallet.spent_minutes), tone: "accent" },
-    { label: "Refunds (net)", value: formatCredits(wallet.refunds_minutes), tone: "neutral" },
+    { label: ACTIVITY_COPY.bought, value: <MinutesFigure value={wallet.top_ups_minutes} />, tone: "success" },
+    { label: ACTIVITY_COPY.spent, value: <MinutesFigure value={wallet.spent_minutes} />, tone: "accent" },
+    { label: ACTIVITY_COPY.refunds, value: <MinutesFigure value={wallet.refunds_minutes} />, tone: "neutral" },
     // Attendance, which nothing in the product showed anywhere — `reporting.md` has promised
     // "Time on court" since it was written.
     { label: "Time on court", value: formatMinutes(wallet.minutes_on_court), tone: "neutral" },
@@ -136,7 +137,7 @@ function ActivityBody({ data }: { data: WalletActivity }) {
       <WalletTotals wallet={wallet} />
       <Section title="Charts">
         {days.length > 0 ? <Charts days={days} /> : (
-          <StateBlock empty emptyIcon={ChartBar} emptyTitle="Nothing to chart in this period." emptyHint="Pick a longer range, or come back after your next top-up or booking." />
+          <StateBlock empty emptyIcon={ChartBar} emptyTitle="Nothing to chart in this period." emptyHint="Pick a longer range, or come back after your next purchase or booking." />
         )}
       </Section>
       <DailyBreakdown days={days} />
@@ -144,18 +145,6 @@ function ActivityBody({ data }: { data: WalletActivity }) {
   );
 }
 
-/**
- * Every bucket a movement can land in, because this has to reconcile. It once showed top-ups,
- * spend, refunds and a penalty COUNT and nothing else, so a member with 2,500 credits of admin
- * adjustments read "0 in, 950 out, 100 back" beside a balance of 1,635 with nothing accounting
- * for the difference. The net line is the arithmetic, spelled out.
- *
- * <p>
- * Every figure goes through `formatSignedCredits`, including the two whose direction is fixed:
- * hardcoding "−" around `formatCredits` printed "−0.00 cr" for a period with no spend, and on
- * the one card whose job is to reconcile, a signed zero reads as a movement that did not happen.
- * </p>
- */
 /**
  * The three charts: a carousel on a phone, where one at a time is all the width holds, and side
  * by side from lg (an AutoGrid of three 18rem-and-up cards: one row on a wide page) — a desktop paging through three charts in a
@@ -184,30 +173,51 @@ function Charts({ days }: { days: DailyMePoint[] }) {
 
 const LG_UP = "(min-width: 1024px)";
 
+/** The page's words (P13: minutes, and "bought" — never "top-ups"). */
+export const ACTIVITY_COPY = {
+  bought: "Bought",
+  spent: "Spent",
+  refunds: "Refunds (net)",
+  totalsHelp: "Every way minutes moved in or out of your wallet in this period.",
+  netSum: "bought − spent + refunds − penalties + adjustments",
+} as const;
+
+/**
+ * Every bucket a movement can land in, because this has to reconcile. It once showed purchases,
+ * spend, refunds and a penalty COUNT and nothing else, so a member with hours of admin
+ * adjustments read figures that did not add up to their balance. The net line is the arithmetic,
+ * spelled out.
+ *
+ * <p>
+ * Every figure is signed through `lib/minutes`, including the two whose direction is fixed: a
+ * hand-made "−" printed "−0" for a period with no spend, and on the one card whose job is to
+ * reconcile, a signed zero reads as a movement that did not happen (`minutesSigned(0)` has none).
+ * </p>
+ */
 function WalletTotals({ wallet }: { wallet: WalletReport }) {
   return (
-    <Section title="Totals" description="Every way credit moved in or out of your wallet in this period.">
+    <Section title="Totals" description={ACTIVITY_COPY.totalsHelp}>
       <TotalsCard
         footnote={(
           <>
-            Net movement over this period: <strong className="font-semibold tabular-nums text-text-primary">{formatSignedCredits(wallet.net_movement_minutes)}</strong>.
-            That is top-ups − spend + refunds − penalties + adjustments{typeof wallet.share_transfers_minutes === "number" ? " + shares" : ""}, and it is exactly what your balance moved by.
+            Net movement over this period: <strong className="font-semibold tabular-nums text-text-primary"><MinutesFigure value={wallet.net_movement_minutes} signed /></strong>.
+            {`That is ${ACTIVITY_COPY.netSum}`}{typeof wallet.share_transfers_minutes === "number" ? " + shares" : ""}, and it is exactly what your balance moved by.
             {typeof wallet.share_transfers_minutes === "number" ? ` ${REPORT_SHARES_COPY.memberFootnote}` : null}
           </>
         )}
       >
-        <Stat label="Top-ups" value={formatSignedCredits(wallet.top_ups_minutes)} />
-        <Stat label="Spent" value={formatSignedCredits(-wallet.spent_minutes)} />
-        <Stat label="Refunds (net)" value={formatSignedCredits(wallet.refunds_minutes)} />
-        <Stat label="Penalties" value={formatSignedCredits(-wallet.penalties_minutes)} />
-        <Stat label="Adjustments" value={formatSignedCredits(wallet.adjustments_minutes)} />
+        <Stat label={ACTIVITY_COPY.bought} value={<MinutesFigure value={wallet.top_ups_minutes} signed />} />
+        <Stat label={ACTIVITY_COPY.spent} value={<MinutesFigure value={-wallet.spent_minutes} signed />} />
+        <Stat label={ACTIVITY_COPY.refunds} value={<MinutesFigure value={wallet.refunds_minutes} signed />} />
+        <Stat label="Penalties" value={<MinutesFigure value={-wallet.penalties_minutes} signed />} />
+        <Stat label="Adjustments" value={<MinutesFigure value={wallet.adjustments_minutes} signed />} />
         {/* D11 — optional on the wire: an API that predates shares sends neither, and a row
-            reading 0.00 for a figure the server never sent would be a claim it did not make. */}
+            reading 0 min for a figure the server never sent would be a claim it did not make. */}
         {typeof wallet.share_transfers_minutes === "number" ? (
-          <Stat label={REPORT_SHARES_COPY.memberShares} value={formatSignedCredits(wallet.share_transfers_minutes)} />
+          <Stat label={REPORT_SHARES_COPY.memberShares} value={<MinutesFigure value={wallet.share_transfers_minutes} signed />} />
         ) : null}
         {typeof wallet.net_court_spend_minutes === "number" ? (
-          <Stat label={REPORT_SHARES_COPY.memberNetCourt} value={formatCredits(wallet.net_court_spend_minutes)} />
+          <Stat label={REPORT_SHARES_COPY.memberNetCourt} value={<MinutesFigure value={wallet.net_court_spend_minutes} />} />
         ) : null}
         <Stat label="Penalty count" value={String(wallet.penalty_count)} />
         <Stat label="Bookings played" value={`${wallet.attended_bookings} · ${formatMinutes(wallet.minutes_on_court)}`} />
@@ -219,11 +229,11 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
 
 const DAY_COLUMNS: DataColumn<DailyMePoint>[] = [
   { key: "date", header: "Date", cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
-  { key: "top_ups_minutes", header: "Top-ups", align: "right", cell: (r) => <Cell>{formatCredits(r.top_ups_minutes)}</Cell>, sortValue: (r) => r.top_ups_minutes },
-  { key: "spent_minutes", header: "Spent", align: "right", cell: (r) => <Cell>{formatCredits(r.spent_minutes)}</Cell>, sortValue: (r) => r.spent_minutes },
-  { key: "refunds_minutes", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_minutes} />, sortValue: (r) => r.refunds_minutes },
+  { key: "top_ups_minutes", header: ACTIVITY_COPY.bought, align: "right", cell: (r) => <Cell><MinutesFigure value={r.top_ups_minutes} /></Cell>, sortValue: (r) => r.top_ups_minutes },
+  { key: "spent_minutes", header: ACTIVITY_COPY.spent, align: "right", cell: (r) => <Cell><MinutesFigure value={r.spent_minutes} /></Cell>, sortValue: (r) => r.spent_minutes },
+  { key: "refunds_minutes", header: ACTIVITY_COPY.refunds, align: "right", cell: (r) => <Cell><MinutesFigure value={r.refunds_minutes} signed /></Cell>, sortValue: (r) => r.refunds_minutes },
   { key: "bookings", header: "Bookings", align: "right", cell: (r) => <Cell>{r.bookings}</Cell>, sortValue: (r) => r.bookings },
-  { key: "balance_minutes", header: "Balance", align: "right", cell: (r) => <Cell>{formatCredits(r.balance_minutes)}</Cell>, sortValue: (r) => r.balance_minutes },
+  { key: "balance_minutes", header: "Balance", align: "right", cell: (r) => <Cell><MinutesFigure value={r.balance_minutes} /></Cell>, sortValue: (r) => r.balance_minutes },
 ];
 
 function DailyBreakdown({ days }: { days: DailyMePoint[] }) {

@@ -15,11 +15,11 @@ import { useAuth } from "@/lib/auth";
 export type ChipFigures = { shown: number | null; parted: boolean; held: number; owedBack: number; heldParts: string | null };
 
 function chipFigures(balance: number | null, held: HeldFigures | null): ChipFigures {
-  const heldCredits = held && held.held > 0 ? held.held : 0;
+  const heldMinutes = held && held.held > 0 ? held.held : 0;
   const owedBack = held && held.owedBack > 0 ? held.owedBack : 0;
-  const parted = balance !== null && held !== null && (heldCredits > 0 || owedBack > 0);
+  const parted = balance !== null && held !== null && (heldMinutes > 0 || owedBack > 0);
   // F4-18 — each held part with its own release, when there are two or more deadlines.
-  return { shown: parted ? held!.spendable : balance, parted, held: heldCredits, owedBack, heldParts: heldCredits > 0 ? heldPartsLine(held?.parts) : null };
+  return { shown: parted ? held!.spendable : balance, parted, held: heldMinutes, owedBack, heldParts: heldMinutes > 0 ? heldPartsLine(held?.parts) : null };
 }
 
 /**

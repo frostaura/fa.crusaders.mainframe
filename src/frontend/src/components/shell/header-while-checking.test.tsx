@@ -8,7 +8,7 @@ import { primeQuery, setDataOwner, wipeMemberData } from "@/lib/offline/queryCac
 
 /**
  * P5-6 (review round 5) — on one bar of signal the session check (`whoami`) can be out for many
- * seconds. The header dropped the bell, the credits chip and the account menu for all of it, so a
+ * seconds. The header dropped the bell, the minutes chip and the account menu for all of it, so a
  * member could not reach Sign out — while My Code, Bookings and the tab bar were already drawn for
  * the member this phone had confirmed. The header now draws them for that member too, the chip
  * from the wallet figure the phone kept, until the club answers.
@@ -56,8 +56,8 @@ describe("the header while the session check is out", () => {
       return found;
     });
     expect(await within(header).findByRole("link", { name: INBOX_TITLE })).toBeInTheDocument();
-    const chip = await within(header).findByRole("link", { name: /120\.00 credits/ });
-    expect(chip).toHaveTextContent("120.00");
+    const chip = await within(header).findByRole("link", { name: /2 hours to spend|2 hours\. Tap/ });
+    expect(chip).toHaveTextContent("2 h");
     expect(chip.getAttribute("title") ?? "").toMatch(/last/i);
 
     const menu = within(header).getByRole("button", { name: "Account menu" });
@@ -77,7 +77,7 @@ describe("the header while the session check is out", () => {
       return found;
     });
     const chip = await within(header).findByRole("link", { name: /Wallet balance/ });
-    expect(chip).not.toHaveTextContent("0.00");
+    expect(chip).not.toHaveTextContent("0 min");
     expect(within(header).getByRole("button", { name: "Account menu" })).toBeInTheDocument();
   }, 15_000);
 });

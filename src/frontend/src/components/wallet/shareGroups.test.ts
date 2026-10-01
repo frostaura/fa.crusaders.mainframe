@@ -47,12 +47,12 @@ describe("groupShareRows", () => {
     expect(groups.map((g) => g.kind === "shares" && g.bookingId)).toEqual(["b1", "b2"]);
   });
 
-  it("nets a paid-then-returned share, and rounds away float dust", () => {
+  it("nets a paid-then-returned share in whole minutes (P13)", () => {
     const items = groupShareRows([
-      row("s1", { signedAmountMinutes: 33.33 }), row("s2", { signedAmountMinutes: 33.34 }),
-      row("s3", { signedAmountMinutes: 0.1 }), row("s4", { signedAmountMinutes: 0.2 }),
+      row("s1", { signedAmountMinutes: 33 }), row("s2", { signedAmountMinutes: 34 }),
+      row("s3", { signedAmountMinutes: -20 }),
     ]);
-    expect(items[0].kind === "shares" && items[0].net).toBe(66.97);
+    expect(items[0].kind === "shares" && items[0].net).toBe(47);
   });
 
   it("leaves a share row that names no booking as a plain row", () => {

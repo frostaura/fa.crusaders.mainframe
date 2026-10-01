@@ -11,7 +11,7 @@ import { CelebrationOverlay } from "../play/CelebrationOverlay";
 import { ShutDoorsBanner } from "../doors/ShutDoorsBanner";
 import { useDoorsChrome } from "../doors/useDoorsChrome";
 import { AccountMenu } from "./AccountMenu";
-import { CreditsChip } from "./CreditsChip";
+import { MinutesChip } from "./MinutesChip";
 import { CrestLink } from "./Crest";
 import { LANDING_PATH } from "./nav";
 import { NotificationBell } from "./NotificationBell";
@@ -25,8 +25,8 @@ import { SkipLink } from "./SkipLink";
  *
  * <ul>
  *   <li><b>Desktop (`md`+):</b> one 56px top bar — crest · My Code · Bookings · Wallet · Admin
- *   (admins, with its attention badge) · notification bell · credits chip · avatar menu.</li>
- *   <li><b>Phone:</b> a slim top bar (crest, bell, credits chip, avatar) and a fixed, safe-area-aware
+ *   (admins, with its attention badge) · notification bell · minutes chip · avatar menu.</li>
+ *   <li><b>Phone:</b> a slim top bar (crest, bell, minutes chip, avatar) and a fixed, safe-area-aware
  *   bottom tab bar. Both are the same `PrimaryNav`.</li>
  * </ul>
  *
@@ -85,7 +85,7 @@ const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-
 /*
  * `@container/appbar` (V5-3, review round 5): the bar is the query container for its own parts —
  * whether the tabs sit inline (`PrimaryNav`), whether the club's name shows (`CrestLink`) and
- * whether the chip stands in the row (`CreditsChip`) are decided by the bar's width in REM, so at
+ * whether the chip stands in the row (`MinutesChip`) are decided by the bar's width in REM, so at
  * 200 % text they follow what fits rather than the viewport's `md`/`lg`. A container does not
  * capture the phone tab bar's `position: fixed` (checked in Chromium): only a transform, filter,
  * backdrop-filter or layout/paint containment would.
@@ -259,7 +259,7 @@ function BarRow(props: {
       */}
       {memberChrome ? <NotificationBell className="ml-auto @[44rem]/appbar:-mr-3" /> : null}
       <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !memberChrome && "ml-auto")}>
-        {memberChrome ? <><CreditsChip /><AccountMenu /></> : null}
+        {memberChrome ? <><MinutesChip /><AccountMenu /></> : null}
         {anonymous ? (
           <Button asChild variant="outline" size="sm"><Link to="/login">Sign in</Link></Button>
         ) : null}

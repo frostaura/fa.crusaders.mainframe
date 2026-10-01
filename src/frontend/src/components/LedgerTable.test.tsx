@@ -42,7 +42,7 @@ describe("LedgerTable — what survives a 375px screen", () => {
       id: "r2", at: "2026-09-02T08:00:00Z",
       from: "Club treasury", to: "Naledi Khumalo",
       amountMinutes: 2000, signedAmountMinutes: 2000,
-      type: "AdminAdjustment", comment: "Desk credit",
+      type: "AdminAdjustment", comment: "Desk adjustment",
       subjectUserId: "u1", subjectName: "Naledi Khumalo",
       actorUserId: "a1", actorName: "Front desk",
       relatedBookingId: null,
@@ -93,10 +93,11 @@ describe("LedgerTable — what survives a 375px screen", () => {
       const stacked = cell.querySelector("[data-stacked-amount]")!;
       expect(stacked.className).toContain("@[16rem]/ledger:hidden");
     }
-    // Newest first: the desk credit (2 Sep), then the court (1 Sep).
+    // Newest first: the desk adjustment (2 Sep), then the court (1 Sep).
     const [credit, debit] = cellsOf("Comment").map((c) => c.querySelector("[data-stacked-amount]")!);
-    expect(debit).toHaveTextContent("\u221224.00 crClub treasury");
-    expect(credit).toHaveTextContent("+2000.00 crClub treasury");
+    // Whole minutes for the eye, the long form for a screen reader, then the counterparty (P13).
+    expect(debit).toHaveTextContent("\u221224 minminus 24 minutesClub treasury");
+    expect(credit).toHaveTextContent("+1 d 9 h 20 minplus 1 day 9 hours 20 minutesClub treasury");
     expect(credit.firstElementChild!.className).toContain("text-success-strong");
     expect(credit.firstElementChild!.className).toContain("whitespace-nowrap");
   });
@@ -156,8 +157,8 @@ describe("LedgerTable — what survives a 375px screen", () => {
 
   /**
    * P3 — the header says which way a column runs in words (`aria-sort`), not only by caret, and
-   * money reads by sign: a debit is never painted in the warning ink (spending your own credit
-   * on a court is not something to look at), a credit is the success ink.
+   * money reads by sign: a debit is never painted in the warning ink (spending your own minutes
+   * on a court is not something to look at), minutes in wear the success ink.
    */
   it("says the sort in aria-sort and colours money by its sign, never debits as a warning", () => {
     render(<LedgerTable rows={rows} label="Ledger" />);
@@ -195,17 +196,17 @@ describe("LedgerTable — what survives a 375px screen", () => {
     // A debit's counterparty is who was paid; a credit's is who paid. Picking by sign is
     // what makes one line enough — the member is always the other end. And the amount
     // keeps its sign, with a real U+2212 minus in a tabular column so debits line up.
-    expect(text).toContain("\u221224.00 crClub treasury");
-    expect(text).toContain("+2000.00 crClub treasury");
+    expect(text).toContain("\u221224 minminus 24 minutesClub treasury");
+    expect(text).toContain("+1 d 9 h 20 minplus 1 day 9 hours 20 minutesClub treasury");
     for (const cell of amounts) expect(cell.className).toContain("tabular-nums");
 
     // The counterparty line goes once the box draws the From/To columns (60rem): repeating the
     // name under the amount would be noise.
     for (const cell of amounts) {
-      expect(cell.querySelector("span")!.className).toContain("@[60rem]/ledger:hidden");
+      expect(cell.lastElementChild!.className).toContain("@[60rem]/ledger:hidden");
       // R4 form factor: the amount cell is nowrap; the name under it wraps, or a long one held
       // the column wide and squeezed the movement beside it on a phone.
-      expect(cell.querySelector("span")!.className.split(" ")).toEqual(expect.arrayContaining(["whitespace-normal", "break-words"]));
+      expect(cell.lastElementChild!.className.split(" ")).toEqual(expect.arrayContaining(["whitespace-normal", "break-words"]));
     }
   });
   /**

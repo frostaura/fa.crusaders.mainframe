@@ -1,5 +1,6 @@
 import { endpoints, type WalletReport } from "@/lib/api";
-import { cn, formatSignedCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { MinutesFigure } from "./MinutesFigure";
 import { typography } from "@/lib/typography";
 import { WALLET_MINI_COPY as COPY } from "@/lib/walletCopy";
 import { Button } from "../ui/button";
@@ -53,7 +54,7 @@ function Figures({ data }: { data: WalletReport }) {
         // A figure beside its label wraps UNDER it at large text, never squeezes it (gotchas-frontend-layout).
         <div key={row.label} className="flex flex-wrap items-baseline justify-between gap-x-3">
           <dt className="text-text-secondary">{row.label}</dt>
-          <dd className={cn("ml-auto whitespace-nowrap font-semibold tabular-nums", row.tone)}>{formatSignedCredits(row.value)}</dd>
+          <dd className={cn("ml-auto whitespace-nowrap font-semibold tabular-nums", row.tone)}><MinutesFigure value={row.value} signed /></dd>
         </div>
       ))}
     </dl>

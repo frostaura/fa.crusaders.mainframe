@@ -130,8 +130,8 @@ function SignedOutLanding() {
           */}
           <p className="mt-3 max-w-prose text-base text-text-secondary 2xl:text-lg">
             Four glass-back courts, thirteen league teams, and squash at Northwood Crusaders
-            Sports Club — part of Durban North since the mid-1960s. Book a court, top up your
-            credits and check your league night — all from here.
+            Sports Club — part of Durban North since the mid-1960s. Book a court, buy court
+            minutes and check your league night — all from here.
           </p>
 
           {/* The two things a visitor came to do. Buttons, not the pair of bare text links this
@@ -215,7 +215,7 @@ function SignedOutLanding() {
 
       {/* ---- What this app is for -------------------------------------------------- */}
       <section aria-labelledby="mainframe" className="rounded-lg border border-border bg-bg-muted p-5 sm:p-6">
-        <h2 id="mainframe" className="text-lg font-semibold">Booking, credits and court lights</h2>
+        <h2 id="mainframe" className="text-lg font-semibold">Booking, minutes and court lights</h2>
         {/*
           What the member actually does, which is not what this paragraph used to say.
 
@@ -233,8 +233,9 @@ function SignedOutLanding() {
           a club that sets 20 would have a public page quietly advertising the wrong thing.
         */}
         <p className="mt-2 max-w-prose text-sm text-text-secondary">
-          Members book courts here in short slices, paid from a credit balance you top up in the
-          app — there is no key to collect and nothing to pay at the door. When you get to the
+          Members book courts here in short slices, paid in minutes from a balance you buy in
+          packages in the app — a booking costs exactly its length, there is no key to collect
+          and nothing to pay at the door. When you get to the
           court, hold your code up to the scanner on the court box and the lights come on for
           your slot.
         </p>
@@ -250,7 +251,7 @@ function SignedOutLanding() {
         */}
         <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-text-secondary">
           <span className="inline-flex items-center gap-1.5"><CalendarDots size={16} aria-hidden="true" /> Courts bookable through the day, seven days a week in season</span>
-          <span className="inline-flex items-center gap-1.5"><Wallet size={16} aria-hidden="true" /> Pay from credits, not at the door</span>
+          <span className="inline-flex items-center gap-1.5"><Wallet size={16} aria-hidden="true" /> Pay in minutes, not at the door</span>
         </div>
       </section>
       </div>

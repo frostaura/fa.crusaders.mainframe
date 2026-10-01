@@ -1,6 +1,7 @@
 import { clubDayAndClock } from "@/lib/clubClock";
 import { ArrowRight } from "../ui/icons";
-import { cn, formatSignedCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { MinutesFigure } from "./MinutesFigure";
 import { COMPACT_ONLY, STACKED_ONLY } from "./ledgerColumns";
 
 /** The club's day and clock, under the comment in the compact form, where the Time column folds away. */
@@ -25,7 +26,7 @@ export function ToName({ name }: { name: string }) {
 export function StackedAmount({ signed, ink, under }: { signed: number; ink: string; under: string }) {
   return (
     <span data-stacked-amount="" className={cn("mt-1 block", STACKED_ONLY)}>
-      <span className={cn("block whitespace-nowrap font-semibold tabular-nums", ink)}>{formatSignedCredits(signed)}</span>
+      <span className={cn("block whitespace-nowrap font-semibold tabular-nums", ink)}><MinutesFigure value={signed} signed /></span>
       <span className="block break-words text-xs text-text-muted">{under}</span>
     </span>
   );

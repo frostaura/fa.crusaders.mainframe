@@ -7,12 +7,12 @@ import { BalanceProvider } from "@/lib/balance";
 import type { BalanceFrame, BalanceTransport } from "@/lib/liveBalance";
 import { movementSentence, shareRowSentence } from "@/lib/walletCopy";
 import { ToastProvider } from "../Toast";
-import { CreditsChip } from "./CreditsChip";
+import { MinutesChip } from "./MinutesChip";
 import { signIn, signOut, stubFetch, type StubRoute } from "../../test/harness";
 
 /**
  * D4 — the chip's toast for a movement, measured in a headed walk against the real stack:
- * "The club took 50.00 credits off your wallet." after the member's OWN booking (the stream's
+ * "The club took 50 min off your wallet." after the member's OWN booking (the stream's
  * frame overtook the booking's HTTP answer, so the "this was mine" mark came too late), and the
  * same sentence to a partner who had just accepted an invite — money that went to the organiser,
  * not the club. And the organiser, whose partner paid them, was told nothing about who.
@@ -43,7 +43,7 @@ function mount(extra: StubRoute[] = []) {
     <MemoryRouter>
       <AuthProvider>
         <BalanceProvider transport={w.transport}>
-          <ToastProvider><CreditsChip /></ToastProvider>
+          <ToastProvider><MinutesChip /></ToastProvider>
         </BalanceProvider>
       </AuthProvider>
     </MemoryRouter>,
@@ -63,7 +63,7 @@ function holdBookingPost() {
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 50)); });
 
-describe("CreditsChip — whose movement it was", () => {
+describe("MinutesChip — whose movement it was", () => {
   it("raises no 'club' toast for the member's own booking, although its frame lands before the answer", async () => {
     const w = mount([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_minutes: 150 } }]);
     await w.push({ balance_minutes: 200 });
@@ -109,7 +109,7 @@ describe("CreditsChip — whose movement it was", () => {
     const expected = shareRowSentence({
       side: "organiser", signed: 20, place: { courtName: "Court 1", startsAt: "2026-09-29T16:00:00Z" }, other: "Sam Petersen",
     });
-    expect(expected).toBe("Sam paid you 20.00 cr for their share of Court 1");
+    expect(expected).toBe("Sam paid you 20 min for their share of Court 1");
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(/The club/)).toBeNull();
   });
@@ -120,6 +120,6 @@ describe("CreditsChip — whose movement it was", () => {
     await w.push({ balance_minutes: 250, delta_minutes: 50, reason: "cancellation_refund" });
     expect(await screen.findByText(movementSentence(50, "cancellation_refund"))).toBeInTheDocument();
     await w.push({ balance_minutes: 350, delta_minutes: 100, reason: "admin_adjustment" });
-    expect(await screen.findByText("The club added 100.00 credits to your wallet.")).toBeInTheDocument();
+    expect(await screen.findByText("The club added 1 h 40 min to your wallet.")).toBeInTheDocument();
   });
 });

@@ -22,9 +22,9 @@ describe("WalletMiniTotals", () => {
     renderPage(<WalletMiniTotals />);
     const box = screen.getByRole("region", { name: COPY.title });
     expect(within(box).getByRole("status")).toBeInTheDocument();
-    expect(await within(box).findByText("+300.00 cr")).toBeInTheDocument();
-    expect(within(box).getByText("−150.00 cr")).toBeInTheDocument();
-    expect(within(box).getByText("+150.00 cr")).toBeInTheDocument();
+    expect(await within(box).findByText("+5 h")).toBeInTheDocument();
+    expect(within(box).getByText("−2 h 30 min")).toBeInTheDocument();
+    expect(within(box).getByText("+2 h 30 min")).toBeInTheDocument();
     expect(within(box).getByRole("link", { name: COPY.more })).toHaveAttribute("href", "/wallet/activity");
     expect(fetch.calls.filter((c) => c.path.startsWith("/api/v1/reports/me/wallet"))).toHaveLength(1);
   });
@@ -34,10 +34,10 @@ describe("WalletMiniTotals", () => {
     stubFetch([{ path: "/api/v1/reports/me/wallet", status: 500, body: { error: "boom" } }]);
     renderPage(<WalletMiniTotals />);
     expect(await screen.findByText(COPY.failed)).toBeInTheDocument();
-    expect(screen.queryByText("0.00 cr", { exact: false })).toBeNull();
+    expect(screen.queryByText("0 min", { exact: false })).toBeNull();
     stubFetch([{ path: "/api/v1/reports/me/wallet", body: REPORT }]);
     fireEvent.click(screen.getByRole("button", { name: COPY.retry }));
-    expect(await screen.findByText("+300.00 cr")).toBeInTheDocument();
+    expect(await screen.findByText("+5 h")).toBeInTheDocument();
   });
 
   it("offline, says the figures need a connection", async () => {

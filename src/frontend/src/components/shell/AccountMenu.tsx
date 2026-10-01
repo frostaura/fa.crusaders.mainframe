@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ArrowCounterClockwise, Compass, Desktop, Moon, Question, SignOut, Sun, UserCircle, Wallet, type Icon } from "@/components/ui/icons";
 import { walletHref } from "@/lib/balance";
-import { formatCredits } from "@/lib/utils";
+import { minutesCompact } from "@/lib/minutes";
 import { useChipBalance } from "./chipBalance";
 import { useAuth } from "@/lib/auth";
 import {
@@ -187,9 +187,9 @@ export function AccountMenu() {
   );
 }
 
-/** Whether the credits chip is in the bar but not drawn (its slot folded at large text, V5-4). */
+/** Whether the minutes chip is in the bar but not drawn (its slot folded at large text, V5-4). */
 function chipIsFolded(): boolean {
-  const slot = document.querySelector<HTMLElement>("[data-credits-chip-slot]");
+  const slot = document.querySelector<HTMLElement>("[data-minutes-chip-slot]");
   // `checkVisibility` (not a computed style: cheap, and absent — so "not folded" — in jsdom).
   return slot !== null && typeof slot.checkVisibility === "function" && !slot.checkVisibility();
 }
@@ -204,7 +204,7 @@ function WalletItem({ onSelect }: { onSelect: () => void }) {
         <Wallet size={16} aria-hidden="true" className="text-text-muted" />
         Wallet
         <span className="ml-auto whitespace-nowrap font-semibold tabular-nums">
-          {shown === null ? "— cr" : formatCredits(shown)}
+          {shown === null ? "— min" : minutesCompact(shown)}
         </span>
       </Link>
     </DropdownMenuItem>

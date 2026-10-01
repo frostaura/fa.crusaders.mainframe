@@ -30,9 +30,9 @@ export function isGroupableShare(row: LedgerRow): row is LedgerRow & { relatedBo
   return row.type === "ShareTransfer" && typeof row.relatedBookingId === "string" && row.relatedBookingId.length > 0;
 }
 
-/** Credits are two-place figures; summing floats must not print 49.999999. */
-function roundCredits(value: number): number {
-  return Math.round(value * 100) / 100;
+/** Minutes are whole (P13); a sum of whole figures stays whole, and a stray fraction is not kept. */
+function wholeMinutes(value: number): number {
+  return Math.round(value);
 }
 
 export function groupShareRows(rows: readonly LedgerRow[]): LedgerItem[] {
@@ -46,10 +46,10 @@ export function groupShareRows(rows: readonly LedgerRow[]): LedgerItem[] {
     const existing = groups.get(row.relatedBookingId);
     if (existing) {
       existing.rows.push(row);
-      existing.net = roundCredits(existing.net + row.signedAmountMinutes);
+      existing.net = wholeMinutes(existing.net + row.signedAmountMinutes);
       continue;
     }
-    const group = { kind: "shares" as const, bookingId: row.relatedBookingId, rows: [row], net: roundCredits(row.signedAmountMinutes) };
+    const group = { kind: "shares" as const, bookingId: row.relatedBookingId, rows: [row], net: wholeMinutes(row.signedAmountMinutes) };
     groups.set(row.relatedBookingId, group);
     items.push(group);
   }
@@ -60,7 +60,7 @@ export function groupShareRows(rows: readonly LedgerRow[]): LedgerItem[] {
 export type ShareSide = "organiser" | "partner";
 
 /**
- * The organiser RECEIVES shares (credit rows); a partner PAYS one (debit rows). A group that
+ * The organiser RECEIVES shares (rows in); a partner PAYS one (rows out). A group that
  * has netted to zero — paid then returned in full — is read off its first row's sign, which is
  * the direction the money first went.
  */

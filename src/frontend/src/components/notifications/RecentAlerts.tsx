@@ -5,7 +5,7 @@ import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Bell, CaretRight, Clock, Coins, CreditCard, Door, Repeat, ShieldCheck, ShieldWarning, UserPlus, Warning,
+  Bell, CaretRight, Clock, Coins, Door, Receipt, Repeat, ShieldCheck, ShieldWarning, UserPlus, Warning,
   WebhooksLogo, WifiHigh, WifiSlash, type Icon,
 } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,7 +39,8 @@ const KIND_ICON: Record<string, Icon> = {
   "device.recovered": WifiHigh,
   "device.fault_spike": Warning,
   "door.refusal_spike": Door,
-  "topup.failed": CreditCard,
+  // A package purchase that needs looking at (the code keeps its name, P13 §5).
+  "topup.failed": Receipt,
   "webhook.auto_disabled": WebhooksLogo,
   "schedule.conflict": Repeat,
   "booking.overdraft_authorised": Coins,

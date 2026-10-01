@@ -5,16 +5,16 @@ import { AuthProvider } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
 import type { BalanceFrame, BalanceTransport } from "@/lib/liveBalance";
 import { ToastProvider } from "../Toast";
-import { CreditsChip } from "./CreditsChip";
+import { MinutesChip } from "./MinutesChip";
 import { signIn, signOut, stubFetch } from "../../test/harness";
 
 /**
- * M-1 (review round 3) — the flyout over the credits chip says the NET change the chip just made.
+ * M-1 (review round 3) — the flyout over the minutes chip says the NET change the chip just made.
  *
  * <p>
  * A split booking's cancel lands as a burst of frames: the organiser's refund, then each partner's
  * share going back to them. The flyout read only the LAST frame's `delta_minutes`, so the chip
- * counted 235 → 335 while the number floating over it said "−33.00" — the opposite direction.
+ * counted 235 → 335 while the number floating over it said "−33" — the opposite direction.
  * </p>
  */
 
@@ -34,7 +34,7 @@ function mount(startingBalance: number) {
     <MemoryRouter>
       <AuthProvider>
         <BalanceProvider transport={transport}>
-          <ToastProvider><CreditsChip /></ToastProvider>
+          <ToastProvider><MinutesChip /></ToastProvider>
         </BalanceProvider>
       </AuthProvider>
     </MemoryRouter>,
@@ -44,21 +44,21 @@ function mount(startingBalance: number) {
   return { push, flyout };
 }
 
-describe("CreditsChip — the flyout", () => {
+describe("MinutesChip — the flyout", () => {
   it("shows the net of a burst of frames, not the last frame's delta", async () => {
     const chip = mount(235);
     await chip.push({ balance_minutes: 235 });
     // Refund of the whole court to the organiser, then a partner's share handed back to them.
     await chip.push({ balance_minutes: 368, delta_minutes: 133, reason: "cancellation_refund" });
     await chip.push({ balance_minutes: 335, delta_minutes: -33, reason: "share_transfer" });
-    expect(chip.flyout()).toBe("+100.00");
+    expect(chip.flyout()).toBe("+1 h 40 min");
   });
 
   it("shows a single movement as itself", async () => {
     const chip = mount(200);
     await chip.push({ balance_minutes: 200 });
     await chip.push({ balance_minutes: 150, delta_minutes: -50, reason: "booking_charge" });
-    expect(chip.flyout()).toBe("−50.00");
+    expect(chip.flyout()).toBe("−50 min");
   });
 
   it("starts a new burst once the last one has settled", async () => {
@@ -68,7 +68,7 @@ describe("CreditsChip — the flyout", () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 1_700)); });
     expect(chip.flyout()).toBeNull();
     await chip.push({ balance_minutes: 170, delta_minutes: 20, reason: "share_transfer" });
-    expect(chip.flyout()).toBe("+20.00");
+    expect(chip.flyout()).toBe("+20 min");
   });
 
   it("says nothing when the burst nets to nothing the chip shows", async () => {

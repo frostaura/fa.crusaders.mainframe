@@ -5,7 +5,7 @@ import { heldFrom, type HeldFigures } from "@/lib/liveBalance";
 import { memberReads, WALLET_PAGE_SIZE } from "@/lib/offline/memberReads";
 import { fetchQuery, peekQuery, subscribeQuery } from "@/lib/offline/queryCache";
 import { isConnectionFailure, JOIN_MS, useDataOwner } from "@/lib/offline/useCachedRead";
-import { creditArrivedSentence, creditLeftSentence } from "@/lib/walletCopy";
+import { minutesArrivedSentence, minutesLeftSentence } from "@/lib/walletCopy";
 import { useToast } from "../Toast";
 import { shareBookingsFrom, type ShareBookings } from "./useShareBookings";
 import { useBalanceMovement, useCountUp, useWalletLive } from "./useWalletLive";
@@ -48,8 +48,8 @@ export function useWalletLedger() {
 
   /*
     The header chip follows the live wallet stream; this page used to fetch once on mount and
-    never again. So an admin crediting a member while they watched showed 517.01 in the chip
-    and 510.01 in the card underneath it, with no +7.00 row and no refresh control anywhere —
+    never again. So an admin adding minutes while the member watched showed one figure in the
+    chip and another in the card underneath it, with no new row and no refresh control anywhere —
     on the screen a member opens when they are arguing about their balance. Following the same
     signal is what keeps the two from disagreeing.
 
@@ -126,7 +126,7 @@ export function useWalletLedger() {
   useEffect(() => {
     // A live figure this page has just read (and handed over) is not news; re-reading it would
     // be a second identical round trip after every Refresh that moved the balance.
-    if (live.balance !== null && lastRead.current !== null && Math.abs(live.balance - lastRead.current) < 0.005) return;
+    if (live.balance !== null && lastRead.current !== null && live.balance === lastRead.current) return;
     // Fetch on mount, and re-read when the live balance moves.
     // Only the mount's read joins a link press's; a re-read after a balance move asks the club.
     void load(WALLET_PAGE_SIZE, firstRead.current);
@@ -164,7 +164,7 @@ export function useWalletLedger() {
  *
  * <p>
  * <b>What it says is read off the ledger, never assumed.</b> The delta says how much moved;
- * the newest row that matches it says what it WAS. "The club added 200 credits" would be
+ * the newest row that matches it says what it WAS. "The club added 3 h" would be
  * false if a partner had cancelled a court in another tab, and this page cannot tell those
  * apart except by looking at the row.
  * </p>
@@ -181,12 +181,12 @@ function useMoneyAnnouncement(
     const match = matchingRow(rows, delta.amount, delta.direction);
     const rising = delta.direction === "up";
     toast.push({
-      // Money going out is not an error — spending your own credit on a court you chose is
+      // Minutes going out is not an error — spending your own minutes on a court you chose is
       // the product working — so it is `info`, and it is the quieter of the two.
       tone: rising ? "success" : "info",
       text: rising
-        ? creditArrivedSentence(delta.amount, match?.type ?? null, match?.actorName ?? null)
-        : creditLeftSentence(delta.amount, match?.type ?? null),
+        ? minutesArrivedSentence(delta.amount, match?.type ?? null, match?.actorName ?? null)
+        : minutesLeftSentence(delta.amount, match?.type ?? null),
       durationMs: MONEY_TOAST_MS,
     });
   }, [delta, rows, toast]);
@@ -218,9 +218,9 @@ function matchingRow(
 ): { type: LedgerEntryType; actorName: string | null } | null {
   if (!rows) return null;
   const wanted = direction === "up" ? amount : -amount;
-  const row = rows.find((r) => Math.abs(r.signedAmountMinutes - wanted) < 0.005);
+  const row = rows.find((r) => r.signedAmountMinutes === wanted);
   if (!row) return null;
-  // An admin crediting somebody is an actor who is not the subject. A top-up the member made
+  // An admin adding minutes is an actor who is not the subject. A purchase the member made
   // themselves has the member as both, and naming them back to themselves reads as a fault.
   const actor = row.actorUserId && row.actorUserId !== row.subjectUserId ? row.actorName : null;
   return { type: row.type, actorName: actor || null };

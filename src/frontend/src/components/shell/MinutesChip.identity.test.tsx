@@ -5,14 +5,14 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
 import type { BalanceTransport } from "@/lib/liveBalance";
 import { ToastProvider } from "../Toast";
-import { CreditsChip } from "./CreditsChip";
+import { MinutesChip } from "./MinutesChip";
 import { signIn, signOut, stubFetch } from "../../test/harness";
 
 /**
  * D1 — the chip while the balance is loading, and across a change of member.
  *
  * <p>
- * Measured right after a password sign-in: a red danger "0.00 cr". The figure was the previous
+ * Measured right after a password sign-in: a red danger zero. The figure was the previous
  * identity's (a leftover token for a member who no longer existed) — the provider was keyed on
  * "is somebody signed in", not on WHO, so it never re-read. And while a figure is loading the
  * chip must say so neutrally: never a zero, never the danger tone.
@@ -47,7 +47,7 @@ function holdLaterWalletReads() {
   return () => release();
 }
 
-describe("CreditsChip — loading, and a change of member", () => {
+describe("MinutesChip — loading, and a change of member", () => {
   it("drops the previous identity's zero on sign-in, shows a neutral placeholder while loading, then the new figure", async () => {
     const whoami = { ...signIn({ isAdmin: false }), user_id: STALE };
     stubFetch([
@@ -63,25 +63,25 @@ describe("CreditsChip — loading, and a change of member", () => {
       <MemoryRouter>
         <AuthProvider>
           <BalanceProvider transport={silent}>
-            <ToastProvider><CreditsChip /><SignInButton /></ToastProvider>
+            <ToastProvider><MinutesChip /><SignInButton /></ToastProvider>
           </BalanceProvider>
         </AuthProvider>
       </MemoryRouter>,
     );
-    const chip = () => container.querySelector("[data-credits-chip]") as HTMLElement;
+    const chip = () => container.querySelector("[data-minutes-chip]") as HTMLElement;
 
     // The stale identity's figure.
-    await waitFor(() => expect(chip()).toHaveTextContent("0.00"));
+    await waitFor(() => expect(chip()).toHaveTextContent("0 min"));
 
     fireEvent.click(screen.getByRole("button", { name: "sign in" }));
     // Loading for the new member: no zero, no danger tone, a placeholder, and a label that says so.
     await waitFor(() => expect(chip()).toHaveAttribute("aria-label", expect.stringMatching(/loading/i)));
-    expect(chip()).not.toHaveTextContent("0.00");
+    expect(chip()).not.toHaveTextContent("0 min");
     expect(chip().className).not.toMatch(/danger/);
     expect(chip().querySelector("[data-slot='skeleton']")).not.toBeNull();
 
     release();
-    await waitFor(() => expect(chip()).toHaveAttribute("aria-label", expect.stringContaining("170.00 credits")));
+    await waitFor(() => expect(chip()).toHaveAttribute("aria-label", expect.stringContaining("2 hours 50 minutes")));
     expect(chip().className).not.toMatch(/danger/);
   });
 });

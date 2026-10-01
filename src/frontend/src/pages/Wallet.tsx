@@ -13,7 +13,8 @@ import { LedgerTable } from "../components/LedgerTable";
 import type { ShareBookings } from "../components/wallet/useShareBookings";
 import { useWalletLedger } from "../components/wallet/useWalletLedger";
 import { StaleNotice } from "../components/shell/StaleNotice";
-import { walletTone } from "../lib/balance";
+import { BUY_MINUTES_PATH, walletTone } from "../lib/balance";
+import { Minutes } from "../components/Minutes";
 import type { HeldFigures } from "../lib/liveBalance";
 import { WALLET_PAGE_SIZE as PAGE_SIZE } from "../lib/offline/memberReads";
 import { WalletNav } from "../components/wallet/WalletNav";
@@ -29,18 +30,18 @@ import { WalletMiniTotals } from "../components/wallet/WalletMiniTotals";
  *
  * <p>
  * Every branch in here forks on the SAME answer, `walletTone`, which is the whole point of
- * having one: the fill, the edge, the ink on the figure, the sentence under it and the top-up
+ * having one: the fill, the edge, the ink on the figure, the sentence under it and the buy
  * control's own label and prominence all say the same thing about the same balance, and a
  * member reading a green card over "you can't book a court" is the disagreement that one rule
  * exists to make unrepresentable.
  * </p>
  *
  * <p>
- * The top-up control is navigation, so it is a link — drawn as the page's primary action
+ * The buy control is navigation, so it is a link — drawn as the page's primary action
  * (`<Button asChild><Link/></Button>`, design-system.md: Buttons vs links). It is drawn here only
  * in the desktop rail, and there it is PRIMARY beside the figure whatever the balance (R5 M5-9,
  * SPEC 3.4): a soft secondary next to the number read as an afterthought, while the phone's docked
- * Top up was primary — one verb, one weight, wherever it is drawn.
+ * button was primary — one verb, one weight, wherever it is drawn.
  * </p>
  */
 function BalanceCard({ balance, painted, held, topUp = true }: { balance: number | null; painted: number | null; held: HeldFigures | null; topUp?: boolean }) {
@@ -59,7 +60,8 @@ function BalanceCard({ balance, painted, held, topUp = true }: { balance: number
             announcements. The toast is the announcement.
           */}
           <p className={cn(typography({ variant: "display" }), "mt-1 tabular-nums", level === "zero" && tone.ink)}>
-            {(painted ?? 0).toFixed(2)} <span className="text-base font-medium tracking-normal text-text-secondary">credits</span>
+            {/* Whole minutes in the one compact form ("7 h 30 min"), spoken in full (P13 §7.1). */}
+            <Minutes value={painted ?? 0} className={level === "zero" ? tone.ink : undefined} />
           </p>
           <p className={cn("mt-2 max-w-prose text-sm", level === "fine" ? "text-text-secondary" : tone.ink)}>
             {BALANCE_SENTENCE[level]}
@@ -73,14 +75,14 @@ function BalanceCard({ balance, painted, held, topUp = true }: { balance: number
 }
 
 /**
- * The top-up control. Navigation, so a link drawn as the page's primary action
+ * The buy control. Navigation, so a link drawn as the page's primary action
  * (`<Button asChild><Link/></Button>`). Primary when there is nothing to play with; on a phone it is
  * docked in thumb reach (R4 form factor, SPEC 3.4) and primary there whatever the balance.
  */
 function TopUpLink({ level, primary = false, block = false }: { level: BalanceLevel; primary?: boolean; block?: boolean }) {
   return (
     <Button asChild block={block} variant={primary || level === "zero" ? "primary" : "secondary"} className="shrink-0">
-      <Link to="/wallet/topup">{TOP_UP_LABEL[level]}</Link>
+      <Link to={BUY_MINUTES_PATH}>{TOP_UP_LABEL[level]}</Link>
     </Button>
   );
 }
@@ -132,7 +134,7 @@ function LedgerSection(props: LedgerProps) {
           empty
           emptyIcon={Receipt}
           emptyTitle="No movements yet"
-          emptyHint="Top up, or wait for the club to credit you — every movement lands here."
+          emptyHint="Buy minutes, or wait for the club to add some — every movement lands here."
         />
       ) : (
         // `overflow-clip`, not `-hidden`: a hidden overflow is a scroll container, and the ledger's
@@ -158,14 +160,14 @@ export default function WalletPage() {
   const loaded = rows !== null && cardBalance !== null;
   const shown = rows?.length ?? 0;
   const refresh = () => { void load(Math.max(shown, PAGE_SIZE)); };
-  // One Top up, in one place: beside the figure from lg, docked in thumb reach below it.
+  // One buy button, in one place: beside the figure from lg, docked in thumb reach below it.
   const wide = useMediaQuery(LG_UP);
 
   return (
     <PageShell width="wide">
       <PageHeader
         title="Wallet"
-        description="Your credit, and every movement of it."
+        description="Your minutes, and every movement of them."
         actions={<RefreshButton onRefresh={refresh} loading={busy} />}
         freshness={<Freshness at={readAt} />}
       />
@@ -182,7 +184,7 @@ export default function WalletPage() {
       >
         {loaded ? (
           // R4 form factor (SPEC 3.4): from a 64rem page the balance is a sticky rail beside the
-          // ledger, first in reading order — the figure and Top up together, not 800px apart.
+          // ledger, first in reading order — the figure and Buy minutes together, not 800px apart.
           // The rail carries the last 30 days under the figure (R5 M5-9) where it is a rail.
           <WithAside placement="before" at="64rem" asideLabel={WALLET_LAYOUT.railLabel} aside={
             <>

@@ -6,7 +6,8 @@ import { useBalance, walletHref, walletLabel, walletTone } from "@/lib/balance";
 import type { BalanceDelta, LiveState } from "@/lib/liveBalance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
 import { movementSentence } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/auth";
 import { useChipBalance, type ChipFigures } from "./chipBalance";
@@ -14,12 +15,13 @@ import { namedShareMovement } from "./shareMovement";
 import { useToast } from "../Toast";
 
 /**
- * The credits chip in the top bar (item 8, rebuilt on the P1 tokens for the P2 shell).
+ * The minutes chip in the top bar (item 8, rebuilt on the P1 tokens for the P2 shell; P13 renamed
+ * it from the old balance chip — the club's unit is whole minutes).
  *
  * <p>
- * Everything the old `CreditsBadge` promised, kept: the figure counts to a new balance; three
- * states with three looks (empty is not "running low"); a finite breathe at zero, or a static
- * "· Top up" word under reduced motion; exactly ONE toast when the club moves a member's money
+ * Everything the old balance badge promised, kept: the figure — what the member can SPEND, in
+ * minutes ("7 h 30 min") — counts to a new balance; three states with three looks (empty is not
+ * "running low"); a finite breathe at zero, or a static "· Buy minutes" word under reduced motion; exactly ONE toast when the club moves a member's money
  * (a changed `aria-label` is not an announcement, so without it a blind member is never told
  * they were paid) and none for their own spending; the accessible name carries the NUMBER and
  * the degraded-stream qualifier; and the figure is never truncated.
@@ -79,38 +81,39 @@ function useClubMovementToast() {
   }, [delta, clearDelta]);
 }
 
-/** ", 20.00 held for partners, 16.00 owed back to partners" — the parts, in words. */
+/** ", 20 minutes held for partners, 16 minutes owed back to partners" — the parts, in words. */
 function partsInWords(f: ChipFigures): string {
-  const held = f.held > 0 ? `, ${f.held.toFixed(2)} held for partners` : "";
-  const owed = f.owedBack > 0 ? `, ${f.owedBack.toFixed(2)} owed back to partners` : "";
+  const held = f.held > 0 ? `, ${minutesSpoken(f.held)} held for partners` : "";
+  const owed = f.owedBack > 0 ? `, ${minutesSpoken(f.owedBack)} owed back to partners` : "";
   return `${held}${owed}`;
 }
 
 /**
  * The accessible name. Unparted, exactly `walletLabel`. Parted: the spendable figure first, then
- * the whole balance with its parts — "Wallet balance 500.00 credits to spend — 550.00 credits,
- * 50.00 held for partners. Tap to top up." The tone sentence follows the SPENDABLE figure, as the
+ * the whole balance with its parts — "Wallet balance 8 hours 20 minutes to spend — 9 hours
+ * 10 minutes, 50 minutes held for partners. Tap to buy minutes." The tone sentence follows the
+ * SPENDABLE figure, as the
  * chip's colour does: a member with nothing to spend cannot book, whatever the whole says.
  */
 function chipLabel(balance: number | null, loading: boolean, state: LiveState, f: ChipFigures): string {
   if (!f.parted || balance === null || f.shown === null) return walletLabel(balance, loading, state, f.held, f.owedBack);
-  const spend = f.shown > 0 ? `${f.shown.toFixed(2)} credits to spend` : "nothing to spend";
+  const spend = f.shown >= 1 ? `${minutesSpoken(f.shown)} to spend` : "nothing to spend";
   const tone = walletTone(f.shown);
-  const next = tone === "zero" ? " You can't book until you top up. Tap to top up." : tone === "low" ? " Running low. Tap to top up." : " Tap to top up.";
+  const next = tone === "zero" ? " You can't book until you buy minutes. Tap to buy minutes." : tone === "low" ? " Running low. Tap to buy minutes." : " Tap to buy minutes.";
   const stale = state === "degraded" ? " This figure is checked every 30 seconds." : "";
-  return `Wallet balance ${spend} — ${balance.toFixed(2)} credits${partsInWords(f)}.${next}${stale}`;
+  return `Wallet balance ${spend} — ${minutesSpoken(balance)}${partsInWords(f)}.${next}${stale}`;
 }
 
 /** The chip's hover title: the stream's health first, then what is set aside, then the plain one. */
 function chipTitle(state: string, loading: boolean, balance: number | null, f: ChipFigures): string {
   if (state === "degraded") return "The club's live updates aren't coming through — this figure is checked every 30 seconds.";
   if (loading) return "Refreshing balance…";
-  if (!f.parted || balance === null || f.shown === null) return "Wallet balance — tap to top up";
+  if (!f.parted || balance === null || f.shown === null) return "Wallet balance — tap to buy minutes";
   const parts = [
-    f.held > 0 ? `${formatCredits(f.held)} held for partners${f.heldParts ? ` (${f.heldParts})` : ""}` : null,
-    f.owedBack > 0 ? `${formatCredits(f.owedBack)} owed back to partners` : null,
+    f.held > 0 ? `${minutesCompact(f.held)} held for partners${f.heldParts ? ` (${f.heldParts})` : ""}` : null,
+    f.owedBack > 0 ? `${minutesCompact(f.owedBack)} owed back to partners` : null,
   ].filter(Boolean).join(", ");
-  return `${formatCredits(Math.max(0, f.shown))} to spend — ${formatCredits(balance)} in your wallet, ${parts}. Tap to top up.`;
+  return `${minutesCompact(Math.max(0, f.shown))} to spend — ${minutesCompact(balance)} in your wallet, ${parts}. Tap to buy minutes.`;
 }
 
 /**
@@ -124,7 +127,7 @@ type Burst = { from: number | null; last: number | null; at: number; startedAt: 
 
 /**
  * What the flyout says: the NET change of the figure the chip shows, across the current burst —
- * not the last frame's `delta_minutes`. That read "−33.00" while the chip counted 235 → 335. Null
+ * not the last frame's `delta_minutes`. That read "−33" while the chip counted 235 → 335. Null
  * when there is no movement to show, or the burst nets to nothing the chip shows (a partner's paid
  * share that is only HELD moves the balance but not the spendable figure on the chip).
  *
@@ -146,17 +149,19 @@ function useFlyoutAmount(shown: number | null, delta: BalanceDelta | null): { am
   if (!delta || shown === null || burst.from === null) return null;
   const net = shown - burst.from;
   // Keyed by the burst, so a new movement replays the rise and one burst's frames do not restart it.
-  return Math.abs(net) >= 0.005 ? { amount: net, key: burst.startedAt } : null;
+  // Whole minutes (P13): a net of less than one is no movement the chip shows.
+  return Math.abs(net) >= 1 ? { amount: Math.trunc(net), key: burst.startedAt } : null;
 }
 
 /**
  * The figure — or, while it is loading, a neutral placeholder the width of one (D1). Never a
- * zero: a loading chip once painted a red "0.00 cr" that belonged to nobody signed in.
- * aria-hidden: the label says the number in words; "cr" is not a word. Never truncated.
+ * zero: a loading chip once painted a red zero that belonged to nobody signed in.
+ * aria-hidden: the label says the number in words ("7 hours 30 minutes"); "h" and "min" are not
+ * words a screen reader should spell. Never truncated.
  */
 function ChipFigure({ balance, loading, displayed }: { balance: number | null; loading: boolean; displayed: number }) {
-  if (balance === null && loading) return <Skeleton className="h-4 w-14 rounded-full bg-border" />;
-  return <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(displayed)}</span>;
+  if (balance === null && loading) return <Skeleton data-chip-skeleton="" className="h-4 w-14 rounded-full bg-border" />;
+  return <span aria-hidden="true" data-chip-figure="">{balance === null ? "— min" : minutesCompact(displayed)}</span>;
 }
 
 /** "Last known at 18:04 — …": a kept figure says it is one. */
@@ -165,7 +170,7 @@ function keptTitle(at: number | null, rest: string): string {
   return `${time ? `Last known at ${time}` : "Last known"}, not yet confirmed by the club — ${rest}`;
 }
 
-export function CreditsChip() {
+export function MinutesChip() {
   const { live, kept, balance, loading, figures } = useChipBalance();
   const { state, delta } = live;
   const location = useLocation();
@@ -188,11 +193,11 @@ export function CreditsChip() {
     // where crest, bell, chip and avatar cannot share one row (320 px at 200 %: the header took
     // two rows). The account menu then shows the figure (`AccountMenu`), and the Wallet tab is one
     // tap away. Still mounted, so its money toasts still speak.
-    <div data-credits-chip-slot="" className="relative hidden shrink-0 @[17.5rem]/appbar:block">
+    <div data-minutes-chip-slot="" className="relative hidden shrink-0 @[17.5rem]/appbar:block">
       <Link
         to={walletHref(figures.shown)}
         onClick={() => entice.stop("tapped")}
-        data-credits-chip=""
+        data-minutes-chip=""
         data-zero-entice={entice.breathing || undefined}
         data-live-state={state}
         aria-label={chipLabel(balance, loading, state, figures)}
@@ -209,13 +214,13 @@ export function CreditsChip() {
       >
         <Wallet size={16} weight="fill" aria-hidden="true" className={cn("shrink-0", ICON_TONE[tone])} />
         <ChipFigure balance={figures.shown} loading={loading} displayed={displayed} />
-        {entice.showWord ? <span aria-hidden="true">· Top up</span> : null}
+        {entice.showWord ? <span aria-hidden="true">· Buy minutes</span> : null}
         {state === "degraded" ? (
           <span aria-hidden="true" className="ml-0.5 inline-block size-1 rounded-full border border-current opacity-70" />
         ) : null}
       </Link>
       {showFlyout ? (
-        // Up is success; down is secondary, deliberately not red — spending your own credit on a
+        // Up is success; down is secondary, deliberately not red — spending your own minutes on a
         // court you chose is not an error.
         <span
           key={flyout!.key}
@@ -227,7 +232,7 @@ export function CreditsChip() {
             flyout!.amount > 0 ? "text-success-strong" : "text-text-secondary",
           )}
         >
-          {flyout!.amount > 0 ? "+" : "−"}{Math.abs(flyout!.amount).toFixed(2)}
+          {minutesSigned(flyout!.amount)}
         </span>
       ) : null}
     </div>

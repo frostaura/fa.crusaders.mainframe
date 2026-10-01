@@ -1,7 +1,8 @@
 import { Fragment, useId, useState, type ReactNode } from "react";
 import type { LedgerRow } from "@/lib/api";
 import { clubDayAndClock, clubInstant } from "@/lib/clubClock";
-import { cn, formatSignedCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { MinutesFigure } from "./MinutesFigure";
 import { SHARE_LEDGER_COPY as COPY, shareGroupSentence, shareRowSentence } from "@/lib/walletCopy";
 import { TableCell, TableRow } from "../ui/table";
 import { TextLink } from "../ui/text-link";
@@ -110,9 +111,9 @@ const GROUP_CELL: Record<Column, (h: Head) => ReactNode> = {
   category: (h) => <TableCell className={CELL_CLASS.category}>{ledgerCategory(h.group.rows[0])}</TableCell>,
   actor: () => <TableCell className={CELL_CLASS.actor} />,
   amount: (h) => (
-    // Netted to nothing is neither money in nor out: neutral ink, never the green of a credit (R1 F2.14).
+    // Netted to nothing is neither money in nor out: neutral ink, never the green of money in (R1 F2.14).
     <TableCell className={cn(CELL_CLASS.amount, PIN_AMOUNT, PIN_CELL, PIN_RIGHT_EDGE, h.group.net === 0 ? "text-text-secondary" : amountInk(h.group.net))}>
-      {formatSignedCredits(h.group.net)}
+      <MinutesFigure value={h.group.net} signed />
       <span className={cn("block text-xs font-normal text-text-muted", COMPACT_ONLY)}>{COPY.movements(h.group.rows.length)}</span>
     </TableCell>
   ),
