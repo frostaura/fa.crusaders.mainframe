@@ -364,7 +364,9 @@ jobs:
       - name: Enforce coverage threshold on the merged report
         run: |
           THRESHOLD=70
-          reports=$(find shards -name "coverage.cobertura.xml" | sort)
+          # The trx logger copies each run's attachments under <run>/In/<machine>/; count the
+          # collector's own report (its <guid>/ folder) once per shard, not that copy as well.
+          reports=$(find shards -name "coverage.cobertura.xml" -not -path "*/In/*" | sort)
           if [ "$(echo "$reports" | grep -c .)" -ne "$BACKEND_SHARDS" ]; then
             echo "Expected $BACKEND_SHARDS coverage reports, found:"; echo "$reports"
             echo "A missing report used to pass this gate; it fails it now."
