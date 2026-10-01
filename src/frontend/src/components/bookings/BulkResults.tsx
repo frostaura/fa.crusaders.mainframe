@@ -24,7 +24,7 @@ export type BulkResultRow = {
   ok: boolean;
   /** "Booked", "Not booked", "Cancelled"… */
   word: string;
-  /** Why it failed, or what it moved ("35.00 cr back"). */
+  /** Why it failed, or what it moved ("35 min back"). */
   detail: string | null;
 };
 

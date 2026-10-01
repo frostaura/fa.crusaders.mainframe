@@ -17,7 +17,7 @@ import type { BookingFor } from "./useBookingFor";
  * what they pay per slice — and offers the way back to booking for oneself.
  * </p>
  */
-export function BookingForBar({ booking, sliceMinutes }: { booking: BookingFor; sliceMinutes: number }) {
+export function BookingForBar({ booking }: { booking: BookingFor }) {
   const { state, retry } = booking;
   if (state.status === "error") {
     return (
@@ -37,7 +37,7 @@ export function BookingForBar({ booking, sliceMinutes }: { booking: BookingFor; 
     >
       <UserCircle size={24} aria-hidden="true" className="shrink-0 text-accent-strong" />
       <div className="grid min-w-0 flex-[1_1_14rem] gap-0.5 text-sm">
-        {member ? <MemberFacts member={member} sliceMinutes={sliceMinutes} /> : (
+        {member ? <MemberFacts member={member} /> : (
           <>
             <span className="sr-only" role="status">{BOOKING_FOR.reading}</span>
             <Skeleton className="h-5 w-48" />
@@ -52,9 +52,9 @@ export function BookingForBar({ booking, sliceMinutes }: { booking: BookingFor; 
   );
 }
 
-function MemberFacts({ member, sliceMinutes }: { member: BookingForMember; sliceMinutes: number }) {
+function MemberFacts({ member }: { member: BookingForMember }) {
+  // P13 — no price fact: a booking costs its playing minutes, the same for every member.
   const facts = [BOOKING_FOR.canSpend(member.spendable)];
-  if (member.slicePrice !== null) facts.push(BOOKING_FOR.price(member.slicePrice, sliceMinutes));
   return (
     <>
       <span className="break-words font-semibold text-text-primary">

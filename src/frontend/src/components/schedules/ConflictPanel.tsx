@@ -8,7 +8,7 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { BatchResultList, type BatchResultRow } from "./BatchResultList";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
-  NOTHING_CHANGED_YET, clearAllLabel, conflictRefundPhrase, conflictsHeadline,
+  NOTHING_CHANGED_YET, clearAllDescription, clearAllLabel, conflictRefundPhrase, conflictRefundedLine, conflictsHeadline,
 } from "../../lib/scheduleCopy";
 import { describeFailure } from "../../lib/errors";
 import { adminEndpoints, type ScheduleConflict } from "../../lib/adminApi";
@@ -47,7 +47,7 @@ import { adminEndpoints, type ScheduleConflict } from "../../lib/adminApi";
 function knownRefundTotal(conflicts: readonly ScheduleConflict[]): number | null {
   let total = 0;
   for (const c of conflicts) {
-    // Unknown is never zero. A button promising "refund 314.00 cr" over a list where one
+    // Unknown is never zero. A button promising "refund 5 h 14 min" over a list where one
     // quote never arrived is promising a figure nobody computed.
     if (c.would_refund_minutes === undefined || c.would_refund_minutes === null) return null;
     total += c.would_refund_minutes;
@@ -99,7 +99,7 @@ export function ConflictPanel({
           id: conflict.booking_id as string,
           label,
           ok: true,
-          detail: `${result.refunded_minutes.toFixed(2)} cr went back in full.`,
+          detail: conflictRefundedLine(result.refunded_minutes),
         });
       } catch (err) {
         rows.push({
@@ -191,11 +191,7 @@ export function ConflictPanel({
               </Button>
             )}
             title={`Cancel ${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"}?`}
-            description={
-              total === null
-                ? `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled and refunded in full, and each member emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
-                : `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled, ${total.toFixed(2)} cr goes back in full, and each member is emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
-            }
+            description={clearAllDescription(cancellable.length, total)}
             confirmLabel={clearAllLabel(cancellable.length, total)}
             cancelLabel="Keep them"
             focusAfter={() => resultsRef.current?.querySelector("h3")}

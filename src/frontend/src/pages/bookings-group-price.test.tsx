@@ -2,28 +2,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
-import { COURT_A, COURT_B, dayFixture, openBookings } from "../test/bookingsKit";
-import { BOOK_SHEET, bookCellLabel, slicePriceLine } from "../lib/bookingsCopy";
-import { viewerSlicePrice } from "../lib/viewerPrice";
+import { dayFixture, openBookings } from "../test/bookingsKit";
+import { BOOK_SHEET, CELL_TEXT, bookCellLabel, sliceLengthLine } from "../lib/bookingsCopy";
+import { BUY_MINUTES_PATH } from "../lib/gridCopy";
 import { walletNotice } from "../lib/gridExplain";
 import { emptyWalletSentence } from "../lib/gridCopy";
 import type { ScheduleDay } from "../lib/api";
 
 /**
- * R5 I5-1 (HIGH, money display) — the grid, its headers and the Book sheet price a slice at the
- * MEMBER's group price (`rules.slicePriceCredits`), not the court's own.
+ * P13 — "minutes, not credits": a booking costs its playing minutes, `slices × slice_minutes`
+ * (contract §1.1), the same for every member on every court. There is no court price and no
+ * group price any more, and the grid shows none (§3.12).
  *
  * <p>
- * Reproduced on the running app: a group at 30 on a 50 court, 40 to spend — every cell said
- * "Book … 50.00 cr", the sheet said "You need 10.00 cr more" and disabled Book, while the club
- * charges 30 and would have taken the booking. These tests use the REAL sheets.
+ * This file used to pin R5 I5-1 — the grid pricing a slice at the member's GROUP price. That
+ * whole class of defect is gone with the prices; what replaces it is the rule that nothing on
+ * the grid, its headers or the Book sheet reads a price at all — not even one an older server
+ * still sends in the rules block. These tests use the REAL sheets.
  * </p>
  */
 vi.setConfig({ testTimeout: 20_000 });
 beforeEach(() => { forgetClubZone(); });
 afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
 
-const JUNIORS = { slicePriceCredits: 30, groups: [{ id: "g-jr", name: "Juniors" }] };
+/** An older server's rules block, still carrying a group price: it must change nothing. */
+const STALE_PRICE = { slicePriceCredits: 30, groups: [{ id: "g-jr", name: "Juniors" }] };
 
 async function toConfirm(dialog: HTMLElement) {
   fireEvent.click(within(dialog).getByRole("button", { name: BOOK_SHEET.next }));
@@ -31,66 +34,55 @@ async function toConfirm(dialog: HTMLElement) {
   await new Promise((r) => setTimeout(r, 350));
 }
 
-describe("a member whose group pays less than the court", () => {
-  it("books when the group price fits the balance though the court price would not", async () => {
+describe("a booking costs its minutes — the grid carries no price", () => {
+  it("draws a free cell as Free, names it without a price, and heads each court with the slot length", async () => {
+    openBookings({ balance: 40, day: dayFixture({ rules: STALE_PRICE }) });
+    const cell = await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") });
+    expect(cell).toHaveTextContent(CELL_TEXT.available);
+    expect(cell.textContent).not.toMatch(/\d/);
+    const header = screen.getAllByRole("columnheader").find((h) => h.textContent?.includes("Court 1"))!;
+    expect(header).toHaveTextContent(sliceLengthLine(15));
+    expect(header.textContent).not.toMatch(/30|credit|\bcr\b/);
+  });
+
+  it("books one slice for its 15 minutes, whatever price an older server's rules still send", async () => {
     const stub = openBookings({
       balance: 40,
-      day: dayFixture({ rules: JUNIORS }),
-      routes: [{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-new", balance_after_minutes: 10 } }],
+      day: dayFixture({ rules: STALE_PRICE }),
+      routes: [{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-new", balance_after_minutes: 25 } }],
     });
-    // The cell and the header say the member's price.
-    const cell = await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 30) });
-    expect(screen.queryByRole("button", { name: bookCellLabel("Court 1 at 16:00", 50) })).toBeNull();
-    const header = screen.getAllByRole("columnheader").find((h) => h.textContent?.includes("Court 1"))!;
-    expect(header).toHaveTextContent(slicePriceLine(30, 15));
-
-    fireEvent.click(cell);
+    fireEvent.click(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") }));
     const dialog = await screen.findByRole("dialog");
     await toConfirm(dialog);
     const money = dialog.querySelector("dl")!;
-    expect(money).toHaveTextContent(`${BOOK_SHEET.total}30.00 cr`);
-    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}10.00 cr`);
-    expect(within(dialog).queryByText(BOOK_SHEET.needMore(10))).toBeNull();
+    expect(money).toHaveTextContent(`${BOOK_SHEET.total}15 min`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}25 min`);
+    // The figures are read to a screen reader in words, never "min".
+    expect(money).toHaveTextContent("15 minutes");
 
-    const book = within(dialog).getByRole("button", { name: BOOK_SHEET.primary(1, 30, null) });
+    const book = within(dialog).getByRole("button", { name: BOOK_SHEET.primary(1, 15, null) });
+    expect(book).toHaveTextContent("Book · 15 min");
     expect(book).toBeEnabled();
     await act(async () => { fireEvent.click(book); });
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path.startsWith("/api/v1/bookings/"))).toBe(true));
   });
 
-  it("prices a multi-slot selection at the group price too", async () => {
-    openBookings({ balance: 40, day: dayFixture({ rules: JUNIORS }) });
-    await screen.findByRole("button", { name: bookCellLabel("Court 2 at 16:00", 30) });
-    // A court the member's rules do not change still shows the group's figure, cell by cell.
-    expect(screen.getByRole("button", { name: bookCellLabel("Court 2 at 16:15", 30) })).toBeInTheDocument();
-  });
-
-  it("keeps the court's own price when the server says nothing about the viewer", async () => {
-    openBookings({ balance: 40 });
-    expect(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 50) })).toBeInTheDocument();
+  it("tells a member short of one slice what they need, and points them at the package shelf", async () => {
+    openBookings({ balance: 10, day: dayFixture() });
+    fireEvent.click(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") }));
+    const dialog = await screen.findByRole("dialog");
+    await toConfirm(dialog);
+    expect(within(dialog).getByText(BOOK_SHEET.needMore(5))).toHaveTextContent("You need 5 min more");
+    expect(within(dialog).getByRole("link", { name: BOOK_SHEET.buyMinutes })).toHaveAttribute("href", BUY_MINUTES_PATH);
   });
 });
 
-describe("viewerSlicePrice — per-court derivation", () => {
-  const court = (id: string, price: number) => ({ id, slicePriceCredits: price });
-  it("takes the server's per-court figure first", () => {
-    const byCourt = new Map([[COURT_B, 44]]);
-    expect(viewerSlicePrice(court(COURT_B, 80), { groupPrice: 30, referencePrice: 50, byCourt })).toBe(44);
-  });
-  it("is the group price on the reference court, the court's own when the group changes nothing", () => {
-    expect(viewerSlicePrice(court(COURT_A, 50), { groupPrice: 30, referencePrice: 50, byCourt: null })).toBe(30);
-    expect(viewerSlicePrice(court(COURT_B, 80), { groupPrice: 50, referencePrice: 50, byCourt: null })).toBe(80);
-  });
-  it("scales a dearer court by the group's ratio, and is the court's own when unknown", () => {
-    expect(viewerSlicePrice(court(COURT_B, 80), { groupPrice: 30, referencePrice: 50, byCourt: null })).toBe(48);
-    expect(viewerSlicePrice(court(COURT_B, 80), { groupPrice: null, referencePrice: 50, byCourt: null })).toBe(80);
-  });
-});
-
-describe("the empty-wallet banner", () => {
-  it("quotes what a slot costs the member, not the court", () => {
+describe("the empty- and short-wallet banners", () => {
+  it("say what a slot takes — the day's slice, in minutes", () => {
     const day = dayFixture() as unknown as ScheduleDay;
-    expect(walletNotice(0, day, false, 30)?.title).toBe(emptyWalletSentence(0, 30));
-    expect(walletNotice(0, day, false, null)?.title).toBe(emptyWalletSentence(0, 50));
+    expect(walletNotice(0, day, false)?.title).toBe(emptyWalletSentence(0, 15));
+    expect(walletNotice(0, day, false)?.title).toBe("You have no minutes left, so you can't book yet. A slot here takes 15 min.");
+    expect(walletNotice(10, day, false)?.title).toBe("You have 10 min left and a slot here takes 15 min. Buy a package to book.");
+    expect(walletNotice(10, day, false)?.action?.to).toBe(BUY_MINUTES_PATH);
   });
 });

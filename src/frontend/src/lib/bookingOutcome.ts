@@ -8,7 +8,7 @@ import { isPartnerSlot } from "./bookingsApi";
  * <b>A 5xx, a timeout or a dropped connection is not a "no".</b> The request may well have reached
  * the club and been committed before the reply was lost — a 504 from the gateway after the API
  * had already booked and charged is the ordinary case. The sheet used to say "Nothing was booked
- * and no credit was taken" to every one of them, went on offering the slot, and the member's
+ * and no minutes were taken" to every one of them, went on offering the slot, and the member's
  * second try was told "someone just took that slot" — about their own booking. The same happened
  * in reverse on a cancel the server had refunded.
  * </p>

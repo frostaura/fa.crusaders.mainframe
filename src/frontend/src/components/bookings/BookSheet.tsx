@@ -13,6 +13,7 @@ import { worthRetrying } from "@/lib/bookingErrors";
 import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine, heldPartsLine } from "@/lib/bookingsCopy";
 import { firstNameOf, heldPartsOf, type HeldPart } from "@/lib/bookingsApi";
 import { useBalance } from "@/lib/balance";
+import { BUY_MINUTES_PATH } from "@/lib/gridCopy";
 import { heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
@@ -41,7 +42,7 @@ export type { BookedOutcome } from "./useBookFlow";
  * </p>
  *
  * <p>
- * <b>Members spend their SPENDABLE credits</b> (D11 §3a): shares partners have paid them
+ * <b>Members spend their SPENDABLE minutes</b> (D11 §3a): shares partners have paid them
  * are held until 48 hours after each game, so "Balance now" and "Balance after" read
  * `useBalance().held.spendable`, with the held line under them when anything is held.
  * </p>
@@ -50,7 +51,7 @@ export type { BookedOutcome } from "./useBookFlow";
  * <b>Admin god mode is quoted, never discovered.</b> The admin's Confirm asks the quote route
  * first and, when the booking takes the payer below zero, says so in a `GodModeNotice` and
  * sends `allowNegativeBalance` on purpose. Members never overdraw: a member who is short is told
- * what they need ("You need 30.00 cr more") with a Top up link beside it, and the Book button
+ * what they need ("You need 30 min more") with a "Buy minutes" link beside it, and the Book button
  * stays in its place, unavailable, described by that sentence.
  * </p>
  *
@@ -104,9 +105,9 @@ function useSpendable(given: number | null): Spendable {
 }
 
 function BookFlowView(props: ViewProps) {
-  const wallet = useSpendable(props.balanceCredits);
+  const wallet = useSpendable(props.balanceMinutes);
   const flow = useBookFlow({
-    ...props, balanceCredits: props.isAdmin ? props.balanceCredits : wallet.spendable, held: wallet.held,
+    ...props, balanceMinutes: props.isAdmin ? props.balanceMinutes : wallet.spendable, held: wallet.held,
   });
   const body = useRef<HTMLDivElement>(null);
   /** The sentence an unavailable Book button is described by. */
@@ -192,8 +193,8 @@ function CancelTerms({ terms }: { terms: BookSheetProps["cancelTerms"] }) {
 }
 
 /**
- * "12.00 cr held until Wed 30 Sep, 20:00", under the money, when any of it is held (§3a) — and
- * "16.00 cr owed back to partners — paid from your next credit" when any is owed back (P11),
+ * "12 min held until Wed 30 Sep, 20:00", under the money, when any of it is held (§3a) — and
+ * "16 min owed back to partners — paid from the next minutes you buy" when any is owed back (P11),
  * which is why "Balance now" can read below zero for a member.
  */
 function HeldNote({ flow }: { flow: BookFlow }) {
@@ -214,7 +215,7 @@ function HeldNote({ flow }: { flow: BookFlow }) {
 
 /**
  * P11 — an admin's quote names what the payer owes back to partners even when the booking does
- * not overdraw: that debt is paid from their next credit first. When it DOES overdraw, the
+ * not overdraw: that debt is paid from the next minutes they buy, first. When it DOES overdraw, the
  * god-mode notice carries the same sentence, so this stays quiet.
  */
 function QuoteOwedBack({ flow }: { flow: BookFlow }) {
@@ -250,7 +251,7 @@ function ConfirmStep({ flow, reasonId, terms }: { flow: BookFlow; reasonId: stri
 
 /**
  * A member who is short: what they need, and the way to get it. The sentence is the Book
- * button's description (`reasonId`); the Top up is navigation, so it is a link in a button's
+ * button's description (`reasonId`); "Buy minutes" is navigation, so it is a link in a button's
  * clothes. `role="status"`: it is the standing state of this sheet, not an event.
  */
 function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string }) {
@@ -262,7 +263,7 @@ function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string 
         <span>{BOOK_SHEET.needMoreBody}</span>
       </p>
       <Button asChild variant="outline" size="sm" className="ml-auto shrink-0">
-        <Link to="/wallet/topup">{BOOK_SHEET.topUp}</Link>
+        <Link to={BUY_MINUTES_PATH}>{BOOK_SHEET.buyMinutes}</Link>
       </Button>
     </div>
   );

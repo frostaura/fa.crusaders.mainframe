@@ -79,18 +79,20 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); signOut(); });
 
 describe("every slot in the booking grid says what it is", () => {
-  it("names the court, the time and the price on a bookable slot", async () => {
+  it("names the court and the time on a bookable slot — and no price (P13 §3.12)", async () => {
     signIn({ isAdmin: false });
     stubFetch(routes());
     renderPage(<BalanceProvider><SchedulePage /></BalanceProvider>);
 
-    // Not "Available" — which court, which time, how many credits.
-    const slot = await screen.findByRole("button", { name: /^Book Court 1 at 06:00 for 50\.00/ });
+    // Not "Available" — which court and which time. A booking costs its minutes, the same on
+    // every court, so the cell neither shows nor speaks a price; the sheet says what it takes.
+    const slot = await screen.findByRole("button", { name: /^Book Court 1 at 06:00$/ });
     expect(slot).toBeInTheDocument();
+    expect(slot).toHaveTextContent(/^Free$/);
 
     // And the second court's 06:00 is a different button with a different name, which is the
     // whole point: position was the only thing separating them.
-    expect(screen.getByRole("button", { name: /^Book Court 2 at 06:30 for 50\.00/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Book Court 2 at 06:30$/ })).toBeInTheDocument();
   });
 
   it("names the member's own booking as theirs, on that court, at that time", async () => {
@@ -101,20 +103,20 @@ describe("every slot in the booking grid says what it is", () => {
     expect(await screen.findByRole("button", { name: "Cancel your booking on Court 2 at 06:00" })).toBeInTheDocument();
   });
 
-  it("hands the confirmation step the court, the time and the price the cell named", async () => {
+  it("hands the confirmation step the court, the time and the slot's minutes", async () => {
     signIn({ isAdmin: false });
     stubFetch(routes());
     renderPage(<BalanceProvider><SchedulePage /></BalanceProvider>);
 
-    const slot = await screen.findByRole("button", { name: /^Book Court 1 at 06:00 for 50\.00/ });
+    const slot = await screen.findByRole("button", { name: /^Book Court 1 at 06:00$/ });
     fireEvent.click(slot);
 
     // The dialog itself — `aria-modal`, its title, its figures and the Book button's name — is
     // BookSheet's, tested with it (P4 replaced BookingConfirmModal). What the grid owes it is the
-    // same court, instant and price the cell's own name announced.
+    // same court and instant the cell's own name announced, costing the slice's 30 minutes.
     expect(await screen.findByRole("dialog", { name: "Book sheet" })).toBeInTheDocument();
     expect(sheets.book?.slots).toEqual([
-      { courtId: "court-1", courtName: "Court 1", startsAt: at("06:00"), sliceCount: 1, priceMinutes: 50 },
+      { courtId: "court-1", courtName: "Court 1", startsAt: at("06:00"), sliceCount: 1, priceMinutes: 30 },
     ]);
   });
 });

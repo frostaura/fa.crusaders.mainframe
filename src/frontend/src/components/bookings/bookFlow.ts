@@ -97,7 +97,7 @@ export function slotKey(slot: Pick<SelectedSlot, "courtId" | "startsAt">): strin
 /**
  * How many grid slots a set of bookings covers. The sheet counts in the grid's unit, not in
  * requests: three ticked slots of which two are adjacent on one court go out as two bookings, and
- * a sheet titled "Book 2 slots" under a bar that said "3 slots · 150.00 cr" reads as a slot lost.
+ * a sheet titled "Book 2 slots" under a bar that said "3 slots · 45 min" reads as a slot lost.
  */
 export function slotCount(slots: readonly Pick<SelectedSlot, "sliceCount">[]): number {
   return slots.reduce((n, s) => n + Math.max(1, s.sliceCount), 0);
@@ -128,7 +128,7 @@ export type SheetQuote = {
   /**
    * What the payer may SPEND (D11 §3a): the raw balance less what is held for partners and owed
    * back to them. Every figure the desk is shown before booking reads this (F1.4) — the raw one
-   * said "After this booking 35.00" to a member who would really stand at −90.
+   * said "After this booking 35 min" to a member who would really stand at −90.
    */
   spendable: number;
   /** Held for partners, for the line that explains why `spendable` is lower. */

@@ -4,10 +4,10 @@ import type { GridReason, ViewerRules } from "./gridRules";
 import type { TimeSlice } from "./scheduleGrid";
 import { walletTone } from "./balance";
 import { adminWalletNote } from "./bookingsCopy";
-import { schedulePriceSource, viewerSlicePrice } from "./viewerPrice";
 import {
-  closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence, groupRateLine,
+  BUY_MINUTES_ACTION, BUY_MINUTES_PATH, closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence,
   memberEmptyWindowSentence, memberRestrictionSentence, notYetOpenSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
+  shortWalletSentence,
 } from "./gridCopy";
 
 /** The member the desk is booking for, and their rules — what a window-locked cell explains (R2 F1-3). */
@@ -56,10 +56,9 @@ export type GridExplainer = {
   announce: (text: string) => void;
   explain: (reason: GridReason, where: string) => void;
   /** `isAdmin` is the ACTOR's role: an admin may book at or below zero (R19), a member may not. */
-  notices: (balanceCredits: number | null, day: ScheduleDay | null, isAdmin?: boolean) => Notice[];
+  notices: (balanceMinutes: number | null, day: ScheduleDay | null, isAdmin?: boolean) => Notice[];
   /** `null` until the member has booked something today — a counter from zero is noise. */
   quotaPill: { text: string; atLimit: boolean } | null;
-  rateLine: string | null;
   collapsedRows: (
     slices: TimeSlice[], pastThresholdMs: number, expanded: boolean,
     isAdmin: boolean, slotsByCourt: Map<string, ScheduleSlot[]>,
@@ -100,8 +99,8 @@ export function useGridExplainer(
   const dismiss = useCallback(() => setShown(""), []);
 
   const notices = useCallback(
-    (balanceCredits: number | null, current: ScheduleDay | null, isAdmin = false) =>
-      buildNotices(rules, balanceCredits, current, isAdmin),
+    (balanceMinutes: number | null, current: ScheduleDay | null, isAdmin = false) =>
+      buildNotices(rules, balanceMinutes, current, isAdmin),
     [rules],
   );
 
@@ -113,12 +112,6 @@ export function useGridExplainer(
     return { text: quotaPill(booked, max, dayLabel), atLimit: booked >= max };
   }, [rules, dayLabel]);
 
-  const courtPrice = standardSlice(day);
-  const rateLine = useMemo(
-    () => (rules.known && !rules.adminExempt ? groupRateLine(rules.groups, rules.slicePriceCredits, courtPrice) : null),
-    [rules, courtPrice],
-  );
-
   const collapsedRows = useCallback(
     (slices: TimeSlice[], pastThresholdMs: number, expanded: boolean, isAdmin: boolean,
       slotsByCourt: Map<string, ScheduleSlot[]>) =>
@@ -126,7 +119,7 @@ export function useGridExplainer(
     [],
   );
 
-  return { live, shown, dismiss, announce, explain, notices, quotaPill: pill, rateLine, collapsedRows };
+  return { live, shown, dismiss, announce, explain, notices, quotaPill: pill, collapsedRows };
 }
 
 /**
@@ -187,9 +180,9 @@ function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null,
  * gets nothing at all.
  * </p>
  */
-function buildNotices(rules: ViewerRules, balanceCredits: number | null, day: ScheduleDay | null, isAdmin: boolean): Notice[] {
+function buildNotices(rules: ViewerRules, balanceMinutes: number | null, day: ScheduleDay | null, isAdmin: boolean): Notice[] {
   const clubDay = rules.clubDay ?? day?.date ?? "";
-  return [ruleNotice(rules, clubDay), walletNotice(balanceCredits, day, isAdmin, rules.known ? rules.slicePriceCredits : null)]
+  return [ruleNotice(rules, clubDay), walletNotice(balanceMinutes, day, isAdmin)]
     .filter((n): n is Notice => n !== null);
 }
 
@@ -211,34 +204,37 @@ function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
 }
 
 /**
- * D4 §2.6. A member with 0.00 credits was shown thirty-one green cells and found out in the
+ * D4 §2.6. A member with an empty wallet was shown thirty-one green cells and found out in the
  * dialog, after picking a court and a time. `null` is UNKNOWN — a wallet read that has not
- * landed — and says nothing, because a grid that shouted "no credits" at a slow network would
+ * landed — and says nothing, because a grid that shouted "no minutes" at a slow network would
  * be wrong more often than right.
  *
  * <p>
  * <b>An admin is not refused.</b> R19: an admin books at or below zero, and the booking API lets
  * them. "You can't book yet" was false for the desk, so an admin at or below zero gets a calm
- * `info` note with the figure and what it means — no Top up call to action, because nothing is
- * blocked.
+ * `info` note with the figure and what it means — no "Buy minutes" call to action, because
+ * nothing is blocked.
+ * </p>
+ *
+ * <p>
+ * <b>P13 — a short wallet is said too.</b> A member with 10 min and a 15-minute slice can book
+ * nothing on this grid; they are told so, with the same way out (buy a package), before they
+ * pick rather than in the sheet after.
  * </p>
  */
-export function walletNotice(
-  balanceCredits: number | null, day: ScheduleDay | null, isAdmin = false, groupPrice: number | null = null,
-): Notice | null {
+export function walletNotice(balanceMinutes: number | null, day: ScheduleDay | null, isAdmin = false): Notice | null {
   // Through `walletTone`, and exported so the one rule can be asserted on all three surfaces
-  // at once. This used to ask `balanceCredits > 0`, which let 0.004 through — a balance that
-  // renders as "0.00" and buys nothing, on a grid still offering thirty-one green cells while
-  // the chip beside it was already red.
-  if (walletTone(balanceCredits) !== "zero") return null;
-  if (isAdmin) return { id: "wallet-admin", tone: "info", title: adminWalletNote(balanceCredits ?? 0) };
-  return {
-    id: "wallet", tone: "warning",
-    // The balance, not just the price. A member below zero is told what they owe rather than
-    // that they "have no credits" — the banner could not say it while this dropped the figure.
-    title: emptyWalletSentence(balanceCredits, cheapestSlice(day, groupPrice)),
-    action: { label: "Top up", to: "/wallet/topup" },
-  };
+  // at once.
+  const tone = walletTone(balanceMinutes);
+  const slice = day && day.sliceMinutes > 0 ? day.sliceMinutes : null;
+  const action = { label: BUY_MINUTES_ACTION, to: BUY_MINUTES_PATH };
+  if (tone !== "zero") {
+    if (isAdmin || balanceMinutes === null || slice === null || balanceMinutes >= slice) return null;
+    return { id: "wallet-short", tone: "warning", title: shortWalletSentence(balanceMinutes, slice), action };
+  }
+  if (isAdmin) return { id: "wallet-admin", tone: "info", title: adminWalletNote(balanceMinutes ?? 0) };
+  // The balance, not just the slot's minutes: a member below zero is told what they owe.
+  return { id: "wallet", tone: "warning", title: emptyWalletSentence(balanceMinutes, slice), action };
 }
 
 /** The club's own opening and closing for THIS weekday, as clock faces. */
@@ -250,22 +246,6 @@ function hoursFromDay(day: ScheduleDay | null): { start: string; end: string } |
 
 function asClock(minutes: number): string {
   return `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-}
-
-/**
- * The court's own price the server prices a member's group from: the first open court by number
- * (`ScheduleService` — `rules.slicePriceCredits` is `GroupRules.PriceFor(groups, that)`).
- */
-function standardSlice(day: ScheduleDay | null): number | null {
-  const open = (day?.courts ?? []).filter((c) => c.isActive !== false).sort((a, b) => a.courtNumber - b.courtNumber);
-  return open[0]?.slicePriceCredits ?? null;
-}
-
-/** The cheapest slice THIS viewer can buy — at their group's price (R5 I5-1), not the court's own. */
-function cheapestSlice(day: ScheduleDay | null, groupPrice: number | null): number | null {
-  const source = schedulePriceSource(day, groupPrice);
-  const prices = (day?.courts ?? []).map((c) => viewerSlicePrice(c, source)).filter((p) => typeof p === "number");
-  return prices.length ? Math.min(...prices) : null;
 }
 
 /**

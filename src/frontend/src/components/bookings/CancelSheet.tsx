@@ -29,8 +29,8 @@ import { useLateLanding, useSendingGuard } from "./useSendingGuard";
  *
  * <p>
  * <b>Destructive, so no celebration.</b> The confirm is the danger button; on success a single
- * cancellation closes the sheet and says what moved in a toast ("35.00 cr back to your credit,
- * 15.00 cr kept as the late-cancellation penalty") — never a tick, which would congratulate a
+ * cancellation closes the sheet and says what moved in a toast ("35 min back to your balance,
+ * 15 min kept as the late-cancellation penalty") — never a tick, which would congratulate a
  * member on losing a penalty. The way out names what it keeps: "Keep booking".
  * </p>
  *

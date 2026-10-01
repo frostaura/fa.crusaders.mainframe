@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Racquet } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn, formatCredits } from "@/lib/utils";
-import { signedCredits } from "@/lib/bookingsCopy";
+import { Minutes } from "@/components/Minutes";
+import { cn } from "@/lib/utils";
 
 /**
  * The reading parts BookSheet and CancelSheet share: the stepper, the slot list and the money
@@ -49,7 +49,7 @@ export type SlotLine = {
   day: string;
   time: string;
   duration: string;
-  /** The payer's price; null while it is being read (skeleton) or when not shown at all. */
+  /** What it costs, in whole minutes; null while it is being read (skeleton) or when not shown at all. */
   price: number | null;
   priceLoading?: boolean;
   /** Set when this slot cannot be booked: the reason, in a sentence. */
@@ -67,7 +67,7 @@ function SlotPrice({ line }: { line: SlotLine }) {
   if (line.price === null) return null;
   return (
     <span className={cn("text-sm font-semibold tabular-nums", line.refusal ? "text-text-muted line-through" : "text-text-primary")}>
-      {formatCredits(line.price)}
+      <Minutes value={line.price} />
     </span>
   );
 }
@@ -121,7 +121,7 @@ export function SlotList({ lines, label, refusedWord }: { lines: readonly SlotLi
 /**
  * D3 — what is being booked, one compact line a slot, at the top of the steps that are not
  * already the slot list (Players, Split). The sheet's subtitle says "Check the slots and the
- * price", and on those steps there was neither until Confirm. At most `SUMMARY_ROWS` rows, then
+ * minutes they take", and on those steps there was neither until Confirm. At most `SUMMARY_ROWS` rows, then
  * "and N more", so a twelve-slot run does not push the step off the screen.
  */
 const SUMMARY_ROWS = 3;
@@ -149,11 +149,11 @@ export function SlotSummary({ lines, label, more }: { lines: readonly SlotLine[]
 
 export type MoneyRow = {
   term: string;
-  /** Credits. Negative reads in the danger ink with a real minus. Null = still reading. */
+  /** Whole minutes. Negative reads in the danger ink with a real minus. Null = still reading. */
   value: number | null;
   /** The row the eye should land on: bigger, bolder, a rule above it. */
   total?: boolean;
-  /** Show as a debit ("−15.00 cr") even though the figure is positive. */
+  /** Show as a debit ("−15 min") even though the figure is positive. */
   debit?: boolean;
   /** Replace the figure with words ("No charge"). */
   text?: string;
@@ -163,7 +163,8 @@ function MoneyValue({ row }: { row: MoneyRow }) {
   if (row.text) return <>{row.text}</>;
   if (row.value === null) return <Skeleton className="ml-auto h-4 w-20 rounded-sm" />;
   const shown = row.debit ? -Math.abs(row.value) : row.value;
-  return <>{signedCredits(shown)}</>;
+  // A debit is a debit by its row, not a debt: it keeps the row's ink (the dd's), not the red.
+  return <Minutes value={shown} className={row.debit ? "text-inherit" : undefined} />;
 }
 
 /** The figures, right-aligned and tabular so they line up down the column. */

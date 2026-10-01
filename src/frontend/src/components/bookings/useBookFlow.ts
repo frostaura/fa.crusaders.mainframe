@@ -48,7 +48,7 @@ export type BookFlowInput = {
   sliceMinutes: number;
   isAdmin: boolean;
   actorUserId: string | null;
-  balanceCredits: number | null;
+  balanceMinutes: number | null;
   bookAsUserId?: string | null;
   members?: ComboboxMember[];
   onBooked?: (outcome: BookedOutcome) => void;
@@ -81,7 +81,7 @@ export type Primary =
   | { kind: "reading"; label: string }
   /**
    * A member who is short: the Book button stays, named, but unavailable — its reason is the
-   * "You need X more" notice, which carries the Top up link. Members never overdraw.
+   * "You need X more" notice, which carries the "Buy minutes" link. Members never overdraw.
    */
   | { kind: "unavailable"; label: string }
   | { kind: "none" };
@@ -184,8 +184,8 @@ function firstName(name: string | null): string | null {
 /* ─────────────────────────────── the figures ─────────────────────────────── */
 
 /**
- * The desk's figures — the payer's SPENDABLE credits, never the raw balance (F1.4): shares held
- * for partners are not the desk's to book against, and "After this booking 35.00" over a member
+ * The desk's figures — the payer's SPENDABLE minutes, never the raw balance (F1.4): shares held
+ * for partners are not the desk's to book against, and "After this booking 35 min" over a member
  * who really stands at −90 was the quote contradicting its own god-mode notice.
  */
 function adminMoney(quote: QuoteState, name: string | null): MoneyRow[] | null {
@@ -207,8 +207,8 @@ function adminTerms(name: string | null, holding: boolean) {
 }
 
 /**
- * A member's figures. Short, the last row is what they still need — never "Balance after −30.00
- * cr" in red: a member's balance cannot go below zero, so that figure is one their wallet can
+ * A member's figures. Short, the last row is what they still need — never "Balance after −30
+ * min" in red: a member's balance cannot go below zero, so that figure is one their wallet can
  * never show (P4 walk). With anything held for partners the rows say "Available", the figure
  * every spend reads — and the Done line after the booking says the same figure (F1.3).
  */
@@ -256,7 +256,7 @@ function neighbour(steps: readonly StepId[], at: StepId, by: 1 | -1): StepId {
 /* ─────────────────────────────── the hook ─────────────────────────────── */
 
 export function useBookFlow(input: BookFlowInput) {
-  const { slots, timezone, sliceMinutes, isAdmin, actorUserId, balanceCredits } = input;
+  const { slots, timezone, sliceMinutes, isAdmin, actorUserId, balanceMinutes } = input;
   const [stepId, setStepId] = useState<StepId>(() => stepsFor({ isAdmin })[0]);
   const [who, setWhoState] = useState<BookAs>(() => initialWho(isAdmin, input.bookAsUserId));
   const [key, setKey] = useState(() => newIdempotencyKey(isAdmin ? "ab" : "mb"));
@@ -365,7 +365,7 @@ export function useBookFlow(input: BookFlowInput) {
   const count = slotCount(slots);
   const refusedSlots = ready ? slotCount(slots.filter((_, i) => ready.refused.has(i))) : 0;
   const total = slots.reduce((n, s) => n + s.priceMinutes, 0);
-  const short = !isAdmin && balanceCredits !== null && balanceCredits < total ? total - balanceCredits : null;
+  const short = !isAdmin && balanceMinutes !== null && balanceMinutes < total ? total - balanceMinutes : null;
   const memberHeld = isAdmin ? null : input.held ?? null;
   const memberReserved = memberHeld ? memberHeld.held + (memberHeld.owedBack ?? 0) : 0;
 
@@ -374,8 +374,9 @@ export function useBookFlow(input: BookFlowInput) {
     const refusedCode = ready?.refused.has(i) ? ready.refused.get(i) ?? null : undefined;
     return {
       key: slotKey(s), courtName: s.courtName, day: f.day, time: f.time, duration: f.duration,
-      price: isAdmin ? ready?.prices.get(i) ?? null : s.priceMinutes,
-      priceLoading: isAdmin && !hold && quote.state.status === "loading",
+      // A slot costs its playing minutes (P13 §1.1), known before any quote: the desk's quote
+      // confirms the same figure, so nothing waits on it.
+      price: ready?.prices.get(i) ?? s.priceMinutes,
       refusal: refusedCode === undefined ? null : refusalReason(refusedCode),
       note: hold ? BOOK_SHEET.holdNote(who.kind === "hold" ? who.label : "") : undefined,
     };
@@ -390,7 +391,7 @@ export function useBookFlow(input: BookFlowInput) {
     money = adminMoney(quote.state, memberName);
     primary = adminPrimary(quote.state, count, slotCount(sendable), firstName(memberName));
   } else {
-    money = memberMoney(total, balanceCredits, short, memberReserved > 0);
+    money = memberMoney(total, balanceMinutes, short, memberReserved > 0);
     const label = BOOK_SHEET.primary(count, total, null);
     primary = short !== null ? { kind: "unavailable", label } : { kind: "book", label, allowNegativeBalance: false };
   }

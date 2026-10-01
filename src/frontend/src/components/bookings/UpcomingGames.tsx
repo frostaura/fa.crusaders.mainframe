@@ -99,7 +99,7 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
 
 /**
  * R3 M-3 — what the game has cost the member: owed on their seat, else paid off their wallet.
- * "Your share 25.00" was said to an organiser who had paid 50 while the partner never accepted.
+ * "Your share 25 min" was said to an organiser who had paid 50 while the partner never accepted.
  * A server without the figures (or a game that has cost nothing yet) keeps the share line.
  */
 function MoneyLine({ game }: { game: UpcomingGame }) {

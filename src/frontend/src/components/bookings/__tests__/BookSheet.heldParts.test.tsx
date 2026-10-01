@@ -46,7 +46,7 @@ describe("held parts (C4)", () => {
     stubFetch([]);
     render(
       <BookSheet
-        open onOpenChange={vi.fn()} timezone={TZ} sliceMinutes={15} isAdmin={false} actorUserId="me" balanceCredits={100}
+        open onOpenChange={vi.fn()} timezone={TZ} sliceMinutes={15} isAdmin={false} actorUserId="me" balanceMinutes={100}
         slots={[{ courtId: "c1", courtName: "Court 1", startsAt: "2030-10-05T16:00:00.000Z", sliceCount: 1, priceMinutes: 20 }]}
         onBooked={vi.fn()}
       />,
@@ -59,7 +59,7 @@ describe("held parts (C4)", () => {
       return el!;
     });
     expect(line).toHaveTextContent(heldPartsLine([PARTS[1], PARTS[0]], TZ));
-    expect(heldPartsLine([PARTS[1], PARTS[0]], TZ)).toBe("Held: 25.00 cr until Wed 2 Oct, 06:45 · 35.00 cr until Fri 4 Oct, 10:30");
+    expect(heldPartsLine([PARTS[1], PARTS[0]], TZ)).toBe("Held: 25 min until Wed 2 Oct, 06:45 · 35 min until Fri 4 Oct, 10:30");
     expect(line).not.toHaveTextContent(heldLine(60, PARTS[1].until, TZ));
   });
 });

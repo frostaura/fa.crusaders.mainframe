@@ -2,7 +2,6 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { ScheduleDay } from "./api";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import { clubDayAndClock } from "./clubClock";
-import type { PriceOf } from "./viewerPrice";
 
 /**
  * Multi-select on the booking grid — R4, and D8: members get it too.
@@ -293,14 +292,14 @@ export function useGridSelection(options: Options): Selection {
  * </p>
  *
  * <p>
- * Priced at the VIEWER's price (`priceOf`, R5 I5-1) — their group's, not the court's own.
+ * A run costs its playing minutes, `slices × slice_minutes` (P13 §1.1, §3.12) — the same for
+ * every member on every court; there is no court price and no group price any more.
  * </p>
  */
-export function toSelectedSlots(
-  keys: readonly SelectionKey[], day: ScheduleDay | null, priceOf: PriceOf = (court) => court.slicePriceCredits,
-): SelectedSlot[] {
+export function toSelectedSlots(keys: readonly SelectionKey[], day: ScheduleDay | null): SelectedSlot[] {
   if (!day) return [];
-  const sliceMs = (day.sliceMinutes > 0 ? day.sliceMinutes : 15) * 60_000;
+  const sliceMinutes = day.sliceMinutes > 0 ? day.sliceMinutes : 15;
+  const sliceMs = sliceMinutes * 60_000;
   const out: SelectedSlot[] = [];
   for (const court of day.courts) {
     const starts = keys
@@ -314,7 +313,7 @@ export function toSelectedSlots(
       if (!run) return;
       out.push({
         courtId: court.id, courtName: court.name, startsAt: new Date(run.from).toISOString(),
-        sliceCount: run.count, priceMinutes: priceOf(court) * run.count,
+        sliceCount: run.count, priceMinutes: sliceMinutes * run.count,
       });
     };
     for (const ms of starts) {

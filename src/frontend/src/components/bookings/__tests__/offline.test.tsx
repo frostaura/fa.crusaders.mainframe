@@ -64,7 +64,7 @@ describe("R3 I-4 — offline, nothing is sent, and the sheet says so", () => {
     const reread = vi.fn(async () => null);
     render(
       <BookSheet open onOpenChange={vi.fn()} slots={[C1]} timezone={TZ} sliceMinutes={15}
-        isAdmin={false} actorUserId={ME} balanceCredits={500} reread={reread} />,
+        isAdmin={false} actorUserId={ME} balanceMinutes={500} reread={reread} />,
       { wrapper: Providers, reactStrictMode: true },
     );
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));

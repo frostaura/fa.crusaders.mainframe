@@ -167,15 +167,16 @@ describe("the day — R5", () => {
 });
 
 describe("a tap hands the right thing to the right sheet", () => {
-  it("books one slot: the court, the instant, one slice, this viewer's price", async () => {
+  it("books one slot: the court, the instant, one slice — costing its playing minutes (P13 §1.1)", async () => {
     openBookings();
-    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15 for 50\.00 cr/ }));
+    // P13 §3.12 — the cell's name carries no price: "Book Court 2 at 16:15", nothing after it.
+    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15$/ }));
     await screen.findByRole("dialog", { name: "Book sheet" });
     expect(sheets.book?.slots).toEqual([
-      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceMinutes: 50 },
+      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceMinutes: 15 },
     ]);
     expect(sheets.book?.isAdmin).toBe(false);
-    expect(sheets.book?.balanceCredits).toBe(900);
+    expect(sheets.book?.balanceMinutes).toBe(900);
     expect(sheets.book?.timezone).toBe("Africa/Johannesburg");
   });
 

@@ -6,9 +6,8 @@ import type { ScheduleCourt, ScheduleSlot } from "../../lib/api";
 import { cn } from "../../lib/utils";
 import { isSlotHead, peakRestricted, slotAt, type TimeSlice } from "../../lib/scheduleGrid";
 import { selectionKey } from "../../lib/gridSelection";
-import type { PriceOf } from "../../lib/viewerPrice";
 import { ScrollArea } from "../ScrollArea";
-import { BOOKINGS_COPY, CELL_TEXT, courtChipLabel, slicePriceLine } from "../../lib/bookingsCopy";
+import { BOOKINGS_COPY, CELL_TEXT, courtChipLabel, sliceLengthLine } from "../../lib/bookingsCopy";
 import { useGridInteractions } from "../../lib/useGridInteractions";
 import { useTicker } from "../../lib/useTicker";
 import { SlotCell, type BoardContext } from "../ScheduleCells";
@@ -111,8 +110,7 @@ export function BookingBoard(props: BoardProps) {
               "select-none",
             )}
           >
-            <HeaderRow courts={day.courts} sliceMinutes={day.sliceMinutes} priceOf={ctx.priceOf}
-              yourRate={ctx.rules.known && ctx.rules.groups.length > 0 && !ctx.rules.adminExempt} />
+            <HeaderRow courts={day.courts} sliceMinutes={day.sliceMinutes} />
             {earlierLabel ? <EarlierRow label={earlierLabel} onExpand={onExpandEarlier} /> : null}
             {bodyRows > 0 ? (
               <div aria-hidden="true" style={{ gridRow: `${bodyStart} / span ${bodyRows}`, gridColumn: 1 }}
@@ -186,8 +184,8 @@ export function BookingGridHeading() {
   return <h2 id={GRID_HEADING_ID} className="sr-only">{BOOKINGS_COPY.gridHeading}</h2>;
 }
 
-function HeaderRow(props: { courts: ScheduleCourt[]; sliceMinutes: number; priceOf: PriceOf; yourRate: boolean }) {
-  const { courts, sliceMinutes, priceOf, yourRate } = props;
+function HeaderRow(props: { courts: ScheduleCourt[]; sliceMinutes: number }) {
+  const { courts, sliceMinutes } = props;
   return (
     <div role="row" style={{ display: "contents" }}>
       {/* One sticky backdrop under the whole header row, reaching over the row gap below it, so
@@ -205,8 +203,8 @@ function HeaderRow(props: { courts: ScheduleCourt[]; sliceMinutes: number; price
           className={cn(HEADER_CELL, "flex min-w-0 snap-start scroll-ml-16 flex-col justify-end px-1 pb-2 pt-3 md:scroll-ml-20")}>
           <span className="truncate text-sm font-semibold text-text-primary">{c.name}</span>
           <span className="text-xs text-text-secondary">
-            {c.isActive === false ? CELL_TEXT.idle : slicePriceLine(priceOf(c), sliceMinutes)}
-            {yourRate && c.isActive !== false ? <span className="hidden md:inline">{` · ${BOOKINGS_COPY.yourRate}`}</span> : null}
+            {/* P13 §3.12 — no price on the grid: the header says how long a slot is, the same on every court. */}
+            {c.isActive === false ? CELL_TEXT.idle : sliceLengthLine(sliceMinutes)}
           </span>
         </div>
       ))}

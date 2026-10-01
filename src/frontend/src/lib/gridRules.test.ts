@@ -56,7 +56,8 @@ describe("readViewerRules", () => {
     expect(r.allowedWindows).toEqual([{ start: "06:00", end: "09:00" }]);
     expect(r.remainingToday).toBe(2);
     expect(r.maxSlotsPerDay).toBe(4);
-    expect(r.slicePriceCredits).toBe(12.5);
+    // P13 §3.12 — a price an older server still sends is not read: a booking costs its minutes.
+    expect(r).not.toHaveProperty("slicePriceCredits");
   });
 
   it("also reads the snake_case spelling, including the orchestrator's `remaining_slots_today`", () => {

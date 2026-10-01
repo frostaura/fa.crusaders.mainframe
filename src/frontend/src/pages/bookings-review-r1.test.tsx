@@ -25,7 +25,7 @@ describe("F1.6 — booking for a member says so before the sheet does", () => {
   const memberRoutes = [
     {
       path: `/api/v1/admin/members/${NALEDI}/booking-rules`,
-      body: { slice_price_credits: 40, groups: [{ name: "Juniors" }] },
+      body: { groups: [{ name: "Juniors" }] },
     },
     {
       path: `/api/v1/admin/members/${NALEDI}`,
@@ -33,7 +33,7 @@ describe("F1.6 — booking for a member says so before the sheet does", () => {
     },
   ];
 
-  it("names the member, what they can spend and their price — and hides the admin's own wallet", async () => {
+  it("names the member and what they can spend — no price (P13) — and hides the admin's own wallet", async () => {
     const stub = openBookings({
       isAdmin: true, balance: -100, routes: memberRoutes, at: `/bookings?date=2030-09-09&as=${NALEDI}`,
     });
@@ -41,11 +41,12 @@ describe("F1.6 — booking for a member says so before the sheet does", () => {
     expect(bar).toHaveTextContent(`${BOOKING_FOR.label} Naledi Khumalo`);
     expect(bar).toHaveTextContent("Juniors");
     expect(bar).toHaveTextContent(BOOKING_FOR.canSpend(125));
-    expect(bar).toHaveTextContent(BOOKING_FOR.price(40, 15));
+    expect(bar).toHaveTextContent("can spend 2 h 5 min");
+    expect(bar.textContent).not.toMatch(/pays|\bcr\b|credit|\.00/);
     expect(bar).toHaveTextContent(BOOKING_FOR.held(90));
     expect(within(bar).getByRole("link", { name: BOOKING_FOR.stop })).toHaveAttribute("href", "/bookings");
     // The admin's own −100 is not this booking's wallet.
-    expect(document.body.textContent).not.toContain("Your balance is −100.00 cr");
+    expect(document.body.textContent).not.toContain("Your balance is −1 h 40 min");
     const rules = stub.calls.find((c) => c.path.includes("/booking-rules"));
     expect(rules?.path).toContain("day=2030-09-09");
   });

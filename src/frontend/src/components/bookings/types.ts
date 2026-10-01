@@ -21,7 +21,7 @@ export type SelectedSlot = {
   /** ISO UTC instant the first slice starts. */
   startsAt: string;
   sliceCount: number;
-  /** THIS viewer's price for the whole item (slice price × sliceCount), in credits. */
+  /** What the item costs: its playing minutes, `slice_minutes × sliceCount` (P13 §1.1). */
   priceMinutes: number;
 };
 

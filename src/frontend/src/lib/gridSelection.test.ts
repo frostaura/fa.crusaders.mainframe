@@ -37,11 +37,20 @@ describe("selection keys", () => {
 });
 
 describe("toSelectedSlots — what a BookSheet is handed", () => {
-  it("merges adjacent slices on one court into one booking, priced at this viewer's rate", () => {
+  it("merges adjacent slices on one court into one booking, costing its playing minutes (P13 §1.1)", () => {
     const keys = [selectionKey("a", at(16, 15)), selectionKey("a", at(16)), selectionKey("b", at(16)), selectionKey("a", at(16, 30))];
+    // The fixture's courts still carry the old per-court prices (50, 40): they must change nothing.
     expect(toSelectedSlots(keys, DAY)).toEqual([
-      { courtId: "a", courtName: "Court 1", startsAt: at(16), sliceCount: 3, priceMinutes: 150 },
-      { courtId: "b", courtName: "Court 2", startsAt: at(16), sliceCount: 1, priceMinutes: 40 },
+      { courtId: "a", courtName: "Court 1", startsAt: at(16), sliceCount: 3, priceMinutes: 45 },
+      { courtId: "b", courtName: "Court 2", startsAt: at(16), sliceCount: 1, priceMinutes: 15 },
+    ]);
+  });
+
+  it("prices by the day's slice length — vary it, and the minutes follow", () => {
+    const halfHours = { ...DAY, sliceMinutes: 30 } as ScheduleDay;
+    const keys = [selectionKey("a", at(16)), selectionKey("a", at(16, 30))];
+    expect(toSelectedSlots(keys, halfHours)).toEqual([
+      { courtId: "a", courtName: "Court 1", startsAt: at(16), sliceCount: 2, priceMinutes: 60 },
     ]);
   });
 

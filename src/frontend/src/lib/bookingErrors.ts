@@ -1,14 +1,14 @@
 import { ApiError } from "./api";
 import { NotSent, UnsureOutcome } from "./bookingOutcome";
 import type { SplitCancel } from "./bookingsApi";
-import { formatCredits } from "./utils";
+import { minutesCompact } from "./minutes";
 import { rateLimitedSentence } from "./errors";
 
 /**
  * Booking refusals, turned into sentences a member can act on.
  *
  * <p>
- * The schedule used to branch on the HTTP STATUS: 402 meant "top up", 409 meant "just
+ * The schedule used to branch on the HTTP STATUS: 402 meant "buy more", 409 meant "just
  * taken", 400 meant "that slot is in the past", and everything else meant "Booking
  * failed." Three of those were wrong. The two headline rules of the whole product —
  * peak-hour league exclusivity and the per-day cap — answered 500 and so came out as
@@ -48,7 +48,7 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
   // `provesStaleGrid` below), so the sentence states what has happened rather than asking
   // for something the member cannot do.
   slot_taken: "Someone just took that slot. The schedule behind this is up to date now — pick another time.",
-  insufficient_balance: "Not enough credits — top up your wallet and try again.",
+  insufficient_balance: "Not enough minutes — buy a package and try again.",
   court_not_found: "That court isn't on the schedule any more. The schedule behind this is up to date now.",
   duplicate_request: "That booking already went through — it's on the schedule behind this.",
   already_started: "That booking has already started, so it can't be cancelled.",
@@ -79,7 +79,7 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
  *
  * <p>
  * <b>It never claims nothing happened</b> (review round 1, F1.1). A 504 after the club had
- * already booked and charged was told "Nothing was booked and no credit was taken". The sheets
+ * already booked and charged was told "Nothing was booked and no minutes were taken". The sheets
  * re-read the day first and say what the schedule shows (`UNSURE_TEXT`); this is what is left
  * for a caller that cannot look.
  * </p>
@@ -97,19 +97,19 @@ const SERVER_DOWN_TEXT: Record<BookingAction, string> = {
  */
 export const UNSURE_TEXT: Record<BookingAction, { checked: string; unchecked: string }> = {
   book: {
-    checked: "The club's system didn't answer, so we checked the schedule: the slot is still free — nothing was booked and no credit was taken. Try again in a minute.",
+    checked: "The club's system didn't answer, so we checked the schedule: the slot is still free — nothing was booked and no minutes were taken. Try again in a minute.",
     unchecked: "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether this was booked. Check the schedule and your wallet before trying again.",
   },
   cancel: {
-    checked: "The club's system didn't answer, so we checked the schedule: the booking is still there — nothing was cancelled and no credit moved. Try again in a minute.",
+    checked: "The club's system didn't answer, so we checked the schedule: the booking is still there — nothing was cancelled and no minutes moved. Try again in a minute.",
     unchecked: "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether it was cancelled. Check the schedule and your wallet before trying again.",
   },
 };
 
 /** R3 I-4 — offline before sending: certain that nothing happened, and said so. */
 export const NOT_SENT_TEXT: Record<BookingAction, string> = {
-  book: "You're offline, so nothing was sent — nothing was booked and no credit was taken. Try again when you're back online.",
-  cancel: "You're offline, so nothing was sent — the booking is still there and no credit moved. Try again when you're back online.",
+  book: "You're offline, so nothing was sent — nothing was booked and no minutes were taken. Try again when you're back online.",
+  cancel: "You're offline, so nothing was sent — the booking is still there and no minutes moved. Try again when you're back online.",
 };
 
 /**
@@ -118,8 +118,8 @@ export const NOT_SENT_TEXT: Record<BookingAction, string> = {
  * the generic "Couldn't make that booking", and the seconds were never used.
  */
 export const RATE_LIMITED_TAIL: Record<BookingAction, string> = {
-  book: "Nothing was booked and no credit was taken.",
-  cancel: "The booking is still there and no credit moved.",
+  book: "Nothing was booked and no minutes were taken.",
+  cancel: "The booking is still there and no minutes moved.",
 };
 
 function describeRateLimited(e: ApiError, action: BookingAction): string {
@@ -188,7 +188,7 @@ function groupNames(err: ApiError): string | null {
 /**
  * The member's groups leave no time at all that day (`no_bookable_window`) or not this time
  * (`group_window`). Said about the MEMBER when an admin is booking for them (F1.5): the desk's
- * booking follows that member's group times — god mode lifts the credit and the daily cap, never
+ * booking follows that member's group times — god mode lifts the balance check and the daily cap, never
  * a group's window — so the sentence says that plainly, and where it can be changed.
  */
 function describeGroupWindow(err: ApiError, forName: string | null | undefined): string {
@@ -336,13 +336,13 @@ export function provesStaleGrid(e: unknown): boolean {
 /**
  * R5 M5-7 — what came back to the organiser on a split cancel. `refunded` is the GROSS refund and
  * the penalty is its own ledger row; a server whose `net_minutes` is `refunded − partners` left
- * the penalty out ("25.00 cr back" for a ledger +50 −15 −25 = +10). Such a net is corrected here;
+ * the penalty out ("25 min back" for a ledger +50 −15 −25 = +10). Such a net is corrected here;
  * a net that already counts the penalty (or one from the quote) is taken as it is.
  */
 function splitBack(refunded: number, penalty: number, split: SplitCancel): number {
   if (penalty <= 0) return split.net;
   const partners = split.partners.reduce((n, p) => n + p.minutes, 0);
-  return Math.abs(split.net - (refunded - partners)) < 0.005 ? split.net - penalty : split.net;
+  return split.net === refunded - partners ? split.net - penalty : split.net;
 }
 
 /**
@@ -356,7 +356,7 @@ function splitBack(refunded: number, penalty: number, split: SplitCancel): numbe
  *
  * <p>
  * It replaces "Booking cancelled — refund pending.", which was shown identically when
- * 50.00 credits came back, when 35.00 came back with 15.00 kept as a penalty, and when
+ * 50 min came back, when 35 min came back with 15 min kept as a penalty, and when
  * a checked-in member lost the whole price and nothing came back at all. Nothing in that
  * sentence was true in the third case, and the member had no other way to find out.
  * </p>
@@ -364,15 +364,15 @@ function splitBack(refunded: number, penalty: number, split: SplitCancel): numbe
  * <p>
  * `member` is the first name of the person whose booking it was, and it is present exactly
  * when an ADMIN cancelled on somebody else's behalf. §7 is explicit that "refunds always
- * go to the booking's player", and the sentence said "back to your credit" to a desk
+ * go to the booking's player", and the sentence said "back to your balance" to a desk
  * account whose own balance never moved — first person about another person's money, with
- * the member never named. An admin acting for someone should be told whose credit moved.
+ * the member never named. An admin acting for someone should be told whose minutes moved.
  * </p>
  */
 export function cancellationOutcome(
   refunded: number | null, penalty: number | null, member?: string | null, split?: SplitCancel | null,
 ): string {
-  const whose = member ? `${member}'s credit` : "your credit";
+  const whose = member ? `${member}'s balance` : "your balance";
   // F1.1 — the schedule shows it gone but the reply with the figures was lost.
   if (refunded === null || penalty === null) {
     return `Booking cancelled. The club's reply didn't arrive, so the refund isn't shown here — it's on ${member ? `${member}'s` : "your"} wallet.`;
@@ -383,11 +383,11 @@ export function cancellationOutcome(
       : "Booking cancelled. Nothing was refunded — the lights had already been on.";
   }
   // F1.13 — a split booking: what the organiser keeps, and each partner's share, by name.
-  const partners = split ? `; ${split.partners.map((p) => `${formatCredits(p.minutes)} to ${p.name}`).join(", ")}` : "";
+  const partners = split ? `; ${split.partners.map((p) => `${minutesCompact(p.minutes)} to ${p.name}`).join(", ")}` : "";
   const back = split ? splitBack(refunded, penalty, split) : refunded - (penalty > 0 ? penalty : 0);
   if (penalty > 0) {
-    return `Booking cancelled. ${formatCredits(back)} back to ${whose}${partners}, `
-      + `${formatCredits(penalty)} kept as the late-cancellation penalty.`;
+    return `Booking cancelled. ${minutesCompact(back)} back to ${whose}${partners}, `
+      + `${minutesCompact(penalty)} kept as the late-cancellation penalty.`;
   }
-  return `Booking cancelled. ${formatCredits(split ? split.net : refunded)} back to ${whose}${partners}.`;
+  return `Booking cancelled. ${minutesCompact(split ? split.net : refunded)} back to ${whose}${partners}.`;
 }

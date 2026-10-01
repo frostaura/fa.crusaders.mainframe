@@ -30,7 +30,7 @@ function open() {
   const onSending = vi.fn();
   render(
     <BookSheet open onOpenChange={vi.fn()} slots={[C1]} timezone="Africa/Johannesburg" sliceMinutes={15}
-      isAdmin={false} actorUserId="me" balanceCredits={500} onBooked={onBooked} onSending={onSending} />,
+      isAdmin={false} actorUserId="me" balanceMinutes={500} onBooked={onBooked} onSending={onSending} />,
     { wrapper: Providers, reactStrictMode: true },
   );
   return { onBooked, onSending };

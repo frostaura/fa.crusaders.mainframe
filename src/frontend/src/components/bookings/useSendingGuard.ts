@@ -6,7 +6,7 @@ import { useToast } from "@/components/Toast";
  *
  * <p>
  * A member pressed Book on a slow reply, then Back, then Cancel (or Escape, or the ×): the sheet
- * closed without a word, the booking landed a moment later, and 50 credits were gone with nothing
+ * closed without a word, the booking landed a moment later, and 50 minutes were gone with nothing
  * on screen saying so. Every way out of a sheet — its own Cancel/Back/Keep/Done, the ×, Escape,
  * the scrim and the system Back — now asks here first, and while the write is in flight the answer
  * is no: the sheet says it is waiting for the club, and says it again when somebody tries to leave.

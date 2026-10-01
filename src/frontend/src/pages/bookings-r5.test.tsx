@@ -4,7 +4,7 @@ import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
 import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, slotRow } from "../test/bookingsKit";
 import { liftWithReason } from "../test/liftHold";
-import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET, OFFLINE_CELL, SPLIT_CANCEL, bookCellLabel } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, BOOKING_FOR, BOOK_SHEET, CANCEL_SHEET, CELL_TEXT, LIFT_HOLD_SHEET, OFFLINE_CELL, SPLIT_CANCEL, bookCellLabel } from "../lib/bookingsCopy";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import type { ScheduleDay } from "../lib/api";
 import { HOLD_LIFTED } from "../lib/scheduleEnd";
@@ -90,7 +90,7 @@ describe("A5-10 — a batch of two cancelled reads \"Both cancelled\"", () => {
 const NALEDI = "55555555-5555-5555-5555-555555555555";
 function memberRoutes(rules: Record<string, unknown> = {}) {
   return [
-    { path: `/api/v1/admin/members/${NALEDI}/booking-rules`, body: { slice_price_credits: 30, groups: [{ name: "Juniors" }], day: "2030-09-09", allowed_windows: [{ start: "16:00", end: "18:00" }], ...rules } },
+    { path: `/api/v1/admin/members/${NALEDI}/booking-rules`, body: { groups: [{ name: "Juniors" }], day: "2030-09-09", allowed_windows: [{ start: "16:00", end: "18:00" }], ...rules } },
     { path: `/api/v1/admin/members/${NALEDI}`, body: { full_name: "Naledi Khumalo", balance_minutes: 215, held_minutes: 15 } },
   ];
 }
@@ -100,7 +100,7 @@ describe("A5-9 — booking for a member, the rail shows THEIR wallet", () => {
     openBookings({ isAdmin: true, balance: 0, at: `/bookings?date=2030-09-09&as=${NALEDI}`, routes: memberRoutes() });
     const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTheirTitle("Naledi") });
     expect(wallet).toHaveTextContent(BOOKINGS_COPY.summaryTheirSpendable("Naledi"));
-    expect(wallet).toHaveTextContent("200.00 cr");
+    expect(wallet).toHaveTextContent("3 h 20 min");
     expect(within(wallet).queryByRole("link")).toBeNull();
     expect(screen.queryByRole("group", { name: BOOKINGS_COPY.summaryTitle })).toBeNull();
   });
@@ -108,23 +108,20 @@ describe("A5-9 — booking for a member, the rail shows THEIR wallet", () => {
   it("keeps the desk's own wallet when it books for itself", async () => {
     openBookings({ isAdmin: true, balance: 120 });
     const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTitle });
-    expect(wallet).toHaveTextContent("120.00 cr");
+    expect(wallet).toHaveTextContent("2 h");
   });
 });
 
-describe("I5-1 — booking for a member, the grid prices at the MEMBER's group price", () => {
-  it("uses the member's per-court figures when the desk read sends them", async () => {
+describe("I5-1, after P13 — booking for a member, the grid prices nothing at all", () => {
+  it("ignores the per-court prices an older desk read still sends: every cell is the same Free", async () => {
     openBookings({
       isAdmin: true, at: `/bookings?date=2030-09-09&as=${NALEDI}`,
-      routes: memberRoutes({ slice_prices_by_court: [{ court_id: COURT_A, credits: 30 }, { court_id: COURT_B, credits: 35 }] }),
+      routes: memberRoutes({ slice_price_credits: 30, slice_prices_by_court: [{ court_id: COURT_A, credits: 30 }, { court_id: COURT_B, credits: 35 }] }),
     });
-    expect(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 30) })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: bookCellLabel("Court 2 at 16:00", 35) })).toBeInTheDocument();
-  });
-
-  it("derives it from the single figure on an older server", async () => {
-    openBookings({ isAdmin: true, at: `/bookings?date=2030-09-09&as=${NALEDI}`, routes: memberRoutes() });
-    expect(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 30) })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") })).toHaveTextContent(CELL_TEXT.available);
+    expect(screen.getByRole("button", { name: bookCellLabel("Court 2 at 16:00") })).toHaveTextContent(CELL_TEXT.available);
+    // The member's bar names who and what they can spend — never a price (P13).
+    expect(screen.getByRole("region", { name: BOOKING_FOR.region("Naledi Khumalo") }).textContent).not.toMatch(/pays|\bcr\b|credit/);
   });
 });
 
@@ -154,7 +151,7 @@ describe("P5 — a slot past the club's rolling booking window is drawn not yet 
 describe("V5-8 — offline, the grid's free cells are muted, not green Book cells", () => {
   it("draws them Free with no price, and a press says booking needs a connection", async () => {
     openBookings();
-    await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 50) });
+    await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") });
     // The signal goes: the refresh fails to reach the club, and the phone says it is offline.
     vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
     const answered = globalThis.fetch;
@@ -231,17 +228,17 @@ describe("M5-7 (D1's ask) — a late split cancel says what came back, net of th
 
   it("corrects a net that left the penalty out (gross 50, penalty 15, Thandi's 25 → 10 back)", () => {
     const said = cancellationOutcome(50, 15, null, { net: 25, partners: thandi });
-    expect(said).toContain("10.00 cr back to your credit");
-    expect(said).toContain("25.00 cr to Thandi Third");
-    expect(said).toContain("15.00 cr kept as the late-cancellation penalty");
+    expect(said).toContain("10 min back to your balance");
+    expect(said).toContain("25 min to Thandi Third");
+    expect(said).toContain("15 min kept as the late-cancellation penalty");
   });
 
   it("takes a net that already counts the penalty as it is", () => {
-    expect(cancellationOutcome(50, 15, null, { net: 10, partners: thandi })).toContain("10.00 cr back to your credit");
+    expect(cancellationOutcome(50, 15, null, { net: 10, partners: thandi })).toContain("10 min back to your balance");
   });
 
   it("leaves a cancel with no penalty alone", () => {
-    expect(cancellationOutcome(50, 0, null, { net: 25, partners: thandi })).toContain("25.00 cr back to your credit");
+    expect(cancellationOutcome(50, 0, null, { net: 25, partners: thandi })).toContain("25 min back to your balance");
   });
 
   it("names the organiser's row \"Back to you\", never \"You keep\"", () => {

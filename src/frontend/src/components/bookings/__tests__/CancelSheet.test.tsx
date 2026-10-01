@@ -62,8 +62,8 @@ describe("CancelSheet — a member's own booking", () => {
     open();
     const dialog = screen.getByRole("dialog", { name: CANCEL_SHEET.title(1) });
     expect(await within(dialog).findByText(CANCEL_SHEET.free(null))).toBeTruthy();
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.paid}50.00 cr`);
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}50.00 cr`);
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.paid}50 min`);
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}50 min`);
     expect(within(dialog).getByRole("list")).toHaveTextContent("Mon 9 Sep · 18:00–18:45");
     // F4-9: the × is "Close" + the sheet's own title, never a second bare "Close".
     expect(within(dialog).getByRole("button", { name: `Close ${CANCEL_SHEET.title(1)}` })).toBeTruthy();
@@ -77,15 +77,15 @@ describe("CancelSheet — a member's own booking", () => {
     stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: late }]);
     open();
     expect(await screen.findByText(CANCEL_SHEET.late(30))).toBeTruthy();
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.penalty(30)}−15.00 cr`);
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}35.00 cr`);
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.penalty(30)}−15 min`);
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}35 min`);
   });
 
   it("says nothing comes back once the lights have been on", async () => {
     stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote({ refundMinutes: 0, checkedIn: true }) }]);
     open();
     expect(await screen.findByText(CANCEL_SHEET.checkedIn(null))).toBeTruthy();
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}0.00 cr`);
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}0 min`);
   });
 
   it("cancels once, closes, and says what moved in a toast — no tick for a destructive action", async () => {
@@ -155,11 +155,11 @@ describe("CancelSheet — an admin, for a member", () => {
     ]);
     const { onCancelled } = open({ isAdmin: true, bookings: [THANDI] });
     expect(await screen.findByText(CANCEL_SHEET.late(30))).toBeTruthy();
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack("Thandi")}35.00 cr`);
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack("Thandi")}35 min`);
     expect(screen.getByRole("list")).toHaveTextContent("Court 2 · Thandi");
 
     fireEvent.click(screen.getByRole("checkbox", { name: new RegExp(CANCEL_SHEET.waive(15)) }));
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack("Thandi")}50.00 cr`);
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack("Thandi")}50 min`);
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
     expect(screen.getByText(CANCEL_SHEET.reasonMissing)).toBeTruthy();
     expect(posts(stub.calls, "/api/v1/admin/bookings/")).toHaveLength(0);
@@ -188,8 +188,8 @@ describe("CancelSheet — an admin, for a member", () => {
       },
     ]);
     open({ isAdmin: true, bookings: [THANDI, SIPHO] });
-    await waitFor(() => expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.totalBack}85.00 cr`));
-    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.penalty(30)}\u221215.00 cr`);
+    await waitFor(() => expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.totalBack}1 h 25 min`));
+    expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.penalty(30)}\u221215 min`);
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(2) }));
     expect(screen.getByText(CANCEL_SHEET.reasonMissing)).toBeTruthy();
     fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Court 2 lights faulty" } });
@@ -200,7 +200,7 @@ describe("CancelSheet — an admin, for a member", () => {
     expect(String(body.idempotencyKey)).toMatch(/^bc_/);
     const results = screen.getByRole("list", { name: RESULTS_LABEL.cancel });
     expect(results).toHaveTextContent(RESULT_WORD.cancelled);
-    expect(results).toHaveTextContent("35.00 cr back, 15.00 cr penalty kept");
+    expect(results).toHaveTextContent("35 min back, 15 min penalty kept");
     expect(results).toHaveTextContent(RESULT_WORD.notCancelled);
     expect(screen.getByRole("button", { name: CANCEL_SHEET.done })).toBeTruthy();
   });

@@ -48,7 +48,12 @@ export type ViewerRules = {
   /** `null` = the server did not say. `[]` = it said there are none, which is D2 §4.3's empty intersection. */
   allowedWindows: ClockWindow[] | null;
   clubHours: ClockWindow | null;
-  slicePriceCredits: number | null;
+  /**
+   * P13-F1 STAND-IN: nothing reads it — a booking costs its minutes, and the schedule sends no
+   * price (§3.12). It stays optional only because the integrator-owned `bookingsApi.memberGridRules`
+   * still sets it; it goes with that patch (`p13-ask-F1-to-integrator.md`).
+   */
+  slicePriceCredits?: number | null;
   maxSlotsPerDay: number | null;
   maxMinutesPerDay: number | null;
   bookedSlotsToday: number | null;
@@ -61,7 +66,7 @@ export type ViewerRules = {
 
 const NOTHING_KNOWN: ViewerRules = {
   known: false, adminExempt: false, groups: [], allowedWindows: null, clubHours: null,
-  slicePriceCredits: null, maxSlotsPerDay: null, maxMinutesPerDay: null,
+  maxSlotsPerDay: null, maxMinutesPerDay: null,
   bookedSlotsToday: null, bookedMinutesToday: null, remainingToday: null,
   emptyWindow: null, clubDay: null,
 };
@@ -86,7 +91,6 @@ export function readViewerRules(day: ScheduleDay | null, actorIsAdmin = false): 
     groups: readGroups(pick(raw, "groups", "groups")),
     allowedWindows: readWindows(pick(raw, "allowedWindows", "allowed_windows")),
     clubHours: readWindow(pick(raw, "clubHours", "club_hours")),
-    slicePriceCredits: num(pick(raw, "slicePriceCredits", "slice_price_credits")),
     maxSlotsPerDay: num(pick(raw, "maxSlotsPerDay", "max_slots_per_day")),
     maxMinutesPerDay: num(pick(raw, "maxMinutesPerDay", "max_minutes_per_day")),
     bookedSlotsToday: num(pick(raw, "bookedSlotsToday", "booked_slots_today")),

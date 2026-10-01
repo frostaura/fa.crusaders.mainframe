@@ -67,7 +67,7 @@ function openBook(props: Partial<BookSheetProps> = {}) {
   const onBooked = vi.fn();
   render(
     <BookSheet open onOpenChange={vi.fn()} slots={[C1]} timezone={TZ} sliceMinutes={15}
-      isAdmin={false} actorUserId={ME} balanceCredits={500} onBooked={onBooked} {...props} />,
+      isAdmin={false} actorUserId={ME} balanceMinutes={500} onBooked={onBooked} {...props} />,
     { wrapper: Providers, reactStrictMode: true },
   );
   return { onBooked };
@@ -210,9 +210,9 @@ describe("F1.3 — Confirm and Done say the same figure", () => {
       { method: "POST", path: BOOK_POST, body: { booking_id: "bk-9", balance_after_minutes: 300 } },
     ]);
     signIn({ isAdmin: false });
-    openBook({ balanceCredits: 350 });
+    openBook({ balanceMinutes: 350 });
     await toConfirm();
-    await waitFor(() => expect(document.querySelector("dl")).toHaveTextContent(`${BOOK_SHEET.availableAfter}250.00 cr`));
+    await waitFor(() => expect(document.querySelector("dl")).toHaveTextContent(`${BOOK_SHEET.availableAfter}4 h 10 min`));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(1, 50, null) }));
     // The server answers the RAW balance (300); what the member may spend is 250 — the Confirm figure.
     expect(await screen.findByText(BOOK_SHEET.availableLine(250, null))).toBeTruthy();
@@ -239,9 +239,9 @@ describe("F1.4 — the desk's quote reads the member's spendable credits", () =>
     });
     expect(notice).toHaveTextContent(GOD_MODE.body("Naledi Khumalo", -90));
     const money = document.querySelector("dl")!;
-    expect(money).toHaveTextContent(`${BOOK_SHEET.theirAvailableNow("Naledi Khumalo")}−40.00 cr`);
-    expect(money).toHaveTextContent(`${BOOK_SHEET.theirBalanceAfter}−90.00 cr`);
-    expect(money).not.toHaveTextContent("35.00 cr");
+    expect(money).toHaveTextContent(`${BOOK_SHEET.theirAvailableNow("Naledi Khumalo")}−40 min`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.theirBalanceAfter}−1 h 30 min`);
+    expect(money).not.toHaveTextContent("35 min");
   });
 });
 
@@ -322,9 +322,9 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
     openCancel();
     await screen.findByText(CANCEL_SHEET.free(null));
     const money = document.querySelector("dl")!;
-    expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}50.00 cr`);
-    expect(money).toHaveTextContent(`${SPLIT_CANCEL.youKeep}50.00 cr`);
-    expect(money).not.toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}100.00 cr`);
+    expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}50 min`);
+    expect(money).toHaveTextContent(`${SPLIT_CANCEL.youKeep}50 min`);
+    expect(money).not.toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}1 h 40 min`);
     expect(screen.getByText(SPLIT_CANCEL.note)).toBeTruthy();
   });
 
@@ -336,14 +336,14 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
     openCancel();
     await screen.findByText(`${SPLIT_CANCEL.youKeep}`);
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
-    expect(await screen.findByText("Booking cancelled. 50.00 cr back to your credit; 50.00 cr to Sam.")).toBeTruthy();
+    expect(await screen.findByText("Booking cancelled. 50 min back to your balance; 50 min to Sam.")).toBeTruthy();
   });
 
   it("a booking without players is unchanged", async () => {
     stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: QUOTE }]);
     openCancel();
     await screen.findByText(CANCEL_SHEET.free(null));
-    expect(document.querySelector("dl")).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}50.00 cr`);
+    expect(document.querySelector("dl")).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}50 min`);
   });
 });
 
@@ -353,7 +353,7 @@ describe("F1.13 — the desk cancelling a split booking says the truth even when
     ...QUOTE, amountChargedMinutes: 250, refundMinutes: 250, net_minutes: 125, partner_refunds: [{ name: "Sam", minutes: 125 }],
   };
 
-  it("never '250.00 cr back to Adm' when 125 of it went to the partner", async () => {
+  it("never '4 h 10 min back to Adm' when 125 of it went to the partner", async () => {
     stubFetch([
       { path: "/api/v1/bookings/bk-1/cancellation-quote", body: splitQuote },
       // The desk's route answers the gross figures only.
@@ -362,12 +362,12 @@ describe("F1.13 — the desk cancelling a split booking says the truth even when
     openCancel({ bookings: [ADM], isAdmin: true });
     await screen.findByText(CANCEL_SHEET.free("Adm"));
     const money = document.querySelector("dl")!;
-    expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}125.00 cr`);
-    expect(money).toHaveTextContent(`${CANCEL_SHEET.goesBack("Adm")}125.00 cr`);
+    expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}2 h 5 min`);
+    expect(money).toHaveTextContent(`${CANCEL_SHEET.goesBack("Adm")}2 h 5 min`);
     // R4 A4-4: a desk cancel of somebody else's booking always carries a reason.
     fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Court closed" } });
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
-    expect(await screen.findByText("Booking cancelled. 125.00 cr back to Adm's credit; 125.00 cr to Sam.")).toBeTruthy();
-    expect(screen.queryByText(/250\.00 cr back to Adm/)).toBeNull();
+    expect(await screen.findByText("Booking cancelled. 2 h 5 min back to Adm's balance; 2 h 5 min to Sam.")).toBeTruthy();
+    expect(screen.queryByText(/4 h 10 min back to Adm/)).toBeNull();
   });
 });

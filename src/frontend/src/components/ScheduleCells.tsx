@@ -6,7 +6,7 @@ import { Interactable } from "@/components/ui/interactable";
 import { Check, Gauge, Info, LockOpen } from "@/components/ui/icons";
 import { Spinner } from "@/components/ui/spinner";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
-import { cn, formatCredits } from "../lib/utils";
+import { cn } from "../lib/utils";
 import { cellVerdict, type CellFacts, type GridReason, type ViewerRules } from "../lib/gridRules";
 import { closedCellLabel, holdCellLabel, holdLiftLabel, pastCellLabel, quotaCellLabel, restrictionLabel, unavailableWhy } from "../lib/gridCopy";
 import {
@@ -18,7 +18,6 @@ import {
   bookedKey, isPendingBooking, selectionKey, type GridCoord, type SelectionApi, type SelectionKey,
 } from "../lib/gridSelection";
 import { RESULT_READABLE } from "../lib/bookingLink";
-import type { PriceOf } from "../lib/viewerPrice";
 import type { HoldToLift } from "./bookings/LiftHoldSheet";
 
 /**
@@ -63,8 +62,6 @@ export type BoardContext = {
   forName?: string | null;
   /** R5 V5-8 — the grid is the phone's copy (no connection): free cells are drawn muted and book nothing. */
   offline?: boolean;
-  /** What THIS viewer pays per slice on a court — their group's price, not the court's own (R5 I5-1). */
-  priceOf: PriceOf;
   /** The sentence a locked cell answers with (D4 §2.9) — visible and spoken. */
   explain: (reason: GridReason, where: string) => void;
   /** A single tap on a free cell outside selection mode: book that one slice. */
@@ -341,20 +338,19 @@ function AvailableCell(props: SlotCellProps) {
   if (ctx.offline) return <OfflineFreeCell {...props} />;
   const key = selectionKey(court.id, startsAtUtc);
   const pick = choosable(ctx, key, at, () => ctx.onBook(court, startsAtUtc));
-  const price = ctx.priceOf(court);
   return (
     <Cell label={where} selfFocus={false} selectKey={key} selected={pick.selected} at={at} line={props.line} roving={props.roving} selecting={ctx.selection.active}>
       <Interactable asChild surface="cell" watermark>
         <button
           type="button"
           tabIndex={props.roving ? 0 : -1}
-          aria-label={bookCellLabel(where, price)}
+          aria-label={bookCellLabel(where)}
           {...pick.button}
           className={cn(SURFACE, PRESSABLE, TONE.available, "group flex-col items-start justify-center gap-0", pick.inset)}
         >
           {pick.check}
+          {/* P13 §3.12 — a free cell carries no price: it reads "Free", and the sheet says what it takes. */}
           <span>{CELL_TEXT.available}</span>
-          <span className="hidden font-medium md:inline">{formatCredits(price)}</span>
         </button>
       </Interactable>
     </Cell>

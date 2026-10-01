@@ -11,7 +11,7 @@ vi.mock("../components/bookings/CancelSheet", async () => (await import("../test
 
 /**
  * The P4 headed walk's findings on the Bookings grid, each pinned where a person met it: an admin
- * at 0 credits with four courts, and a member booking through the sheet.
+ * at 0 minutes with four courts, and a member booking through the sheet.
  *
  * <ul>
  *   <li><b>God mode on the grid (R19).</b> An admin at or below zero was told "you can't book yet"
@@ -37,7 +37,7 @@ describe("the wallet notice follows the actor's role (R19)", () => {
   it("gives an admin below zero a calm note, never the member's refusal", async () => {
     openBookings({ isAdmin: true, balance: -100 });
     const note = await screen.findByText(adminWalletNote(-100));
-    expect(note.textContent).toBe("Your balance is −100.00 cr. As an admin you can still book — going below zero is recorded.");
+    expect(note.textContent).toBe("Your balance is −1 h 40 min. As an admin you can still book — going below zero is recorded.");
     expect(document.body.textContent).not.toMatch(/can't book yet|You owe/);
     // Nothing is blocked, so there is no call to action; the note wears info, not warning.
     const notice = note.closest('[role="status"]')!;
@@ -50,13 +50,15 @@ describe("the wallet notice follows the actor's role (R19)", () => {
   it("gives an admin at exactly zero the same note", async () => {
     openBookings({ isAdmin: true, balance: 0 });
     expect(await screen.findByText(adminWalletNote(0))).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/You have no credits/);
+    expect(document.body.textContent).not.toMatch(/You have no minutes/);
   });
 
-  it("keeps the member's banner, with its Top up, for a member", async () => {
+  it("keeps the member's banner, with its Buy minutes, for a member", async () => {
     openBookings({ isAdmin: false, balance: -100 });
-    expect(await screen.findByText(emptyWalletSentence(-100, 50))).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Top up" })).toHaveAttribute("href", "/wallet/topup");
+    // What a slot takes is the day's slice (15 min), never a price (P13 §3.12).
+    expect(await screen.findByText(emptyWalletSentence(-100, 15))).toBeTruthy();
+    expect(screen.getByText("You owe 1 h 40 min, so you can't book yet. A slot here takes 15 min.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Buy minutes" })).toHaveAttribute("href", "/wallet/buy");
     expect(document.body.textContent).not.toContain("As an admin");
   });
 });
@@ -70,7 +72,8 @@ describe("two courts at the same time", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^Book Court 2 at 16:45/ })); });
     expect(chosen().map((c) => c.getAttribute("aria-label"))).toEqual(["Court 1 at 16:45", "Court 2 at 16:45"]);
     const bar = screen.getByRole("toolbar", { name: BOOKINGS_COPY.actionBarLabel });
-    expect(within(bar).getByText("2 slots · 100.00 cr")).toBeTruthy();
+    // Two 15-minute slices: the bar counts the minutes they take (P13 §3.12).
+    expect(within(bar).getByText("2 slots · 30 min")).toBeTruthy();
     await act(async () => { fireEvent.click(within(bar).getByRole("button", { name: BOOKINGS_COPY.bookSelection })); });
     expect(sheets.book?.slots.map((s) => [s.courtId, s.startsAt])).toEqual([[COURT_A, sast(16, 45)], [COURT_B, sast(16, 45)]]);
   });
@@ -140,8 +143,8 @@ describe("the grid is the ACTOR's rules", () => {
     await screen.findByRole("grid");
     expect(screen.getByRole("button", { name: /^Book Court 1 at 17:15/ })).toBeTruthy();
     expect(document.querySelectorAll('[role="grid"] button[aria-label*="outside the times you can book"]')).toHaveLength(0);
-    // No "your rate" line for a group whose rules the admin is not held to.
-    expect(document.body.textContent).not.toContain(BOOKINGS_COPY.yourRate);
+    // No rate line at all — P13 removed group prices (§3.12).
+    expect(document.body.textContent).not.toMatch(/your rate|rate\./i);
   });
 
   it("still paints them for a member, who is held to them", async () => {

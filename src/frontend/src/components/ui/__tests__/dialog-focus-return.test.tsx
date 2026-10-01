@@ -108,7 +108,7 @@ const CONTROLLED: Case[] = [
     name: "Book (BookSheet)",
     draw: (open, close) => (
       <BookSheet open={open} onOpenChange={(o) => { if (!o) close(); }} slots={[SLOT]} timezone={TZ} sliceMinutes={15}
-        isAdmin={false} actorUserId={ME} balanceCredits={500} onBooked={noop} />
+        isAdmin={false} actorUserId={ME} balanceMinutes={500} onBooked={noop} />
     ),
   },
   {

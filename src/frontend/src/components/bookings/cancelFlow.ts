@@ -121,7 +121,7 @@ export type CancelRequest = {
   /**
    * The quotes the sheet showed. A route that does not answer the split figures (the desk's
    * cancel, the bulk) is told them from here, so the outcome never calls a partner's share the
-   * organiser's (F1.13: "250.00 cr back to Adm" while 125 went to the partner).
+   * organiser's (F1.13: "2 h 30 min back to Adm" while 1 h 15 min went to the partner).
    */
   quotes?: QuoteMap | null;
 };

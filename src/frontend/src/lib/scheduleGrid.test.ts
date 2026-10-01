@@ -175,11 +175,11 @@ describe("cancellationOutcome — the message names what actually moved", () => 
     // The API posts refund and penalty as two ledger rows, gross and deduction. What the
     // member wants to read is what landed in their wallet, and what was kept.
     expect(cancellationOutcome(50, 15)).toBe(
-      "Booking cancelled. 35.00 cr back to your credit, 15.00 cr kept as the late-cancellation penalty.");
+      "Booking cancelled. 35 min back to your balance, 15 min kept as the late-cancellation penalty.");
   });
 
   it("states a free cancellation as a plain figure", () => {
-    expect(cancellationOutcome(50, 0)).toBe("Booking cancelled. 50.00 cr back to your credit.");
+    expect(cancellationOutcome(50, 0)).toBe("Booking cancelled. 50 min back to your balance.");
   });
 
   it("says nothing came back when the lights had been on", () => {
@@ -197,7 +197,7 @@ describe("cancellationOutcome — the message names what actually moved", () => 
  * Blueprint A.12 reserves the peak window for league and senior members until
  * `peak_advance_hours_for_regular` before a slot starts, and the rule lived only in
  * `BookingService`. A Regular member's grid therefore drew 44 cells a day as green, clickable
- * "Available" — same colour, same cursor, same "Book Court 2 at 17:00 for 50.00 cr" label as a
+ * "Available" — same colour, same cursor, same "Book Court 2 at 17:00 for 50 min" label as a
  * slot they could actually have — and the refusal arrived only after they had read a price and
  * pressed Confirm.
  * </p>

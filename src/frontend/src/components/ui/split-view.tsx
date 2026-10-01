@@ -106,7 +106,7 @@ export type SplitViewProps = {
   back?: { label: string; onBack: () => void };
   /** Which item is picked (an id): a change moves focus when stacked and says `announce`. */
   pickedKey?: string | null;
-  /** Said politely when the pick changes: "Showing: Sam paid you 25.00 credits". */
+  /** Said politely when the pick changes: "Showing: Sam paid you 25 minutes". */
   announce?: string;
 };
 

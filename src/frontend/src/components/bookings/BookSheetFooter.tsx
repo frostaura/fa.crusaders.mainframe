@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
 import { BOOK_SHEET } from "@/lib/bookingsCopy";
+import { BUY_MINUTES_PATH } from "@/lib/gridCopy";
 import { BOOK_PLAYERS } from "@/lib/playersCopy";
 import type { BookFlow } from "./useBookFlow";
 import { isAdminRun } from "./bookFlow";
@@ -77,7 +78,7 @@ function ResultFooter(props: ResultFooterProps) {
     <DialogFooter>
       {halted && !admin ? (
         <Button variant="outline" asChild>
-          <Link to="/wallet/topup">{BOOK_SHEET.topUp}</Link>
+          <Link to={BUY_MINUTES_PATH}>{BOOK_SHEET.buyMinutes}</Link>
         </Button>
       ) : null}
       {halted ? (

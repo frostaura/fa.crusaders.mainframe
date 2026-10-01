@@ -25,39 +25,7 @@ import { describe, expect, it } from "vitest";
  * </p>
  */
 const ALLOW: ReadonlyArray<readonly [file: string, lane: "F1" | "F2" | "F3" | "F4"]> = [
-  // F1
-  ["components/ScheduleCells.tsx", "F1"],
-  ["components/bookings/DaySummary.tsx", "F1"],
-  ["components/bookings/SheetParts.tsx", "F1"],
-  ["components/bookings/SplitTotals.tsx", "F1"],
-  ["components/players/admin/adminActs.ts", "F1"],
-  ["components/players/detail/MoneyPanel.tsx", "F1"],
-  ["components/players/detail/PlayerPanel.tsx", "F1"],
-  ["components/players/detail/ShareAskDialog.tsx", "F1"],
-  ["components/players/detail/splitEditor.ts", "F1"],
-  ["components/players/invites/AcceptBody.tsx", "F1"],
-  ["components/players/invites/InviteCard.tsx", "F1"],
-  ["components/players/invites/InviteSignedOut.tsx", "F1"],
-  ["components/ui/member-combobox.tsx", "F1"],
-  ["lib/bookingErrors.ts", "F1"],
-  ["lib/bookingsCopy.ts", "F1"],
-  ["lib/gridCopy.ts", "F1"],
-  ["lib/playersCopy.ts", "F1"],
-  ["lib/scheduleCopy.ts", "F1"],
-  ["pages/InviteLink.tsx", "F1"],
-  // F2
-  ["components/member-code/WalletGlance.tsx", "F2"],
-  ["components/shell/AccountMenu.tsx", "F2"],
-  ["components/shell/CreditsChip.tsx", "F2"],
-  ["components/wallet/LedgerCellParts.tsx", "F2"],
-  ["components/wallet/ShareGroupRows.tsx", "F2"],
-  ["components/wallet/WalletMiniTotals.tsx", "F2"],
-  ["components/wallet/ledgerCells.tsx", "F2"],
-  ["lib/amountCopy.ts", "F2"],
-  ["lib/topUpCopy.ts", "F2"],
-  ["lib/walletCopy.ts", "F2"],
-  ["pages/TopUp.tsx", "F2"],
-  ["pages/WalletActivity.tsx", "F2"],
+  // F2 — none left (P13 F2 migrated all twelve).
   // F3
   ["components/admin/LedgerDetailSheet.tsx", "F3"],
   ["components/members/MemberPicker.tsx", "F3"],
@@ -71,13 +39,7 @@ const ALLOW: ReadonlyArray<readonly [file: string, lane: "F1" | "F2" | "F3" | "F
   ["pages/AdminLedger.tsx", "F3"],
   ["pages/admin/member/MemberDetailLayout.tsx", "F3"],
   ["pages/admin/member/parts.tsx", "F3"],
-  // F4
-  ["components/Charts.tsx", "F4"],
-  ["components/reports/ReportParts.tsx", "F4"],
-  ["lib/onboardingCopy.ts", "F4"],
-  ["pages/admin/AdminReports.tsx", "F4"],
-  ["pages/dev/DataSection.tsx", "F4"],
-  ["pages/monitoring/MemberNight.tsx", "F4"],
+  // F4 — none left (P13 F4 migrated all six).
 ];
 
 const SRC = __dirname;

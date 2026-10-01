@@ -59,7 +59,7 @@ function openBook(onOpenChange = vi.fn()) {
   const onBooked = vi.fn();
   render(
     <BookSheet open onOpenChange={onOpenChange} slots={[C1]} timezone="Africa/Johannesburg" sliceMinutes={15}
-      isAdmin={false} actorUserId="me" balanceCredits={500} onBooked={onBooked} />,
+      isAdmin={false} actorUserId="me" balanceMinutes={500} onBooked={onBooked} />,
     { wrapper: Providers, reactStrictMode: true },
   );
   return { onOpenChange, onBooked };
@@ -100,7 +100,7 @@ describe("BookSheet — nothing leaves the sheet while a booking is on its way (
           <button type="button" onClick={() => setShown(false)}>tear down</button>
           {shown ? (
             <BookSheet open onOpenChange={vi.fn()} slots={[C1]} timezone="Africa/Johannesburg" sliceMinutes={15}
-              isAdmin={false} actorUserId="me" balanceCredits={500} />
+              isAdmin={false} actorUserId="me" balanceMinutes={500} />
           ) : null}
         </>
       );

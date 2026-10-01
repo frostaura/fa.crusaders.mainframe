@@ -14,7 +14,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIsSmUp } from "@/components/ui/use-media-query";
-import { cn, formatCredits } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
+import { cn } from "@/lib/utils";
 
 /**
  * Pick one member from a searchable list (design-system.md: member-combobox).
@@ -37,7 +38,7 @@ export type ComboboxMember = {
   id: string;
   name: string;
   photoUrl?: string | null;
-  /** Credits. Shown right-aligned; negative reads in the danger ink. */
+  /** Whole minutes. Shown right-aligned; negative reads in the danger ink. */
   balance?: number | null;
   subtitle?: string | null;
 };
@@ -70,9 +71,7 @@ function MemberAvatar({ member }: { member: ComboboxMember }) {
 function Balance({ value }: { value: number | null | undefined }) {
   if (value === null || value === undefined) return null;
   return (
-    <span className={cn("ml-auto shrink-0 text-xs tabular-nums", value < 0 ? "text-danger-strong" : "text-text-secondary")}>
-      {formatCredits(value)}
-    </span>
+    <Minutes value={value} className={cn("ml-auto shrink-0 text-xs", value < 0 ? "text-danger-strong" : "text-text-secondary")} />
   );
 }
 

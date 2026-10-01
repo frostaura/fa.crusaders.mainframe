@@ -1,4 +1,4 @@
-import { formatCredits } from "./utils";
+import { minutesCompact } from "./minutes";
 import { playersWhen } from "./playersCopy";
 
 /**
@@ -30,6 +30,8 @@ export const BOOKINGS_COPY = {
   /** R5 A5-9 — booking FOR a member, the rail's wallet is theirs, never the desk's. */
   summaryTheirTitle: (name: string) => `${name}'s wallet`,
   summaryTheirSpendable: (name: string) => `${name} can spend`,
+  /** The rail's way to the package shelf (P13): said as a reason when the wallet is empty. */
+  summaryBuy: (empty: boolean) => (empty ? "Buy minutes to start booking" : "Buy minutes"),
   /**
    * R5 §3.1 — the rail's day summary says what is LEFT of today's cap (the pill beside the week
    * says what is used). Only on today's grid, only under a cap.
@@ -49,7 +51,6 @@ export const BOOKINGS_COPY = {
   /** The time column's header. */
   timeHeader: "Time",
   nowCaption: "Now",
-  yourRate: "your rate",
   /** The floating bar's toolbar name, its × and its primary. */
   actionBarLabel: "Selected slots",
   clearSelection: "Clear selection",
@@ -67,7 +68,8 @@ export const BOOKINGS_COPY = {
 
 /** The word each cell wears. Short enough for a 104px column at a large root font. */
 export const CELL_TEXT = {
-  available: "Book",
+  /** P13 §3.12 — a free cell reads "Free" and carries no price; a booking costs its minutes. */
+  available: "Free",
   past: "—",
   closed: "Closed",
   /** R5 — beyond the club's rolling booking window: free, but not bookable until it opens. */
@@ -85,16 +87,19 @@ export const CELL_TEXT = {
 
 /**
  * R5 V5-8 — offline, the grid is the phone's copy and books nothing: a free cell is drawn muted,
- * "Free", never the green "Book 50.00 cr" under "Booking needs a connection". Pressing it says why.
+ * "Free", never the green "Book" under "Booking needs a connection". Pressing it says why.
  */
 export const OFFLINE_CELL = {
   word: "Free",
   label: (where: string) => `${where} — free when last read; booking needs a connection`,
 } as const;
 
-/** "Book Court 1 at 18:00 for 50.00 cr" — which court, which time, what it costs. */
-export function bookCellLabel(where: string, priceMinutes: number): string {
-  return `Book ${where} for ${formatCredits(priceMinutes)}`;
+/**
+ * "Book Court 1 at 18:00" — which court and which time. P13 §3.12: the grid carries no price, so
+ * neither does its spoken label; what a slot takes is said in the sheet.
+ */
+export function bookCellLabel(where: string): string {
+  return `Book ${where}`;
 }
 
 /** The viewer's own future booking: pressing it opens the cancel sheet. */
@@ -124,20 +129,24 @@ export function idleCellLabel(where: string): string {
   return `${where} — this court is not in use`;
 }
 
-/** "Court 1 · 50.00 cr / 15 min" — the header's price line. */
-export function slicePriceLine(priceMinutes: number, sliceMinutes: number): string {
-  return `${formatCredits(priceMinutes)} / ${sliceMinutes} min`;
+/**
+ * "15 min slots" — a court header's second line. P13 §3.12: the grid carries no price (a booking
+ * costs its playing minutes, the same on every court), so the header says how long a slot is.
+ */
+export function sliceLengthLine(sliceMinutes: number): string {
+  return `${minutesCompact(sliceMinutes)} slots`;
 }
 
 /* ─────────────────────────── the selection ─────────────────────────── */
 
 /**
- * "3 slots · 150.00 cr" — the action bar's headline; "3 slots · 150.00 cr · 1 booking" when
- * bookings are in the selection too, so free and booked are counted apart.
+ * "3 slots · 1 h 30 min" — the action bar's headline; "3 slots · 45 min · 1 booking" when
+ * bookings are in the selection too, so free and booked are counted apart. The total is the
+ * playing minutes the slots take (P13 §3.12), never a price.
  */
-export function selectionHeadline(slots: number, totalCredits: number, bookings = 0): string {
+export function selectionHeadline(slots: number, totalMinutes: number, bookings = 0): string {
   const parts: string[] = [];
-  if (slots > 0) parts.push(`${slots} ${slots === 1 ? "slot" : "slots"} · ${formatCredits(totalCredits)}`);
+  if (slots > 0) parts.push(`${slots} ${slots === 1 ? "slot" : "slots"} · ${minutesCompact(totalMinutes)}`);
   if (bookings > 0) parts.push(`${bookings} ${bookings === 1 ? "booking" : "bookings"}`);
   return parts.join(" · ");
 }
@@ -177,12 +186,12 @@ export function courtChipLabel(courtName: string): string {
 }
 
 /**
- * An ADMIN at or below zero (R19). The member's banner ("You have no credits, so you can't book
- * yet") is false for an admin, who may book anyway — so the admin gets the fact, calmly, and
- * what it means, instead of a refusal the booking API would not make.
+ * An ADMIN at or below zero (R19). The member's banner ("You have no minutes left, so you can't
+ * book yet") is false for an admin, who may book anyway — so the admin gets the fact, calmly,
+ * and what it means, instead of a refusal the booking API would not make.
  */
-export function adminWalletNote(balanceCredits: number): string {
-  return `Your balance is ${signedCredits(Number(balanceCredits.toFixed(2)) || 0)}. `
+export function adminWalletNote(balanceMinutes: number): string {
+  return `Your balance is ${signedMinutes(balanceMinutes)}. `
     + "As an admin you can still book — going below zero is recorded.";
 }
 
@@ -210,14 +219,17 @@ export const PENDING_CELL = {
 /* Appended by the sheets lane. */
 /*
  * Dialog copy rules (design-system.md, Patterns): dismiss = "Cancel"; a multi-step dismiss =
- * "Back"; the primary names its outcome ("Book 3 slots · 150.00 cr"); when the primary itself
+ * "Back"; the primary names its outcome ("Book 3 slots · 45 min"); when the primary itself
  * cancels something, the dismiss names what is kept ("Keep booking"). Banned: "Keep looking",
- * "Don't move any credit", "OK".
+ * "OK".
  */
 
-/** A credit figure honest about its sign: "−16.00 cr" with a real minus (U+2212), never "-16". */
-export function signedCredits(value: number): string {
-  return value < 0 ? `−${formatCredits(-value)}` : formatCredits(value);
+/**
+ * A balance honest about its sign: "−16 min" with a real minus (U+2212), never "-16" — the
+ * minutes formatter's own compact form (P13 §7.1), so a balance is spelt one way everywhere.
+ */
+export function signedMinutes(value: number): string {
+  return minutesCompact(value);
 }
 
 function countOf(n: number, one: string, many: string): string {
@@ -227,7 +239,7 @@ function countOf(n: number, one: string, many: string): string {
 export const BOOK_SHEET = {
   title: (count: number) => (count === 1 ? "Book this court" : `Book ${count} slots`),
   holdTitle: (count: number) => (count === 1 ? "Hold this court" : `Hold ${count} slots`),
-  description: "Check the slots and the price, then book.",
+  description: "Check the slots and the minutes they take, then book.",
   holdDescription: "A club hold charges nobody. The name you write shows on the grid.",
   steps: { slots: "Slots", players: "Players", split: "Split", confirm: "Confirm" },
   /** D3 — the compact slot summary on the steps that are not the slot list. */
@@ -264,8 +276,8 @@ export const BOOK_SHEET = {
   availableNow: "Available now",
   availableAfter: "Available after",
   theirAvailableNow: (name: string) => `${name} can spend`,
-  quoteReading: "Working out the price…",
-  quoteAction: "work out the price",
+  quoteReading: "Working out the minutes…",
+  quoteAction: "work out the minutes",
   notBookable: "Can't be booked",
   noneBookable: "None of these slots can be booked right now.",
   someNotBookable: (n: number) =>
@@ -276,13 +288,14 @@ export const BOOK_SHEET = {
   cancel: "Cancel",
   done: "Done",
   retry: "Try again",
-  topUp: "Top up",
-  primary: (count: number, credits: number, forName: string | null) => {
+  /** P13 — every short-balance prompt points to the package shelf; the verb is "buy" (§6). */
+  buyMinutes: "Buy minutes",
+  primary: (count: number, minutes: number, forName: string | null) => {
     const what = count === 1 ? "Book" : `Book ${count} slots`;
     const who = forName ? ` for ${forName}` : "";
-    return `${what}${who} · ${formatCredits(credits)}`;
+    return `${what}${who} · ${minutesCompact(minutes)}`;
   },
-  /** While the quote is still being read — the price is not known yet, so it is not claimed. */
+  /** While the quote is still being read — the minutes are not known yet, so they are not claimed. */
   primaryPending: (count: number) => (count === 1 ? "Book" : `Book ${count} slots`),
   /** The slot row's note on a hold: the name the grid will show. */
   holdNote: (label: string) => `“${label.trim()}”`,
@@ -290,11 +303,11 @@ export const BOOK_SHEET = {
 
   /**
    * A member who is short (members never overdraw): what they need, never a red "Balance after
-   * −30.00 cr" — a figure their wallet can never reach. The Book button stays, unavailable, and
-   * names this as its reason.
+   * −30 min" — a figure their wallet can never reach. The Book button stays, unavailable, and
+   * names this as its reason; the way out is a package (P13).
    */
-  needMore: (shortBy: number) => `You need ${formatCredits(shortBy)} more`,
-  needMoreBody: "Top up, then book — a member's balance can't go below zero.",
+  needMore: (shortBy: number) => `You need ${minutesCompact(shortBy)} more`,
+  needMoreBody: "Buy a package, then book — a member's balance can't go below zero.",
   stillNeeded: "Still needed",
   bookedTitle: (booked: number, total: number) => {
     if (booked === total) return total === 1 ? "Court booked" : total === 2 ? "Both booked" : `All ${total} booked`;
@@ -306,20 +319,20 @@ export const BOOK_SHEET = {
   },
   noneBookedTitle: "Nothing was booked",
   balanceLine: (after: number, forName: string | null) =>
-    forName ? `${forName}'s balance is now ${signedCredits(after)}.` : `Your balance is now ${signedCredits(after)}.`,
+    forName ? `${forName}'s balance is now ${signedMinutes(after)}.` : `Your balance is now ${signedMinutes(after)}.`,
   /** The same concept as Confirm's "Available after" (F1.3) — what is left to SPEND. */
   availableLine: (after: number, forName: string | null) =>
-    forName ? `${forName} now has ${signedCredits(after)} to spend.` : `You now have ${signedCredits(after)} to spend.`,
+    forName ? `${forName} now has ${signedMinutes(after)} to spend.` : `You now have ${signedMinutes(after)} to spend.`,
   /** F1.1 — the club's reply was lost; the outcome was read off the schedule. */
   provenNote: "The club's reply didn't arrive, so this was read off the schedule. Your wallet is being re-read.",
   confirmedFromSchedule: "On the schedule in this name.",
   notOnSchedule: "Not on the schedule — not booked.",
   haltedShort:
-    "You ran out of credit part-way, so the rest weren't tried. Top up, then try again — "
+    "You ran out of minutes part-way, so the rest weren't tried. Buy a package, then try again — "
     + "the ones already booked won't be charged twice.",
   you: "You",
   haltedShortAdmin: (name: string) =>
-    `${name} ran out of credit part-way, so the rest weren't tried. `
+    `${name} ran out of minutes part-way, so the rest weren't tried. `
     + "You can book the rest anyway — it's recorded in the change record.",
   bookRestAnyway: "Book the rest anyway",
   failedAction: "make that booking",
@@ -344,7 +357,7 @@ export const BOOK_SHEET = {
 export const GOD_MODE = {
   title: "This goes below zero",
   body: (name: string | null, after: number) =>
-    `This takes ${name ?? "you"} to ${signedCredits(after)}. It's recorded in the change record.`,
+    `This takes ${name ?? "you"} to ${signedMinutes(after)}. It's recorded in the change record.`,
 } as const;
 
 /**
@@ -356,7 +369,7 @@ export const REFUSAL_REASON: Record<string, string> = {
   past_time: "That slot has already started.",
   too_far_ahead: "That day isn't open for booking yet.",
   slot_taken: "Someone else just took it.",
-  insufficient_balance: "Not enough credit.",
+  insufficient_balance: "Not enough minutes.",
   peak_hours_league_only: "Peak hours are for league members until closer to the time.",
   per_day_cap_exceeded: "That's all your court time for that day.",
   per_day_slot_cap_exceeded: "That's all your slots for that day.",
@@ -367,7 +380,7 @@ export const REFUSAL_REASON: Record<string, string> = {
   no_time_available: "There's no free time on that court.",
   invalid_duration: "That length of booking isn't allowed.",
   duplicate_request: "Already booked.",
-  not_attempted: "Not tried — the credit ran out first.",
+  not_attempted: "Not tried — the minutes ran out first.",
   idempotency_key_reused: "That request was already used. Start again from the grid.",
   member_suspended: "The membership is suspended.",
   member_not_active: "The membership isn't active.",
@@ -419,16 +432,16 @@ export const CANCEL_SHEET = {
   totalBack: "Goes back in total",
 
   free: (whose: string | null) =>
-    `Cancelling now is free — the full amount goes back to ${whose ? `${whose}'s` : "your"} credit.`,
+    `Cancelling now is free — every minute goes back to ${whose ? `${whose}'s` : "your"} balance.`,
   late: (pct: number) => `This is inside the late-cancellation window, so ${pct}% is kept as a penalty.`,
   checkedIn: (name: string | null) =>
     (name
       ? `${name} has already checked in and the lights have been on, so nothing is refunded.`
       : "You've already checked in and the lights have been on, so nothing is refunded."),
   nothingBack: "Nothing back — the lights had been on",
-  finalLine: "Cancelling can't be undone. Booking again is a new booking at today's price.",
+  finalLine: "Cancelling can't be undone. Booking again is a new booking.",
 
-  waive: (penalty: number) => `Waive the ${formatCredits(penalty)} penalty`,
+  waive: (penalty: number) => `Waive the ${minutesCompact(penalty)} penalty`,
   waiveMany: "Waive the late-cancellation penalties",
   waiveHint: "Recorded against your name, with your reason.",
   reasonLabel: "Reason",
@@ -452,16 +465,16 @@ export const CANCEL_SHEET = {
 
 /** F1.13 — a split booking's row: the organiser's net, and what went on to the partners. */
 export function splitRowOutcome(net: number, toPartners: number, penalty: number): string {
-  const line = `${formatCredits(Math.max(net, 0))} back, ${formatCredits(toPartners)} to partners`;
-  return penalty > 0 ? `${line}, ${formatCredits(penalty)} penalty kept` : line;
+  const line = `${minutesCompact(Math.max(net, 0))} back, ${minutesCompact(toPartners)} to partners`;
+  return penalty > 0 ? `${line}, ${minutesCompact(penalty)} penalty kept` : line;
 }
 
 /** What a successful cancellation moved, per row. `refund` is GROSS, as the cancel routes answer it. */
 export function cancelRowOutcome(refund: number, penalty: number): string {
   const back = refund - penalty;
   if (back <= 0 && penalty <= 0) return CANCEL_SHEET.nothingBack;
-  const line = `${formatCredits(Math.max(back, 0))} back`;
-  return penalty > 0 ? `${line}, ${formatCredits(penalty)} penalty kept` : line;
+  const line = `${minutesCompact(Math.max(back, 0))} back`;
+  return penalty > 0 ? `${line}, ${minutesCompact(penalty)} penalty kept` : line;
 }
 
 /* ═══════════════════════════════ REVIEW ROUND 1 ═══════════════════════════════ */
@@ -470,10 +483,9 @@ export function cancelRowOutcome(refund: number, penalty: number): string {
 export const BOOKING_FOR = {
   label: "Booking for",
   region: (name: string) => `Booking for ${name}`,
-  canSpend: (credits: number) => `can spend ${signedCredits(credits)}`,
-  price: (credits: number, sliceMinutes: number) => `pays ${formatCredits(credits)} / ${sliceMinutes} min`,
-  held: (credits: number) => `${formatCredits(credits)} held for or owed to partners`,
-  gridNote: "The grid shows your prices and their group's hours; the sheet charges theirs.",
+  canSpend: (minutes: number) => `can spend ${signedMinutes(minutes)}`,
+  held: (minutes: number) => `${minutesCompact(minutes)} held for or owed to partners`,
+  gridNote: "The grid shows their group's hours; the sheet charges their minutes.",
   reading: "Reading this member's details…",
   failed: "Couldn't read this member's details. The sheet still books for them and shows their figures.",
   retry: "Try again",
@@ -509,11 +521,11 @@ export const UPCOMING = {
   needsAction: "Needs you",
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",
-  share: (credits: number) => `Your share ${formatCredits(credits)}`,
+  share: (minutes: number) => `Your share ${minutesCompact(minutes)}`,
   /** R3 M-3 — what the game has actually cost the member so far, not the share they would carry. */
-  paid: (credits: number) => `You've paid ${formatCredits(credits)}`,
+  paid: (minutes: number) => `You've paid ${minutesCompact(minutes)}`,
   /** R3 M-3 — a partner's share not yet paid. */
-  owe: (credits: number) => `You owe ${formatCredits(credits)}`,
+  owe: (minutes: number) => `You owe ${minutesCompact(minutes)}`,
   /**
    * R3 M-3 — "Dean, Sam · 1 still to answer": the accepted players by first name, then the seats
    * asked but not taken (an invite, an open link), counted and never named as players. The space
@@ -578,7 +590,7 @@ export const SPLIT_CANCEL = {
   partnerBack: (name: string) => `Back to ${name}`,
   /**
    * R5 M5-7 (D1's ask) — what comes back to the organiser net of the partners' shares. "You keep"
-   * under "penalty −15.00" read as the penalty's opposite.
+   * under "penalty −15 min" read as the penalty's opposite.
    */
   youKeep: "Back to you",
   note: "Partners get their shares back from what comes back to you.",
@@ -587,12 +599,12 @@ export const SPLIT_CANCEL = {
 /* ─────────────────────────────── end SHEETS ─────────────────────────────── */
 
 /**
- * C4 — "25.00 cr until Fri 2 Oct, 06:45 · 35.00 cr until Sun 4 Oct, 10:30": held credit, one
+ * C4 — "25 min until Fri 2 Oct, 06:45 · 35 min until Sun 4 Oct, 10:30": held minutes, one
  * part per share deadline, each with its own release (R2 F4-18 — one date for the whole amount
  * was right only for the first part). "held" leads, so it reads as the held line it replaces.
  */
 export function heldPartsLine(parts: readonly { minutes: number; until: string }[], timezone?: string): string {
-  return `Held: ${parts.map((p) => `${formatCredits(p.minutes)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
+  return `Held: ${parts.map((p) => `${minutesCompact(p.minutes)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
 }
 
 /**

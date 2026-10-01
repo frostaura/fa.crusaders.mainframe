@@ -73,7 +73,7 @@ function open(props: Partial<BookSheetProps> = {}) {
       sliceMinutes={15}
       isAdmin={false}
       actorUserId={ME}
-      balanceCredits={500}
+      balanceMinutes={500}
       onBooked={onBooked}
       onStale={onStale}
       {...props}
@@ -102,9 +102,9 @@ describe("BookSheet — a member, one slot", () => {
     expect(slots).toHaveTextContent("Mon 9 Sep · 18:00–18:45");
     expect(slots).toHaveTextContent("45 min");
     const money = d.querySelector("dl")!;
-    expect(money).toHaveTextContent(`${BOOK_SHEET.total}50.00 cr`);
-    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceNow}500.00 cr`);
-    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}450.00 cr`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.total}50 min`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceNow}8 h 20 min`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}7 h 30 min`);
     // F4-9: the × is "Close" + the sheet's own title, never a second bare "Close".
     expect(within(d).getByRole("button", { name: /^Close \S/ })).toBeTruthy();
     expect(within(d).getByRole("button", { name: BOOK_SHEET.back })).toBeTruthy();
@@ -163,19 +163,19 @@ describe("BookSheet — a member, one slot", () => {
 
   it("tells a short member what they need, never a red negative balance — members never overdraw", async () => {
     const stub = stubFetch([]);
-    const { dialog } = open({ balanceCredits: 20 });
+    const { dialog } = open({ balanceMinutes: 20 });
     await toConfirm();
     const d = dialog();
-    // P4 walk: "Balance after −30.00 cr" in red, a figure a member's wallet can never reach.
+    // P4 walk: "Balance after −30 min" in red, a figure a member's wallet can never reach.
     const money = d.querySelector("dl")!;
     expect(money).not.toHaveTextContent(BOOK_SHEET.balanceAfter);
     expect(money).not.toHaveTextContent("−");
-    expect(money).toHaveTextContent(`${BOOK_SHEET.stillNeeded}30.00 cr`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.stillNeeded}30 min`);
     expect(money.querySelector(".text-danger-strong")).toBeNull();
     expect(within(d).getByText(BOOK_SHEET.needMore(30))).toBeTruthy();
     // The way out is navigation, so a link in a button's clothes.
-    const topUp = within(d).getByRole("link", { name: BOOK_SHEET.topUp });
-    expect(topUp).toHaveAttribute("href", "/wallet/topup");
+    const topUp = within(d).getByRole("link", { name: BOOK_SHEET.buyMinutes });
+    expect(topUp).toHaveAttribute("href", "/wallet/buy");
     expect(topUp).toHaveAttribute("data-slot", "button");
     // The Book button is still there, unavailable, and says why.
     const book = within(d).getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) });
@@ -188,10 +188,10 @@ describe("BookSheet — a member, one slot", () => {
 
   it("keeps the ordinary Balance after for a member who can afford it", async () => {
     stubFetch([]);
-    const { dialog } = open({ balanceCredits: 50 });
+    const { dialog } = open({ balanceMinutes: 50 });
     await toConfirm();
     const money = dialog().querySelector("dl")!;
-    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}0.00 cr`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}0 min`);
     expect(screen.queryByText(BOOK_SHEET.needMore(0))).toBeNull();
     expect(screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) })).not.toHaveAttribute("aria-disabled");
   });
@@ -242,7 +242,7 @@ describe("BookSheet — a member, several slots (D8)", () => {
     await toConfirm();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(S12, 70, null) }));
     expect(await screen.findByText(BOOK_SHEET.haltedShort)).toBeTruthy();
-    expect(screen.getByRole("link", { name: BOOK_SHEET.topUp })).toHaveAttribute("href", "/wallet/topup");
+    expect(screen.getByRole("link", { name: BOOK_SHEET.buyMinutes })).toHaveAttribute("href", "/wallet/buy");
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.retry }));
     await waitFor(() => expect(posts(stub.calls, "/api/v1/bookings/bulk")).toHaveLength(2));
     const [first, second] = posts(stub.calls, "/api/v1/bookings/bulk").map((c) => (c.body as { idempotencyKey: string }).idempotencyKey);
@@ -296,7 +296,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     const { onBooked } = open({ isAdmin: true, members, bookAsUserId: NALEDI });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     expect(await screen.findByText(GOD_MODE.body("Naledi Khumalo", -16))).toBeTruthy();
-    expect(GOD_MODE.body("Naledi Khumalo", -16)).toBe("This takes Naledi Khumalo to −16.00 cr. It's recorded in the change record.");
+    expect(GOD_MODE.body("Naledi Khumalo", -16)).toBe("This takes Naledi Khumalo to −16 min. It's recorded in the change record.");
     const [q] = gets(stub.calls, "/api/v1/admin/bookings/quote");
     expect(q.path).toContain(`userId=${NALEDI}`);
     expect(q.path).toContain("slices=3");

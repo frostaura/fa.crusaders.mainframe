@@ -133,8 +133,11 @@ describe("MemberCombobox — rows and states", () => {
     const [sam, alex] = screen.getAllByRole("option");
     expect(sam).toHaveTextContent("Sam Smith");
     expect(sam).toHaveTextContent("League");
-    expect(within(sam).getByText("12.00 cr").className).toContain("text-text-secondary");
-    expect(within(alex).getByText("−16.00 cr").className).toContain("text-danger-strong");
+    // `<Minutes>`: the compact figure the eye reads sits inside the toned span, beside the words
+    // a screen reader hears ("minus 16 minutes", never "min").
+    expect(within(sam).getByText("12 min").parentElement!.className).toContain("text-text-secondary");
+    expect(within(alex).getByText("−16 min").parentElement!.className).toContain("text-danger-strong");
+    expect(within(alex).getByText("minus 16 minutes")).toHaveClass("sr-only");
     expect(sam.querySelector('[data-slot="avatar"]')).toHaveAttribute("aria-hidden", "true");
   });
 

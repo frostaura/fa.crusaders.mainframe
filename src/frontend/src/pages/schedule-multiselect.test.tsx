@@ -115,21 +115,22 @@ describe("entering and leaving — R4", () => {
 });
 
 describe("the floating action bar", () => {
-  it("counts slots and money, names the span, and books them as runs per court", async () => {
+  it("counts slots and the minutes they take, names the span, and books them as runs per court", async () => {
     openBookings({ day: DAY });
     await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/, /^Book Court 2 at 16:30/]);
-    expect(within(bar()).getByText("3 slots · 150.00 cr")).toBeInTheDocument();
+    // Three 15-minute slices take 45 minutes — the headline is minutes, never a price (P13 §3.12).
+    expect(within(bar()).getByText("3 slots · 45 min")).toBeInTheDocument();
     // Each court's run to the END of its last slot — never one span over both courts, which
     // read as 45 minutes on each (review round 1, F1.8).
     expect(within(bar()).getByText(/Mon 9 Sep · Court 1 16:00–16:30, Court 2 16:30–16:45/)).toBeInTheDocument();
     // The count is announced politely, beside the toolbar rather than inside it.
-    expect(screen.getAllByRole("status").some((s) => s.textContent === "3 slots · 150.00 cr")).toBe(true);
+    expect(screen.getAllByRole("status").some((s) => s.textContent === "3 slots · 45 min")).toBe(true);
 
     await act(async () => { fireEvent.click(within(bar()).getByRole("button", { name: BOOKINGS_COPY.bookSelection })); });
     // Two adjacent slices on Court 1 are one booking of two; Court 2 is its own.
     expect(sheets.book?.slots).toEqual([
-      { courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 2, priceMinutes: 100 },
-      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 30), sliceCount: 1, priceMinutes: 50 },
+      { courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 2, priceMinutes: 30 },
+      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 30), sliceCount: 1, priceMinutes: 15 },
     ]);
     expect(sheets.book?.open).toBe(true);
   });
@@ -137,7 +138,7 @@ describe("the floating action bar", () => {
   it("offers an admin Cancel for ticked bookings beside Book for ticked slots", async () => {
     openBookings({ isAdmin: true, day: DAY });
     await select([/^Book Court 1 at 16:00/, /Thandi — cancel on their behalf/]);
-    expect(within(bar()).getByText("1 slot · 50.00 cr · 1 booking")).toBeInTheDocument();
+    expect(within(bar()).getByText("1 slot · 15 min · 1 booking")).toBeInTheDocument();
     await act(async () => { fireEvent.click(within(bar()).getByRole("button", { name: "Cancel booking" })); });
     expect(sheets.cancel?.bookings.map((b) => b.bookingId)).toEqual(["bk-1"]);
     expect(sheets.cancel?.bookings[0].memberFirstName).toBe("Thandi");

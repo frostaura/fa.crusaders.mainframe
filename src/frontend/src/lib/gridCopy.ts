@@ -1,4 +1,4 @@
-import { formatCredits } from "./utils";
+import { minutesCompact } from "./minutes";
 import { dateTimeFormat } from "./intlCache";
 
 /**
@@ -192,7 +192,7 @@ export function restrictionSentence(
 
 /**
  * The same sentence about the member the desk is booking FOR (R2 F1-3). Booking for a member
- * follows their group's times — god mode lifts the credit and the daily cap, never the window —
+ * follows their group's times — god mode lifts the balance check and the daily cap, never the window —
  * so it says whose times they are and where they are changed.
  */
 export function memberRestrictionSentence(
@@ -231,67 +231,47 @@ export function emptyWindowSentence(groups: readonly string[], day: string): str
   return `${who}, so there is nothing you can book on ${weekdayName(day)}. Please ask the club.`;
 }
 
-/**
- * The day picker's quiet line when the viewer's price is their group's rather than the court's.
- *
- * <p>
- * R4 I4-7: it read "You're booking as a ix review group." — the club's own name lowercased and
- * singularised, an "a" hard-coded in front of it, and shown for a group that charges the club's
- * standard price, where it said nothing true. Now: only when the group price differs from the
- * court's (`rules.slicePriceCredits` against the first open court's own price, which is what the
- * server prices from), the name as the club wrote it, and never a figure — a member is never
- * shown another group's rate. With several groups the server takes the highest of their prices
- * and does not say whose, so the line does not guess.
- * </p>
- */
-export function groupRateLine(
-  groups: readonly { name: string }[], groupPrice: number | null, courtPrice: number | null,
-): string | null {
-  if (groups.length === 0 || groupPrice === null || courtPrice === null || groupPrice === courtPrice) return null;
-  const name = groups[0].name.trim();
-  if (groups.length > 1 || name === "") return "You book at your groups' rate.";
-  return `You book at the ${name} rate.`;
-}
-
 /* ─────────────────────────── The wallet, before the member picks ─────────────────────────── */
 
+/** Where every "not enough minutes" prompt points: the member's package shelf (P13 §3.1). */
+export const BUY_MINUTES_PATH = "/wallet/buy";
+/** The action on every empty- or short-wallet prompt. The verb is "buy" (P13 §6). */
+export const BUY_MINUTES_ACTION = "Buy minutes";
+
 /**
- * D4 §2.6. A member with no credit was shown thirty-one green cells and found out in the
+ * D4 §2.6. A member with an empty wallet was shown thirty-one green cells and found out in the
  * dialog, after choosing a court and a time. The dialog handles it well; it just handles it
  * too late.
  *
  * <p>
  * The cells are deliberately NOT locked by this. A balance is not a booking rule — an admin
- * may top the member up while they look, and a grid that hides slots on a wallet read would
- * be making a promise in the other direction. The member is told, and the cells still work.
+ * may sell the member a package while they look, and a grid that hides slots on a wallet read
+ * would be making a promise in the other direction. The member is told, and the cells still work.
  * </p>
  *
  * <p>
- * <b>It takes the balance, because a wallet below zero is not an empty one.</b> This used to
- * take the slice price alone, so the banner was structurally incapable of saying the one thing
- * a member in debt needs to hear — while `walletNotice`, its only caller, had the figure in
- * its hand and dropped it on the way in. "You have no credits" told a member 25.00 credits
- * overdrawn to top up the price of a slot, which would not have bought them one: they must
- * clear the hole first. The two sentences differ only in their first clause, because the rest
- * of the banner — what a slot costs, and the fact that the cells still work — is identical
- * either way.
- * </p>
- *
- * <p>
- * The rounding case is the product's usual one, decided on the number the member can SEE.
- * −0.001 renders as "0.00", so it is an empty wallet and not a debt; taking `toFixed(2)` first
- * is also what stops "-0.00 cr" reaching the screen.
+ * <b>It takes the balance, because a wallet below zero is not an empty one.</b> A member who
+ * owes minutes must clear the hole before a package buys them a slot, so the first clause says
+ * what they owe; the rest — what a slot takes — is the same either way. A slot costs its
+ * playing minutes (P13 §1.1), so "what a slot takes" is the day's slice length, never a price.
  * </p>
  */
-export function emptyWalletSentence(balanceCredits: number | null, cheapestSliceCredits: number | null): string {
-  const cost = cheapestSliceCredits !== null
-    ? ` A slot here costs ${formatCredits(cheapestSliceCredits)}.`
-    : "";
+export function emptyWalletSentence(balanceMinutes: number | null, sliceMinutes: number | null): string {
+  const cost = sliceMinutes !== null && sliceMinutes > 0 ? ` A slot here takes ${minutesCompact(sliceMinutes)}.` : "";
   // `null` is UNKNOWN and never reaches here — `walletTone` answers "fine" for it — but it is
   // read as "not a debt" rather than trusted not to arrive.
-  const shown = balanceCredits === null ? 0 : Number(balanceCredits.toFixed(2));
-  if (shown < 0) return `You owe ${formatCredits(Math.abs(shown))}, so you can't book yet.${cost}`;
-  return `You have no credits, so you can't book yet.${cost}`;
+  const shown = balanceMinutes === null ? 0 : Math.trunc(balanceMinutes);
+  if (shown < 0) return `You owe ${minutesCompact(Math.abs(shown))}, so you can't book yet.${cost}`;
+  return `You have no minutes left, so you can't book yet.${cost}`;
+}
+
+/**
+ * P13 — a member with SOME minutes, but fewer than one slot takes: not an empty wallet, and not
+ * fine either. Said before they pick, with the way out (buy a package), because the Book sheet
+ * would refuse every slot on the grid.
+ */
+export function shortWalletSentence(balanceMinutes: number, sliceMinutes: number): string {
+  return `You have ${minutesCompact(balanceMinutes)} left and a slot here takes ${minutesCompact(sliceMinutes)}. Buy a package to book.`;
 }
 
 /* ─────────────────────────── The past wall ─────────────────────────── */

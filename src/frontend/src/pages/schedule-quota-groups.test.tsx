@@ -39,19 +39,19 @@ function dayWith(rules: unknown, extra: Record<string, unknown> = {}) {
     dayStartMinute: 16 * 60, dayEndMinute: 19 * 60,
     advanceBookingDays: 3650, // 2030 inside the rolling booking window (R5 "Not open yet")
     penaltyPct: 30, penaltyWindowMinutes: 15,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1" }],
     slots: [], rules, ...extra,
   };
 }
 
-function open(day: unknown, balanceCredits = 500, isAdmin = false) {
+function open(day: unknown, balanceMinutes = 500, isAdmin = false) {
   stubFetch([
     // `whoami` is what makes the session real — without it `useAuth` never reaches
     // "authenticated", the balance is never read, and an admin-only control never renders.
     { path: "/api/v1/whoami", body: signIn({ isAdmin }) },
     { path: "/api/v1/schedule", body: day },
     { path: "/api/v1/admin/members/", body: [] },
-    { path: "/api/v1/wallet", body: { balance_minutes: balanceCredits, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: balanceMinutes, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   ]);
   renderPage(<SchedulePage />);
 }
@@ -148,7 +148,7 @@ describe("item 3 — the group's window, on the member's grid", () => {
     groups: [{ id: "g1", name: "Non-league members" }],
     allowedWindows: [{ start: "16:00", end: "17:00" }],
     clubHours: { start: "16:00", end: "19:00" },
-    slicePriceCredits: 50, remainingToday: null, adminExempt: false,
+    remainingToday: null, adminExempt: false,
   };
 
   it("marks a slot outside the window with its own colour, glyph and word", async () => {
@@ -159,7 +159,7 @@ describe("item 3 — the group's window, on the member's grid", () => {
     expect(restricted.className).toMatch(/bg-slot-restricted-fill/);
     expect(restricted.className).toMatch(/border-dashed/);
     // And the cell INSIDE the window is an ordinary offer — a rule, not a blanked grid.
-    expect(screen.getByRole("button", { name: /^Book Court 1 at 16:45 for 50\.00 cr/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 16:45$/ })).toBeInTheDocument();
   });
 
   it("refuses a slot that would straddle the window's edge, exactly as the server does", async () => {
@@ -167,7 +167,7 @@ describe("item 3 — the group's window, on the member's grid", () => {
     // which is the same whole-range rule `CheckOperatingHoursRule` already applies.
     open(dayWith(GROUPED));
     expect(await screen.findByRole("button", { name: /^Book Court 1 at 16:45/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00 for/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00$/ })).toBeNull();
   });
 
   it("explains without shaming, and names the group the member chose", async () => {
@@ -192,24 +192,12 @@ describe("item 3 — the group's window, on the member's grid", () => {
     expect(visible[0].closest("[aria-hidden='true']")).not.toBeNull();
   });
 
-  it("names the rate by the group, as the club wrote it, when the group changes the price (R4 I4-7)", async () => {
+  it("names no rate at all, whatever price an older server's rules still carry (P13: no group prices)", async () => {
+    // R4 I4-7's "You book at the … rate." line went with the prices: a booking costs its
+    // minutes, the same for every group (contract §1.1, §3.12).
     open(dayWith({ ...GROUPED, groups: [{ id: "g1", name: "ix review group" }], slicePriceCredits: 60 }));
-    // Naming the group is what makes it a membership the member chose. A price COMPARISON is
-    // deliberately absent: a member is never shown another group's rate.
-    expect(await screen.findByText("You book at the ix review group rate.")).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/was \d/);
-    expect(document.body.textContent).not.toMatch(/booking as a/);
-  });
-
-  it("says nothing about a rate when the group charges the club's standard price (R4 I4-7)", async () => {
-    open(dayWith(GROUPED)); // group price 50, the court's own 50
     await screen.findByRole("button", { name: /Court 1 at 16:00/ });
-    expect(document.body.textContent).not.toMatch(/rate\./);
-  });
-
-  it("does not guess whose rate it is when several groups set the price (R4 I4-7)", async () => {
-    open(dayWith({ ...GROUPED, groups: [{ id: "g1", name: "Juniors" }, { id: "g2", name: "Seniors" }], slicePriceCredits: 40 }));
-    expect(await screen.findByText("You book at your groups' rate.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/rate\.|\bcr\b|credit/);
   });
 
   it("says the empty intersection out loud instead of drawing a grid that reads as 'shut'", async () => {
@@ -241,15 +229,15 @@ describe("the wallet, before the member picks a court — D4 §2.6", () => {
   beforeEach(() => { forgetClubZone(); signIn({ isAdmin: false }); });
   afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
 
-  it("says a zero balance cannot book anything, and names what a slot costs", async () => {
+  it("says a zero balance cannot book anything, names what a slot takes, and offers a package", async () => {
     open(dayWith(undefined), 0);
-    expect(await screen.findByText(/You have no credits, so you can't book yet\./)).toBeInTheDocument();
-    expect(screen.getByText(/A slot here costs 50\.00 cr\./)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Top up" })).toHaveAttribute("href", "/wallet/topup");
+    expect(await screen.findByText(/You have no minutes left, so you can't book yet\./)).toBeInTheDocument();
+    expect(screen.getByText(/A slot here takes 15 min\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Buy minutes" })).toHaveAttribute("href", "/wallet/buy");
   });
 
   it("still offers the cells, because a balance is a wallet and not a booking rule", async () => {
-    // An admin may top the member up while they are looking at this screen, and the confirm
+    // An admin may sell the member a package while they are looking at this screen, and the confirm
     // dialog already handles the shortfall well. Hiding slots on a wallet read would be a
     // promise broken in the other direction.
     open(dayWith(undefined), 0);
@@ -265,14 +253,21 @@ describe("the wallet, before the member picks a court — D4 §2.6", () => {
     ]);
     renderPage(<SchedulePage />);
     await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ });
-    // A grid that shouted "no credits" at a slow network would be wrong more often than right.
-    expect(screen.queryByText(/You have no credits/)).toBeNull();
+    // A grid that shouted "no minutes" at a slow network would be wrong more often than right.
+    expect(screen.queryByText(/You have no minutes/)).toBeNull();
   });
 
-  it("says nothing when the member has credit", async () => {
+  it("says nothing when the member has minutes for a slot", async () => {
     open(dayWith(undefined), 120);
     await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ });
-    expect(screen.queryByText(/You have no credits/)).toBeNull();
+    expect(screen.queryByText(/You have no minutes|Buy a package/)).toBeNull();
+  });
+
+  it("says a short wallet — some minutes, fewer than a slot takes — before the member picks (P13)", async () => {
+    open(dayWith(undefined), 10);
+    const sentence = await screen.findByText("You have 10 min left and a slot here takes 15 min. Buy a package to book.");
+    const notice = sentence.closest('[role="status"]') as HTMLElement;
+    expect(within(notice).getByRole("link", { name: "Buy minutes" })).toHaveAttribute("href", "/wallet/buy");
   });
 });
 
