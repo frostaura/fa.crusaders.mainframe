@@ -15,7 +15,7 @@ vi.mock("../components/bookings/CancelSheet", async () => (await import("../test
  * The grid is a flat CSS grid of about a hundred buttons, every one of them reading
  * "Available". The court is a column header, the time is a row label, and the slot button
  * itself contains neither — so which court and which time a member is about to spend fifty
- * credits on is conveyed entirely by <em>visual position</em>. A member tabbing through it, or
+ * minutes on is conveyed entirely by <em>visual position</em>. A member tabbing through it, or
  * hearing it read, gets "Available, button" a hundred times.
  * </p>
  *

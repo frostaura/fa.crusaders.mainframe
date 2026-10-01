@@ -55,7 +55,7 @@ describe("a cancel whose reply was lost (R2 F2-2)", () => {
     expect(screen.queryByText(/Couldn't cancel/)).toBeNull();
   });
 
-  it("a booking still there after the lost reply says so — nothing cancelled, no credit moved", async () => {
+  it("a booking still there after the lost reply says so — nothing cancelled, no minutes moved", async () => {
     serve({
       detail: { path: DETAIL_PATH, body: detail() },
       extra: [

@@ -417,7 +417,7 @@ describe("BookSheet — Confirm and the booking", () => {
     expect(screen.getByRole("button", { name: BOOK_SHEET.primary(6, 200, null) })).toBeTruthy();
   });
 
-  it("reads the member's SPENDABLE credits, with the held line under the money", async () => {
+  it("reads the member's SPENDABLE minutes, with the held line under the money", async () => {
     stubFetch([
       { path: "/api/v1/whoami", body: { tenant_slug: "crusaders", tenant_id: "t", user_id: ME, is_authenticated: true, is_admin: false } },
       {

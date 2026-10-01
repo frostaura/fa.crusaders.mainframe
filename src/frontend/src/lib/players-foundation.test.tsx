@@ -12,7 +12,7 @@ import {
 import { signIn, signOut, stubFetch } from "../test/harness";
 
 /**
- * P11's foundation: the refusal sentences every players screen shares, the held-credit
+ * P11's foundation: the refusal sentences every players screen shares, the held-minutes
  * arithmetic (D11 §3a — spend decisions read SPENDABLE, never the raw balance), and the wallet
  * stream's named `notification` frame reaching the bell's count.
  */
@@ -85,7 +85,7 @@ describe("names", () => {
   });
 });
 
-describe("held credits (§3a)", () => {
+describe("held minutes (§3a)", () => {
   it("a frame with nothing held is all spendable, whatever an older API left out", () => {
     expect(heldFrom({ balance_minutes: 80 })).toEqual({ held: 0, owedBack: 0, spendable: 80, until: null });
     expect(heldFrom({ balance_minutes: 80, held_minutes: 0, spendable_minutes: 80, held_until: null })).toEqual({ held: 0, owedBack: 0, spendable: 80, until: null });

@@ -12,7 +12,7 @@ import { savePendingInvite } from "../lib/playersPending";
 
 /**
  * Invites (`/bookings/invites`) and its accept sheet: the list and its three states, the figures
- * the sheet shows (on SPENDABLE credits), what Accept sends, and every way it can be refused.
+ * the sheet shows (on SPENDABLE minutes), what Accept sends, and every way it can be refused.
  */
 vi.setConfig({ testTimeout: 20_000 });
 afterEach(() => { vi.unstubAllGlobals(); signOut(); window.localStorage.clear(); });
@@ -84,7 +84,7 @@ describe("the list", () => {
     expect(list).not.toHaveTextContent("Petersen");
   });
 
-  it("R1 F2.5: an open seat from a link the member opened (short of credit) is offered first, as a link back to it", async () => {
+  it("R1 F2.5: an open seat from a link the member opened (short of minutes) is offered first, as a link back to it", async () => {
     savePendingInvite("tok123", "44444444-4444-4444-4444-444444444444");
     openInvites({ invites: [], routes: [
       { path: "/api/v1/invites/tok123", body: invite({ participant_id: "p-open", open_link: true }) },
@@ -262,7 +262,7 @@ describe("the accept sheet", () => {
     expect(sheet.querySelector("[data-owed-back]")).toBeNull();
   });
 
-  it("short of spendable credits: no Accept to press, the reason, and a Top up", async () => {
+  it("short of spendable minutes: no Accept to press, the reason, and a Buy minutes", async () => {
     const stub = openInvites({ invites: [invite({ spendable_minutes: 10, balance_minutes: 30, to_pay_minutes: 25 })] });
     const sheet = await openSheet();
     const accept = within(sheet).getByRole("button", { name: acceptLabel(25) });

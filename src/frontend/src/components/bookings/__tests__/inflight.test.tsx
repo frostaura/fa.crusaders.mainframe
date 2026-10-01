@@ -18,7 +18,7 @@ import type { GridBooking, SelectedSlot } from "../types";
  *
  * <p>
  * The review's repro: Book on a slow reply → Back → Cancel (or Escape, or ×) closed the sheet with
- * nothing said; the booking landed a moment later and 50 credits were gone. Every way out now waits
+ * nothing said; the booking landed a moment later and 50 minutes were gone. Every way out now waits
  * for the club's answer and says so; an answer arriving after the sheet was torn down is a toast.
  * </p>
  */

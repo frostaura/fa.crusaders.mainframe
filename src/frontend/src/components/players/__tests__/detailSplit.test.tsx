@@ -114,7 +114,7 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     const ask = await screen.findByRole("dialog", { name: SHARE_ASK.title("Jo") });
     expect(ask).toHaveTextContent(SHARE_ASK.amountBody("1 h"));
     const field = within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") });
-    // Offered the equal share among three payers, in whole credits: ⌊100 / 3⌋.
+    // Offered the equal share among three payers, in whole minutes: ⌊100 / 3⌋.
     expect(field).toHaveValue("33");
     fireEvent.change(field, { target: { value: "30" } });
     fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));

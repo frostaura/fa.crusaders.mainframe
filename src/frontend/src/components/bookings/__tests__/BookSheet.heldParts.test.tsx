@@ -11,7 +11,7 @@ import { heldLine } from "@/lib/playersCopy";
 import { BookSheet } from "../BookSheet";
 
 /**
- * C4 on the book sheet (R2, F4-18's book-sheet half): held credit is explained part by part —
+ * C4 on the book sheet (R2, F4-18's book-sheet half): held minutes are explained part by part —
  * each share deadline with its own release — never one date for the whole amount.
  */
 vi.setConfig({ testTimeout: 20_000 });

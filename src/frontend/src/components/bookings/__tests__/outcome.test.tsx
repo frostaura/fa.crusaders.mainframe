@@ -200,7 +200,7 @@ describe("F1.1/F1.2 — a cancel that failed says so in its own words", () => {
 /* ─────────────────────────────── the figures ─────────────────────────────── */
 
 describe("F1.3 — Confirm and Done say the same figure", () => {
-  it("with credits held for partners, Done reads what is left to SPEND, as Confirm did", async () => {
+  it("with minutes held for partners, Done reads what is left to SPEND, as Confirm did", async () => {
     stubFetch([
       { path: "/api/v1/whoami", body: { tenant_slug: "crusaders", tenant_id: "t", user_id: ME, is_authenticated: true, is_admin: false } },
       {
@@ -220,8 +220,8 @@ describe("F1.3 — Confirm and Done say the same figure", () => {
   });
 });
 
-describe("F1.4 — the desk's quote reads the member's spendable credits", () => {
-  it("rows and the god-mode notice agree when credits are held", async () => {
+describe("F1.4 — the desk's quote reads the member's spendable minutes", () => {
+  it("rows and the god-mode notice agree when minutes are held", async () => {
     stubFetch([{
       path: "/api/v1/admin/bookings/quote",
       body: {

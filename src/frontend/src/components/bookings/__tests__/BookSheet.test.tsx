@@ -227,7 +227,7 @@ describe("BookSheet — a member, several slots (D8)", () => {
     expect(onBooked).toHaveBeenCalledWith(expect.objectContaining({ booked: [C1], ownBalanceAfter: 450 }));
   });
 
-  it("offers Top up and a retry under the SAME key when the credit runs out part-way", async () => {
+  it("offers Buy minutes and a retry under the SAME key when the minutes run out part-way", async () => {
     const halted = bulkAnswer({
       halted_at: 1, halted_reason: "insufficient_balance",
       results: [

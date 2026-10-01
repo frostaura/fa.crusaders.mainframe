@@ -77,7 +77,7 @@ describe("slotAt — a booking occupies every cell it covers", () => {
 
   it("shows a walk-up that started mid-slice, which used to be invisible entirely", () => {
     // The box stamps StartsAt = now. 12:51:05 -> 13:21:05 is a real row from the finding:
-    // relay B closed, 100.00 credits charged, and BOTH 13:00 and 13:15 read "Available"
+    // relay B closed, 100 minutes charged, and BOTH 13:00 and 13:15 read "Available"
     // for the member and for the admin, while the court was lit and in use.
     const walkUp = slot(sast(12, 51, 5), sast(13, 21, 5), { isMine: false, checkedIn: null, amountChargedMinutes: null });
     const byCourt = groupSlotsByCourt(day({}, [walkUp]));
@@ -137,7 +137,7 @@ describe("buildTimeSlices — the grid is drawn to the club's hours for that day
     const rows = buildTimeSlices(day());
     expect(rows[0].label).toBe("07:00");
     expect(rows[rows.length - 1].label).toBe("19:45");
-    // 21:45 on a Saturday — the slot finder B was sold and charged 50.00 credits for —
+    // 21:45 on a Saturday — the slot finder B was sold and charged 50 minutes for —
     // is not on the grid at all now that the day carries its own hours.
     expect(rows.some((r) => r.label === "21:45")).toBe(false);
   });

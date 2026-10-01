@@ -222,7 +222,7 @@ describe("R1 F2.3 / F2.4 — opened signed out", () => {
 });
 
 describe("R1 F2.5 / F2.7 — the link is remembered until it is answered", () => {
-  it("opened and not answered (short of credit), it is kept for this member", async () => {
+  it("opened and not answered (short of minutes), it is kept for this member", async () => {
     openLink([{ path: OPEN, body: invite({ spendable_minutes: 5, balance_minutes: 5 }) }]);
     await screen.findByText(invitedLine("Nomsa", true));
     await waitForPending(TOKEN);
