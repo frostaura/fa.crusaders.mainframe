@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
 import { typography } from "@/lib/typography";
 import { Toggle } from "@/components/ui/toggle";
 import { AutoGrid } from "@/components/ui/auto-grid";
@@ -79,13 +80,14 @@ const TILE_TONES: Record<TileTone, string> = {
   neutral: "bg-bg-muted text-text-primary",
 };
 
-export type Tile = { label: string; value: string; tone: TileTone };
+/** `value` is a node so a minutes figure can carry its spoken form (`<Minutes>`). */
+export type Tile = { label: string; value: ReactNode; tone: TileTone };
 
 /**
  * The headline figures for a period: as many 9rem tiles across as the BOX holds, four at most
  * (R5 X5-4). A fixed `grid-cols-2` at 390 with 200 % text gave each tile 150px and `break-words`
  * cut the money mid-figure ("R2 / 50. / 50"); an AutoGrid falls to one column there instead, and
- * a figure only ever breaks at its space ("250.00 / cr"), never inside the number.
+ * a figure only ever breaks between its parts ("1 d / 6 h"), never inside a number.
  */
 export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
   return (
@@ -101,7 +103,7 @@ export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
 }
 
 /** One labelled figure in a totals list. `dt` then `dd`, so the pair reads as one line. */
-export function Stat({ label, value }: { label: string; value: string }) {
+export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-bg-muted px-3 py-2.5">
       <dt className={typography({ variant: "overline" })}>{label}</dt>
@@ -142,7 +144,7 @@ export function ChartsCard({ slides }: { slides: CarouselSlide[] }) {
 }
 
 /**
- * A net credit figure, signed, with a negative one marked.
+ * A net minutes figure, with a negative one marked.
  *
  * <p>
  * Settlement-model I11: a correction posts a new row of the same type with the opposite sign
@@ -153,13 +155,20 @@ export function ChartsCard({ slides }: { slides: CarouselSlide[] }) {
  * happened at all. Marked in the warning ink: "look at this day", not "error".
  * </p>
  */
-export function NetCredits({ value }: { value: number }) {
-  return <span className={cn("whitespace-nowrap tabular-nums", 0 > value && "font-medium text-warning-strong")}>{formatCredits(value)}</span>;
+export function NetMinutes({ value }: { value: number }) {
+  // Warning ink, not `<Minutes>`' own danger ink: a negative day is the netting working.
+  return <Minutes value={value} className={cn("whitespace-nowrap", 0 > value && "font-medium text-warning-strong")} />;
 }
 
 /**
+ * @deprecated P13 — the member's Activity page (F2) still imports the old name; it goes when
+ * that page moves to {@link NetMinutes} (phase 2 deletes it either way).
+ */
+export const NetCredits = NetMinutes;
+
+/**
  * A table cell's figure or date, kept on one line. A phone's table scrolls sideways inside its
- * own region; a "160.00 cr" broken over two lines, or a date over three, is a column nobody can
+ * own region; a "2 h 40 min" broken over two lines, or a date over three, is a column nobody can
  * scan down.
  */
 export function Cell({ children }: { children: ReactNode }) {

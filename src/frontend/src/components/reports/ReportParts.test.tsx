@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ReportSkeleton, StatTiles } from "./ReportParts";
+import { NetMinutes, ReportSkeleton, Stat, StatTiles } from "./ReportParts";
+import { Minutes } from "../Minutes";
 
 /**
  * R5 X5-4: the headline tiles were a fixed `grid-cols-2 sm:grid-cols-4`, and at 390 with 200 %
@@ -10,8 +11,8 @@ import { ReportSkeleton, StatTiles } from "./ReportParts";
  */
 describe("StatTiles", () => {
   const tiles = [
-    { label: "Top-ups", value: "125050.50 cr", tone: "success" as const },
-    { label: "Spent", value: "98765.25 cr", tone: "accent" as const },
+    { label: "Rand received", value: "R125050.50", tone: "accent" as const },
+    { label: "Minutes sold", value: <Minutes value={98765} />, tone: "success" as const },
   ];
 
   it("lays the tiles out by the box (AutoGrid), not by two fixed columns", () => {
@@ -36,5 +37,38 @@ describe("StatTiles", () => {
     expect(grid).toHaveAttribute("data-auto-grid", "stat");
     expect(grid.children).toHaveLength(4);
     expect(container.innerHTML).not.toMatch(/grid-cols-2/);
+  });
+});
+
+/**
+ * P13 — a minutes figure on the reports is whole minutes in the app's one format, and a screen
+ * reader hears it in words ("1 hour 30 minutes"), never "h" or "min".
+ */
+describe("minutes on the report parts", () => {
+  it("puts a minutes figure in a tile and a totals stat with its spoken form", () => {
+    render(<StatTiles tiles={[{ label: "Minutes sold", value: <Minutes value={90} />, tone: "success" }]} label="Glance" />);
+    const dd = screen.getByLabelText("Glance").querySelector("dd")!;
+    expect(dd).toHaveTextContent("1 h 30 min");
+    expect(dd.querySelector(".sr-only")).toHaveTextContent("1 hour 30 minutes");
+    render(<dl><Stat label="Sold" value={<Minutes value={-45} signed />} /></dl>);
+    expect(screen.getByText("Sold").nextElementSibling).toHaveTextContent("−45 min");
+  });
+
+  it("marks a negative net day in the warning ink, not the danger ink, and keeps the sign", () => {
+    const { container } = render(<NetMinutes value={-90} />);
+    const span = container.firstElementChild as HTMLElement;
+    expect(span).toHaveTextContent("−1 h 30 min");
+    expect(span.className).toContain("text-warning-strong");
+    // The netting working is "look at this day", not an error.
+    expect(span.className).not.toContain("text-danger-strong");
+    expect(span.className).toContain("whitespace-nowrap");
+  });
+
+  it("leaves a positive or zero day in the body ink, unsigned like every other figure", () => {
+    const { container } = render(<><NetMinutes value={0} /><NetMinutes value={45} /></>);
+    const [zero, positive] = Array.from(container.children) as HTMLElement[];
+    expect(zero).toHaveTextContent("0 min");
+    expect(positive).toHaveTextContent("45 min");
+    expect(positive.className).not.toMatch(/text-(warning|danger)-strong/);
   });
 });

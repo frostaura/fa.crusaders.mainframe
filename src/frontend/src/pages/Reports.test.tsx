@@ -8,6 +8,9 @@ import { refuse, renderPage, signIn, signOut, stubFetch } from "../test/harness"
 import { formatClubDayLabel } from "../components/ui/date-picker-day";
 import { clubToday, presetRange } from "../components/reports/range";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
+import { CLUB_REPORT_COPY } from "../lib/reportsCopy";
+
+const CLUB_TOTALS = CLUB_REPORT_COPY.totals.title;
 
 /*
   The reports split (R16): what was one `/reports` page forking on `isAdmin` is now the club's
@@ -57,13 +60,13 @@ describe("Reports — net daily buckets", () => {
   // Tuesday the sweep, Wednesday the box's upload landing and reversing it. Wednesday's
   // refund and penalty buckets are the reversal rows alone, and both are negative.
   //
-  // Wednesday also carries a −160.00 PaymentReversal, which is the shape the verifier put on
+  // Wednesday also carries a −160-minute PaymentReversal, which is the shape the verifier put on
   // a live stack: `LedgerEntryType.PaymentReversal` reached no bucket of this row, so the
-  // totals card printed 161.50 — the five buckets it did have — under a sentence claiming it
-  // was "every ledger movement in the club summed". The true movement is 1.50.
+  // totals card printed the five buckets it did have under a sentence claiming it was "every
+  // ledger movement in the club summed". The true movement is +1 minute.
   const ADMIN_DAYS = [
-    { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2.4, adjustments_minutes: 25.5, reversals_minutes: 0, net_movement_minutes: 167.1, bookings: 3, no_shows: 1 },
-    { date: "2026-09-02", top_ups_minutes: 0, booking_charges_minutes: 0, refunds_minutes: -8, penalties_minutes: -2.4, adjustments_minutes: 0, reversals_minutes: -160, net_movement_minutes: -165.6, bookings: 0, no_shows: 0 },
+    { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 6, adjustments_minutes: 25, reversals_minutes: 0, net_movement_minutes: 163, bookings: 3, no_shows: 1 },
+    { date: "2026-09-02", top_ups_minutes: 0, booking_charges_minutes: 0, refunds_minutes: -8, penalties_minutes: -6, adjustments_minutes: 0, reversals_minutes: -160, net_movement_minutes: -162, bookings: 0, no_shows: 0 },
   ];
   const ME_DAYS = [
     { date: "2026-09-01", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 136 },
@@ -101,11 +104,13 @@ describe("Reports — net daily buckets", () => {
     expect(table.getByRole("columnheader", { name: /Refunds \(net\)/ })).toBeInTheDocument();
     expect(table.getByRole("columnheader", { name: /Penalties \(net\)/ })).toBeInTheDocument();
 
-    // Both signs present, and the negative kept as a negative rather than shown as 8.00.
-    expect(table.getByText("8.00 cr")).toBeInTheDocument();
-    expect(table.getByText("−8.00 cr")).toBeInTheDocument();
-    expect(table.getByText("2.40 cr")).toBeInTheDocument();
-    expect(table.getByText("−2.40 cr")).toBeInTheDocument();
+    // Both signs present, and the negative kept as a negative rather than shown as 8 min.
+    // Whole minutes in the app's one format, never "8.00" (P13).
+    expect(table.getByText("8 min")).toBeInTheDocument();
+    expect(table.getByText("−8 min")).toBeInTheDocument();
+    expect(table.getByText("6 min")).toBeInTheDocument();
+    expect(table.getByText("−6 min")).toBeInTheDocument();
+    expect(table.queryByText(/\d\.\d\d|\bcr\b/)).not.toBeInTheDocument();
 
     // No NaN anywhere — the number went through a formatter, not a subtraction.
     expect(table.queryByText(/NaN/)).not.toBeInTheDocument();
@@ -120,7 +125,7 @@ describe("Reports — net daily buckets", () => {
    *
    * <p>
    * There was no adjustments figure anywhere, tenant-wide — a club that had handed out
-   * 2,525.50 credits at the desk could read that number on a member's own report and on
+   * 2,525 minutes at the desk could read that number on a member's own report and on
    * Transactions, and on no screen describing the club. And in the middle of the club-wide
    * report sat "My wallet — totals": the ADMIN'S wallet, all zeros, permanently, because a
    * desk account's balance is zero by design (`feature-spec.md` §8) — ending in the
@@ -132,12 +137,12 @@ describe("Reports — net daily buckets", () => {
     renderAdmin();
 
     // The card itself, not the page: the daily table below carries the same column labels.
-    const region = await screen.findByRole("region", { name: "Club money — totals" });
+    const region = await screen.findByRole("region", { name: CLUB_TOTALS });
     const card = within(region);
     const stats = within(region.querySelector("dl")!);
 
     expect(stats.getByText("Adjustments")).toBeInTheDocument();
-    expect(stats.getByText("+25.50 cr")).toBeInTheDocument();
+    expect(stats.getByText("+25 min")).toBeInTheDocument();
     expect(card.getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
 
     // The desk's own wallet is gone from the club's report — and is not even asked for.
@@ -151,8 +156,8 @@ describe("Reports — net daily buckets", () => {
    * <p>
    * "top-ups − charges + refunds − penalties + adjustments, which is every ledger movement
    * in the club summed" was false: `PaymentReversal` was in no bucket of the daily row, so a
-   * −160.00 clawback inside the window left the card printing +161.50 over a true movement
-   * of +1.50, and the member's own report — which sums every type — disagreed with it by
+   * −160 clawback inside the window left the card printing +161 over a true movement
+   * of +1, and the member's own report — which sums every type — disagreed with it by
    * exactly the reversals. The sentence is a promise; this is the promise being kept.
    * </p>
    */
@@ -160,22 +165,24 @@ describe("Reports — net daily buckets", () => {
     stubFetch(routes(true));
     renderAdmin();
 
-    const region = await screen.findByRole("region", { name: "Club money — totals" });
+    const region = await screen.findByRole("region", { name: CLUB_TOTALS });
     const card = within(region);
     const stats = within(region.querySelector("dl")!);
 
     // The bucket that was on no screen, with its sign.
     expect(stats.getByText("Reversals")).toBeInTheDocument();
-    expect(stats.getByText("−160.00 cr")).toBeInTheDocument();
+    expect(stats.getByText("−2 h 40 min")).toBeInTheDocument();
 
-    // The net, which is the whole point: 160 − 24 + 0 − 0 + 25.5 − 160.
-    expect(card.getByText("+1.50 cr")).toBeInTheDocument();
-    // And NOT the number the five-bucket sum produced. This is the assertion that fails if
-    // the reversal is dropped anywhere between the endpoint and this paragraph.
-    expect(card.queryByText("+161.50 cr")).not.toBeInTheDocument();
+    // The net, which is the whole point: 160 − 24 + 0 − 0 + 25 − 160.
+    expect(card.getByText("+1 min")).toBeInTheDocument();
+    // And NOT the number the five-bucket sum produced (161 = 2 h 41 min). This is the
+    // assertion that fails if the reversal is dropped anywhere between the endpoint and here.
+    expect(card.queryByText("+2 h 41 min")).not.toBeInTheDocument();
 
     // The copy names the sixth term, so the arithmetic on the page can be checked by hand.
     expect(card.getByText(/\+ reversals, which is every ledger movement in the club summed/)).toBeInTheDocument();
+    // P13: the card's sentence is about members' minutes, and buys are "sold", not "top-ups".
+    expect(card.getByText(/sold − bookings \+ refunds/)).toBeInTheDocument();
     expect(card.getByText(/clawed back after the fact/)).toBeInTheDocument();
   });
 
@@ -195,7 +202,7 @@ describe("Reports — net daily buckets", () => {
     const stub = stubFetch(routes(true));
     renderAdmin("/admin/reports?from=2026-09-01&to=2026-09-02");
 
-    await regionNamed("Club money — totals");
+    await regionNamed(CLUB_TOTALS);
     const call = stub.calls.find((c) => c.path.includes("/admin/reports/daily"))!;
     expect(call, "the daily report was never requested").toBeTruthy();
 
@@ -213,7 +220,7 @@ describe("Reports — net daily buckets", () => {
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Reversals/ })).toBeInTheDocument();
-    expect(table.getByText("−160.00 cr")).toBeInTheDocument();
+    expect(table.getByText("−2 h 40 min")).toBeInTheDocument();
   });
 
   it("puts the desk's adjustments in the daily table and says which clock each column is on", async () => {
@@ -222,13 +229,15 @@ describe("Reports — net daily buckets", () => {
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Adjustments/ })).toBeInTheDocument();
-    expect(table.getByText("25.50 cr")).toBeInTheDocument();
+    expect(table.getByText("25 min")).toBeInTheDocument();
 
     // "Charges 2300.00 cr · Bookings 6" was one row about two different sets of bookings —
     // money on the day it moved, courts on the day they are played — with nothing on the
     // page saying so. The column is renamed and the consequence is spelled out.
     expect(table.getByRole("columnheader", { name: /Courts played/ })).toBeInTheDocument();
-    expect(table.queryByRole("columnheader", { name: /^Bookings$/ })).not.toBeInTheDocument();
+    // "Bookings" is the MINUTES the bookings were charged (P13), beside the count that is not.
+    expect(table.getByRole("columnheader", { name: /^Bookings$/ })).toBeInTheDocument();
+    expect(table.getByText("24 min")).toBeInTheDocument();
     expect(table.getByText(/Two dates in one row, on purpose/)).toBeInTheDocument();
     expect(table.getByText(/charged today and plays later/)).toBeInTheDocument();
   });
@@ -241,7 +250,7 @@ describe("Reports — net daily buckets", () => {
     expect(table.getByRole("columnheader", { name: /Refunds \(net\)/ })).toBeInTheDocument();
     // A member reading their own statement is the person most likely to read a negative
     // refund as a mistake, and the one with the least context to resolve it.
-    expect(table.getByText("−8.00 cr")).toBeInTheDocument();
+    expect(table.getByText("−8 min")).toBeInTheDocument();
     expect(table.getByText(/Refunds are net/)).toBeInTheDocument();
 
     // The window totals are the same arithmetic over a longer bucket, so they are
@@ -254,11 +263,11 @@ describe("Reports — net daily buckets", () => {
  * The member's own summary, on the ledger the finder actually had in front of her.
  *
  * <p>
- * Naledi's 30-day window covers her entire history: 0.00 in, 950.00 of court spend,
- * 100.00 refunded, one 15.00 penalty and 2,500.00 of `AdminAdjustment` — the 500 seed
- * opening balance and a 2,000 desk credit. The page showed top-ups, spend, refunds and a
+ * Naledi's 30-day window covers her entire history: nothing bought, 950 minutes of court
+ * time, 100 refunded, one 15-minute penalty and 2,500 of `AdminAdjustment` — the 500 seed
+ * opening balance and a 2,000-minute desk adjustment. The page showed top-ups, spend, refunds and a
  * penalty COUNT and nothing else, so it read as <b>0 in, 950 out, 100 back = −850</b>
- * beside a header saying <b>1,635.00 cr</b>, with nothing on screen accounting for the
+ * beside a header saying <b>1,635</b>, with nothing on screen accounting for the
  * gap. The 2,500 was not small print; it was most of her balance.
  * </p>
  *
@@ -279,7 +288,7 @@ describe("Reports — the member's summary reconciles to their balance", () => {
     penalties_minutes: 15,
     adjustments_minutes: 2500,
     reversals_minutes: 0,
-    // 0 − 950 + 100 − 15 + 2500. Her balance is 1,635.00 and this is what it moved by.
+    // 0 − 950 + 100 − 15 + 2500. Her balance is 1,635 minutes and this is what it moved by.
     net_movement_minutes: 1635,
     penalty_count: 1,
     attended_bookings: 14,
@@ -307,20 +316,22 @@ describe("Reports — the member's summary reconciles to their balance", () => {
     const w = await regionNamed("Totals");
 
     // The two that were invisible. Without the adjustments line the page is off by 2,500
-    // and says nothing about it; without the penalty total the 15.00 appears NOWHERE in
-    // the product, only its count does — `reporting.md` asks for count AND total.
+    // and says nothing about it; without the penalty total the 15 minutes appear NOWHERE in
+    // the product, only their count does — `reporting.md` asks for count AND total.
+    // P13: in whole minutes, in the app's one format (2,500 minutes is 1 d 17 h 40 min).
     expect(w.getByText("Adjustments")).toBeInTheDocument();
-    expect(w.getByText("+2500.00 cr")).toBeInTheDocument();
+    expect(w.getByText("+1 d 17 h 40 min")).toBeInTheDocument();
     expect(w.getByText("Penalties")).toBeInTheDocument();
-    expect(w.getByText("−15.00 cr")).toBeInTheDocument();
+    expect(w.getByText("−15 min")).toBeInTheDocument();
 
     // Signs on the buckets, so the reader can add them up without guessing direction.
-    expect(w.getByText("−950.00 cr")).toBeInTheDocument();
-    expect(w.getByText("+100.00 cr")).toBeInTheDocument();
+    expect(w.getByText("−15 h 50 min")).toBeInTheDocument();
+    expect(w.getByText("+1 h 40 min")).toBeInTheDocument();
 
-    // And the arithmetic, stated. 1,635.00 is her balance; the page now says so out loud
+    // And the arithmetic, stated. 1,635 minutes is her balance; the page now says so out loud
     // rather than leaving a −850 summary next to a 1,635 header.
-    expect(w.getByText("+1635.00 cr")).toBeInTheDocument();
+    expect(w.getByText("+1 d 3 h 15 min")).toBeInTheDocument();
+    expect(w.queryByText(/\d\.\d\d|\bcr\b/)).not.toBeInTheDocument();
     expect(w.getByText(/is exactly what your balance moved by/)).toBeInTheDocument();
   });
 
@@ -370,8 +381,8 @@ describe("Reports — the member's summary reconciles to their balance", () => {
  * The club's utilisation table, which contradicted the ledger and mixed units.
  *
  * <p>
- * "Revenue" was the price quoted at booking, so a no-showed 50.00 court counted as 50.00
- * of revenue on the same dashboard whose ledger said the club took the 15.00 penalty —
+ * "Revenue" was the price at booking, so a no-showed 50-minute court counted as 50 of
+ * revenue on the same dashboard whose ledger said the club took the 15-minute penalty —
  * and settlement-model S5 agrees with the ledger. "Slices" counted a 60-minute walk-up
  * (SliceCount 1) the same as a 15-minute booking, so the column added quarter-hours to
  * hours and reported the total as a number.
@@ -386,7 +397,7 @@ describe("Reports — utilisation says what it counts", () => {
     net_movement_minutes: 0, penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
   };
 
-  it("separates what was quoted from what the club kept, and counts minutes not slices", async () => {
+  it("separates what the bookings were charged from what the club kept, and counts minutes not slices", async () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
       { path: "/api/v1/reports/me/wallet", body: WALLET },
@@ -396,7 +407,7 @@ describe("Reports — utilisation says what it counts", () => {
         path: "/api/v1/admin/reports/utilisation",
         body: {
           from: "", to: "",
-          // Court 1: one 50.00 booking, no-showed. Quoted 50.00; the club kept the 15.00
+          // Court 1: one 50-minute booking, no-showed. Charged 50; the club kept the 15-minute
           // penalty, which is what its own ledger rows for that booking sum to.
           by_court: [{ court_id: "c1", court_number: 1, court_name: "Court 1", slices: 1, booked_minutes: 60, bookings: 1, kept_minutes: 15, sold_minutes: 50 }],
         },
@@ -410,10 +421,13 @@ describe("Reports — utilisation says what it counts", () => {
 
     // Two columns, because they are two different numbers and the old single "Revenue"
     // column was the wrong one of them.
-    expect(card.getByRole("columnheader", { name: /Quoted/ })).toBeInTheDocument();
+    // P13 §3.15: `sold_minutes` is what the bookings were CHARGED, and the header says so —
+    // "Quoted" was the price-list word, and there is no price list any more.
+    expect(card.getByRole("columnheader", { name: /Charged/ })).toBeInTheDocument();
+    expect(card.queryByRole("columnheader", { name: /Quoted/ })).not.toBeInTheDocument();
     expect(card.getByRole("columnheader", { name: /Kept/ })).toBeInTheDocument();
-    expect(card.getByText("50.00 cr")).toBeInTheDocument();
-    expect(card.getByText("15.00 cr")).toBeInTheDocument();
+    expect(card.getByText("50 min")).toBeInTheDocument();
+    expect(card.getByText("15 min")).toBeInTheDocument();
 
     // Minutes, said as a person says them. "Slices" is gone: 1 there meant either 15
     // minutes or 60 depending on the row, and the column summed the two.
@@ -421,9 +435,10 @@ describe("Reports — utilisation says what it counts", () => {
     expect(card.getByRole("columnheader", { name: /Booked/ })).toBeInTheDocument();
     expect(card.getByText("1 h")).toBeInTheDocument();
 
-    // And a sentence saying which is which, because "Kept" below "Quoted" reads as an
+    // And a sentence saying which is which, because "Kept" below "Charged" reads as an
     // error to anyone who has not been told about no-shows.
-    expect(card.getByText(/for a no-show that is the penalty, not the price/)).toBeInTheDocument();
+    expect(card.getByText(/for a no-show that is the penalty, not the booking/)).toBeInTheDocument();
+    expect(card.getByText(/a booking costs its playing time/)).toBeInTheDocument();
   });
 });
 
@@ -432,9 +447,9 @@ describe("Reports — utilisation says what it counts", () => {
  *
  * <p>
  * "My wallet — totals" hardcoded its own <code>+</code> and <code>−</code> around
- * <code>formatCredits</code> for Top-ups, Spent and Penalties, while going through
- * <code>formatSignedCredits</code> two lines away for Refunds and Adjustments. A member
- * with no spend and no penalties was therefore shown <b>−0.00 cr</b> twice, on the one
+ * the old unsigned formatter for Top-ups, Spent and Penalties, while going through the signed
+ * one two lines away for Refunds and Adjustments. A member
+ * with no spend and no penalties was therefore shown <b>−0.00</b> twice, on the one
  * card whose whole job is to reconcile. Zero has no direction, and every figure on the
  * card now comes through the same formatter.
  * </p>
@@ -462,14 +477,13 @@ describe("Reports — the totals card on a period with no movement", () => {
     const card = within((await screen.findByRole("region", { name: "Totals" })).querySelector("dl")!);
 
     // U+2212 MINUS is what the card actually printed, so look for that as well as a hyphen.
-    expect(card.queryByText("−0.00 cr")).not.toBeInTheDocument();
-    expect(card.queryByText("−0.00 cr")).not.toBeInTheDocument();
-    expect(card.queryByText("+0.00 cr")).not.toBeInTheDocument();
+    expect(card.queryByText("−0 min")).not.toBeInTheDocument();
+    expect(card.queryByText("+0 min")).not.toBeInTheDocument();
 
     // Every bucket on the card, all of them zero, all of them unsigned.
-    for (const label of ["Top-ups", "Spent", "Refunds (net)", "Penalties", "Adjustments"]) {
+    for (const label of ["Spent", "Refunds (net)", "Penalties", "Adjustments"]) {
       const term = card.getByText(label);
-      expect(term.parentElement).toHaveTextContent(`${label}0.00 cr`);
+      expect(term.parentElement).toHaveTextContent(`${label}0 min`);
     }
   });
 
@@ -484,9 +498,9 @@ describe("Reports — the totals card on a period with no movement", () => {
     // The <dl> itself, not the card: the tiles above it carry the same labels.
     const card = within((await screen.findByRole("region", { name: "Totals" })).querySelector("dl")!);
 
-    expect(card.getByText("Top-ups").parentElement).toHaveTextContent("Top-ups+160.00 cr");
+    expect(card.getByText("+2 h 40 min")).toBeInTheDocument();
     // Spend leaves the wallet, so it is negated — not merely labelled with a minus.
-    expect(card.getByText("Spent").parentElement).toHaveTextContent("Spent−24.00 cr");
+    expect(card.getByText("Spent").parentElement).toHaveTextContent("Spent−24 min");
   });
 });
 
@@ -539,7 +553,7 @@ describe("Reports — one page per reader", () => {
   it("never asks for the admin's own wallet on the club's report", async () => {
     const stub = stubFetch([{ path: "/api/v1/whoami", body: signIn({ isAdmin: true }) }, ...CLUB]);
     renderAdmin();
-    await screen.findByRole("region", { name: "Club money — totals" });
+    await screen.findByRole("region", { name: CLUB_TOTALS });
     expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/reports/me/"))).toEqual([]);
   });
 
@@ -626,12 +640,12 @@ describe("Reports — reading, failing, refreshing", () => {
     const retry = await screen.findByRole("button", { name: "Try again" });
     // An empty report over a failed read tells a member they did nothing all month.
     expect(screen.queryByRole("region", { name: "Totals" })).not.toBeInTheDocument();
-    expect(screen.queryByText("0.00 cr")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 min")).not.toBeInTheDocument();
 
     fail = false;
     fireEvent.click(retry);
     const totals = await screen.findByRole("region", { name: "Totals" });
-    expect(within(totals).getByText("+160.00 cr")).toBeInTheDocument();
+    expect(within(totals).getByText("+2 h 40 min")).toBeInTheDocument();
   });
 
   /** R5 M5-6 (D2's kept read): a refresh that fails keeps the figures and says when they are from. */
@@ -647,7 +661,7 @@ describe("Reports — reading, failing, refreshing", () => {
     fail = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByText(OFFLINE_COPY.refreshFailedTitle)).toBeInTheDocument();
-    expect(within(totals).getByText("+160.00 cr")).toBeInTheDocument();
+    expect(within(totals).getByText("+2 h 40 min")).toBeInTheDocument();
   });
 
   it("keeps the figures on screen while Refresh asks again, and marks the control busy", async () => {
@@ -676,7 +690,7 @@ describe("Reports — reading, failing, refreshing", () => {
     fireEvent.click(refresh);
     await waitFor(() => expect(refresh).toHaveAttribute("aria-busy", "true"));
     // Still the figures it had — not a skeleton, not a blank.
-    expect(within(totals).getByText("+160.00 cr")).toBeInTheDocument();
+    expect(within(totals).getByText("+2 h 40 min")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Totals" })).toBe(totals);
 
     await waitFor(() => expect(release).not.toBeNull());

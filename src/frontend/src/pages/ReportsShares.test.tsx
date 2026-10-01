@@ -3,11 +3,12 @@ import { screen, within } from "@testing-library/react";
 import AdminReportsPage from "./admin/AdminReports";
 import WalletActivityPage from "./WalletActivity";
 import { REPORT_SHARES_COPY as COPY } from "../lib/playersCopy";
+import { CLUB_REPORT_COPY } from "../lib/reportsCopy";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 /**
  * D11 — shares on the reports. Both figures are optional on the wire: an API that predates
- * shares sends neither, and then there is no row at all rather than a 0.00 the server never said.
+ * shares sends neither, and then there is no row at all rather than a "0 min" the server never said.
  */
 
 const WALLET = {
@@ -45,9 +46,9 @@ describe("the member's activity: shares and what court time really cost", () => 
     renderPage(<WalletActivityPage />, { initialEntries: ["/wallet/activity"], reactStrictMode: true });
     const totals = within(await screen.findByRole("region", { name: "Totals" }));
     expect(totals.getByText(COPY.memberShares)).toBeInTheDocument();
-    expect(totals.getByText("+50.00 cr")).toBeInTheDocument();
+    expect(totals.getByText("+50 min")).toBeInTheDocument();
     expect(totals.getByText(COPY.memberNetCourt)).toBeInTheDocument();
-    expect(totals.getByText("50.00 cr")).toBeInTheDocument();
+    expect(totals.getByText("50 min")).toBeInTheDocument();
     expect(totals.getByText(new RegExp(COPY.memberFootnote.replace(/[.]/g, "\\.")))).toBeInTheDocument();
   });
 
@@ -65,7 +66,7 @@ describe("the club's report: shares net to zero, and it says so", () => {
   it("adds the share bucket to the totals and the daily table, with the caption", async () => {
     stubFetch(adminRoutes([{ ...DAY, share_transfers_minutes: 0 }]));
     renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
-    const totals = await screen.findByRole("region", { name: "Club money — totals" });
+    const totals = await screen.findByRole("region", { name: CLUB_REPORT_COPY.totals.title });
     expect(within(totals.querySelector("dl")!).getByText(COPY.clubShares)).toBeInTheDocument();
     // Ten figures, at most five across: whole rows, never two orphans (review round 2, VIS F3-15);
     // an AutoGrid capped at 5, so 200 % text drops to one column (R4).
@@ -81,7 +82,7 @@ describe("the club's report: shares net to zero, and it says so", () => {
   it("carries no share column or row against an older API", async () => {
     stubFetch(adminRoutes([DAY]));
     renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
-    const nine = await screen.findByRole("region", { name: "Club money — totals" });
+    const nine = await screen.findByRole("region", { name: CLUB_REPORT_COPY.totals.title });
     expect(screen.queryByText(COPY.clubShares)).toBeNull();
     // Nine figures, at most three across (F3-15): an AutoGrid capped at 3, one column at 200 % text (R4).
     expect(nine.querySelector("dl")!.children).toHaveLength(9);

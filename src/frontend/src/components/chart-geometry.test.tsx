@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { Area, Bar, AreaChart, BarChart, Line, LineChart, YAxis } from "recharts";
 import {
-  creditAxisWidth, drawBookingsLine, drawCourtsRevenue, drawDailyFlow, drawMyBalance, drawMyBookings,
+  minuteAxis, drawBookingsLine, drawCourtsRevenue, drawDailyFlow, drawMyBalance, drawMyBookings,
   drawMyFlow, drawRevenueArea,
 } from "./Charts";
 import { paletteNow } from "./ChartFrame";
@@ -13,10 +13,10 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
  *
  * <p>
  * Two things were measured wrong on the live page. The topmost y-axis tick was sliced in half by
- * the SVG's own top edge — "50.00 cr" drawn as a row of half-height digits above an intact
- * "45.00 cr" — because the top margin was 8px and a tick is centred on its gridline. And every
- * credit tick wrapped onto two lines ("50.00" / "cr"), because the 48px gutter was narrower than
- * the label and recharts wraps rather than overflows.
+ * the SVG's own top edge — the label drawn as a row of half-height digits above an intact
+ * one — because the top margin was 8px and a tick is centred on its gridline. And every money
+ * tick wrapped onto two lines, because the 48px gutter was narrower than the label and recharts
+ * wraps rather than overflows.
  * </p>
  *
  * <p>
@@ -33,7 +33,7 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
  */
 
 const ADMIN: DailyAdminPoint[] = [
-  { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2.4, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 141.6, bookings: 3, no_shows: 1 },
+  { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 142, bookings: 3, no_shows: 1 },
 ];
 const ME: DailyMePoint[] = [
   { date: "2026-09-01", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 136 },
@@ -49,19 +49,19 @@ function flatten(node: ReactNode): ReactElement[] {
   return [node, ...flatten(children)];
 }
 
-/** Every cartesian chart, and whether its y-axis carries credits or plain counts. */
-const CHARTS: [string, ReactNode, "credits" | "counts"][] = [
-  ["Top-ups over time", drawRevenueArea(ADMIN, P), "credits"],
-  ["Daily money flow (club)", drawDailyFlow(ADMIN, P), "credits"],
+/** Every cartesian chart, and whether its y-axis carries minutes or plain counts. */
+const CHARTS: [string, ReactNode, "minutes" | "counts"][] = [
+  ["Minutes sold over time", drawRevenueArea(ADMIN, P), "minutes"],
+  ["Daily money flow (club)", drawDailyFlow(ADMIN, P), "minutes"],
   ["Bookings & no-shows", drawBookingsLine(ADMIN, P), "counts"],
-  ["Revenue by court", drawCourtsRevenue([{ court_name: "Court 1", kept_minutes: 80, bookings: 4 }], P), "credits"],
-  ["Wallet balance", drawMyBalance(ME, P), "credits"],
-  ["Daily money flow (member)", drawMyFlow(ME, P), "credits"],
+  ["Minutes kept by court", drawCourtsRevenue([{ court_name: "Court 1", kept_minutes: 80, bookings: 4 }], P), "minutes"],
+  ["Wallet balance", drawMyBalance(ME, P), "minutes"],
+  ["Daily money flow (member)", drawMyFlow(ME, P), "minutes"],
   ["My bookings", drawMyBookings(ME, P), "counts"],
 ];
 
-/** Wide enough for "50.00 cr" at the axis size, which is what wrapped at 48. */
-const CREDIT_GUTTER = 64;
+/** The floor a minutes axis is given ("45 min" is 37px at 12px Figtree, plus the 8px tick gap). */
+const MINUTE_GUTTER = 40;
 
 describe("chart plot area", () => {
   for (const [name, chart, axis] of CHARTS) {
@@ -80,7 +80,7 @@ describe("chart plot area", () => {
     it(`${name}: gives the y-axis a gutter its labels fit in`, () => {
       expect(yAxis).not.toHaveLength(0);
       for (const props of yAxis) {
-        expect(props.width).toBeGreaterThanOrEqual(axis === "credits" ? CREDIT_GUTTER : 32);
+        expect(props.width).toBeGreaterThanOrEqual(axis === "minutes" ? MINUTE_GUTTER : 32);
       }
     });
   }
@@ -91,35 +91,23 @@ describe("chart plot area", () => {
  * anybody happened to have on screen the day it was set.
  *
  * <p>
- * 64 was measured against "50.00 cr" and shipped as a constant, and the constant is the defect:
- * the signed charts plot <b>net</b> series, net goes four figures negative on any day whose
- * penalty rows are reversals of an earlier day's sweep, and "-1350.00 cr" does not fit in it.
- * Measured in Chromium at the 11px Figtree the axis is actually set in, the label is 57.3px
- * wide and the gutter leaves it <code>64 − 6 − 2 = 56px</code> — recharts anchors a left axis's
- * tick text at <code>width − tickSize − tickMargin</code>. It overhangs the chart's own left
- * edge, which is where the carousel's Previous arrow sits.
+ * The history: 64px was measured against one label and shipped as a constant, and the constant
+ * was the defect — the signed charts plot <b>net</b> series, net goes four figures negative on
+ * any day whose penalty rows are reversals of an earlier day's sweep, and that label did not
+ * fit. recharts anchors a left axis's tick text at <code>width − tickSize − tickMargin</code>,
+ * so it overhung the chart's own left edge, which is where the carousel's Previous arrow sits.
+ * And recharts measures a tick in a hidden span at the BODY's font size, so it wrapped labels
+ * it judged too wide — the fix for that is a non-breaking space between every part.
  * </p>
  *
  * <p>
- * <b>The browser found a second, larger fault the arithmetic above does not show.</b> recharts
- * decides whether a tick fits by measuring it in a hidden <code>&lt;span&gt;</code> that
- * inherits the BODY's font size, while drawing it at the axis's 11px — so it was judging every
- * label about 45% too wide and wrapping it onto two lines. "100.00 cr" — a wholly ordinary
- * label, on an ordinary club's chart — rendered as "100.00" above "cr" at the shipped gutter.
- * The fix for that is not a wider number: it is a non-breaking space, which makes the label one
- * token that recharts cannot break wherever it thinks the edge is. See `Charts.tsx`.
- * </p>
- *
- * <p>
- * These remain assertions about numbers — jsdom has no layout — and the widths they check
- * against were measured in a real browser. What stops the constant drifting back is that it is
- * no longer a constant: `creditAxisWidth` derives it from the extremes of the series the chart
- * declares, so a wider label widens the gutter instead of defeating it. The last test here
- * reads those series off the chart's own elements rather than repeating them, so a series
- * added to a chart and not to its width calculation fails rather than silently under-fitting.
+ * P13: the ticks are minutes now ("1 h 30 min", "−1 d"), so the width is the widest TICK LABEL
+ * the axis will draw, costed glyph by glyph from widths measured in Chromium at the axis's
+ * 12px Figtree. The widths below are those measurements; `e2e/chart-axis-labels` is the proof
+ * in a real browser.
  * </p>
  */
-describe("a credit axis is as wide as its own numbers", () => {
+describe("a minutes axis is as wide as its own labels", () => {
   /** A club day whose net penalties are a four-figure reversal. Real shape, extreme value. */
   const bigNegative: DailyAdminPoint[] = [
     { date: "2026-09-01", top_ups_minutes: 200, booking_charges_minutes: 30, refunds_minutes: 0, penalties_minutes: -1350, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: -1180, bookings: 4, no_shows: 0 },
@@ -128,50 +116,56 @@ describe("a credit axis is as wide as its own numbers", () => {
   const widthsOf = (chart: ReactNode) =>
     flatten(chart).filter((e) => e.type === YAxis).map((e) => (e.props as { width: number }).width);
 
-  it("fits a four-figure negative, which is what the shipped 64 did not", () => {
-    // 61.7px for the widest "-9999.00 cr" shaped label at 11px Figtree, plus the 8px recharts
-    // reserves between the plot and the tick text. Measured, not counted from characters.
-    expect(widthsOf(drawDailyFlow(bigNegative, P))[0]).toBeGreaterThanOrEqual(70);
+  /** Measured with getComputedTextLength at 12px Figtree 400 (P13, 2026-10-01), plus the 8px gap. */
+  const MEASURED = { "1 h 30 min": 54.45, "−16 h": 32.6, "45 min": 37 } as const;
+  const GAP = 8;
+
+  it("fits the widest label it draws, measured, not counted from characters", () => {
+    // 0 to 100 minutes ticks every half hour, so "1 h 30 min" is on the axis.
+    expect(minuteAxis([0, 100]).ticks).toContain(90);
+    expect(minuteAxis([0, 100]).width).toBeGreaterThanOrEqual(Math.ceil(MEASURED["1 h 30 min"] + GAP));
+    // A four-figure negative net: ticks down to −1 d, through −16 h.
+    expect(minuteAxis([-1350, 200]).ticks).toContain(-960);
+    expect(widthsOf(drawDailyFlow(bigNegative, P))[0]).toBeGreaterThanOrEqual(Math.ceil(MEASURED["−16 h"] + GAP));
   });
 
-  it("does not narrow the charts that were already right", () => {
-    // The floor stays at the measured 64. This is a fix for labels that do not fit, not a
-    // licence to reclaim plot width from the ones that do.
-    expect(widthsOf(drawRevenueArea(ADMIN, P))[0]).toBe(64);
-    expect(creditAxisWidth([0, 45])).toBe(64);
+  it("never goes under the floor, and does not waste the plot's width on short labels", () => {
+    // Every digit is costed as the widest, so a short label gets a few pixels of slack — no more.
+    expect(minuteAxis([0, 45]).width).toBeGreaterThanOrEqual(Math.ceil(MEASURED["45 min"] + GAP));
+    expect(minuteAxis([0, 45]).width).toBeLessThanOrEqual(Math.ceil(MEASURED["45 min"] + GAP) + 4);
+    expect(minuteAxis([0, 1]).width).toBeGreaterThanOrEqual(40);
+    // An upper bound, but a tight one: no more than a digit's slack over what was measured.
+    expect(minuteAxis([0, 100]).width).toBeLessThanOrEqual(Math.ceil(MEASURED["1 h 30 min"] + GAP) + 8);
   });
 
-  it("keeps widening past the first label that defeated the old constant", () => {
-    // The property that makes this a derivation rather than a bigger magic number: each extra
-    // digit buys more room, so the next wider label cannot defeat it either.
-    const four = creditAxisWidth([-1350, 200]);
-    const five = creditAxisWidth([-13500, 200]);
-    const six = creditAxisWidth([-135000, 200]);
-    expect(four).toBeGreaterThan(64);
-    expect(five).toBeGreaterThan(four);
-    expect(six).toBeGreaterThan(five);
+  it("widens when the labels get wider, so the next wider label cannot defeat it", () => {
+    const quarterHours = minuteAxis([0, 45]).width;
+    const halfHours = minuteAxis([0, 100]).width;
+    expect(halfHours).toBeGreaterThan(quarterHours);
   });
 
   /**
    * The varied setup: the same four-figure reach arriving as a STACK rather than as one bar.
    * `stackOffset="sign"` piles a stack's negatives on top of each other, so an axis sized from
    * the largest single value would be right for the fixture above and wrong here, on data no
-   * more unusual than it. Two ordinary-looking days, one axis that has to reach −1460.
+   * more unusual than it. Two ordinary-looking bars, one axis that has to reach −1460.
    */
   it("reaches the stacked sum, not the largest single bar", () => {
     const stacked: DailyAdminPoint[] = [
       { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: -760, refunds_minutes: 0, penalties_minutes: -700, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: -1300, bookings: 2, no_shows: 0 },
     ];
-    const width = widthsOf(drawDailyFlow(stacked, P))[0];
-    expect(width).toBe(creditAxisWidth([-1460]));
-    // Sized for four figures, though no single series in the fixture reaches them.
-    expect(width).toBeGreaterThanOrEqual(70);
+    const axis = flatten(drawDailyFlow(stacked, P)).find((e) => e.type === YAxis)!.props as { width: number; domain: number[] };
+    expect(axis.width).toBe(minuteAxis([-1460, 160]).width);
+    // Reaches the stack, though no single series in the fixture does.
+    expect(axis.domain[0]).toBeLessThanOrEqual(-1460);
   });
 
-  it("allows for the tick recharts rounds UP to, not just the value in the data", () => {
-    // A domain ending at 950 is labelled to 1000, which is a digit wider than anything in the
-    // series. Reading the data alone would under-fit the axis by exactly one character.
-    expect(creditAxisWidth([0, 950])).toBe(creditAxisWidth([0, 1000]));
+  it("allows for the tick it rounds UP to, not just the value in the data", () => {
+    // A series topping out at 950 is ticked to 960 (a step of 4 h); the label drawn is the
+    // tick's, so the width is costed from the ticks, not from the data.
+    const axis = minuteAxis([0, 950]);
+    expect(axis.ticks[axis.ticks.length - 1]).toBeGreaterThanOrEqual(950);
+    expect(axis.domain[1]).toBe(axis.ticks[axis.ticks.length - 1]);
   });
 
   it("is computed from every series the chart declares, read off the chart itself", () => {
@@ -181,7 +175,7 @@ describe("a credit axis is as wide as its own numbers", () => {
     const charts: [string, ReactNode, Record<string, number>[]][] = [
       ["Daily money flow (club)", drawDailyFlow(bigNegative, P), bigNegative as unknown as Record<string, number>[]],
       ["Daily money flow (member)", drawMyFlow(ME, P), ME as unknown as Record<string, number>[]],
-      ["Top-ups over time", drawRevenueArea(ADMIN, P), ADMIN as unknown as Record<string, number>[]],
+      ["Minutes sold over time", drawRevenueArea(ADMIN, P), ADMIN as unknown as Record<string, number>[]],
       ["Wallet balance", drawMyBalance(ME, P), ME as unknown as Record<string, number>[]],
     ];
 
@@ -209,7 +203,7 @@ describe("a credit axis is as wide as its own numbers", () => {
       }
 
       const widths = flatten(chart).filter((e) => e.type === YAxis).map((e) => (e.props as { width: number }).width);
-      expect(widths, name).toEqual([creditAxisWidth(extremes)]);
+      expect(widths, name).toEqual([minuteAxis(extremes).width]);
     }
   });
 });

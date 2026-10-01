@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { createElement } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
-import { formatCredits } from "../lib/utils";
+import { minutesCompact } from "../lib/minutes";
 import { clubCalendarDate } from "@/lib/clubClock";
 import { ChartFrame, type ChartPalette } from "./ChartFrame";
 
@@ -36,26 +36,22 @@ const AXIS_FONT_PX = 12;
 const TOP_MARGIN = 16;
 
 /**
- * The narrowest y-axis gutter a credit-denominated axis is ever given — a FLOOR, not the answer.
- * The width each chart uses comes from {@link creditAxisWidth}, computed from its own data;
- * these series are net and go four figures negative, and no constant survives that.
+ * The narrowest y-axis gutter a minutes axis is given — a FLOOR, not the answer. The width each
+ * chart uses comes from {@link minuteAxis}, computed from the labels it will actually draw.
  */
-const CREDIT_AXIS_MIN_WIDTH = 64;
+const MINUTE_AXIS_MIN_WIDTH = 40;
 
 /**
- * The parts of a credit tick label, in pixels, measured in Chromium at 11px Figtree 400 with
- * `getComputedTextLength` ("0.00 cr" 35.83, "50.00 cr" 42.16, "-1000.00 cr" 59.06, "-8000.00 cr"
- * 61.28), then scaled to the {@link AXIS_FONT_PX} the axis is now set in — an outline font's
- * advance widths scale linearly with its size. Figtree's figures are proportional, so every
- * digit is costed as the widest one: {@link creditLabelWidth} is an upper bound, which is the
- * right side to be wrong on.
+ * The advance width of each glyph a minutes tick can contain, in pixels at the
+ * {@link AXIS_FONT_PX} the axis is set in — measured in Chromium with `getComputedTextLength`
+ * on Figtree 400 at 12px (P13, 2026-10-01: "1 h 30 min" 54.45, "−45 min" 44.48, "10 d" 22.64;
+ * the per-glyph sums below reproduce each to within 0.1px). Figtree's figures are proportional,
+ * so every digit is costed as the widest one ("0", 7.70): {@link labelWidth} is an upper bound,
+ * which is the right side to be wrong on.
  */
-const MEASURED_AT_PX = 11;
-const SCALE = AXIS_FONT_PX / MEASURED_AT_PX;
-const AXIS_WIDEST_DIGIT_PX = 7.07 * SCALE;
-const AXIS_MINUS_PX = 4.6 * SCALE;
-/** ".00 cr" — the tail every credit label carries, measured whole so its kerning is included. */
-const AXIS_DECIMALS_AND_UNIT_PX = 28.79 * SCALE;
+const GLYPH_PX: Readonly<Record<string, number>> = {
+  digit: 7.71, "\u00a0": 2.97, h: 6.71, d: 7.04, m: 10.22, i: 2.79, n: 6.71, "\u2212": 7.49, "+": 7.49,
+};
 
 /**
  * What recharts keeps between the plot and the tick text: `tickSize` 6 plus `tickMargin` 2. A
@@ -64,7 +60,7 @@ const AXIS_DECIMALS_AND_UNIT_PX = 28.79 * SCALE;
  */
 const AXIS_TICK_GAP_PX = 8;
 
-/** The gutter for an axis of plain integers — "12" needs nothing like the room "50.00 cr" does. */
+/** The gutter for an axis of plain integers — "12" needs nothing like the room "1 h 30 min" does. */
 const COUNT_AXIS_WIDTH = 36;
 
 /**
@@ -120,61 +116,95 @@ function axisProps(c: ChartPalette) {
   return { fontSize: AXIS_FONT_PX, stroke: c.muted, tick: { fill: c.muted } } as const;
 }
 
-// Credits, not rand. These charts plot ledger movements and court spend, both of
-// which are credit-denominated — a rand sign here overstates every bar by the
-// conversion rate.
-const fmtCredits = (v: number | string) => formatCredits(Number(v));
+// Minutes, not rand. These charts plot ledger movements and court time, all of them in the
+// club's unit of account — a rand sign here would claim a price nobody paid.
+const fmtMinutes = (v: number | string) => minutesCompact(Number(v));
 
 /**
  * U+00A0, written as an escape on purpose: a literal non-breaking space in source is invisible,
- * and an editor that normalises whitespace would silently put every credit tick back onto two
- * lines.
+ * and an editor that normalises whitespace would silently put every tick back onto two lines.
  */
 const NON_BREAKING_SPACE = "\u00a0";
 
 /**
- * The same figure for an axis tick, with the space before the unit made non-breaking.
+ * The same figure for an axis tick, with every space made non-breaking.
  *
  * <p>
  * recharts decides whether a tick fits by measuring its words in a hidden span that inherits
- * the BODY's font size, not the axis's, and breaks the label accordingly — "100.00" above "cr".
+ * the BODY's font size, not the axis's, and breaks the label accordingly — "1 h" above "30 min".
  * A label with no breaking space in it is one word, and recharts never breaks a word. Not
- * applied to {@link fmtCredits}: a tooltip is laid out in HTML and its text is copied by people.
+ * applied to {@link fmtMinutes}: a tooltip is laid out in HTML and its text is copied by people.
  * </p>
  */
-const fmtAxisCredits = (v: number | string) => formatCredits(Number(v)).replace(" ", NON_BREAKING_SPACE);
+const fmtAxisMinutes = (v: number | string) => fmtMinutes(v).replaceAll(" ", NON_BREAKING_SPACE);
 
-/** The width of the widest label an axis reaching `value` can draw, in pixels. Upper bound. */
-function creditLabelWidth(value: number): number {
-  const digits = String(Math.floor(Math.abs(value))).length;
-  const sign = 0 > value ? AXIS_MINUS_PX : 0;
-  return sign + digits * AXIS_WIDEST_DIGIT_PX + AXIS_DECIMALS_AND_UNIT_PX;
+/** The width of one tick label as drawn, in pixels. An upper bound (see {@link GLYPH_PX}). */
+function labelWidth(label: string): number {
+  let width = 0;
+  for (const ch of label) width += GLYPH_PX[/\d/.test(ch) ? "digit" : ch] ?? GLYPH_PX.digit;
+  return width;
 }
 
 /**
- * A value rounded AWAY from zero to the next multiple of its own leading power of ten. The axis
- * labels its ticks, not the data, and recharts picks round ones past the extreme: a series
- * topping out at 950 is drawn with a tick at 1000, one digit wider than anything in the data.
+ * The step between ticks on a minutes axis, smallest first: whole minutes, then quarter and
+ * half hours, then whole hours, then whole days. Every tick is a figure a member reads at a
+ * glance — "1 h", "2 h", "1 d" — where recharts' own decimal steps drew "1 h 40 min" and
+ * "3 h 20 min" (a step of 100 minutes is round only to a computer).
  */
-function niceAway(value: number): number {
-  if (value === 0) return 0;
-  const magnitude = Math.abs(value);
-  const step = 10 ** Math.max(0, Math.floor(Math.log10(magnitude)));
-  return Math.sign(value) * Math.ceil(magnitude / step) * step;
+const MINUTE_STEPS = [
+  1, 2, 5, 10, 15, 30, 60, 120, 180, 240, 360, 480, 720,
+  1440, 2 * 1440, 5 * 1440, 10 * 1440, 20 * 1440, 50 * 1440, 100 * 1440, 200 * 1440, 500 * 1440,
+] as const;
+
+/** At most this many gaps between ticks before the outward rounding below. */
+const TARGET_GAPS = 4;
+
+/** The step for a span: the smallest in {@link MINUTE_STEPS} that keeps to {@link TARGET_GAPS}. */
+function minuteStep(span: number): number {
+  const fits = MINUTE_STEPS.find((step) => span / step <= TARGET_GAPS);
+  if (fits !== undefined) return fits;
+  const last = MINUTE_STEPS[MINUTE_STEPS.length - 1];
+  return Math.ceil(span / TARGET_GAPS / last) * last;
 }
 
+/** What a minutes y-axis is told: where its ticks go, the domain they span, and its gutter. */
+export type MinuteAxis = { ticks: number[]; domain: [number, number]; width: number };
+
 /**
- * The gutter a credit y-axis needs for the widest label its own data can produce. Exported so
- * `chart-geometry.test.tsx` can rebuild the expectation from the series each chart declares.
- * Zero is always in the range, because every one of these axes draws a zero line.
+ * The y-axis for a chart of minutes, derived from the values its series reach.
+ *
+ * <ul>
+ *   <li><b>Ticks on human steps</b> ({@link MINUTE_STEPS}), always including zero, because every
+ *   one of these axes draws a zero line.</li>
+ *   <li><b>A signed floor.</b> These series are <b>net</b> (settlement-model I11 posts every
+ *   correction as a new opposite-sign row), so a day can be negative: the domain goes below zero
+ *   exactly one step past the data, and never below zero when nothing is negative — floating the
+ *   floor up to the data minimum would make every bar's length a lie.</li>
+ *   <li><b>A gutter as wide as the widest label drawn</b>, so "−1 d 12 h" never overhangs the
+ *   chart's own left edge, which is where the carousel's Previous arrow sits.</li>
+ * </ul>
+ *
+ * Exported so the geometry tests can rebuild the expectation from the series each chart
+ * declares.
  */
-export function creditAxisWidth(values: readonly number[]): number {
+export function minuteAxis(values: readonly number[]): MinuteAxis {
   const finite = values.filter(Number.isFinite);
-  const widest = Math.max(
-    creditLabelWidth(niceAway(Math.min(0, ...finite))),
-    creditLabelWidth(niceAway(Math.max(0, ...finite))),
-  );
-  return Math.max(CREDIT_AXIS_MIN_WIDTH, Math.ceil(widest) + AXIS_TICK_GAP_PX);
+  const lo = Math.min(0, ...finite);
+  const hi = Math.max(0, ...finite);
+  // An empty or all-zero window still draws an hour, rather than a single tick at "0 min".
+  const step = minuteStep(Math.max(hi - lo, 60));
+  const first = Math.floor(lo / step) * step;
+  const last = hi === lo ? first + 60 : Math.max(Math.ceil(hi / step) * step, first + step);
+  const ticks: number[] = [];
+  for (let tick = first; tick <= last; tick += step) ticks.push(tick === 0 ? 0 : tick);
+  const widest = Math.max(...ticks.map((tick) => labelWidth(fmtAxisMinutes(tick))));
+  return { ticks, domain: [first, last], width: Math.max(MINUTE_AXIS_MIN_WIDTH, Math.ceil(widest) + AXIS_TICK_GAP_PX) };
+}
+
+/** The YAxis props for a minutes axis — one spread, so no chart can take the ticks and not the width. */
+function minuteYAxis(values: readonly number[], c: ChartPalette) {
+  const axis = minuteAxis(values);
+  return { ...axisProps(c), tickFormatter: fmtAxisMinutes, ticks: axis.ticks, domain: axis.domain, width: axis.width, interval: 0 } as const;
 }
 
 /**
@@ -200,18 +230,7 @@ const MEMBER_FLOW_STACKS = [["top_ups_minutes", "refunds_minutes"], ["spent_minu
 /** F4-15 — the axis in the club's format ("1 Sep"), not the reader's locale ("Sep 01"). */
 const fmtDate = (d: string) => clubCalendarDate(d, { weekday: false });
 
-/**
- * The y-axis floor for a chart plotting ledger movements: zero, or below it exactly as far as
- * the data goes. These series are <b>net</b> (settlement-model I11 posts every correction as a
- * new opposite-sign row), so a day can be negative. recharts' default `[0, 'auto']` survives a
- * negative only through an implementation detail; saying the floor out loud cannot regress.
- */
-export const signedFloor = (dataMin: number) => (Number.isFinite(dataMin) ? Math.min(0, Math.floor(dataMin)) : 0);
-
-/** {@link signedFloor} as a recharts y-domain: signed floor, auto ceiling. */
-export const SIGNED_DOMAIN = [signedFloor, "auto"] as const;
-
-const creditTooltip = { formatter: ((v: number) => fmtCredits(v)) as never, labelFormatter: ((l: string) => fmtDate(l)) as never };
+const minutesTooltip = { formatter: ((v: number) => fmtMinutes(v)) as never, labelFormatter: ((l: string) => fmtDate(l)) as never };
 const dateTooltip = { labelFormatter: ((l: string) => fmtDate(l)) as never };
 
 /** A soft vertical wash under an area series, in the series' own colour. */
@@ -232,15 +251,15 @@ export function drawRevenueArea(data: DailyAdminPoint[], c: ChartPalette) {
       {fillGradient("revFill", c.accent, 0.35)}
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["top_ups_minutes"]]))} />
-      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
-      <Area type="monotone" dataKey="top_ups_minutes" name="Top-ups" stroke={c.accent} fill="url(#revFill)" strokeWidth={2} />
+      <YAxis {...minuteYAxis(stackedExtremes(data, [["top_ups_minutes"]]), c)} />
+      <Tooltip {...tooltipProps(c)} {...minutesTooltip} />
+      <Area type="monotone" dataKey="top_ups_minutes" name="Minutes sold" stroke={c.accent} fill="url(#revFill)" strokeWidth={2} />
     </AreaChart>
   );
 }
 
 /**
- * The club's money by day. <b>Penalties are net</b> — see {@link signedFloor} — so the series is
+ * The club's money by day. <b>Penalties are net</b> — see {@link minuteAxis} — so the series is
  * labelled as such, and the bar goes below the solid zero line on a reversal day.
  */
 export function drawDailyFlow(data: DailyAdminPoint[], c: ChartPalette) {
@@ -248,11 +267,11 @@ export function drawDailyFlow(data: DailyAdminPoint[], c: ChartPalette) {
     <BarChart data={data} margin={MARGIN} stackOffset="sign">
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, CLUB_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
+      <YAxis {...minuteYAxis(stackedExtremes(data, CLUB_FLOW_STACKS), c)} />
       <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
-      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
+      <Tooltip {...tooltipProps(c)} {...minutesTooltip} />
       <Legend {...legendProps(c)} />
-      <Bar dataKey="top_ups_minutes" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="top_ups_minutes" name="Minutes sold" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
       <Bar dataKey="booking_charges_minutes" name="Bookings" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
       <Bar dataKey="penalties_minutes" name="Penalties (net)" stackId="b" fill={c.warning} radius={[3, 3, 0, 0]} />
     </BarChart>
@@ -280,9 +299,9 @@ export function drawCourtsRevenue(data: CourtRevenue[], c: ChartPalette) {
     <BarChart data={data} margin={MARGIN}>
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="court_name" {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["kept_minutes"]]))} />
-      <Tooltip {...tooltipProps(c)} formatter={creditTooltip.formatter} />
-      <Bar dataKey="kept_minutes" name="Revenue" fill={c.accent} radius={[6, 6, 0, 0]} />
+      <YAxis {...minuteYAxis(stackedExtremes(data, [["kept_minutes"]]), c)} />
+      <Tooltip {...tooltipProps(c)} formatter={minutesTooltip.formatter} />
+      <Bar dataKey="kept_minutes" name="Kept" fill={c.accent} radius={[6, 6, 0, 0]} />
     </BarChart>
   );
 }
@@ -310,15 +329,15 @@ export function drawMyBalance(data: DailyMePoint[], c: ChartPalette) {
       {fillGradient("balFill", c.accent, 0.3)}
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["balance_minutes"]]))} />
-      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
+      <YAxis {...minuteYAxis(stackedExtremes(data, [["balance_minutes"]]), c)} />
+      <Tooltip {...tooltipProps(c)} {...minutesTooltip} />
       <Area type="monotone" dataKey="balance_minutes" name="Balance" stroke={c.accent} fill="url(#balFill)" strokeWidth={2} />
     </AreaChart>
   );
 }
 
 /**
- * A member's own money by day. <b>Refunds are net</b> — see {@link signedFloor}: a member whose
+ * A member's own money by day. <b>Refunds are net</b> — see {@link minuteAxis}: a member whose
  * no-show was reversed a day later sees the refund taken back on the day the evidence landed.
  */
 export function drawMyFlow(data: DailyMePoint[], c: ChartPalette) {
@@ -326,11 +345,11 @@ export function drawMyFlow(data: DailyMePoint[], c: ChartPalette) {
     <BarChart data={data} margin={MARGIN} stackOffset="sign">
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, MEMBER_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
+      <YAxis {...minuteYAxis(stackedExtremes(data, MEMBER_FLOW_STACKS), c)} />
       <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
-      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
+      <Tooltip {...tooltipProps(c)} {...minutesTooltip} />
       <Legend {...legendProps(c)} />
-      <Bar dataKey="top_ups_minutes" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="top_ups_minutes" name="Bought" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
       <Bar dataKey="refunds_minutes" name="Refunds (net)" stackId="a" fill={c.successSoft} radius={[3, 3, 0, 0]} />
       <Bar dataKey="spent_minutes" name="Spent" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
     </BarChart>

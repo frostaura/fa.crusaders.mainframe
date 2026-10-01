@@ -39,7 +39,7 @@ function flatten(node: ReactNode): ReactElement[] {
 }
 
 const ADMIN: DailyAdminPoint[] = [
-  { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2.4, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 141.6, bookings: 3, no_shows: 1 },
+  { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 142, bookings: 3, no_shows: 1 },
 ];
 const ME: DailyMePoint[] = [
   { date: "2026-09-01", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 136 },
@@ -47,10 +47,10 @@ const ME: DailyMePoint[] = [
 
 /** Every chart in the product, by the name a reader would recognise it under. */
 const CHARTS: [string, (c: ChartPalette) => ReactNode][] = [
-  ["Top-ups over time", (c) => drawRevenueArea(ADMIN, c)],
+  ["Minutes sold over time", (c) => drawRevenueArea(ADMIN, c)],
   ["Daily money flow (club)", (c) => drawDailyFlow(ADMIN, c)],
   ["Bookings & no-shows", (c) => drawBookingsLine(ADMIN, c)],
-  ["Revenue by court", (c) => drawCourtsRevenue([{ court_name: "Court 1", kept_minutes: 80, bookings: 4 }], c)],
+  ["Minutes kept by court", (c) => drawCourtsRevenue([{ court_name: "Court 1", kept_minutes: 80, bookings: 4 }], c)],
   ["Show rate", (c) => drawNoShowDonut(10, 2, c)],
   ["Wallet balance", (c) => drawMyBalance(ME, c)],
   ["Daily money flow (member)", (c) => drawMyFlow(ME, c)],
