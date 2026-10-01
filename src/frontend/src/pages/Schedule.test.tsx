@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { BOOKINGS_COPY, CELL_TEXT, PENDING_CELL } from "../lib/bookingsCopy";
+import { liftWithReason } from "../test/liftHold";
 import { HOLD_LIFTED, HOLD_LIFT_FAILED } from "../lib/scheduleEnd";
 import { signOut, refuse } from "../test/harness";
 import { COURT_A, COURT_B, ME, dayFixture, openBookings, resetSheets, sast, scheduleCalls, sheets, slotRow } from "../test/bookingsKit";
@@ -300,7 +301,7 @@ describe("a club hold, lifted from the grid", () => {
         { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => { lifted = true; return {}; } },
       ],
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Lift the League night hold on Court 1 at 17:00" }));
+    await liftWithReason(await screen.findByRole("button", { name: "Lift the League night hold on Court 1 at 17:00" }));
     expect(await screen.findByText(HOLD_LIFTED)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
   });
@@ -310,7 +311,7 @@ describe("a club hold, lifted from the grid", () => {
       isAdmin: true, day: HELD,
       routes: [{ method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => refuse(409, { error: "conflict" }) }],
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Lift the League night hold on Court 1 at 17:00" }));
+    await liftWithReason(await screen.findByRole("button", { name: "Lift the League night hold on Court 1 at 17:00" }));
     await waitFor(() => expect(document.body.textContent).toMatch(new RegExp(HOLD_LIFT_FAILED.slice(0, 20))));
     expect(screen.getByRole("gridcell", { name: "Court 1 at 17:00 — held by the club for League night" })).toBeInTheDocument();
   });

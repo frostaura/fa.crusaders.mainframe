@@ -419,7 +419,7 @@ export const CANCEL_SHEET = {
   reasonMissing: "Say why — the member is told the reason, and the club's records keep it.",
 
   cancelledTitle: (done: number, total: number) => {
-    if (done === total) return total === 1 ? "Booking cancelled" : `All ${total} cancelled`;
+    if (done === total) return total === 1 ? "Booking cancelled" : total === 2 ? "Both cancelled" : `All ${total} cancelled`;
     return `${done} of ${total} cancelled`;
   },
   noneCancelledTitle: "Nothing was cancelled",
@@ -571,3 +571,20 @@ export const SPLIT_CANCEL = {
 export function heldPartsLine(parts: readonly { credits: number; until: string }[], timezone?: string): string {
   return `Held: ${parts.map((p) => `${formatCredits(p.credits)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
 }
+
+/**
+ * R5 A5-1 — lifting a club hold asks first, and asks why. One tap used to DELETE it with no
+ * confirm and no reason, and the change record showed the lift with reason null. The reason is
+ * required by the API (400 reason_required) and lands on the change record.
+ */
+export const LIFT_HOLD_SHEET = {
+  title: "Lift this hold?",
+  description: (where: string, label: string | null) =>
+    `${where}${label ? ` — ${label}` : ""}. The court is free to book the moment it's lifted.`,
+  reasonLabel: "Reason",
+  reasonHint: "Required — it goes on the club's change record.",
+  reasonPlaceholder: "League moved, court repaired, set by mistake…",
+  reasonMissing: "Say why — the club's change record keeps the reason.",
+  keep: "Keep hold",
+  confirm: "Lift hold",
+};

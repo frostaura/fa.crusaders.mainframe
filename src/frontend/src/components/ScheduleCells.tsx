@@ -19,6 +19,7 @@ import {
 } from "../lib/gridSelection";
 import { RESULT_READABLE } from "../lib/bookingLink";
 import type { PriceOf } from "../lib/viewerPrice";
+import type { HoldToLift } from "./bookings/LiftHoldSheet";
 
 /**
  * The booking grid's cells — one per court per time slice (design-system.md, "Slot-state
@@ -68,7 +69,8 @@ export type BoardContext = {
   onBook: (court: ScheduleCourt, startsAtUtc: string) => void;
   /** A booking the viewer may act on — their own, or anybody's for an admin. */
   onOpenBooking: (slot: ScheduleSlot, court: ScheduleCourt) => void;
-  onLiftHold: (blockId: string) => void | Promise<void>;
+  /** An admin pressed Lift on a club hold — the page asks to confirm and why (R5 A5-1). */
+  onLiftHold: (hold: HoldToLift) => void;
   selection: SelectionApi;
 };
 
@@ -432,7 +434,7 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
             label={holdLiftLabel(where, slot.blockLabel)}
             size="icon-sm"
             tabIndex={props.roving ? 0 : -1}
-            onClick={() => ctx.onLiftHold(slot.bookingId!)}
+            onClick={() => ctx.onLiftHold({ blockId: slot.bookingId!, where, label: slot.blockLabel })}
             className="shrink-0 text-slot-hold-ink hover:bg-bg-surface/70"
           >
             <LockOpen aria-hidden="true" />

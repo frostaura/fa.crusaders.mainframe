@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
 import { RECENT, UPCOMING } from "../lib/bookingsCopy";
+import { liftWithReason } from "../test/liftHold";
 import { HOLD_LIFTED, HOLD_LIFT_OFFLINE, HOLD_LIFT_UNANSWERED, HOLD_LIFT_UNKNOWN } from "../lib/scheduleEnd";
 import { refuse, signOut } from "../test/harness";
 import { COURT_A, dayFixture, openBookings, resetSheets, sast, slotRow } from "../test/bookingsKit";
@@ -87,7 +88,7 @@ describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the
         { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => { lifted = true; return refuse(504, {}); } },
       ],
     });
-    fireEvent.click(await screen.findByRole("button", { name: LIFT }));
+    await liftWithReason(await screen.findByRole("button", { name: LIFT }));
     expect(await screen.findByText(HOLD_LIFTED)).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
   });
@@ -100,7 +101,7 @@ describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the
         { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => refuse(503, {}) },
       ],
     });
-    fireEvent.click(await screen.findByRole("button", { name: LIFT }));
+    await liftWithReason(await screen.findByRole("button", { name: LIFT }));
     expect(await screen.findByText(HOLD_LIFT_UNANSWERED)).toBeInTheDocument();
     expect(await screen.findByRole("gridcell", { name: "Court 1 at 17:00 — held by the club for League night" })).toBeInTheDocument();
   });
@@ -114,7 +115,7 @@ describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the
         { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => { down = true; return refuse(504, {}); } },
       ],
     });
-    fireEvent.click(await screen.findByRole("button", { name: LIFT }));
+    await liftWithReason(await screen.findByRole("button", { name: LIFT }));
     expect(await screen.findByText(HOLD_LIFT_UNKNOWN)).toBeInTheDocument();
     expect(screen.getByRole("gridcell", { name: "Court 1 at 17:00 — held by the club for League night" })).toBeInTheDocument();
   });
@@ -123,7 +124,7 @@ describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the
     const stub = openBookings({ isAdmin: true, day: HELD });
     const lift = await screen.findByRole("button", { name: LIFT });
     vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
-    fireEvent.click(lift);
+    await liftWithReason(lift);
     expect(await screen.findByText(HOLD_LIFT_OFFLINE)).toBeInTheDocument();
     await waitFor(() => expect(stub.calls.some((c) => c.method === "DELETE")).toBe(false));
     vi.restoreAllMocks();

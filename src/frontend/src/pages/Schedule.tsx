@@ -21,6 +21,7 @@ import type { BoardContext } from "../components/ScheduleCells";
 import { BookingBoard, BookingGridHeading, BookingGridSkeleton } from "../components/bookings/BookingGrid";
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
 import { BookingForBar } from "../components/bookings/BookingForBar";
+import { LiftHoldSheet, type HoldToLift } from "../components/bookings/LiftHoldSheet";
 import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { DaySummary } from "../components/bookings/DaySummary";
@@ -109,6 +110,8 @@ export default function BookingsPage() {
   const { sending, setSending } = sheets;
   const holding = useMemo(() => holdingKeys(sending, day?.sliceMinutes ?? 15), [sending, day?.sliceMinutes]);
   const liftHold = useHoldLift({ day, setDay, reconcile, toast });
+  // R5 A5-1 — a lift asks first, and asks why.
+  const lift = useLiftSheet();
   // Keyed on the day, so moving to another day folds the past wall away again by itself.
   const [earlierShownFor, setEarlierShownFor] = useState<string | null>(null);
   const showEarlier = earlierShownFor === date;
@@ -155,11 +158,11 @@ export default function BookingsPage() {
   // a slot it shows free may have gone. The press says why instead of opening the sheet.
   const { offlineGrid, openBook } = useOnlineOnly(schedule, sheets.openBook, toast);
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
-    day: shown, rules: gridRules, isAdmin, dayLabel: otherDay, forName: forMember?.name ?? null, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
+    day: shown, rules: gridRules, isAdmin, dayLabel: otherDay, forName: forMember?.name ?? null, explain: explainer.explain, selection: selection.api, onLiftHold: lift.ask,
     priceOf,
     onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc, priceOf)]),
     onOpenBooking: (slot: ScheduleSlot) => openCancel([gridBookingOf(slot, shown)]),
-  } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, liftHold, openBook, openCancel, priceOf]);
+  } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, lift.ask, openBook, openCancel, priceOf]);
 
   const collapsed = explainer.collapsedRows(schedule.timeSlices, schedule.pastThresholdMs, showEarlier, isAdmin, schedule.slotsByCourt);
 
@@ -243,6 +246,8 @@ export default function BookingsPage() {
         onSending={setSending} onBusyChange={sheets.onBookBusy}
         cancelTerms={day ? { penaltyPct: day.penaltyPct, windowMinutes: day.penaltyWindowMinutes } : null}
       />
+      <LiftHoldSheet hold={lift.hold} open={lift.open} onOpenChange={lift.setOpen} onLift={(id, reason) => void liftHold(id, reason)}
+        onCloseAutoFocus={sheets.returnFocus} />
       {/* Perf — lazy: mounted from its first opening (and kept, so it closes whole), fetched at
           idle once the day is on screen. */}
       {sheets.cancelMounted ? (
@@ -460,6 +465,15 @@ function useSheets() {
     bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, cancelMounted, setCancelOpen, openBook, openCancel, returnFocus,
     underSheet, sending, setSending, onBookBusy, onCancelBusy,
   };
+}
+
+/** R5 A5-1 — the hold being lifted, and its sheet (kept while it closes, so it animates out whole). */
+function useLiftSheet() {
+  const [hold, setHold] = useState<HoldToLift | null>(null);
+  const [open, setOpen] = useState(false);
+  const ask = useCallback((h: HoldToLift) => { setHold(h); setOpen(true); }, []);
+  useSheetHistory(open, () => setOpen(false), "lift-hold");
+  return { hold, open, setOpen, ask };
 }
 
 /**

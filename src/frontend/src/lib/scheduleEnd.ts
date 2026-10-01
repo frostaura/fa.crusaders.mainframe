@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { endpoints, type ScheduleDay } from "./api";
+import { api, type ScheduleDay } from "./api";
 import { describeBookingError, provesStaleGrid } from "./bookingErrors";
 import { goneFrom, outcomeUnknown } from "./bookingOutcome";
 
@@ -8,9 +8,10 @@ import { goneFrom, outcomeUnknown } from "./bookingOutcome";
  *
  * <p>
  * Cancelling a booking moved into `CancelSheet` (P4): the sheet reads the quote, states the
- * figures and does the write. A hold charges nobody and refunds nobody, so it needs no sheet —
- * the lift button is its own confirmation, and it is optimistic: the hold leaves the grid the
- * moment the admin presses, and comes back with a sentence if the server refuses.
+ * figures and does the write. A hold charges nobody and refunds nobody, so its sheet only
+ * confirms and takes the reason (R5 A5-1, `LiftHoldSheet`); the lift is optimistic: the hold
+ * leaves the grid the moment the admin confirms, and comes back with a sentence if the server
+ * refuses.
  * </p>
  */
 
@@ -45,8 +46,17 @@ async function readBack(blockId: string, reconcile: Args["reconcile"]): Promise<
   return { lifted: false, text: HOLD_LIFT_UNANSWERED };
 }
 
+/**
+ * R5 A5-1 — the lift carries the admin's reason, which the club records (`?reason=`, lane F's
+ * shape; a blank one is refused 400 reason_required). Called here rather than through
+ * `endpoints.adminUnblock`, whose signature has no reason yet (integrator-owned `lib/api.ts`).
+ */
+function unblock(blockId: string, reason: string): Promise<void> {
+  return api.del<void>(`/api/v1/admin/blocks/${encodeURIComponent(blockId)}?reason=${encodeURIComponent(reason)}`);
+}
+
 export function useHoldLift({ day, setDay, reconcile, toast }: Args) {
-  return useCallback(async (blockId: string) => {
+  return useCallback(async (blockId: string, reason: string) => {
     const removed = day?.slots.filter((s) => s.bookingId === blockId) ?? [];
     const putBack = () => setDay((d) => (d ? { ...d, slots: [...d.slots, ...removed] } : d));
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -55,7 +65,7 @@ export function useHoldLift({ day, setDay, reconcile, toast }: Args) {
     }
     setDay((d) => (d ? { ...d, slots: d.slots.filter((s) => s.bookingId !== blockId) } : d));
     try {
-      await endpoints.adminUnblock(blockId);
+      await unblock(blockId, reason);
       toast.push({ tone: "success", text: HOLD_LIFTED });
       void reconcile();
     } catch (err) {
