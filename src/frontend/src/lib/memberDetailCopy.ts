@@ -388,6 +388,13 @@ export const ADMIN_ROLE_COPY = {
   configLocked:
     "Set in the server's configuration (Admins:Emails). It can't be removed from here — whoever runs the server changes it there.",
   notActive: "Only an active member can be made an administrator. Approve or reactivate them first.",
+  /**
+   * R5 lane G: the same two reasons under a ⋯ item (members list, the record's header), where a
+   * menu row has a few words, not a paragraph. The item's own label is `grantConfirm` /
+   * `revokeConfirm` — the menu names the act the dialog's primary performs.
+   */
+  menuConfigLocked: "Set in the server's configuration — only whoever runs the server can remove it.",
+  menuNotActive: "Only an active member can be made an administrator.",
   grantTitle: (name: string) => `Make ${name} an administrator?`,
   grantBody: (name: string) =>
     `${name} will be able to manage members, move credit, book courts for members even past what their balance covers, open doors and change settings. They and every other admin are emailed the reason.`,

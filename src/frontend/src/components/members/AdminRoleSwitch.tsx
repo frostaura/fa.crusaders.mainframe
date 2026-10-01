@@ -1,19 +1,11 @@
-import { useId, useRef, useState } from "react";
-import { ConfirmDialog } from "../admin/ConfirmDialog";
-import { useToast } from "../Toast";
-import { Checkbox } from "../ui/checkbox";
+import { useRef, useState } from "react";
 import { Field, FieldDescription, FieldLabel } from "../ui/field";
-import { REQUIRED_MARK } from "../../lib/confirmDialogCopy";
-import { unsureSentence, writeOrReadBack } from "../../lib/lostReply";
-import { LOST_REPLY, unsureWords } from "../../lib/lostReplyCopy";
 import { Lock } from "../ui/icons";
 import { Switch } from "../ui/switch";
-import { Textarea } from "../ui/textarea";
-import { useAuth } from "../../lib/auth";
-import {
-  memberDetailEndpoints, type AdminRoleResult, type AdminSource, type MembershipStatus,
-} from "../../lib/memberDetailApi";
-import { ADMIN_ROLE_CODES, ADMIN_ROLE_COPY as COPY } from "../../lib/memberDetailCopy";
+import type { AdminRoleResult, AdminSource, MembershipStatus } from "../../lib/memberDetailApi";
+import { ADMIN_ROLE_COPY as COPY } from "../../lib/memberDetailCopy";
+import { AdminRoleDialog } from "./AdminRoleDialog";
+import { adminRoleOffer } from "./adminRoleOffer";
 
 /**
  * Grant or revoke a member's admin rights (R20) — a Switch that never flips on its own.
@@ -26,21 +18,13 @@ import { ADMIN_ROLE_CODES, ADMIN_ROLE_COPY as COPY } from "../../lib/memberDetai
  * to be optimistic about.
  * </p>
  *
- * <ul>
- *   <li><b>Granting</b> asks once.</li>
- *   <li><b>Revoking</b> requires a reason: it is written to the change record and emailed.</li>
- *   <li><b>Revoking yourself</b> requires a second, explicit yes (`confirm_self`) — the page you
- *   are on stops working within seconds, and only another admin can undo it.</li>
- *   <li><b>A config admin</b> (`Admins:Emails`) is shown locked with the reason: the console
- *   cannot remove it, and a switch that looks pressable and is always refused is a lie.</li>
- *   <li><b>A member who is not active</b> cannot be granted; the switch says so before anyone
- *   presses it rather than after a 409.</li>
- * </ul>
- *
  * <p>
- * Every refusal the route can give — `last_admin`, `not_active_member`,
- * `admin_inherited_from_config`, `confirm_self_required`, `actor_not_admin` — has its own
- * sentence, shown inside the dialog, which stays open.
+ * The act itself — the reason both ways, the self-revoke second yes, a sentence for every refusal,
+ * the lost-reply read-back — is {@link AdminRoleDialog}, the same one the members list's ⋯ and the
+ * record header's ⋯ open (R5 lane G). This file is the switch: a config admin (`Admins:Emails`) is
+ * shown locked with the reason, because a switch that looks pressable and is always refused is a
+ * lie; a member who is not active cannot be granted, and the switch says so before anyone presses
+ * it rather than after a 409. Both rules are {@link adminRoleOffer}, shared with the menus.
  * </p>
  */
 export type AdminRoleSwitchProps = {
@@ -52,43 +36,19 @@ export type AdminRoleSwitchProps = {
   onChanged: (result: AdminRoleResult) => void | Promise<void>;
 };
 
-type Mode = "grant" | "revoke" | null;
-
-/** What the dialog says, by what it does and to whom. */
-function dialogWords(mode: "grant" | "revoke", self: boolean, name: string) {
-  if (mode === "grant") {
-    return { tone: "primary" as const, title: COPY.grantTitle(name), description: COPY.grantBody(name), confirmLabel: COPY.grantConfirm, action: COPY.grantAction };
-  }
-  return {
-    tone: "danger" as const,
-    title: self ? COPY.revokeSelfTitle : COPY.revokeTitle(name),
-    description: self ? COPY.revokeSelfBody : COPY.revokeBody(name),
-    confirmLabel: COPY.revokeConfirm,
-    action: COPY.revokeAction,
-  };
-}
-
-/** Why the switch cannot be pressed, or null when it can. */
-function lockReason(isAdmin: boolean, adminSource: AdminSource | null, status: MembershipStatus | null): string | null {
-  if (isAdmin && adminSource === "config") return COPY.configLocked;
-  if (!isAdmin && status !== "Active") return COPY.notActive;
-  return null;
-}
-
 export function AdminRoleSwitch(props: AdminRoleSwitchProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { userId, name, isAdmin, adminSource, status } = props;
-  const auth = useAuth();
-  const self = auth.status === "authenticated" && auth.userId === userId;
+  const { userId, name, isAdmin, adminSource, status, onChanged } = props;
   const control = useRef<HTMLButtonElement>(null);
-  const [mode, setMode] = useState<Mode>(null);
+  // Which attempt, and whether its dialog is open, are separate: the dialog stays mounted after
+  // it closes so its exit animation and its focus return both run; a new attempt is a new key,
+  // so nothing typed last time is carried over.
+  const [attempt, setAttempt] = useState<{ n: number; grant: boolean } | null>(null);
   const [open, setOpen] = useState(false);
-  const locked = lockReason(isAdmin, adminSource, status);
-  const act = useRoleChange(props, self);
+  const { locked } = adminRoleOffer(isAdmin, adminSource, status);
 
   const begin = (next: boolean) => {
-    act.reset();
-    setMode(next ? "grant" : "revoke");
+    setAttempt((a) => ({ n: (a?.n ?? 0) + 1, grant: next }));
     setOpen(true);
   };
 
@@ -113,99 +73,18 @@ export function AdminRoleSwitch(props: AdminRoleSwitchProps) {
           <span>{locked}</span>
         </p>
       ) : null}
-      {mode ? (
-        <ConfirmDialog
-          key={mode}
+      {attempt ? (
+        <AdminRoleDialog
+          key={attempt.n}
+          userId={userId}
+          name={name}
+          grant={attempt.grant}
           open={open}
           onOpenChange={setOpen}
           returnFocus={() => control.current}
-          {...dialogWords(mode, self, name)}
-          codes={ADMIN_ROLE_CODES}
-          // R3 A-16: enabled, and a press names what is missing and focuses the reason.
-          notReady={!act.ready(mode === "grant")}
-          describe={(error) => unsureSentence(error, unsureWords(
-            mode === "grant" ? COPY.stillNotAdmin(name) : COPY.stillAdmin(name),
-            mode === "grant" ? COPY.whetherGranted(name) : COPY.whetherRevoked(name),
-            `${name}'s page`,
-          ))}
-          notReadyMessage={act.reason.trim() ? COPY.confirmSelfMissing : undefined}
-          onConfirm={() => act.run(mode === "grant")}
-        >
-          <ReasonFields grant={mode === "grant"} self={self} act={act} />
-        </ConfirmDialog>
-      ) : null}
-    </>
-  );
-}
-
-type RoleChange = ReturnType<typeof useRoleChange>;
-
-/** The reason, and — for yourself — the second yes. */
-/**
- * The reason, for BOTH directions (review round 1, F3.9 — contract §7). Granting admin rights
- * asked for nothing while revoking them asked why, so the change record could say why somebody
- * lost the console and never why they were given it.
- */
-function ReasonFields({ grant, self, act }: { grant: boolean; self: boolean; act: RoleChange }) {
-  const confirmId = useId();
-  return (
-    <>
-      <Field controlId="admin-role-reason">
-        <span className="flex flex-wrap items-baseline gap-x-1.5">
-          <FieldLabel>{COPY.reason}</FieldLabel>
-          <span aria-hidden="true" className="text-sm text-text-secondary">{REQUIRED_MARK}</span>
-        </span>
-        <Textarea
-          required
-          aria-required="true"
-          value={act.reason}
-          onChange={(e) => act.setReason(e.target.value)}
-          placeholder={grant ? COPY.grantReasonPlaceholder : COPY.reasonPlaceholder}
+          onChanged={onChanged}
         />
-        <FieldDescription>{COPY.reasonHint}</FieldDescription>
-      </Field>
-      {!grant && self ? (
-        <div className="flex items-center gap-3">
-          <Checkbox id={confirmId} checked={act.confirmSelf} onCheckedChange={(v) => act.setConfirmSelf(v === true)} />
-          <label htmlFor={confirmId} className="text-sm font-medium text-text-primary">{COPY.confirmSelf}</label>
-        </div>
       ) : null}
     </>
   );
-}
-
-/**
- * The request and its aftermath. A rejection is THROWN so the dialog keeps itself open and
- * shows the refusal's own sentence; a success says so, hands the server's answer up, and — when
- * an admin has just removed their own rights — re-asks the server who this session is, so the
- * console closes on them now rather than at their next click.
- */
-function useRoleChange(props: AdminRoleSwitchProps, self: boolean) {
-  const { userId, name, onChanged } = props;
-  const toast = useToast();
-  const auth = useAuth();
-  const [reason, setReason] = useState("");
-  const [confirmSelf, setConfirmSelf] = useState(false);
-
-  const run = async (grant: boolean) => {
-    // A lost reply is looked up (review round 3): the member read again holds the rights asked
-    // for → it landed; does not → nothing changed; unreadable → not known (said by the dialog).
-    const { value: result, proven } = await writeOrReadBack(
-      () => memberDetailEndpoints.setAdmin(userId, { grant, reason: reason.trim(), ...(!grant && self ? { confirmSelf } : {}) }),
-      async () => {
-        const now = await memberDetailEndpoints.detail(userId);
-        return now.is_admin === grant ? { user_id: userId, is_admin: now.is_admin, admin_source: now.admin_source, changed: true } : null;
-      },
-    );
-    const said = !result.changed ? COPY.unchanged(name, result.is_admin) : grant ? COPY.granted(name) : COPY.revoked(name);
-    toast.push({ tone: "success", text: proven ? LOST_REPLY.proven(said) : said });
-    await onChanged(result);
-    if (!grant && self) void auth.retryConnection();
-  };
-
-  return {
-    reason, setReason, confirmSelf, setConfirmSelf, run,
-    ready: (grant: boolean) => reason.trim().length > 0 && (grant || !self || confirmSelf),
-    reset: () => { setReason(""); setConfirmSelf(false); },
-  };
 }
