@@ -135,3 +135,24 @@ test.describe("Sign in and Join (SPEC 3.17)", () => {
     expect(await box(page, "[data-auth-brand]")).toBeNull();
   });
 });
+
+test.describe("Home, signed out (SPEC 3.18)", () => {
+  test("1920: the 120rem frame; league, the Open and the app's blocks share one row", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "a desktop width");
+    await openAnon(page, "/", 1920);
+    await expect(page.getByRole("heading", { name: "Crusaders Squash", level: 1 })).toBeVisible();
+    await healthy(page);
+    const league = (await box(page, 'section[aria-labelledby="league"]'))!;
+    const app = (await box(page, 'section[aria-labelledby="mainframe"]'))!;
+    expect(app.x).toBeGreaterThanOrEqual(league.right);
+    expect(Math.abs(app.y - league.y)).toBeLessThan(4);
+    expect(await widthUsed(page)).toBeGreaterThanOrEqual(0.9);
+  });
+
+  test("390 at 200 % text: one column, nothing off screen", async ({ page }) => {
+    await openAnon(page, "/", 390);
+    await expect(page.getByRole("heading", { name: "Crusaders Squash", level: 1 })).toBeVisible();
+    await bigText(page);
+    await healthy(page);
+  });
+});

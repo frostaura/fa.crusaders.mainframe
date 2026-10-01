@@ -106,9 +106,11 @@ function SignedOutLanding() {
   return (
     // Owns its own gutter and width cap, because Layout gives the public landing a bare,
     // full-bleed <main> rather than the app's boxed content column.
-    <div className="mx-auto w-full max-w-content space-y-10 px-4 py-10 sm:space-y-14 sm:py-14">
+    // R4 form factor (SPEC 3.18): the 120rem frame from 2xl, where the hero splits wide, the club's
+    // three blocks share one row and the court plan is drawn large rather than as a 60px icon.
+    <div className="mx-auto w-full max-w-content space-y-10 px-4 py-10 sm:space-y-14 sm:px-6 sm:py-14 lg:px-8 2xl:max-w-page 3xl:px-12">
       {/* ---- Hero ---------------------------------------------------------------- */}
-      <header className="grid grid-cols-1 items-center gap-6 sm:grid-cols-[1fr_auto]">
+      <header className="grid grid-cols-1 items-center gap-6 sm:grid-cols-[1fr_auto] 2xl:gap-16">
         <div>
           <CrestMark className="mb-4 h-14 w-12" />
           <p className="text-sm font-medium uppercase tracking-wider text-accent-strong">
@@ -117,7 +119,7 @@ function SignedOutLanding() {
           {/* R4: never wider than a phone — at 200 % text "Crusaders" alone was wider than a 320px
               screen. 13vw is above 1.875rem at every phone width at normal text, so only large
               text is capped. */}
-          <h1 className="mt-1 font-display text-[length:min(1.875rem,13vw)] font-bold leading-tight tracking-tight sm:text-4xl">
+          <h1 className="mt-1 font-display text-[length:min(1.875rem,13vw)] font-bold leading-tight tracking-tight sm:text-4xl 2xl:text-5xl">
             Crusaders Squash
           </h1>
           {/*
@@ -126,7 +128,7 @@ function SignedOutLanding() {
             headed "Crusaders Squash" — it read as the founding date of the squash section,
             which is not what the source says and is not known.
           */}
-          <p className="mt-3 max-w-prose text-base text-text-secondary">
+          <p className="mt-3 max-w-prose text-base text-text-secondary 2xl:text-lg">
             Four glass-back courts, thirteen league teams, and squash at Northwood Crusaders
             Sports Club — part of Durban North since the mid-1960s. Book a court, top up your
             credits and check your league night — all from here.
@@ -141,7 +143,7 @@ function SignedOutLanding() {
         </div>
 
         {/* Decorative at small sizes, where the copy and the buttons are the whole job. */}
-        <CourtMotif className="hidden h-56 w-auto justify-self-end sm:block" />
+        <CourtMotif className="hidden h-56 w-auto justify-self-end sm:block 2xl:h-96" />
       </header>
 
       {/* ---- The four claims that are strongest and best-sourced ------------------ */}
@@ -157,6 +159,8 @@ function SignedOutLanding() {
         </div>
       </section>
 
+      {/* League, the Open and what the app is for: stacked, then ONE three-column row from 2xl. */}
+      <div className="grid gap-10 sm:gap-14 2xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] 2xl:items-start 2xl:gap-6">
       {/* ---- League ---------------------------------------------------------------- */}
       <section aria-labelledby="league" className="grid gap-6 lg:grid-cols-2">
         <Panel>
@@ -249,6 +253,7 @@ function SignedOutLanding() {
           <span className="inline-flex items-center gap-1.5"><Wallet size={16} aria-hidden="true" /> Pay from credits, not at the door</span>
         </div>
       </section>
+      </div>
 
       {/* ---- Find us ---------------------------------------------------------------- */}
       <section aria-labelledby="find-us" className="grid gap-6 lg:grid-cols-2">
