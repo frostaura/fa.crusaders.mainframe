@@ -260,7 +260,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// <c>/admin/reports/revenue</c> — rand and credits both, since the two are read off
+    /// <c>/admin/reports/revenue</c> — rand and minutes both, since the two are read off
     /// different columns and a window that slipped would move them together.
     /// </summary>
     [SkippableFact]
@@ -409,18 +409,18 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
-        void Adjustment(DateTimeOffset at, int credits, string reason) =>
+        void Adjustment(DateTimeOffset at, int minutes, string reason) =>
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.AdminAdjustment,
-                AmountMinutes = credits, ActorUserId = admin.Id, Reason = reason, CreatedAt = at,
+                AmountMinutes = minutes, ActorUserId = admin.Id, Reason = reason, CreatedAt = at,
             });
 
-        void TopUp(DateTimeOffset at, int credits, decimal zar, string reason) =>
+        void TopUp(DateTimeOffset at, int minutes, decimal zar, string reason) =>
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp,
-                AmountMinutes = credits, ZarPaid = zar,
+                AmountMinutes = minutes, ZarPaid = zar,
                 ActorUserId = member.Id, Reason = reason, CreatedAt = at,
             });
 
@@ -430,7 +430,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
                 TenantId = tenant.Id, CourtId = court.Id, UserId = member.Id,
                 BookedByUserId = member.Id, PaidByUserId = member.Id, ActorUserId = member.Id,
                 StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 30, SliceCount = 1, AmountChargedMinutes = 16,
+                SliceMinutes = 30, SliceCount = 1, AmountChargedMinutes = 30,
                 Status = status, ChargedAt = startsAt.AddDays(-1),
             });
 

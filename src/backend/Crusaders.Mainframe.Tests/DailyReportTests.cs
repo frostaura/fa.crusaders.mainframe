@@ -21,7 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// previous day's row — and on the 1st of a month, into the previous month's report.
 /// <c>reporting.md</c> § Implementation notes has required the tenant's own timezone since
 /// it was written. And the row carried no <b>adjustments</b> figure at all: a club that had
-/// handed out 2,525.50 credits at the desk could read that number on a member's own report
+/// handed out 2,525 minutes at the desk could read that number on a member's own report
 /// and on Transactions, and on no screen describing the club.
 /// </para>
 ///
@@ -79,7 +79,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var byDate = doc.RootElement.EnumerateArray().ToDictionary(e => e.GetProperty("date").GetString()!);
 
-        // The 300-credit top-up sits on the club's day, and on no other day — asserting the
+        // The 300-minute purchase sits on the club's day, and on no other day — asserting the
         // whole series rather than one cell, so a fix that duplicates a row across two
         // buckets fails here too.
         foreach (var (date, row) in byDate)
@@ -88,7 +88,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
             Assert.Equal(expected, row.GetProperty("top_ups_minutes").GetDecimal());
         }
 
-        // The 50-credit charge is an hour earlier and stays on 2 March under BOTH zones. So
+        // The 50-minute charge is an hour earlier and stays on 2 March under BOTH zones. So
         // in Johannesburg the two rows are split by the club's midnight, and in UTC they are
         // not — which is the whole difference between the two cases.
         Assert.Equal(50m, byDate["2026-03-02"].GetProperty("booking_charges_minutes").GetDecimal());
@@ -177,7 +177,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
         // admin picking two dates is thinking in.
         var first = new DateOnly(2026, 9, 1);
         var last = new DateOnly(2026, 9, 3);
-        var probes = new (string Label, DateTimeOffset At, int Credits)[]
+        var probes = new (string Label, DateTimeOffset At, int Minutes)[]
         {
             ("the day before, at 23:30", ClubTime(first.AddDays(-1), 23, 30, 0, tz), 99),
             ("the first instant of the first day", ClubTime(first, 0, 0, 0, tz), 11),
@@ -249,7 +249,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
 
         var types = Enum.GetValues<LedgerEntryType>();
         var probes = types
-            .Select(t => (Label: t.ToString(), At: ClubTime(day, 12, 0, 0, tz), Credits: AmountFor(t)))
+            .Select(t => (Label: t.ToString(), At: ClubTime(day, 12, 0, 0, tz), Minutes: AmountFor(t)))
             .ToArray();
 
         var (tenantId, slug, adminId) = await SeedProbesAsync(factory, ClubZone, probes, types);
@@ -270,7 +270,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
 
         // The type-blind total first: it is what the member's own `net_movement_minutes`
         // means, and what the club's card now claims to print.
-        var posted = probes.Sum(x => x.Credits);
+        var posted = probes.Sum(x => x.Minutes);
         Assert.Equal(posted, Get("net_movement_minutes"));
 
         // And the buckets, which must be the same number by a different route. Charges and
@@ -322,7 +322,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
     /// </summary>
     private static async Task<(Guid TenantId, string Slug, Guid AdminId)> SeedProbesAsync(
         TestWebAppFactory factory, string timezone,
-        (string Label, DateTimeOffset At, int Credits)[] probes,
+        (string Label, DateTimeOffset At, int Minutes)[] probes,
         LedgerEntryType[]? types = null)
     {
         using var scope = factory.Services.CreateScope();
@@ -349,7 +349,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
                 TenantId = tenant.Id,
                 UserId = member.Id,
                 Type = types is null ? LedgerEntryType.AdminAdjustment : types[i],
-                AmountMinutes = probes[i].Credits,
+                AmountMinutes = probes[i].Minutes,
                 ActorUserId = admin.Id,
                 Reason = probes[i].Label,
                 CreatedAt = probes[i].At,
