@@ -69,6 +69,8 @@ test("the webhook catalogue reads as cards on a phone, with every description on
   await signIn(page);
   await serveApi(page, [...BASE, { path: "/api/v1/admin/webhooks/", body: [] }]);
   await page.goto("/admin/webhooks");
+  // R4 form factor (SPEC §3.15): on a phone the catalogue is folded until asked for.
+  await page.getByRole("button", { name: "Show the catalogue" }).click({ timeout: 20_000 });
   const list = page.getByRole("list", { name: "Events and the variables each carries" });
   await expect(list).toBeVisible();
   await expect(page.getByRole("table", { name: "Events and the variables each carries" })).toBeHidden();

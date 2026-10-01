@@ -2,6 +2,9 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./
 import { CONFIRM_NOT_READY } from "../src/lib/confirmDialogCopy";
 import { ACTIONS_COPY, ADMIN_ROLE_COPY, DOORS_TAB_COPY, MEMBER_COPY, MEMBER_TABS } from "../src/lib/memberDetailCopy";
 
+/** The record is a child route of the members list (R4): two lazy chunks, cold on a fresh dev server. */
+const ARRIVES = { timeout: 20_000 };
+
 /**
  * The member page (P5, R17/R20/D9), driven in Chromium at both project widths.
  *
@@ -82,7 +85,7 @@ test.describe("member detail", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     await serveApi(page, routes([{ path: BASE, body: detail({ is_admin: true, admin_source: "granted" }) }]));
     await page.goto(`/admin/members/${MEMBER_ID}`);
-    await expect(page.getByRole("heading", { level: 1, name: "Naledi Khumalo-Van der Merwe" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Naledi Khumalo-Van der Merwe" })).toBeVisible(ARRIVES);
     const tabs = await page.getByRole("navigation", { name: MEMBER_COPY.tabsLabel }).boundingBox();
     const bar = await page.locator("[data-primary-nav]").boundingBox();
     expect(tabs!.y + tabs!.height, "the tabs end under the bottom tab bar").toBeLessThanOrEqual(bar!.y);
@@ -91,7 +94,7 @@ test.describe("member detail", () => {
   test("never scrolls the page sideways, and every tab is a 44px link", async ({ page }) => {
     await serveApi(page, routes());
     await page.goto(`/admin/members/${MEMBER_ID}`);
-    await expect(page.getByRole("heading", { level: 1, name: "Naledi Khumalo-Van der Merwe" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Naledi Khumalo-Van der Merwe" })).toBeVisible(ARRIVES);
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);

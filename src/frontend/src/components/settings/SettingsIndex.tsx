@@ -5,8 +5,9 @@ import type { SettingsSectionDef, SettingsSectionId } from "@/lib/settingsSchema
 
 /**
  * The sections, listed BESIDE them (R4 form factor, SPEC §3.12): where the page has the room, a
- * sticky index with each section's name, its one-line summary and a dot where it holds unsaved
- * changes. A press opens that section and brings it into view; the entry for the section at the
+ * sticky index with each section's name and a dot where it holds unsaved changes. Not its
+ * summary: the accordion beside it already says that line, and the same words twice in one view
+ * are two answers to "where is it?". A press opens that section and brings it into view; the entry for the section at the
  * top of the screen is marked as the current one as the page scrolls.
  *
  * <p>
@@ -17,12 +18,11 @@ import type { SettingsSectionDef, SettingsSectionId } from "@/lib/settingsSchema
  */
 export type SettingsIndexProps = {
   sections: readonly SettingsSectionDef[];
-  summaryOf: (id: SettingsSectionId) => string;
   dirty: ReadonlySet<SettingsSectionId>;
   onGo: (id: SettingsSectionId) => void;
 };
 
-export function SettingsIndex({ sections, summaryOf, dirty, onGo }: SettingsIndexProps) {
+export function SettingsIndex({ sections, dirty, onGo }: SettingsIndexProps) {
   const current = useCurrentSection(sections);
   return (
     <nav aria-label={SETTINGS_COPY.indexLabel} className="flex flex-col gap-1">
@@ -35,7 +35,7 @@ export function SettingsIndex({ sections, summaryOf, dirty, onGo }: SettingsInde
               aria-current={current === section.id ? "true" : undefined}
               onClick={() => onGo(section.id)}
               className={cn(
-                "no-lift relative flex w-full min-h-touch flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left",
+                "no-lift relative flex w-full min-h-touch items-center rounded-lg px-3 py-2 text-left",
                 "transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none",
                 "before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-full",
                 "aria-[current=true]:bg-accent-soft aria-[current=true]:before:bg-accent-strong",
@@ -50,7 +50,6 @@ export function SettingsIndex({ sections, summaryOf, dirty, onGo }: SettingsInde
                   </span>
                 ) : null}
               </span>
-              <span className="line-clamp-2 text-xs text-text-secondary">{summaryOf(section.id)}</span>
             </button>
           </li>
         ))}

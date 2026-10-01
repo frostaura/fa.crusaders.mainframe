@@ -214,7 +214,7 @@ function SettingsEditor({ doc }: { doc: Doc }) {
       <PageShell width="full" className={barShown ? (blockers.length > 0 ? "pb-80" : "pb-40") : undefined}>
         <PageHeader title={SETTINGS_COPY.title} description={SETTINGS_COPY.description} />
         {/* R4 form factor (SPEC §3.12): from a 64rem box the sections are indexed BESIDE them —
-            sticky, with each one's summary and an unsaved dot — so a 1920 screen is not a 1024px
+            sticky, with an unsaved dot on each that holds changes — so a 1920 screen is not a 1024px
             column in the middle; narrower, the accordion alone, as before. */}
         <WithAside
           placement="sheet"
@@ -224,7 +224,6 @@ function SettingsEditor({ doc }: { doc: Doc }) {
           aside={(
             <SettingsIndex
               sections={SETTINGS_SECTIONS}
-              summaryOf={(id) => sectionSummary(id, draft, currency)}
               dirty={dirty}
               onGo={(id) => goToSection(id)}
             />

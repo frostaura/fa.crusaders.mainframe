@@ -91,7 +91,9 @@ async function openMembers(page: import("@playwright/test").Page, club: Club = C
     },
   ]);
   await page.goto("/admin/members");
-  await expect(page.getByRole("region", { name: "Members table" })).toBeVisible();
+  // The admin frame and the members page are lazy chunks; cold on a fresh dev server they take
+  // longer than the default 5 s (measured 12.7 s for the first, 2 s after).
+  await expect(page.getByRole("region", { name: "Members table" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Naledi Khoza")).toBeVisible();
   // Groups arrive from their own read; measure once the column has settled.
   await expect(page.locator("tbody [data-slot='badge']", { hasText: "Social squash" }).first()).toBeAttached();
