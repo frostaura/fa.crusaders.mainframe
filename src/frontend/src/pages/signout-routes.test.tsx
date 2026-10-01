@@ -88,7 +88,8 @@ describe("signing out, through the real guard", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); localStorage.clear(); });
 
   it("D7 — 'Sign out everywhere' lands on /login WITH its sentence, although RequireAuth redirects first", async () => {
-    renderApp("/profile", [{ method: "POST", path: REVOKE, body: { signed_out: true, passkeys_revoked: false, passkeys_removed: 0 } }]);
+    // R4 form factor: the signed-in-devices card is on Profile's Account tab.
+    renderApp("/profile?tab=account", [{ method: "POST", path: REVOKE, body: { signed_out: true, passkeys_revoked: false, passkeys_removed: 0 } }]);
     const card = await screen.findByRole("region", { name: COPY.title });
     fireEvent.click(within(card).getByRole("button", { name: COPY.open }));
     const dialog = await screen.findByRole("dialog", { name: COPY.confirmTitle });
@@ -101,7 +102,7 @@ describe("signing out, through the real guard", () => {
   });
 
   it("D11 — after a sign-out the next person lands on the landing, not on the last person's /profile", async () => {
-    renderApp("/profile", [loginAnswer(BEN)]);
+    renderApp("/profile?tab=account", [loginAnswer(BEN)]);
     await screen.findByRole("region", { name: COPY.title });
     fireEvent.click(screen.getByRole("button", { name: "probe sign out" }));
     await waitFor(() => expect(screen.getByTestId("at")).toHaveTextContent("/login"));
@@ -114,7 +115,7 @@ describe("signing out, through the real guard", () => {
     ["the same member signs back in: back to the page they were on", ADA, "/profile"],
     ["somebody else signs in: the landing, never the last member's page", BEN, "/my-code"],
   ])("D11 — after a session is taken away, %s", async (_name, who, landing) => {
-    renderApp("/profile", [loginAnswer(who)]);
+    renderApp("/profile?tab=account", [loginAnswer(who)]);
     await screen.findByRole("region", { name: COPY.title });
     // Another tab signed out: this tab's session ends underneath it (an expiry, not a choice).
     localStorage.removeItem(TOKEN_KEY);

@@ -706,7 +706,8 @@ describe("Profile — the name rule the server has always had", () => {
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/me/webauthn/credentials", body: [] },
     ]);
-    renderAt(<ProfilePage />);
+    // R4 form factor: the name and password cards are on Profile's Account tab.
+    renderAt(<ProfilePage />, ["/profile?tab=account"]);
 
     const field = await screen.findByLabelText("Full name");
     expect(screen.getByText(/At least 2 characters/i)).toBeInTheDocument();
@@ -730,7 +731,8 @@ describe("Profile — the name rule the server has always had", () => {
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/me/webauthn/credentials", body: [] },
     ]);
-    renderAt(<ProfilePage />);
+    // R4 form factor: the name and password cards are on Profile's Account tab.
+    renderAt(<ProfilePage />, ["/profile?tab=account"]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Change password" }));
     expect(await screen.findByLabelText("Current password")).toBeInTheDocument();
