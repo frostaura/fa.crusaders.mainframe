@@ -123,6 +123,8 @@ function useKeptDraft(doc: Doc | null, setDoc: (next: Doc) => void) {
 export function useSettingsDocument() {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [error, setError] = useState<unknown>(null);
+  /** When the settings were last read: a failed re-read keeps the page (and any draft), said as of then. */
+  const [readAt, setReadAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<SaveFailure | null>(null);
   /** The sentence the save bar keeps on screen after a save, until the next edit (F3-4). */
@@ -154,6 +156,7 @@ export function useSettingsDocument() {
     try {
       const settings = await endpoints.adminSettingsGet();
       setDoc((prev) => withFresh(prev, settings));
+      setReadAt(Date.now());
     } catch (err) {
       setError(err);
     } finally {
@@ -221,7 +224,7 @@ export function useSettingsDocument() {
   return {
     saved: doc?.saved ?? null,
     draft: doc?.draft ?? null,
-    error, loading, load, update, discard, save, failure,
+    error, readAt, loading, load, update, discard, save, failure,
     restored: restored !== null,
     restoredAfterSignIn: restored?.afterSignIn === true,
     droppedLabels,

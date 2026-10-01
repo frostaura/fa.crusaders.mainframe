@@ -3,6 +3,7 @@ import { Alert } from "../components/Alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { AutoGrid } from "../components/ui/auto-grid";
+import { StaleNotice } from "../components/shell/StaleNotice";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { StateBlock } from "../components/ui/state-block";
 import { TextLink } from "../components/ui/text-link";
@@ -82,6 +83,22 @@ function ScheduleListRow({ row, timezone }: { row: ScheduleRow; timezone?: strin
   );
 }
 
+type ScheduleRead = {
+  key: string; status: Status; rows: ScheduleRow[] | null; error: unknown; timezone?: string;
+  /** When `rows` were read — kept across a failed re-read of the same list. */
+  at: number | null;
+};
+
+/**
+ * A re-read of the SAME list that failed (after a create, say) keeps the rows it had, under
+ * "Couldn't refresh" (R4); another list's rows are not this list's answer, so a failure there
+ * has nothing to keep.
+ */
+function keptOnFailure(prev: ScheduleRead, key: string, status: Status, error: unknown): ScheduleRead {
+  const same = prev.status === status && prev.rows !== null;
+  return { key, status, rows: same ? prev.rows : null, error, timezone: same ? prev.timezone : undefined, at: same ? prev.at : null };
+}
+
 export function AdminSchedulesPage() {
   const [status, setStatus] = useState<Status>("active");
   const [nonce, setNonce] = useState(0);
@@ -98,23 +115,23 @@ export function AdminSchedulesPage() {
    * more honest sentence: rows from the previous filter are not this filter's answer.
    */
   const key = `${status}:${nonce}`;
-  const [read, setRead] = useState<{ key: string; rows: ScheduleRow[] | null; error: unknown; timezone?: string }>(
-    { key: "", rows: null, error: null },
-  );
+  const [read, setRead] = useState<ScheduleRead>({ key: "", status, rows: null, error: null, at: null });
   const load = useCallback(() => setNonce((n) => n + 1), []);
 
   useEffect(() => {
     let live = true;
     const asked = `${status}:${nonce}`;
     adminEndpoints.schedules(status)
-      .then((page) => { if (live) setRead({ key: asked, rows: page.schedules ?? [], error: null, timezone: page.timezone }); })
-      .catch((err) => { if (live) setRead({ key: asked, rows: null, error: err }); });
+      .then((page) => { if (live) setRead({ key: asked, status, rows: page.schedules ?? [], error: null, timezone: page.timezone, at: Date.now() }); })
+      .catch((err) => { if (live) setRead((prev) => keptOnFailure(prev, asked, status, err)); });
     return () => { live = false; };
   }, [status, nonce]);
 
   const loading = read.key !== key;
   const rows = loading ? null : read.rows;
-  const error = loading ? null : read.error;
+  // Rows kept from the last good read of this list stand under "Couldn't refresh" (R4).
+  const kept = !loading && read.error !== null && rows !== null;
+  const error = loading || kept ? null : read.error;
 
   const codes = useMemo(() => scheduleCodes({}), []);
 
@@ -178,6 +195,7 @@ export function AdminSchedulesPage() {
           </ToggleGroup>
         </div>
 
+        <StaleNotice stale={kept} readAt={read.at} />
         <StateBlock
           loading={loading}
           error={error}

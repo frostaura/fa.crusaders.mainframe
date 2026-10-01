@@ -8,6 +8,7 @@ import { RefreshButton } from "../../components/ui/refresh-button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { StateBlock } from "../../components/ui/state-block";
 import { CourtSheet } from "../../components/settings/CourtSheet";
+import { StaleNotice } from "../../components/shell/StaleNotice";
 import { endpoints, type AdminCourt } from "../../lib/api";
 import { COURTS_COPY } from "../../lib/courtsCopy";
 
@@ -36,12 +37,15 @@ export default function AdminCourtsPage() {
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<AdminCourt | "new" | null>(null);
+  /** When the courts were last read: a failed refresh keeps them, said as of then (R4). */
+  const [readAt, setReadAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       setCourts(await endpoints.adminCourtsList());
+      setReadAt(Date.now());
     } catch (err) {
       setError(err);
     } finally {
@@ -66,9 +70,11 @@ export default function AdminCourtsPage() {
           </>
         )}
       />
+      <StaleNotice stale={Boolean(error) && courts !== null} readAt={readAt} />
       <StateBlock
         loading={loading && courts === null}
-        error={error}
+        // Only a club whose courts were never read is a failure in their place (R4).
+        error={courts === null ? error : null}
         action={COURTS_COPY.readAction}
         failedCaveat={COURTS_COPY.readCaveat}
         onRetry={() => void load()}

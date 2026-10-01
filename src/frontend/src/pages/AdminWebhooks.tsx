@@ -4,6 +4,7 @@ import { describeFailure } from "../lib/errors";
 import { LOST_CREATE } from "../lib/webhooksCopy";
 import { ActionsMenu } from "../components/admin/ActionsMenu";
 import { Alert } from "../components/Alert";
+import { StaleNotice } from "../components/shell/StaleNotice";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -273,12 +274,15 @@ export default function AdminWebhooksPage() {
    */
   const [loadError, setLoadError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  /** When the list was last READ — so a failed refresh can keep it, said as of then (R4). */
+  const [readAt, setReadAt] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
       setList(await endpoints.adminWebhooksList());
       setLoadError(null);
+      setReadAt(Date.now());
     } catch (err) {
       setLoadError(err);
       throw err;
@@ -385,7 +389,10 @@ export default function AdminWebhooksPage() {
           </CardAction>
         </CardHeader>
         <CardContent>
-          {loadError ? <ListFailed error={loadError} retrying={loading} onRetry={retry} /> : null}
+          {/* A list read before stays, under "Couldn't refresh" (R4); New endpoint stays off until a
+              read succeeds, because the list on screen may be missing one made since. */}
+          {loadError && readAt === null ? <ListFailed error={loadError} retrying={loading} onRetry={retry} /> : null}
+          <StaleNotice stale={loadError !== null && readAt !== null} readAt={readAt} />
           <StateBlock
             action="read the webhook endpoints"
             loading={!loadError && loading && list.length === 0}
@@ -395,7 +402,7 @@ export default function AdminWebhooksPage() {
             emptyTitle="No webhook endpoints yet."
             emptyHint="Create one to start sending the club's events to another system."
           >
-            <ul hidden={loadError !== null} className="divide-y divide-border rounded-lg border border-border">
+            <ul hidden={loadError !== null && readAt === null} className="divide-y divide-border rounded-lg border border-border">
               {list.map((w) => (
                 <EndpointRow
                   key={w.id}

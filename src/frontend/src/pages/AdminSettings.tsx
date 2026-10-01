@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Accordion } from "../components/ui/accordion";
 import { Alert } from "../components/Alert";
+import { StaleNotice } from "../components/shell/StaleNotice";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { WithAside } from "../components/ui/with-aside";
@@ -64,7 +65,9 @@ import { YourEmailAlerts } from "../components/settings/YourEmailAlerts";
 export default function AdminSettingsPage() {
   const doc = useSettingsDocument();
 
-  if (doc.error) {
+  // A failed re-read over settings already on screen keeps them — and the admin's draft — under
+  // "Couldn't refresh" (R4); only settings never read are a failure in place of the page.
+  if (doc.error && !doc.draft) {
     return (
       <PageShell width="full">
         <PageHeader title={SETTINGS_COPY.title} description={SETTINGS_COPY.description} />
@@ -227,6 +230,7 @@ function SettingsEditor({ doc }: { doc: Doc }) {
             />
           )}
         >
+        <StaleNotice stale={Boolean(doc.error)} readAt={doc.readAt} />
         <SaveNotices doc={doc} changes={changed.length} currency={currency} onGoTo={focusSetting} />
         <SettingsIntro />
         <SettingsToolbar
