@@ -17,12 +17,12 @@ A line-by-line reconciliation of [`client-blueprints/Crusaders-Blueprint-2026-05
 | --- | --- | --- |
 | A.1 — book on a cell-phone app | ✅ | Mobile-first responsive PWA. |
 | A.2 — ID + password / thumbprint, admin approval | ✅ | Registration → email verify → admin approval → password + WebAuthn passkey login. |
-| A.3 — top-up in **R100 blocks**, max **R1000** for members, **admin unlimited** | 🟡 | Currently R50 / R250 / R500 / R1000 presets, range R50–R5000. Tighten to R100-block-only with R1000 cap for members; admin manual-credit already has no cap. |
+| A.3 — top-up in **R100 blocks**, max **R1000** for members, **admin unlimited** | ⚠️ | **Superseded by [D-3](#d-3--minutes-packages-replace-credits-the-r100-block-and-the-r1000-cap) (P13, 2026-10-01):** members buy admin-defined **minutes packages** with **no cap** and no block; the desk sells packages over the counter. |
 | A.4 — 2-week horizon, **1 hour / day per member** | 🟡 | 14-day horizon already there. **New rule:** per-member-per-day max minutes (default 60), enforced at booking-create. Admin can override. |
 | A.5 — unfunded accounts can't book | ✅ | `BookingResult.InsufficientBalance` already returned 402. |
 | A.6 — admin override unlimited | ✅ | Admin booking endpoint bypasses windows + caps. |
 | A.7 — **two member classes:** member, league/65+ | 🆕 | ~~Add `MemberClass` enum to `Membership`.~~ **Superseded by D2 (2026-09-23):** the class is removed and GROUPS carry it — the league group (system key `league`) holds the A.8 league rate and the A.12 peak priority; `GroupsReplaceClass` moved every `LeagueOrSenior` member into it. Same economics per member; any number of groups beyond the two. |
-| A.8 — **differential top-up rates by class:** R100 → 160 credits (Regular) / 240 credits (League/65+) | 🆕 | Major model change — the ledger unit is **credits**, not ZAR. Top-up converts at class-specific rate. ZAR amount is captured on the `PendingTopup` row for reconciliation; ledger entry is denominated in credits. Slice prices are also in credits. |
+| A.8 — **differential top-up rates by class:** R100 → 160 credits (Regular) / 240 credits (League/65+) | ⚠️ | **Superseded by [D-3](#d-3--minutes-packages-replace-credits-the-r100-block-and-the-r1000-cap) (P13, 2026-10-01):** the ledger unit is **whole minutes**; a booking costs its own length. The league advantage is a configurable **package discount** on the league group (rand only, lowest discount wins), not a conversion rate. |
 | A.9 — **debit on lights-on**, not on booking | ⚠️ | **Built the other way, on purpose.** `CreateAsync` posts the `BookingCharge` debit at booking time; the court settles only *who* pays. See [D-1](#d-1--the-debit-happens-at-booking-not-at-lights-on) — **needs committee sign-off**. |
 | A.10 — league games booked by admin, paid by member | ✅ | Admin booking-on-behalf charges the member's credit. |
 | A.11 — admin override for control | ✅ | Audit-logged. |
@@ -44,6 +44,11 @@ A line-by-line reconciliation of [`client-blueprints/Crusaders-Blueprint-2026-05
 ## Architectural changes — the four big ones
 
 ### 1. Credits as the unit of account (not ZAR)
+
+> **Historical — superseded by [D-3](#d-3--minutes-packages-replace-credits-the-r100-block-and-the-r1000-cap)
+> (P13, 2026-10-01).** The unit of account is whole minutes and members buy packages; the
+> contract is [`minutes-and-packages.md`](./minutes-and-packages.md). This section is kept as
+> the record of what was built before.
 
 The ledger is denominated in **credits**. Top-ups convert ZAR → credits at the member's class-specific rate, stored as conversion metadata on the ledger entry so the conversion is auditable.
 
@@ -185,6 +190,33 @@ because it holds the device credential. What the boot guard does instead is stop
 being installed twice — which is the failure that takes out a club, since every box
 heartbeats against the same manifest and would otherwise reflash in a loop, all at once. A
 box that will not boot at all still needs a USB cable.
+
+### D-3 — minutes packages replace credits, the R100 block and the R1000 cap
+
+**Blueprint A.8:** a top-up converts rand to credits at a class rate — R100 → 160 credits
+(Regular) or 240 credits (League/65+). **Blueprint A.3:** top-ups in R100 blocks, at most R1000
+for a member, admin unlimited.
+**Built (P13):** the ledger unit is **whole minutes**, and a booking costs exactly its own
+length. A member buys a **package** of minutes the club defines (seeded as 1 hour R120, 5 hours
+R550, 10 hours R1000); a group may have packages of its own, and a group may carry a
+**package discount** (basis points, rand only, the lowest of a member's groups wins — the league
+group starts with none). There is **no block and no cap**; the desk sells packages at the counter
+and may adjust minutes by hand. The full contract is
+[`minutes-and-packages.md`](./minutes-and-packages.md).
+**Decided by:** the founder, 2026-10-01. **Status: decided — no committee step**, by the
+founder's own answer (contract §11.3); recorded here so nobody reads the blueprint later and
+assumes A.3 and A.8 are still in force.
+
+*Why.* A credit at a class rate made every figure a member saw a conversion they had to do in
+their head, and a slice price per court and per group made "what does this booking cost" a
+lookup. Minutes are what the member buys and what the court delivers: "45 min" means the same
+thing on the grid, the receipt and the wallet. The cap protected nothing once purchases are
+whole packages the club itself priced, and every abandoned checkout used to count against it.
+
+*What it costs.* The league's advantage changes shape — from more credits per rand to a
+discount on the club's packages — and is zero until the club sets one. Money already in a
+club's ledger cannot be converted: the migration refuses to run on a database with money
+history, so a club resets before go-live (`docs/go-live-checklist.md`).
 
 ### Ratified, not open
 

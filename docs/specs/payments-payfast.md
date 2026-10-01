@@ -13,9 +13,9 @@ number into anything this project serves, which is what keeps PCI scope to a red
 ```
 member                  mainframe                    PayFast
   │                         │                           │
-  │  POST /credit/topup     │                           │
+  │  POST /minutes/purchase │                           │
   ├────────────────────────►│                           │
-  │                         │ writes PendingTopup       │
+  │                         │ writes the purchase lock  │
   │  form fields + signature│                           │
   │◄────────────────────────┤                           │
   │  auto-POST the form                                 │
@@ -24,7 +24,7 @@ member                  mainframe                    PayFast
   │◄─── redirect to return_url ─────────────────────────┤
   │                         │                           │
   │                         │◄──── ITN (server to server)
-  │                         │  verify, then post credits │
+  │                         │  verify, post the minutes │
 ```
 
 **The redirect is not the notification.** A member can close the tab, lose signal, or come
@@ -69,15 +69,18 @@ In order, and each step exists because skipping it has a specific cost:
    configurable, never primary — a reverse proxy that rewrites the source would otherwise
    reject every genuine notification. It exists because a merchant with no passphrase has
    nothing else.
-3. **Check the amount** against the `PendingTopup` row. A signature says the message is
-   authentic; it does not say the amount is the one that was asked for.
+3. **Check the amount** against the purchase row's locked `AmountZar` (the price after any
+   group discount). A signature says the message is authentic; it does not say the amount is
+   the one that was asked for. A mismatch fails the row (`amount_mismatch`) for good.
 4. **`payment_status == "COMPLETE"` is the only success.** A valid signature on a `FAILED`
-   notification is a valid message saying no money moved. Treating them as the same credits a
-   member for a payment that failed.
-5. **Post the credits idempotently.** PayFast **retries ITNs by design**, so a duplicate is
+   notification is a valid message saying no money moved. Treating them as the same gives a
+   member minutes for a payment that failed.
+5. **Post the LOCKED minutes idempotently** — `pending.Minutes`, never the live package. PayFast
+   **retries ITNs by design**, so a duplicate is
    normal traffic rather than an attack. The filtered unique index on
    `LedgerEntry.ExternalReference` is the only database-level guarantee, and it is what makes
-   a retry safe rather than a double credit.
+   a retry safe rather than a double posting. The reference is
+   `topup:{tenant:N}:{pf_payment_id}`, so two clubs on one merchant account never collide.
 
 There is no status polling. `GetStatusAsync` returns an explicit "not supported" rather than
 throwing, so a caller that reaches it gets a decision instead of a 500. PayFast's query API
@@ -85,35 +88,49 @@ needs a separate signed request and the ITN already retries until acknowledged.
 
 ### A checkout PayFast never reports on
 
-**PayFast sends no ITN when a member cancels on its page or closes it.** The row would stay
-`Pending` for ever, and `Pending` counts against `topup_max_zar_per_member` (the cap is
-cumulative per member, over completed top-ups plus checkouts in flight). So (review round 4, M4-1):
+**PayFast sends no ITN when a member cancels on its page or closes it**, so the row would stay
+`Pending` for ever. There is no cap any more (P13, Dean 2026-10-01), so nothing is locked out by
+it — but the member's screen lists open checkouts, and a row that never settles would sit there.
+So (review round 4, M4-1, kept):
 
 - **The cancel return** — the member landing on `cancel_url` — calls
-  `POST /api/v1/credit/topup/{id}/cancel`: own row only (404 otherwise), idempotent, and a
+  `POST /api/v1/minutes/purchase/{id}/cancel`: own row only (404 otherwise), idempotent, and a
   conditional update that never overwrites a completion. The row becomes `Cancelled` with
   `failure_code: "cancelled_at_return"`; nobody is mailed. The answer is the status read's shape.
-- **A `Pending` row older than one hour stops counting** against the cap at once
-  (`TopUpEndpoints.PendingLifetime` — a property of the gateway's checkout, not a club policy).
+- **A `Pending` row older than one hour leaves the open-checkout list** at once
+  (`TopUpEndpoints.PendingLifetime` — a property of the gateway's checkout, not a club policy;
+  each row carries `expires_at`).
 - **A sweep closes it** (`TopUpExpiryWorker`, on start and every 5 minutes) as `Cancelled` with
-  `failure_code: "expired"`, mailing nobody. The pass on start is also the one-off fix for rows
-  already stranded.
+  `failure_code: "expired"`, mailing nobody.
 - **Both are reopenable:** they are our word, not the gateway's, so a signed `COMPLETE` arriving
-  later still credits the member — money moved. A gateway `CANCELLED` or `FAILED` stays terminal.
-- **Registrations are serialised per member**: the cap is read and the row written under the
-  member's advisory lock (`PayerLock`), so checkouts sent together cannot all fit in one remainder.
+  later still posts the locked minutes — money moved. A gateway `CANCELLED` or `FAILED` stays
+  terminal.
 
-## Credits, not rand
+## Minutes, not rand: packages and the purchase lock
 
-The member pays rand; the ledger records **credits**. Conversion happens at the member's
-groups' rate (D2) — the lowest `credits_per_zar` any of their active groups sets, else the
-tenant's `credits_per_zar_regular` (1.6 by default); the league group carries 2.4 by default.
-The rate and the group it came from (`GroupId`, null for the club default) are locked on the
-`PendingTopup` row at checkout, with the rand figure, for reconciliation.
+The member pays rand; the ledger records **whole minutes** (P13,
+[`minutes-and-packages.md`](./minutes-and-packages.md)). A member buys a **package** the club
+defines — the club's own packages at the member's group discount (the LOWEST any active group of
+theirs sets, rand only, rounded down to the cent), plus their groups' own packages at those
+groups' prices. There is no conversion rate, no block and no cap.
 
-A ledger field whose name says rand while the column holds credits is a money-correctness
-bug, and `CLAUDE.md` forbids adding a second one. See `AmountCredits`, which is
-credit-denominated despite a legacy name.
+`POST /api/v1/minutes/purchase {packageId, quotedPriceZar}` refuses `package_price_changed` when
+the quote differs from the live shelf price (compared exactly), `package_unavailable` for a
+package not on this member's shelf (archived, another group's, another club's) and
+`package_price_zero` after a 100% discount (the desk can sell that one). Otherwise it writes the
+**purchase lock** on the `pending_topups` row BEFORE calling PayFast: `PackageId`,
+`PackageName`, `Minutes`, `ListPriceZar`, `DiscountBps`, `GroupId` (the discount's group, null
+when none applied) and `AmountZar` (what PayFast is asked for). The ITN credits that row and
+never reads `minute_packages`, so an admin editing, re-pricing or archiving a package — or a
+group's discount — while the member is on PayFast's card page changes nothing about what money
+already paid buys.
+
+The ledger reason is `PayFast purchase: {package} ({minutes in words}) for {rand}`;
+`minutes.purchased` carries the package, minutes, list price, discount and its group, and what
+was paid. `item_name` is `"{club} - {package} ({compact minutes})"` with an **ASCII hyphen**,
+truncated to 100 characters — a dash would put a non-ASCII byte into the string PHP
+`urlencode` signs. The return and cancel URLs are `/wallet/buy/{id}` (the SPA keeps
+`/wallet/topup/…` as a redirect for a return in flight at deploy time).
 
 ## Configuration
 
