@@ -91,8 +91,10 @@ test("every wallet ledger column a member needs is on screen at 375px", async ({
   // And the amounts are readable as text, not merely present in the DOM.
   // U+2212 MINUS, not a hyphen — `formatSignedCredits` uses it so a debit lines up under a
   // credit in the tabular-nums column.
-  await expect(page.getByText("+1600.00 cr", { exact: false })).toBeVisible();
-  await expect(page.getByText("\u22121250.75 cr", { exact: false })).toBeVisible();
+  // `.filter({ visible: true })`: since R5 the amount is also drawn inside the movement's cell for
+  // the one-column form (a phone at 200 % text), hidden at this width — one of the two shows.
+  await expect(page.getByText("+1600.00 cr", { exact: false }).filter({ visible: true })).toHaveCount(1);
+  await expect(page.getByText("\u22121250.75 cr", { exact: false }).filter({ visible: true })).toHaveCount(1);
 });
 
 test("the page itself never scrolls sideways at 375px", async ({ page }) => {
