@@ -1,15 +1,17 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMenu";
 import { useResetMemberCodeConfirm } from "@/components/member-code/useResetMemberCodeConfirm";
 import { useToast } from "@/components/Toast";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { ArrowCounterClockwise, Envelope, Key, Prohibit, UserMinus, UserPlus } from "@/components/ui/icons";
+import { ArrowCounterClockwise, Envelope, Key, Lock, Prohibit, ShieldCheck, ShieldWarning, UserMinus, UserPlus } from "@/components/ui/icons";
 import { Textarea } from "@/components/ui/textarea";
 import { endpoints } from "@/lib/api";
-import { ACTIONS_COPY as COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
-import type { MemberDetail } from "@/lib/memberDetailApi";
+import { ACTIONS_COPY as COPY, ADMIN_ROLE_COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
+import type { AdminRoleResult, MemberDetail } from "@/lib/memberDetailApi";
+import { AdminRoleDialog } from "@/components/members/AdminRoleDialog";
+import { adminRoleOffer } from "@/components/members/adminRoleOffer";
 import { transitionTruth } from "@/components/members/lostTransition";
 import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 
@@ -30,6 +32,9 @@ import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
  * </p>
  */
 type Props = { detail: MemberDetail; name: string; onChanged: () => void | Promise<void> };
+
+/** The header's ⋯ also takes the server's answer to a role change, so the badge redraws from it. */
+type ActionsProps = Props & { onRole: (result: AdminRoleResult) => void | Promise<void> };
 
 function ReasonField({ id, value, onChange }: { id: string; value: string; onChange: (next: string) => void }) {
   return (
@@ -139,10 +144,12 @@ function useResetCodeItem({ detail, name, onChanged }: Props): ActionsMenuItem |
   return { label: COPY.resetCode, icon: <Key aria-hidden="true" />, danger: true, confirm };
 }
 
-export function MemberActions(props: Props) {
+export function MemberActions(props: ActionsProps) {
   const { detail, name } = props;
   const toast = useToast();
   const lifecycle = menuLifecycle(detail.status, useLifecycleItems(props));
+  const role = useRoleItem(props);
+  const anchor = useRef<HTMLSpanElement>(null);
 
   const resend: ActionsMenuItem | null = detail.email_verified ? null : {
     label: COPY.resendVerification, icon: <Envelope aria-hidden="true" />,
@@ -154,7 +161,46 @@ export function MemberActions(props: Props) {
   };
   const resetCode = useResetCodeItem(props);
 
-  return <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[resend, resetCode, ...lifecycle]} />;
+  return (
+    // `contents`: the wrapper is only there to find the ⋯ again, for the role dialog's focus return.
+    <span ref={anchor} className="contents">
+      <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[resend, role.item, resetCode, ...lifecycle]} />
+      {role.attempt ? (
+        <AdminRoleDialog
+          key={role.attempt.n}
+          userId={detail.user_id}
+          name={name}
+          grant={role.attempt.grant}
+          open={role.open}
+          onOpenChange={role.setOpen}
+          returnFocus={() => anchor.current?.querySelector("button")}
+          onChanged={props.onRole}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * Make administrator / Remove admin rights, on the record's header (R5 lane G — the plan put the
+ * role control in the header, and Dean did not find it on the Sign-in tab). The SAME dialog the
+ * Access tab's switch and the members list's ⋯ open; the switch's own rule decides what is offered
+ * and why it is locked. Each press is a fresh dialog (a new key), so no reason is carried over.
+ */
+function useRoleItem({ detail }: ActionsProps) {
+  // The direction is fixed at the press: the header redraws from the answer while the dialog closes.
+  const [attempt, setAttempt] = useState<{ n: number; grant: boolean } | null>(null);
+  const [open, setOpen] = useState(false);
+  const offer = adminRoleOffer(detail.is_admin, detail.admin_source, detail.status);
+  const item: ActionsMenuItem = {
+    label: offer.grant ? ADMIN_ROLE_COPY.grantConfirm : ADMIN_ROLE_COPY.revokeConfirm,
+    icon: offer.locked ? <Lock aria-hidden="true" /> : offer.grant ? <ShieldCheck aria-hidden="true" /> : <ShieldWarning aria-hidden="true" />,
+    danger: !offer.grant && !offer.locked,
+    disabled: offer.locked !== null,
+    hint: offer.short ?? undefined,
+    onSelect: () => { setAttempt((a) => ({ n: (a?.n ?? 0) + 1, grant: offer.grant })); setOpen(true); },
+  };
+  return { item, attempt, open, setOpen };
 }
 
 /**

@@ -30,6 +30,12 @@ export type ActionsMenuItem = {
   /** A consequential one: opens this confirm dialog instead. */
   confirm?: Omit<ConfirmDialogProps, "trigger" | "open" | "onOpenChange" | "returnFocus">;
   disabled?: boolean;
+  /**
+   * A few words under the label — why a disabled item cannot be pressed (R5 lane G: a config
+   * admin's "Remove admin rights"). A disabled item that has one is muted by ink, not by the
+   * row's 50 % opacity, so the reason stays readable.
+   */
+  hint?: string;
 };
 
 export function ActionsMenu({ label, items }: { label: string; items: ReadonlyArray<ActionsMenuItem | null | false> }) {
@@ -51,6 +57,7 @@ export function ActionsMenu({ label, items }: { label: string; items: ReadonlyAr
       key={item.label}
       variant={item.danger ? "danger" : "default"}
       disabled={item.disabled}
+      className={item.hint ? "py-2 data-[disabled]:opacity-100" : undefined}
       onSelect={() => {
         if (item.confirm) {
           setConfirming(shown.indexOf(item));
@@ -59,7 +66,12 @@ export function ActionsMenu({ label, items }: { label: string; items: ReadonlyAr
       }}
     >
       {item.icon}
-      {item.label}
+      {item.hint ? (
+        <span className="flex min-w-0 flex-col">
+          <span className={item.disabled ? "text-text-secondary" : undefined}>{item.label}</span>
+          <span className="text-xs text-text-secondary">{item.hint}</span>
+        </span>
+      ) : item.label}
     </DropdownMenuItem>
   );
 

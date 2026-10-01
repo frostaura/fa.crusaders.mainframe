@@ -17,7 +17,7 @@ import { StateBlock } from "@/components/ui/state-block";
 import type { MemberGroupChip } from "@/lib/adminApi";
 import { errorCode } from "@/lib/api";
 import { ASSIGN_COPY, tariffLine } from "@/lib/groupsCopy";
-import type { MemberDetail } from "@/lib/memberDetailApi";
+import type { AdminRoleResult, MemberDetail } from "@/lib/memberDetailApi";
 import { MEMBER_COPY, MEMBER_TABS, STATUS_WORD, statusTone } from "@/lib/memberDetailCopy";
 import { heldLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { typography } from "@/lib/typography";
@@ -179,7 +179,7 @@ function MemberHeader(props: HeaderProps) {
         actions={(
           <>
             <RefreshButton label={MEMBER_COPY.refresh} onRefresh={() => void state.reload()} loading={state.loading} />
-            <MemberActions detail={detail} name={name} onChanged={state.reload} />
+            <MemberActions detail={detail} name={name} onChanged={state.reload} onRole={(r) => roleChanged(state, r)} />
           </>
         )}
         freshness={<Freshness at={state.readAt} />}
@@ -205,6 +205,12 @@ function MemberHeader(props: HeaderProps) {
       </section>
     </>
   );
+}
+
+/** The header takes the server's answer to a role change, then reads the member again (as the Access tab does). */
+async function roleChanged(state: MemberDetailState, result: AdminRoleResult) {
+  state.patch({ is_admin: result.is_admin, admin_source: result.admin_source });
+  await state.reload();
 }
 
 function Identity({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
