@@ -43,15 +43,27 @@ type LedgerTableProps = {
   /** F3.8: when given, every row opens its detail — a "Details" button per row, and the row. */
   onOpen?: (row: LedgerRow) => void;
   /**
-   * Columns shown only from `2xl` (review round 2, F3-9). The club's book has seven columns and a
-   * Details button; at 1280 beside the admin rail the Amount and Details were off the right edge.
-   * The comment is the column that can go — every row's Details sheet carries it whole.
+   * Columns folded from `sm` until the TABLE'S box is 72rem (review round 2, F3-9; R4 form factor).
+   * The club's book has seven columns and a Details button; at 1280 beside the admin rail the
+   * Amount and Details were off the right edge. The comment is the column that can go — every
+   * row's Details sheet carries it whole. On a phone it stays: there it is the movement + time.
    */
   wideOnly?: Column[];
 };
 
-/** Hide a cell below `2xl` — merged over its own classes, so `sm:table-cell` does not win. */
-const WIDE_ONLY = "sm:hidden 2xl:table-cell";
+/**
+ * Fold a cell from `sm` until the table's own box (`@container/ledger`) is 72rem — appended after
+ * its own classes, and `!` on the way back, so a cell's `sm:table-cell` cannot win either way.
+ *
+ * <p>
+ * <b>Never `hidden` at the base</b> (R4 form factor, SPEC §4.1, MED): it was `hidden` +
+ * `sm:hidden 2xl:table-cell`, which hid the comment on a PHONE too — where the comment cell is
+ * the movement with its time under it, the one cell meant to stay. Admin Transactions at 390 read
+ * "+25.00 cr / Dispute Partner" beside a blank half row. And a box, not the viewport: beside the
+ * admin rail `2xl` lied about the room, and at 1920 a full-width book has the room for it.
+ * </p>
+ */
+const WIDE_ONLY = "sm:hidden @[72rem]/ledger:!table-cell";
 
 /**
  * Named rather than written inline as `isValidElement<{ className?: string }>`: lizard reads an
@@ -60,9 +72,19 @@ const WIDE_ONLY = "sm:hidden 2xl:table-cell";
  */
 type ClassNamed = { className?: string };
 
-function narrowed(cell: ReactNode, wide: boolean): ReactNode {
-  if (!wide || !isValidElement<ClassNamed>(cell)) return cell;
-  return cloneElement(cell, { className: cn("hidden", cell.props.className, WIDE_ONLY) });
+/**
+ * On a phone the comment cell is the row's left half — the movement with its time under it —
+ * so it takes the width the amount does not need (`w-full` below `sm`). Left to the table's own
+ * sharing it measured 110px beside a 186px amount at 390, "Share of a / split booking" over
+ * three lines beside empty space (R4 form factor).
+ */
+const PHONE_LEAD = "w-full sm:w-auto";
+
+function narrowed(cell: ReactNode, column: Column, wide: boolean): ReactNode {
+  if (!isValidElement<ClassNamed>(cell)) return cell;
+  const lead = column === "comment" ? PHONE_LEAD : null;
+  if (!wide && !lead) return cell;
+  return cloneElement(cell, { className: cn(cell.props.className, lead, wide && WIDE_ONLY) });
 }
 
 type Sort = { key: Column; dir: SortDir };
@@ -134,23 +156,26 @@ export function LedgerTable(props: LedgerTableProps) {
     // ScrollArea, not a bare overflow-auto div: the ledger is wider than a phone, and a
     // container that silently cuts off the Amount column reads as a missing column rather
     // than as one swipe away. It also makes the region keyboard-reachable.
-    <ScrollArea label={label} className={cn(fill && "min-h-0 flex-1")}>
-      {/* Named as well as its scroller (A11Y F3.22): a table reached by a screen reader's table
-          navigation announces its own name, not the region's. */}
-      <table data-slot="table" aria-label={label} className="w-full border-collapse text-sm">
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            {columns.map((column) => <Fragment key={column}>{headerFor(column)}</Fragment>)}
-            {onOpen ? <TableHead className="sticky top-0 z-sticky"><span className="sr-only">{LEDGER_COPY.detailsHeader}</span></TableHead> : null}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {items.map((item) => (item.kind === "row"
-            ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} />
-            : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId] ?? null} />))}
-        </TableBody>
-      </table>
-    </ScrollArea>
+    // The box the wide-only columns ask about (`@container/ledger`).
+    <div data-ledger-box="" className={cn("@container/ledger min-w-0", fill && "flex min-h-0 flex-1 flex-col")}>
+      <ScrollArea label={label} className={cn(fill && "min-h-0 flex-1")}>
+        {/* Named as well as its scroller (A11Y F3.22): a table reached by a screen reader's table
+            navigation announces its own name, not the region's. */}
+        <table data-slot="table" aria-label={label} className="w-full border-collapse text-sm">
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              {columns.map((column) => <Fragment key={column}>{headerFor(column)}</Fragment>)}
+              {onOpen ? <TableHead className="sticky top-0 z-sticky"><span className="sr-only">{LEDGER_COPY.detailsHeader}</span></TableHead> : null}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((item) => (item.kind === "row"
+              ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} />
+              : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId] ?? null} />))}
+          </TableBody>
+        </table>
+      </ScrollArea>
+    </div>
   );
 }
 
@@ -165,7 +190,7 @@ function LedgerLine({ row, columns, onOpen, wideOnly }: {
       onClick={onOpen ? () => onOpen(row) : undefined}
       className={onOpen ? "cursor-pointer" : undefined}
     >
-      {columns.map((column) => <Fragment key={column}>{narrowed(CELL[column](row), wideOnly.includes(column))}</Fragment>)}
+      {columns.map((column) => <Fragment key={column}>{narrowed(CELL[column](row), column, wideOnly.includes(column))}</Fragment>)}
       {onOpen ? (
         <TableCell className="w-0 align-top">
           <Button
@@ -227,7 +252,7 @@ function SortHeader(props: HeaderProps) {
         "sticky top-0 z-sticky",
         align === "right" ? "text-right" : "text-left",
         hideOnMobile && "hidden sm:table-cell",
-        wideOnly && ["hidden", WIDE_ONLY],
+        wideOnly && WIDE_ONLY,
       )}
     >
       <button

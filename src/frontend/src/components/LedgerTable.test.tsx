@@ -156,4 +156,25 @@ describe("LedgerTable — what survives a 375px screen", () => {
       expect(cell.querySelector("span")!.className).toContain("sm:hidden");
     }
   });
+  /**
+   * R4 form factor, SPEC §4.1 (MED): the club's book passes `wideOnly={["comment"]}`, and the
+   * comment cell went `hidden` at EVERY width below the wide threshold — on a phone, where it is
+   * the movement + time cell, Transactions read "+25.00 cr / Dispute Partner" with the left half
+   * of every row blank. Wide-only means "folded from `sm` until the BOX is wide", never on a phone.
+   */
+  it("keeps a wide-only Comment on a phone and folds it only between sm and the wide box", () => {
+    render(<LedgerTable rows={rows} label="Club book" wideOnly={["comment"]} />);
+    const header = screen.getByRole("columnheader", { name: /Comment/ });
+    expect(header.classList.contains("hidden")).toBe(false);
+    expect(header.className).toContain("sm:hidden");
+    for (const cell of cellsOf("Comment")) {
+      expect(cell.classList.contains("hidden")).toBe(false);
+      expect(cell.className).toContain("sm:hidden");
+      // Back once the TABLE'S box is 72rem — beside the admin rail a viewport breakpoint lies.
+      expect(cell.className).toContain("@[72rem]/ledger:!table-cell");
+      expect(cell.querySelector("time")).not.toBeNull();
+    }
+    expect(header.className).toContain("@[72rem]/ledger:!table-cell");
+    expect(document.querySelector("[data-ledger-box]")!.className).toContain("@container/ledger");
+  });
 });
