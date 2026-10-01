@@ -159,3 +159,7 @@ beforeEach(async () => { await wipeMemberCode(); });
 import { resetQueryCacheForTests } from "../lib/offline/queryCache";
 
 beforeEach(() => { resetQueryCacheForTests(); });
+
+// A tapped notice's held read mark lives at module scope (`components/inbox/heldMarks`): none is carried to the next test.
+import { resetHeldMarksForTests } from "../components/inbox/heldMarks";
+beforeEach(() => { resetHeldMarksForTests(); });
