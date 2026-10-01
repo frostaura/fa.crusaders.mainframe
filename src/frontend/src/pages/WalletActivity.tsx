@@ -1,6 +1,6 @@
-import { Suspense, lazy, type ReactNode } from "react";
+import { Suspense, lazy, useRef, type ReactNode } from "react";
 import { endpoints, type DailyMePoint, type WalletReport } from "../lib/api";
-import { formatCredits, formatMinutes, formatSignedCredits } from "../lib/utils";
+import { cn, formatCredits, formatMinutes, formatSignedCredits } from "../lib/utils";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
@@ -14,6 +14,7 @@ import { WalletNav } from "../components/wallet/WalletNav";
 import { AutoGrid } from "../components/ui/auto-grid";
 import { Card } from "../components/ui/card";
 import { useMediaQuery } from "../components/ui/use-media-query";
+import { useStickyTop } from "../components/ui/use-sticky-top";
 import { REPORT_SHARES_COPY } from "../lib/playersCopy";
 import {
   Cell, ChartsCard, NetCredits, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
@@ -74,6 +75,9 @@ async function downloadWalletCsv(range: ReportRange): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+/** The most of the scroller the range card may take and still stick. */
+const RANGE_STICKY_MAX = 0.3;
+
 const REFRESH_FAILED = "Couldn't refresh these figures — they are from the last read. Try Refresh again.";
 
 export default function WalletActivityPage() {
@@ -83,6 +87,10 @@ export default function WalletActivityPage() {
     toast: { failure: "Couldn't build that CSV. Try a shorter date range." },
   });
   const { data } = report;
+  const rangeBar = useRef<HTMLDivElement>(null);
+  // R5 X5-1: the range sticks by ROOM, not from the `lg` viewport — at 1280 with 200 % text the
+  // card was 292–360px of a 744px scroller; on a phone its wrapped presets are a third of the screen.
+  const sticks = useStickyTop(rangeBar, true, RANGE_STICKY_MAX);
 
   return (
     // R4 form factor (SPEC 3.4): `wide`; the range sticks while the figures scroll, and from lg
@@ -95,7 +103,7 @@ export default function WalletActivityPage() {
         freshness={<Freshness at={report.readAt} />}
       />
       <WalletNav />
-      <div data-range-bar="" className="lg:sticky lg:top-0 lg:z-sticky lg:-my-2 lg:bg-bg-app lg:py-2">
+      <div ref={rangeBar} data-range-bar="" data-sticks={sticks || undefined} className={cn("-my-2 py-2", sticks && "sticky top-0 z-sticky bg-bg-app")}>
         <RangeToolbar range={range} onChange={setRange}>
           <Button variant="outline" onClick={() => void csv.run()} pending={csv.pending} icon={<DownloadSimple aria-hidden="true" />}>
             Download CSV

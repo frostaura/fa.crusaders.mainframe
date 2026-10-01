@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import type { ReactElement } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { PageShell } from "../page-shell";
 import { SplitView } from "../split-view";
@@ -185,20 +186,67 @@ describe("AutoGrid and Columns", () => {
 });
 
 describe("ContextBar", () => {
-  it("a top bar is a named sticky strip that shows from its breakpoint", () => {
+  it("a top bar is a named strip that shows from its breakpoint", () => {
     render(<ContextBar position="top" label="Activity range" until="lg" summary="Last 30 days" primary={<button type="button">Download CSV</button>} />, strict);
     const bar = screen.getByRole("region", { name: "Activity range" });
-    expect(bar.className.split(" ")).toEqual(expect.arrayContaining(["sticky", "top-0", "z-sticky", "hidden", "lg:flex"]));
+    expect(bar.className.split(" ")).toEqual(expect.arrayContaining(["z-sticky", "hidden", "lg:flex"]));
     expect(within(bar).getByText("Last 30 days")).toBeInTheDocument();
     expect(within(bar).getByRole("button", { name: "Download CSV" })).toBeInTheDocument();
     expect(document.documentElement.style.getPropertyValue("--context-bar-height")).toBe("");
   });
 
-  it("a top bar can stick only from a breakpoint, drawn in the flow below it", () => {
-    render(<ContextBar position="top" label="Filters and totals" stickyFrom="lg" summary="All types" />);
-    const bar = screen.getByRole("region", { name: "Filters and totals" });
-    expect(bar.className.split(" ")).toEqual(expect.arrayContaining(["static", "lg:sticky"]));
-    expect(bar.className).not.toContain("hidden");
+  /**
+   * R5 X5-1 (HIGH): the bar stuck from the `lg` VIEWPORT, so at 1280 with 200 % text a 665px bar
+   * held a 744px scroller and no ledger row was ever on screen. It sticks by room now — and while
+   * it sticks it publishes its height for the shell's scroll-padding-top (X5-2).
+   */
+  function inScroller(barHeight: number, room: number, bar: ReactElement) {
+    const rect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { ...rect.call(this), height: this.hasAttribute("data-context-bar") ? barHeight : 0 } as DOMRect;
+    };
+    const restore = () => { HTMLElement.prototype.getBoundingClientRect = rect; };
+    const scroller = document.createElement("div");
+    scroller.style.overflowY = "auto";
+    Object.defineProperty(scroller, "clientHeight", { value: room, configurable: true });
+    document.body.appendChild(scroller);
+    const view = render(bar, { container: scroller, ...strict });
+    return { ...view, restore: () => { view.unmount(); scroller.remove(); restore(); } };
+  }
+
+  it("a short top bar sticks, and publishes its height while it does", () => {
+    const view = inScroller(90, 744, <ContextBar position="top" label="Filters and totals" summary="All types" />);
+    try {
+      const bar = screen.getByRole("region", { name: "Filters and totals" });
+      expect(bar.className.split(" ")).toEqual(expect.arrayContaining(["sticky", "top-0"]));
+      expect(bar).toHaveAttribute("data-sticks");
+      expect(document.documentElement.style.getPropertyValue("--context-bar-top-height")).toBe("90px");
+    } finally {
+      view.restore();
+    }
+    expect(document.documentElement.style.getPropertyValue("--context-bar-top-height")).toBe("");
+  });
+
+  it("a top bar taller than its share of the scroller scrolls away with the page", () => {
+    const view = inScroller(665, 744, <ContextBar position="top" label="Filters and totals" summary="All types" />);
+    try {
+      const bar = screen.getByRole("region", { name: "Filters and totals" });
+      expect(bar.className.split(" ")).not.toContain("sticky");
+      expect(bar).not.toHaveAttribute("data-sticks");
+      expect(bar.className).not.toContain("hidden");
+      expect(document.documentElement.style.getPropertyValue("--context-bar-top-height")).toBe("");
+    } finally {
+      view.restore();
+    }
+  });
+
+  it("the share a bar may take is the caller's", () => {
+    const view = inScroller(200, 744, <ContextBar position="top" label="Filters and totals" stickyMax={0.25} summary="All types" />);
+    try {
+      expect(screen.getByRole("region", { name: "Filters and totals" })).not.toHaveAttribute("data-sticks");
+    } finally {
+      view.restore();
+    }
   });
 
   it("a bottom bar docks above the tab bar, hides from its breakpoint, and reserves its room while mounted", () => {
