@@ -5,6 +5,7 @@ import { TopUpSheet } from "../TopUpSheet";
 import { renderPage } from "../../../test/harness";
 import { LIVE_SAID, REASON_MISSING, ZAR_RECEIVED } from "../../../lib/topUpCopy";
 import { AMOUNT_COPY } from "../../../lib/amountCopy";
+import { TOP_UP_SHEET } from "../../../lib/membersCopy";
 
 /**
  * The desk top-up sheet — review round 1: F3.4 (rand received), F3.5 (frozen receipt),
@@ -200,5 +201,37 @@ describe("the confirm says what the caller found (R3 I-6)", () => {
     await chooseReason("Goodwill — something went wrong");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByRole("button", { name: /^Add 50\.00 cr/ })).toHaveClass("w-full");
+  });
+});
+
+/**
+ * Review round 5, I5-3: Escape, the × and the scrim closed the sheet while the credit was on its
+ * way — the landing was silent — and a sheet reopened meanwhile showed Add disabled with no reason.
+ */
+describe("the sheet stays open while the credit is on its way (R5 I5-3)", () => {
+  it("refuses Escape mid-credit and says it is waiting, again on the refusal", async () => {
+    const onClose = vi.fn();
+    let land: (r: { balanceAfterCredits: number }) => void = () => {};
+    renderPage(
+      <TopUpSheet name="Sam" balance={200} busy={false} bookingError={null} onClose={onClose}
+        onApply={() => new Promise((resolve) => { land = resolve; })} />,
+    );
+    typeAmount("50");
+    await chooseReason("Goodwill — something went wrong");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await confirm();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-sheet='top-up']")).toBeInTheDocument();
+    land({ balanceAfterCredits: 250 });
+    expect(await screen.findByText("Done. Sam now has 250.00 cr.", { selector: "[role='status']" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("says why Add waits when it opens over a movement still in flight", () => {
+    renderPage(<TopUpSheet name="Sam" balance={200} busy bookingError={null} onClose={() => {}} onApply={vi.fn()} />);
+    expect(document.querySelector("[data-sending-note]")).toHaveTextContent(TOP_UP_SHEET.sending("Sam"));
   });
 });

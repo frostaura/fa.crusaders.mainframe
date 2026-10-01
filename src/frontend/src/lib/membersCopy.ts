@@ -374,6 +374,8 @@ export const TOP_UP_SHEET = {
   serverWorksItOut: "the club's system works it out",
   reasonLine: (label: string, text: string) => `Reason: ${label} — “${text}”`,
   failed: "That didn't go through.",
+  /** R5 I5-3: said while a movement is on its way — and again on each refused way out. */
+  sending: (name: string) => `Waiting for the club to answer about ${name}'s credit. This stays open until it does.`,
 } as const;
 
 /** "+100.00 cr" / "−100.00 cr" — the direction carries the sign, never a typed character. */

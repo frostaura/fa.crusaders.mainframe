@@ -5,6 +5,8 @@ import { type AdjustReasonCode } from "@/lib/adminApi";
 import { TOP_UP_COPY } from "@/lib/memberDetailCopy";
 import { attemptAdjustment, type AdjustmentKey } from "@/components/members/adjustmentAttempt";
 import type { ApplyResult } from "@/components/members/TopUpSheet";
+import { useLateLanding } from "@/components/bookings/useSendingGuard";
+import { doneSentence } from "@/lib/topUpCopy";
 
 /**
  * One hand movement of credit from the member's page — the members list's idempotency
@@ -34,6 +36,9 @@ export function useMemberTopUp(userId: string, name: string, onApplied: (balance
   const inFlight = useRef(false);
   const key = useRef<AdjustmentKey>(null);
 
+  // R5 I5-3: a landing after the member's page has gone is said in a toast, never silent.
+  const { sayIfGone } = useLateLanding(open);
+
   const reset = useCallback(() => {
     setBookingState("");
     setBookingError(null);
@@ -41,7 +46,15 @@ export function useMemberTopUp(userId: string, name: string, onApplied: (balance
     inFlight.current = false;
   }, []);
   const show = useCallback(() => { reset(); setOpen(true); }, [reset]);
-  const close = useCallback(() => { setOpen(false); reset(); }, [reset]);
+  /**
+   * R5 I5-3: refused while a movement is in flight — it used to reset the ref and the key mid-
+   * flight, so the sheet could be reopened over a credit still on its way.
+   */
+  const close = useCallback(() => {
+    if (inFlight.current) return;
+    setOpen(false);
+    reset();
+  }, [reset]);
   const setBooking = useCallback((next: string) => { setBookingState(next); setBookingError(null); }, []);
 
   const apply = useCallback(async (
@@ -61,7 +74,11 @@ export function useMemberTopUp(userId: string, name: string, onApplied: (balance
       const outcome = await attemptAdjustment({
         userId, amount, reasonCode, reason, zarReceived, name, ...(bookingId ? { bookingId } : {}),
       }, key);
-      if (outcome.kind === "booking") { setBookingError(outcome.message); return null; }
+      if (outcome.kind === "booking") {
+        setBookingError(outcome.message);
+        sayIfGone("danger", () => outcome.message);
+        return null;
+      }
       if (outcome.kind === "failed") {
         toast.push({ tone: "danger", text: outcome.message, unchanged: outcome.unchanged, durationMs: 8000 });
         // A 409 reused key proved an earlier press landed: the header's figure is stale (R3 I-6).
@@ -69,13 +86,14 @@ export function useMemberTopUp(userId: string, name: string, onApplied: (balance
         return { said: outcome.said };
       }
       onApplied(outcome.balanceAfterCredits);
+      sayIfGone("success", () => doneSentence(name, outcome.balanceAfterCredits));
       // No success toast: the sheet keeps its own receipt on screen, which is what money needs.
       return { balanceAfterCredits: outcome.balanceAfterCredits, recovered: outcome.recovered };
     } finally {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [userId, name, booking, onApplied, toast]);
+  }, [userId, name, booking, onApplied, toast, sayIfGone]);
 
   return { open, busy, show, close, apply, booking, setBooking, bookingError };
 }

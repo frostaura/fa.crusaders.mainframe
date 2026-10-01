@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Alert } from "@/components/Alert";
 import { ConfirmButton } from "@/components/ConfirmButton";
-import { Stepper } from "@/components/bookings/SheetParts";
+import { SendingNote, Stepper } from "@/components/bookings/SheetParts";
+import { useSendingGuard, type SendingGuard } from "@/components/bookings/useSendingGuard";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { AnimatedCheck } from "@/components/ui/feedback-marks";
@@ -155,13 +156,20 @@ function useTopUpFlow() {
   };
 }
 
+/**
+ * R5 I5-3: every way out — ×, Escape, the scrim, Cancel — asks the sending guard first, so the
+ * sheet cannot close while a credit is on its way; the footer says it is waiting, again on each
+ * refused close. A sheet opened while an earlier movement is still in flight (`busy` from the
+ * caller) says why its Add waits rather than showing a disabled button with no reason.
+ */
 export function TopUpSheet(props: TopUpSheetProps) {
   const { name, onClose } = props;
   const wide = useIsSmUp();
   const flow = useTopUpFlow();
+  const guard = useSendingGuard((open) => { if (!open) onClose(); });
   useFocusFirstInvalid(flow.refused);
   return (
-    <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Sheet open onOpenChange={guard.onOpenChange}>
       <SheetContent side={wide ? "right" : "bottom"} data-sheet="top-up">
         <SheetHeader>
           <SheetTitle>{sheetTitle(flow.direction, name)}</SheetTitle>
@@ -180,7 +188,8 @@ export function TopUpSheet(props: TopUpSheetProps) {
             Stacked, BOTH rows run the sheet's width (R3 V-3): the primary was left at its own
             width under a full-width Back. */}
         <SheetFooter className={cn("sm:items-end", flow.step === 3 && !flow.done && "sm:flex-col sm:items-stretch")}>
-          <StepFooter flow={flow} {...props} />
+          <SendingNote text={props.busy ? COPY.sending(name) : null} refused={guard.refused} />
+          <StepFooter flow={flow} guard={guard} {...props} />
         </SheetFooter>
       </SheetContent>
     </Sheet>
@@ -338,12 +347,15 @@ function Receipt({ name, done }: { name: string; done: Applied }) {
   );
 }
 
-function StepFooter({ flow, ...props }: TopUpSheetProps & { flow: Flow }) {
-  if (flow.done) return <Button onClick={props.onClose}>{COPY.done}</Button>;
+type FooterProps = TopUpSheetProps & { flow: Flow; guard: SendingGuard };
+
+function StepFooter({ flow, guard, ...props }: FooterProps) {
+  const leave = () => guard.onOpenChange(false);
+  if (flow.done) return <Button onClick={leave}>{COPY.done}</Button>;
   if (flow.step === 1) {
     return (
       <>
-        <Button variant="outline" onClick={props.onClose}>{COPY.cancel}</Button>
+        <Button variant="outline" onClick={leave}>{COPY.cancel}</Button>
         <Button onClick={flow.toReason}>{COPY.next}</Button>
       </>
     );
@@ -356,15 +368,16 @@ function StepFooter({ flow, ...props }: TopUpSheetProps & { flow: Flow }) {
       </>
     );
   }
-  return <ApplyControls flow={flow} {...props} />;
+  return <ApplyControls flow={flow} guard={guard} {...props} />;
 }
 
-function ApplyControls({ flow, name, balance, busy, onApply }: TopUpSheetProps & { flow: Flow }) {
+function ApplyControls({ flow, guard, name, balance, busy, onApply }: FooterProps) {
   const { valid, reasonCode, direction } = flow;
   if (valid === null || reasonCode === null) return null;
   return (
     <>
-      <Button variant="outline" onClick={() => flow.back(2)}>{COPY.back}</Button>
+      {/* Back while the credit is on its way would drop the receipt it lands on (R5 I5-3). */}
+      <Button variant="outline" disabled={busy} onClick={() => flow.back(2)}>{COPY.back}</Button>
       {/* Its own full-width row (F3.23, F3-14): armed, the confirm is a sentence over two buttons.
           `w-full` on the idle button too (R3 V-3, A-15): at its own width "Add 50.00 cr" wrapped. */}
       <div className="min-w-0">
@@ -382,9 +395,17 @@ function ApplyControls({ flow, name, balance, busy, onApply }: TopUpSheetProps &
           disabled={busy}
           onConfirm={async () => {
             const before = balance;
-            const applied = await onApply(
-              direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim(), flow.zar ?? undefined,
-            );
+            // Set here, at the press, not from `busy`: that prop commits a render later, and an
+            // Escape in between closed the sheet over a credit already sent (R5 I5-3).
+            guard.setSending(true);
+            let applied: ApplyResult;
+            try {
+              applied = await onApply(
+                direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim(), flow.zar ?? undefined,
+              );
+            } finally {
+              guard.setSending(false);
+            }
             if (!applied) return LIVE_SAID.refused;
             if ("said" in applied) return applied.said;
             flow.setDone({ ...applied, before, amount: valid });

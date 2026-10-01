@@ -3,6 +3,8 @@ import { useToast } from "@/components/Toast";
 import { type AdjustReasonCode } from "@/lib/adminApi";
 import { isGuid } from "@/lib/creditAdjustment";
 import { RELATED_BOOKING } from "@/lib/membersCopy";
+import { doneSentence } from "@/lib/topUpCopy";
+import { useLateLanding } from "@/components/bookings/useSendingGuard";
 import { attemptAdjustment, type AdjustmentKey } from "./adjustmentAttempt";
 import { patchRow, type MemberRow } from "./membersModel";
 import type { ApplyResult } from "./TopUpSheet";
@@ -45,7 +47,15 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
     inFlight.current = false;
   }, []);
 
+  // R5 I5-3: a landing after the page has gone (a route change) is said in a toast, never silent.
+  const { sayIfGone } = useLateLanding(target !== null);
+
+  /**
+   * R5 I5-3: refused while a movement is in flight. It used to reset the ref and the key mid-
+   * flight, so a reopened sheet could post the same credit again under a NEW key.
+   */
   const close = useCallback(() => {
+    if (inFlight.current) return;
     setTarget(null);
     setBookingState("");
     setBookingError(null);
@@ -80,7 +90,12 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
         userId: target.user_id, amount, reasonCode, reason, zarReceived, name: target.full_name ?? target.email,
         ...(bookingId ? { bookingId } : {}),
       }, key);
-      if (outcome.kind === "booking") { setBookingError(outcome.message); return null; }
+      const name = target.full_name ?? target.email;
+      if (outcome.kind === "booking") {
+        setBookingError(outcome.message);
+        sayIfGone("danger", () => outcome.message);
+        return null;
+      }
       if (outcome.kind === "failed") {
         toast.push({ tone: "danger", text: outcome.message, unchanged: outcome.unchanged, durationMs: 8000 });
         const now = outcome.balanceNow;
@@ -94,12 +109,13 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
       // The row follows the server's answer at once — no refetch that would re-sort the table.
       const after = outcome.balanceAfterCredits;
       if (after !== null) setMembers((rows) => patchRow(rows, target.user_id, { balance_credits: after }));
+      sayIfGone("success", () => doneSentence(name, after));
       return { balanceAfterCredits: after, recovered: outcome.recovered };
     } finally {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [target, booking, setMembers, toast]);
+  }, [target, booking, setMembers, toast, sayIfGone]);
 
   return { target, booking, setBooking, bookingError, busy, open, close, apply };
 }
