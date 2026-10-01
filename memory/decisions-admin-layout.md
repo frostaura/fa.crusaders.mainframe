@@ -34,6 +34,9 @@ Spec: the round's `SPEC.md` §3/§4. Primitives: `components/ui` (`SplitView`, `
 - **Rails, from a 64rem box:** Overview's recent alerts, Settings' section index (scroll-spy,
   unsaved dot), Webhooks' variable catalogue (folded below it). Grids by the box: control-board
   tiles 1/2/4 for four courts, never 3 + 1; groups, schedules, boards, doors, courts as AutoGrid.
+- **A failed refresh keeps what is on screen** (integrator ask, D's `StaleNotice`): Members (a
+  re-read publishes only a WHOLE club), Transactions (same filters only — new filters that fail
+  drop the rows, R12), Courts, Webhooks, Settings (and its draft), Schedules (same list only).
 - **Not built (no data or another lane's file):** the Overview's court-occupancy strip and the
   board's live-event rail; split views for Groups/Schedules/Boards (cards instead); Settings'
   third help column; "show 5 alerts" (`components/notifications`).
