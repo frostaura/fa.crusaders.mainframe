@@ -420,7 +420,8 @@ describe("the club door log", () => {
     await waitFor(() => expect(screen.getByText(/Showing all 4 scans in this range/)).toBeInTheDocument());
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(4);
-    expect(rows[2]).toHaveFocus();
+    // Focus moves after the rows render (focusAfterAction's backoff), not in the same tick — wait for it.
+    await waitFor(() => expect(rows[2]).toHaveFocus());
   });
 
   it("keeps the rows it has when the next page fails, and says the ones it has are right", async () => {
