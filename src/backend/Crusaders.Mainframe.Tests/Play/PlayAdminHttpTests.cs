@@ -84,7 +84,10 @@ public sealed class PlayAdminHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Assert.Equal((AdminChangeAreas.Play, AdminChangeSubjects.MatchResult, id, "Both players asked", club.Admin),
             (row.Area, row.SubjectKind, row.SubjectId!.Value, row.Reason, row.ActorUserId));
         var after = JsonDocument.Parse(row.AfterJson!).RootElement;
-        Assert.Equal("disputed", after.GetProperty("from_status").GetString());
+        // Wave B: the status on BOTH sides — the record read "Disputed → —".
+        Assert.Equal("disputed", JsonDocument.Parse(row.BeforeJson!).RootElement.GetProperty("status").GetString());
+        Assert.Equal("voided", after.GetProperty("status").GetString());
+        Assert.False(after.TryGetProperty("from_status", out _));
         Assert.Equal(club.Organiser, after.GetProperty("subject_user_id").GetGuid());
         Assert.Equal([club.Organiser, club.Sam], after.GetProperty("lineup_user_ids").EnumerateArray().Select(x => x.GetGuid()));
         Assert.Equal(4, after.GetProperty("games").GetArrayLength());
@@ -115,8 +118,10 @@ public sealed class PlayAdminHttpTests(PostgresFixture pg) : IClassFixture<Postg
 
         var kept = await (await admin.PostAsJsonAsync($"/api/v1/admin/play/results/{id}/uphold", new { reason = "Scoresheet agrees" })).JsonAsync();
         Assert.Equal(("confirmed", true), (kept.GetProperty("status").GetString(), kept.GetProperty("closed_by_admin").GetBoolean()));
-        Assert.Single(await PlayersClub.ReadAsync(f, db => db.AdminChangeLogs.IgnoreQueryFilters()
+        var upheld = Assert.Single(await PlayersClub.ReadAsync(f, db => db.AdminChangeLogs.IgnoreQueryFilters()
             .Where(l => l.TenantId == club.TenantId && l.Action == AdminChangeActions.PlayResultUpheld).ToListAsync()));
+        var status = Assert.Single(Crusaders.Mainframe.Api.Endpoints.AdminChangeDiff.Of(upheld.BeforeJson, upheld.AfterJson), c => c.Field == "status");
+        Assert.Equal(("disputed", "confirmed"), (status.Before, status.After));
         Assert.Equal(1, (await MyGameAsync(club.Client(f, club.Organiser))).GetProperty("stats").GetProperty("matches_won").GetInt32());
 
         var again = await admin.PostAsJsonAsync($"/api/v1/admin/play/results/{id}/uphold", new { reason = "x" });

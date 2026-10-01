@@ -598,12 +598,14 @@ public sealed class ResultService
     {
         await _changes.StageAsync(new AdminChange(
             action, act.Admin, AdminChangeSubjects.MatchResult, r.Id, $"{context.CourtName}, {context.When}", act.Reason,
+            // The status on BOTH sides (review round 4 wave B): `from_status` sat on the after side
+            // alone and the record read "Status: Disputed → —" over a result the club had kept.
             Before: new { status = fromStatus },
             After: new
             {
+                status = r.Status,
                 result_id = r.Id,
                 booking_id = r.BookingId,
-                from_status = fromStatus,
                 reason = act.Reason,
                 games = ResultGames.Read(r.GamesJson).Select(g => new { a = g.A, b = g.B }),
                 format = r.Format,
