@@ -2304,7 +2304,7 @@ export const endpoints = {
     api.post<{ booking_id: string }>("/api/v1/admin/blocks/", { courtId, startsAt, sliceCount, label }),
   // R5 A5-1: a lift needs a reason (400 reason_required without one); the query form, as `del` sends no body.
   adminUnblock: (blockId: string, reason?: string) =>
-    api.del<void>(`/api/v1/admin/blocks/${blockId}${reason === undefined ? "" : `?reason=${encodeURIComponent(reason)}`}`),
+    api.del<void>(`/api/v1/admin/blocks/${blockId}` + (reason === undefined ? "" : "?reason=" + encodeURIComponent(reason))),
 
   /**
    * Items 5 + 13 — a list of checkboxes answered with a list of outcomes.
