@@ -153,6 +153,12 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
             var moved = await PlayersClub.BalanceAsync(f, club.Organiser) - before;
             Assert.True(answer.GetProperty("penalty_credits").GetDecimal() > 0m, "the cancel must be late");
             Assert.Equal(moved, answer.GetProperty("net_credits").GetDecimal());
+
+            // The detail states the same settlement from the ledger (M5-3/M5-7): refund and penalty.
+            var money = (await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{id}"))).GetProperty("money");
+            Assert.Equal(answer.GetProperty(answer.TryGetProperty("refunded_credits", out _) ? "refunded_credits" : "refund_credits").GetDecimal(),
+                money.GetProperty("refunded_credits").GetDecimal());
+            Assert.Equal(answer.GetProperty("penalty_credits").GetDecimal(), money.GetProperty("penalty_credits").GetDecimal());
         }
 
         var member = club.Client(f, club.Organiser);

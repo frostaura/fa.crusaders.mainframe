@@ -104,6 +104,7 @@ public sealed partial class PlayersQuery
         var people = await MembersAsync(seats.Select(s => s.UserId).Append(booking.UserId), ct);
         var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id, settings), ct);
+        var (refunded, penalty) = await SettledAsync(booking, ct);
 
         return new
         {
@@ -127,6 +128,10 @@ public sealed partial class PlayersQuery
                 unpaid_credits = table.Unpaid,
                 share_deadline = PlayerSettings.ShareDeadline(booking, settings),
                 is_split = seats.Any(s => s.IsPartner && s.IsLive && s.ShareCredits > 0) || table.Received != 0m,
+                // R5 (M5-3/M5-7, lane D1's ask): what the club gave back and kept, from the payer's
+                // own rows — the client derived both and was wrong beside an admin compensation.
+                refunded_credits = refunded,
+                penalty_credits = penalty,
             },
             attendance = new
             {
@@ -178,6 +183,25 @@ public sealed partial class PlayersQuery
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
+    }
+
+    /// <summary>
+    /// The payer's refund rows for this booking, and the penalties kept (late cancel or no-show,
+    /// as a positive figure), in one read. Zero for a booking nothing was settled on.
+    /// </summary>
+    private async Task<(decimal Refunded, decimal Penalty)> SettledAsync(Booking booking, CancellationToken ct)
+    {
+        var payer = ShareLedger.PayerOf(booking);
+        var rows = await _db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId == booking.Id && l.UserId == payer
+                        && (l.Type == LedgerEntryType.CancellationRefund || l.Type == LedgerEntryType.LateCancellationPenalty
+                            || l.Type == LedgerEntryType.NoShowPenalty))
+            .GroupBy(l => l.Type == LedgerEntryType.CancellationRefund)
+            .Select(g => new { Refund = g.Key, Sum = g.Sum(l => l.AmountCredits) })
+            .ToListAsync(ct);
+        var refunded = rows.Where(r => r.Refund).Sum(r => r.Sum);
+        var penalty = -rows.Where(r => !r.Refund).Sum(r => r.Sum);
+        return (refunded, penalty);
     }
 
     /// <summary>

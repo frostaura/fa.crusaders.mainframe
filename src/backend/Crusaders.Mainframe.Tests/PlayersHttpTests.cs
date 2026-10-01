@@ -497,8 +497,10 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(50m, await PlayersClub.BalanceAsync(f, club.Sam));
-        Assert.True(await PlayersClub.ReadAsync(f, db => db.MemberNotifications.IgnoreQueryFilters()
-            .AnyAsync(n => n.UserId == club.Sam && n.Kind == MemberEventCatalogue.GameChanged)));
+        // R5 (M5-8): the notice names the seat — the removed member reads 404 from the booking itself.
+        var link = await PlayersClub.ReadAsync(f, db => db.MemberNotifications.IgnoreQueryFilters()
+            .Where(n => n.UserId == club.Sam && n.Kind == MemberEventCatalogue.GameChanged).Select(n => n.Link).SingleAsync());
+        Assert.Equal($"/bookings/{bookingId}?seat={samSeat}", link);
     }
 
     // ------------------------------------------------------------------ re-split and consent

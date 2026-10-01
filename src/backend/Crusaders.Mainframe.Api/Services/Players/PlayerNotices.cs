@@ -116,7 +116,9 @@ public static class PlayerNotices
             new GameChangedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, removed,
                 removed ? null : seat.ShareCredits, needsConsent, seat.Id),
             removed ? $"You were taken off {game.CourtName}, {game.StartsLocal}" : $"Your share changed — {game.CourtName}",
-            $"/bookings/{booking.Id}", booking.Id);
+            // R5 (M5-8): a removed member reads 404 from the booking; naming the seat lets the page
+            // read their invite and say they were taken off. A share change keeps the plain path.
+            removed ? $"/bookings/{booking.Id}?seat={seat.Id}" : $"/bookings/{booking.Id}", booking.Id);
     }
 
     /// <summary>
