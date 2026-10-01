@@ -8,8 +8,11 @@ import { api, type AdminMember, type LedgerRow } from "./api";
  */
 export type Page<T> = { items: T[]; next_cursor: string | null; total?: number };
 
-/** The whole range's four figures (R4, B2): credits in, debits as a magnitude, net = credits − debits. */
-export type LedgerTotals = { count: number; credits: number; debits: number; net: number };
+/**
+ * The whole range's four figures (R4, B2; renamed by P13 §3.2): minutes in, minutes out as a
+ * magnitude, net = in − out.
+ */
+export type LedgerTotals = { count: number; in_minutes: number; out_minutes: number; net_minutes: number };
 
 export type LedgerPage = Page<LedgerRow> & { totals?: LedgerTotals | null };
 
@@ -33,9 +36,9 @@ export async function ledgerPage(filters: LedgerFilters, cursor = "", limit = 20
 
 /** The four figures over rows the page holds — only ever over a COMPLETE set. */
 export function totalsOver(rows: readonly LedgerRow[]): LedgerTotals {
-  const credits = rows.filter((r) => r.signedAmountCredits > 0).reduce((s, r) => s + r.amountCredits, 0);
-  const debits = rows.filter((r) => r.signedAmountCredits < 0).reduce((s, r) => s + r.amountCredits, 0);
-  return { count: rows.length, credits, debits, net: credits - debits };
+  const into = rows.filter((r) => r.signedAmountMinutes > 0).reduce((s, r) => s + r.amountMinutes, 0);
+  const out = rows.filter((r) => r.signedAmountMinutes < 0).reduce((s, r) => s + r.amountMinutes, 0);
+  return { count: rows.length, in_minutes: into, out_minutes: out, net_minutes: into - out };
 }
 
 /**

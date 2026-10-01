@@ -473,7 +473,7 @@ function isSessionEnded(status: number, hadToken: boolean, payload: unknown): bo
  * happened to land while the organiser was marking a notification read.
  * </p>
  */
-const MONEY_PATHS = ["/api/v1/bookings", "/api/v1/invites/", "/api/v1/admin/bookings", "/api/v1/admin/credit/", "/api/v1/credit/topup"];
+const MONEY_PATHS = ["/api/v1/bookings", "/api/v1/invites/", "/api/v1/admin/bookings", "/api/v1/admin/minutes/", "/api/v1/minutes/purchase"];
 export type MoneyRequestPhase = "start" | "end";
 let moneyRequestListener: ((phase: MoneyRequestPhase) => void) | null = null;
 export function setMoneyRequestListener(fn: ((phase: MoneyRequestPhase) => void) | null) { moneyRequestListener = fn; }
@@ -724,8 +724,8 @@ export type LedgerRow = {
   at: string;
   from: string;
   to: string;
-  amountCredits: number;
-  signedAmountCredits: number;
+  amountMinutes: number;
+  signedAmountMinutes: number;
   type: LedgerEntryType;
   comment: string;
   subjectUserId: string;
@@ -736,19 +736,19 @@ export type LedgerRow = {
 };
 
 export type WalletResponse = {
-  balance_credits: number;
+  balance_minutes: number;
   /** D11 §3a — shares received as an organiser, held until `held_until`. Absent before P11. */
-  held_credits?: number;
+  held_minutes?: number;
   /** The balance less what is held: what a booking or a share may spend. */
-  spendable_credits?: number;
+  spendable_minutes?: number;
   /** The earliest release, or null when nothing is held. */
   held_until?: string | null;
   /**
    * P11 — owed back to partners whose return waits on this balance; paid first from incoming
-   * credit, no release date. `spendable_credits` subtracts it too, so it may be negative.
+   * credit, no release date. `spendable_minutes` subtracts it too, so it may be negative.
    * Absent from an older API: read as 0.
    */
-  owed_back_credits?: number;
+  owed_back_minutes?: number;
   entries: LedgerRow[];
   /** Every movement the member has ever had; `entries` is one page of them. */
   total_entries: number;
@@ -766,7 +766,7 @@ export type ShareBookingSummary = {
   court_name: string | null;
   starts_at: string;
   organiser: { user_id: string; name: string | null; photo_url: string | null };
-  partners: { user_id: string; name: string | null; paid_credits: number }[];
+  partners: { user_id: string; name: string | null; paid_minutes: number }[];
 };
 export type ScheduleSlot = {
   courtId: string; courtNumber: number;
@@ -781,7 +781,7 @@ export type ScheduleSlot = {
   /** Whether the lights have been on. Null for another member's booking — attendance is not public. */
   checkedIn: boolean | null;
   /** What the booking cost. Null for another member's booking, for the same reason. */
-  amountChargedCredits: number | null;
+  amountChargedMinutes: number | null;
   /**
    * The viewer's side of a booking that `isMine` (review round 1, B2): `partner` for an accepted
    * seat on somebody else's game — theirs to open, never to cancel. Absent on an older API and
@@ -801,6 +801,9 @@ export type ScheduleCourt = {
    * because "the court's price" and "your price" are now two different numbers and only one of
    * them belongs on a member's screen.
    * </p>
+   *
+   * @deprecated P13-F1: removed from `/schedule` (contract §3.3, §3.12) — a cell is "Free" and a
+   * booking costs `slices × slice_minutes`. The server no longer sends it.
    */
   slicePriceCredits: number;
   /**
@@ -827,6 +830,7 @@ export type ScheduleRulesWire = {
   /** The intersection of the viewer's groups' windows with the club's hours, for this weekday. */
   allowedWindows?: { start: string; end: string }[];
   clubHours?: { start: string; end: string } | null;
+  /** @deprecated P13-F1: removed (contract §3.3). */
   slicePriceCredits?: number | null;
   maxSlotsPerDay?: number | null;
   maxMinutesPerDay?: number | null;
@@ -878,14 +882,14 @@ export type BulkResultRow = Record<string, unknown>;
 
 export type BulkCancelResponse = {
   requested?: number; succeeded?: number; failed?: number;
-  total_refunded_credits?: number; total_penalty_credits?: number;
+  total_refunded_minutes?: number; total_penalty_minutes?: number;
   results?: BulkResultRow[];
 } & Record<string, unknown>;
 
 export type BulkBookResponse = {
   requested?: number; succeeded?: number; failed?: number;
-  total_charged_credits?: number;
-  payer?: { user_id?: string; name?: string; balance_before_credits?: number; balance_after_credits?: number };
+  total_charged_minutes?: number;
+  payer?: { user_id?: string; name?: string; balance_before_minutes?: number; balance_after_minutes?: number };
   results?: BulkResultRow[];
   /** D2 §5.3 — the batch stopped here because the payer ran out of credit. */
   halted_at?: number; halted_reason?: string;
@@ -907,14 +911,17 @@ export type AdminBookingQuote = {
   starts_at: string;
   ends_at: string | null;
   slices: number;
-  price_credits: number;
-  balance_credits: number;
-  balance_after_credits: number;
+  price_minutes: number;
+  balance_minutes: number;
+  balance_after_minutes: number;
+  /** P13 §3.11 — `spendable_minutes < price_minutes`, exactly the guard behind 402. */
   overdraws: boolean;
-  /** D11 §3a — the payer's held credits. Absent from an older API. */
-  held_credits?: number;
+  /** P13 §3.11 — the balance less what is held and owed back. Absent from an older API. */
+  spendable_minutes?: number;
+  /** D11 §3a — the payer's held minutes. Absent from an older API. */
+  held_minutes?: number;
   /** P11 — what the payer owes back to partners, paid from their next credit. Absent: 0. */
-  owed_back_credits?: number;
+  owed_back_minutes?: number;
 };
 
 /** One line of a bulk quote. `reason` is a booking refusal code when `bookable` is false. */
@@ -924,7 +931,7 @@ export type AdminBulkQuoteItem = {
   court_name: string | null;
   starts_at: string;
   slices: number;
-  price_credits: number | null;
+  price_minutes: number | null;
   bookable: boolean;
   reason: string | null;
 };
@@ -932,13 +939,14 @@ export type AdminBulkQuoteItem = {
 /** `POST /api/v1/admin/bookings/bulk/quote` — the batch version of {@link AdminBookingQuote}. */
 export type AdminBulkQuote = {
   user_id: string;
-  total_credits: number;
-  balance_credits: number;
-  balance_after_credits: number;
+  total_minutes: number;
+  balance_minutes: number;
+  balance_after_minutes: number;
   overdraws: boolean;
   /** As on {@link AdminBookingQuote}: absent from an older API, and read as 0. */
-  held_credits?: number;
-  owed_back_credits?: number;
+  spendable_minutes?: number;
+  held_minutes?: number;
+  owed_back_minutes?: number;
   items: AdminBulkQuoteItem[];
 };
 
@@ -952,14 +960,14 @@ export type MemberBulkResultRow = {
   status: "booked" | "refused";
   reason: string | null;
   booking_id: string | null;
-  amount_credits: number | null;
+  amount_minutes: number | null;
   /** True when this item landed under the same idempotency key on an earlier try. */
   replayed: boolean;
 };
 
 /**
- * D8 — `POST /api/v1/bookings/bulk`, the member's multiselect. `total_charged_credits` counts
- * every booked item including replays; `charged_now_credits` is what THIS request debited, which
+ * D8 — `POST /api/v1/bookings/bulk`, the member's multiselect. `total_charged_minutes` counts
+ * every booked item including replays; `charged_now_minutes` is what THIS request debited, which
  * is what the balance pair moved by. `halted_reason: "insufficient_balance"` means the member ran
  * out part-way: the rest are `not_attempted`, and a retry under the SAME key books only those.
  */
@@ -967,10 +975,10 @@ export type MemberBulkBookResponse = {
   requested: number;
   booked: number;
   refused: number;
-  total_charged_credits: number;
-  charged_now_credits: number;
-  balance_before_credits: number;
-  balance_after_credits: number;
+  total_charged_minutes: number;
+  charged_now_minutes: number;
+  balance_before_minutes: number;
+  balance_after_minutes: number;
   halted_at: number | null;
   halted_reason: string | null;
   results: MemberBulkResultRow[];
@@ -982,10 +990,10 @@ export type BulkBookItemBody = { courtId: string; startsAt: string; sliceCount: 
 /** What cancelling a booking would cost right now — server-computed, read when the modal opens. */
 export type CancellationQuote = {
   bookingId: string;
-  amountChargedCredits: number;
+  amountChargedMinutes: number;
   /** What actually lands back in the wallet: the refund NET of any penalty. */
-  refundCredits: number;
-  penaltyCredits: number;
+  refundMinutes: number;
+  penaltyMinutes: number;
   penaltyPct: number;
   penaltyWindowMinutes: number;
   insidePenaltyWindow: boolean;
@@ -995,6 +1003,7 @@ export type CancellationQuote = {
 
 export type AdminSettings = {
   slice_minutes: number;
+  /** @deprecated P13-F3: dropped from the settings GET (contract §3.9); the PUT binds and ignores it. */
   slice_price_credits: number;
   advance_booking_days: number;
   day_start_minute: number;
@@ -1023,8 +1032,11 @@ export type AdminSettings = {
   // The nine keys the engine has always read and this API never showed. Until they
   // were surfaced the only way to change one was to hand-edit a JSON column on a
   // live money system.
+  /** @deprecated P13-F3: dropped from the settings GET (contract §3.9); bound and ignored on the PUT. */
   credits_per_zar_regular: number;
+  /** @deprecated P13-F3: the cap is removed (contract §3.6); bound and ignored on the PUT. */
   topup_block_zar: number;
+  /** @deprecated P13-F3: the cap is removed (contract §3.6); bound and ignored on the PUT. */
   topup_max_zar_per_member: number;
   member_per_day_max_minutes: number;
   peak_hours: string;
@@ -1539,6 +1551,7 @@ export type AdminCourt = {
   court_number: number;
   name: string;
   court_type: string;
+  /** @deprecated P13-F3: courts carry no price (contract §3.9). */
   slice_price_credits: number;
   is_active: boolean;
 };
@@ -1554,15 +1567,20 @@ export type MyProfile = {
   must_change_password?: boolean;
   /** D2: the member's active groups. Absent from an API that predates it. */
   groups?: MemberRowGroup[];
-  /** D2: what their groups resolve to — the rate a top-up converts at. */
+  /** @deprecated P13-F2: replaced by `package_discount_bps` (contract §3.8). */
   top_up_credits_per_zar?: number;
+  /**
+   * P13 §3.8 — the discount the member's groups give on CLUB packages, in basis points: the
+   * lowest set among their active groups. Null when no group sets one.
+   */
+  package_discount_bps?: number | null;
   /** D2: whether their groups give them the peak window at any time. */
   peak_priority?: boolean;
   /** D11 §3a — credits held for partners, and until when (null when nothing is held). */
-  held_credits?: number;
+  held_minutes?: number;
   held_until?: string | null;
   /** P11 — credits owed back to partners, paid from the next credit in. Absent before P11. */
-  owed_back_credits?: number;
+  owed_back_minutes?: number;
   /**
    * The club's IANA zone. Read at every app start, so `lib/clubZone` learns the club's day from
    * boot and no screen — least of all one opened cold from a mail on a phone in another zone —
@@ -1624,11 +1642,14 @@ export type MemberRowGroup = {
   id: string;
   name: string;
   system_key?: string | null;
+  /** @deprecated P13-F3: replaced by `package_discount_bps` (contract §3.8). */
   credits_per_zar?: number | null;
+  /** P13 §3.8 — this group's say on club-package prices, 0–10 000 bps; null = no say. */
+  package_discount_bps?: number | null;
   peak_priority?: boolean | null;
 };
 
-/** The group a member's top-up rate comes from, as `/credit/topup/options` names it (D2). */
+/** @deprecated P13-F2: the options route is removed (contract §3.1). The group a member's top-up rate comes from (D2). */
 export type RateGroup = { id: string; name: string; system_key?: string | null };
 
 export type AdminMember = {
@@ -1644,19 +1665,19 @@ export type AdminMember = {
    * approved, active member has no answer on this screen.
    */
   email_verified?: boolean;
-  balance_credits: number;
+  balance_minutes: number;
 };
 
 // Phase 8 — per-member spend drill-down (blueprint C.3).
 export type MemberSpendMonth = {
   month: string;
-  top_ups_credits: number;   // credits added to the wallet
+  top_ups_minutes: number;   // credits added to the wallet
   top_ups_zar: number;       // actual rand paid, for reconciliation
-  spent_credits: number;
-  refunds_credits: number;
-  penalties_credits: number;
-  adjustments_credits: number;
-  net_credits: number;
+  spent_minutes: number;
+  refunds_minutes: number;
+  penalties_minutes: number;
+  adjustments_minutes: number;
+  net_minutes: number;
   movement_count: number;
 };
 export type MemberSpendReport = {
@@ -1665,7 +1686,7 @@ export type MemberSpendReport = {
     membership_id: string; user_id: string; full_name: string; membership_number: string;
     groups?: MemberRowGroup[];
   };
-  totals: { top_ups_credits: number; top_ups_zar: number; spent_credits: number; refunds_credits: number; penalties_credits: number; net_credits: number; movement_count: number };
+  totals: { top_ups_minutes: number; top_ups_zar: number; spent_minutes: number; refunds_minutes: number; penalties_minutes: number; net_minutes: number; movement_count: number };
   monthly: MemberSpendMonth[];
 };
 
@@ -1725,7 +1746,91 @@ export type WebAuthnCredentialRow = {
   last_used_at: string | null;
 };
 
+// ---------------------------------------------------------------------------------------
+// P13 — minutes and packages (docs/specs/minutes-and-packages.md §3.4). The member buys a
+// PACKAGE of whole minutes for rand; the old amount-and-rate top-up is gone.
+// ---------------------------------------------------------------------------------------
+
+/** A group as the shelf names it. */
+export type ShelfGroup = { id: string; name: string };
+
 /**
+ * One package on a member's shelf (contract §3.4, §4.2). `price_zar` is what this member pays
+ * (after their group discount on a club package); `saving_*` is against the shelf's smallest
+ * package (§4.3) and null unless there is a real saving.
+ */
+export type ShelfPackage = {
+  id: string;
+  name: string;
+  /** Whole minutes; a discount never changes them. */
+  minutes: number;
+  list_price_zar: number;
+  /** 0 on a group package and when no discount applies. */
+  discount_bps: number;
+  price_zar: number;
+  saving_zar: number | null;
+  saving_pct: number | null;
+  source: "club" | "group";
+  /** Set on a `source: "group"` package only. */
+  group: ShelfGroup | null;
+};
+
+/** One of the member's own checkouts still open at PayFast (§3.4, §3.6). */
+export type OpenCheckout = {
+  id: string;
+  package_name: string;
+  minutes: number;
+  amount_zar: number;
+  created_at: string;
+  /** `created_at` + 60 min; replaces the old `counts_until`. */
+  expires_at: string;
+};
+
+/** `GET /api/v1/minutes/packages` — the member's shelf. */
+export type MinutesShelf = {
+  /** Null when none of the member's active groups sets a discount. Applies to club packages only. */
+  discount: { bps: number; group: ShelfGroup } | null;
+  packages: ShelfPackage[];
+  open_checkouts: OpenCheckout[];
+};
+
+/** `GET /api/v1/admin/minutes/{userId}/packages` — the shelf as that member sees it, without checkouts. */
+export type MemberShelf = Omit<MinutesShelf, "open_checkouts">;
+
+/**
+ * `POST /api/v1/minutes/purchase` 200. `form_fields` IS the payment: the browser POSTs this
+ * signed form to `redirect_url` (PayFast has no server-side checkout registration).
+ */
+export type PurchaseStart = {
+  purchase_id: string;
+  checkout_id: string;
+  redirect_url: string;
+  form_fields: PayFastFormField[];
+  package: { id: string; name: string; minutes: number };
+  /** The locked price — what PayFast is asked for. */
+  amount_zar: number;
+};
+
+/** `GET /api/v1/minutes/purchase/{id}` and its cancel return (§3.4). */
+export type PurchaseStatus = {
+  id: string;
+  status: "Pending" | "Completed" | "Failed" | "Cancelled";
+  package_id: string;
+  package_name: string;
+  minutes: number;
+  list_price_zar: number;
+  discount_bps: number;
+  amount_zar: number;
+  /** A stable snake_case code (`cancelled_at_return`, `expired`, …), never an internal string. */
+  failure_code: string | null;
+  created_at: string;
+  expires_at: string;
+};
+
+/**
+ * @deprecated P13-F2: the route `/credit/topup/options` is removed (contract §3.1); the shelf is
+ * `MinutesShelf`. Delete with the top-up page.
+ *
  * What the club will take for a top-up, and at what rate — read from `tenant_settings`
  * rather than hardcoded on the screen.
  *
@@ -1750,10 +1855,10 @@ export type TopUpOptions = {
 /**
  * One court's row in the utilisation report.
  *
- * `revenue_credits` is what the club KEPT, summed off the ledger rows naming each booking
+ * `kept_minutes` is what the club KEPT, summed off the ledger rows naming each booking
  * — the settlement model's `Owed`. It used to be the price quoted at booking, so a
  * no-showed 50-credit court counted as 50 of revenue when the club's take was the 15
- * penalty. `quoted_credits` keeps the old figure under a name that says what it is.
+ * penalty. `sold_minutes` keeps the old figure under a name that says what it is.
  *
  * `booked_minutes` exists because `slices` mixes units: a 60-minute walk-up is one slice,
  * the same as a 15-minute booking.
@@ -1763,8 +1868,9 @@ export type UtilisationRow = {
   slices: number;
   booked_minutes: number;
   bookings: number;
-  revenue_credits: number;
-  quoted_credits: number;
+  kept_minutes: number;
+  /** Σ `AmountChargedMinutes` — what was sold, before refunds (contract §3.15). */
+  sold_minutes: number;
 };
 
 /** One form field of the signed PayFast checkout, in the order the signature covers. */
@@ -1776,6 +1882,7 @@ export type PayFastFormField = { name: string; value: string };
  * Following `redirect_url` as a GET — which is what the page used to do — reaches PayFast
  * with no merchant id, no amount and no signature.
  */
+/** @deprecated P13-F2: the route is removed (contract §3.1); use `PurchaseStart`. */
 export type TopUpStart = {
   topup_id: string;
   checkout_id: string;
@@ -1785,7 +1892,10 @@ export type TopUpStart = {
   conversion_rate: number;
 };
 
-/** A stable snake_case code, never an internal string — see `TOPUP_FAILURE_COPY`. */
+/**
+ * @deprecated P13-F2: the route is removed (contract §3.1); use `PurchaseStatus`.
+ * A stable snake_case code, never an internal string — see `TOPUP_FAILURE_COPY`.
+ */
 export type TopUpStatus = {
   id: string;
   status: "Pending" | "Completed" | "Failed" | "Cancelled";
@@ -1800,23 +1910,23 @@ export type TopUpStatus = {
  * Every bucket a movement can land in, because the page has to reconcile: it reported
  * top-ups, spend, refunds and a penalty COUNT and nothing else, so a member with 2,500
  * credits of admin adjustments read "0 in, 950 out, 100 back" beside a header saying
- * 1,635 and no way to see where the gap came from. `net_movement_credits` is the sum,
+ * 1,635 and no way to see where the gap came from. `net_movement_minutes` is the sum,
  * and over a range covering the whole ledger it is the balance.
  */
 export type WalletReport = {
   from: string; to: string;
-  top_ups_credits: number;
-  spent_credits: number;
-  refunds_credits: number;
+  top_ups_minutes: number;
+  spent_minutes: number;
+  refunds_minutes: number;
   /** The penalty TOTAL `reporting.md` asks for, beside the count that was already here. */
-  penalties_credits: number;
-  adjustments_credits: number;
-  reversals_credits: number;
+  penalties_minutes: number;
+  adjustments_minutes: number;
+  reversals_minutes: number;
   /** D11 — shares paid to (−) or received from (+) other players. Absent before P11. */
-  share_transfers_credits?: number;
+  share_transfers_minutes?: number;
   /** D11 — what court time cost once the players settled up: spend − refunds + penalties − shares. */
-  net_court_spend_credits?: number;
-  net_movement_credits: number;
+  net_court_spend_minutes?: number;
+  net_movement_minutes: number;
   penalty_count: number;
   /** Attendance — `CheckedInAt`, the source of truth the settlement model hangs off. */
   attended_bookings: number;
@@ -1826,16 +1936,16 @@ export type WalletReport = {
 /**
  * One club day on the admin report.
  *
- * `reversals_credits` and `net_movement_credits` are here because the row has to add up.
+ * `reversals_minutes` and `net_movement_minutes` are here because the row has to add up.
  * `PaymentReversal` was in no bucket at all, under a card claiming the buckets were "every
  * ledger movement in the club summed", so a clawed-back payment moved balances while being
- * invisible on the club's own report. `net_movement_credits` is the day summed WITHOUT
- * looking at the type — the same arithmetic the member's own `net_movement_credits` uses —
+ * invisible on the club's own report. `net_movement_minutes` is the day summed WITHOUT
+ * looking at the type — the same arithmetic the member's own `net_movement_minutes` uses —
  * so the club screen and the member screen cannot mean different things by "net", and a
  * ledger type nobody bucketed still reaches the total.
  */
-export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; adjustments_credits: number; reversals_credits: number; share_transfers_credits?: number; net_movement_credits: number; bookings: number; no_shows: number };
-export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; attended: number; minutes_on_court: number; balance_credits: number };
+export type DailyAdminPoint = { date: string; top_ups_minutes: number; booking_charges_minutes: number; refunds_minutes: number; penalties_minutes: number; adjustments_minutes: number; reversals_minutes: number; share_transfers_minutes?: number; net_movement_minutes: number; bookings: number; no_shows: number };
+export type DailyMePoint = { date: string; top_ups_minutes: number; spent_minutes: number; refunds_minutes: number; bookings: number; attended: number; minutes_on_court: number; balance_minutes: number };
 /**
  * Club revenue over a window, in BOTH units, because they are not interchangeable.
  *
@@ -1850,9 +1960,11 @@ export type RevenueReport = {
   gross_topups_zar: number;
   reversals_zar: number;
   net_zar: number;
-  gross_topups_credits: number;
-  reversals_credits: number;
-  net_credits: number;
+  gross_topups_minutes: number;
+  reversals_minutes: number;
+  net_minutes: number;
+  /** P13 §3.15 — `net_zar ÷ net_minutes`, rounded down to 4 dp; null when `net_minutes ≤ 0`. */
+  zar_per_minute_sold?: number | null;
 };
 
 // --- doors: member ---------------------------------------------------------------
@@ -2273,14 +2385,14 @@ export const endpoints = {
    */
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}&photos=url`),
   book: (courtId: string, startsAt: string, sliceCount: number) =>
-    api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
-  cancelBooking: (bookingId: string) => api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/bookings/${bookingId}/cancel`),
+    api.post<{ booking_id: string; balance_after_minutes: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
+  cancelBooking: (bookingId: string) => api.post<{ refunded_minutes: number; penalty_minutes: number }>(`/api/v1/bookings/${bookingId}/cancel`),
   /** Read when the cancellation modal opens, never cached with the schedule — the answer moves with the clock and with a scan at the box. */
   cancellationQuote: (bookingId: string) => api.get<CancellationQuote>(`/api/v1/bookings/${bookingId}/cancellation-quote`),
 
   /**
    * Admin: book for a member — or, since R19, for themselves (`userId` = the admin). The payer
-   * is charged; the admin is the actor on the audit row, and `balance_after_credits` in the
+   * is charged; the admin is the actor on the audit row, and `balance_after_minutes` in the
    * answer is the PAYER's balance.
    *
    * `allowNegativeBalance` is god mode (R19): sent when {@link endpoints.adminBookingQuote} said
@@ -2288,7 +2400,7 @@ export const endpoints = {
    * refuse-then-retry 402 dance — the quote is asked first.
    */
   adminBook: (courtId: string, userId: string, startsAt: string, sliceCount: number, allowNegativeBalance = false) =>
-    api.post<{ booking_id: string; balance_after_credits: number }>(
+    api.post<{ booking_id: string; balance_after_minutes: number }>(
       "/api/v1/admin/bookings/", { courtId, userId, startsAt, sliceCount, allowNegativeBalance }),
   /** Admin: cancel anyone's booking, optionally waiving the late-cancellation penalty. */
   /**
@@ -2297,7 +2409,7 @@ export const endpoints = {
    * at month end had a tick and no way to tell a club decision from a quiet favour.
    */
   adminCancelBooking: (bookingId: string, waivePenalty: boolean, waiveReason = "") =>
-    api.post<{ refunded_credits: number; penalty_credits: number }>(
+    api.post<{ refunded_minutes: number; penalty_minutes: number }>(
       `/api/v1/admin/bookings/${bookingId}/cancel`, { waivePenalty, waiveReason }),
   /** Admin: hold a court for an event. Takes no money and refuses to sit over a paid booking. */
   adminBlock: (courtId: string, startsAt: string, sliceCount: number, label: string) =>
@@ -2399,9 +2511,9 @@ export const endpoints = {
    * desk already compensated the member for a wrongly-swept no-show, and audit instead of
    * refunding twice (`BookingService.ReverseNoShowAsync`). One without it is plain money.
    */
-  adminAdjust: (userId: string, amountCredits: number, reason: string, relatedBookingId?: string, idempotencyKey?: string) =>
-    api.post<{ entry_id: string; amount_credits: number; balance_after_credits: number }>(`/api/v1/admin/credit/${userId}/adjust`, {
-      amountCredits,
+  adminAdjust: (userId: string, amountMinutes: number, reason: string, relatedBookingId?: string, idempotencyKey?: string) =>
+    api.post<{ entry_id: string; amount_minutes: number; balance_after_minutes: number }>(`/api/v1/admin/minutes/${userId}/adjust`, {
+      amountMinutes,
       reason,
       ...(relatedBookingId ? { relatedBookingId } : {}),
       // Names THIS movement, so every retry of one intended adjustment is the same
@@ -2433,8 +2545,24 @@ export const endpoints = {
   courtQrMatch: (courtNumber: number, token: string) =>
     api.post<{ matched: boolean; user_id?: string; reason?: string }>(`/api/v1/court/${courtNumber}/qr/match`, { token }),
 
-  // Top-up
+  // P13 — buying minutes (contract §3.4). Every one of these is the member's own.
+  /** The member's shelf: their packages at their price, and their checkouts still open. */
+  minutesPackages: () => api.get<MinutesShelf>("/api/v1/minutes/packages"),
   /**
+   * Registers a purchase and returns the SIGNED FORM the browser must POST to PayFast.
+   * `quotedPriceZar` is the shelf `price_zar` the member was shown; a different live price is
+   * 409 `package_price_changed` (with the package as it is now), never a silent re-price.
+   */
+  minutesPurchase: (packageId: string, quotedPriceZar: number) =>
+    api.post<PurchaseStart>("/api/v1/minutes/purchase", { packageId, quotedPriceZar }),
+  minutesPurchaseStatus: (purchaseId: string) => api.get<PurchaseStatus>(`/api/v1/minutes/purchase/${purchaseId}`),
+  /** The cancel return (M4-1 semantics kept): own row only, idempotent, never overwrites a completion. */
+  minutesPurchaseCancel: (purchaseId: string) => api.post<PurchaseStatus>(`/api/v1/minutes/purchase/${purchaseId}/cancel`),
+
+  // Top-up — P13-F2: every call below names a route the contract removes (§3.1). Delete them
+  // with the top-up pages; the replacements are the four `minutes*` calls above.
+  /**
+   * @deprecated P13-F2: use `minutesPackages`.
    * What the club will take, and at what rate — every number the top-up screen used to
    * hardcode. See `TopUpOptions`.
    */
@@ -2453,8 +2581,10 @@ export const endpoints = {
    * member was never shown. Sending nothing would silently opt this screen back into the
    * defect — a member offered 240 credits for R100 and given 160.
    */
+  /** @deprecated P13-F2: use `minutesPurchase`. */
   topupStart: (amountZar: number, quotedConversionRate: number) =>
     api.post<TopUpStart>("/api/v1/credit/topup", { amountZar, quotedConversionRate }),
+  /** @deprecated P13-F2: use `minutesPurchaseStatus`. */
   topupStatus: (topupId: string) => api.get<TopUpStatus>(`/api/v1/credit/topup/${topupId}`),
   /**
    * R4 M4-1 — the member came back through PayFast's cancel URL (`?cancelled=1`). PayFast sends
@@ -2462,6 +2592,7 @@ export const endpoints = {
    * ever. Own row only (404 otherwise), idempotent, and it never overwrites a completion; the
    * reply is the status read's shape (`failure_code: "cancelled_at_return"`).
    */
+  /** @deprecated P13-F2: use `minutesPurchaseCancel`. */
   topupCancel: (topupId: string) => api.post<TopUpStatus>(`/api/v1/credit/topup/${topupId}/cancel`),
 
   // Webhooks (admin)
@@ -2526,6 +2657,7 @@ export const endpoints = {
    */
   adminSettingsSave: (req: AdminSettingsSave) => api.put<{ saved: true }>("/api/v1/admin/settings/", {
     sliceMinutes: req.slice_minutes,
+    // P13-F3: the next five keys are bound and IGNORED by the server (contract §3.9).
     slicePriceCredits: req.slice_price_credits,
     advanceBookingDays: req.advance_booking_days,
     dayStartMinute: req.day_start_minute,
@@ -2663,6 +2795,7 @@ export const endpoints = {
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),
+  // P13-F3: `slicePriceCredits` is removed from both court bodies (contract §3.3); an old value is ignored.
   adminCourtsCreate: (req: { name: string; courtType?: string; slicePriceCredits: number }) =>
     api.post<{ id: string; court_number: number }>("/api/v1/admin/courts/", { name: req.name, courtType: req.courtType ?? "Squash", slicePriceCredits: req.slicePriceCredits }),
   adminCourtsUpdate: (id: string, req: { name?: string; slicePriceCredits?: number; isActive?: boolean }) =>

@@ -48,7 +48,7 @@ export type MemberBookingRow = {
   starts_at: string;
   ends_at: string;
   status: BookingRowStatus;
-  charged_credits: number;
+  charged_minutes: number;
   checked_in_at: string | null;
   cancelled_at: string | null;
   /**
@@ -90,16 +90,16 @@ export type MemberDetail = {
   groups: MemberGroupChip[];
   /** D2: the top-up rate and peak standing those groups resolve to. Absent from an API that predates it. */
   tariff?: MemberTariff;
-  balance_credits: number;
+  balance_minutes: number;
   /**
    * D9 — what of the balance is held for partners (D11 §3a) and owed back to them (P11), as the
    * member's own wallet says it. Optional: an API that does not send them shows the balance alone.
    */
-  held_credits?: number;
+  held_minutes?: number;
   held_until?: string | null;
-  /** The held credit per share deadline, soonest first, summing to `held_credits`. */
-  held_parts?: { credits: number; until: string }[];
-  owed_back_credits?: number;
+  /** The held credit per share deadline, soonest first, summing to `held_minutes`. */
+  held_parts?: { minutes: number; until: string }[];
+  owed_back_minutes?: number;
   passkey_count: number;
   fingerprints: { count: number; enrolments: FingerprintEnrolment[] };
   next_bookings: MemberBookingRow[];

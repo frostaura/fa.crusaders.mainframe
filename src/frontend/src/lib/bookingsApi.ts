@@ -30,16 +30,16 @@ export type UpcomingGame = {
   status: string;
   players: UpcomingPlayer[];
   /** The caller's share of the price — the whole price for an organiser with nobody else paying. */
-  my_share_credits: number | null;
+  my_share_minutes: number | null;
   /** Something is waiting on the caller: an answer, a payment. */
   needs_action: boolean;
   /**
    * R3 M-3 — what the game has cost the caller so far, off their own wallet, net (an organiser's
    * charge less the shares partners have paid back). Absent from an older server.
    */
-  my_paid_credits?: number;
+  my_paid_minutes?: number;
   /** R3 M-3 — what a partner still owes on their seat; 0 for the organiser. Absent from an older server. */
-  my_owing_credits?: number;
+  my_owing_minutes?: number;
 };
 
 export type UpcomingGames = { timezone?: string; items: UpcomingGame[] };
@@ -96,12 +96,14 @@ export type MemberWindows = {
 };
 
 type DetailWire = {
-  full_name: string | null; email?: string; balance_credits: number;
-  held_credits?: number; owed_back_credits?: number;
+  full_name: string | null; email?: string; balance_minutes: number;
+  held_minutes?: number; owed_back_minutes?: number;
 };
 
 type RulesWire = {
+  /** @deprecated P13-F1: dropped from the booking-rules read (contract §3.8). */
   slice_price_credits?: number | null;
+  /** @deprecated P13-F1: dropped from the booking-rules read (contract §3.8). */
   slice_prices_by_court?: Array<{ court_id?: string; credits?: number }> | null;
   groups?: Array<{ id?: string; name: string }>;
   day?: string;
@@ -135,12 +137,13 @@ export async function readBookingFor(userId: string, day: string): Promise<Booki
     // The price is a nicety: a member whose rules cannot be read is still bookable.
     api.get<RulesWire>(`${base}/booking-rules?day=${encodeURIComponent(day)}`).catch(() => null),
   ]);
-  const reserved = positive(detail.held_credits) + positive(detail.owed_back_credits);
+  const reserved = positive(detail.held_minutes) + positive(detail.owed_back_minutes);
   return {
     userId,
     name: detail.full_name?.trim() || detail.email || "This member",
-    spendable: detail.balance_credits - reserved,
+    spendable: detail.balance_minutes - reserved,
     reserved,
+    // P13-F1: the server sends no slice price any more (§3.8); a booking costs its minutes.
     slicePrice: typeof rules?.slice_price_credits === "number" ? rules.slice_price_credits : null,
     pricesByCourt: readPricesByCourt(rules?.slice_prices_by_court),
     groups: (rules?.groups ?? []).map((g) => g.name),
@@ -172,7 +175,8 @@ export function firstNameOf(name: string): string {
 
 /* ─────────────────────────────── the split cancel (§3) ─────────────────────────────── */
 
-export type PartnerRefund = { name: string; credits: number };
+/** P13 §3.2 — `partner_refunds[]` is `{user_id, name, minutes}`. */
+export type PartnerRefund = { userId?: string; name: string; minutes: number };
 
 /** What a split booking's cancel sends back to partners, and what the organiser keeps. */
 export type SplitCancel = { net: number; partners: PartnerRefund[] };
@@ -181,8 +185,12 @@ function partnersOf(raw: unknown): PartnerRefund[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((p) => (p && typeof p === "object" ? p as Record<string, unknown> : {}))
-    .filter((p) => typeof p.name === "string" && typeof p.credits === "number" && p.credits > 0)
-    .map((p) => ({ name: p.name as string, credits: p.credits as number }));
+    .filter((p) => typeof p.name === "string" && typeof p.minutes === "number" && p.minutes > 0)
+    .map((p) => ({
+      ...(typeof p.user_id === "string" ? { userId: p.user_id } : {}),
+      name: p.name as string,
+      minutes: p.minutes as number,
+    }));
 }
 
 /**
@@ -194,7 +202,7 @@ export function splitCancelOf(source: CancellationQuote | Record<string, unknown
   if (!source) return null;
   const raw = source as Record<string, unknown>;
   const partners = partnersOf(raw.partner_refunds ?? raw.partnerRefunds);
-  const net = raw.net_credits ?? raw.netCredits;
+  const net = raw.net_minutes ?? raw.netMinutes;
   if (partners.length === 0 || typeof net !== "number") return null;
   return { net, partners };
 }
@@ -214,8 +222,8 @@ export const bookingsApi = {
 
 /* ─────────────────────────────── held parts (C4) ─────────────────────────────── */
 
-/** One share deadline's held credit (contract C4): `held_parts`, soonest first, summing to held. */
-export type HeldPart = { credits: number; until: string };
+/** One share deadline's held minutes (contract C4; P13 §3.2): `held_parts`, soonest first, summing to held. */
+export type HeldPart = { minutes: number; until: string };
 
 /**
  * The held parts off whatever carries them — a wallet read, a stream frame or the balance
@@ -228,7 +236,7 @@ export function heldPartsOf(source: unknown): HeldPart[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((p) => (p && typeof p === "object" ? p as Record<string, unknown> : {}))
-    .filter((p) => typeof p.credits === "number" && p.credits > 0 && typeof p.until === "string")
-    .map((p) => ({ credits: p.credits as number, until: p.until as string }))
+    .filter((p) => typeof p.minutes === "number" && p.minutes > 0 && typeof p.until === "string")
+    .map((p) => ({ minutes: p.minutes as number, until: p.until as string }))
     .sort((a, b) => Date.parse(a.until) - Date.parse(b.until));
 }

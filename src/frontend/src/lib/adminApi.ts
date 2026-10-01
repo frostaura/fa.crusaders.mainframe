@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, type MemberShelf } from "./api";
 
 /**
  * The ecosystem admin wire — Monitoring, schedules, member groups, the change record.
@@ -206,7 +206,7 @@ export type ControlBoardBooking = {
   label?: string | null;
   booked_by?: AdminPerson | null;
   checked_in_at?: string | null;
-  amount_credits?: number | null;
+  amount_minutes?: number | null;
   minutes_until?: number | null;
 };
 
@@ -414,8 +414,8 @@ export type TraceEvent = {
   actor?: TraceActor | null;
   subject?: AdminPerson | null;
   court?: { id?: string; number?: number; name?: string } | null;
-  amount_credits?: number | null;
-  balance_after_credits?: number | null;
+  amount_minutes?: number | null;
+  balance_after_minutes?: number | null;
   /** The instant came from a board's own clock after an outage, so it may be minutes out. */
   approximate?: boolean;
   device_code?: string | null;
@@ -447,8 +447,8 @@ export type TraceView = {
     last_seen_at?: string | null;
     minutes_on_court?: number;
     courts?: string[];
-    credits_spent?: number;
-    credits_received?: number;
+    minutes_spent?: number;
+    minutes_received?: number;
     doors_entered?: number;
     doors_refused?: number;
     bookings_made?: number;
@@ -576,12 +576,12 @@ export type ScheduleConflict = {
   kind?: string | null;
   label?: string | null;
   member_name?: string | null;
-  amount_credits?: number | null;
+  amount_minutes?: number | null;
   /**
    * From the server's own cancellation quote, so the figure an admin reads before deciding is
    * the figure the cancellation will actually pay.
    */
-  would_refund_credits?: number | null;
+  would_refund_minutes?: number | null;
 };
 
 export type SchedulePreview = {
@@ -668,6 +668,7 @@ export type ScheduleOccurrence = {
 // Member groups — GOAL items 3 + 19 (D2 §4)
 // ---------------------------------------------------------------------------------------
 
+/** @deprecated P13-F3: group pricing is removed (contract §2.2, §3.8). */
 export const GROUP_PRICING_MODES = ["inherit_court", "multiplier", "flat_per_slice"] as const;
 export type GroupPricingMode = typeof GROUP_PRICING_MODES[number];
 
@@ -681,6 +682,7 @@ export type MemberGroup = {
   sort_order?: number;
   /** The two seeded groups: renameable and editable, never deletable. */
   is_system_default?: boolean;
+  /** @deprecated P13-F3: the whole `pricing` object is removed from the group wire (contract §3.8). */
   pricing?: {
     mode?: GroupPricingMode;
     multiplier_bps?: number | null;
@@ -705,10 +707,16 @@ export type MemberGroup = {
    */
   system_key?: string | null;
   /**
+   * @deprecated P13-F3: removed from the group wire, replaced by `package_discount_bps` (§3.8).
    * D2: the top-up rate this group carries, credits per one unit of the club's money — or null,
    * which INHERITS the club's `credits_per_zar_regular` and has no say in a member's rate.
    */
   credits_per_zar?: number | null;
+  /**
+   * P13 §3.8 — this group's discount on CLUB packages, in basis points (0–10 000), or null for
+   * no say. A member's discount is the LOWEST set among their active groups.
+   */
+  package_discount_bps?: number | null;
   /**
    * D2, tri-state: `true` grants peak priority, `false` withholds it (and wins over any grant),
    * `null` has no say. Absent (an API that predates it) is none of the three.
@@ -728,11 +736,14 @@ export type PeakSay = boolean | null;
 export type MemberGroupBody = {
   name: string;
   description?: string | null;
+  /** @deprecated P13-F3: removed (contract §3.3); an old console's value is ignored by the server. */
   pricing: { mode: GroupPricingMode; multiplierBps?: number; flatSlicePriceCredits?: number };
   caps: { maxSlotsPerDay?: number | null; maxMinutesPerDay?: number | null; advanceBookingDays?: number | null };
   windows: GroupWindow[];
-  /** Absent = unchanged; null = inherit the club's rate; else (0, 1000], at most 4 decimals. */
+  /** @deprecated P13-F3: removed (contract §3.3), replaced by `packageDiscountBps`. */
   creditsPerZar?: number | null;
+  /** P13 §3.8 — absent = unchanged; null clears it; else an integer 0–10 000 (400 `group_package_discount_invalid`). */
+  packageDiscountBps?: number | null;
   /** Absent = unchanged; true grants, false withholds, null has no say. */
   peakPriority?: PeakSay;
 };
@@ -742,9 +753,17 @@ export type MemberGroupBody = {
  * (`MemberTariffs.Resolve`), never re-derived on a screen that then disagrees with the top-up.
  */
 export type MemberTariff = {
-  top_up_credits_per_zar: number;
-  /** The group the rate comes from; null when it is the club's default rate. */
-  rate_group_id: string | null;
+  /**
+   * P13 §3.8 — the discount on club packages: the lowest `package_discount_bps` among the
+   * member's active groups that set one. Null when none does.
+   */
+  package_discount_bps: number | null;
+  /** The group the discount comes from; null when there is no discount. */
+  discount_group_id: string | null;
+  /** @deprecated P13-F3: removed from the tariff wire (contract §3.8); the server no longer sends it. */
+  top_up_credits_per_zar?: number;
+  /** @deprecated P13-F3: removed from the tariff wire, replaced by `discount_group_id` (§3.8). */
+  rate_group_id?: string | null;
   peak_priority: boolean;
   /** The groups explicitly withholding peak priority, by name. Empty when nothing withholds it. */
   peak_withheld_by: string[];
@@ -755,7 +774,9 @@ export type MemberGroupChip = {
   id: string;
   name: string;
   system_key?: string | null;
+  /** @deprecated P13-F3: replaced by `package_discount_bps` (contract §3.8). */
   credits_per_zar?: number | null;
+  package_discount_bps?: number | null;
   peak_priority?: boolean | null;
 };
 
@@ -790,9 +811,12 @@ export type MemberBookingRules = {
   groups?: Array<{ id: string; name: string; description?: string | null }>;
   allowed_windows?: Array<{ start: string; end: string }>;
   club_hours?: { start: string; end: string } | null;
+  /** @deprecated P13-F1/F3: dropped from the booking-rules read (contract §3.8). */
   slice_price_credits?: number | null;
   /** The slice price across the club's courts, and per court (`slice_price_credits` is the cheapest). */
+  /** @deprecated P13-F1/F3: dropped (contract §3.8). */
   slice_price_range_credits?: { min: number; max: number };
+  /** @deprecated P13-F1/F3: dropped (contract §3.8). */
   slice_prices_by_court?: Array<{ court_id: string; court_name: string; credits: number }>;
   max_slots_per_day?: number | null;
   max_minutes_per_day?: number | null;
@@ -800,7 +824,7 @@ export type MemberBookingRules = {
   empty_window_reason?: { groups?: string[]; day?: string } | null;
   /** The server's spelling of the same fact: the groups whose times leave nothing, or null. */
   empty_window_groups?: string[] | null;
-  /** D2: the top-up rate and peak standing these groups add up to. */
+  /** D2: the package discount (P13) and peak standing these groups add up to. */
   tariff?: MemberTariff;
 };
 
@@ -822,8 +846,17 @@ export type MemberBookingRules = {
  */
 export const TOP_UP_REASON_CODES = ["top_up_cash", "top_up_eft", "top_up_card_offline"] as const;
 export const ADJUSTMENT_REASON_CODES = ["goodwill", "correction", "refund_outside_system", "other"] as const;
+/**
+ * @deprecated P13-F3: P13 §3.7 splits these — the three top-up codes go to `sellPackage` (`/sell`)
+ * and `/adjust` answers 400 `reason_code_invalid` to them. Use the two lists above.
+ */
 export const ADJUST_REASON_CODES = [...TOP_UP_REASON_CODES, ...ADJUSTMENT_REASON_CODES] as const;
+/** @deprecated P13-F3: see `ADJUST_REASON_CODES`. */
 export type AdjustReasonCode = typeof ADJUST_REASON_CODES[number];
+/** P13 §3.7 — how the desk took the money for a package it sold. */
+export type SellReasonCode = typeof TOP_UP_REASON_CODES[number];
+/** P13 §3.7 — the kinds of hand adjustment `/adjust` still takes. */
+export type AdjustmentReasonCode = typeof ADJUSTMENT_REASON_CODES[number];
 
 /** `POST /admin/members/{membershipId}/code/reset` (`AdminMemberEndpoints.ResetCodeAsync`). */
 export type MemberCodeResetResult = {
@@ -840,7 +873,7 @@ export type AdminAdjustResult = {
   /** `AdminTopUp` or `AdminAdjustment`, decided by the reason code. */
   type?: string;
   reason_code?: string;
-  amount_credits: number;
+  amount_minutes: number;
   /** Rand the desk said it took, on a top-up; null on an adjustment. */
   zar_received?: number | null;
   /**
@@ -852,10 +885,55 @@ export type AdminAdjustResult = {
    * and two numbers read at two different instants are not a movement.
    * </p>
    */
-  balance_before_credits?: number | null;
-  balance_after_credits: number;
+  balance_before_minutes?: number | null;
+  balance_after_minutes: number;
   /** Who was moved — the id and the account's email (`WalletEndpoints.AdjustmentResult`), never a name. */
   member?: { user_id: string; email: string } | null;
+};
+
+/** P13 §3.7 — `POST /admin/minutes/{userId}/sell`: the adjust answer plus the package sold. */
+export type AdminSellResult = AdminAdjustResult & {
+  package: { id: string; name: string; minutes: number; price_zar: number };
+};
+
+// ---------------------------------------------------------------------------------------
+// P13 — minutes packages, the admin side (contract §3.5)
+// ---------------------------------------------------------------------------------------
+
+export const PACKAGE_STATUSES = ["active", "archived"] as const;
+export type PackageStatus = typeof PACKAGE_STATUSES[number];
+
+/** One package as the console reads it. A package is archived, never deleted (§4.1). */
+export type AdminPackage = {
+  id: string;
+  name: string;
+  minutes: number;
+  price_zar: number;
+  /** Null = a club package (every member). Fixed once created (409 `package_group_immutable`). */
+  group: { id: string; name: string } | null;
+  sort_order: number;
+  status: PackageStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The create body. `groupId` absent or null = a club package. */
+export type AdminPackageCreate = {
+  name: string;
+  minutes: number;
+  priceZar: number;
+  groupId?: string | null;
+  sortOrder?: number;
+};
+
+/** The PUT body — a full replace. `groupId` may be omitted, or must equal the stored one. */
+export type AdminPackageUpdate = {
+  name: string;
+  minutes: number;
+  priceZar: number;
+  sortOrder: number;
+  groupId?: string | null;
+  reason?: string;
 };
 
 // ---------------------------------------------------------------------------------------
@@ -979,7 +1057,7 @@ export const adminEndpoints = {
    * reason is the same words, sent as `waiveReason` too for the waiver's own record.
    */
   adminCancelBooking: (bookingId: string, body: { waivePenalty: boolean; reason: string }) =>
-    api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/admin/bookings/${bookingId}/cancel`, {
+    api.post<{ refunded_minutes: number; penalty_minutes: number }>(`/api/v1/admin/bookings/${bookingId}/cancel`, {
       waivePenalty: body.waivePenalty,
       reason: body.reason,
       ...(body.waivePenalty ? { waiveReason: body.reason } : {}),
@@ -1009,7 +1087,7 @@ export const adminEndpoints = {
    * One hand movement of credit, with the KIND of movement it is.
    *
    * <p>
-   * `amountCredits` is signed on the wire, exactly as it always was — the screen is what
+   * `amountMinutes` is signed on the wire, exactly as it always was — the screen is what
    * refuses to offer one signed field (D3-B08), not the API. `reasonCode` is new and required;
    * a request without it is accepted for one release as `other`, and the console ships in the
    * same wave.
@@ -1023,19 +1101,24 @@ export const adminEndpoints = {
   memberCodeReset: (membershipId: string, body: { revokePasskeys: boolean; reason: string }) =>
     api.post<MemberCodeResetResult>(
       `/api/v1/admin/members/${membershipId}/code/reset`, { revoke_passkeys: body.revokePasskeys, reason: body.reason }),
+  /**
+   * P13 §3.7 — goodwill and corrections. `amountMinutes` is a signed whole number, not 0,
+   * `|n| ≤ 999 999`. P13-F3: the three top-up codes are refused here now (`reason_code_invalid`);
+   * a desk sale is `sellPackage`. The type still admits them until the desk dialog is rebuilt.
+   */
   adjustCredit: (
     userId: string,
     body: {
-      amountCredits: number;
+      amountMinutes: number;
       reasonCode: AdjustReasonCode;
       reason: string;
       relatedBookingId?: string;
-      /** Rand the desk received, for a top-up that counts as revenue (round-1 contract §5). */
+      /** @deprecated P13-F3: a desk sale's rand goes on `sellPackage` (§3.7). */
       zarReceived?: number;
       idempotencyKey?: string;
     },
-  ) => api.post<AdminAdjustResult>(`/api/v1/admin/credit/${userId}/adjust`, {
-    amountCredits: body.amountCredits,
+  ) => api.post<AdminAdjustResult>(`/api/v1/admin/minutes/${userId}/adjust`, {
+    amountMinutes: body.amountMinutes,
     reasonCode: body.reasonCode,
     reason: body.reason,
     ...(body.relatedBookingId ? { relatedBookingId: body.relatedBookingId } : {}),
@@ -1046,4 +1129,52 @@ export const adminEndpoints = {
     // worse of the two failures.
     ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
   }),
+
+  // --- P13: the desk sells a package (§3.7) ----------------------------------------------
+  /** The shelf as THIS member sees it (their discount, their groups' packages), without checkouts. */
+  memberShelf: (userId: string) => api.get<MemberShelf>(`/api/v1/admin/minutes/${userId}/packages`),
+  /**
+   * Sell a package from the member's shelf at the desk. `zarReceived` defaults (server-side) to
+   * the member's shelf price and may differ from it; 0–1 000 000 in whole cents. Posts one
+   * `AdminTopUp` row of the package's minutes. The key names THIS sale, as on `adjustCredit`.
+   */
+  sellPackage: (
+    userId: string,
+    body: {
+      packageId: string;
+      reasonCode: SellReasonCode;
+      reason: string;
+      zarReceived?: number;
+      idempotencyKey?: string;
+    },
+  ) => api.post<AdminSellResult>(`/api/v1/admin/minutes/${userId}/sell`, {
+    packageId: body.packageId,
+    reasonCode: body.reasonCode,
+    reason: body.reason,
+    ...(body.zarReceived !== undefined ? { zarReceived: body.zarReceived } : {}),
+    ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
+  }),
+
+  // --- P13: the club's packages (§3.5) ---------------------------------------------------
+  /** Ordered by the server: club first, then `sort_order`, `minutes`, `name`. */
+  packages: (status: PackageStatus | "all" = "active") =>
+    api.get<{ packages: AdminPackage[] }>(`/api/v1/admin/packages${qs({ status })}`),
+  packageCreate: (body: AdminPackageCreate) => api.post<AdminPackage>("/api/v1/admin/packages", {
+    name: body.name,
+    minutes: body.minutes,
+    priceZar: body.priceZar,
+    ...(body.groupId ? { groupId: body.groupId } : {}),
+    ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+  }),
+  packageUpdate: (id: string, body: AdminPackageUpdate) => api.put<AdminPackage>(`/api/v1/admin/packages/${id}`, {
+    name: body.name,
+    minutes: body.minutes,
+    priceZar: body.priceZar,
+    sortOrder: body.sortOrder,
+    ...(body.groupId !== undefined ? { groupId: body.groupId } : {}),
+    ...(body.reason && body.reason.trim() ? { reason: body.reason.trim() } : {}),
+  }),
+  /** Idempotent: archiving an archived package answers 200 and records nothing new. */
+  packageArchive: (id: string, reason?: string) =>
+    api.post<AdminPackage>(`/api/v1/admin/packages/${id}/archive`, reason && reason.trim() ? { reason: reason.trim() } : {}),
 };

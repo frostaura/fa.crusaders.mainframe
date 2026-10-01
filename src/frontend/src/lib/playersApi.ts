@@ -67,7 +67,7 @@ export type PlayersPayload = {
 };
 
 export type SplitPreviewRequest = {
-  priceCredits: number;
+  priceMinutes: number;
   splitMode: SplitMode;
   organiserWeight?: number;
   players: PlayerSpec[];
@@ -75,8 +75,8 @@ export type SplitPreviewRequest = {
 
 /* ─────────────────────────────── answers ─────────────────────────────── */
 
-export type SplitPreviewShare = { seat: number; team: Team; share_credits: number; weight: number };
-export type SplitPreview = { price_credits: number; shares: SplitPreviewShare[] };
+export type SplitPreviewShare = { seat: number; team: Team; share_minutes: number; weight: number };
+export type SplitPreview = { price_minutes: number; shares: SplitPreviewShare[] };
 
 /** A seat as the add answers it. `invite_token` is shown ONCE — it is stored only hashed. */
 export type AddedParticipant = {
@@ -85,7 +85,7 @@ export type AddedParticipant = {
   user_id: string | null;
   guest_name: string | null;
   status: ParticipantStatus;
-  share_credits: number;
+  share_minutes: number;
   invite_token: string | null;
   invite_path: string | null;
 };
@@ -98,7 +98,7 @@ export type AddPlayersAnswer = { booking_id: string; participants: AddedParticip
  */
 export type BookWithPlayersAnswer = {
   booking_id: string;
-  balance_after_credits: number;
+  balance_after_minutes: number;
   players?: AddPlayersAnswer | null;
   players_error?: string | null;
 };
@@ -117,17 +117,17 @@ export type DetailPlayer = {
   name: string | null;
   photo_url: string | null;
   status: ParticipantStatus;
-  share_credits: number;
+  share_minutes: number;
   weight: number;
-  consented_credits: number;
-  paid_credits: number;
-  target_credits: number;
-  unpaid_credits: number;
+  consented_minutes: number;
+  paid_minutes: number;
+  target_minutes: number;
+  unpaid_minutes: number;
   /**
-   * R2 F2-4 — share credits that came BACK to this seat (paid_credits nets them out, so a
+   * R2 F2-4 — share credits that came BACK to this seat (paid_minutes nets them out, so a
    * cancelled game read "paid 0"). Optional: an older server does not send it.
    */
-  returned_credits?: number;
+  returned_minutes?: number;
   needs_consent: boolean;
   settled_outside: boolean;
   lapsed: boolean;
@@ -152,15 +152,15 @@ export type BookingDetail = {
   organiser: { user_id: string | null; name: string | null; photo_url: string | null };
   players: DetailPlayer[];
   money: {
-    price_credits: number;
-    organiser_owed_credits: number;
-    shares_received_credits: number;
-    organiser_net_credits: number;
+    price_minutes: number;
+    organiser_owed_minutes: number;
+    shares_received_minutes: number;
+    organiser_net_minutes: number;
     /**
      * Every seat still owing, INCLUDING open link seats nobody has claimed yet (R1 contract §4).
      * The page shows this figure as it is — never a sum of the member seats it can see.
      */
-    unpaid_credits: number;
+    unpaid_minutes: number;
     share_deadline: string;
     is_split: boolean;
     /**
@@ -168,8 +168,8 @@ export type BookingDetail = {
      * the payer's wallet for it. Optional: until the API sends them they are read off the ledger's
      * shape (a refund of the whole charge, the penalty what the payer is left paying).
      */
-    refunded_credits?: number;
-    penalty_credits?: number;
+    refunded_minutes?: number;
+    penalty_minutes?: number;
   };
   attendance: { checked_in_at: string | null; players_checked_in: number };
   permissions: {
@@ -201,7 +201,7 @@ export type InvitePreview = {
   court_name: string | null;
   starts_at: string;
   ends_at: string;
-  share_credits: number;
+  share_minutes: number;
   timezone: string;
 };
 
@@ -221,7 +221,7 @@ export type MySeat = {
   starts_at: string;
   ends_at: string;
   organiser_name: string | null;
-  share_credits: number;
+  share_minutes: number;
   timezone: string;
 };
 
@@ -229,10 +229,10 @@ export type MySeat = {
  * One invite, as the accept sheet reads it — also the answer to opening a link.
  *
  * <p>
- * <b>`balance_credits` is the RAW balance</b> (contract update, 2026-09-28): the backend makes it
- * mean the raw balance everywhere, with `spendable_credits` and `held_credits` always beside
- * it. Every "balance after" and "enough to accept" figure is built on `spendable_credits` —
- * use {@link inviteMoney}, never `balance_credits` or the server's `balance_after_credits`.
+ * <b>`balance_minutes` is the RAW balance</b> (contract update, 2026-09-28): the backend makes it
+ * mean the raw balance everywhere, with `spendable_minutes` and `held_minutes` always beside
+ * it. Every "balance after" and "enough to accept" figure is built on `spendable_minutes` —
+ * use {@link inviteMoney}, never `balance_minutes` or the server's `balance_after_minutes`.
  * </p>
  */
 export type Invite = {
@@ -248,17 +248,17 @@ export type Invite = {
   organiser: { user_id: string | null; name: string | null; photo_url: string | null };
   /** How many live seats the game has. */
   players: number;
-  share_credits: number;
-  to_pay_credits: number;
+  share_minutes: number;
+  to_pay_minutes: number;
   needs_consent: boolean;
-  balance_credits: number;
+  balance_minutes: number;
   /** What the accept checks: the balance less what is held. Optional only for an older API. */
-  spendable_credits?: number;
-  held_credits: number;
+  spendable_minutes?: number;
+  held_minutes: number;
   /** P11 — owed back to the member's own partners, paid from their next credit. Absent: 0. */
-  owed_back_credits?: number;
-  balance_after_credits: number;
-  short_by_credits: number;
+  owed_back_minutes?: number;
+  balance_after_minutes: number;
+  short_by_minutes: number;
   share_deadline: string;
   cap: PartnerCap | null;
   /** The club's IANA zone — the link view is opened cold from a mail. Absent from an older API. */
@@ -267,16 +267,16 @@ export type Invite = {
 
 /**
  * The accept sheet's figures, on the SPENDABLE credits. Against an older API that sent no
- * `spendable_credits`, the spendable figure is the balance less what is held.
+ * `spendable_minutes`, the spendable figure is the balance less what is held.
  */
 export function inviteMoney(
-  invite: Pick<Invite, "balance_credits" | "spendable_credits" | "held_credits" | "owed_back_credits" | "to_pay_credits">,
+  invite: Pick<Invite, "balance_minutes" | "spendable_minutes" | "held_minutes" | "owed_back_minutes" | "to_pay_minutes">,
 ) {
-  const held = invite.held_credits ?? 0;
-  const owedBack = invite.owed_back_credits ?? 0;
+  const held = invite.held_minutes ?? 0;
+  const owedBack = invite.owed_back_minutes ?? 0;
   // P11: spendable is balance − held − owed back, and may be negative.
-  const spendable = typeof invite.spendable_credits === "number" ? invite.spendable_credits : invite.balance_credits - held - owedBack;
-  const toPay = invite.to_pay_credits;
+  const spendable = typeof invite.spendable_minutes === "number" ? invite.spendable_minutes : invite.balance_minutes - held - owedBack;
+  const toPay = invite.to_pay_minutes;
   return { spendable, toPay, after: spendable - toPay, shortBy: Math.max(0, toPay - spendable), held, owedBack };
 }
 
@@ -284,23 +284,23 @@ export type AcceptAnswer = {
   participant_id: string;
   booking_id: string;
   status: ParticipantStatus;
-  share_credits: number;
-  consented_credits: number;
-  paid_credits: number;
-  /** The RAW balance after; `spendable_credits` beside it where the server sends it. */
-  balance_credits: number;
-  spendable_credits?: number;
-  held_credits?: number;
-  owed_back_credits?: number;
+  share_minutes: number;
+  consented_minutes: number;
+  paid_minutes: number;
+  /** The RAW balance after; `spendable_minutes` beside it where the server sends it. */
+  balance_minutes: number;
+  spendable_minutes?: number;
+  held_minutes?: number;
+  owed_back_minutes?: number;
 };
 
 export type SeatAnswer = { participant_id: string; status: ParticipantStatus };
 /**
  * P11 — an admin remove or settle-outside. `return_waiting` is true when the partner's return
  * could not be paid because the organiser's balance could not cover it: NO money has moved yet,
- * and `return_credits` is what goes back once it is covered. Absent from an older API.
+ * and `return_minutes` is what goes back once it is covered. Absent from an older API.
  */
-export type ReturnAnswer = SeatAnswer & { return_waiting?: boolean; return_credits?: number | null };
+export type ReturnAnswer = SeatAnswer & { return_waiting?: boolean; return_minutes?: number | null };
 export type NudgeAnswer = { participant_id: string; nudges_left: number };
 export type LinkAnswer = { participant_id: string; invite_token: string; invite_path: string };
 
@@ -311,7 +311,7 @@ export type SplitChange = {
 export type SplitChangeAnswer = {
   booking_id: string;
   split_mode: SplitMode;
-  shares: { participant_id: string; seat: number; share_credits: number; weight: number; needs_consent: boolean }[];
+  shares: { participant_id: string; seat: number; share_minutes: number; weight: number; needs_consent: boolean }[];
 };
 
 export type RecentPartner = PublicMember & { last_played_at: string; games: number };
@@ -366,7 +366,7 @@ export type SocialPrefs = {
 /* ─────────────────────────────── admin (god mode) ─────────────────────────────── */
 
 export type AdminAddPlayer = { userId?: string; guestName?: string; accepted?: boolean; reason?: string };
-export type CollectAnswer = { participant_id: string; collected_credits: number; balance_after_credits: number };
+export type CollectAnswer = { participant_id: string; collected_minutes: number; balance_after_minutes: number };
 
 /* ─────────────────────────────── routes ─────────────────────────────── */
 
@@ -403,8 +403,8 @@ export const playersEndpoints = {
   changeSplit: (bookingId: string, body: SplitChange) => api.put<SplitChangeAnswer>(`/api/v1/bookings/${bookingId}/split`, body),
 
   /* the partner's hand — accept names the share the partner was SHOWN */
-  accept: (bookingId: string, participantId: string, expectedShareCredits: number) =>
-    api.post<AcceptAnswer>(`${seat(bookingId, participantId)}/accept`, { expectedShareCredits }),
+  accept: (bookingId: string, participantId: string, expectedShareMinutes: number) =>
+    api.post<AcceptAnswer>(`${seat(bookingId, participantId)}/accept`, { expectedShareMinutes }),
   decline: (bookingId: string, participantId: string) => api.post<SeatAnswer>(`${seat(bookingId, participantId)}/decline`),
   withdraw: (bookingId: string, participantId: string) => api.post<SeatAnswer>(`${seat(bookingId, participantId)}/withdraw`),
 
@@ -413,8 +413,8 @@ export const playersEndpoints = {
   invite: (token: string) => api.get<Invite>(`/api/v1/invites/${encodeURIComponent(token)}`),
   invitePreview: (token: string) => api.get<InvitePreview>(`/api/v1/invites/${encodeURIComponent(token)}/preview`),
   mySeat: (participantId: string) => api.get<MySeat>(`/api/v1/me/invites/${encodeURIComponent(participantId)}`),
-  acceptLink: (token: string, expectedShareCredits: number) =>
-    api.post<AcceptAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/accept`, { expectedShareCredits }),
+  acceptLink: (token: string, expectedShareMinutes: number) =>
+    api.post<AcceptAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/accept`, { expectedShareMinutes }),
   declineLink: (token: string) => api.post<SeatAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/decline`),
 
   /* partners */
