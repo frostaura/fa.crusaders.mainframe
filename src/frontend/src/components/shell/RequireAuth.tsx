@@ -34,6 +34,7 @@ const OFFLINE_CAPABLE: readonly RegExp[] = [
   // R5 M5-6: /bookings/invites joins them — the open invites are a kept read too (`useKeptInvites`).
   /^\/bookings\/[^/]+\/?$/,
   /^\/wallet\/?$/,
+  /^\/wallet\/activity\/?$/,
   /^\/profile\/?$/,
   /^\/inbox\/?$/,
 ];

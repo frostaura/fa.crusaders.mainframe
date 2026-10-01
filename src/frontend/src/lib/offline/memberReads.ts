@@ -2,6 +2,7 @@ import { endpoints, type DailyMePoint, type WalletReport } from "../api";
 import { bookingsApi } from "../bookingsApi";
 import { clubDayOf } from "../gridClock";
 import { playEndpoints } from "../playApi";
+import { takeMyInvites } from "../earlyInvites";
 import { playersEndpoints } from "../playersApi";
 import { getDataOwner, prefetchQuery } from "./queryCache";
 
@@ -29,7 +30,8 @@ export const memberReads = {
   profile: { key: "me:profile", load: () => endpoints.meProfile() },
   myPlay: { key: "play:me", load: () => playEndpoints.myPlay() },
   /** R5 M5-6 — the open invites (`/bookings/invites`, and the Inbox's invite pane). */
-  invites: { key: "invites:mine", load: () => playersEndpoints.myInvites() },
+  // The answer B's press-time read started (`earlyInvites`), when fresh: one request, not two.
+  invites: { key: "invites:mine", load: () => takeMyInvites() ?? playersEndpoints.myInvites() },
   /**
    * R5 M5-6 — Wallet activity for one range, by its club-day markers (`dayMarkers(range)`): the
    * totals and the daily points, read together as the page draws them.

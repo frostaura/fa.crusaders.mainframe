@@ -226,7 +226,7 @@ describe("the member's own pages, kept on the phone", () => {
       <MemoryRouter initialEntries={[path]}>
         <AuthProvider>
           <Routes>
-            {["/bookings", "/bookings/:id", "/bookings/invites", "/wallet", "/wallet/topup", "/profile", "/inbox", "/admin/members"].map((p) => (
+            {["/bookings", "/bookings/:id", "/bookings/invites", "/wallet", "/wallet/activity", "/wallet/topup", "/profile", "/inbox", "/admin/members"].map((p) => (
               <Route key={p} path={p} element={<RequireAuth admin={p.startsWith("/admin")}><p>{`page ${p}`}</p></RequireAuth>} />
             ))}
             <Route path="/login" element={<p>the sign-in page</p>} />
@@ -237,7 +237,7 @@ describe("the member's own pages, kept on the phone", () => {
   }
 
   for (const [path, page] of [
-    ["/bookings", "/bookings"], ["/bookings/b1", "/bookings/:id"], ["/bookings/invites", "/bookings/invites"], ["/wallet", "/wallet"], ["/profile", "/profile"], ["/inbox", "/inbox"],
+    ["/bookings", "/bookings"], ["/bookings/b1", "/bookings/:id"], ["/bookings/invites", "/bookings/invites"], ["/wallet", "/wallet"], ["/wallet/activity", "/wallet/activity"], ["/profile", "/profile"], ["/inbox", "/inbox"],
   ]) {
     it(`opens ${path} with no signal for the member this device confirmed`, async () => {
       tokenStore.set("member.jwt.value");

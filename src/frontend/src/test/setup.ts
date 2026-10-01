@@ -162,4 +162,6 @@ beforeEach(() => { resetQueryCacheForTests(); });
 
 // A tapped notice's held read mark lives at module scope (`components/inbox/heldMarks`): none is carried to the next test.
 import { resetHeldMarksForTests } from "../components/inbox/heldMarks";
-beforeEach(() => { resetHeldMarksForTests(); });
+// The invites read started at a link press (`lib/earlyInvites`) is module scope too: taking it empties it.
+import { takeMyInvites } from "../lib/earlyInvites";
+beforeEach(() => { resetHeldMarksForTests(); takeMyInvites(); });
