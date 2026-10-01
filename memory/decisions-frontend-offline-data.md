@@ -55,3 +55,5 @@ the worker still caches NO member data. Code: `src/frontend/src/lib/offline/`.
 - **Under Playwright's `context.setOffline(true)` the offline Wallet said "Couldn't refresh"**
   when the wording keyed on `navigator.onLine` alone (production-build spec, observed). Offline is
   now judged from the failed read too (`NetworkError`/`OfflineError`), never from `onLine` alone.
+- **A page's optimistic write dies with the page; the cached read does not.** Back within `JOIN_MS` the
+  stale list is REUSED unread (inbox: tapped notice unread again). Hold such marks at module scope (`inbox/heldMarks`).
