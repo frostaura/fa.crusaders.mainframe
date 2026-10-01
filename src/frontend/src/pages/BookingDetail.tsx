@@ -24,8 +24,11 @@ import { CalendarBlank } from "@/components/ui/icons";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
+import { StaleNotice } from "@/components/shell/StaleNotice";
 import { useAuth } from "@/lib/auth";
-import { playEndpoints } from "@/lib/playApi";
+import { memberReads } from "@/lib/offline/memberReads";
+import { fetchQuery, peekQuery } from "@/lib/offline/queryCache";
+import { useDataOwner } from "@/lib/offline/useCachedRead";
 import type { EarlyResult } from "@/components/play/useResult";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
@@ -81,19 +84,25 @@ function useEarlyResult(bookingId: string): EarlyResult | null {
   // Only when the link that brought us here knew the game is live (`lib/bookingLink`): a
   // cancelled game asks for no result at all (F2.15).
   const vouched = vouchesForResult(useLocation().state);
-  const member = auth.status === "authenticated" && !auth.isAdmin && vouched;
+  // P4-5 (R4 wave B) — a deep link carries no such state, but the phone may: the booking as this
+  // member last saw it (`lib/offline`) vouches as well as a link would.
+  const { who } = useDataOwner();
+  const known = peekQuery(who, memberReads.booking(bookingId).key)?.value as BookingDetail | undefined;
+  const member = auth.status === "authenticated" && !auth.isAdmin && (vouched || (known !== undefined && showsResult(known)));
   const started = useRef<EarlyResult | null>(null);
   const [early, setEarly] = useState<EarlyResult | null>(null);
   useEffect(() => {
     if (!member || !bookingId) return;
     if (started.current?.bookingId !== bookingId) {
-      const read = playEndpoints.bookingResult(bookingId);
+      // Through the cache, so the card's own first read joins this one rather than repeating it.
+      const result = memberReads.bookingResult(bookingId);
+      const read = fetchQuery(who, result.key, result.load);
       // Its failure is the card's to show when it takes it; untaken, it is dropped.
       read.catch(() => undefined);
       started.current = { bookingId, read };
     }
     setEarly(started.current);
-  }, [member, bookingId]);
+  }, [member, bookingId, who]);
   return early?.bookingId === bookingId ? early : null;
 }
 
@@ -130,7 +139,8 @@ function DetailBody({ read, say, earlyResult }: { read: DetailRead; say: (notice
   }
   return (
     <>
-      {read.error ? <Alert tone="warning" live="polite">{DETAIL_COPY.refreshFailed}</Alert> : null}
+      {/* R4 wave B — the phone's copy, drawn because the club could not be asked: said with its time. */}
+      {read.error ? <Alert tone="warning" live="polite">{DETAIL_COPY.refreshFailed}</Alert> : <StaleNotice stale={read.stale} readAt={read.readAt} />}
       <DetailView detail={read.data} readAt={read.readAt} reload={read.reload} say={say} earlyResult={earlyResult} />
     </>
   );

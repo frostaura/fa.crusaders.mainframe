@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { tokenStore } from "@/lib/api";
 import { useAdminAttention } from "@/lib/adminAttention";
 import { useAuth } from "@/lib/auth";
+import { useDataOwner } from "@/lib/offline/useCachedRead";
 import { cn } from "@/lib/utils";
 import { CelebrationOverlay } from "../play/CelebrationOverlay";
 import { ShutDoorsBanner } from "../doors/ShutDoorsBanner";
@@ -99,6 +100,10 @@ export default function AppShell() {
   const location = useLocation();
   const signedIn = auth.status === "authenticated";
   const isAdmin = signedIn && auth.isAdmin;
+  // R4 wave B (P4-4) — the tab bar stays for the member this phone confirmed while the club is
+  // out of reach or not yet asked: My Code offline had no way to Bookings or Wallet.
+  const offlineMember = useDataOwner().who !== null;
+  const memberChrome = signedIn || offlineMember;
   // One read each, shared with the admin rail and the Overview (both stores dedupe their requests).
   const attention = useAdminAttention({ enabled: isAdmin });
   const doors = useDoorsChrome(isAdmin, location.pathname);
@@ -165,9 +170,9 @@ export default function AppShell() {
         */}
         <div className={frame.header}>
           <div data-app-crest="" className={frame.crest}>
-            <CrestLink to={signedIn ? LANDING_PATH : "/"} />
+            <CrestLink to={memberChrome ? LANDING_PATH : "/"} />
           </div>
-          {signedIn ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
+          {memberChrome ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
           {signedIn ? <NotificationBell className="ml-auto md:-mr-4" /> : null}
           <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !signedIn && "ml-auto")}>
             {signedIn ? <><CreditsChip /><AccountMenu /></> : null}

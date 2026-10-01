@@ -1,4 +1,5 @@
-import { ApiError, NetworkError, errorCode } from "./api";
+import { ApiError, NetworkError, OfflineError, errorCode } from "./api";
+import { OFFLINE_COPY } from "./offline/offlineCopy";
 
 /**
  * One place that turns a thrown error into a sentence a member can act on.
@@ -108,6 +109,9 @@ export type DescribeOptions = {
  * codes · codes any request can produce · well-known statuses · the screen's fallback.
  */
 export function describeFailure(err: unknown, opts: DescribeOptions = {}): string {
+  // R4 wave B — refused on the phone, before anything was sent: nothing changed, and only a
+  // connection will help.
+  if (err instanceof OfflineError) return lead(opts.action, OFFLINE_COPY.writeCause);
   if (err instanceof NetworkError) {
     return err.kind === "timeout"
       ? lead(opts.action, "the club's system took too long to answer. Check your connection and try again.")

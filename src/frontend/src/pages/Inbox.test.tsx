@@ -109,16 +109,18 @@ describe("the inbox", () => {
 
   // A 5xx is a deployment fault, which StateBlock deliberately offers no retry for.
   it("turns a failed read into a failure with a retry — not an empty inbox", async () => {
-    let calls = 0;
+    // Refused until Try again is pressed — however many first reads StrictMode makes.
+    let refusing = true;
     setup({
       list: {
         path: "/api/v1/me/notifications",
-        respond: () => (++calls <= 2 ? refuse(429, { error: "rate_limited" }) : { items: FIRST, unread_count: 2, next_cursor: null }),
+        respond: () => (refusing ? refuse(429, { error: "rate_limited" }) : { items: FIRST, unread_count: 2, next_cursor: null }),
       },
     });
     renderInbox();
     expect(await screen.findByText(new RegExp(INBOX_COPY.readCaveat))).toBeInTheDocument();
     expect(screen.queryByText(INBOX_COPY.empty)).toBeNull();
+    refusing = false;
     screen.getByRole("button", { name: "Try again" }).click();
     expect(await list()).toBeInTheDocument();
   });

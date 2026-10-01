@@ -153,3 +153,9 @@ beforeEach(() => { resetStandingAnnouncements(); });
 import { wipeMemberCode } from "../lib/memberCode/keyStore";
 
 beforeEach(async () => { await wipeMemberCode(); });
+
+// R4 wave B — the member query cache (`lib/offline`) is module memory too: a read one test made
+// would draw the next test's page instantly, before its own stub had answered anything.
+import { resetQueryCacheForTests } from "../lib/offline/queryCache";
+
+beforeEach(() => { resetQueryCacheForTests(); });

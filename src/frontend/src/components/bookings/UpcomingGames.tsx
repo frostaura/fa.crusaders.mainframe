@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
+import { intentProps } from "@/routeChunks";
 import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +9,7 @@ import { CaretRight, Warning } from "@/components/ui/icons";
 import { UPCOMING } from "@/lib/bookingsCopy";
 import { bookingsApi, type UpcomingGame, type UpcomingPlayer } from "@/lib/bookingsApi";
 import { firstName } from "@/lib/playersCopy";
+import { memberReads } from "@/lib/offline/memberReads";
 import { useGamesRead } from "./useGamesRead";
 import { SHOWN, when } from "./gameWhen";
 import { RESULT_READABLE } from "@/lib/bookingLink";
@@ -29,7 +31,7 @@ import { RESULT_READABLE } from "@/lib/bookingLink";
  */
 
 export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknown; fallbackZone?: string }) {
-  const { state, retry } = useGamesRead(bookingsApi.upcoming, refreshKey);
+  const { state, retry } = useGamesRead(bookingsApi.upcoming, refreshKey, memberReads.upcoming.key);
   const [all, setAll] = useState(false);
   const headingId = useId();
   if (state.status === "loading") return null;
@@ -68,6 +70,7 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
     <Interactable asChild surface="card" watermark>
       <Link
         to={`/bookings/${game.booking_id}`}
+        {...intentProps(`/bookings/${game.booking_id}`)}
         state={RESULT_READABLE}
         className="flex min-h-touch items-center gap-3 rounded-xl border border-border bg-bg-surface p-3 text-left shadow-xs"
       >

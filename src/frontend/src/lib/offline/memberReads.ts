@@ -1,0 +1,66 @@
+import { endpoints } from "../api";
+import { bookingsApi } from "../bookingsApi";
+import { clubDayOf } from "../gridClock";
+import { playEndpoints } from "../playApi";
+import { playersEndpoints } from "../playersApi";
+import { getDataOwner, prefetchQuery } from "./queryCache";
+
+/**
+ * The member reads kept by `lib/offline`, by key — ONE place that names each read and how it is
+ * made, so the hook a page draws from and the hint that starts the read early (a nav link
+ * pressed, a deep link opened) can never ask for different things under one key.
+ */
+
+/** The wallet page's first read: the newest movements and the share summaries. */
+export const WALLET_PAGE_SIZE = 100;
+
+export type MemberRead<T> = { key: string; load: () => Promise<T> };
+
+export const memberReads = {
+  schedule: (date: string) => ({ key: `schedule:${date}`, load: () => endpoints.schedule(date) }),
+  /** The day the member last looked at, whichever it was — the grid offline falls back to it. */
+  lastDay: "schedule:last",
+  upcoming: { key: "games:upcoming", load: () => bookingsApi.upcoming() },
+  recent: { key: "games:recent", load: () => bookingsApi.recent() },
+  booking: (id: string) => ({ key: `booking:${id}`, load: () => playersEndpoints.detail(id) }),
+  bookingResult: (id: string) => ({ key: `result:${id}`, load: () => playEndpoints.bookingResult(id) }),
+  wallet: { key: "wallet:page", load: () => endpoints.walletWithShareBookings(WALLET_PAGE_SIZE, 0) },
+  inbox: { key: "inbox:first", load: () => playersEndpoints.notifications() },
+  profile: { key: "me:profile", load: () => endpoints.meProfile() },
+  myPlay: { key: "play:me", load: () => playEndpoints.myPlay() },
+} as const;
+
+/** The `?date=` a Bookings link names, or the club's today as this phone knows it. */
+function dayOf(search: string): string {
+  const asked = new URLSearchParams(search).get("date");
+  return asked && /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : clubDayOf(Date.now(), undefined);
+}
+
+/** The reads a member page opens with, by path. Admin and anonymous pages have none here. */
+export function readsFor(pathname: string, search = ""): MemberRead<unknown>[] {
+  if (/^\/bookings\/?$/.test(pathname)) {
+    const day = memberReads.schedule(dayOf(search));
+    // The desk booking FOR a member (`?as=`) shows no games lists.
+    return new URLSearchParams(search).has("as") ? [day] : [day, memberReads.upcoming, memberReads.recent];
+  }
+  if (/^\/bookings\/invites\/?$/.test(pathname)) return [];
+  const booking = /^\/bookings\/([^/]+)\/?$/.exec(pathname);
+  if (booking) return [memberReads.booking(decodeURIComponent(booking[1]))];
+  if (/^\/wallet\/?$/.test(pathname)) return [memberReads.wallet];
+  if (/^\/inbox\/?$/.test(pathname)) return [memberReads.inbox];
+  if (/^\/profile\/?$/.test(pathname)) return [memberReads.profile, memberReads.myPlay];
+  return [];
+}
+
+/**
+ * P4-5 — start a page's reads now, for the member this phone holds: beside its code on a direct
+ * load, and on the press (or hover, or focus) of a link to it. Joined by the page's own read when
+ * it mounts (`useCachedRead`), so it is never asked twice. Returns how many were started.
+ */
+export function prefetchRouteData(pathname: string, search = ""): number {
+  const who = getDataOwner();
+  if (!who) return 0;
+  const reads = readsFor(pathname, search);
+  for (const read of reads) prefetchQuery(who, read.key, read.load);
+  return reads.length;
+}

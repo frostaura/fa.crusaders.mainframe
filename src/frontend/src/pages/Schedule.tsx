@@ -13,6 +13,10 @@ import { StateBlock } from "@/components/ui/state-block";
 import { WeekStrip } from "@/components/ui/week-strip";
 import { useToast } from "../components/Toast";
 import { ScheduleNotices } from "../components/ScheduleNotices";
+import { StaleNotice } from "../components/shell/StaleNotice";
+import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
+import { isConnectionFailure } from "../lib/offline/useCachedRead";
+import { phoneIsOffline } from "../lib/api";
 import type { BoardContext } from "../components/ScheduleCells";
 import { BookingBoard, BookingGridHeading, BookingGridSkeleton, SELECTION_ROOM_PX } from "../components/bookings/BookingGrid";
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
@@ -140,7 +144,11 @@ export default function BookingsPage() {
     void reconcile();
   }, [setDay, refreshBalance, selection.api, reconcile, wrote]);
 
-  const { openBook, openCancel } = sheets;
+  const { openCancel } = sheets;
+  // R4 wave B — a grid drawn from the phone because the club could not be reached books nothing:
+  // a slot it shows free may have gone. The press says why instead of opening the sheet.
+  const offlineGrid = schedule.stale && (isConnectionFailure(schedule.error) || phoneIsOffline());
+  const openBook = useOnlineOnly(offlineGrid, sheets.openBook, toast);
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
     day: shown, rules: gridRules, isAdmin, dayLabel: otherDay, forName: forMember?.name ?? null, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
     onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc)]),
@@ -164,6 +172,7 @@ export default function BookingsPage() {
       {/* Room under the grid while the floating bar is up, so it never covers the last row —
           padding, not a spacer element, because a spacer would also take the shell's section gap. */}
       <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
+        <StaleNotice stale={schedule.stale} readAt={schedule.readAt} extra={offlineGrid ? OFFLINE_COPY.gridStale : undefined} />
         {bookAsUserId
           ? <BookingForBar booking={bookingFor} sliceMinutes={day?.sliceMinutes ?? 15} />
           : (
@@ -224,6 +233,14 @@ export default function BookingsPage() {
       ) : null}
     </PageShell>
   );
+}
+
+/** `open`, unless the grid on screen is the phone's copy — then the reason, as a toast. */
+function useOnlineOnly<A extends unknown[]>(stale: boolean, open: (...args: A) => void, toast: ReturnType<typeof useToast>) {
+  return useCallback((...args: A) => {
+    if (stale) { toast.push({ tone: "warning", text: OFFLINE_COPY.bookNeedsConnection }); return; }
+    open(...args);
+  }, [stale, open, toast]);
 }
 
 /** The member being booked for, with the grid rules their groups set — null until known (R2 F1-3). */

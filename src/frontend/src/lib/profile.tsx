@@ -1,6 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { endpoints, type MyProfile } from "./api";
+import { createContext, useCallback, useContext, useState } from "react";
+import type { MyProfile } from "./api";
 import { useAuth } from "./auth";
+import { memberReads } from "./offline/memberReads";
+import { fetchQuery, peekQuery, primeQuery } from "./offline/queryCache";
+import { useCachedRead, useDataOwner } from "./offline/useCachedRead";
 
 type ProfileState = {
   /** The signed-in member's profile — never an earlier member's. Null until read. */
@@ -20,6 +23,9 @@ type ProfileState = {
   error: unknown;
   refresh: () => Promise<void>;
   setLocal: (next: MyProfile | null) => void;
+  /** R4 wave B — when `profile` was true at the club, and whether the club has since failed to confirm it. */
+  readAt?: number | null;
+  stale?: boolean;
 };
 
 const ProfileContext = createContext<ProfileState | null>(null);
@@ -32,10 +38,6 @@ export function useProfile(): ProfileState {
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
-  const [profile, setProfile] = useState<MyProfile | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [error, setError] = useState<unknown>(null);
 
   /**
    * The session is authenticated but holds an admin-issued temporary password, so the API
@@ -61,41 +63,45 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
    * reads the profile, never fired. Every identity change — sign-in, passkey, magic link, an
    * account switch — is a new read.
    * </p>
+   *
+   * <p>
+   * R4 wave B — the read is kept by `lib/offline` under the member (`useDataOwner`), so another
+   * member's profile is never in hand; while the session check is out, or the club cannot be
+   * reached, the phone's copy is drawn and the club is asked only once the check has answered
+   * (`whileChecking: false` — not beside `whoami` on a cold My Code).
+   * </p>
    */
-  const identity = auth.status === "authenticated" && !gated ? auth.userId : null;
-  // A read that answers after the identity has moved on belongs to somebody else.
-  const current = useRef(identity);
-  useLayoutEffect(() => { current.current = identity; }, [identity]);
+  const { who } = useDataOwner();
+  const key = who && !gated ? memberReads.profile.key : null;
+  const read = useCachedRead<MyProfile>(key, memberReads.profile.load, { whileChecking: false });
+  const [manual, setManual] = useState<{ base: string | null; at: number | null; error: unknown } | null>(null);
+  const base = key ? who : null;
 
+  // `refresh` is awaited (a photo just uploaded): it resolves once the club has answered.
   const refresh = useCallback(async () => {
-    if (identity === null) return;
-    setLoading(true);
+    if (!key) return;
     try {
-      const read = await endpoints.meProfile();
-      if (current.current !== identity) return;
-      setProfile(read);
-      setFailed(false);
-      setError(null);
+      await fetchQuery(who, key, memberReads.profile.load);
+      setManual({ base: who, at: Date.now(), error: null });
     } catch (err) {
       // Keep what was on screen for THIS member, but say the read failed.
-      if (current.current === identity) { setFailed(true); setError(err); }
-    } finally {
-      if (current.current === identity) setLoading(false);
+      setManual({ base: who, at: peekQuery(who, key)?.at ?? null, error: err });
     }
-  }, [identity]);
+  }, [key, who]);
+  const setLocal = useCallback((next: MyProfile | null) => {
+    if (key && next) primeQuery(who, key, next);
+  }, [key, who]);
 
-  useEffect(() => {
-    // Whatever was shown belonged to the previous identity (or to none).
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs profile state with the signed-in identity
-    setProfile(null);
-    setFailed(false);
-    setError(null);
-    if (identity !== null) void refresh();
-    else setLoading(false);
-  }, [identity, refresh]);
-
+  // A manual refresh's failure stands until the profile on hand moves on from it.
+  const manualError = manual && manual.base === base && manual.at === read.readAt ? manual.error : null;
+  const error = read.error ?? manualError;
+  const profile = key ? read.data : null;
   return (
-    <ProfileContext.Provider value={{ profile, loading, failed, error, refresh, setLocal: setProfile }}>
+    <ProfileContext.Provider value={{
+      profile, loading: read.loading, failed: Boolean(error), error: error ?? null, refresh, setLocal,
+      readAt: profile ? read.readAt : null, stale: profile !== null && (read.stale || Boolean(manualError)),
+    }}
+    >
       {children}
     </ProfileContext.Provider>
   );

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "@/lib/auth";
-import { playEndpoints, type MyPlay } from "@/lib/playApi";
+import { memberReads } from "@/lib/offline/memberReads";
+import { useCachedRead, useDataOwner } from "@/lib/offline/useCachedRead";
+import type { MyPlay } from "@/lib/playApi";
 
 /**
  * The member's "My game" (§6.2), in one read — and kept on screen through a re-read.
@@ -21,40 +21,10 @@ export type MyGameRead = {
   patch: (update: (current: MyPlay) => MyPlay) => void;
 };
 
-type Held = { key: string; who: string; data: MyPlay | null; error: unknown };
-
-const EMPTY: Held = { key: "", who: "", data: null, error: null };
-
 export function useMyGame(): MyGameRead {
-  const auth = useAuth();
-  const who = auth.status === "authenticated" ? auth.userId : "";
-  const [nonce, setNonce] = useState(0);
-  const [held, setHeld] = useState<Held>(EMPTY);
-  const asked = `${who}:${nonce}`;
-
-  useEffect(() => {
-    if (!who) return undefined;
-    let live = true;
-    playEndpoints.myPlay().then(
-      (data) => { if (live) setHeld({ key: asked, who, data, error: null }); },
-      (error: unknown) => {
-        if (!live) return;
-        setHeld((prev) => ({ key: asked, who, data: prev.who === who ? prev.data : null, error }));
-      },
-    );
-    return () => { live = false; };
-  }, [asked, who]);
-
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
-  const patch = useCallback((update: (current: MyPlay) => MyPlay) => {
-    setHeld((prev) => (prev.data ? { ...prev, data: update(prev.data) } : prev));
-  }, []);
-  const same = held.who === who && who !== "";
-  return {
-    data: same ? held.data : null,
-    error: held.key === asked ? held.error : null,
-    loading: held.key !== asked,
-    reload,
-    patch,
-  };
+  // R4 wave B — kept by `lib/offline` (`play:me`), keyed by the member (`useDataOwner`): a revisit
+  // draws at once, offline draws the phone's copy. Nobody signed in reads nothing.
+  const { who } = useDataOwner();
+  const cached = useCachedRead(who ? memberReads.myPlay.key : null, memberReads.myPlay.load);
+  return { data: cached.data, error: cached.error, loading: cached.loading, reload: cached.reload, patch: cached.patch };
 }

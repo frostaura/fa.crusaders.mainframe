@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { playEndpoints, type BookingResultView, type MatchResult } from "@/lib/playApi";
+import { useCallback } from "react";
+import { memberReads } from "@/lib/offline/memberReads";
+import { useCachedRead } from "@/lib/offline/useCachedRead";
+import type { BookingResultView, MatchResult } from "@/lib/playApi";
 
 /**
  * A booking's result, read and re-read (§6.1) — the card's three states kept apart.
@@ -21,10 +23,6 @@ export type ResultRead = {
   adopt: (result: MatchResult) => void;
 };
 
-type Held = { key: string; id: string; data: BookingResultView | null; error: unknown };
-
-const EMPTY: Held = { key: "", id: "", data: null, error: null };
-
 /**
  * `first` — a read of THIS booking's result the page already started (perf: beside the booking's
  * own read, not a round trip after it). Used for the first read only; every re-read asks again.
@@ -33,34 +31,17 @@ const EMPTY: Held = { key: "", id: "", data: null, error: null };
 export type EarlyResult = { bookingId: string; read: Promise<BookingResultView> };
 
 export function useResult(bookingId: string, first?: EarlyResult | null): ResultRead {
-  const [nonce, setNonce] = useState(0);
-  const [held, setHeld] = useState<Held>(EMPTY);
-  const asked = `${bookingId}:${nonce}`;
-  const early = nonce === 0 && first?.bookingId === bookingId ? first.read : null;
-
-  useEffect(() => {
-    let live = true;
-    (early ?? playEndpoints.bookingResult(bookingId)).then(
-      (data) => { if (live) setHeld({ key: asked, id: bookingId, data, error: null }); },
-      (error: unknown) => {
-        if (!live) return;
-        setHeld((prev) => ({ key: asked, id: bookingId, data: prev.id === bookingId ? prev.data : null, error }));
-      },
-    );
-    return () => { live = false; };
-  }, [asked, bookingId, early]);
-
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  // R4 wave B — kept by `lib/offline` (`result:<id>`), so the card draws at once on a revisit and
+  // from the phone offline. The page's early read (`first`) goes through the same cache
+  // (`BookingDetail`'s `useEarlyResult`), so the card's first read JOINS it rather than repeating
+  // it — `first` is only the page saying it started one; every re-read asks the club.
+  void first;
+  const load = useCallback(() => memberReads.bookingResult(bookingId).load(), [bookingId]);
+  const cached = useCachedRead(memberReads.bookingResult(bookingId).key, load, { foreground: false });
+  const { patch, reload } = cached;
   const adopt = useCallback((result: MatchResult) => {
-    setHeld((prev) => (prev.data ? { ...prev, data: { ...prev.data, result } } : prev));
-    setNonce((n) => n + 1);
-  }, []);
-  const same = held.id === bookingId;
-  return {
-    data: same ? held.data : null,
-    error: held.key === asked ? held.error : null,
-    loading: held.key !== asked,
-    reload,
-    adopt,
-  };
+    patch((prev) => ({ ...prev, result }));
+    reload();
+  }, [patch, reload]);
+  return { data: cached.data, error: cached.error, loading: cached.loading, reload, adopt };
 }

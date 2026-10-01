@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCachedRead } from "@/lib/offline/useCachedRead";
 
 /**
  * A list of the member's games (upcoming, recent), read again whenever `refreshKey` changes.
@@ -7,26 +7,23 @@ import { useEffect, useRef, useState } from "react";
  * Three states, never two: loading, ready (possibly empty) and failed. A re-read keeps the list
  * it had rather than flashing empty under a member's thumb.
  * </p>
+ *
+ * <p>
+ * R4 wave B — kept by `lib/offline` under `key`: a revisit draws the last list at once, a warm
+ * start and an offline open draw the phone's copy. The Bookings page re-reads on return itself
+ * (`useScheduleLiveness` bumps `refreshKey`), so this does not add its own foreground read.
+ * </p>
  */
 export type GamesState<T> =
   | { status: "loading" }
   | { status: "ready"; items: T[]; timezone: string | undefined }
   | { status: "error" };
 
-export function useGamesRead<T>(read: () => Promise<{ timezone?: string; items?: T[] }>, refreshKey: unknown) {
-  const [attempt, setAttempt] = useState(0);
-  const [answer, setAnswer] = useState<{ key: string; state: GamesState<T> } | null>(null);
-  const latest = useRef(read);
-  useEffect(() => { latest.current = read; });
-  const key = `${String(refreshKey)}|${attempt}`;
-  useEffect(() => {
-    let live = true;
-    latest.current().then(
-      (res) => { if (live) setAnswer({ key, state: { status: "ready", items: res.items ?? [], timezone: res.timezone } }); },
-      () => { if (live) setAnswer({ key, state: { status: "error" } }); },
-    );
-    return () => { live = false; };
-  }, [key]);
-  const state: GamesState<T> = answer ? answer.state : { status: "loading" };
-  return { state, retry: () => setAttempt((n) => n + 1) };
+export function useGamesRead<T>(read: () => Promise<{ timezone?: string; items?: T[] }>, refreshKey: unknown, key: string) {
+  const cached = useCachedRead(key, read, { foreground: false, refresh: refreshKey });
+  const { data, error } = cached;
+  const state: GamesState<T> = data
+    ? { status: "ready", items: data.items ?? [], timezone: data.timezone }
+    : error ? { status: "error" } : { status: "loading" };
+  return { state, retry: cached.reload };
 }

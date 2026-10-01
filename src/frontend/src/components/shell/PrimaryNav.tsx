@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { intentProps } from "@/routeChunks";
 import { destinationsFor, type PrimaryDestination } from "./nav";
 import type { AdminAttention } from "@/lib/adminAttention";
 
@@ -100,6 +101,9 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
   return (
     <NavLink
       to={to}
+      // P4-5 (R4 wave B) — the page's code AND its reads start at the first sign of intent, not
+      // after the tap has loaded the code: pressed (a phone), hovered or focused (a desk).
+      {...intentProps(to)}
       className={({ isActive }) => cn(
         LINK,
         isActive ? "font-semibold text-accent-strong md:bg-accent-soft" : "text-text-secondary hover:text-text-primary md:hover:bg-bg-muted",

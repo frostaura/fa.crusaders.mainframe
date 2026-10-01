@@ -14,7 +14,7 @@ import "./index.css";
 // rather than after it (`routeChunks`) — the moment that check is sent, so it is not queued behind
 // the page's files. No session: the page is sign-in, which is in the entry.
 // R4: and Bookings' straight after — the next tap from every page (`preloadAtSessionCheck`).
-if (tokenStore.get()) whenSessionCheckSent(() => preloadAtSessionCheck(window.location.pathname));
+if (tokenStore.get()) whenSessionCheckSent(() => preloadAtSessionCheck(window.location.pathname, undefined, window.location.search));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

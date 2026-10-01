@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { intentProps } from "@/routeChunks";
 import { Link, useNavigate } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -124,7 +125,7 @@ export function AccountMenu() {
         <Identity name={name} email={profile?.email ?? null} photo={profile?.photo_url ?? null} />
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild onSelect={going}>
-          <Link to="/profile">
+          <Link to="/profile" {...intentProps("/profile")}>
             <UserCircle size={16} aria-hidden="true" className="text-text-muted" />
             Profile
           </Link>

@@ -73,13 +73,14 @@ describe("remove (I-2)", () => {
   it("unreadable: says it cannot tell", async () => {
     let reads = 0;
     serve({
-      detail: { path: DETAIL_PATH, respond: () => { reads += 1; return reads <= 2 ? detail() : refuse(503, { error: "down" }); } },
+      // One first read: StrictMode's second mount joins the read in flight (R4 wave B, `lib/offline`).
+      detail: { path: DETAIL_PATH, respond: () => { reads += 1; return reads <= 1 ? detail() : refuse(503, { error: "down" }); } },
       extra: [{ method: "DELETE", path: SEAT(PID.sam), respond: lost }],
     });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.removeFor("Sam") }));
     const dialog = await screen.findByRole("dialog", { name: DETAIL_ACTIONS.removeTitle("Sam") });
-    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(1));
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ACTIONS.removeConfirm }));
     expect(await within(dialog).findByText(PLAYERS_UNSURE.remove("Sam").unchecked)).toBeInTheDocument();
   });
@@ -272,7 +273,7 @@ describe("one cancelled banner (R3 I-5)", () => {
       permissions: { ...detail().permissions, can_invite: false, can_change_split: false, can_cancel: false },
     });
     serve({
-      detail: { path: DETAIL_PATH, body: detail(), sequence: [detail(), detail(), cancelled] },
+      detail: { path: DETAIL_PATH, body: detail(), sequence: [detail(), cancelled] },
       extra: [
         { path: `${DETAIL_PATH}/cancellation-quote`, body: quote },
         { method: "POST", path: `${DETAIL_PATH}/cancel`, status: 504, body: { error: "gateway_timeout" } },

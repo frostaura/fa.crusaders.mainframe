@@ -5,7 +5,8 @@ import { useToast } from "@/components/Toast";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { failureOf, knownUnchanged, markAllOrProve, markReadOrProve } from "./inboxReadBack";
-import { useRead } from "@/lib/useRead";
+import { memberReads } from "@/lib/offline/memberReads";
+import { useCachedRead } from "@/lib/offline/useCachedRead";
 import { useUnreadCount } from "./useUnreadCount";
 
 /**
@@ -57,7 +58,9 @@ function useMarks(base: MemberNotificationPage | null) {
 
 export function useInbox() {
   const load = useCallback(() => playersEndpoints.notifications(), []);
-  const [read, retry] = useRead("member-notifications", load);
+  // R4 wave B — kept by `lib/offline`: drawn at once on a revisit, from the phone offline.
+  const read = useCachedRead(memberReads.inbox.key, load);
+  const retry = read.reload;
   const base = read.data;
   const unread = useUnreadCount();
   const { set: setCount, refresh: refreshCount } = unread;
@@ -104,10 +107,15 @@ export function useInbox() {
   });
 
   return {
-    loading: read.loading,
-    error: read.error,
+    // Nothing to show yet: the list's skeleton or its failure. With a list in hand, a re-read
+    // (`refreshing`) or a failed one (`stale`) is said beside it, never instead of it.
+    loading: read.loading && base === null,
+    error: base === null ? read.error : null,
+    refreshing: read.loading,
+    stale: read.stale,
+    readAt: read.readAt,
     answered: base !== null,
-    items: base ? [...base.items, ...older.items] : [],
+    items: base ? [...(base.items ?? []), ...older.items] : [],
     cursor: older.cursor,
     more: older.more,
     count,

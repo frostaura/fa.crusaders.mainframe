@@ -7,6 +7,7 @@ import { RECENT, UPCOMING } from "@/lib/bookingsCopy";
 import { bookingsApi, recentAction, type RecentGame } from "@/lib/bookingsApi";
 import { GameCard } from "./UpcomingGames";
 import { SHOWN, when } from "./gameWhen";
+import { memberReads } from "@/lib/offline/memberReads";
 import { useGamesRead } from "./useGamesRead";
 import { RESULT_READABLE } from "@/lib/bookingLink";
 
@@ -22,7 +23,7 @@ import { RESULT_READABLE } from "@/lib/bookingLink";
  * </p>
  */
 export function RecentGames({ refreshKey, fallbackZone }: { refreshKey: unknown; fallbackZone?: string }) {
-  const { state, retry } = useGamesRead<RecentGame>(bookingsApi.recent, refreshKey);
+  const { state, retry } = useGamesRead<RecentGame>(bookingsApi.recent, refreshKey, memberReads.recent.key);
   const [all, setAll] = useState(false);
   const headingId = useId();
   if (state.status === "loading") return null;

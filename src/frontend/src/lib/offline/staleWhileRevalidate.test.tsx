@@ -1,0 +1,202 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
+import { RequireAuth } from "@/components/shell/RequireAuth";
+import { resetUnread } from "@/components/inbox/useUnreadCount";
+import type { MemberNotification } from "@/lib/playersApi";
+import { INBOX_COPY } from "@/lib/playersCopy";
+import { useAuth } from "@/lib/auth";
+import { ledgerRowFixture, refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "@/test/harness";
+import InboxPage from "@/pages/Inbox";
+import WalletPage from "@/pages/Wallet";
+import { memberReads } from "./memberReads";
+import { OFFLINE_COPY, asOfLabel } from "./offlineCopy";
+import { getDataOwner, peekQuery, primeQuery, setDataOwner } from "./queryCache";
+
+/**
+ * R4 wave B — the member pages drawn from `lib/offline`: what the club last said is on screen at
+ * once and stays there, said with its time, when a refresh fails (a 429 included — the
+ * form-factor reviewer's capture found a single rate-limited read replacing a whole screen) or the
+ * club cannot be reached at all; and none of it survives a sign-out or belongs to anybody else.
+ */
+
+const ANA = "44444444-4444-4444-4444-444444444444";
+const BEN = "55555555-5555-5555-5555-555555555555";
+const LAST_IDENTITY_KEY = "crusaders.mainframe.last-identity";
+const NOW = new Date().toISOString();
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  signOut();
+  resetUnread();
+  localStorage.clear();
+});
+
+function notice(id: string, headline: string): MemberNotification {
+  return { id, kind: "players.reminder", headline, link: null, booking_id: null, created_at: NOW, read_at: null };
+}
+
+const ANAS = { items: [notice("n1", "Your share for Friday is still open")], unread_count: 1, next_cursor: null };
+
+function memberRoutes(list: StubRoute, whoami: unknown): StubRoute[] {
+  return [
+    list,
+    { path: "/api/v1/whoami", body: whoami },
+    { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
+    { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 1 } },
+  ];
+}
+
+const inboxList = () => screen.findByRole("list", { name: INBOX_COPY.listLabel }, { timeout: 3000 });
+
+describe("a refresh that fails keeps what is on screen", () => {
+  it("a 429 on Refresh leaves the inbox up, with 'couldn't refresh' and the time it was read", async () => {
+    let refusing = false;
+    stubFetch(memberRoutes({
+      path: "/api/v1/me/notifications",
+      respond: () => (refusing ? refuse(429, { error: "rate_limited", retry_after_seconds: 60 }) : ANAS),
+    }, signIn({ isAdmin: false })));
+    renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
+    expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
+    const readAt = Date.now();
+
+    refusing = true;
+    fireEvent.click(screen.getByRole("button", { name: INBOX_COPY.refresh }));
+
+    const note = await screen.findByText(OFFLINE_COPY.refreshFailedTitle);
+    expect(note.closest("[data-stale-notice]")).toHaveTextContent(OFFLINE_COPY.refreshFailedLine(readAt));
+    // The list is still there — never the full-screen "busy" failure in its place.
+    expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(INBOX_COPY.readCaveat))).toBeNull();
+  });
+
+  it("a 429 on the wallet's refresh keeps the balance and the ledger, said as last known", async () => {
+    // Reduced motion: the card snaps to its figure (see Wallet.test's note on jsdom's frame clock).
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query.includes("reduce"), media: query, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+    let refusing = false;
+    const wallet = { balance_credits: 412.5, total_entries: 1, offset: 0, limit: 100, entries: [ledgerRowFixture()] };
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", respond: () => (refusing ? refuse(429, { error: "rate_limited" }) : wallet) },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
+      { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
+    ]);
+    renderPage(<WalletPage />, { initialEntries: ["/wallet"] });
+    expect(await screen.findByText("412.50", { exact: false })).toBeInTheDocument();
+    refusing = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText(OFFLINE_COPY.refreshFailedTitle)).toBeInTheDocument();
+    expect(screen.getByText("412.50", { exact: false })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Wallet ledger" })).toBeInTheDocument();
+  });
+});
+
+describe("a revisit is instant", () => {
+  it("draws the last list at once while the club is asked again", async () => {
+    let visit = 1;
+    const fresher = { ...ANAS, items: [notice("n2", "Sam accepted — Court 2")] };
+    stubFetch(memberRoutes({
+      path: "/api/v1/me/notifications",
+      respond: () => (visit === 1 ? ANAS : fresher),
+    }, signIn({ isAdmin: false })));
+    const first = renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
+    await inboxList();
+    first.unmount();
+
+    visit = 2;
+    // Come back a minute later (a read under JOIN_MS old is the one a link press just started).
+    const later = Date.now() + 60_000;
+    vi.spyOn(Date, "now").mockImplementation(() => later);
+    renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
+    // The first paint — before any answer — is the last list, never a skeleton.
+    expect(screen.getByText(ANAS.items[0].headline)).toBeInTheDocument();
+    expect(document.querySelector("[data-inbox-skeleton]")).toBeNull();
+    // ...and the club's newer answer replaces it.
+    expect(await screen.findByText("Sam accepted — Court 2")).toBeInTheDocument();
+  });
+});
+
+describe("with no signal", () => {
+  function renderOffline(path: string) {
+    return renderPage(
+      <Routes>
+        <Route path="/inbox" element={<RequireAuth><InboxPage /></RequireAuth>} />
+      </Routes>,
+      { initialEntries: [path] },
+    );
+  }
+
+  it("the inbox opens from the phone for the member it confirmed, said as offline with its time", async () => {
+    signIn({ isAdmin: false });
+    localStorage.setItem(LAST_IDENTITY_KEY, ANA);
+    setDataOwner(ANA);
+    primeQuery(ANA, memberReads.inbox.key, ANAS);
+    const keptAt = peekQuery(ANA, memberReads.inbox.key)!.at;
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+
+    renderOffline("/inbox");
+
+    expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
+    const note = (await screen.findByText(OFFLINE_COPY.staleTitle)).closest("[data-stale-notice]");
+    expect(note).toHaveTextContent(`Showing what we had at ${asOfLabel(keptAt)}`);
+    expect(screen.queryByText(/Can't reach the club/i)).toBeNull();
+  });
+
+  it("with nothing on the phone it says it cannot reach the club — never an empty inbox", async () => {
+    signIn({ isAdmin: false });
+    localStorage.setItem(LAST_IDENTITY_KEY, ANA);
+    setDataOwner(ANA);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+
+    renderOffline("/inbox");
+
+    expect(await screen.findByText(/couldn't be reached/i)).toBeInTheDocument();
+    expect(screen.queryByText(INBOX_COPY.empty)).toBeNull();
+  });
+});
+
+describe("whose reads they are", () => {
+  it("a different member confirmed on the phone never sees the last member's inbox", async () => {
+    localStorage.setItem(LAST_IDENTITY_KEY, BEN);
+    setDataOwner(BEN);
+    primeQuery(BEN, memberReads.inbox.key, { items: [notice("b1", "Ben's private notice")], unread_count: 1, next_cursor: null });
+    // Ana signs in on Ben's phone: whoami confirms ANA (the token is hers).
+    stubFetch(memberRoutes({ path: "/api/v1/me/notifications", body: ANAS }, signIn({ isAdmin: false })));
+
+    renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
+    // Not even while the check is out: the phone's member is Ben, the token Ana's — drawn as Ben's
+    // only because Ben is the member this phone confirmed, and gone the moment Ana is.
+    await waitFor(() => expect(getDataOwner()).toBe(ANA));
+    expect(peekQuery(BEN, memberReads.inbox.key)).toBeUndefined();
+    expect(screen.queryByText("Ben's private notice")).toBeNull();
+    expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
+    expect(screen.queryByText("Ben's private notice")).toBeNull();
+  });
+
+  function SignOut() {
+    const auth = useAuth();
+    return <button type="button" onClick={() => void auth.logout()}>sign out</button>;
+  }
+
+  it("signing out leaves nothing of the member's reads in the tab", async () => {
+    stubFetch([
+      ...memberRoutes({ path: "/api/v1/me/notifications", body: ANAS }, signIn({ isAdmin: false })),
+      { method: "POST", path: "/api/v1/auth/logout", status: 204, body: null },
+    ]);
+    renderPage(<><InboxPage /><SignOut /></>, { initialEntries: ["/inbox"] });
+    await inboxList();
+    expect(peekQuery(ANA, memberReads.inbox.key)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "sign out" }));
+
+    await waitFor(() => expect(getDataOwner()).toBeNull());
+    expect(peekQuery(ANA, memberReads.inbox.key)).toBeUndefined();
+  });
+});

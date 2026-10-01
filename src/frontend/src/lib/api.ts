@@ -75,6 +75,29 @@ export class NetworkError extends Error {
 }
 
 /**
+ * A write the phone refused to send because it has no connection at all (`navigator.onLine` is
+ * false) — R4 wave B, "offline & instant": writes say "needs a connection" and are never queued.
+ *
+ * <p>
+ * <b>Known not to have happened</b>, unlike a {@link NetworkError}: nothing left the phone, so
+ * there is no record to read back (`outcomeUnknown` is false for it) and "nothing changed" is the
+ * truth. No money or slot write is ever held for later — a booking sent when the signal returns
+ * could charge for a court somebody else took in the meantime.
+ * </p>
+ */
+export class OfflineError extends Error {
+  constructor() {
+    super("This phone is offline, so nothing was sent.");
+    this.name = "OfflineError";
+  }
+}
+
+/** True when the phone says it has no network at all. A `true` from `onLine` proves nothing. */
+export function phoneIsOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+/**
  * How long any single API call may take before we give up on it.
  *
  * <p>
@@ -522,6 +545,8 @@ function readWallet(limit?: number, offset?: number, shareBookings = false): Pro
 }
 
 async function send<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+  // R4 wave B — a write with no network at all is refused here, before anything is sent.
+  if (method !== "GET" && phoneIsOffline()) throw new OfflineError();
   const sentToken = tokenStore.get();
   const res = await fetchWithTimeout(path, {
     method,

@@ -5,6 +5,7 @@ import { clearOfflineCache } from "./pwa";
 import { forgetLastKnown } from "./lastKnown";
 import { forgetClubZone } from "./clubZone";
 import { wipeMemberCode } from "./memberCode/keyStore";
+import { setDataOwner, setPersistGuard, wipeMemberData } from "./offline/queryCache";
 
 type AuthState =
   | { status: "loading" }
@@ -316,9 +317,22 @@ function rememberIdentity(userId: string): void {
     // D1 — and the last member's code key. `loadFor` refuses a key stored for somebody else
     // anyway; wiping it here as well means it does not sit on a shared phone until My Code opens.
     void wipeMemberCode();
+    // R4 wave B — and every read kept on the phone for the last member (`lib/offline`).
+    void wipeMemberData();
   }
   try { window.localStorage?.setItem(LAST_IDENTITY_KEY, userId); } catch { /* private mode */ }
+  setDataOwner(userId);
 }
+
+/**
+ * R4 wave B — whose reads `lib/offline` may keep and show: the member this phone last CONFIRMED,
+ * and only while a token is held (the two conditions an offline-capable route renders on). A
+ * write to the phone is allowed only while both still name that member — read at the moment of
+ * writing, from storage another tab's sign-out clears, so a read landing after a sign-out in any
+ * tab is never kept.
+ */
+setPersistGuard((who) => tokenStore.get() !== null && readLastIdentity() === who);
+setDataOwner(tokenStore.get() ? readLastIdentity() : null);
 
 /**
  * A session was given up: the id goes, and everything the page stored under it goes with it.
@@ -361,6 +375,9 @@ function endLocally(): void {
   endSessionGeneration(true);
   tokenStore.clear();
   void clearOfflineCache();
+  // R4 wave B — the member's reads kept on the phone (`lib/offline`): sign-out and "sign out
+  // everywhere" leave nothing of them, in memory or in IndexedDB.
+  void wipeMemberData();
   forgetIdentity();
 }
 
@@ -382,6 +399,9 @@ function endTakenAway(): void {
   endSessionGeneration(false);
   tokenStore.clear();
   void clearOfflineCache();
+  // R4 wave B — the member's kept reads go with the offline caches. Unlike the code's key they
+  // open no door, and a phone left signed out must not keep showing a wallet to whoever holds it.
+  void wipeMemberData();
 }
 
 /**
@@ -589,6 +609,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return refreshFromToken();
   }, [refreshFromToken]);
 
+  // R4 wave B — the phone found a network again: ask the club now rather than at the end of the
+  // backoff, so the pages drawn from the phone's copy refresh the moment they can.
+  useEffect(() => {
+    const back = () => { if (statusRef.current === "offline") void retryConnection(); };
+    window.addEventListener("online", back);
+    return () => window.removeEventListener("online", back);
+  }, [retryConnection]);
+
   const { login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink } = useSignIns(setState, setSessionExpired, setSessionEnding);
 
   const endOnPurpose = useCallback((notice: string | null, returnTo: string | null) => {
@@ -630,6 +658,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, signedOutEverywhere, passwordChanged, sessionExpired, clearSessionExpired, sessionEnding, clearSessionEnding, retryConnection],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/** The session, or null outside an `AuthProvider` (a hook rendered on its own in a test). */
+export function useOptionalAuth() {
+  return useContext(Ctx);
 }
 
 export function useAuth() {

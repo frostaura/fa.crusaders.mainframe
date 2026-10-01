@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { endpoints, type ScheduleDay } from "./api";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ScheduleDay } from "./api";
+import { memberReads } from "./offline/memberReads";
+import { fetchQuery, peekQuery, primeQuery, subscribeQuery, whenHydrated } from "./offline/queryCache";
+import { useDataOwner } from "./offline/useCachedRead";
 import { clubDayOf, gridNow, shiftClubDay } from "./gridClock";
 import { buildTimeSlices, groupSlotsByCourt } from "./scheduleGrid";
 import { readViewerRules, type ViewerRules } from "./gridRules";
@@ -60,6 +63,11 @@ export type ScheduleDayState = {
   today: string;
   /** When the day on screen was read, for `Freshness`. Null before the first read. */
   readAt: number | null;
+  /**
+   * R4 wave B — the day on screen is the phone's copy, shown because the club could not be
+   * reached: say so with `readAt`, and book nothing from it.
+   */
+  stale: boolean;
 };
 
 /** How far an admin may move the strip either way — the desk reconciles the past too. */
@@ -107,25 +115,64 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
    */
   const wanted = useRef(date);
   const latestRead = useRef(0);
+  const [stale, setStale] = useState(false);
+
+  // R4 wave B — every day read is kept by `lib/offline` for the member, with the last day looked
+  // at, so a revisit draws at once and a cold start with no signal draws the last grid (stale).
+  const { who } = useDataOwner();
+  const whoRef = useRef(who);
+  useEffect(() => { whoRef.current = who; }, [who]);
+  const keepDay = useCallback((fresh: ScheduleDay) => {
+    primeQuery(whoRef.current, memberReads.lastDay, fresh.date);
+  }, []);
+  /** The phone's copy of `which` — or, when the member asked for no day in particular, the last one looked at. */
+  const heldDay = useCallback(async (which: string, anyDay: boolean) => {
+    await whenHydrated();
+    const own = peekQuery(whoRef.current, memberReads.schedule(which).key);
+    if (own || !anyDay) return own;
+    const last = peekQuery(whoRef.current, memberReads.lastDay)?.value;
+    return typeof last === "string" ? peekQuery(whoRef.current, memberReads.schedule(last).key) : undefined;
+  }, []);
+  // The day the page opened on by itself (no `?date=`): only that one may fall back to the last
+  // day looked at. A day the member picked, or linked to, is that day or nothing.
+  const autoDay = useRef(validClubDay(initialDate) ? null : date);
 
   const load = useCallback(async (which: string) => {
     const read = ++latestRead.current;
     setLoading(true);
     setError(null);
     try {
-      const fresh = await endpoints.schedule(which);
+      const day = memberReads.schedule(which);
+      const fresh = await fetchQuery(whoRef.current, day.key, day.load);
       if (read !== latestRead.current || wanted.current !== which) return;
       loadedDate.current = fresh.date;
       setDay(fresh);
       setReadAt(Date.now());
+      setStale(false);
+      keepDay(fresh);
       if (fresh.date !== which) { wanted.current = fresh.date; setDate(fresh.date); }
     }
     // Was a bare `catch` mapping EVERY failure to "Check your connection and press Refresh." —
     // so a missing tenant row, a 500 and an expired session all told the member their network
     // was down, and Refresh was the one thing that could not help.
-    catch (err) { if (read === latestRead.current) setError(err); }
+    catch (err) {
+      if (read !== latestRead.current) return;
+      setError(err);
+      // The day on screen is this day already (a Refresh, a re-read): it stays, said as the
+      // last-known grid — a 429 or a 5xx must not blank a grid the member is reading.
+      if (loadedDate.current === which) { setStale(true); return; }
+      const held = await heldDay(which, which === autoDay.current);
+      if (read !== latestRead.current || !held) return;
+      const kept = held.value as ScheduleDay;
+      loadedDate.current = kept.date;
+      wanted.current = kept.date;
+      setDay(kept);
+      setReadAt(held.at);
+      setStale(true);
+      if (kept.date !== which) setDate(kept.date);
+    }
     finally { if (read === latestRead.current) setLoading(false); }
-  }, []);
+  }, [heldDay, keepDay]);
 
   useEffect(() => {
     wanted.current = date;
@@ -148,38 +195,47 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
   //
   // A member who has moved to another day by the time it lands keeps that day on screen (F1-2);
   // the sheet that asked still gets the answer, because it is about the day it wrote to.
-  const reconcile = useCallback(() => endpoints.schedule(date)
+  const reconcile = useCallback(() => fetchQuery(whoRef.current, memberReads.schedule(date).key, memberReads.schedule(date).load)
     .then((fresh): ScheduleDay => {
-      if (wanted.current === date) { loadedDate.current = fresh.date; setDay(fresh); setReadAt(Date.now()); }
+      if (wanted.current === date) { loadedDate.current = fresh.date; setDay(fresh); setReadAt(Date.now()); setStale(false); keepDay(fresh); }
       return fresh;
     })
     .catch(() => null /* the optimistic view stands until something asks for the day again */),
-  [date]);
+  [date, keepDay]);
 
-  const slotsByCourt = useMemo(() => groupSlotsByCourt(day), [day]);
-  const timeSlices = useMemo(() => (day ? buildTimeSlices(day) : []), [day]);
+  // A day already on the phone or in memory is drawn at once while its read is out (a revisit, a
+  // warm start); the read's answer replaces it.
+  const subscribeHeld = useCallback((fn: () => void) => subscribeQuery(who, memberReads.schedule(date).key, fn), [who, date]);
+  const peekHeld = useCallback(() => peekQuery(who, memberReads.schedule(date).key), [who, date]);
+  const held = useSyncExternalStore(subscribeHeld, peekHeld, peekHeld);
+  const onScreen = day && day.date === date ? day : null;
+  const shownDay = onScreen ?? (held ? (held.value as ScheduleDay) : day);
+  const shownAt = onScreen || !held ? readAt : held.at;
+
+  const slotsByCourt = useMemo(() => groupSlotsByCourt(shownDay), [shownDay]);
+  const timeSlices = useMemo(() => (shownDay ? buildTimeSlices(shownDay) : []), [shownDay]);
   // The ACTOR's rules: an admin is exempt from every window and cap the API would not enforce.
-  const rules = useMemo(() => readViewerRules(day, isAdmin), [day, isAdmin]);
+  const rules = useMemo(() => readViewerRules(shownDay, isAdmin), [shownDay, isAdmin]);
 
   const tick = useTicker(true, GRID_TICK_MS);
   const rowStarts = useMemo(() => timeSlices.map((t) => Date.parse(t.utc)), [timeSlices]);
   const { pastThresholdMs, peakNowMs } = useMemo(() => gridNow(rowStarts, tick), [rowStarts, tick]);
 
-  const today = clubDayOf(tick, day?.timezone);
+  const today = clubDayOf(tick, shownDay?.timezone);
   const bounds = useMemo(() => {
-    const span = day?.advanceBookingDays ?? 14;
+    const span = shownDay?.advanceBookingDays ?? 14;
     // R5: a member's strip starts at today — the past is greyed and cannot be chosen — and ends
     // at the club's booking window. An admin reconciles the past and plans the far future, so
     // the desk's strip reaches a year either way.
     if (isAdmin) return { min: shiftClubDay(today, -ADMIN_REACH_DAYS), max: shiftClubDay(today, ADMIN_REACH_DAYS) };
     return { min: today, max: shiftClubDay(today, span) };
-  }, [isAdmin, day?.advanceBookingDays, today]);
+  }, [isAdmin, shownDay?.advanceBookingDays, today]);
 
   const nextDay = useCallback(() => setDate((d) => shiftClubDay(d, 1)), []);
   const refresh = useCallback(() => { void load(date); }, [load, date]);
 
   return {
-    date, setDate, nextDay, day, setDay, rules, error, loading, refresh, reconcile,
-    slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, bounds, today, readAt,
+    date, setDate, nextDay, day: shownDay, setDay, rules, error, loading, refresh, reconcile,
+    slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, bounds, today, readAt: shownAt, stale,
   };
 }

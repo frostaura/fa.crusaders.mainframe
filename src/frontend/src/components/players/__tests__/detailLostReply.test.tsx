@@ -40,7 +40,7 @@ async function pressCancel() {
 describe("a cancel whose reply was lost (R2 F2-2)", () => {
   it("re-reads the booking: cancelled is said as cancelled, and Cancel is no longer offered", async () => {
     serve({
-      detail: { path: DETAIL_PATH, body: detail(), sequence: [detail(), detail(), CANCELLED] },
+      detail: { path: DETAIL_PATH, body: detail(), sequence: [detail(), CANCELLED] },
       extra: [
         { path: `${DETAIL_PATH}/cancellation-quote`, body: QUOTE },
         { method: "POST", path: `${DETAIL_PATH}/cancel`, status: 504, body: { error: "gateway_timeout" } },

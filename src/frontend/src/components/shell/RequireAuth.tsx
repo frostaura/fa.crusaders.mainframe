@@ -9,7 +9,7 @@ import { LANDING_PATH } from "./nav";
  * The routes that are worth anything with no signal at all. (D3)
  *
  * <p>
- * One, today, and the list is deliberately a literal rather than a prop somebody can pass: a
+ * A short list, and the list is deliberately a literal rather than a prop somebody can pass: a
  * route that renders while the club cannot be reached is rendering from a store on the device,
  * and which screens may do that is an app-wide decision, not a per-page one.
  * </p>
@@ -24,7 +24,18 @@ import { LANDING_PATH } from "./nav";
  * and gets the honest "can't reach it" screen.
  * </p>
  */
-const OFFLINE_CAPABLE = new Set(["/my-code"]);
+const OFFLINE_CAPABLE: readonly RegExp[] = [
+  /^\/my-code\/?$/,
+  // R4 wave B ("offline & instant") — the member's own reads are kept on the phone for the member
+  // this device confirmed (`lib/offline`, IndexedDB, wiped on sign-out and on a user switch), so
+  // these pages draw what the club last said, with its "as of", instead of "can't reach the club".
+  // Writes on them say "needs a connection" (`OfflineError`); nothing is queued.
+  /^\/bookings\/?$/,
+  /^\/bookings\/(?!invites\/?$)[^/]+\/?$/,
+  /^\/wallet\/?$/,
+  /^\/profile\/?$/,
+  /^\/inbox\/?$/,
+];
 
 /**
  * The guard on every member and admin route.
@@ -100,7 +111,7 @@ export function RequireAuth(props: { children: ReactNode; admin?: boolean; allow
 
 /** D3 — an offline-capable route, on a device that has confirmed a member at some point. */
 function copesWithoutClub(pathname: string): boolean {
-  return OFFLINE_CAPABLE.has(pathname) && readLastIdentity() !== null;
+  return OFFLINE_CAPABLE.some((route) => route.test(pathname)) && readLastIdentity() !== null;
 }
 
 /**
@@ -110,5 +121,7 @@ function copesWithoutClub(pathname: string): boolean {
  * way back in. A device that never confirmed anybody, or whose member signed out, gets /login.
  */
 function rendersSignedOut(pathname: string, allowAnonymous: boolean): boolean {
-  return allowAnonymous || copesWithoutClub(pathname);
+  // Only the code: a lapse wipes the kept reads (`lib/offline`), and a signed-out Bookings or
+  // Wallet would have nothing true to say.
+  return allowAnonymous || (/^\/my-code\/?$/.test(pathname) && readLastIdentity() !== null);
 }

@@ -149,9 +149,12 @@ describe("the streak", () => {
   });
 
   it("turns the injury pause on, and says what is left", async () => {
+    // The club's record follows the write: the re-read after it (R4 wave B joins nothing here) says on.
+    const on = { active: true, started_at: "2026-09-29T17:00:00Z", weeks_used_this_year: 3, weeks_per_year: 8 };
+    let paused = false;
     const { stub, region } = await render([
-      { path: PLAY, body: myPlay() },
-      { method: "POST", path: `${PLAY}/pause`, body: { active: true, started_at: "2026-09-29T17:00:00Z", weeks_used_this_year: 3, weeks_per_year: 8 } },
+      { path: PLAY, respond: () => (paused ? myPlay({ pause: on }) : myPlay()) },
+      { method: "POST", path: `${PLAY}/pause`, respond: () => { paused = true; return on; } },
     ]);
     await screen.findByText(STREAK_COPY.current(6));
     expect(region).toHaveTextContent(PAUSE_COPY.hint(6, 8, 2026));

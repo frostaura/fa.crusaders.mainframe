@@ -211,3 +211,77 @@ describe("while the session check is still out", () => {
     expect(screen.queryByText("the member code page")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * R4 wave B ("offline & instant") — the member's own pages join My Code: their reads are kept on
+ * the phone for the member it confirmed (`lib/offline`), so with no signal, or while the check is
+ * out, they draw what the club last said instead of "can't reach the club". The same two
+ * conditions hold them (a confirmed identity, and the route on the list); the desk, the invites
+ * list, top-ups and a lapsed session stay where they were.
+ */
+describe("the member's own pages, kept on the phone", () => {
+  const ID = "44444444-4444-4444-4444-444444444444";
+  function renderMember(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <AuthProvider>
+          <Routes>
+            {["/bookings", "/bookings/:id", "/bookings/invites", "/wallet", "/wallet/topup", "/profile", "/inbox", "/admin/members"].map((p) => (
+              <Route key={p} path={p} element={<RequireAuth admin={p.startsWith("/admin")}><p>{`page ${p}`}</p></RequireAuth>} />
+            ))}
+            <Route path="/login" element={<p>the sign-in page</p>} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  for (const [path, page] of [
+    ["/bookings", "/bookings"], ["/bookings/b1", "/bookings/:id"], ["/wallet", "/wallet"], ["/profile", "/profile"], ["/inbox", "/inbox"],
+  ]) {
+    it(`opens ${path} with no signal for the member this device confirmed`, async () => {
+      tokenStore.set("member.jwt.value");
+      localStorage.setItem(LAST_IDENTITY_KEY, ID);
+      clubUnreachable();
+      renderMember(path);
+      expect(await screen.findByText(`page ${page}`)).toBeInTheDocument();
+      expect(screen.queryByText(/Can't reach the club/i)).not.toBeInTheDocument();
+    });
+  }
+
+  for (const path of ["/bookings/invites", "/wallet/topup", "/admin/members"]) {
+    it(`keeps the connection notice on ${path}`, async () => {
+      tokenStore.set("member.jwt.value");
+      localStorage.setItem(LAST_IDENTITY_KEY, ID);
+      clubUnreachable();
+      renderMember(path);
+      await waitFor(() => expect(screen.getByText(/Can't reach the club/i)).toBeInTheDocument());
+    });
+  }
+
+  it("draws /wallet at once while the check is out, and waits on a token nobody confirmed", async () => {
+    tokenStore.set("member.jwt.value");
+    localStorage.setItem(LAST_IDENTITY_KEY, ID);
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    const first = renderMember("/wallet");
+    expect(await screen.findByText("page /wallet")).toBeInTheDocument();
+    first.unmount();
+    localStorage.removeItem(LAST_IDENTITY_KEY);
+    renderMember("/wallet");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByText("page /wallet")).not.toBeInTheDocument();
+  });
+
+  it("a lapsed session sends /wallet to sign-in — only My Code renders signed out", async () => {
+    tokenStore.set("member.jwt.value");
+    localStorage.setItem(LAST_IDENTITY_KEY, ID);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
+      ok: false, status: 401, headers: { get: () => null },
+      text: () => Promise.resolve(JSON.stringify({ error: "expired" })),
+      json: () => Promise.resolve({ error: "expired" }),
+    } as unknown as Response)));
+    renderMember("/wallet");
+    expect(await screen.findByText("the sign-in page")).toBeInTheDocument();
+    expect(screen.queryByText("page /wallet")).not.toBeInTheDocument();
+  });
+});

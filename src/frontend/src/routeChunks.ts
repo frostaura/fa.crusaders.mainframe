@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { whenApiQuiet } from "./lib/api";
+import { prefetchRouteData } from "./lib/offline/memberReads";
 
 /**
  * The member pages' code, by route — one loader per lazy page, shared by `App.tsx`'s `lazy()` and
@@ -71,12 +72,15 @@ function hint(name: ChunkName) {
  * asked for.
  * </p>
  */
-export function preloadAtSessionCheck(pathname: string, quiet: () => Promise<void> = whenApiQuiet): boolean {
+export function preloadAtSessionCheck(pathname: string, quiet: () => Promise<void> = whenApiQuiet, search = ""): boolean {
   if (!worthFetching()) return false;
   // The desk's console is its own chunk; a desk page is not where Bookings is the next tap.
   if (/^\/admin(\/|$)/.test(pathname)) return preloadRouteChunk(pathname);
   const current = BY_PATH.find(([pattern]) => pattern.test(pathname))?.[1];
   if (current) preloadRouteChunk(pathname);
+  // P4-5 (R4 wave B) — and the opened page's own reads, beside its code rather than after it.
+  // My Code has none here (its reads wait for the check, `useMemberCode`), so it pays nothing.
+  prefetchRouteData(pathname, search);
   if (current === "schedule") return true;
   // Not beside the opened page's code and reads, but once they have settled: measured, asking for
   // Bookings' ~30 files beside the session check made a cold My Code — the page a member opens at
@@ -131,4 +135,22 @@ export function prefetchNavChunks(delayMs = 500, admin = false, quiet: () => Pro
     window.clearTimeout(timer);
     if (idle !== null && typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(idle);
   };
+}
+
+/**
+ * P4-5 (R4 wave B) — a member is about to open `to` (a nav link pressed, hovered or focused): its
+ * code AND its reads start now, together, so the page arrives with both instead of fetching its
+ * data only once its code has run. Hints only — nothing here is said to the member.
+ */
+export function routeIntent(to: string): void {
+  if (!worthFetching()) return;
+  const url = new URL(to, "http://intent.local");
+  preloadRouteChunk(url.pathname);
+  prefetchRouteData(url.pathname, url.search);
+}
+
+/** {@link routeIntent} as a link's props: pressed, hovered or focused. */
+export function intentProps(to: string) {
+  const go = () => routeIntent(to);
+  return { onPointerDown: go, onMouseEnter: go, onFocus: go };
 }

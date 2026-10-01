@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { intentProps } from "@/routeChunks";
 import { useUnreadCount, useUnreadCountDriver } from "@/components/inbox/useUnreadCount";
 import { Bell } from "@/components/ui/icons";
 import { bellBadge, bellLabel } from "@/lib/bellCopy";
@@ -41,6 +42,7 @@ export function NotificationBell({ className }: { className?: string }) {
   return (
     <Link
       to="/inbox"
+      {...intentProps("/inbox")}
       data-notification-bell=""
       aria-label={bellLabel(count)}
       aria-current={here ? "page" : undefined}
