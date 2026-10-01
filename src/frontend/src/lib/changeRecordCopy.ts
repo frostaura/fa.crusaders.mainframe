@@ -111,7 +111,7 @@ const FIELD_LABEL: Record<string, string> = {
   format: "Format",
   // R5 A5-2: a batch's own row — its bookings one per line, and its counts and totals.
   bookings: "Bookings",
-  requested: "Asked for",
+  requested: "Bookings requested",
   succeeded: "Done",
   failed: "Not done",
   total_refunded_credits: "Refunded in all",

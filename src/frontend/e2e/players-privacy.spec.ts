@@ -36,7 +36,7 @@ test.describe("P11: privacy, off until the member says otherwise", () => {
 
     await page.getByRole("button", { name: GET_STARTED.next, exact: true }).click();
     await expect(page.getByRole("heading", { level: 2, name: GET_STARTED.steps.privacy.title })).toBeVisible();
-    await expect(page.getByText(GET_STARTED.stepOf(8, 8))).toBeVisible();
+    await expect(page.getByText(GET_STARTED.stepOf(7, 7))).toBeVisible();
 
     const findable = page.getByRole("switch", { name: PRIVACY_COPY.findableLabel });
     await expect(findable).toHaveAttribute("aria-checked", "false");

@@ -285,12 +285,13 @@ describe("bookings at the desk (lib/api.ts)", () => {
   it("bulk cancel and bulk book, and the row keys the sheets' flows read", () => {
     reads(last(ok(BULK, "CancelAsync")), F.bulkCancelResponse());
     // cancelFlow.ts fromBulk + splitCancelOf read these off each row.
-    reads(only(at(BULK, "CancelAsync", "Select(r => ")),
+    // The reply's own `results` projection — the change record's `bookings` rows (R5 A5-2) project too.
+    reads(only(at(BULK, "CancelAsync", "results = outcome.Results.Select(r => ")),
       { booking_id: 0, status: 0, error: 0, refund_credits: 0, penalty_credits: 0, net_credits: 0, partner_refunds: 0 });
     reads(last(ok(BULK, "BookAsync")), F.bulkBookResponse());
     reads(only(at(BULK, "BookAsync", /payer = [^;]*?:\s*/)), F.bulkBookPayer());
     // bookFlow.ts fromAdminBulk reads these off each row.
-    reads(only(at(BULK, "BookAsync", "Select(r => ")), { index: 0, status: 0, error: 0 });
+    reads(only(at(BULK, "BookAsync", "results = outcome.Results.Select(r => ")), { index: 0, status: 0, error: 0 });
   });
 });
 
