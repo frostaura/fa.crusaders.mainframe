@@ -96,11 +96,17 @@ export function wipeMemberData(): Promise<void> {
   return wipeStore();
 }
 
+/** A kept day grid from before yesterday (UTC): nothing a member could open, offline or not. */
+function pastDay(key: string): boolean {
+  const day = /^schedule:(\d{4}-\d{2}-\d{2})$/.exec(key)?.[1];
+  return day !== undefined && Date.parse(`${day}T00:00:00Z`) < Date.now() - 2 * 86_400_000;
+}
+
 /** Reads the phone's copy of `who`'s reads into memory, never over a read this tab has made. */
 function hydrate(who: string): Promise<void> {
   if (hydration?.owner === who) return hydration.promise;
   const at = generation;
-  const promise = readAllFor(who).then((records) => {
+  const promise = readAllFor(who, Date.now(), pastDay).then((records) => {
     if (at !== generation || owner !== who) return;
     for (const record of records) {
       const id = slot(who, record.key);

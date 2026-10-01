@@ -80,12 +80,17 @@ function run<T>(mode: IDBTransactionMode, work: (store: IDBObjectStore) => IDBRe
   }));
 }
 
-/** Everything stored for `owner` that is still young enough to show. Never throws. */
-export async function readAllFor(owner: string, now = Date.now()): Promise<StoredRead[]> {
-  const rows = await run<Row[]>("readonly", (store) => store.getAll());
-  return (rows ?? [])
-    .filter((row) => row && row.owner === owner && typeof row.at === "number" && now - row.at < MAX_AGE_MS)
-    .map(({ owner: o, key, at, value }) => ({ owner: o, key, at, value }));
+/**
+ * Everything stored for `owner` that is still worth showing. Never throws. What is not — too old,
+ * somebody else's (which a wipe should already have removed), or a day the club has moved past
+ * (`stale(key)`) — is deleted on the way, so the store never grows past what a member could open.
+ */
+export async function readAllFor(owner: string, now = Date.now(), stale: (key: string) => boolean = () => false): Promise<StoredRead[]> {
+  const rows = (await run<Row[]>("readonly", (store) => store.getAll())) ?? [];
+  const keep = (row: Row) => row && row.owner === owner && typeof row.at === "number" && now - row.at < MAX_AGE_MS && !stale(row.key);
+  const gone = rows.filter((row) => !keep(row)).map((row) => row.id);
+  if (gone.length > 0) void run("readwrite", (store) => { for (const id of gone) store.delete(id); return null; });
+  return rows.filter(keep).map(({ owner: o, key, at, value }) => ({ owner: o, key, at, value }));
 }
 
 /** Keeps one read. Never throws; a refusal (quota, private mode) keeps nothing. */
