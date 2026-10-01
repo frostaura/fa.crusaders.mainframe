@@ -1,5 +1,6 @@
 import { api, type CancellationQuote, type ScheduleSlot } from "./api";
 import type { ClockWindow, ViewerRules } from "./gridRules";
+import { readPricesByCourt } from "./viewerPrice";
 
 /**
  * The Bookings screen's own reads beyond `/schedule` (review round 1): the member's upcoming
@@ -74,6 +75,8 @@ export type BookingForMember = {
   reserved: number;
   /** Their price for one slice, from their groups; null when the rules could not say. */
   slicePrice: number | null;
+  /** What they pay on each open court, by court id (R5 I5-1); null when the server did not say. */
+  pricesByCourt: ReadonlyMap<string, number> | null;
   groups: string[];
   /**
    * Their group hours on the day being booked (R2 F1-3) — what the grid draws for the desk, so a
@@ -99,6 +102,7 @@ type DetailWire = {
 
 type RulesWire = {
   slice_price_credits?: number | null;
+  slice_prices_by_court?: Array<{ court_id?: string; credits?: number }> | null;
   groups?: Array<{ id?: string; name: string }>;
   day?: string;
   allowed_windows?: Array<{ start?: unknown; end?: unknown }> | null;
@@ -138,6 +142,7 @@ export async function readBookingFor(userId: string, day: string): Promise<Booki
     spendable: detail.balance_credits - reserved,
     reserved,
     slicePrice: typeof rules?.slice_price_credits === "number" ? rules.slice_price_credits : null,
+    pricesByCourt: readPricesByCourt(rules?.slice_prices_by_court),
     groups: (rules?.groups ?? []).map((g) => g.name),
     windows: rules ? windowsOf(rules, day) : null,
   };

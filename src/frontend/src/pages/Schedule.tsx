@@ -47,6 +47,8 @@ import { useHoldLift } from "../lib/scheduleEnd";
 import { useSheetHistory } from "../lib/bookingSheetHistory";
 import { focusAfterAction } from "../lib/focusAfterAction";
 import { gridTabStop } from "../lib/useGridInteractions";
+import type { ViewerRules } from "../lib/gridRules";
+import { NO_PRICE_SOURCE, cheapestOpenPrice, priceOfFor, schedulePriceSource, type PriceOf } from "../lib/viewerPrice";
 
 /**
  * Bookings — the week strip, the grid and the two sheets it opens (R1–R6, D8).
@@ -90,6 +92,8 @@ export default function BookingsPage() {
   const bookingFor = useBookingFor(bookAsUserId, date);
   const forMember = useForMember(bookingFor);
   const gridRules = forMember?.rules ?? rules;
+  // R5 I5-1 — every price on the grid, its headers and the Book sheet is the payer's group price.
+  const priceOf = useViewerPrice(day, rules, bookAsUserId ? bookingFor : null);
   const explainer = useGridExplainer(day, rules, otherDay, forMember);
   const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay), [otherDay]);
   const capShort = useCallback((cap: number) => selectionCapShort(cap, otherDay), [otherDay]);
@@ -152,9 +156,10 @@ export default function BookingsPage() {
   const { offlineGrid, openBook } = useOnlineOnly(schedule, sheets.openBook, toast);
   const ctx = useMemo<BoardContext | null>(() => (shown ? {
     day: shown, rules: gridRules, isAdmin, dayLabel: otherDay, forName: forMember?.name ?? null, explain: explainer.explain, selection: selection.api, onLiftHold: liftHold,
-    onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc)]),
+    priceOf,
+    onBook: (court: ScheduleCourt, startsAtUtc: string) => openBook([oneSlot(court, startsAtUtc, priceOf)]),
     onOpenBooking: (slot: ScheduleSlot) => openCancel([gridBookingOf(slot, shown)]),
-  } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, liftHold, openBook, openCancel]);
+  } : null), [shown, gridRules, isAdmin, otherDay, forMember, explainer.explain, selection.api, liftHold, openBook, openCancel, priceOf]);
 
   const collapsed = explainer.collapsedRows(schedule.timeSlices, schedule.pastThresholdMs, showEarlier, isAdmin, schedule.slotsByCourt);
 
@@ -228,7 +233,7 @@ export default function BookingsPage() {
           </StateBlock>
         </WithAside>
       </div>
-      <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
+      <SelectionBar selection={selection} day={shown} priceOf={priceOf} onBook={openBook} onCancel={openCancel} />
       <BookSheet
         open={sheets.bookOpen} onOpenChange={sheets.setBookOpen} slots={sheets.bookSlots}
         timezone={day?.timezone ?? "UTC"} sliceMinutes={day?.sliceMinutes ?? 15}
@@ -266,6 +271,22 @@ function useOnlineOnly<A extends unknown[]>(
     open(...args);
   }, [offlineGrid, open, toast]);
   return { offlineGrid, openBook };
+}
+
+/**
+ * R5 I5-1 — what the payer pays per slice on each court: the viewer's group price from the day's
+ * rules, or — booking FOR a member — that member's, from their own rules (never the desk's). A
+ * member whose rules are not read yet prices at the court's own figure; the club quotes the desk.
+ */
+function useViewerPrice(day: ScheduleDay | null, rules: ViewerRules, bookingFor: BookingFor | null): PriceOf {
+  const member = bookingFor?.state.status === "ready" ? bookingFor.state.member : null;
+  const forSomeone = bookingFor !== null;
+  const groupPrice = rules.known ? rules.slicePriceCredits : null;
+  return useMemo(() => {
+    if (!forSomeone) return priceOfFor(schedulePriceSource(day, groupPrice));
+    if (!member) return priceOfFor(NO_PRICE_SOURCE);
+    return priceOfFor({ groupPrice: member.slicePrice, referencePrice: cheapestOpenPrice(day), byCourt: member.pricesByCourt });
+  }, [day, groupPrice, forSomeone, member]);
 }
 
 /** The member being booked for, with the grid rules their groups set — null until known (R2 F1-3). */
@@ -347,12 +368,12 @@ function DayPicker(props: {
  * ticked slots. Next in DOM order after the grid, so Tab out of the grid lands on it.
  */
 function SelectionBar(props: {
-  selection: Selection; day: ScheduleDay | null;
+  selection: Selection; day: ScheduleDay | null; priceOf: PriceOf;
   onBook: (slots: SelectedSlot[]) => void; onCancel: (bookings: GridBooking[]) => void;
 }) {
-  const { selection, day, onBook, onCancel } = props;
+  const { selection, day, priceOf, onBook, onCancel } = props;
   if (!selection.api.active) return null;
-  const slots = toSelectedSlots(selection.keys, day);
+  const slots = toSelectedSlots(selection.keys, day, priceOf);
   const bookings = toGridBookings(selection.keys, day);
   const free = freeCount(selection.keys);
   const total = slots.reduce((sum, s) => sum + s.priceCredits, 0);
@@ -496,8 +517,8 @@ function useClearOnDayChange(date: string, selection: Selection, explainer: { an
 
 /* ─────────────────────────────── painting outcomes ─────────────────────────────── */
 
-function oneSlot(court: ScheduleCourt, startsAtUtc: string): SelectedSlot {
-  return { courtId: court.id, courtName: court.name, startsAt: startsAtUtc, sliceCount: 1, priceCredits: court.slicePriceCredits };
+function oneSlot(court: ScheduleCourt, startsAtUtc: string, priceOf: PriceOf): SelectedSlot {
+  return { courtId: court.id, courtName: court.name, startsAt: startsAtUtc, sliceCount: 1, priceCredits: priceOf(court) };
 }
 
 /**

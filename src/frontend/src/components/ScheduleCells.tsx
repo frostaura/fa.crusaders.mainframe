@@ -18,6 +18,7 @@ import {
   bookedKey, isPendingBooking, selectionKey, type GridCoord, type SelectionApi, type SelectionKey,
 } from "../lib/gridSelection";
 import { RESULT_READABLE } from "../lib/bookingLink";
+import type { PriceOf } from "../lib/viewerPrice";
 
 /**
  * The booking grid's cells — one per court per time slice (design-system.md, "Slot-state
@@ -59,6 +60,8 @@ export type BoardContext = {
   dayLabel: string | null;
   /** The first name of the member the desk is booking for (`?as=`), whose group hours the grid draws (R2 F1-3). */
   forName?: string | null;
+  /** What THIS viewer pays per slice on a court — their group's price, not the court's own (R5 I5-1). */
+  priceOf: PriceOf;
   /** The sentence a locked cell answers with (D4 §2.9) — visible and spoken. */
   explain: (reason: GridReason, where: string) => void;
   /** A single tap on a free cell outside selection mode: book that one slice. */
@@ -333,19 +336,20 @@ function AvailableCell(props: SlotCellProps) {
   if (props.holding) return <HoldingCell {...props} />;
   const key = selectionKey(court.id, startsAtUtc);
   const pick = choosable(ctx, key, at, () => ctx.onBook(court, startsAtUtc));
+  const price = ctx.priceOf(court);
   return (
     <Cell label={where} selfFocus={false} selectKey={key} selected={pick.selected} at={at} line={props.line} roving={props.roving} selecting={ctx.selection.active}>
       <Interactable asChild surface="cell" watermark>
         <button
           type="button"
           tabIndex={props.roving ? 0 : -1}
-          aria-label={bookCellLabel(where, court.slicePriceCredits)}
+          aria-label={bookCellLabel(where, price)}
           {...pick.button}
           className={cn(SURFACE, PRESSABLE, TONE.available, "group flex-col items-start justify-center gap-0", pick.inset)}
         >
           {pick.check}
           <span>{CELL_TEXT.available}</span>
-          <span className="hidden font-medium md:inline">{formatCredits(court.slicePriceCredits)}</span>
+          <span className="hidden font-medium md:inline">{formatCredits(price)}</span>
         </button>
       </Interactable>
     </Cell>

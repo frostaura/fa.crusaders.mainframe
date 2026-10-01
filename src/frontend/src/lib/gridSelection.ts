@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { ScheduleDay } from "./api";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import { clubDayAndClock } from "./clubClock";
+import type { PriceOf } from "./viewerPrice";
 
 /**
  * Multi-select on the booking grid — R4, and D8: members get it too.
@@ -290,8 +291,14 @@ export function useGridSelection(options: Options): Selection {
  * the run, and so does a court change. Items come back court by court in grid order, then by
  * time, so the sheet lists them the way the grid shows them.
  * </p>
+ *
+ * <p>
+ * Priced at the VIEWER's price (`priceOf`, R5 I5-1) — their group's, not the court's own.
+ * </p>
  */
-export function toSelectedSlots(keys: readonly SelectionKey[], day: ScheduleDay | null): SelectedSlot[] {
+export function toSelectedSlots(
+  keys: readonly SelectionKey[], day: ScheduleDay | null, priceOf: PriceOf = (court) => court.slicePriceCredits,
+): SelectedSlot[] {
   if (!day) return [];
   const sliceMs = (day.sliceMinutes > 0 ? day.sliceMinutes : 15) * 60_000;
   const out: SelectedSlot[] = [];
@@ -307,7 +314,7 @@ export function toSelectedSlots(keys: readonly SelectionKey[], day: ScheduleDay 
       if (!run) return;
       out.push({
         courtId: court.id, courtName: court.name, startsAt: new Date(run.from).toISOString(),
-        sliceCount: run.count, priceCredits: court.slicePriceCredits * run.count,
+        sliceCount: run.count, priceCredits: priceOf(court) * run.count,
       });
     };
     for (const ms of starts) {

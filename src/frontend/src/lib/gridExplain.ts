@@ -4,6 +4,7 @@ import type { GridReason, ViewerRules } from "./gridRules";
 import type { TimeSlice } from "./scheduleGrid";
 import { walletTone } from "./balance";
 import { adminWalletNote } from "./bookingsCopy";
+import { schedulePriceSource, viewerSlicePrice } from "./viewerPrice";
 import {
   closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence, groupRateLine,
   memberEmptyWindowSentence, memberRestrictionSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
@@ -187,7 +188,7 @@ function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null,
  */
 function buildNotices(rules: ViewerRules, balanceCredits: number | null, day: ScheduleDay | null, isAdmin: boolean): Notice[] {
   const clubDay = rules.clubDay ?? day?.date ?? "";
-  return [ruleNotice(rules, clubDay), walletNotice(balanceCredits, day, isAdmin)]
+  return [ruleNotice(rules, clubDay), walletNotice(balanceCredits, day, isAdmin, rules.known ? rules.slicePriceCredits : null)]
     .filter((n): n is Notice => n !== null);
 }
 
@@ -221,7 +222,9 @@ function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
  * blocked.
  * </p>
  */
-export function walletNotice(balanceCredits: number | null, day: ScheduleDay | null, isAdmin = false): Notice | null {
+export function walletNotice(
+  balanceCredits: number | null, day: ScheduleDay | null, isAdmin = false, groupPrice: number | null = null,
+): Notice | null {
   // Through `walletTone`, and exported so the one rule can be asserted on all three surfaces
   // at once. This used to ask `balanceCredits > 0`, which let 0.004 through — a balance that
   // renders as "0.00" and buys nothing, on a grid still offering thirty-one green cells while
@@ -232,7 +235,7 @@ export function walletNotice(balanceCredits: number | null, day: ScheduleDay | n
     id: "wallet", tone: "warning",
     // The balance, not just the price. A member below zero is told what they owe rather than
     // that they "have no credits" — the banner could not say it while this dropped the figure.
-    title: emptyWalletSentence(balanceCredits, cheapestSlice(day)),
+    title: emptyWalletSentence(balanceCredits, cheapestSlice(day, groupPrice)),
     action: { label: "Top up", to: "/wallet/topup" },
   };
 }
@@ -257,8 +260,10 @@ function standardSlice(day: ScheduleDay | null): number | null {
   return open[0]?.slicePriceCredits ?? null;
 }
 
-function cheapestSlice(day: ScheduleDay | null): number | null {
-  const prices = (day?.courts ?? []).map((c) => c.slicePriceCredits).filter((p) => typeof p === "number");
+/** The cheapest slice THIS viewer can buy — at their group's price (R5 I5-1), not the court's own. */
+function cheapestSlice(day: ScheduleDay | null, groupPrice: number | null): number | null {
+  const source = schedulePriceSource(day, groupPrice);
+  const prices = (day?.courts ?? []).map((c) => viewerSlicePrice(c, source)).filter((p) => typeof p === "number");
   return prices.length ? Math.min(...prices) : null;
 }
 
