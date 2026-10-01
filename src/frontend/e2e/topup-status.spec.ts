@@ -7,8 +7,8 @@ import { signIn, test, expect } from "./fixtures";
  * The error branch of this page was one sentence in a bare card: no Check again, no View
  * wallet, no link, not even the page's own layout. Nothing used to walk a member into it. The
  * Check again button added in the previous round does, in one press — a refuter aborted the
- * status request on a live Pending top-up, pressed the button, and the page became
- * "Couldn't load top-up status." with <code>buttons: [""]</code> and no way out but a reload.
+ * status request on a live Pending purchase, pressed the button, and the page became
+ * "Couldn't load the status." with <code>buttons: [""]</code> and no way out but a reload.
  * </p>
  *
  * <p>
@@ -28,7 +28,10 @@ const SESSION_MEMBER = {
 };
 
 const ID = "aaaa1111-0000-0000-0000-00000000000e";
-const PENDING = { id: ID, status: "Pending", amount_zar: 500, conversion_rate: 1.6, failure_code: null };
+const PENDING = {
+  id: ID, status: "Pending", package_id: "p-5", package_name: "5 hours", minutes: 300, list_price_zar: 500, discount_bps: 0,
+  amount_zar: 500, failure_code: null, created_at: "2026-10-01T12:05:00Z", expires_at: "2026-10-01T13:05:00Z",
+};
 
 test("pressing Check again against a club that stops answering is not a dead end", async ({ page }) => {
   await signIn(page);
@@ -42,7 +45,7 @@ test("pressing Check again against a club that stops answering is not a dead end
     const json = (body: unknown) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 
-    if (path.startsWith("/api/v1/credit/topup/")) {
+    if (path.startsWith("/api/v1/minutes/purchase/")) {
       if (!statusReachable) return route.abort("failed");
       return json(PENDING);
     }
@@ -54,11 +57,14 @@ test("pressing Check again against a club that stops answering is not a dead end
     return route.fulfill({ status: 501, contentType: "application/json", body: "{}" });
   });
 
+  // The old return URL: the page itself until the route table moves, a redirect to
+  // `/wallet/buy/{id}` after it (§12.14) — a PayFast return in flight at deploy time lands here.
   await page.goto(`/wallet/topup/${ID}`);
+  await expect(page).toHaveURL(new RegExp(`/wallet/(topup|buy)/${ID}$`));
 
   // The live Pending page the refuter started from.
   await expect(page.getByText("Waiting for confirmation from PayFast…")).toBeVisible();
-  await expect(page.getByText("R500.00")).toBeVisible();
+  await expect(page.getByText("5 hours for R500.00")).toBeVisible();
   const checkAgain = page.getByRole("button", { name: "Check again" });
   await expect(checkAgain).toBeVisible();
 
@@ -70,8 +76,8 @@ test("pressing Check again against a club that stops answering is not a dead end
   await expect(page.getByRole("button", { name: "Check again" })).toBeEnabled();
   await expect(page.getByRole("link", { name: "View wallet" })).toBeVisible();
   // The status that had already been read is still on screen rather than discarded.
-  await expect(page.getByText("Pending")).toBeVisible();
-  await expect(page.getByText("R500.00")).toBeVisible();
+  await expect(page.getByText("Waiting", { exact: true })).toBeVisible();
+  await expect(page.getByText("5 hours for R500.00")).toBeVisible();
 
   // And the way out is a real one: the club answers, the page catches up without a reload.
   statusReachable = true;

@@ -50,7 +50,7 @@ export function ShelfCards({ shelf, selected, onSelect }: ShelfProps) {
       aria-label={BUY_COPY.shelfLabel}
       value={selected ?? ""}
       onValueChange={(id) => { if (id) onSelect(id); }}
-      className="gap-8"
+      className="min-w-0 grid-cols-[minmax(0,1fr)] gap-8"
     >
       {sections.map((section) => (
         <ShelfSectionBlock key={section.key} section={section} discount={shelf.discount} baseline={baseline} />
@@ -65,7 +65,7 @@ function ShelfSectionBlock({ section, discount, baseline }: {
   const heading = section.group ? BUY_COPY.groupSection(section.group.name) : BUY_COPY.clubSection;
   const headingId = `shelf-${section.key.replace(/[^a-z0-9]/gi, "-")}`;
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+    <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-col gap-1">
         <h2 id={headingId} className="flex items-center gap-2 text-base font-semibold text-text-primary">
           {section.group ? <UsersThree size={18} aria-hidden="true" className="text-accent-strong" /> : null}
@@ -79,7 +79,7 @@ function ShelfSectionBlock({ section, discount, baseline }: {
           </p>
         ) : null}
       </div>
-      <div className="grid gap-3 @[40rem]/page:grid-cols-2 @[72rem]/page:grid-cols-3">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 @[40rem]/page:grid-cols-2 @[72rem]/page:grid-cols-3">
         {section.packages.map((p) => <PackageCard key={p.id} pkg={p} baseline={baseline} />)}
       </div>
     </section>
@@ -100,15 +100,15 @@ function PackageCard({ pkg, baseline }: { pkg: ShelfPackage; baseline: ShelfPack
       data-package-id={pkg.id}
       title={pkg.name}
       description={<span className="sr-only">{BUY_COPY.spoken(pkg, baseline)}</span>}
-      className="h-full p-5"
+      className="h-full min-w-0 p-3 @[18rem]/page:p-5"
     >
-      <span aria-hidden="true" className="flex flex-col gap-3 pt-1">
+      <span aria-hidden="true" className="flex min-w-0 flex-col gap-3 break-words pt-1">
         <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <span className="text-3xl font-bold tracking-tight tabular-nums text-text-primary">{minutesCompact(pkg.minutes)}</span>
+          <span className="text-2xl font-bold tracking-tight tabular-nums text-text-primary @[18rem]/page:text-3xl">{minutesCompact(pkg.minutes)}</span>
           {pkg.saving_pct !== null && saving ? <Badge tone="success">{BUY_COPY.save(pkg.saving_pct)}</Badge> : null}
         </span>
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-xl font-semibold tabular-nums text-text-primary">{formatMoney(pkg.price_zar)}</span>
+          <span className="text-base font-semibold tabular-nums text-text-primary @[18rem]/page:text-xl">{formatMoney(pkg.price_zar)}</span>
           {pkg.discount_bps > 0 ? (
             <span className="text-sm tabular-nums text-text-muted line-through">{BUY_COPY.wasPrice(pkg.list_price_zar)}</span>
           ) : null}

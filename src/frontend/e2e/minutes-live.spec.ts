@@ -92,8 +92,8 @@ test.describe("two tabs, one club", () => {
     const phone = await openApp(context);
     const tablet = await openApp(context);
 
-    await expect(chip(phone)).toHaveAttribute("aria-label", /100\.00 credits/);
-    await expect(chip(tablet)).toHaveAttribute("aria-label", /100\.00 credits/);
+    await expect(chip(phone)).toHaveAttribute("aria-label", /1 hour 40 minutes/);
+    await expect(chip(tablet)).toHaveAttribute("aria-label", /1 hour 40 minutes/);
 
     // The club pays the member while both tabs are open.
     server.topUpTo(320);
@@ -103,19 +103,19 @@ test.describe("two tabs, one club", () => {
     // the provider listens for both for exactly that reason.
     await phone.bringToFront();
 
-    await expect(chip(phone)).toHaveAttribute("aria-label", /320\.00 credits/, { timeout: 10_000 });
+    await expect(chip(phone)).toHaveAttribute("aria-label", /5 hours 20 minutes/, { timeout: 10_000 });
 
     // …and the other tab agrees once it is looked at, rather than sitting on a stale figure
     // with nothing to say so.
     await tablet.bringToFront();
-    await expect(chip(tablet)).toHaveAttribute("aria-label", /320\.00 credits/, { timeout: 10_000 });
+    await expect(chip(tablet)).toHaveAttribute("aria-label", /5 hours 20 minutes/, { timeout: 10_000 });
 
     await context.close();
   });
 });
 
 test.describe("what the chip says at zero", () => {
-  test("is red, is honest, and goes to the top-up page rather than an empty ledger", async ({ browser }) => {
+  test("is red, is honest, and goes to the buy page rather than an empty ledger", async ({ browser }) => {
     const context = await browser.newContext();
     await context.addInitScript(() => {
       window.localStorage.setItem("crusaders.mainframe.token", "e2e-token");
@@ -127,12 +127,12 @@ test.describe("what the chip says at zero", () => {
     await expect(wallet).toBeVisible();
 
     // Zero is not "running low" — it is empty, and the member cannot book anything at all.
-    await expect(wallet).toHaveAttribute("aria-label", /can't book until you top up/);
+    await expect(wallet).toHaveAttribute("aria-label", /can't book until you buy minutes/);
     await expect(wallet).not.toHaveAttribute("aria-label", /running low/);
 
     // At zero `/wallet` is a dead end: the ledger is empty and the only useful control is one
     // more tap away.
-    await expect(wallet).toHaveAttribute("href", "/wallet/topup");
+    await expect(wallet).toHaveAttribute("href", "/wallet/buy");
 
     /*
      * A third look, from the existing palette — not the same amber as 49.99.
@@ -159,7 +159,7 @@ test.describe("what the chip says at zero", () => {
     await expect(wallet).toBeVisible();
     // A different affordance, not a quieter one: a static thing that is always there beats
     // motion somebody has asked not to see, and it carries the same information.
-    await expect(wallet).toContainText("Top up");
+    await expect(wallet).toContainText("Buy minutes");
     await expect(wallet).toHaveCSS("animation-name", "none");
   });
 
@@ -174,7 +174,7 @@ test.describe("what the chip says at zero", () => {
     await expect(wallet).toBeVisible();
 
     // The grace period is the booking toast's own life: a member who has just spent their last
-    // credits must not have that turned into an alarm.
+    // minutes must not have that turned into an alarm.
     await expect(wallet).toHaveCSS("animation-name", "none");
     await expect(async () => {
       expect(await wallet.evaluate((el) => getComputedStyle(el).animationName)).toBe("chip-breathe");

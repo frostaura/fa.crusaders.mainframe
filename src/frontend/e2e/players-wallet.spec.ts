@@ -72,7 +72,7 @@ test.describe("P11: the wallet, with shares", () => {
     await expect(held).toContainText(HELD_EXPLAINER);
     // The chip's name carries it too: the figure it shows is SPENDABLE (F1.11), and its name
     // also says the whole balance and what is held.
-    await expect(page.locator("[data-credits-chip]")).toHaveAttribute("aria-label", /120\.00 credits, 20\.00 held for partners/);
+    await expect(page.locator("[data-minutes-chip]")).toHaveAttribute("aria-label", /2 hours, 20 minutes held for partners/);
   });
 
   test("gathers a booking's shares under one line that opens, and links to the booking", async ({ page }) => {
@@ -90,13 +90,13 @@ test.describe("P11: the wallet, with shares", () => {
 
     await organiser.click();
     await expect(organiser).toHaveAttribute("aria-expanded", "true");
-    await expect(page.getByText(/^Sam paid you 25\.00 cr for their share of Court 1/)).toBeVisible();
+    await expect(page.getByText(/^Sam paid you 25 min for their share of Court 1/)).toBeVisible();
 
     // The partner's side of another booking reads as their share, not as a debt.
     const partner = page.getByRole("button", { name: /^Your share · Court 2 · / });
     await expect(partner).toBeVisible();
     await partner.click();
-    await expect(page.getByText(/^25\.00 cr moved to Jo for your share of Court 2/)).toBeVisible();
+    await expect(page.getByText(/^25 min moved to Jo for your share of Court 2/)).toBeVisible();
     await expect(page.locator("body")).not.toContainText(/owe|debt/i);
 
     // Every other movement is its own row.

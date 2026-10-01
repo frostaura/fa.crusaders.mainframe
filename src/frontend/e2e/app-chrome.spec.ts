@@ -553,7 +553,7 @@ test.describe("V5-3 — the top bar at 200 % text from md", () => {
       if (badge) {
         const b = badge.getBoundingClientRect();
         const hit = document.elementFromPoint(b.right - 3, b.top + b.height / 2);
-        onTop = hit && (hit === badge || badge.contains(hit)) ? "badge" : (hit?.closest("[data-credits-chip]") ? "chip" : hit?.tagName ?? null);
+        onTop = hit && (hit === badge || badge.contains(hit)) ? "badge" : (hit?.closest("[data-minutes-chip]") ? "chip" : hit?.tagName ?? null);
       }
       return {
         crestShares: others.some((b) => b.top < crest.bottom && b.bottom > crest.top),
