@@ -7,6 +7,7 @@ import WalletActivityPage from "./WalletActivity";
 import { refuse, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 import { formatClubDayLabel } from "../components/ui/date-picker-day";
 import { clubToday, presetRange } from "../components/reports/range";
+import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 
 /*
   The reports split (R16): what was one `/reports` page forking on `isAdmin` is now the club's
@@ -633,9 +634,27 @@ describe("Reports — reading, failing, refreshing", () => {
     expect(within(totals).getByText("+160.00 cr")).toBeInTheDocument();
   });
 
+  /** R5 M5-6 (D2's kept read): a refresh that fails keeps the figures and says when they are from. */
+  it("keeps the figures when a refresh fails, under the standard \"Couldn't refresh\" notice", async () => {
+    let fail = false;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/reports/me/wallet", respond: () => (fail ? refuse(500, { error: "boom" }) : WALLET) },
+      { path: "/api/v1/reports/me/daily", body: [] },
+    ]);
+    renderMember();
+    const totals = await screen.findByRole("region", { name: "Totals" });
+    fail = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText(OFFLINE_COPY.refreshFailedTitle)).toBeInTheDocument();
+    expect(within(totals).getByText("+160.00 cr")).toBeInTheDocument();
+  });
+
   it("keeps the figures on screen while Refresh asks again, and marks the control busy", async () => {
     let release: (() => void) | null = null;
-    let calls = 0;
+    // Gate the REFRESH, not "the third call": since R5 M5-6 the first read is a kept read
+    // (lib/offline), which joins StrictMode's double mount into one request.
+    let gate = false;
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: "/api/v1/reports/me/wallet", body: WALLET },
@@ -643,7 +662,7 @@ describe("Reports — reading, failing, refreshing", () => {
     ]);
     const realFetch = globalThis.fetch;
     vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).includes("/reports/me/wallet") && ++calls > 2) {
+      if (String(input).includes("/reports/me/wallet") && gate) {
         return new Promise<void>((resolve) => { release = resolve; }).then(() => realFetch(input, init));
       }
       return realFetch(input, init);
@@ -653,6 +672,7 @@ describe("Reports — reading, failing, refreshing", () => {
     const refresh = screen.getByRole("button", { name: "Refresh" });
     await waitFor(() => expect(refresh).not.toHaveAttribute("aria-busy"));
 
+    gate = true;
     fireEvent.click(refresh);
     await waitFor(() => expect(refresh).toHaveAttribute("aria-busy", "true"));
     // Still the figures it had — not a skeleton, not a blank.

@@ -1,12 +1,14 @@
 import { Suspense, lazy, useRef, type ReactNode } from "react";
 import { endpoints, type DailyMePoint, type WalletReport } from "../lib/api";
+import { memberReads, type WalletActivity } from "../lib/offline/memberReads";
+import { useKeptReport } from "../lib/offline/useKeptReport";
+import { StaleNotice } from "../components/shell/StaleNotice";
 import { cn, formatCredits, formatMinutes, formatSignedCredits } from "../lib/utils";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { StateBlock } from "../components/ui/state-block";
 import { Button } from "../components/ui/button";
-import { Alert } from "../components/Alert";
 import { ChartBar, DownloadSimple } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { Skeleton } from "../components/ui/skeleton";
@@ -20,7 +22,7 @@ import {
   Cell, ChartsCard, NetCredits, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
   type Tile,
 } from "../components/reports/ReportParts";
-import { dayMarkers, prettyDay, useReport, useReportRange, type ReportRange } from "../components/reports/range";
+import { dayMarkers, prettyDay, useReportRange, type ReportRange } from "../components/reports/range";
 
 /*
  * R4 P4-6 — the charts (the chart library, ~125 KB gz) load with the chart card, not with the
@@ -46,16 +48,6 @@ function LazyChart({ children }: { children: ReactNode }) {
  * (`WalletNav`), because "where did my credit go?" is asked from the wallet.
  * </p>
  */
-type Activity = { wallet: WalletReport; days: DailyMePoint[] };
-
-async function loadActivity(markers: { from: string; to: string }): Promise<Activity> {
-  const [wallet, days] = await Promise.all([
-    endpoints.reportWallet(markers.from, markers.to),
-    endpoints.reportDailyMe(markers.from, markers.to),
-  ]);
-  return { wallet, days };
-}
-
 /**
  * Fetched with the session token and saved from the blob. A plain `<a download>` made the
  * browser navigate to the endpoint on its own with no Authorization header: the API answered
@@ -78,11 +70,11 @@ async function downloadWalletCsv(range: ReportRange): Promise<void> {
 /** The most of the scroller the range card may take and still stick. */
 const RANGE_STICKY_MAX = 0.3;
 
-const REFRESH_FAILED = "Couldn't refresh these figures — they are from the last read. Try Refresh again.";
 
 export default function WalletActivityPage() {
   const [range, setRange] = useReportRange();
-  const report = useReport(range, loadActivity);
+  // R5 M5-6 (lane D2's kept read): drawn from the phone offline and on a revisit, per range.
+  const report = useKeptReport(memberReads.walletActivity(dayMarkers(range)));
   const csv = useAsyncAction(() => downloadWalletCsv(range), {
     toast: { failure: "Couldn't build that CSV. Try a shorter date range." },
   });
@@ -110,8 +102,8 @@ export default function WalletActivityPage() {
           </Button>
         </RangeToolbar>
       </div>
-      {/* A refresh that failed keeps the figures it had, and says so above them. */}
-      {report.error && data ? <Alert tone="warning">{REFRESH_FAILED}</Alert> : null}
+      {/* A refresh that failed keeps the figures it had, and says so — and when — above them. */}
+      <StaleNotice stale={report.stale} readAt={report.readAt} offline={report.offline} />
       <StateBlock
         loading={report.loading && data === null}
         error={data === null ? report.error : null}
@@ -128,7 +120,7 @@ export default function WalletActivityPage() {
   );
 }
 
-function ActivityBody({ data }: { data: Activity }) {
+function ActivityBody({ data }: { data: WalletActivity }) {
   const { wallet, days } = data;
   const tiles: Tile[] = [
     { label: "Top-ups", value: formatCredits(wallet.top_ups_credits), tone: "success" },
