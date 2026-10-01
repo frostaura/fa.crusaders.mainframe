@@ -56,7 +56,7 @@ describe("the toast viewport", () => {
 
     const viewport = container.parentElement!.querySelector<HTMLElement>("[data-toast-viewport]")!;
     const classes = viewport.className.split(/\s+/);
-    expect(classes).toContain("bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px)]");
+    expect(classes).toContain("bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px+var(--context-bar-height,0px))]");
     expect(classes.filter((c) => /^top-/.test(c)), "no top anchor below sm").toEqual([]);
     expect(classes).toContain("sm:bottom-auto");
     expect(classes).toContain("sm:right-6");

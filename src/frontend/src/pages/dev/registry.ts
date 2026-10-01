@@ -7,6 +7,7 @@ import { FieldsSection } from "./FieldsSection";
 import { FoundationsSection } from "./FoundationsSection";
 import { GridSection } from "./GridSection";
 import { IconsSection } from "./IconsSection";
+import { LayoutSection } from "./LayoutSection";
 import { LegacySection } from "./LegacySection";
 import { OverlaysSection } from "./OverlaysSection";
 import { PassCardSection } from "./PassCardSection";
@@ -37,6 +38,7 @@ export const SECTIONS: readonly GalleryEntry[] = [
   { id: "data", title: "Data", description: "Table, badges, avatars, card parts.", Body: DataSection },
   { id: "grid", title: "Booking grid", description: "Every slot state, the selection ring and the now-line.", Body: GridSection },
   { id: "shell", title: "Shell", description: "Page header variants, refresh and freshness, sections, the action bar.", Body: ShellSection },
+  { id: "layout", title: "Layout", description: "AutoGrid, Columns, WithAside, SplitView and ContextBar — laid out by the width they are given.", Body: LayoutSection },
   { id: "passcard", title: "Pass card", description: "Live, expiring and offline.", Body: PassCardSection },
   { id: "legacy", title: "Legacy tabs", description: "The pre-facelift segmented tabs, until My Code stops using them.", Body: LegacySection },
 ];

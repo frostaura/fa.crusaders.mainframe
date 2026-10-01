@@ -148,9 +148,10 @@ export default function Gallery() {
   const setPageTheme = (next: PageTheme) => setParams((previous) => withTheme(previous, next), { replace: true });
   const visible = current ? [current] : SECTIONS;
   return (
-    // `wide`: two theme panels side by side beside an index need the admin width; in the member
-    // frame the pass card overflowed its panel at 1280px (axe: scrollable-region-focusable).
-    <PageShell width="wide" data-gallery="" className="gap-6">
+    // `full`: two theme panels side by side beside an index need at least the admin width (in the
+    // member frame the pass card overflowed its panel at 1280px — axe: scrollable-region-focusable),
+    // and the layout section's split view needs a 64rem box beside the index to split at all.
+    <PageShell width="full" data-gallery="" className="gap-6">
       <PageTheme theme={theme} />
       <PageHeader
         title="Primitives"

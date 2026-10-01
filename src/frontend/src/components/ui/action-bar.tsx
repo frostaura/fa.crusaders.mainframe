@@ -1,6 +1,7 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Toolbar } from "radix-ui";
 import { cn } from "@/lib/utils";
+import { DOCK_BOTTOM, DOCK_PANEL, usePublishDockedHeight } from "./layout";
 import { X } from "./icons";
 
 /**
@@ -9,10 +10,11 @@ import { X } from "./icons";
  *
  * <p>
  * <b>Where it floats.</b> Fixed to the bottom, clear of the home indicator AND of the mobile tab
- * bar: the shell publishes the bar's height as `--app-bottom-bar-height` (which already includes
- * the safe area), so the offset is the larger of the two plus 12px — never their sum, which would
- * double-count the safe area on a phone with a tab bar. Centred at `max-w-screen-sm` (640px) on a
- * desktop. `z-actionbar` sits above sticky chrome and below every overlay.
+ * bar, on the dock every bottom bar shares (`ui/context-bar` {@link DOCK_BOTTOM}: the larger of
+ * the tab bar's published height and the safe area, plus 12px). Centred at `max-w-screen-sm`
+ * (640px) on a desktop. `z-actionbar` sits above sticky chrome and below every overlay. Like a
+ * bottom ContextBar it publishes its height, so `<main>` grows by it and the last grid row can be
+ * scrolled clear of the bar (R4 form factor).
  * </p>
  *
  * <p>
@@ -53,6 +55,8 @@ export function ActionBar(props: ActionBarProps) {
     count, countLabel, detail, onClose, closeLabel = "Clear selection", label = "Selection", children, className,
   } = props;
   const headline = countLabel ?? `${count} selected`;
+  const ref = useRef<HTMLDivElement>(null);
+  usePublishDockedHeight(ref, true);
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return;
     event.stopPropagation();
@@ -60,20 +64,16 @@ export function ActionBar(props: ActionBarProps) {
   };
   return (
     <div
+      ref={ref}
       data-action-bar=""
-      className={cn(
-        "pointer-events-none fixed inset-x-0 z-actionbar px-4",
-        "bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px)]",
-        className,
-      )}
+      className={cn("pointer-events-none fixed inset-x-0 z-actionbar px-4", DOCK_BOTTOM, className)}
     >
       <Toolbar.Root
         aria-label={label}
         onKeyDown={onKeyDown}
         className={cn(
           // R4: wraps — at 200 % text the actions drop under the words instead of cutting them to "4 sl…".
-          "pointer-events-auto mx-auto flex w-full max-w-screen-sm flex-wrap items-center gap-2 rounded-2xl border border-border",
-          "bg-bg-raised p-2 text-text-primary shadow-lg",
+          DOCK_PANEL,
           "animate-sheet-up motion-reduce:animate-none",
         )}
       >

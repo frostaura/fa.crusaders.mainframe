@@ -11,21 +11,31 @@ import { CaretLeft } from "./icons";
  * of those on nearly every screen, and it read as eight apps in one.
  *
  * <ul>
- *   <li><b>narrow</b> 36rem — My Code, auth, single forms.</li>
+ *   <li><b>narrow</b> 36rem — ONLY single-task, linear pages: auth forms, change password, top up
+ *   and its status, not found. Never a screen with more than one thing on it (R4 form factor:
+ *   My Code, Inbox, Invites and Profile sat in a 512px column with 73 % of a 1920 screen empty).</li>
  *   <li><b>content</b> 64rem — the default.</li>
- *   <li><b>wide</b> 80rem — admin tables and the booking grid.</li>
+ *   <li><b>wide</b> 80rem — member screens with an aside or a split view, the booking grid.</li>
+ *   <li><b>full</b> 120rem (`max-w-page`) — admin and data screens; never unbounded.</li>
  * </ul>
  * <p>
- * Gutters `px-4 sm:px-6 lg:px-8`, top `pt-6 lg:pt-8`, 32px between sections. The header sits 24px
- * above the body (it pulls the 32px gap in by 8px), per the spacing table.
+ * Gutters `px-4 sm:px-6 lg:px-8 3xl:px-12`, top `pt-6 lg:pt-8`, 32px between sections. The header
+ * sits 24px above the body (it pulls the 32px gap in by 8px), per the spacing table.
+ * </p>
+ *
+ * <p>
+ * <b>The shell is the page's container</b> (`@container/page`): a layout inside it asks how wide
+ * the PAGE is, not the viewport, which lies beside the admin rail. The app bar follows a `full`
+ * shell's frame from 3xl by `:has()` (AppShell), so the crest and the content share one edge.
  * </p>
  */
-export type PageWidth = "narrow" | "content" | "wide";
+export type PageWidth = "narrow" | "content" | "wide" | "full";
 
 const WIDTH: Record<PageWidth, string> = {
   narrow: "max-w-narrow",
   content: "max-w-content",
   wide: "max-w-wide",
+  full: "max-w-page",
 };
 
 export type PageShellProps = ComponentProps<"div"> & { width?: PageWidth };
@@ -34,7 +44,7 @@ export function PageShell({ width = "content", className, children, ...rest }: P
   return (
     <div
       data-page-shell={width}
-      className={cn("mx-auto flex w-full flex-col gap-8 px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8", WIDTH[width], className)}
+      className={cn("@container/page mx-auto flex w-full flex-col gap-8 px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8 3xl:px-12", WIDTH[width], className)}
       {...rest}
     >
       {children}

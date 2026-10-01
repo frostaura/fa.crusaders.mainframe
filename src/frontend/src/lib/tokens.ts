@@ -333,12 +333,43 @@ export const z = {
   overlay: "40", modal: "50", popover: "60", toast: "70", tooltip: "80", skip: "90",
 } as const;
 
-/** Named lengths: touch target, app bar, tab bar, and the three page widths. */
+/**
+ * Named lengths: touch target, app bar, tab bar, the page widths and the layout slots inside them.
+ *
+ * <p>
+ * <b>Widths</b> (R4 form factor, `max-w-*`). `narrow` 36rem is for single-task linear pages only
+ * (auth, change password, top up, not found); `content` 64rem; `wide` 80rem; `page` 120rem is
+ * PageShell's `full` frame — admin and data screens, the booking grid at 3xl — never unbounded,
+ * so lines stay readable on an ultrawide. (`page`, not `full`: Tailwind's `max-w-full` is 100 %
+ * and 33 call sites mean exactly that.) `list` is a split view's master pane, `aside` /
+ * `asideWide` a side rail (the wide one from 3xl), `form` one field column inside a wider page.
+ * </p>
+ *
+ * <p>
+ * <b>Tiles</b> are the minimum widths an `AutoGrid` packs to: `stat` a figure, `card` an upcoming
+ * game or a badge, `panel` a profile or settings section, `wide` a two-up card. In rem, so at
+ * 200 % text a grid holds half as many columns instead of squeezing the words.
+ * </p>
+ *
+ * <p>
+ * <b>`stickyTop` is 0, not the app bar's 56px.</b> The shell scrolls `<main>`, which sits BELOW
+ * the app bar, so a sticky box's `top` is measured from main's top edge — 56px would leave a
+ * 56px band of scrolled content showing above every context bar. The full-height panes (a split
+ * view's list, a sticky aside) subtract `--app-chrome-height`, which the shell measures.
+ * </p>
+ */
 export const layout = {
   touch: "44px",
   appbar: "56px",
   tabbar: "64px",
-  width: { narrow: "36rem", content: "64rem", wide: "80rem" },
+  width: {
+    narrow: "36rem", content: "64rem", wide: "80rem", page: "120rem",
+    list: "24rem", aside: "20rem", asideWide: "24rem", form: "40rem",
+  },
+  tile: { stat: "9rem", card: "18rem", panel: "26rem", wide: "34rem" },
+  stickyTop: "0px",
+  /** Tailwind's breakpoints plus one: a 1920 screen is not a 1536 one with more margin. */
+  screens: { "3xl": "1800px" },
 } as const;
 
 /**

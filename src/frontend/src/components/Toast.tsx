@@ -121,7 +121,9 @@ const TONE_ICON: Record<ToastTone, Icon> = {
  * `--app-bottom-bar-height` (it already includes the safe area); where there is no bar the
  * home-indicator inset is the floor, so the strip never sits under the gesture bar (the viewport
  * meta carries `viewport-fit=cover`). The bottom is also the far side of the screen from the
- * status lines a failure toast most often contradicts (R3-28 / B10).
+ * status lines a failure toast most often contradicts (R3-28 / B10). A docked ContextBar (Top up,
+ * Accept &amp; pay) publishes `--context-bar-height`, and the strip climbs over it rather than
+ * covering the one verb the page docked within thumb reach (R4 form factor).
  * </p>
  *
  * <p>
@@ -137,7 +139,7 @@ const TONE_ICON: Record<ToastTone, Icon> = {
  */
 export const TOAST_VIEWPORT_CLASS = cn(
   "pointer-events-none fixed inset-x-4 z-toast mx-auto flex max-w-md flex-col items-stretch gap-2",
-  "bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px)]",
+  "bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px+var(--context-bar-height,0px))]",
   "sm:bottom-auto sm:left-auto sm:right-6 sm:top-[calc(var(--app-chrome-height,4rem)+12px)] sm:mx-0 sm:w-96",
 );
 

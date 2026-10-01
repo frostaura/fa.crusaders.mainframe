@@ -18,10 +18,20 @@ import { cn } from "../lib/utils";
  * The role and label are what stop that focus stop being a mystery to a screen reader.
  * </p>
  */
+/**
+ * The colour each fade melts into — the surface the region sits on. A surface-white fade on the
+ * page canvas reads as a smudge (R4 form factor: the bookings court chips sit on `bg-app`).
+ */
+const FADE = {
+  surface: { left: "from-bg-surface", right: "from-bg-surface" },
+  app: { left: "from-bg-app", right: "from-bg-app" },
+} as const;
+
 export function ScrollArea({
   label,
   className,
   tabbable = true,
+  fade = "surface",
   children,
 }: {
   /** Names the region for assistive tech — "Wallet ledger", not "Table". */
@@ -39,6 +49,8 @@ export function ScrollArea({
    * </p>
    */
   tabbable?: boolean;
+  /** What the region sits on, so the edge fades melt into it. */
+  fade?: keyof typeof FADE;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -88,14 +100,16 @@ export function ScrollArea({
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-bg-surface to-transparent transition-opacity duration-fast",
+          "pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r to-transparent transition-opacity duration-fast",
+          FADE[fade].left,
           more.left ? "opacity-100" : "opacity-0",
         )}
       />
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-bg-surface to-transparent transition-opacity duration-fast",
+          "pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l to-transparent transition-opacity duration-fast",
+          FADE[fade].right,
           more.right ? "opacity-100" : "opacity-0",
         )}
       />

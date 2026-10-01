@@ -1,5 +1,6 @@
 import type { Config } from "tailwindcss";
 import plugin from "tailwindcss/plugin";
+import containerQueries from "@tailwindcss/container-queries";
 import {
   color, cssVariables, layout, motion, radius, tailwindColors, typography, z,
 } from "./src/lib/tokens";
@@ -61,6 +62,8 @@ const config: Config = {
   theme: {
     container: { center: true, padding: "1rem" },
     extend: {
+      // R4 form factor: `3xl` (1800px) — extended, so sm…2xl keep their defaults.
+      screens: layout.screens,
       colors: tailwindColors(),
       // A bare `border` / `divide-*` gets the decorative hairline, and a bare `ring` the accent —
       // never Tailwind's gray-200 / blue-500, which would glare in the dark theme.
@@ -156,7 +159,12 @@ const config: Config = {
       },
     },
   },
-  plugins: [themeVariables],
+  /*
+   * Container queries (`@container/name`, `@[64rem]/name:`; pinned, official). Layout inside the
+   * admin frame is decided by the width the page actually has, not the viewport: the rail takes
+   * 16rem from xl, so a viewport breakpoint lies there (R4 form factor, SPEC 2.0).
+   */
+  plugins: [themeVariables, containerQueries],
 };
 
 export default config;

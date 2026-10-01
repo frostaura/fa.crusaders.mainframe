@@ -23,7 +23,7 @@ import { SESSION_ANON, serveApi, test, expect } from "./fixtures";
 
 const SECTIONS = [
   "foundations", "icons", "watermark", "buttons", "fields", "datetime", "overlays",
-  "feedback", "data", "grid", "shell", "passcard", "legacy",
+  "feedback", "data", "grid", "shell", "layout", "passcard", "legacy",
 ] as const;
 
 const THEMES = ["light", "dark"] as const;
@@ -197,7 +197,7 @@ async function edgesOf(page: Page): Promise<Edge[]> {
 }
 
 test.describe("forced colours", () => {
-  const CONTROL_SECTIONS = ["watermark", "buttons", "fields", "datetime", "overlays", "feedback", "data", "grid", "shell", "legacy"];
+  const CONTROL_SECTIONS = ["watermark", "buttons", "fields", "datetime", "overlays", "feedback", "data", "grid", "shell", "layout", "legacy"];
 
   for (const section of CONTROL_SECTIONS) {
     test(`every control in ${section} keeps a visible edge`, async ({ page }) => {
