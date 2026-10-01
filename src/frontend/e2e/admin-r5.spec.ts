@@ -282,3 +282,37 @@ test.describe("R5 X5-8 / V4-5 — the admin tour at 390 / 200 %", () => {
     expect(await inside(ADMIN_TOUR.close), "the focused Close is in view").toBe(true);
   });
 });
+
+test.describe("R5 A5-6 — the Overview on a phone", () => {
+  const ALERTS = Array.from({ length: 34 }, (_, i) => ({
+    id: `n${i}`, kind: "member.registered", title: "New membership applications",
+    headline: `Applicant ${i + 1} applied to join the club's membership`, link: "/admin/members",
+    subject_user_id: null, created_at: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(),
+    delivery: { state: "sent", sent_at: null, finished_at: null, recipients: 3 },
+  }));
+
+  for (const [width, big] of [[390, false], [390, true]] as const) {
+    test(`caps the alerts at five and folds the Console (${width}${big ? ", 200%" : ""})`, async ({ page }) => {
+      await open(page, "/admin", { width }, big, [
+        { path: "/api/v1/admin/notifications", body: { items: ALERTS, next_cursor: "older" } },
+      ]);
+      const list = page.locator("[data-recent-alerts] > li");
+      await expect(list).toHaveCount(5);
+      await expect(page.getByRole("button", { name: /See all 34 alerts/ })).toBeVisible();
+      await expect(page.locator("[data-quick-link]").first()).toBeHidden();
+      await expect(page.getByRole("button", { name: "Show every section" })).toBeVisible();
+      const height = await page.evaluate(() => document.getElementById("main-content")!.scrollHeight);
+      // Was 5,790px at 390 (34 alerts, the Console in full) and 21,497px at 390 / 200 %.
+      expect(height, "the Overview's height").toBeLessThan(big ? 9_000 : 3_200);
+      // X4-6: no alert word broken mid-word.
+      await noWordBroken(page, "[data-recent-alerts] li span.font-semibold");
+      expect(await sideways(page)).toBeLessThanOrEqual(1);
+    });
+  }
+
+  test("keeps the Console open where the box has room (1280)", async ({ page }) => {
+    await open(page, "/admin", { width: 1280 }, false);
+    await expect(page.locator("[data-quick-link]").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show every section" })).toBeHidden();
+  });
+});
