@@ -93,6 +93,13 @@ export async function readAllFor(owner: string, now = Date.now(), stale: (key: s
   return rows.filter(keep).map(({ owner: o, key, at, value }) => ({ owner: o, key, at, value }));
 }
 
+/** One kept read for `owner`, if it is still young enough to show. Never throws. */
+export async function readOne(owner: string, key: string, now = Date.now()): Promise<StoredRead | null> {
+  const row = await run<Row | undefined>("readonly", (store) => store.get(idOf(owner, key)));
+  if (!row || row.owner !== owner || typeof row.at !== "number" || now - row.at >= MAX_AGE_MS) return null;
+  return { owner: row.owner, key: row.key, at: row.at, value: row.value };
+}
+
 /** Keeps one read. Never throws; a refusal (quota, private mode) keeps nothing. */
 export async function writeRead(record: StoredRead): Promise<void> {
   await run("readwrite", (store) => store.put({ ...record, id: idOf(record.owner, record.key) } satisfies Row));

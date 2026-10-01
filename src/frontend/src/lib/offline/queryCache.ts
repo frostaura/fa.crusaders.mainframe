@@ -1,4 +1,4 @@
-import { readAllFor, removeRead, wipeStore, writeRead } from "./memberStore";
+import { readAllFor, readOne, removeRead, wipeStore, writeRead } from "./memberStore";
 
 /**
  * The member's reads, held for the life of the tab and on the phone (R4 wave B, "offline &
@@ -39,7 +39,9 @@ const inflight = new Map<string, { generation: number; promise: Promise<unknown>
 const listeners = new Map<string, Set<() => void>>();
 const ownerListeners = new Set<() => void>();
 let persistGuard: (who: string) => boolean = () => false;
-let hydration: { owner: string; promise: Promise<void> } | null = null;
+/** Kept reads already looked for on the phone this generation, by slot: one IndexedDB read each. */
+const looked = new Map<string, Promise<CacheEntry | undefined>>();
+let pruneTimer: ReturnType<typeof setTimeout> | null = null;
 
 const slot = (who: string, key: string) => `${who}\u0000${key}`;
 
@@ -77,9 +79,9 @@ export function setDataOwner(next: string | null): void {
   generation += 1;
   memory.clear();
   inflight.clear();
-  hydration = null;
+  looked.clear();
   notifyEverything();
-  if (next) void hydrate(next);
+  if (next) schedulePrune(next);
 }
 
 /**
@@ -91,7 +93,7 @@ export function wipeMemberData(): Promise<void> {
   generation += 1;
   memory.clear();
   inflight.clear();
-  hydration = null;
+  looked.clear();
   notifyEverything();
   return wipeStore();
 }
@@ -102,26 +104,41 @@ export function pastDay(key: string): boolean {
   return day !== undefined && Date.parse(`${day}T00:00:00Z`) < Date.now() - 2 * 86_400_000;
 }
 
-/** Reads the phone's copy of `who`'s reads into memory, never over a read this tab has made. */
-function hydrate(who: string): Promise<void> {
-  if (hydration?.owner === who) return hydration.promise;
+/**
+ * The phone's copy of ONE read, into memory — never over a read this tab has made. On demand, key
+ * by key, rather than the whole store at boot: reading every kept day grid back at start-up cost a
+ * cold My Code ~110 ms of structured-clone on the main thread (4x CPU, measured A/B), for reads My
+ * Code never shows. The first subscriber to a key asks; everyone after shares the answer.
+ */
+export function loadKept(who: string | null, key: string): Promise<CacheEntry | undefined> {
+  if (!who) return Promise.resolve(undefined);
+  const id = slot(who, key);
+  const held = memory.get(id);
+  if (held) return Promise.resolve(held);
+  const asked = looked.get(id);
+  if (asked) return asked;
   const at = generation;
-  const promise = readAllFor(who, Date.now(), pastDay).then((records) => {
-    if (at !== generation || owner !== who) return;
-    for (const record of records) {
-      const id = slot(who, record.key);
-      if (memory.has(id)) continue;
+  const promise = readOne(who, key).then((record) => {
+    if (!record || at !== generation || owner !== who) return memory.get(id);
+    if (!memory.has(id)) {
       memory.set(id, { value: record.value, at: record.at, source: "stored" });
       notify(id);
     }
+    return memory.get(id);
   });
-  hydration = { owner: who, promise };
+  looked.set(id, promise);
   return promise;
 }
 
-/** Resolves once the phone's copy for the current member is in memory (or there is none). */
-export function whenHydrated(): Promise<void> {
-  return hydration?.promise ?? Promise.resolve();
+/** Once the app has settled, delete what the phone keeps that nobody could open (see `pastDay`). */
+function schedulePrune(who: string) {
+  if (pruneTimer !== null || typeof window === "undefined") return;
+  pruneTimer = setTimeout(() => {
+    pruneTimer = null;
+    const run = () => { if (owner === who) void readAllFor(who, Date.now(), pastDay); };
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(run, { timeout: 10_000 });
+    else run();
+  }, 15_000);
 }
 
 export function peekQuery(who: string | null, key: string): CacheEntry | undefined {
@@ -134,6 +151,8 @@ export function subscribeQuery(who: string | null, key: string, fn: () => void):
   let set = listeners.get(id);
   if (!set) { set = new Set(); listeners.set(id, set); }
   set.add(fn);
+  // The first look at a key this generation reads the phone's copy of it.
+  if (!memory.has(id) && !looked.has(id)) void loadKept(who, key);
   return () => {
     set.delete(fn);
     if (set.size === 0) listeners.delete(id);
@@ -211,5 +230,5 @@ export function resetQueryCacheForTests(): void {
   generation += 1;
   memory.clear();
   inflight.clear();
-  hydration = null;
+  looked.clear();
 }

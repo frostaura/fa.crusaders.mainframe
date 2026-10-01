@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ScheduleDay } from "./api";
 import { memberReads } from "./offline/memberReads";
-import { fetchQuery, peekQuery, primeQuery, subscribeQuery, whenHydrated } from "./offline/queryCache";
+import { fetchQuery, loadKept, peekQuery, primeQuery, subscribeQuery } from "./offline/queryCache";
 import { JOIN_MS, useDataOwner } from "./offline/useCachedRead";
 import { clubDayOf, gridNow, shiftClubDay } from "./gridClock";
 import { buildTimeSlices, groupSlotsByCourt } from "./scheduleGrid";
@@ -127,11 +127,11 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
   }, []);
   /** The phone's copy of `which` — or, when the member asked for no day in particular, the last one looked at. */
   const heldDay = useCallback(async (which: string, anyDay: boolean) => {
-    await whenHydrated();
-    const own = peekQuery(whoRef.current, memberReads.schedule(which).key);
+    const who = whoRef.current;
+    const own = await loadKept(who, memberReads.schedule(which).key);
     if (own || !anyDay) return own;
-    const last = peekQuery(whoRef.current, memberReads.lastDay)?.value;
-    return typeof last === "string" ? peekQuery(whoRef.current, memberReads.schedule(last).key) : undefined;
+    const last = (await loadKept(who, memberReads.lastDay))?.value;
+    return typeof last === "string" ? loadKept(who, memberReads.schedule(last).key) : undefined;
   }, []);
   // The day the page opened on by itself (no `?date=`): only that one may fall back to the last
   // day looked at. A day the member picked, or linked to, is that day or nothing.
