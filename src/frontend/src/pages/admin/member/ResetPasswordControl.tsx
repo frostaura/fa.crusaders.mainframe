@@ -23,7 +23,7 @@ export function ResetPasswordControl({ membershipId, name, email }: { membership
   return (
     <>
       <ConfirmDialog
-        trigger={<Button variant="outline">{COPY.resetPassword}</Button>}
+        trigger={<Button variant="outline" className="!h-auto min-h-touch max-w-full whitespace-normal py-2 text-center">{COPY.resetPassword}</Button>}
         title={COPY.resetTitle(name)}
         description={COPY.resetBody(email)}
         confirmLabel={COPY.resetConfirm}

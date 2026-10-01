@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { AdminRoleSwitch } from "@/components/members/AdminRoleSwitch";
+import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Envelope, Fingerprint, Key, Password, Trash } from "@/components/ui/icons";
@@ -59,6 +60,9 @@ export function MemberAccess() {
   );
 }
 
+/** A row's action may take two lines rather than run off a 320 phone at 200 % text (R5 F5-3). */
+const WRAPS = "!h-auto min-h-touch max-w-full whitespace-normal py-2 text-center";
+
 function Panel({ children }: { children: ReactNode }) {
   return <div className="flex flex-col gap-4 rounded-xl border border-border bg-bg-surface p-4 sm:p-6">{children}</div>;
 }
@@ -71,10 +75,11 @@ function Row({ icon, title, children, action }: { icon: ReactNode; title: string
         <span className="mt-0.5 shrink-0 text-text-secondary">{icon}</span>
         <div className="flex min-w-0 flex-col gap-0.5">
           <p className="font-semibold text-text-primary">{title}</p>
-          <div className="text-sm text-text-secondary">{children}</div>
+          {/* Breaks (R5 F5-3): a long verified address had no break and scrolled the tab sideways at 390. */}
+          <div className="min-w-0 break-words text-sm text-text-secondary">{children}</div>
         </div>
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="min-w-0 max-w-full sm:shrink-0">{action}</div> : null}
     </div>
   );
 }
@@ -95,10 +100,10 @@ function SignIn({ detail, name }: { detail: MemberDetail; name: string }) {
           icon={<Envelope aria-hidden="true" />}
           title={detail.email_verified ? COPY.emailVerified : COPY.emailUnverifiedTitle}
           action={detail.email_verified ? null : (
-            <Button variant="outline" pending={resend.pending} onClick={() => void resend.run()}>{COPY.resend}</Button>
+            <Button variant="outline" className={WRAPS} pending={resend.pending} onClick={() => void resend.run()}>{COPY.resend}</Button>
           )}
         >
-          {detail.email_verified ? detail.email : COPY.emailUnverifiedHint}
+          {detail.email_verified ? <EmailWithBreaks email={detail.email} /> : COPY.emailUnverifiedHint}
         </Row>
         <Row
           icon={<Password aria-hidden="true" />}

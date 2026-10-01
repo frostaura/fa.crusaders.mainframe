@@ -55,7 +55,7 @@ export function MemberWallet() {
         emptyAction={detail.status !== "Active" ? undefined : <Button onClick={openTopUp} icon={<Plus weight="bold" aria-hidden="true" />}>{MEMBER_COPY.topUp}</Button>}
         skeleton={<TableSkeleton rows={5} />}
       >
-        <div className="overflow-hidden rounded-xl border border-border bg-bg-surface">
+        <div className="overflow-clip rounded-xl border border-border bg-bg-surface">
           <LedgerTable rows={rows} columns={COLUMNS} onOpen={setOpened} label={COPY.label(name)} />
         </div>
         {rows.length >= LEDGER_LIMIT ? <p className="text-sm text-text-muted">{COPY.showingLatest(rows.length)}</p> : null}

@@ -1,7 +1,8 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { ScrollArea } from "@/components/ScrollArea";
+import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
 import { GroupAssign } from "@/components/members/GroupAssign";
 import { RelatedBookingField } from "@/components/members/RelatedBookingField";
 import { TopUpSheet } from "@/components/members/TopUpSheet";
@@ -163,7 +164,7 @@ function MemberHeader(props: HeaderProps) {
   // one-word address ran 58px off the screen).
   const subline = (
     <span className="break-words">
-      {breakableEmail(detail.email)}
+      <EmailWithBreaks email={detail.email} />
       {detail.membership_number ? ` · ${detail.membership_number}` : null}
     </span>
   );
@@ -204,18 +205,6 @@ function MemberHeader(props: HeaderProps) {
       </section>
     </>
   );
-}
-
-/**
- * After an "@" and before each ".". Built from a string, not a literal: lizard's lexer reads the
- * literal's lookbehind as the start of something it never closes, and scored every function
- * below this one as part of it (gotchas-gates).
- */
-const EMAIL_BREAKS = new RegExp("(?<=@)|(?=\\.)");
-
-function breakableEmail(email: string | null | undefined): ReactNode {
-  if (!email) return null;
-  return email.split(EMAIL_BREAKS).map((part, i) => <Fragment key={i}>{i > 0 ? <wbr /> : null}{part}</Fragment>);
 }
 
 function Identity({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
@@ -385,6 +374,27 @@ const TAB = cn(
   "aria-[current=page]:text-text-primary aria-[current=page]:after:bg-accent-strong",
 );
 
+/** The ScrollArea's edge fades are 1.5rem; a focused tab is kept this far inside either edge. */
+const FADE_CLEARANCE_REM = 2.5;
+
+/**
+ * R5 X5-9: Tab moved focus to a tab the browser scrolled only just into view — under the row's
+ * edge fade at 390, so the focus ring was half hidden. The row is scrolled sideways (never the
+ * page) until the focused tab sits clear of both fades.
+ */
+function keepClearOfFades(target: EventTarget) {
+  const tab = target instanceof HTMLElement ? target : null;
+  const nav = tab?.closest("nav");
+  const box = nav?.parentElement;
+  if (!tab || !box || tab === nav) return;
+  const root = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const clear = FADE_CLEARANCE_REM * root;
+  const left = tab.getBoundingClientRect().left - box.getBoundingClientRect().left;
+  const right = left + tab.getBoundingClientRect().width;
+  if (left < clear) box.scrollLeft += left - clear;
+  else if (right > box.clientWidth - clear) box.scrollLeft += right - (box.clientWidth - clear);
+}
+
 /**
  * The underline tabs' look (ui/tabs `underline`), as LINKS: each tab is a route, so it is a
  * `NavLink` — it navigates, it can be opened in a new tab, and `aria-current="page"` marks the
@@ -409,7 +419,7 @@ function MemberTabs({ userId }: { userId: string }) {
     // "Door histor" with nothing to say there was more; the edge fades and the region's sentence
     // say it now. Not a tab stop of its own — every tab is a link that scrolls itself in (C19).
     <ScrollArea label={MEMBER_COPY.tabsLabel} tabbable={false} fade="app" className="-mx-4 sm:mx-0">
-    <nav ref={scroller} aria-label={MEMBER_COPY.tabsLabel} className="relative px-4 sm:px-0">
+    <nav ref={scroller} aria-label={MEMBER_COPY.tabsLabel} className="relative px-4 sm:px-0" onFocus={(e) => keepClearOfFades(e.target)}>
       <ul className="flex w-max min-w-full items-end gap-5 border-b border-border">
         {MEMBER_TABS.map((tab) => (
           <li key={tab.path} className="flex">

@@ -1,6 +1,7 @@
-import { Fragment, type MouseEvent } from "react";
+import { type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ScrollArea } from "@/components/ScrollArea";
+import { useBoxAtLeast } from "@/components/admin/useBoxAtLeast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { CaretDown, CaretUp, CaretUpDown, Envelope, Lock, ShieldCheck } from "@/components/ui/icons";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/membersCopy";
 import { cn, formatCredits } from "@/lib/utils";
 import { initialsOf, type GroupChip, type MemberRow, type Sort, type SortKey } from "./membersModel";
+import { EmailWithBreaks } from "./EmailWithBreaks";
 import { RowActions, type RowActionHandlers } from "./RowActions";
 
 /**
@@ -72,13 +74,15 @@ const HEAD = "hidden [@container(min-width:48rem)]:table-header-group";
 const BODY = "grid grid-cols-1 gap-3 [@container(min-width:36rem)]:grid-cols-2 [@container(min-width:48rem)]:table-row-group";
 
 /**
- * A card is COMPACT (R4 form factor, SPEC §3.8/§4.3): a wrapping row — who, then the balance on
- * the same line; status, then the actions on the next — about 100px a member where it was 250,
- * and the list draws a page at a time (281 cards were 72,000px of phone). Groups, the date and
- * the address are the record's to show; the search still finds a member by address.
+ * A card is COMPACT (R4 form factor, SPEC §3.8/§4.3; R5 to the spec's ~72px): a three-column grid
+ * — who (avatar, name, number) on the left over two lines; the balance over the status beside it;
+ * the ⋯ at the end, with Top up inside it. R4's wrapping row put status and the actions on a line
+ * of their own and measured ~126px a member. An application keeps Approve and Reject on a third
+ * line, because those two are the queue. Groups, the date and the address are the record's to
+ * show; the search still finds a member by address.
  */
 const ROW = cn(
-  "no-lift group flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-bg-surface p-3 shadow-xs",
+  "no-lift group grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-bg-surface p-3 shadow-xs",
   "hover:border-control",
   "[@container(min-width:48rem)]:table-row [@container(min-width:48rem)]:rounded-none",
   "[@container(min-width:48rem)]:border-0 [@container(min-width:48rem)]:p-0 [@container(min-width:48rem)]:shadow-none",
@@ -104,28 +108,31 @@ const GROUPS_WIDE = "[@container(min-width:76rem)]:w-48";
 const COL = {
   identity: cn(
     CELL,
-    "order-1 flex-[1_1_12rem]",
+    "col-start-1 row-span-2 row-start-1",
     "[@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:left-0 [@container(min-width:48rem)]:z-raised",
   ),
   email: cn(CELL, EMAIL_COLUMN, "[@container(min-width:48rem)]:w-72"),
-  status: cn(CELL, "order-3 flex-[1_1_auto] self-center [@container(min-width:48rem)]:w-32"),
+  status: cn(CELL, "col-start-2 row-start-2 justify-self-end [@container(min-width:48rem)]:w-32"),
   // `hidden` at the table's own threshold too: CELL makes every cell a table-cell from 48rem, and
   // a cell drawn under a header that is not shifts every column after it (`hidden` sorts last).
   groups: cn(CELL, "hidden [@container(min-width:48rem)]:hidden [@container(min-width:59rem)]:!table-cell [@container(min-width:48rem)]:w-36", GROUPS_WIDE),
   date: cn(CELL, "hidden [@container(min-width:48rem)]:hidden [@container(min-width:65rem)]:!table-cell [@container(min-width:48rem)]:w-24"),
   balance: cn(
     CELL,
-    "order-2 ml-auto shrink-0 text-right",
+    "col-start-2 row-start-1 self-end text-right",
     "[@container(min-width:48rem)]:w-36 [@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:right-64",
     "[@container(min-width:48rem)]:z-raised [@container(min-width:48rem)]:border-l",
   ),
   actions: cn(
     CELL,
-    "order-4 ml-auto",
+    "col-start-3 row-span-2 row-start-1",
     "[@container(min-width:48rem)]:w-64 [@container(min-width:48rem)]:min-w-64 [@container(min-width:48rem)]:sticky",
     "[@container(min-width:48rem)]:right-0 [@container(min-width:48rem)]:z-raised",
   ),
 } as const;
+
+/** On a card, an application's actions run the card's width on a third line. */
+const APPLICATION_ACTIONS = "col-span-3 col-start-1 row-span-1 row-start-3";
 
 /**
  * The header cells carry the same widths, pins and thresholds as their columns.
@@ -160,12 +167,24 @@ export type MembersTableProps = {
   handlers: RowActionHandlers;
 };
 
+/**
+ * R5 V-14: a Groups column where nobody on the page is in a group is 9rem of "No groups" beside
+ * addresses wrapping for want of it — so it is not drawn. Undefined (still reading) keeps it.
+ */
+function groupsWorthAColumn(rows: MemberRow[], groupsOf: MembersTableProps["groupsOf"]): MembersTableProps["groupsOf"] {
+  if (!groupsOf) return null;
+  return rows.some((row) => (groupsOf(row)?.length ?? 1) > 0) ? groupsOf : null;
+}
+
 export function MembersTable(props: MembersTableProps) {
-  const { rows, groupsOf, dateColumn, sort, onSort } = props;
+  const { rows, dateColumn, sort, onSort } = props;
+  const groupsOf = groupsWorthAColumn(rows, props.groupsOf);
   const navigate = useNavigate();
+  // The same 48rem the container queries use: below it the card's Top up lives in the ⋯ (§4.3).
+  const [box, table] = useBoxAtLeast(48);
   const dateKey: SortKey = dateColumn === "lastSeen" ? "last_login_at" : "created_at";
   return (
-    <div className="[container-type:inline-size]">
+    <div ref={box} className="[container-type:inline-size]">
       <div className={FRAME}>
       <ScrollArea label={MEMBERS_PAGE.tableLabel}>
         <Table className={TABLE} containerClassName="overflow-visible" aria-label="Members">
@@ -182,7 +201,7 @@ export function MembersTable(props: MembersTableProps) {
           </TableHeader>
           <TableBody className={BODY}>
             {rows.map((row) => (
-              <MemberTableRow key={row.user_id} row={row} {...props} onOpen={() => navigate(memberHref(row.user_id))} />
+              <MemberTableRow key={row.user_id} row={row} {...props} groupsOf={groupsOf} compact={!table} onOpen={() => navigate(memberHref(row.user_id))} />
             ))}
           </TableBody>
         </Table>
@@ -234,8 +253,8 @@ function rowClick(onOpen: () => void) {
   };
 }
 
-function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () => void }) {
-  const { row, groupsOf, dateColumn, now, handlers, onOpen } = props;
+function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () => void; compact: boolean }) {
+  const { row, groupsOf, dateColumn, now, handlers, onOpen, compact } = props;
   return (
     <tr data-interactive="" data-member-row={row.user_id} onClick={rowClick(onOpen)} className={ROW}>
       <td className={COL.identity}><Identity row={row} /></td>
@@ -257,8 +276,9 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
           {formatCredits(row.balance_credits)}
         </span>
       </td>
-      <td data-label={COLUMNS.actions} className={COL.actions}>
-        <RowActions row={row} handlers={handlers} />
+      {/* An application's Approve and Reject take the card's third line (the queue's two words). */}
+      <td data-label={COLUMNS.actions} className={cn(COL.actions, row.status === "PendingApproval" && APPLICATION_ACTIONS)}>
+        <RowActions row={row} handlers={handlers} compact={compact} />
       </td>
     </tr>
   );
@@ -283,7 +303,9 @@ function Identity({ row }: { row: MemberRow }) {
           <Link
             to={memberHref(row.user_id)}
             title={row.full_name}
-            className="no-lift min-w-0 truncate font-semibold text-text-primary underline-offset-2 hover:underline"
+            // A 44px target on a 20px line (R5 X5-12): the padding grows the hit area, the margin
+            // gives the line its height back.
+            className="no-lift -my-3 min-w-0 truncate py-3 font-semibold text-text-primary underline-offset-2 hover:underline"
           >
             {row.full_name}
           </Link>
@@ -301,16 +323,6 @@ function Identity({ row }: { row: MemberRow }) {
       </div>
     </div>
   );
-}
-
-/**
- * An address that may break after its "@" and before each "." (R3 V-14): `break-all` split it
- * mid-word over three lines at 1280 ("eve.muo7664z@memb / er-r3.review.test"). With the break
- * points offered, `break-words` breaks mid-word only where one part alone is wider than the cell.
- */
-function EmailWithBreaks({ email }: { email: string }) {
-  const parts = email.split(/(?<=@)|(?=\.)/);
-  return <>{parts.map((part, i) => <Fragment key={i}>{i > 0 ? <wbr /> : null}{part}</Fragment>)}</>;
 }
 
 /**
@@ -338,7 +350,7 @@ function AdminBadge({ source }: { source: "config" | "granted" | null }) {
 
 function StatusCell({ row }: { row: MemberRow }) {
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex flex-wrap items-center justify-end gap-1 [@container(min-width:48rem)]:justify-start">
       <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
       {row.is_admin ? <AdminBadge source={row.admin_source ?? null} /> : null}
       {row.email_verified === false ? (
@@ -386,7 +398,7 @@ export function MembersTableSkeleton() {
   return (
     <div className="grid gap-3" aria-hidden="true">
       {[0, 1, 2, 3, 4].map((i) => (
-        <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-bg-surface p-4">
+        <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-bg-surface p-3">
           <Skeleton className="size-10 rounded-full" />
           <div className="grid flex-1 gap-2">
             <Skeleton className="h-4 w-40 max-w-full" />

@@ -105,7 +105,9 @@ async function measure(page: import("@playwright/test").Page) {
     const region = document.querySelector('[role="region"][aria-label="Members table"]')!;
     region.scrollLeft = 0;
     const box = region.getBoundingClientRect();
-    const controls = Array.from(document.querySelectorAll<HTMLElement>('tbody td[data-label="Actions"] button'));
+    // Drawn buttons only: below a 48rem card the Top up lives in the ⋯ (R5 §4.3) and is not drawn.
+    const drawn = (b: HTMLElement) => b.getClientRects().length > 0;
+    const controls = Array.from(document.querySelectorAll<HTMLElement>('tbody td[data-label="Actions"] button')).filter(drawn);
     const outsideAtRest = controls
       .filter((c) => {
         const r = c.getBoundingClientRect();
@@ -115,7 +117,7 @@ async function measure(page: import("@playwright/test").Page) {
     // Lines of controls in each action cell, grouped by vertical OVERLAP rather than equal tops,
     // because `items-center` centres a 36px button beside a 36px icon button a pixel apart.
     const actionLines = Array.from(document.querySelectorAll("tbody td[data-label='Actions']")).map((cell) => {
-      const boxes = Array.from(cell.querySelectorAll<HTMLElement>("button")).map((b) => b.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+      const boxes = Array.from(cell.querySelectorAll<HTMLElement>("button")).filter(drawn).map((b) => b.getBoundingClientRect()).sort((a, b) => a.top - b.top);
       let lines = 0;
       let lineBottom = -Infinity;
       for (const b of boxes) {
@@ -217,9 +219,10 @@ for (const club of CLUBS) {
       test("keeps every row action on screen, on one line, before anything is scrolled", async ({ page }) => {
         await openMembers(page, club);
         const m = await measure(page);
-        // Seven rows: a pending row's Approve + Reject + ⋯, four active rows' Top up + ⋯, and a
-        // suspended row's ⋯ — fourteen buttons, every one of them inside the box.
-        expect(m.controls).toBe(14);
+        // Seven rows: a pending row's Approve + Reject + ⋯, five active rows' Top up + ⋯, and a
+        // suspended row's ⋯ — fourteen buttons, every one of them inside the box. A card (below a
+        // 48rem box) draws its Top up in the ⋯ (R5 §4.3): nine.
+        expect(m.controls).toBe(m.table ? 14 : 9);
         expect(m.outsideAtRest, "row actions outside the scroller's box on arrival").toEqual([]);
         expect(m.maxActionLines, "lines of controls in the widest action cell").toBe(1);
       });

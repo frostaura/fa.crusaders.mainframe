@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   ArrowCounterClockwise, CalendarBlank, CheckCircle, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, Key, Prohibit, QrCode,
-  UserCircle, UsersThree,
+  Plus, UserCircle, UsersThree,
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
 import { ASSIGN_COPY } from "@/lib/groupsCopy";
@@ -14,6 +14,7 @@ import {
   ROW_ACTIONS as COPY, SUSPENDED_NOTE, bookForHref, memberHref, nightHref,
 } from "@/lib/membersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { cn } from "@/lib/utils";
 import type { MemberRow } from "./membersModel";
 
 /**
@@ -49,7 +50,10 @@ export type RowActionHandlers = {
 /** One label for the reset, wherever it is offered (D8). */
 const RESET_CODE_LABEL = ACTIONS_COPY.resetCode;
 
-export function RowActions({ row, handlers }: { row: MemberRow; handlers: RowActionHandlers }) {
+/** Below a 48rem table box the card's Top up is drawn in the ⋯ (SPEC §4.3), not beside it. */
+const TABLE_ONLY = "[@container(max-width:47.99rem)]:hidden";
+
+export function RowActions({ row, handlers, compact = false }: { row: MemberRow; handlers: RowActionHandlers; compact?: boolean }) {
   const approve = useAsyncAction(() => handlers.approve(row));
   return (
     <div className="flex flex-row items-center justify-end gap-2">
@@ -60,27 +64,36 @@ export function RowActions({ row, handlers }: { row: MemberRow; handlers: RowAct
         </>
       ) : null}
       {row.status === "Active" ? (
-        <Button size="sm" variant="outline" onClick={() => handlers.topUp(row)}>{COPY.topUp}</Button>
+        <Button size="sm" variant="outline" className={TABLE_ONLY} onClick={() => handlers.topUp(row)}>{COPY.topUp}</Button>
       ) : null}
       {row.status === "Suspended" ? (
-        <span className="min-w-0 text-right text-xs text-text-muted">{SUSPENDED_NOTE}</span>
+        <span className={cn("min-w-0 text-right text-xs text-text-muted", TABLE_ONLY)}>{SUSPENDED_NOTE}</span>
       ) : null}
-      <MemberMenu row={row} handlers={handlers} />
+      <MemberMenu row={row} handlers={handlers} compact={compact} />
     </div>
   );
 }
 
-function MemberMenu({ row, handlers }: { row: MemberRow; handlers: RowActionHandlers }) {
+function MemberMenu({ row, handlers, compact }: { row: MemberRow; handlers: RowActionHandlers; compact: boolean }) {
   const active = row.status === "Active";
   // Not modal: a modal menu and the dialog it opens both fight over pointer-events on body.
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <IconButton label={COPY.more(row.full_name)} size="icon-sm" data-member-menu={row.user_id} className="shrink-0">
+        {/* 44px on a card (R5 X5-12), where it is the row's one control; 36 beside the table's buttons. */}
+        <IconButton label={COPY.more(row.full_name)} size="icon-sm" data-member-menu={row.user_id} className="shrink-0 [@container(max-width:47.99rem)]:size-11">
           <DotsThree weight="bold" aria-hidden="true" />
         </IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
+        {active && compact ? (
+          <>
+            <DropdownMenuItem onSelect={() => handlers.topUp(row)}>
+              <Plus size={16} aria-hidden="true" />{COPY.topUp}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <NavigationItems row={row} />
         <DropdownMenuSeparator />
         {active ? (

@@ -56,7 +56,9 @@ export function BookingLine({ row, zone, action, people }: {
           </p>
           {/* A div, not a <p> (F3.23): the people line can hold a loading Skeleton, a <div>. */}
           <div className="flex flex-wrap items-center gap-x-2 text-sm text-text-secondary">
-            <span>{bookedByLine(row)}</span>
+            {/* A real, shrinkable item (R5 F5-4): a bare span floored at its longest word ran
+                "Playing as <long name>'s partner" off a 390 phone at 200% text. */}
+            <span className="min-w-0 break-words">{bookedByLine(row)}</span>
             {people ? <div data-booking-people="">{people}</div> : null}
             {row.checked_in_at ? (
               <span className="inline-flex items-center gap-1 text-success-strong">
