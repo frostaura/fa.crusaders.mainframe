@@ -36,7 +36,8 @@ Tests: `AdminSettingsHttpTests+Concurrency`, `R4ScheduleDatesHttpTests`, `R4Sche
   date booked the new days before it, and a date past the horizon came out at the new hours. A list,
   not one rule: two changes can wait at once; a change earlier than a waiting one cuts it back to
   its own date (`ScheduleRuleHistory.Supersede`). `rule_*`/`on_rule` now mean the GOVERNING rule.
-  The edit's conflict check starts at the effective date.
+  The edit's conflict check starts at the effective date. The read exposes them (R5, A5-4):
+  `rules[]` oldest first `{from, until (exclusive), days, start, end, interval_weeks, in_force}`.
 - **A series ended from a future date keeps running until then** (A4-10): `Status` stays Active and
   materialising; the wire's status is "ended" once ended outright or past `end_date`, and the list
   filters on that.

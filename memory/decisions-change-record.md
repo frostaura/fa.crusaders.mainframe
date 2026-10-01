@@ -58,3 +58,8 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   fault resolves (note = reason), each in its action's own save, changed fields only; a no-op or
   refused action records nothing, and a failed save detaches its staged rows. Play-result rows carry
   `status` on both sides. Desk cancels: [`decisions-admin-writes.md`](decisions-admin-writes.md).
+- **Round 5 (lane F):** lifting a hold needs a reason (`DELETE /admin/blocks/{id}?reason=`, 400
+  `reason_required`; `booking.block_lifted` is reason-required). A bulk cancel ALSO writes the
+  per-booking `booking.cancelled_by_admin` row (`after.part_of_batch`), reversing "one row per batch
+  only" — a member's record never showed a court taken from a list. Both bulk rows carry a label
+  ("3 bookings — Olga Smith, Ben Ng and 1 more" / the payer) and `after.bookings` per item.

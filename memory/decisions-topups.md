@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-topups
 description: "Member PayFast top-ups: the R1000 cap is cumulative per member over Completed plus FRESH Pending; a cancel return and a one-hour expiry close abandoned checkouts, reopenable by a late COMPLETE."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — member top-ups and the per-member cap
@@ -32,6 +32,11 @@ Spec: `docs/specs/payments-payfast.md` ("A checkout PayFast never reports on"). 
 - **Registration takes the member's `PayerLock`** around the cap read and the row insert and
   releases it before the gateway call. *Why:* eight registrations sent together all fitted one
   remainder (red in `Registrations_sent_together_cannot_overrun_the_ceiling`).
+- **The member sees and cancels open checkouts** (review round 5, M5-2): `/topup/options` adds
+  `paid_zar` (Completed), `waiting_zar` (fresh Pending) and `open_checkouts` (newest first, with
+  `created_at`/`counts_until`); the cap refusal carries the same split, the status read `created_at`.
+  Cancel is the existing cancel return. *Why:* back from PayFast twice, a member read "You've topped
+  up R1000" with R0 paid for an hour; the screen (`lib/topUpOpen.ts`) never calls unpaid money "used".
 - **Accepted gap:** a completion that raced a cancel return clears the reason by forcing
   `FailureReason` modified; no test can force that interleaving (the mutant survives), and the
   cost would be a stale `failure_code` beside `Completed`, which the screen ignores.

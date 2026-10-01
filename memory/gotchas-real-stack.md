@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-real-stack
 description: "Real-stack walk (e2e-real) traps: the auth limit, booking seconds ahead so the cue is open, courts held by earlier runs, parallel viewports sharing the admin desk, celebrations mid-walk, the 07:00–21:00 play window."
 type: gotcha
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Gotchas — the real-stack walk (`e2e-real/`)
@@ -14,9 +14,10 @@ Found getting `e2e-real/play.spec.ts` green on 2026-09-29. Each one failed the w
   build behind the gateway, not Vite. `up --build -d backend frontend` — never `down -v`.
 - **Anonymous register/verify routes allow 10 a minute per IP** (sign-in and reset moved to a
   per-account limit with a 60-per-IP ceiling on 2026-09-30, `decisions-sessions.md`), and a walk
-  that registers two members per test in two viewports passes it. A `429` on `verify-email` renders **"That link didn't work"**
-  — a member would believe a good link is dead (a PWA defect, not fixed). The spec waits out
-  `Retry-After` and repeats the step; a 429 is refused before the token is spent.
+  that registers two members per test in two viewports passes it. A `429` on `verify-email` is
+  refused before the token is spent; the PWA now says to wait and retry (`VerifyEmail.tsx`, fixed
+  in round 4). The spec still waits out `Retry-After` and repeats the step. Since round 5 a 429's
+  `Retry-After` is the limiter's own wait (a window's reset, the writes bucket's next token), not 60.
 - **A booking "for now" is `past_time`** once its start has passed — but NOTHING requires a
   start on the slice grid. Since 2026-09-30 the walk books `LEAD_MS` (15 s) from now: already inside
   the box's cue window (`StartsAt − activation_cue_window_minutes`), started seconds later. Booking
