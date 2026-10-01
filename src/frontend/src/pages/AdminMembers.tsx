@@ -83,6 +83,7 @@ export default function AdminMembersPage() {
     changeGroups: setAssigning,
     suspend: (member) => setDialog({ kind: "suspend", member }),
     reactivate: (member) => setDialog({ kind: "reactivate", member }),
+    adminRole: (member) => setDialog({ kind: "adminRole", member }),
     fingerprintCount: (member) => prints.byUser[member.user_id]?.templates.length ?? 0,
   };
 
@@ -194,6 +195,8 @@ function MemberOverlays(props: OverlayProps) {
         lifecycle={lifecycle}
         fingerprints={prints.byUser}
         readFingerprints={prints.read}
+        // The row takes what the SERVER answered, once it has (R5 G) — a role is never optimistic.
+        onRoleChanged={(r) => list.setMembers((rows) => patchRow(rows, r.user_id, { is_admin: r.is_admin, admin_source: r.admin_source }))}
       />
       {assigning ? (
         <GroupAssign

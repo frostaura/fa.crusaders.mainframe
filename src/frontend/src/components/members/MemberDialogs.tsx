@@ -14,6 +14,8 @@ import {
   OUTCOMES, PASSWORD_DIALOG, REACTIVATE_DIALOG, REJECT_DIALOG, RESET_DIALOG, SUSPEND_DIALOG,
 } from "@/lib/membersCopy";
 import { ResetMemberCodeDialog } from "@/components/member-code/ResetMemberCodeDialog";
+import type { AdminRoleResult } from "@/lib/memberDetailApi";
+import { AdminRoleDialog } from "./AdminRoleDialog";
 import { FingerprintsDialog } from "./FingerprintsDialog";
 import { rowMenuOf, type MemberRow } from "./membersModel";
 import type { MemberLifecycle, ResetResult } from "./useMemberLifecycle";
@@ -29,7 +31,7 @@ import type { MemberLifecycle, ResetResult } from "./useMemberLifecycle";
  * </p>
  */
 export type MemberDialogState =
-  | { kind: "reject" | "suspend" | "reactivate" | "reset" | "resetCode" | "fingerprints"; member: MemberRow }
+  | { kind: "reject" | "suspend" | "reactivate" | "reset" | "resetCode" | "fingerprints" | "adminRole"; member: MemberRow }
   | { kind: "password"; member: MemberRow; result: ResetResult }
   | null;
 
@@ -39,6 +41,8 @@ type Props = {
   lifecycle: MemberLifecycle;
   fingerprints: Record<string, BiometricEnrollmentRow>;
   readFingerprints: () => Promise<void>;
+  /** The server's answer to a grant or revoke — the row is redrawn from it, never before (R5 G). */
+  onRoleChanged: (result: AdminRoleResult) => void;
 };
 
 export function MemberDialogs(props: Props) {
@@ -60,6 +64,13 @@ export function MemberDialogs(props: Props) {
       />
     );
     case "password": return <PasswordDialog result={dialog.result} onClose={() => closeIf("password")(false)} />;
+    case "adminRole": return (
+      <AdminRoleDialog
+        key={dialog.member.user_id} userId={dialog.member.user_id} name={dialog.member.full_name} grant={dialog.member.is_admin !== true}
+        open onOpenChange={closeIf("adminRole")} returnFocus={() => rowMenuOf(dialog.member.user_id)}
+        onChanged={props.onRoleChanged}
+      />
+    );
     case "fingerprints": return (
       <FingerprintsDialog
         member={dialog.member}
