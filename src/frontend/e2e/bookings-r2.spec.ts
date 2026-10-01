@@ -9,7 +9,7 @@ import { BOOKINGS_COPY, UPCOMING } from "../src/lib/bookingsCopy";
  */
 
 const COURTS = ["a", "b", "c", "d", "e"].map((x, i) => ({
-  id: `aaaaaaaa-0000-4000-8000-00000000000${x}`, courtNumber: i + 1, name: `Court ${i + 1}`, slicePriceCredits: 50,
+  id: `aaaaaaaa-0000-4000-8000-00000000000${x}`, courtNumber: i + 1, name: `Court ${i + 1}`,
 }));
 
 const today = () => new Date().toISOString().slice(0, 10);

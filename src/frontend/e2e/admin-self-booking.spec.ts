@@ -8,7 +8,7 @@ import { BOOK_SHEET, GOD_MODE } from "../src/lib/bookingsCopy";
  *
  * <p>
  * <b>What this replaced.</b> The old dialog learned about a short wallet by being refused: POST,
- * read the 402, offer "Book anyway — leaves −40.00 cr", POST again — and refused the override
+ * read the 402, offer "Book anyway — leaves −40 min", POST again — and refused the override
  * outright for an admin's own wallet, which sent the desk round a loop with no exit (the defect
  * this file was first written about). R19 made self-overdraft legal and moved the figures in
  * front of the button: the sheet asks `GET /admin/bookings/quote` first. The 402 routes are gone
@@ -42,7 +42,7 @@ const day = () => ({
   advanceBookingDays: 14,
   penaltyPct: 30,
   penaltyWindowMinutes: 15,
-  courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+  courts: [{ id: COURT, courtNumber: 1, name: "Court 1" }],
   slots: [],
 });
 
@@ -78,7 +78,8 @@ async function pastTheStepGuard(page: import("@playwright/test").Page) {
 
 async function openFirstFreeSlot(page: import("@playwright/test").Page) {
   await page.goto("/bookings");
-  await page.getByRole("button", { name: /^Book Court 1 .* for 50\.00 cr/ }).first().click();
+  // P13 §3.12 — a free cell's name carries no price.
+  await page.getByRole("button", { name: /^Book Court 1 at / }).first().click();
   const sheet = page.getByRole("dialog", { name: BOOK_SHEET.title(1) });
   await expect(sheet).toBeVisible();
   return sheet;

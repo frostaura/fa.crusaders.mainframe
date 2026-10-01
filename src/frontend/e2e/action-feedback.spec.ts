@@ -51,14 +51,14 @@ function day() {
     date: d, timezone: "UTC", sliceMinutes: 15,
     dayStartMinute: 7 * 60, dayEndMinute: 8 * 60,
     advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
-    courts: [{ id: COURT_A, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    courts: [{ id: COURT_A, courtNumber: 1, name: "Court 1" }],
     slots: [],
     rules: {
       // A window that covers the whole day. An EMPTY `allowedWindows` is not "no restriction" —
       // it is a group that may book at no time at all, and every cell draws "Not your hours".
       groups: [], allowedWindows: [{ start: "07:00", end: "08:00" }],
       clubHours: { start: "07:00", end: "08:00" },
-      slicePriceCredits: 50, remainingToday: null, adminExempt: false,
+      remainingToday: null, adminExempt: false,
     },
   };
 }
@@ -97,7 +97,7 @@ async function openBookingSheet(page: Page) {
     { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-9", balance_after_minutes: 450 } },
   ]);
   await page.goto("/bookings");
-  await page.getByRole("button", { name: /^Book Court 1 .* for 50\.00 cr/ }).first().click();
+  await page.getByRole("button", { name: /^Book Court 1 at / }).first().click();
   await expect(page.getByRole("dialog", { name: BOOK_SHEET.title(1) })).toBeVisible();
   await page.getByRole("button", { name: BOOK_SHEET.next }).click();
   await expect(page.getByRole("button", { name: PRIMARY })).toBeVisible();
@@ -117,7 +117,7 @@ async function holdBooking(page: Page) {
   return () => release();
 }
 
-const PRIMARY = BOOK_SHEET.primary(1, 50, null);
+const PRIMARY = BOOK_SHEET.primary(1, 15, null); // one 15-minute slice costs 15 minutes (P13 §1.1)
 
 test.describe("the booking sheet", () => {
   test("wears no glyph at rest on the book or the way out", async ({ page }) => {

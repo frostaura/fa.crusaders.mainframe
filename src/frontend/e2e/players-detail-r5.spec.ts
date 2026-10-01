@@ -22,16 +22,26 @@ async function open(page: Page, body: Record<string, unknown>) {
   await expect(page.locator("[data-players-section]")).toBeVisible();
 }
 
-/** Every money figure (`dd`) and every line holding one sits on ONE line. */
+/**
+ * Every money figure (`dd`) and every line holding one sits on ONE line. Measured on the text a
+ * sighted member SEES: a `<Minutes>` figure also carries its spoken form in an `sr-only` span
+ * (P13 — "1 hour 30 minutes" for a screen reader), which is clipped to one pixel and laid out
+ * apart, so it is not part of the line being measured.
+ */
 async function brokenFigures(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
     for (const dd of document.querySelectorAll<HTMLElement>("[data-money-panel] dd, main dd")) {
       const rects = Array.from(dd.getClientRects());
-      const range = document.createRange();
-      range.selectNodeContents(dd);
-      const lines = new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top)));
-      if (lines.size > 1 || rects.length === 0) out.push(dd.textContent ?? "");
+      const tops = new Set<number>();
+      const walker = document.createTreeWalker(dd, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim() || node.parentElement?.closest(".sr-only")) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const r of Array.from(range.getClientRects())) tops.add(Math.round(r.top));
+      }
+      if (tops.size > 1 || rects.length === 0) out.push(dd.textContent ?? "");
     }
     return out;
   });
@@ -59,11 +69,12 @@ test("F5: an invitee's Review and Decline are docked in thumb reach on a phone, 
 test("V5-7 / M5-3: a no-show at 390 with 200 % text: every figure on one line, nothing off screen", async ({ page }) => {
   const d = detailFixture() as Record<string, unknown> & { players: Record<string, unknown>[] };
   const partner = (n: number) => ({ ...d.players[1], seat: n, participant_id: `p0000000-0000-0000-0000-00000000000${n}`,
-    share_minutes: 16, consented_minutes: 16, paid_minutes: 4.8, target_minutes: 4.8, returned_minutes: 11.2, unpaid_minutes: 0, status: "accepted" });
+    // Whole minutes (P13 §1.2): each share comes down to ⌊30 × 16 ÷ 100⌋ = 4, so 12 goes back.
+    share_minutes: 16, consented_minutes: 16, paid_minutes: 4, target_minutes: 4, returned_minutes: 12, unpaid_minutes: 0, status: "accepted" });
   await open(page, {
     ...d, status: "no_show",
     players: [d.players[0], partner(2), { ...partner(3), team: "B" }],
-    money: { price_minutes: 100, organiser_owed_minutes: 30, shares_received_minutes: 9.6, organiser_net_minutes: 20.4, unpaid_minutes: 0, share_deadline: d.starts_at, is_split: true },
+    money: { price_minutes: 100, organiser_owed_minutes: 30, shares_received_minutes: 8, organiser_net_minutes: 22, unpaid_minutes: 0, share_deadline: d.starts_at, is_split: true },
     permissions: { ...(d.permissions as object), can_invite: false, can_change_split: false, can_cancel: false },
   });
   await expect(page.getByText(DETAIL_NO_SHOW.moneyNote(true))).toBeVisible();

@@ -54,7 +54,7 @@ for (const width of WIDTHS) {
       let unread = 2;
       const at = new Date(Date.now() - 5 * 60_000).toISOString();
       const items = () => [
-        { id: "n1", kind: "players.share_moved", headline: "Sam paid their 25.00 cr share", link: null, booking_id: "b1", created_at: at, read_at: unread ? null : at },
+        { id: "n1", kind: "players.share_moved", headline: "Sam paid their 25 min share", link: null, booking_id: "b1", created_at: at, read_at: unread ? null : at },
         { id: "n2", kind: "players.reminder", headline: "Your share for Friday is still open", link: null, booking_id: "b2", created_at: at, read_at: unread ? null : at },
       ];
       await phone(page, width, [

@@ -22,9 +22,9 @@ function wholeDay(date = today()) {
     dayStartMinute: 0, dayEndMinute: 24 * 60,
     advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
     courts: [
-      { id: COURT_A, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 },
-      { id: COURT_B, courtNumber: 2, name: "Court 2", slicePriceCredits: 50 },
-      { id: COURT_C, courtNumber: 3, name: "Court 3", slicePriceCredits: 50 },
+      { id: COURT_A, courtNumber: 1, name: "Court 1" },
+      { id: COURT_B, courtNumber: 2, name: "Court 2" },
+      { id: COURT_C, courtNumber: 3, name: "Court 3" },
     ],
     slots: [],
   };

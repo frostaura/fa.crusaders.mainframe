@@ -16,7 +16,7 @@ import { bigText, fontsReady, sideways } from "./layoutKit";
  */
 const at = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
 const NOTICES = [
-  { id: "n1", kind: "players.share_moved", headline: "Sam paid you 25.00 credits", link: `/bookings/${BOOKING}`, booking_id: BOOKING, created_at: at(5), read_at: null },
+  { id: "n1", kind: "players.share_moved", headline: "Sam paid you 25 minutes", link: `/bookings/${BOOKING}`, booking_id: BOOKING, created_at: at(5), read_at: null },
   { id: "n2", kind: "players.response", headline: "Alex accepted — Court 1", link: `/bookings/${BOOKING}`, booking_id: BOOKING, created_at: at(9), read_at: null },
 ];
 

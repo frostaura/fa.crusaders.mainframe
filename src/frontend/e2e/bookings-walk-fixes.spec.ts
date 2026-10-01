@@ -34,8 +34,8 @@ function day() {
     dayStartMinute: 7 * 60, dayEndMinute: 9 * 60,
     advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
     courts: [
-      { id: COURT_A, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 },
-      { id: COURT_B, courtNumber: 2, name: "Court 2", slicePriceCredits: 50 },
+      { id: COURT_A, courtNumber: 1, name: "Court 1" },
+      { id: COURT_B, courtNumber: 2, name: "Court 2" },
     ],
     slots: [
       slot(COURT_A, 1, "07:30", "07:45", { isMine: true, bookingId: "mine-1" }),
@@ -141,5 +141,5 @@ test("two courts at one time keep both picks under a real mouse", async ({ page 
   await page.getByRole("button", { name: /^Book Court 1 at 08:45/ }).click();
   await page.getByRole("button", { name: /^Book Court 2 at 08:45/ }).click();
   await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(2);
-  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("2 slots · 100.00 cr");
+  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("2 slots · 30 min");
 });

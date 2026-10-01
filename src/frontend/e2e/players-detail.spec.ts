@@ -151,7 +151,7 @@ function adminDetail(): Detail {
 }
 
 test.describe("R1 F2.1 — changing the split", () => {
-  test("the organiser moves Sam to 30.00 cr on an Amount split, and it is saved by seat", async ({ page }) => {
+  test("the organiser moves Sam to 30 min on an Amount split, and it is saved by seat", async ({ page }) => {
     let sent: unknown = null;
     await openAs(page, { extra: [
       {
@@ -172,8 +172,8 @@ test.describe("R1 F2.1 — changing the split", () => {
     await page.getByRole("button", { name: "Change split" }).click();
     const dialog = page.getByRole("dialog", { name: "Change the split" });
     await dialog.getByRole("radio", { name: "Amount" }).click();
-    await dialog.getByRole("textbox", { name: "Amount for Sam" }).fill("30");
-    await expect(dialog.locator("[data-split-totals]")).toContainText("30.00 cr");
+    await dialog.getByRole("textbox", { name: "Minutes for Sam" }).fill("30");
+    await expect(dialog.locator("[data-split-totals]")).toContainText("30 min");
     // The dialog fits a phone: nothing pushes the page sideways.
     const scroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(scroll).toBeLessThanOrEqual(0);
@@ -199,9 +199,9 @@ test.describe("god mode", () => {
     await expect(dialog).toContainText("This lands in the club's change log.");
     await dialog.getByRole("textbox", { name: "Reason" }).fill("Agreed at the desk");
     // R1 F2.13 — the go-ahead names who goes below zero in full, and the most it can be.
-    await dialog.getByRole("checkbox", { name: `Take 25.00 cr from ${PEOPLE.alex.name} even if it puts them up to 25.00 cr below zero` }).click();
+    await dialog.getByRole("checkbox", { name: `Take 25 min from ${PEOPLE.alex.name} even if it puts them up to 25 min below zero` }).click();
     await dialog.getByRole("button", { name: "Collect share" }).click();
-    await expect(page.getByText("Collected 25.00 cr from Alex.")).toBeVisible();
+    await expect(page.getByText("Collected 25 min from Alex.")).toBeVisible();
     expect(sent).toEqual({ reason: "Agreed at the desk", allowNegativeBalance: true });
   });
 });

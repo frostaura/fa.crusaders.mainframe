@@ -10,7 +10,7 @@ import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, UPCOMING } from "../src/lib/bo
  */
 
 const COURTS = ["a", "b", "c", "d"].map((x, i) => ({
-  id: `aaaaaaaa-0000-4000-8000-00000000000${x}`, courtNumber: i + 1, name: `Court ${i + 1}`, slicePriceCredits: 50,
+  id: `aaaaaaaa-0000-4000-8000-00000000000${x}`, courtNumber: i + 1, name: `Court ${i + 1}`,
 }));
 
 const inDays = (n: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -129,7 +129,7 @@ test.describe("X-6 — a sheet closing over a re-drawn cell gives focus back to 
       await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
       // The sheet ignores a press in the first moments of a new step (a double tap is not a booking).
       await page.waitForTimeout(400);
-      await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 50, null) }).click();
+      await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 15, null) }).click();
       await expect(sheet.getByRole("button", { name: BOOK_SHEET.done })).toBeVisible();
       if (how === "Done") await sheet.getByRole("button", { name: BOOK_SHEET.done }).click();
       else await page.keyboard.press("Escape");

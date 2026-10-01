@@ -10,7 +10,7 @@ import { inviteFixture, memberShellRoutes } from "./playersKit";
  */
 
 const COURTS = ["a", "b", "c", "d"].map((x, i) => ({
-  id: `aaaaaaaa-0000-4000-8000-00000000000${x}`, courtNumber: i + 1, name: `Court ${i + 1}`, slicePriceCredits: 50,
+  id: `aaaaaaaa-0000-4000-8000-00000000000${x}`, courtNumber: i + 1, name: `Court ${i + 1}`,
 }));
 
 const inDays = (n: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };

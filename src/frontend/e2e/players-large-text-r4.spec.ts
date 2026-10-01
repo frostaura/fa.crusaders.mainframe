@@ -43,7 +43,7 @@ function inboxRoutes(): ApiRoute[] {
   const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
   return [{ path: "/api/v1/me/notifications", body: { unread_count: 2, next_cursor: null, items: [
     { id: "n1", kind: "players.invited", headline: "Bongani asked you to play — Court 1, Wed 30 Sep, 18:00", link: "/bookings/b1", booking_id: "b1", created_at: at(5), read_at: null },
-    { id: "n2", kind: "players.reminder", headline: "Your 25.00 cr share for Friday is still open", link: null, booking_id: "b2", created_at: at(90), read_at: null },
+    { id: "n2", kind: "players.reminder", headline: "Your 25 min share for Friday is still open", link: null, booking_id: "b2", created_at: at(90), read_at: null },
   ] } }];
 }
 

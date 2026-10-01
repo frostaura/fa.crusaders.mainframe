@@ -33,21 +33,24 @@ function tomorrow(): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Two courts, one free hour each, 100 cr a slice — the playersKit's 100 cr court. */
+/**
+ * Two courts, one free hour each, sold as one 60-minute slice — so a booking costs 60 minutes
+ * (P13 §1.1: a booking costs its playing minutes; there is no slice price).
+ */
 function day() {
   return {
-    date: tomorrow(), timezone: "UTC", sliceMinutes: 15,
+    date: tomorrow(), timezone: "UTC", sliceMinutes: 60,
     dayStartMinute: 7 * 60, dayEndMinute: 8 * 60,
     advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
     courts: [
-      { id: COURT_1, courtNumber: 1, name: "Court 1", slicePriceCredits: 100 },
-      { id: COURT_2, courtNumber: 2, name: "Court 2", slicePriceCredits: 100 },
+      { id: COURT_1, courtNumber: 1, name: "Court 1" },
+      { id: COURT_2, courtNumber: 2, name: "Court 2" },
     ],
     slots: [],
     rules: {
       groups: [], allowedWindows: [{ start: "07:00", end: "08:00" }],
       clubHours: { start: "07:00", end: "08:00" },
-      slicePriceCredits: 100, remainingToday: null, adminExempt: false,
+      remainingToday: null, adminExempt: false,
     },
   };
 }
@@ -131,8 +134,8 @@ const BOOKED_WITH_PLAYERS = {
   players: {
     booking_id: "bk-1",
     participants: [
-      { participant_id: "p2", seat: 2, user_id: SAM, guest_name: null, status: "invited", share_minutes: 33, invite_token: "t2", invite_path: "/j/SAMSAMSAMSAMSAMSAMSAM" },
-      { participant_id: "p4", seat: 4, user_id: null, guest_name: null, status: "invited", share_minutes: 33, invite_token: "t4", invite_path: OPEN_PATH },
+      { participant_id: "p2", seat: 2, user_id: SAM, guest_name: null, status: "invited", share_minutes: 20, invite_token: "t2", invite_path: "/j/SAMSAMSAMSAMSAMSAMSAM" },
+      { participant_id: "p4", seat: 4, user_id: null, guest_name: null, status: "invited", share_minutes: 20, invite_token: "t4", invite_path: OPEN_PATH },
     ],
   },
 };
@@ -151,14 +154,16 @@ test.describe("booking with players", () => {
     await next(page);
 
     const totals = sheet.getByRole("region", { name: BOOK_SPLIT.totalsLabel });
-    await expect(totals).toContainText(BOOK_SPLIT.youPayNow("100.00 cr", "66.00 cr"));
-    await expect(totals).toContainText("34.00 cr");
+    // 60 minutes, three payers: 20 each, whole minutes, adding up to the price.
+    await expect(totals).toContainText(BOOK_SPLIT.youPayNow("1 h", "40 min"));
+    await expect(totals).toContainText("20 min");
+    await expect(totals).toContainText(BOOK_SPLIT.addsUp("1 h"));
     await next(page);
 
-    await expect(sheet.getByText("You pay 100.00 cr now; Sam and whoever takes your link are asked for 33.00 cr each.")).toBeVisible();
-    // Spendable, not raw: 100 of the 120 cr balance, with the 20 cr held said under it.
-    await expect(sheet.locator("dl")).toContainText(`${BOOK_SHEET.availableNow}100.00 cr`);
-    await expect(sheet.locator("[data-held-line]")).toContainText("20.00 cr held until");
+    await expect(sheet.getByText("You pay 1 h now; Sam and whoever takes your link are asked for 20 min each.")).toBeVisible();
+    // Spendable, not raw: 100 of the 120 minutes, with the 20 held said under it.
+    await expect(sheet.locator("dl")).toContainText(`${BOOK_SHEET.availableNow}1 h 40 min`);
+    await expect(sheet.locator("[data-held-line]")).toContainText("20 min held until");
 
     await page.evaluate(() => {
       (window as unknown as { __shared: unknown[] }).__shared = [];
@@ -167,7 +172,7 @@ test.describe("booking with players", () => {
         value: (data: unknown) => { (window as unknown as { __shared: unknown[] }).__shared.push(data); return Promise.resolve(); },
       });
     });
-    await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 100, null) }).click();
+    await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 60, null) }).click();
     await expect(sheet.getByText(BOOK_SHEET.bookedTitle(1, 1))).toBeVisible();
     expect(sent).toMatchObject({ players: [{ userId: SAM, seat: 2 }, { link: true, seat: 4 }], splitMode: "equal" });
 
@@ -187,7 +192,7 @@ test.describe("booking with players", () => {
     // D3 — the court, the time and the price before Confirm.
     const summary = sheet.getByRole("list", { name: BOOK_SHEET.summaryLabel });
     await expect(summary).toContainText("Court 1");
-    await expect(summary).toContainText("100.00 cr");
+    await expect(summary).toContainText("1 h");
 
     await sheet.getByRole("radio", { name: BOOK_PLAYERS.withOthers }).click();
     await sheet.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }).click();
@@ -209,7 +214,7 @@ test.describe("booking with players", () => {
     ]));
     await openSheet(page);
     await next(page);
-    await page.getByRole("dialog").getByRole("button", { name: BOOK_SHEET.primary(1, 100, null) }).click();
+    await page.getByRole("dialog").getByRole("button", { name: BOOK_SHEET.primary(1, 60, null) }).click();
     await expect(page.getByRole("dialog").getByText(BOOK_SHEET.bookedTitle(1, 1))).toBeVisible();
     expect(Object.keys(raw as object).sort()).toEqual(["courtId", "sliceCount", "startsAt"]);
     await expect(page.locator("[data-result-players]")).toHaveCount(0);
@@ -233,11 +238,11 @@ test.describe("booking with players", () => {
     await next(page);
     await expect(sheet.getByText(BOOK_SPLIT.eachBooking)).toBeVisible();
     await next(page);
-    await expect(sheet.getByText("On each booking you pay 100.00 cr now; Sam is asked for 50.00 cr.")).toBeVisible();
-    await sheet.getByRole("button", { name: BOOK_SHEET.primary(2, 200, null) }).click();
+    await expect(sheet.getByText("On each booking you pay 1 h now; Sam is asked for 30 min.")).toBeVisible();
+    await sheet.getByRole("button", { name: BOOK_SHEET.primary(2, 120, null) }).click();
     await expect(sheet.getByText(PLAYERS_REFUSAL.member_not_found)).toBeVisible();
     expect(bulkCalls).toBe(1);
-    await expect(sheet.getByRole("button", { name: BOOK_SHEET.primary(2, 200, null) })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: BOOK_SHEET.primary(2, 120, null) })).toBeVisible();
     await expect(sheet.locator("[data-bulk-results]")).toHaveCount(0);
   });
 });
@@ -261,7 +266,7 @@ test.describe("screens", () => {
         await seatSamAndALink(page, (name) => shot(page, tag(name)));
         await next(page);
         const sheet = page.getByRole("dialog");
-        await expect(sheet.getByRole("region", { name: BOOK_SPLIT.totalsLabel })).toContainText("66.00 cr");
+        await expect(sheet.getByRole("region", { name: BOOK_SPLIT.totalsLabel })).toContainText("40 min");
         await shot(page, tag("split-equal"));
         await sheet.getByRole("radio", { name: BOOK_SPLIT.modes.ratio }).click();
         await sheet.getByLabel(BOOK_SPLIT.weightLabel("Sam")).fill("2");
@@ -274,11 +279,11 @@ test.describe("screens", () => {
         await expect(sheet.getByText(PLAYERS_REFUSAL.split_exceeds_price)).toBeVisible();
         await shot(page, tag("split-amount-exceeds"));
         await sheet.getByRole("radio", { name: BOOK_SPLIT.modes.equal }).click();
-        await expect(sheet.getByRole("region", { name: BOOK_SPLIT.totalsLabel })).toContainText("66.00 cr");
+        await expect(sheet.getByRole("region", { name: BOOK_SPLIT.totalsLabel })).toContainText("40 min");
         await next(page);
         await expect(sheet.locator("[data-confirm-sentence]")).toBeVisible();
         await shot(page, tag("confirm"));
-        await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 100, null) }).click();
+        await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 60, null) }).click();
         await expect(sheet.getByRole("button", { name: BOOK_CONFIRM.shareLink })).toBeVisible();
         await page.waitForTimeout(300);
         await shot(page, tag("result"));

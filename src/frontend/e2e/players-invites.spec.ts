@@ -29,7 +29,7 @@ function scheduleDay() {
   return {
     date: tomorrowDate(), timezone: "Africa/Johannesburg", sliceMinutes: 15,
     dayStartMinute: 7 * 60, dayEndMinute: 9 * 60, advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 25 }],
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1" }],
     slots: [],
     rules: { clubHours: { start: "07:00", end: "09:00" }, remainingToday: null, adminExempt: false },
   };
@@ -72,7 +72,7 @@ test("the Bookings badge leads to Invites, and an accept ends in a calm confirma
   const sheet = await answerSurface(page);
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("Balance after")).toBeVisible();
-  await sheet.getByRole("button", { name: "Accept and pay 25.00 cr" }).click();
+  await sheet.getByRole("button", { name: "Accept and pay 25 min" }).click();
 
   await expect(sheet.getByText("You're in", { exact: true })).toBeVisible();
   await expect(sheet.getByRole("link", { name: "See the booking" })).toHaveAttribute("href", `/bookings/${BOOKING}`);
@@ -97,9 +97,9 @@ test("a share raised after the sheet opened is shown and asked again", async ({ 
 
   await page.getByRole("button", { name: /Sam invited you to play/ }).click();
   const sheet = await answerSurface(page);
-  await sheet.getByRole("button", { name: "Accept and pay 25.00 cr" }).click();
-  await expect(sheet.getByText("Your share is now 30.00 cr. Check it and say yes again if you're happy.")).toBeVisible();
-  const again = sheet.getByRole("button", { name: "Accept and pay 30.00 cr" });
+  await sheet.getByRole("button", { name: "Accept and pay 25 min" }).click();
+  await expect(sheet.getByText("Your share is now 30 min. Check it and say yes again if you're happy.")).toBeVisible();
+  const again = sheet.getByRole("button", { name: "Accept and pay 30 min" });
   await expect(again).toBeVisible();
   expect(sent).toHaveLength(1);
 
@@ -119,7 +119,7 @@ test("a shared link opens as a page and accepts through the link", async ({ page
   await expect(page.getByRole("heading", { level: 1, name: "You're invited" })).toBeVisible();
   await expect(page.getByText("Sam invited you to take a seat")).toBeVisible();
   await expect(page.getByRole("button", { name: "Decline" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Accept and pay 25.00 cr" }).click();
+  await page.getByRole("button", { name: "Accept and pay 25 min" }).click();
   await expect(page.getByText("You're in", { exact: true })).toBeVisible();
   expect(sent).toEqual([{ expectedShareMinutes: 25 }]);
 });

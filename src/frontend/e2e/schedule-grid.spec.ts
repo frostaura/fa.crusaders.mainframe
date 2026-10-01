@@ -34,8 +34,8 @@ function day() {
     dayStartMinute: 7 * 60, dayEndMinute: 9 * 60,
     advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
     courts: [
-      { id: COURT_A, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 },
-      { id: COURT_B, courtNumber: 2, name: "Court 2", slicePriceCredits: 50 },
+      { id: COURT_A, courtNumber: 1, name: "Court 1" },
+      { id: COURT_B, courtNumber: 2, name: "Court 2" },
     ],
     slots: [
       {
@@ -57,7 +57,7 @@ function day() {
       groups: [{ id: "g1", name: "Non-league members" }],
       allowedWindows: [{ start: "07:00", end: "08:00" }],
       clubHours: { start: "07:00", end: "09:00" },
-      slicePriceCredits: 50, remainingToday: null, adminExempt: false,
+      remainingToday: null, adminExempt: false,
     },
   };
 }
@@ -184,7 +184,7 @@ test("a mouse drag paints a rectangle, enters selection mode, and selects no tex
   await page.mouse.up();
   await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Stop selecting" })).toBeVisible();
-  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("4 slots · 200.00 cr");
+  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("4 slots · 1 h");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await page.evaluate(() => (window.getSelection()?.toString() ?? "").trim())).toBe("");
 });
