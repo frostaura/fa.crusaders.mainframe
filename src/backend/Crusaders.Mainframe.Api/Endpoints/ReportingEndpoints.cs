@@ -56,26 +56,26 @@ public static class ReportingEndpoints
             var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).ToList();
             var reversed = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).ToList();
 
-            // Rand comes from ZarPaid; credits come from AmountMinutes. They are not
-            // interchangeable and this endpoint used to treat them as though they were —
-            // it summed AmountMinutes and labelled the result gross_topups_zar, which the
-            // admin revenue page then printed with a rand sign. A Regular member's R1000
-            // top-up posts 1600 credits and a League member's posts 2400, so the club was
-            // shown R1600–R2400 of income for R1000 actually received, and no amount of
-            // arithmetic downstream could unmix the two classes once summed.
-            //
-            // Both figures are now reported side by side, each under a name that says what
-            // unit it is in — which is the same rule AdminMemberEndpoints already followed.
+            // Rand comes from ZarPaid; minutes come from AmountMinutes. They are not
+            // interchangeable and this endpoint once treated them as though they were — it
+            // summed the ledger unit and labelled the result gross_topups_zar, which the admin
+            // revenue page then printed with a rand sign, and no amount of arithmetic
+            // downstream could unmix the two once summed. Both are reported side by side, each
+            // under a name that says what unit it is in, and the one honest bridge between them
+            // is a RATE over the window (contract §3.15) — never a conversion of either.
+            var netZar = funding.Sum(SignedZar) + reversed.Sum(SignedZar);
+            var netMinutes = funding.Sum(r => r.AmountMinutes) + reversed.Sum(r => r.AmountMinutes);
             return Results.Ok(new
             {
                 from = f,
                 to = t,
                 gross_topups_zar = funding.Sum(SignedZar),
                 reversals_zar = reversed.Sum(SignedZar),
-                net_zar = funding.Sum(SignedZar) + reversed.Sum(SignedZar),
+                net_zar = netZar,
                 gross_topups_minutes = funding.Sum(r => r.AmountMinutes),
                 reversals_minutes = reversed.Sum(r => r.AmountMinutes),
-                net_minutes = funding.Sum(r => r.AmountMinutes) + reversed.Sum(r => r.AmountMinutes),
+                net_minutes = netMinutes,
+                zar_per_minute_sold = ZarPerMinuteSold(netZar, netMinutes),
             });
         });
 
@@ -103,7 +103,7 @@ public static class ReportingEndpoints
 
             // Revenue is what the club KEPT, read off the ledger — not the price quoted at
             // booking. This summed AmountChargedMinutes, so a booking that was swept as a
-            // no-show (charged −50, refunded +50, penalised −15, then credited +5 by the
+            // no-show (charged −50, refunded +50, penalised −15, then given +5 by the
             // desk) counted as 50 of revenue when settlement-model S5 says the club's take
             // is the penalty, netted per I3, and the ledger says 10. Court 4 read 100 on a
             // real take of 60. Summing the rows that name each booking is the definition of
@@ -234,7 +234,7 @@ public static class ReportingEndpoints
                     penalties_minutes = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     // What the desk handed out or took back by hand. It was in the member's
                     // own report and on Transactions and nowhere on the club's report — a
-                    // tenant with 2,525.50 credits of AdminAdjustment had no screen that
+                    // tenant with 2,525 minutes of AdminAdjustment had no screen that
                     // showed the figure at all, on the report whose job is where the money
                     // went.
                     adjustments_minutes = le.Where(x => LedgerEntryTypes.Adjustment.Contains(x.Type)).Sum(x => x.AmountMinutes),
@@ -321,14 +321,27 @@ public static class ReportingEndpoints
     }
 
     /// <summary>
-    /// The rand a ledger row moved, signed the way its credits are.
+    /// What the club took per minute it sold over a window: <c>net_zar ÷ net_minutes</c>, rounded
+    /// DOWN to 4 decimals, and null when no minutes were sold net (contract §3.15). Down, so the
+    /// report never claims a rate the club did not earn; null rather than 0 or a division error,
+    /// because "no rate" is a different fact from "a rate of nothing". A discount, a package of
+    /// another size or a desk sale for less than the shelf price all move it, which is the point.
+    /// </summary>
+    public static decimal? ZarPerMinuteSold(decimal netZar, int netMinutes)
+    {
+        if (netMinutes <= 0) return null;
+        return Math.Floor(netZar / netMinutes * 10_000m) / 10_000m;
+    }
+
+    /// <summary>
+    /// The rand a ledger row moved, signed the way its minutes are.
     ///
     /// <para>
     /// <c>ZarPaid</c> records what the member actually paid and is populated on funding and
     /// reversal rows. Its stored sign cannot be relied on — <c>PaymentReversal</c> has no
-    /// producer yet, so no convention has been set by real data — while the credit amount's
+    /// producer yet, so no convention has been set by real data — while the minutes amount's
     /// sign is load-bearing everywhere else in this file. Taking the direction from the
-    /// credits keeps a reversal subtracting from revenue whichever way the rand figure is
+    /// minutes keeps a reversal subtracting from revenue whichever way the rand figure is
     /// eventually written.
     /// </para>
     /// </summary>
@@ -449,7 +462,7 @@ public static class ReportingEndpoints
     ///
     /// <para>
     /// <b>It must reconcile.</b> It reported top-ups, spend, refunds and a penalty count and
-    /// nothing else, so a member whose ledger held 2,500 credits of admin adjustments read
+    /// nothing else, so a member whose ledger held 2,500 minutes of admin adjustments read
     /// "0 in, 950 out, 100 back" on a page whose header said 1,635 — the two screens
     /// disagreeing with no way to see why. Every bucket a movement can land in is now here,
     /// and <c>net_movement_minutes</c> is their sum: for a range covering the whole ledger

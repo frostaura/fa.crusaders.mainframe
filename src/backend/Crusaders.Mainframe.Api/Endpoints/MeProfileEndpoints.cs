@@ -45,7 +45,7 @@ public static class MeProfileEndpoints
                 peak_priority = tariff.PeakPriority,
 
                 // The club's money symbol, on this payload because it is the one club-wide
-                // value a MEMBER needs (the top-up screens are theirs) and the settings surface
+                // value a MEMBER needs (the buy-minutes screens are theirs) and the settings surface
                 // is admin-only. It is their own club's by construction — the accessor resolves
                 // the tenant from the caller's own token, so no member can ask for another
                 // club's. The alternative, a second endpoint for one string, would be a round
@@ -63,8 +63,8 @@ public static class MeProfileEndpoints
                 // changed one; reading never creates the row.
                 preferences = await prefs.GetAsync(user.Id, ct),
 
-                // D11: credits received as an organiser's shares, held for the partners until the
-                // earliest share deadline — so the first paint can say "12 cr held until …".
+                // D11: minutes received as an organiser's shares, held for the partners until the
+                // earliest share deadline — so the first paint can say "12 min held until …".
                 held_minutes = held.Held,
                 owed_back_minutes = held.OwedBack,
                 held_until = held.ReleasesAt,

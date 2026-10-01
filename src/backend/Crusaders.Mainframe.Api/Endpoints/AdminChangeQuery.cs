@@ -25,7 +25,7 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </para>
 ///
 /// <para>
-/// <b><c>subject_id</c> is accepted for a USER only on the member and credit areas.</b> It
+/// <b><c>subject_id</c> is accepted for a USER only on the member and <c>credit</c> (minutes) areas.</b> It
 /// answers "what did an admin do to this member", never "where was this member" — the
 /// structural distinction the night trace turns on. Filtering the record by a user id without
 /// naming one of those two areas would be a second way to ask the trace's question through a

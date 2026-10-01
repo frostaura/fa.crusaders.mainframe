@@ -4,19 +4,19 @@ Both players and admins get a transactions + activity reporting view. Same engin
 
 ## Player view
 A player sees their own data:
-- **Wallet** — current balance, pending top-ups, ledger view (paginated, filterable).
+- **Wallet** — current balance in minutes, open package checkouts, ledger view (paginated, filterable).
 - **My bookings** — past + upcoming bookings, status, court, duration, cost.
 - **Time on court** — total minutes / hours played in the selected period.
-- **Money spent** — sum of `booking_charge` minus refunds in the selected period (i.e. net spend on play, excluding penalties — penalties are broken out separately).
-- **Penalties incurred** — count and total ZAR.
+- **Minutes spent** — sum of `booking_charge` minus refunds in the selected period (i.e. net spend on play, excluding penalties — penalties are broken out separately).
+- **Penalties incurred** — count and total minutes.
 
 ## Admin view
 A tenant admin sees the above for any individual member, plus tenant-wide:
-- **Revenue** — sum of `top_up` net of `payment_reversal` in the period. Money the tenant actually took.
+- **Revenue** — sum of `top_up` net of `payment_reversal` in the period. Money the tenant actually took, in rand, beside the minutes it sold for it and the rate between them (below).
 - **Bookings issued** — count, broken down by court / weekday / hour-of-day.
 - **Court utilisation** — % of available slices booked, per court, per day. Heatmap chart (court × hour).
 - **No-show rate** — count and % of bookings that no-showed; trend line over time.
-- **Penalty income** — total ZAR collected via penalties.
+- **Penalty income** — total minutes kept via penalties.
 - **Member activity** — most active members, dormant members (no booking in 30 days), low-balance members.
 - **Peripheral health** — uptime per court, failed-read rate, average match latency.
 
@@ -25,7 +25,7 @@ Every report supports:
 - **Time range** — quick presets (Today, Yesterday, Last 7 days, Last 30 days, This month, Last month, This year, Custom range).
 - **Court(s)** — multi-select.
 - **Member(s)** — multi-select with type-ahead (admin only).
-- **Event type(s)** — multi-select (e.g. `booking.created`, `credit.topped_up`).
+- **Event type(s)** — multi-select (e.g. `booking.created`, `minutes.purchased`).
 - **Status** — booked / cancelled / no-show / completed.
 
 Filter state lives in the URL query string so a report can be shared / bookmarked.
@@ -62,11 +62,31 @@ Endpoints on this contract: `/api/v1/reports/me/wallet`, `/reports/me/wallet.csv
 by `ReportWindowTests`, one test per endpoint, because a combined test can only fail on its
 first assertion and would hide four unpinned surfaces behind one.
 
+## Units — minutes and rand (P13)
+
+The unit of account is **whole minutes** (`minutes-and-packages.md`). Every report figure about court
+time or a balance is an integer number of minutes under a `*_minutes` key; rand appears only where a
+member actually paid rand, under a `*_zar` key. The two are never converted into each other.
+
+| Route | Keys |
+| --- | --- |
+| `GET /api/v1/admin/reports/revenue` | `gross_topups_zar`, `reversals_zar`, `net_zar` (rand); `gross_topups_minutes`, `reversals_minutes`, `net_minutes`; `zar_per_minute_sold` = `net_zar ÷ net_minutes` rounded **down** to 4 decimals, `null` when `net_minutes ≤ 0` |
+| `GET /api/v1/admin/reports/utilisation` | per court `booked_minutes`, `blocked_minutes`, `sold_minutes` (Σ `AmountChargedMinutes`, what the bookings were charged) and `kept_minutes` (what the ledger says the club kept — charged, less refunds, net of penalties kept) |
+| `GET /api/v1/admin/reports/daily`, `/reports/me/daily` | every movement bucket as `*_minutes` |
+| `GET /api/v1/reports/me/wallet`, `GET /api/v1/admin/members/{id}/spend` | `top_ups_minutes`, `spent_minutes`, `refunds_minutes`, `penalties_minutes`, `adjustments_minutes`, `reversals_minutes`, `share_transfers_minutes`, `net_court_spend_minutes`, `net_movement_minutes`; `minutes_on_court` is play time, not money |
+
+CSV money columns are **raw integers with no unit suffix** — `45`, never `45.00`:
+`/reports/me/wallet.csv` is `created_at,type,amount_minutes,reason,external_reference,related_booking_id`;
+`/admin/members/{id}/trace.csv` ends `…,court,amount_minutes,balance_after_minutes,source`.
+
+The admin ledger's `totals` are `{count, in_minutes, out_minutes, net_minutes}` — minutes in, minutes
+out (a magnitude) and their difference over the filtered range.
+
 ## Charts
 - **Time series:** line chart, one series per dimension. Default view: bookings per day for the last 30 days.
 - **Distribution:** bar chart for "by court", "by weekday", "by hour-of-day".
 - **Heatmap:** day-of-week × hour-of-day, cell intensity = booking count. Used for "when is the club busy".
-- **KPI cards:** big-number callouts at the top of each report (total revenue, total bookings, total court hours, no-show %).
+- **KPI cards:** big-number callouts at the top of each report (total revenue in rand, minutes sold, rand per minute sold, total bookings, total court hours, no-show %).
 
 Charts render with Recharts. See `design-system.md` § Charts for color rotation and styling rules.
 

@@ -18,7 +18,7 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </para>
 ///
 /// <para>
-/// <b>The record is not filterable by subject MEMBER except on the member and credit areas.</b>
+/// <b>The record is not filterable by subject MEMBER except on the member and <c>credit</c> (minutes) areas.</b>
 /// There it means "this admin did something to this member", which is a question about an
 /// administrator. Everywhere else it would be a second way to ask "where was this person",
 /// which is the night trace's question and belongs only to the night trace's route, with the

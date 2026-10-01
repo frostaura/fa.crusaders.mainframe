@@ -20,7 +20,7 @@ The webhook URL supports **single-brace placeholder substitution** — `{variabl
 - `{id}`, `{type}` — the envelope's own field names, and what a delivered body carries. `{event_id}` and `{event_type}` are accepted as aliases: this document promised those two names while the envelope only ever had `id` and `type`, so a template written against it was refused at delivery as a missing variable — a config error, deliberately not retried, so the endpoint just stopped (review A2-16). Both spellings work now; the short ones are canonical.
 - `{occurred_at}` (ISO8601), `{occurred_at_unix}`
 
-**Event-specific variables** are flattened from `data` — every key in the event's `data` object is available as `{key}`. For booking events that means `{court_id}`, `{court_number}`, `{court_name}`, `{user_id}`, `{user_name}`, `{booking_id}`, `{starts_at}`, `{ends_at}`, `{slice_count}`, `{amount_charged_zar}`, `{balance_after_zar}`, etc.
+**Event-specific variables** are flattened from `data` — every key in the event's `data` object is available as `{key}`. For booking events that means `{court_id}`, `{court_number}`, `{court_name}`, `{user_id}`, `{user_name}`, `{booking_id}`, `{starts_at}`, `{ends_at}`, `{slice_count}`, `{minutes}`, `{amount_minutes}`, `{balance_after_minutes}`, etc. Every amount of court time is a whole number of minutes (P13, `minutes-and-packages.md` §5); rand appears only as `*_zar` on `minutes.purchased`.
 
 `actor` and `subject` are **objects** in the envelope and are not flattened, so `{user_id}` resolves only from `data`, on the events that carry one — not from `actor.user_id` or `subject.user_id`. There is no alias for it: two different user ids in one envelope have no single right answer.
 
@@ -56,10 +56,11 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `booking.cancelled_lights_charged` | A cancelled booking was lit from an offline box's roster and charged pro rata for the lit minutes |
 | `booking.displacement_reversed` | The box's own `release` proved the earlier court went dark before a displaced booking's slot, so it was reinstated and re-charged (settlement model I9) |
 | `booking.completed` | A booking's slice ends naturally |
-| `credit.topped_up` | PayFast confirms a top-up (ITN) |
-| `credit.refunded` | A cancellation/no-show ledger entry is written |
-| `credit.penalty_applied` | A penalty ledger entry is written |
-| `credit.adjusted` | An admin issues a manual adjustment |
+| `minutes.purchased` | PayFast confirms a package purchase (ITN). Was `credit.topped_up` |
+| `minutes.sold_at_desk` | The desk sells a member a package (an `AdminTopUp` ledger row). Was `credit.topped_up_by_admin` |
+| `minutes.refunded` | A cancellation/no-show refund ledger entry is written. Was `credit.refunded` |
+| `minutes.penalty_applied` | A no-show or late-cancellation penalty ledger entry is written. Was `credit.penalty_applied` |
+| `minutes.adjusted` | An admin adjusts a member's minutes by hand (goodwill, a correction). Was `credit.adjusted` |
 | `peripheral.unhealthy` | A court box has not heart-beaten for longer than `offline_after_seconds`. Fires **once per outage**, from `PeripheralHealthWorker`. It means "the box is not reporting" — never "the reader is faulty": `BiometricDeviceState.Faulted` is still set by no driver, so a fingerprint reader failing behind a healthy box remains invisible. See `feature-spec.md` §6a and §9. |
 | `peripheral.recovered` | The same box called in again; carries how long the outage lasted |
 | `webhook.test` | The "send test ping" button is clicked |
@@ -92,22 +93,61 @@ All payloads are JSON, structured:
   "starts_at": "2026-05-08T18:00:00Z",
   "ends_at": "2026-05-08T18:30:00Z",
   "slice_count": 1,
-  "amount_charged_zar": 50.00,
-  "balance_after_zar": 350.00
+  "minutes": 45,
+  "amount_minutes": 45,
+  "balance_after_minutes": 255,
+  "walk_up": false
 }
 ```
+
+**Minutes replaced credits (P13, 2026-10-01).** The unit of account is whole minutes; every `*_credits`
+key in every event's `data` became `*_minutes` with an integer value (`booking.no_show` `penalty_minutes` /
+`refund_minutes`, `booking.lights_*` `amount_charged_minutes`, …), and the five money events were renamed
+(table above). The renamed events are new names, not aliases: an endpoint filtered to `credit.*` receives
+nothing until it is re-filtered. The constants are in `Webhooks/MinutesEvents.cs` and pinned by
+`WebhookEventCoverageTests`.
+
+`data` for `minutes.purchased`:
+```json
+{
+  "purchase_id": "<uuid>",
+  "package_id": "<uuid>",
+  "package_name": "5 hours",
+  "minutes": 300,
+  "list_price_zar": 550.00,
+  "discount_bps": 1000,
+  "zar_paid": 495.00,
+  "discount_group_id": "<uuid-or-null>",
+  "groups": [{ "id": "<uuid>", "name": "League members", "system_key": "league" }],
+  "external_reference": "<pf_payment_id>"
+}
+```
+`topup_id` became `purchase_id`, `credits` became `minutes` and `rate_group_id` became `discount_group_id`
+(the group whose package discount was locked at checkout; null when none applied). `conversion_rate` and
+`member_class` are gone: there is no rate, and the renamed event has no template naming `{member_class}`
+to protect.
+
+`data` for the four ledger mirrors (`minutes.sold_at_desk`, `minutes.refunded`, `minutes.penalty_applied`,
+`minutes.adjusted`):
+```json
+{ "entry_id": "<uuid>", "user_id": "<uuid>", "entry_type": "AdminAdjustment",
+  "amount_minutes": -45, "booking_id": "<uuid-or-null>", "reason": "Goodwill — lights failed" }
+```
+
+`topup.failed` is **not** a webhook: it is an admin-notice kind (`AdminEventCatalogue.TopUpFailed`) and keeps its
+code, because admins' stored opt-outs and the outbox dedupe keys name it. Its display name is "Package purchases
+that need looking at", and its payload carries `package_name` and `minutes` beside the rand amount.
 
 **Groups replaced the member class (D2, 2026-09-23).** Two payloads carried `member_class`:
 
 - `member.approved` / `member.rejected` / `member.suspended` / `member.reactivated` — `data` now carries
   `groups`: an array of the member's ACTIVE groups, `[{"id": "<uuid>", "name": "League members", "system_key": "league"}]`
   (`system_key` is null for any group an admin made).
-- `credit.topped_up` — `data` now carries `rate_group_id` (the group whose rate was locked at checkout;
-  null for the club's regular rate) and the same `groups` array.
+- The purchase event (then `credit.topped_up`, now `minutes.purchased`) carried a rate group and the same
+  `groups` array; since P13 it carries `discount_group_id` and `groups`, and no `member_class` (above).
 
-Both keep **`member_class` for ONE release, deprecated**: `"LeagueOrSenior"` when the member is in the
-league group (for `credit.topped_up`: when the LOCKED rate group is the league group), otherwise
-`"Regular"`. It is kept so a URL template naming `{member_class}` does not start failing as a missing
+The `member.*` events keep **`member_class` for ONE release, deprecated**: `"LeagueOrSenior"` when the
+member is in the league group, otherwise `"Regular"`. It is kept so a URL template naming `{member_class}` does not start failing as a missing
 variable — a config error, never retried — the day the class is removed. `groups` is an array and is
 not flattened, so a URL template cannot name it; a body consumer reads it. Remove `member_class` in the
 release after the Groups page ships.

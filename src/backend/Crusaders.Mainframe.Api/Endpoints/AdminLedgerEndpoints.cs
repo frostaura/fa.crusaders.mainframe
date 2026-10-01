@@ -180,7 +180,7 @@ public static class LedgerRowMapper
         var (counterparty, comment) = e.Type switch
         {
             LedgerEntryType.TopUp =>
-                (PaymentGateway, e.Reason ?? "Wallet top-up"),
+                (PaymentGateway, e.Reason ?? "Package purchase"),
             LedgerEntryType.BookingCharge =>
                 (Treasury, e.Reason ?? "Booking charge"),
             LedgerEntryType.CancellationRefund =>
@@ -233,7 +233,7 @@ public static class LedgerRowMapper
 
     /// <summary>
     /// Who moved this money when it was somebody OTHER than the wallet's owner (review round 1,
-    /// B9): the admin behind a desk adjustment or top-up, or who booked or cancelled on the
+    /// B9): the admin behind a desk adjustment or package sale, or who booked or cancelled on the
     /// member's behalf. Null for the member's own movements and the system's (no actor), and for
     /// a share moving between two members — the other member is already the row's From or To —
     /// unless an administrator moved it.
@@ -258,11 +258,11 @@ public sealed record LedgerRowDto(
     /// without re-deriving it from the type.
     ///
     /// <para>
-    /// This was <c>SignedAmountZar</c> while holding credits — the unit lie
+    /// This was <c>SignedAmountZar</c> while holding the ledger unit — the unit lie
     /// <c>CLAUDE.md</c> says must never be added a second time. It was also simply broken:
     /// the frontend has always read <c>signedAmountMinutes</c>, so the field arrived
     /// undefined, every row in the admin ledger and the member wallet rendered with a minus
-    /// sign, and the credits/debits totals on the admin ledger page were both zero.
+    /// sign, and the in/out totals on the admin ledger page were both zero.
     /// </para>
     /// </summary>
     int SignedAmountMinutes,

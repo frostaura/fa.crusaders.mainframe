@@ -113,7 +113,7 @@ public static class AdminMemberEndpoints
             });
         });
 
-        // Per-member spend drill-down (blueprint C.3) — month-bucketed credit movements for one member.
+        // Per-member spend drill-down (blueprint C.3) — month-bucketed minutes movements for one member.
         // Retires a member's rotating code (member-code §10): generation += 1, so every code
         // their phone can compute stops working and the phone re-enrols on its next check. The
         // desk's answer to "somebody photographed my code" or "I lost my phone".

@@ -109,7 +109,7 @@ public static class AdminMemberDetailEndpoints
             admin_source = AdminSource.Of(user.IsAdmin, user.Email, inherent),
             groups = AdminMemberEndpoints.GroupsWire(tariff.Groups),
             // D2: what the groups add up to for money and the peak window, resolved by the same
-            // MemberTariffs rule the top-up and the booking path read, so the screen cannot
+            // MemberTariffs rule the package shelf and the booking path read, so the screen cannot
             // explain a rate the POST would not quote.
             tariff = new
             {

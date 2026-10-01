@@ -23,11 +23,12 @@ namespace Crusaders.Mainframe.Tests;
 /// </para>
 ///
 /// <para>
-/// The overstatement is not small and it is not uniform. A Regular member converts at 1.6
-/// credits per rand and a League member at 2.4, so the same R1000 shows up as R1600 or
-/// R2400 depending on who paid it — and once summed the two classes cannot be separated
-/// again. This test uses one member of each class precisely so a fix that simply divides by
-/// a single rate cannot pass it.
+/// Since P13 the unit is minutes, bought in packages at prices that differ by package size, by
+/// group discount and at the desk — so the same rand buys different minutes depending on who
+/// paid and how, and once summed the two cannot be separated again. This test buys three
+/// different ways precisely so a fix that simply divides by one price cannot pass it, and the
+/// one honest bridge between the two totals is the rate over the window,
+/// <c>zar_per_minute_sold</c> (contract §3.15).
 /// </para>
 /// </summary>
 public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
@@ -39,7 +40,7 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 
     [SkippableFact]
-    public async Task Revenue_reports_rand_from_what_members_paid_and_credits_from_what_they_got()
+    public async Task Revenue_reports_rand_from_what_members_paid_and_minutes_from_what_they_got()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -60,7 +61,7 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
             db.TenantSettings.Add(new TenantSettings
             {
                 TenantId = tenant.Id,
-                SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"timezone":"UTC"}""",
+                SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"timezone":"UTC"}""",
             });
 
             var admin = new User { TenantId = tenant.Id, Email = $"a-{slug}@test.local", PasswordHash = "x", EmailVerified = true, IsAdmin = true };
@@ -68,20 +69,28 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
             var league = new User { TenantId = tenant.Id, Email = $"l-{slug}@test.local", PasswordHash = "x", EmailVerified = true };
             db.Users.AddRange(admin, regular, league);
 
-            // R1000 each. One converts at 1.6, the other at 2.4 — so R2000 banked becomes
-            // 4000 credits issued, and no single divisor recovers one figure from the other.
+            // Three ways to buy minutes, three prices per minute: 10 hours online at list
+            // (R1000 for 600), 5 hours online at a 10% group discount (R495 for 300), and 1 hour
+            // sold at the desk for cash (R100 for 60). R1595 banked, 960 minutes sold, and no
+            // single divisor recovers one figure from the other.
             db.LedgerEntries.AddRange(
                 new LedgerEntry
                 {
                     TenantId = tenant.Id, UserId = regular.Id, Type = LedgerEntryType.TopUp,
-                    AmountMinutes = 1600, ZarPaid = 1000m,
-                    ActorUserId = regular.Id, Reason = "regular top-up",
+                    AmountMinutes = 600, ZarPaid = 1000m,
+                    ActorUserId = regular.Id, Reason = "PayFast purchase: 10 hours",
                 },
                 new LedgerEntry
                 {
                     TenantId = tenant.Id, UserId = league.Id, Type = LedgerEntryType.TopUp,
-                    AmountMinutes = 2400, ZarPaid = 1000m,
-                    ActorUserId = league.Id, Reason = "league top-up",
+                    AmountMinutes = 300, ZarPaid = 495m,
+                    ActorUserId = league.Id, Reason = "PayFast purchase: 5 hours",
+                },
+                new LedgerEntry
+                {
+                    TenantId = tenant.Id, UserId = league.Id, Type = LedgerEntryType.AdminTopUp,
+                    AmountMinutes = 60, ZarPaid = 100m,
+                    ActorUserId = admin.Id, Reason = "Paid cash at the bar — 1 hour",
                 },
                 // Court time spent is neither: it funds nothing and reverses nothing, so it
                 // must not appear in either total.
@@ -120,12 +129,37 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
         var root = doc.RootElement;
 
         // What the club actually banked.
-        Assert.Equal(2000m, root.GetProperty("gross_topups_zar").GetDecimal());
+        Assert.Equal(1595m, root.GetProperty("gross_topups_zar").GetDecimal());
         Assert.Equal(0m, root.GetProperty("reversals_zar").GetDecimal());
-        Assert.Equal(2000m, root.GetProperty("net_zar").GetDecimal());
+        Assert.Equal(1595m, root.GetProperty("net_zar").GetDecimal());
 
-        // What it issued in exchange, reported separately rather than under a rand name.
-        Assert.Equal(4000m, root.GetProperty("gross_topups_minutes").GetDecimal());
-        Assert.Equal(4000m, root.GetProperty("net_minutes").GetDecimal());
+        // What it sold in exchange, reported separately rather than under a rand name — and
+        // as JSON integers, never 960.0.
+        Assert.Equal(960, root.GetProperty("gross_topups_minutes").GetInt32());
+        Assert.Equal(960, root.GetProperty("net_minutes").GetInt32());
+        Assert.DoesNotContain("960.0", root.GetRawText());
+
+        // The rate: 1595 ÷ 960 = 1.66145833…, rounded DOWN to four places.
+        Assert.Equal(1.6614m, root.GetProperty("zar_per_minute_sold").GetDecimal());
+        Assert.DoesNotContain("credit", root.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The rate rounds DOWN to four places, so the report never claims a rate the club did not
+    /// earn (2 ÷ 3 is 0.6666, not 0.6667), and it is null — not zero, not a division error —
+    /// when no minutes were sold net over the window.
+    /// </summary>
+    [Theory]
+    [InlineData(1595, 960, "1.6614")]
+    [InlineData(2, 3, "0.6666")]
+    [InlineData(550, 300, "1.8333")]
+    [InlineData(120, 60, "2")]
+    [InlineData(0, 60, "0")]
+    [InlineData(100, 0, null)]
+    [InlineData(-100, -60, null)]
+    public void The_rate_per_minute_sold_rounds_down_and_is_null_without_sales(double zar, int minutes, string? expected)
+    {
+        var rate = Api.Endpoints.ReportingEndpoints.ZarPerMinuteSold((decimal)zar, minutes);
+        Assert.Equal(expected is null ? null : decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), rate);
     }
 }

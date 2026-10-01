@@ -48,6 +48,12 @@ public sealed class R4LedgerTotalsHttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Equal(15, totals.GetProperty("in_minutes").GetInt32());
         Assert.Equal(3, totals.GetProperty("out_minutes").GetInt32());
         Assert.Equal(12, totals.GetProperty("net_minutes").GetInt32());
+        // P13 §12.7: "credits"/"debits" were the accounting words for money in and out; they
+        // went with the unit, so nothing on this read says credit.
+        Assert.False(totals.TryGetProperty("credits", out _));
+        Assert.False(totals.TryGetProperty("debits", out _));
+        Assert.False(totals.TryGetProperty("net", out _));
+        Assert.DoesNotContain("credit", first.GetRawText(), StringComparison.OrdinalIgnoreCase);
 
         var cursor = first.GetProperty("next_cursor").GetString();
         var second = await client.GetFromJsonAsync<JsonElement>(

@@ -795,6 +795,48 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
         Assert.DoesNotContain(",=cmd", text);
     }
 
+    /// <summary>
+    /// P13 (contract §3.15): the export's money columns are raw integers with no unit and no
+    /// decimals — "90", "-45", never "90.00" — under <c>amount_minutes,balance_after_minutes</c>,
+    /// and the wallet sentences say minutes in words. The fixture varies the shapes the
+    /// formatter has: an hour and a half bought, three-quarters of an hour spent, a day and a
+    /// quarter sold at the desk.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_export_writes_whole_minutes_as_integers_and_the_sentences_in_words()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        Skip.IfNot(Wired(factory), Unwired);
+
+        var club = await DoorClub.SeedAsync(factory, "trmin");
+        var at = DateTimeOffset.UtcNow.AddHours(-3);
+        await LedgerAsync(factory, club, club.MemberUserId, LedgerEntryType.TopUp, 90, at, club.MemberUserId);
+        await LedgerAsync(factory, club, club.MemberUserId, LedgerEntryType.BookingCharge, -45, at.AddMinutes(10), club.MemberUserId);
+        await LedgerAsync(factory, club, club.MemberUserId, LedgerEntryType.AdminTopUp, 1815, at.AddMinutes(20), club.AdminUserId);
+
+        var response = await club.AdminClient(factory).GetAsync(TraceCsv(club.MemberUserId));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        var lines = text.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.EndsWith("amount_minutes,balance_after_minutes,source", lines[0], StringComparison.Ordinal);
+        Assert.Contains(lines, l => l.Contains("Bought 1 hour 30 minutes", StringComparison.Ordinal) && l.Contains(",90,", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("Paid 45 minutes", StringComparison.Ordinal) && l.Contains(",-45,", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("1 day 6 hours 15 minutes at the desk", StringComparison.Ordinal) && l.Contains(",1815,", StringComparison.Ordinal));
+        Assert.DoesNotContain(".00", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("credit", text, StringComparison.OrdinalIgnoreCase);
+
+        // The JSON read carries the same integers.
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(Trace(club.MemberUserId));
+        var amounts = Events(body)
+            .Where(e => e.GetProperty("amount_minutes").ValueKind == JsonValueKind.Number)
+            .Select(e => e.GetProperty("amount_minutes").GetInt32())
+            .OrderBy(x => x)
+            .ToList();
+        Assert.Equal([-45, 90, 1815], amounts);
+    }
+
     /// <summary>A second admin on this club, so the concurrent-view test has two people.</summary>
     private static Task<Guid> SecondAdminAsync(TestWebAppFactory factory, DoorClub club)
         => PersonAsync(factory, club, "Second Admin", isAdmin: true);

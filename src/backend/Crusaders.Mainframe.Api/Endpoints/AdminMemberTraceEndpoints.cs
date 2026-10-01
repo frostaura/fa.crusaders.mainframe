@@ -356,11 +356,17 @@ public static class AdminMemberTraceEndpoints
         };
     }
 
-    /// <summary>One CSV line, defused then quoted by <see cref="CsvCell"/>.</summary>
+    /// <summary>
+    /// One CSV line: every text cell defused then quoted by <see cref="CsvCell"/>, the two minutes
+    /// cells written raw. A raw integer is the point (contract §3.15) — a spreadsheet must read
+    /// "-45" as a number to sum the column, and the defuser would have made it the text "'-45". A
+    /// figure this method renders itself from an <c>int</c> cannot carry a formula.
+    /// </summary>
     private static string Line(AdminMemberTraceQuery query, TraceEventRow e)
     {
         var local = TimeZoneInfo.ConvertTime(e.At, query.Zone);
-        return CsvCell.Line(
+        var text = string.Join(",", new[]
+        {
             local.ToString("yyyy-MM-dd"),
             local.ToString("HH:mm:ss"),
             query.Timezone,
@@ -373,16 +379,18 @@ public static class AdminMemberTraceEndpoints
             e.IsSelf(query.UserId) ? "yes" : "no",
             e.SubjectName,
             e.Court?.Name,
-            Number(e.AmountMinutes),
-            Number(e.BalanceAfterMinutes),
-            e.Source);
+        }.Select(c => CsvCell.Of(c ?? "")));
+        return $"{text},{Number(e.AmountMinutes)},{Number(e.BalanceAfterMinutes)},{CsvCell.Of(e.Source ?? "")}\r\n";
     }
 
-    /// <summary>A figure as a spreadsheet should read it, or blank where the row carries none.</summary>
-    private static string Number(decimal? value)
+    /// <summary>
+    /// A figure as a spreadsheet should read it — whole minutes as a raw integer, "45", never
+    /// "45.00" (contract §3.15) — or blank where the row carries none.
+    /// </summary>
+    private static string Number(int? value)
     {
         return value is { } amount
-            ? amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+            ? amount.ToString(System.Globalization.CultureInfo.InvariantCulture)
             : "";
     }
 
