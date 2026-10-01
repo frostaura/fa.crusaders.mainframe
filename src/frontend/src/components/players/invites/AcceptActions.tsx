@@ -1,7 +1,11 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { INVITES_COPY, acceptLabel } from "@/lib/playersCopy";
+import { cn } from "@/lib/utils";
 import type { AcceptFlow } from "./useAcceptFlow";
+
+/** The answer buttons sit in a row, not as blocks, so at 200 % text on 320 they opt in to wrapping (R4). */
+const WRAP = "whitespace-normal [overflow-wrap:anywhere]";
 
 /**
  * Accept · Decline · the way out — and, once Decline is pressed, its confirmation (it is final). Source order is dismiss first, primary last, so the dialog
@@ -52,7 +56,7 @@ function ConfirmDecline({ flow }: { flow: AcceptFlow }) {
 function DeclineButton({ flow }: { flow: AcceptFlow }) {
   const ref = useFocusOnMount(flow.keptInvite);
   return (
-    <Button ref={ref} variant="outline" pending={flow.declineAction.pending} onClick={flow.decline} data-decline="">
+    <Button ref={ref} variant="outline" className={WRAP} pending={flow.declineAction.pending} onClick={flow.decline} data-decline="">
       {INVITES_COPY.decline}
     </Button>
   );
@@ -62,13 +66,13 @@ function AcceptButton({ flow, reasonId }: { flow: AcceptFlow; reasonId: string }
   const label = acceptLabel(flow.money.toPay);
   if (flow.blocked) {
     return (
-      <Button aria-disabled="true" aria-describedby={reasonId} data-unavailable="" className="cursor-not-allowed opacity-50 hover:bg-primary">
+      <Button aria-disabled="true" aria-describedby={reasonId} data-unavailable="" className={cn(WRAP, "cursor-not-allowed opacity-50 hover:bg-primary")}>
         {label}
       </Button>
     );
   }
   return (
-    <Button pending={flow.acceptAction.pending} onClick={flow.accept} data-accept="">
+    <Button className={WRAP} pending={flow.acceptAction.pending} onClick={flow.accept} data-accept="">
       {label}
     </Button>
   );
