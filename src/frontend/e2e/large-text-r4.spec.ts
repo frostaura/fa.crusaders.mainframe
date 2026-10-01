@@ -336,3 +336,40 @@ test("a sheet at 320×640 and 200 %: the header leaves the body most of the room
   expect(header.height, "the header takes more than a third of the screen").toBeLessThanOrEqual(640 / 3 + 1);
   expect(body.height, "the body is a sliver").toBeGreaterThanOrEqual(header.height * 0.75);
 });
+
+test("the tab bar at 320 and 200 %: no two labels touch, member and admin", async ({ page }) => {
+  for (const admin of [false, true]) {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await signIn(page);
+    await serveApi(page, admin ? adminRoutes() : memberShellRoutes());
+    await page.goto("/wallet");
+    await expect(page.locator("nav[data-primary-nav]")).toBeVisible();
+    await bigText(page);
+    const words = await page.locator("nav[data-primary-nav] [data-tab-label]").evaluateAll((els) => els.map((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const r = range.getBoundingClientRect();
+      return { text: el.textContent, left: r.left, right: r.right };
+    }));
+    for (let i = 1; i < words.length; i++) {
+      expect(words[i].left, `${admin ? "admin" : "member"}: "${words[i - 1].text}" runs into "${words[i].text}"`).toBeGreaterThanOrEqual(words[i - 1].right + 2);
+    }
+    expect(words[words.length - 1].right).toBeLessThanOrEqual(320);
+    expect(words[0].left).toBeGreaterThanOrEqual(0);
+  }
+});
+
+test("the page skeleton at 390 and 200 % stays on the screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  await serveApi(page, memberShellRoutes());
+  // Hold the Bookings page's code so its skeleton stays up.
+  await page.route("**/src/pages/Schedule.tsx*", () => undefined);
+  await page.goto("/bookings");
+  await expect(page.locator('main [aria-busy="true"]').first()).toBeVisible();
+  await bigText(page);
+  const widest = await page.locator('main [aria-busy="true"] [data-slot="skeleton"], main [aria-busy="true"] .animate-pulse').evaluateAll((els) =>
+    Math.max(0, ...els.map((el) => el.getBoundingClientRect().right)));
+  expect(widest, "a skeleton bar runs off the screen").toBeLessThanOrEqual(390);
+  expect(widest).toBeGreaterThan(0);
+});

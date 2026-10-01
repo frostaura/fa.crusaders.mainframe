@@ -92,7 +92,8 @@ export function RouteSkeleton() {
     <PageShell aria-busy="true">
       <p role="status" className="sr-only">Opening the page…</p>
       <div className="flex flex-col gap-3">
-        <Skeleton className="h-8 w-48" />
+        {/* R4: never wider than the page — `w-48` alone is 384px at 200 % text on a 390 phone. */}
+        <Skeleton className="h-8 w-48 max-w-full" />
         <Skeleton className="h-4 w-72 max-w-full" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">

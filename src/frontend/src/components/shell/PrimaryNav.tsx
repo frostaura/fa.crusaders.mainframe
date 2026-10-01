@@ -55,6 +55,8 @@ const LINK = [
   "no-lift group relative flex min-h-tabbar flex-col items-center justify-center gap-1 px-0.5 text-xs font-medium",
   "transition-colors duration-fast ease-standard motion-reduce:transition-none",
   "md:min-h-touch md:flex-row md:gap-2 md:rounded-lg md:px-2 md:text-sm lg:px-3",
+  // The label's size (TAB_LABEL): capped by the column on a phone, the row's text-sm from md.
+  "[--tab-label-size:min(0.75rem,5vw)] md:[--tab-label-size:0.875rem]",
 ].join(" ");
 
 /**
@@ -83,6 +85,16 @@ const ICON_PILL = [
   "motion-reduce:transition-none md:contents",
 ].join(" ");
 
+/**
+ * R4 — a tab's label never grows past what its column can hold on a phone. At 320 px and 200 %
+ * text a 24px "Bookings" was wider than its third of the screen and ran into "Wallet". The label
+ * is the normal 0.75rem wherever that fits (5vw is above 12px at every width from 240 px), and at
+ * large text on a narrow phone it stops at 5vw — still bigger than normal text, never colliding.
+ * From `md` the bar is a row with room, and the label is not capped. A style, not a utility:
+ * arbitrary lengths are banned outside `ui/`.
+ */
+const TAB_LABEL = { fontSize: "var(--tab-label-size)" } as const;
+
 function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<AdminAttention, "total" | "label"> | null }) {
   const { to, label, icon: Glyph } = item;
   return (
@@ -106,7 +118,7 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
             its neighbours' words are shorter) rather than losing letters. The bar grows by the
             label's lines and publishes its new height, so nothing sits under it.
           */}
-          <span data-tab-label="" className="whitespace-normal break-normal text-center leading-tight md:whitespace-nowrap">{label}</span>
+          <span data-tab-label="" className="whitespace-normal break-normal text-center leading-tight md:whitespace-nowrap" style={TAB_LABEL}>{label}</span>
         </>
       )}
     </NavLink>
