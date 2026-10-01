@@ -1,5 +1,6 @@
 import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute, memberCodeRoutes } from "./fixtures";
 import { ADMIN_TOUR, CHECKLIST, GET_STARTED, REPLAY_ADMIN_TOUR, REPLAY_WELCOME } from "../src/lib/onboardingCopy";
+import { tourStops } from "../src/components/onboarding/adminTourMarks";
 import { LOGIN } from "../src/lib/authCopy";
 
 /**
@@ -279,7 +280,7 @@ test.describe("P8: the welcome wizard", () => {
 
     const titles = [
       GET_STARTED.steps.code.title, GET_STARTED.steps.passkey.title,
-      GET_STARTED.steps.topup.title, GET_STARTED.steps.book.title, GET_STARTED.steps.install.title,
+      GET_STARTED.steps.buy.title, GET_STARTED.steps.book.title, GET_STARTED.steps.install.title,
       GET_STARTED.steps.privacy.title,
     ];
     for (const [i, title] of titles.entries()) {
@@ -291,7 +292,7 @@ test.describe("P8: the welcome wizard", () => {
     await expect(page).toHaveURL(/\/my-code$/);
     expect(recorder.calls.some((c) => c.path.endsWith("/member/complete"))).toBe(true);
     expect(recorder.calls.filter((c) => c.path.endsWith("/member/step")).map((c) => (c.body as { step: string }).step))
-      .toEqual(["code", "passkey", "topup", "book", "install", "privacy"]);
+      .toEqual(["code", "passkey", "buy", "book", "install", "privacy"]);
 
     // Once per sign-in: arriving at the landing again does not send the member round again.
     await page.goto("/my-code");
@@ -364,7 +365,7 @@ test.describe("P8: the setup checklist on My Code", () => {
     await expect(card).toBeVisible();
     await expect(card).toContainText(CHECKLIST.progress(1, 4));
     await expect(card.getByRole("link", { name: CHECKLIST.items.passkey.done })).toBeVisible();
-    await expect(card.getByRole("link", { name: CHECKLIST.items.topup.label })).toHaveAttribute("href", "/wallet/topup");
+    await expect(card.getByRole("link", { name: CHECKLIST.items.buy.label })).toHaveAttribute("href", "/wallet/buy");
 
     await card.getByRole("button", { name: CHECKLIST.hide }).click();
     await expect(card).toHaveCount(0);
@@ -384,10 +385,12 @@ test.describe("P8: the admin tour", () => {
     await serveApi(page, p8Routes({ admin: true, recorder, prefs: { member_onboarding_dismissed_at: "2026-09-01T10:00:00Z" } }));
     await page.goto("/admin");
 
-    for (const [i, stop] of ADMIN_TOUR.stops.entries()) {
+    // The stops this console has a section for (P13's Packages joins with its nav item).
+    const stops = tourStops();
+    for (const [i, stop] of stops.entries()) {
       const mark = page.getByRole("dialog", { name: stop.title });
       await expect(mark).toBeVisible();
-      await expect(mark).toContainText(ADMIN_TOUR.stepOf(i + 1, ADMIN_TOUR.stops.length));
+      await expect(mark).toContainText(ADMIN_TOUR.stepOf(i + 1, stops.length));
       const box = (await mark.boundingBox())!;
       const viewport = page.viewportSize()!;
       expect(box.x).toBeGreaterThanOrEqual(0);
@@ -402,7 +405,7 @@ test.describe("P8: the admin tour", () => {
         expect(box.y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
         await expect(mark).toContainText(ADMIN_TOUR.bar);
       }
-      const last = i === ADMIN_TOUR.stops.length - 1;
+      const last = i === stops.length - 1;
       await mark.getByRole("button", { name: last ? ADMIN_TOUR.done : ADMIN_TOUR.next, exact: true }).click();
     }
     await expect(page.getByRole("dialog")).toHaveCount(0);

@@ -1,4 +1,4 @@
-import { formatCredits } from "./utils";
+import { minutesSpoken } from "./minutes";
 
 /** R3 M-4 — how often the code changes is the club's setting; the sentence never names a period. */
 export const CODE_KEEPS_CHANGING = "The code changes by itself every so often. That is normal, and you never have to do anything about it.";
@@ -128,6 +128,13 @@ function namedRow(labels: readonly string[], colour: "green" | "black"): string 
   return `the ${colour} buttons marked ${list}`;
 }
 
+/**
+ * P13 — the one sentence that explains the unit, said wherever a member first meets it (the
+ * guide, the welcome wizard): a booking costs exactly its playing time, nothing else.
+ */
+export const BOOKING_COSTS_ITS_TIME = "Court time is paid for in minutes, and a booking costs exactly its playing time: "
+  + "45 minutes on court is 45 minutes from your wallet.";
+
 export const GUIDE_TITLE = "How it works";
 export const GUIDE_INTRO = "From booking a court to walking off it. Nothing here needs any setting up — "
   + "your phone and your code are all you bring.";
@@ -154,11 +161,21 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
   const times = namedRow(timeKeys.length ? timeKeys : DEFAULT_TIME_KEYS, "black");
   const steps: GuideStep[] = [
     {
+      // P13 — the club's unit is minutes. Said first, because every step after it spends them.
+      id: "buy",
+      title: "Buy minutes",
+      body: [
+        BOOKING_COSTS_ITS_TIME,
+        "Buy a package of minutes in the app — Wallet, then Buy minutes — and pay for it once, in rand.",
+        "Your wallet shows how much time you have. Bought minutes never expire.",
+      ],
+    },
+    {
       id: "book",
       title: "Book a court",
       body: [
         "Pick a green box on the grid. Each box is one court for fifteen minutes.",
-        "Before anything is charged you see the court, the time, the price, and what your wallet has left.",
+        "Before anything is charged you see the court, the time, the minutes it takes and how much time your wallet has left.",
       ],
     },
     {
@@ -364,21 +381,26 @@ export const GET_STARTED = {
       manage: "Manage passkeys in Profile",
       failed: "Couldn't add the passkey. Nothing was saved — try again.",
     },
-    topup: {
-      title: "Put credit in your wallet",
+    buy: {
+      title: "Buy minutes",
       body: [
-        "Courts are paid for in credits. Top up in rand, and your wallet shows exactly what you have before you book.",
+        BOOKING_COSTS_ITS_TIME,
+        "Buy a package of minutes in rand, and your wallet shows exactly how much time you have before you book. "
+          + "Bought minutes never expire.",
       ],
-      balance: (credits: number) => credits < 0
-        ? `Your wallet is ${formatCredits(-credits)} below zero — a top-up covers that first.`
-        : `Your wallet has ${formatCredits(credits)}.`,
-      cta: "Top up",
+      // A sentence, so the long form: a screen reader never hears "h" or "min" (contract §7.1).
+      balance: (minutes: number) => {
+        if (minutes < 0) return `Your wallet is ${minutesSpoken(-minutes)} below zero — a package covers that first.`;
+        if (minutes === 0) return "Your wallet is empty.";
+        return `Your wallet has ${minutesSpoken(minutes)}.`;
+      },
+      cta: "Buy minutes",
     },
     book: {
       title: "Book your first court",
       body: [
-        "Pick a green box on the bookings grid. Each box is one court for a short slice of time, and you see the price "
-          + "before anything is charged.",
+        "Pick a green box on the bookings grid. Each box is one court for a short slice of time, and it costs that "
+          + "much time from your wallet — you see the total before anything is charged.",
       ],
       cta: "Book a court",
     },
@@ -395,7 +417,7 @@ export const GET_STARTED = {
       ],
       browser: "This browser can't install apps. Everything works here in the browser just the same.",
       emailTitle: "What we tell you",
-      email: "Bookings, cancellations, top-ups and anything else that affects you arrive by email, so keep an eye on "
+      email: "Bookings, cancellations, purchases and anything else that affects you arrive by email, so keep an eye on "
         + "the inbox you signed up with.",
     },
     /** D13 — the switches themselves carry their own labels (`PRIVACY_COPY` in `playersCopy`). */
@@ -409,6 +431,9 @@ export const GET_STARTED = {
   },
 } as const;
 
+/** Where a member buys minutes (contract §3.1; `/wallet/topup` redirects here). */
+export const BUY_MINUTES_PATH = "/wallet/buy";
+
 export const CHECKLIST = {
   title: "Finish setting up",
   progress: (done: number, total: number) => `${done} of ${total} done`,
@@ -417,7 +442,7 @@ export const CHECKLIST = {
   unknown: "Couldn't check just now",
   items: {
     passkey: { label: "Add a passkey", done: "Passkey added", to: `${GET_STARTED_PATH}?step=passkey` },
-    topup: { label: "Top up your wallet", done: "Wallet topped up", to: "/wallet/topup" },
+    buy: { label: "Buy minutes", done: "Minutes bought", to: BUY_MINUTES_PATH },
     booking: { label: "Book your first court", done: "First court booked", to: "/bookings" },
     install: { label: "Install the app", done: "App installed", to: `${GET_STARTED_PATH}?step=install` },
   },
@@ -446,9 +471,11 @@ export const ADMIN_TOUR = {
   stops: [
     { navId: "overview", title: "Overview", body: "What needs you right now — applications waiting, doors and faults — across the whole club." },
     // R5 lane G: Dean could not find where to make someone an admin — the tour says where.
-    { navId: "members", title: "Members", body: "Approve new applications, top up wallets, make someone an admin from their ⋯ menu, and open anybody's bookings, wallet or door history." },
-    { navId: "groups", title: "Groups", body: "Who may book when, at what top-up rate, and the limits each group plays under." },
-    { navId: "transactions", title: "Transactions", body: "Every credit movement in the club's ledger, with who did it and why." },
+    { navId: "members", title: "Members", body: "Approve new applications, sell a member a package at the desk, make someone an admin from their ⋯ menu, and open anybody's bookings, wallet or door history." },
+    { navId: "groups", title: "Groups", body: "Who may book when, the discount each group gets on packages, and the limits each group plays under." },
+    // Shown once the console has a Packages page to point at (`adminTourMarks` skips a stop with no nav item).
+    { navId: "packages", title: "Packages", body: "The minute packages members buy: the club's own, and any a group sells only to its members." },
+    { navId: "transactions", title: "Transactions", body: "Every movement of members' minutes in the club's ledger, with who did it and why." },
     { navId: "control-board", title: "Control board", body: "Every court's lights and bookings live, plus doors, boards and faults." },
     // Court prices live on Courts now (F3.23), so Settings does not claim them.
     { navId: "settings", title: "Settings", body: "Opening hours, booking rules, alerts and the club's details." },

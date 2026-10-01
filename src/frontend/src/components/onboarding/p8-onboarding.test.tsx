@@ -9,6 +9,8 @@ import { ADMIN_TOUR, CHECKLIST, GET_STARTED } from "../../lib/onboardingCopy";
 import { PRIVACY_COPY } from "../../lib/playersCopy";
 import { refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "../../test/harness";
 import { AdminTour } from "./AdminTour";
+import { tourStops } from "./adminTourMarks";
+import { ADMIN_NAV_ITEMS } from "../admin/adminNav";
 import { CoachMarks } from "./CoachMarks";
 import { FirstRunGate } from "./FirstRunGate";
 import { SetupChecklist } from "./SetupChecklist";
@@ -114,10 +116,26 @@ describe("the welcome wizard", () => {
 
   it("resumes where this device left off", async () => {
     const { userId } = api();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({ [userId]: { lastStep: "buy" } }));
+    wizardAt();
+    expect(await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.buy.title })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: GET_STARTED.steps.buy.cta })).toHaveAttribute("href", "/wallet/buy");
+  });
+
+  /**
+   * P13 — the "top up" step became "buy minutes". A phone (or the server) whose resume point is
+   * the old id must land on the step that replaced it, and the step must say what the club sells
+   * now: minutes, a booking costing its playing time — never credit, never a top-up.
+   */
+  it("opens the buy-minutes step for a resume point stored as the old top-up step, in minutes words", async () => {
+    const { userId } = api({ prefs: { member_onboarding_last_step: "topup" } });
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({ [userId]: { lastStep: "topup" } }));
     wizardAt();
-    expect(await screen.findByRole("heading", { level: 2, name: GET_STARTED.steps.topup.title })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: GET_STARTED.steps.topup.cta })).toHaveAttribute("href", "/wallet/topup");
+    expect(await screen.findByRole("heading", { level: 2, name: "Buy minutes" })).toBeInTheDocument();
+    const step = screen.getByRole("region", { name: "Buy minutes" });
+    expect(step).toHaveTextContent(/a booking costs exactly its playing time/);
+    expect(step.textContent).not.toMatch(/credit|top.?up|\bcr\b/i);
+    expect(screen.getByRole("link", { name: "Buy minutes" })).toHaveAttribute("href", "/wallet/buy");
   });
 
   it("resumes where the server says, when this device has nothing", async () => {
@@ -258,7 +276,10 @@ describe("the setup checklist", () => {
     const card = await screen.findByRole("region", { name: CHECKLIST.title });
     await within(card).findByText(CHECKLIST.progress(1, 4));
     expect(within(card).getByRole("link", { name: CHECKLIST.items.passkey.done })).toBeInTheDocument();
-    expect(within(card).getByRole("link", { name: CHECKLIST.items.topup.label })).toHaveAttribute("href", "/wallet/topup");
+    expect(within(card).getByRole("link", { name: CHECKLIST.items.buy.label })).toHaveAttribute("href", "/wallet/buy");
+    // P13: the step is buying minutes (a package), never "top up" — and nothing on the card says credit.
+    expect(CHECKLIST.items.buy.label).toBe("Buy minutes");
+    expect(card.textContent).not.toMatch(/credit|top.?up/i);
     expect(within(card).getByRole("link", { name: CHECKLIST.items.booking.label })).toHaveAttribute("href", "/bookings");
     expect(within(card).getByRole("link", { name: CHECKLIST.resume })).toHaveAttribute("href", "/get-started");
   });
@@ -356,12 +377,29 @@ describe("the admin tour", () => {
     );
   }
 
-  it("fires on the first visit to the Admin tab and covers the six sections", async () => {
+  it("fires on the first visit to the Admin tab and covers every section the console has", async () => {
     api({ admin: true });
     tourAt("/admin");
+    const stops = tourStops();
     const first = await screen.findByRole("dialog", { name: ADMIN_TOUR.stops[0].title });
-    expect(first).toHaveTextContent(ADMIN_TOUR.stepOf(1, 6));
-    expect(ADMIN_TOUR.stops.map((s) => s.title)).toEqual(["Overview", "Members", "Groups", "Transactions", "Control board", "Settings"]);
+    expect(first).toHaveTextContent(ADMIN_TOUR.stepOf(1, stops.length));
+    // Every stop names a section of the console; Packages (P13) only once the console has it.
+    const nav = new Set(ADMIN_NAV_ITEMS.map((item) => item.id));
+    expect(stops.every((stop) => nav.has(stop.navId))).toBe(true);
+    expect(stops.map((s) => s.title)).toEqual(
+      ["Overview", "Members", "Groups", "Packages", "Transactions", "Control board", "Settings"].filter((t) => t !== "Packages" || nav.has("packages")),
+    );
+  });
+
+  it("joins the Packages stop to the tour once the console has the page, and never anchors a stop to nothing", () => {
+    const without = tourStops(new Set(["overview", "members", "groups", "transactions", "control-board", "settings"]));
+    expect(without.map((s) => s.navId)).not.toContain("packages");
+    const withPackages = tourStops(new Set(["overview", "members", "groups", "packages", "transactions", "control-board", "settings"]));
+    expect(withPackages.map((s) => s.navId)).toEqual(["overview", "members", "groups", "packages", "transactions", "control-board", "settings"]);
+    // P13: the tour speaks minutes and packages, never credit or a top-up rate.
+    const words = ADMIN_TOUR.stops.map((s) => s.body).join(" ");
+    expect(words).not.toMatch(/credit|top.?up/i);
+    expect(words).toMatch(/package/);
   });
 
   it("is recorded as finished when skipped, and does not come back", async () => {

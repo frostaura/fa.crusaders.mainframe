@@ -1,3 +1,4 @@
+import { ADMIN_NAV_ITEMS } from "@/components/admin/adminNav";
 import { ADMIN_TOUR } from "@/lib/onboardingCopy";
 import type { CoachMark } from "./CoachMarks";
 
@@ -13,9 +14,18 @@ function railShown(navId: string): Element | null {
   return item && item.getClientRects().length > 0 ? item : null;
 }
 
-/** The six marks, each resolving its anchor at the moment it opens. */
+/**
+ * The stops this console can point at: one whose section has no nav item is skipped rather than
+ * anchored to nothing. P13 added a Packages stop ahead of the console's Packages page; it joins
+ * the tour the day the nav item does, with no second edit.
+ */
+export function tourStops(navIds: ReadonlySet<string> = new Set(ADMIN_NAV_ITEMS.map((item) => item.id))) {
+  return ADMIN_TOUR.stops.filter((stop) => navIds.has(stop.navId));
+}
+
+/** The marks, each resolving its anchor at the moment it opens. */
 export function adminTourMarks(): CoachMark[] {
-  return ADMIN_TOUR.stops.map((stop) => {
+  return tourStops().map((stop) => {
     const onRail = () => railShown(stop.navId) !== null;
     return {
       id: stop.navId,

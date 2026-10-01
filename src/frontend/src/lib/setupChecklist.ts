@@ -15,16 +15,18 @@ import type { LedgerEntryType, WalletResponse, WebAuthnCredentialRow } from "./a
  * </p>
  * <ul>
  *   <li><b>Passkey</b> — `GET /me/webauthn/credentials`, at least one row.</li>
- *   <li><b>Topped up</b> — a `TopUp` in the wallet page read, or any credit on the balance (a
- *   member an admin has credited has money to book with, which is what the step is for).</li>
+ *   <li><b>Bought minutes</b> — a package bought (`TopUp`, through PayFast) or sold at the desk
+ *   (`AdminTopUp`) in the wallet page read, or any minutes on the balance (a member the desk has
+ *   given minutes to has time to book with, which is what the step is for). P13: this was the
+ *   "top up" step; the ledger type names keep their old words (contract §2.5).</li>
  *   <li><b>First booking</b> — a `BookingCharge` or `LightsPurchase` in the same page. The page
  *   is the newest fifty movements; a member with more than fifty movements and none of them a
- *   booking is not a new member, and the balance rule covers the top-up side of the same case.</li>
+ *   booking is not a new member, and the balance rule covers the buying side of the same case.</li>
  *   <li><b>App installed</b> — running as the installed app, or `appinstalled` on this device.</li>
  * </ul>
  */
 
-export type ChecklistItemId = "passkey" | "topup" | "booking" | "install";
+export type ChecklistItemId = "passkey" | "buy" | "booking" | "install";
 export type ChecklistState = "done" | "todo" | "unknown";
 export type ChecklistItem = { id: ChecklistItemId; state: ChecklistState };
 
@@ -32,6 +34,8 @@ export type ChecklistItem = { id: ChecklistItemId; state: ChecklistState };
 export const CHECKLIST_WALLET_PAGE = 50;
 
 const BOOKED: readonly LedgerEntryType[] = ["BookingCharge", "LightsPurchase"];
+/** A package bought in the app, or sold at the desk. */
+const BOUGHT: readonly LedgerEntryType[] = ["TopUp", "AdminTopUp"];
 
 /** `undefined` = still reading; `null` = the read failed. */
 export type ChecklistInput = {
@@ -50,8 +54,8 @@ export function deriveChecklist(input: ChecklistInput): ChecklistItem[] {
   return [
     { id: "passkey", state: fromRead(input.passkeys, (rows) => Array.isArray(rows) && rows.length > 0) },
     {
-      id: "topup",
-      state: fromRead(input.wallet, (w) => w.balance_minutes > 0 || entries(w).some((e) => e.type === "TopUp")),
+      id: "buy",
+      state: fromRead(input.wallet, (w) => w.balance_minutes > 0 || entries(w).some((e) => BOUGHT.includes(e.type))),
     },
     { id: "booking", state: fromRead(input.wallet, (w) => entries(w).some((e) => BOOKED.includes(e.type))) },
     { id: "install", state: input.installed ? "done" : "todo" },

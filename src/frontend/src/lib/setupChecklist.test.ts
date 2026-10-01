@@ -29,7 +29,7 @@ function stateOf(items: ReturnType<typeof deriveChecklist>) {
 describe("the setup checklist", () => {
   it("says nothing is done for a brand-new member", () => {
     const items = deriveChecklist({ passkeys: [], wallet: wallet(0), installed: false });
-    expect(stateOf(items)).toEqual({ passkey: "todo", topup: "todo", booking: "todo", install: "todo" });
+    expect(stateOf(items)).toEqual({ passkey: "todo", buy: "todo", booking: "todo", install: "todo" });
     expect(checklistProgress(items)).toEqual({ done: 0, total: 4, allDone: false });
   });
 
@@ -38,9 +38,24 @@ describe("the setup checklist", () => {
     expect(checklistProgress(items).allDone).toBe(true);
   });
 
-  it("counts credit on the balance as topped up, and a walk-up at the box as a booking", () => {
+  it("counts minutes on the balance as bought, and a walk-up at the box as a booking", () => {
     const items = deriveChecklist({ passkeys: [], wallet: wallet(40, ["AdminAdjustment", "LightsPurchase"]), installed: false });
-    expect(stateOf(items)).toMatchObject({ topup: "done", booking: "done" });
+    expect(stateOf(items)).toMatchObject({ buy: "done", booking: "done" });
+  });
+
+  /**
+   * P13 — a package sold at the desk (`AdminTopUp`) is a purchase too. A member who paid cash at
+   * the bar and booked it all away has a zero balance and no `TopUp` row; the checklist told them
+   * to buy minutes they had already bought.
+   */
+  it("counts a package sold at the desk as bought, even once the minutes are spent", () => {
+    const items = deriveChecklist({ passkeys: [], wallet: wallet(0, ["AdminTopUp", "BookingCharge"]), installed: false });
+    expect(stateOf(items).buy).toBe("done");
+  });
+
+  it("does not count an adjustment that left nothing, or a refund, as buying minutes", () => {
+    const items = deriveChecklist({ passkeys: [], wallet: wallet(0, ["AdminAdjustment", "CancellationRefund"]), installed: false });
+    expect(stateOf(items).buy).toBe("todo");
   });
 
   it("does not count a refund or a penalty as a booking", () => {
@@ -50,7 +65,7 @@ describe("the setup checklist", () => {
 
   it("says it could not check, rather than 'not done', when a read failed", () => {
     const items = deriveChecklist({ passkeys: null, wallet: null, installed: false });
-    expect(stateOf(items)).toEqual({ passkey: "unknown", topup: "unknown", booking: "unknown", install: "todo" });
+    expect(stateOf(items)).toEqual({ passkey: "unknown", buy: "unknown", booking: "unknown", install: "todo" });
     expect(checklistProgress(items).done).toBe(0);
   });
 

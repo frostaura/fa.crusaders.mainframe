@@ -58,7 +58,9 @@ export const MEMBER_STEP_SLOTS = [
   // Off (Dean, 2026-10-01): the court box does not read fingerprints yet, so the wizard must not
   // say it does. The id stays so a phone whose resume point names it still opens cleanly.
   { id: "fingerprint", enabled: false },
-  { id: "topup", enabled: true },
+  // P13 (2026-10-01): "buy minutes" (a package), where it was "top up" (in rand). The old id
+  // is a resume point some phones and the server still hold: `canonicalStep` maps it here.
+  { id: "buy", enabled: true },
   { id: "book", enabled: true },
   { id: "install", enabled: true },
   { id: "privacy", enabled: true },
@@ -75,6 +77,18 @@ export function isMemberStep(value: unknown): value is MemberStepId {
   return typeof value === "string" && memberSteps().includes(value as MemberStepId);
 }
 
+/** Step ids an older build stored, and the step that replaced each one. */
+const RENAMED_STEPS: Readonly<Record<string, MemberStepId>> = { topup: "buy" };
+
+/**
+ * A stored or linked step id, as this build names it: a renamed step's old id becomes its new
+ * one, so a member who stopped at "top up" resumes at "buy minutes" rather than at the start.
+ * Anything else passes through for {@link isMemberStep} to judge.
+ */
+export function canonicalStep(value: string | null | undefined): string | null | undefined {
+  return typeof value === "string" && Object.hasOwn(RENAMED_STEPS, value) ? RENAMED_STEPS[value] : value;
+}
+
 /**
  * Where the wizard opens.
  *
@@ -86,9 +100,11 @@ export function isMemberStep(value: unknown): value is MemberStepId {
  */
 export function startingStep(input: { requested?: string | null; replay?: boolean; last?: string | null }): MemberStepId {
   const steps = memberSteps();
-  if (isMemberStep(input.requested)) return input.requested;
+  const requested = canonicalStep(input.requested);
+  const last = canonicalStep(input.last);
+  if (isMemberStep(requested)) return requested;
   if (input.replay) return steps[0];
-  if (isMemberStep(input.last)) return input.last;
+  if (isMemberStep(last)) return last;
   return steps[0];
 }
 

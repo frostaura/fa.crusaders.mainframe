@@ -11,10 +11,10 @@ import { CodeStep } from "@/components/onboarding/steps/CodeStep";
 import { InstallStep } from "@/components/onboarding/steps/InstallStep";
 import { PasskeyStep } from "@/components/onboarding/steps/PasskeyStep";
 import { PrivacyStep } from "@/components/onboarding/steps/PrivacyStep";
-import { TopUpStep } from "@/components/onboarding/steps/TopUpStep";
+import { BuyStep } from "@/components/onboarding/steps/BuyStep";
 import { WelcomeStep } from "@/components/onboarding/steps/WelcomeStep";
 import {
-  currentStep, initialWizard, isLastStep, isMemberStep, markOffered, memberSteps, startingStep, wizardReducer,
+  canonicalStep, currentStep, initialWizard, isLastStep, isMemberStep, markOffered, memberSteps, startingStep, wizardReducer,
   type MemberStepId,
 } from "@/lib/onboarding";
 import { GET_STARTED } from "@/lib/onboardingCopy";
@@ -43,7 +43,7 @@ const STEP_VIEWS: Partial<Record<MemberStepId, ComponentType<{ focusOnMount?: bo
   welcome: WelcomeStep,
   code: CodeStep,
   passkey: PasskeyStep,
-  topup: TopUpStep,
+  buy: BuyStep,
   book: BookStep,
   install: InstallStep,
   privacy: PrivacyStep,
@@ -66,7 +66,7 @@ function useStartingStep() {
 
 function furthest(candidates: Array<string | null | undefined>): MemberStepId | null {
   const steps = memberSteps();
-  const known = candidates.filter(isMemberStep);
+  const known = candidates.map(canonicalStep).filter(isMemberStep);
   if (known.length === 0) return null;
   return known.reduce((a, b) => (steps.indexOf(b) > steps.indexOf(a) ? b : a));
 }

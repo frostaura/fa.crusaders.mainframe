@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe("the step list", () => {
   it("walks the eight steps in order, with the privacy choice last (P11, D13)", () => {
-    expect(memberSteps()).toEqual(["welcome", "code", "passkey", "topup", "book", "install", "privacy"]);
+    expect(memberSteps()).toEqual(["welcome", "code", "passkey", "buy", "book", "install", "privacy"]);
   });
 
   it("has a title for every step it walks", () => {
@@ -45,15 +45,20 @@ describe("the step list", () => {
 
 describe("where the wizard opens", () => {
   it("resumes at the last step reached", () => {
-    expect(startingStep({ last: "topup" })).toBe("topup");
+    expect(startingStep({ last: "buy" })).toBe("buy");
+    // P13: a resume point an older build stored as "topup" opens the step that replaced it.
+    expect(startingStep({ last: "topup" })).toBe("buy");
+    expect(startingStep({ requested: "topup" })).toBe("buy");
+    // Only a real rename is mapped: an unknown id, or a prototype key, starts at the beginning.
+    expect(startingStep({ last: "constructor" })).toBe("welcome");
   });
 
   it("opens at a step a link names, over the resume point", () => {
-    expect(startingStep({ requested: "install", last: "topup" })).toBe("install");
+    expect(startingStep({ requested: "install", last: "buy" })).toBe("install");
   });
 
   it("starts from the beginning on a replay", () => {
-    expect(startingStep({ replay: true, last: "topup" })).toBe("welcome");
+    expect(startingStep({ replay: true, last: "buy" })).toBe("welcome");
   });
 
   it("resumes at the privacy step now that it is walked", () => {
@@ -188,9 +193,9 @@ describe("the first-run gate", () => {
 
 describe("the device mirror", () => {
   it("keeps each user's record apart on a shared device", () => {
-    writeLocalOnboarding("a", { lastStep: "topup" });
+    writeLocalOnboarding("a", { lastStep: "buy" });
     writeLocalOnboarding("b", { lastStep: "code" });
-    expect(readLocalOnboarding("a").lastStep).toBe("topup");
+    expect(readLocalOnboarding("a").lastStep).toBe("buy");
     expect(readLocalOnboarding("b").lastStep).toBe("code");
     expect(readLocalOnboarding(null)).toEqual({});
   });
