@@ -57,7 +57,7 @@ public class WalletStreamPumpTests
     /// <summary>Collects what the pump writes, so a test can assert on the stream a member would see.</summary>
     private sealed class Sink
     {
-        public ConcurrentQueue<decimal> Balances { get; } = new();
+        public ConcurrentQueue<int> Balances { get; } = new();
         private int _keepAlives;
         public int KeepAlives => Volatile.Read(ref _keepAlives);
 
@@ -78,11 +78,11 @@ public class WalletStreamPumpTests
     private static readonly RealtimeTopic Topic = RealtimeTopic.Wallet(Guid.NewGuid(), Guid.NewGuid());
 
     /// <summary>One balance frame, as LedgerService composes the legacy unnamed one.</summary>
-    private static RealtimeMessage Frame(decimal balance)
-        => new(string.Empty, JsonSerializer.Serialize(new { balance_credits = balance }));
+    private static RealtimeMessage Frame(int balance)
+        => new(string.Empty, JsonSerializer.Serialize(new { balance_minutes = balance }));
 
-    private static decimal BalanceOf(RealtimeMessage frame)
-        => JsonDocument.Parse(frame.JsonPayload).RootElement.GetProperty("balance_credits").GetDecimal();
+    private static int BalanceOf(RealtimeMessage frame)
+        => JsonDocument.Parse(frame.JsonPayload).RootElement.GetProperty("balance_minutes").GetInt32();
 
     private static async Task<bool> WaitUntilAsync(Func<bool> condition)
     {
@@ -118,11 +118,11 @@ public class WalletStreamPumpTests
         // Past the cliff: at least two keep-alive intervals have gone by with no traffic.
         Assert.True(await WaitUntilAsync(() => sink.KeepAlives >= 2), "the pump never wrote a keep-alive");
 
-        bus.Publish(Topic, Frame(1766.00m));
+        bus.Publish(Topic, Frame(1766));
 
         Assert.True(await WaitUntilAsync(() => sink.Balances.Count == 1),
             "a balance published after a keep-alive never reached the stream");
-        Assert.Equal(1766.00m, Assert.Single(sink.Balances));
+        Assert.Equal(1766, Assert.Single(sink.Balances));
 
         await cts.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump);
@@ -150,7 +150,7 @@ public class WalletStreamPumpTests
         var pump = SseStream.PumpAsync(
             channel.Reader, KeepAlive, sink.WriteBalance, sink.WriteKeepAlive, cts.Token);
 
-        bus.Publish(Topic, Frame(12.00m));
+        bus.Publish(Topic, Frame(12));
         Assert.True(await WaitUntilAsync(() => sink.Balances.Count == 1), "the first balance never arrived");
 
         var after = sink.KeepAlives;
@@ -159,7 +159,7 @@ public class WalletStreamPumpTests
         Assert.False(pump.IsCompleted, "the pump ended by itself while the stream was still open");
 
         // …and it is still delivering, which is what the member actually cares about.
-        bus.Publish(Topic, Frame(13.00m));
+        bus.Publish(Topic, Frame(13));
         Assert.True(await WaitUntilAsync(() => sink.Balances.Count == 2), "the second balance never arrived");
 
         await cts.CancelAsync();
@@ -181,7 +181,7 @@ public class WalletStreamPumpTests
     {
         var bus = new InProcessRealtimeBus();
         var channel = bus.Subscribe(Topic);
-        var written = new ConcurrentQueue<decimal>();
+        var written = new ConcurrentQueue<int>();
         var firstWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFirstWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var cts = new CancellationTokenSource();
@@ -201,16 +201,16 @@ public class WalletStreamPumpTests
             _ => Task.CompletedTask,
             cts.Token);
 
-        bus.Publish(Topic, Frame(100.00m));
+        bus.Publish(Topic, Frame(100));
         await firstWriteStarted.Task.WaitAsync(Deadline);
 
         // Two more movements land while the socket is busy with the first.
-        bus.Publish(Topic, Frame(90.00m));
-        bus.Publish(Topic, Frame(95.00m));
+        bus.Publish(Topic, Frame(90));
+        bus.Publish(Topic, Frame(95));
         releaseFirstWrite.TrySetResult();
 
         Assert.True(await WaitUntilAsync(() => written.Count == 3), "a movement was dropped while a write was in flight");
-        Assert.Equal(new[] { 100.00m, 90.00m, 95.00m }, written.ToArray());
+        Assert.Equal(new[] { 100, 90, 95 }, written.ToArray());
 
         await cts.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump);
@@ -242,8 +242,8 @@ public class WalletStreamPumpTests
             async () =>
             {
                 await Task.Yield();
-                bus.Publish(Topic, Frame(108.00m));
-                await sink.WriteBalance(Frame(100.00m), cts.Token);
+                bus.Publish(Topic, Frame(108));
+                await sink.WriteBalance(Frame(100), cts.Token);
             });
 
         var pump = SseStream.PumpAsync(
@@ -251,7 +251,7 @@ public class WalletStreamPumpTests
 
         Assert.True(await WaitUntilAsync(() => sink.Balances.Count == 2),
             "the movement posted during the opening read never reached the stream");
-        Assert.Equal(new[] { 100.00m, 108.00m }, sink.Balances.ToArray());
+        Assert.Equal(new[] { 100, 108 }, sink.Balances.ToArray());
 
         bus.Unsubscribe(Topic, channel);
         await pump.WaitAsync(Deadline);

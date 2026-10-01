@@ -62,7 +62,7 @@ public sealed class QrEndpointHttpTests : IClassFixture<PostgresFixture>
             Status = MembershipStatus.Active,
         });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = 8m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2" };
         db.Courts.Add(court);
 
         await db.SaveChangesAsync();
@@ -85,7 +85,7 @@ public sealed class QrEndpointHttpTests : IClassFixture<PostgresFixture>
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = 15,
             SliceCount = minutes / 15,
-            AmountChargedCredits = 8m * (minutes / 15),
+            AmountChargedMinutes = 8 * (minutes / 15),
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };

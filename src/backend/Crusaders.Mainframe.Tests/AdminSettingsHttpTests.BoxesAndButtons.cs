@@ -51,7 +51,7 @@ public abstract partial class AdminSettingsHttpTests
             var save = await client.PutAsJsonAsync(SettingsPath, new
             {
                 sliceMinutes = 15,
-                slicePriceCredits = 8m,
+                slicePriceCredits = 8,
                 advanceBookingDays = 14,
                 dayStartMinute = 360,
                 dayEndMinute = 1320,
@@ -82,7 +82,7 @@ public abstract partial class AdminSettingsHttpTests
             var save = await client.PutAsJsonAsync(SettingsPath, new
             {
                 sliceMinutes = 15,
-                slicePriceCredits = 8m,
+                slicePriceCredits = 8,
                 advanceBookingDays = 14,
                 dayStartMinute = 360,
                 dayEndMinute = 1320,

@@ -45,7 +45,7 @@ public sealed class R4ChangeRecordWritersHttpTests(PostgresFixture pg) : IClassF
         var other = await DoorClub.SeedAsync(Factory, "r4cwcourtx");
         var admin = club.AdminClient(Factory);
 
-        var made = await admin.PostAsJsonAsync("/api/v1/admin/courts", new { name = "Court 2", courtType = "squash", slicePriceCredits = 9m });
+        var made = await admin.PostAsJsonAsync("/api/v1/admin/courts", new { name = "Court 2", courtType = "squash", slicePriceCredits = 9 });
         Assert.Equal(HttpStatusCode.OK, made.StatusCode);
         var id = (await made.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         var created = Assert.Single(await RowsAsync(club.TenantId, AdminChangeActions.CourtCreated));
@@ -53,7 +53,7 @@ public sealed class R4ChangeRecordWritersHttpTests(PostgresFixture pg) : IClassF
         Assert.Equal("Court 2", After(created, "name"));
         Assert.Equal("9", After(created, "slice_price_credits"));
 
-        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/v1/admin/courts/{id}", new { name = "Glass court", slicePriceCredits = 9m })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/v1/admin/courts/{id}", new { name = "Glass court", slicePriceCredits = 9 })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/v1/admin/courts/{id}", new { name = "Glass court" })).StatusCode);
         var updated = Assert.Single(await RowsAsync(club.TenantId, AdminChangeActions.CourtUpdated));
         Assert.Equal(new Dictionary<string, (string?, string?)> { ["name"] = ("Court 2", "Glass court") }, Diff(updated));

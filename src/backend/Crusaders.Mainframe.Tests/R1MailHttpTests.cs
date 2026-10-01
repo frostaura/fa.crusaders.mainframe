@@ -44,12 +44,12 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1held");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
-        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareCredits;
-        Assert.True((await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = shown })).IsSuccessStatusCode);
+        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareMinutes;
+        Assert.True((await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = shown })).IsSuccessStatusCode);
         await DeliverAsync(f, club);
 
         var received = Assert.Single(To(mail, club, "olive.organiser"), m => m.Subject.Contains("paid their share", StringComparison.Ordinal));
@@ -71,7 +71,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1clubdid");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
         var admin = club.Client(f, club.Admin, admin: true);
@@ -110,7 +110,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1clubadd");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, _) = await club.BookWithPlayersAsync(f, []);
         var admin = club.Client(f, club.Admin, admin: true);
 
@@ -134,7 +134,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r1codeonly");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         await club.BookWithPlayersAsync(f, []);
 
         EmailMessage? confirmation = null;
@@ -157,7 +157,7 @@ public sealed class R1MailHttpTests(PostgresFixture pg) : IClassFixture<Postgres
     [Fact]
     public void Mail_dates_read_the_way_the_screens_do()
     {
-        var settings = new TenantSettingsView(15, 8m, 30m, 5, 15, 14, "UTC", 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
+        var settings = new TenantSettingsView(15, 30, 5, 15, 14, "UTC", 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
         var first = new DateTimeOffset(2026, 10, 1, 8, 0, 0, TimeSpan.Zero);
         Assert.Equal("Thu 1 Oct, 08:00", GameText.Local(first, settings));
         Assert.Equal("Thu 1 Oct, 08:00", PlayNotices.Local(first, settings));

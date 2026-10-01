@@ -75,7 +75,7 @@ public class AdminNotificationTests
 
     private static AdminNotice Overdraft(Guid actor, Guid member, string court = "Court 1") =>
         AdminNotices.OverdraftAuthorised(Guid.NewGuid(), actor, member, new OverdraftPayload(
-            Guid.NewGuid(), "Desk Admin", "Mo Member", Self: actor == member, court, "Tue 29 Sep, 18:00", 24m, -16m));
+            Guid.NewGuid(), "Desk Admin", "Mo Member", Self: actor == member, court, "Tue 29 Sep, 18:00", 24, -16));
 
     // ------------------------------------------------------------------ recipients
 
@@ -356,7 +356,7 @@ public class AdminNotificationTests
     }
 
     private static AdminNotice GatewayError(string identity) =>
-        AdminNotices.TopUpFailed("gateway_error", identity, 100m, "Mo Member", identity);
+        AdminNotices.TopUpFailed("gateway_error", identity, 100, "Mo Member", identity);
 
     /// <summary>
     /// The top-up and overdraft windows are the club's own numbers
@@ -400,7 +400,7 @@ public class AdminNotificationTests
     [Fact]
     public async Task The_notifier_cooldowns_default_to_the_old_windows_and_are_clamped_on_read()
     {
-        var defaults = new TenantSettingsView(15, 8m, 30m, 5, 15, 14, "UTC", 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
+        var defaults = new TenantSettingsView(15, 30, 5, 15, 14, "UTC", 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
         Assert.Equal(TimeSpan.FromMinutes(30), AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.TopUpFailed, defaults));
         Assert.Equal(TimeSpan.FromMinutes(15), AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.OverdraftAuthorised, defaults));
 
@@ -846,7 +846,7 @@ public class AdminNotificationTests
         await using var host = await TestHost.CreateAsync();
         var colleague = await AddPersonAsync(host, "colleague.admin", isAdmin: true);
         await StageAsync(host, AdminNotices.OverdraftAuthorised(Guid.NewGuid(), host.AdminUser.Id, host.PlayerUser.Id, new OverdraftPayload(
-            Guid.NewGuid(), "Desk Admin", "Mo\r\nBcc: someone@elsewhere.review.test", Self: false, "Court 1", "Tue 29 Sep, 18:00", 24m, -16m)));
+            Guid.NewGuid(), "Desk Admin", "Mo\r\nBcc: someone@elsewhere.review.test", Self: false, "Court 1", "Tue 29 Sep, 18:00", 24, -16)));
 
         await host.DeliverAdminNoticesAsync(T0);
 
@@ -871,7 +871,7 @@ public class AdminNotificationTests
     {
         var message = Crusaders.Mainframe.Api.Email.EmailTemplates.AdminTopUpFailed(
             EmailCatalogue.Riverside, "desk@riverside.review.test",
-            new Crusaders.Mainframe.Api.Email.TopUpFailure(reason, 100m, "Naledi Khoza", "ref", "R", "https://riverside.review.test/admin/transactions"));
+            new Crusaders.Mainframe.Api.Email.TopUpFailure(reason, 100, "Naledi Khoza", "ref", "R", "https://riverside.review.test/admin/transactions"));
 
         Assert.Contains(expected, MailText.Unwrap(message.PlainBody), StringComparison.Ordinal);
         if (reason is "payment_id_missing" or "provider_register_failed" or "signature_invalid")
@@ -922,10 +922,10 @@ public class AdminNotificationTests
             [AdminEventCatalogue.DeviceRecovered] = new DeviceOutagePayload(Guid.NewGuid(), true, "Door", "gate-1", "front", [], 12),
             [AdminEventCatalogue.FaultSpike] = new FaultSpikePayload(5, 15, ["box-1"]),
             [AdminEventCatalogue.RefusalSpike] = new RefusalSpikePayload(Guid.NewGuid(), "Door", "gate-1", "front", 9, 20),
-            [AdminEventCatalogue.TopUpFailed] = new TopUpFailedPayload("gateway_error", 100m, "A", "ref"),
+            [AdminEventCatalogue.TopUpFailed] = new TopUpFailedPayload("gateway_error", 100, "A", "ref"),
             [AdminEventCatalogue.WebhookAutoDisabled] = new WebhookDisabledPayload(Guid.NewGuid(), "https://h.review.test", null, 6, false),
             [AdminEventCatalogue.ScheduleConflict] = new ScheduleConflictPayload(Guid.NewGuid(), "League", "2026-10-06", 1, ["2026-10-06"]),
-            [AdminEventCatalogue.OverdraftAuthorised] = new OverdraftPayload(Guid.NewGuid(), "A", "B", false, "Court 1", "Tue", 8m, -8m),
+            [AdminEventCatalogue.OverdraftAuthorised] = new OverdraftPayload(Guid.NewGuid(), "A", "B", false, "Court 1", "Tue", 8, -8),
             [AdminEventCatalogue.AdminRoleChanged] = new AdminRolePayload("A", "B", true, null),
             [AdminEventCatalogue.CodeForgerySuspected] = new ForgeryPayload("box-1", null, "detail"),
             [AdminEventCatalogue.CodesCapabilityLost] = new CodesCapabilityLostPayload(Guid.NewGuid(), "Box", "box-1", "2.0.0", "v1"),
@@ -949,7 +949,7 @@ public class AdminNotificationTests
             {
                 var message = AdminEventCatalogue.Compose(new AdminMailContext(
                     EmailCatalogue.Riverside, "desk@riverside.review.test", row, toSubject, "https://riverside.review.test",
-                    new TenantSettingsView(15, 8m, 30m, 5, 15, 14, "UTC", 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default())));
+                    new TenantSettingsView(15, 30, 5, 15, 14, "UTC", 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default())));
                 Assert.Contains("Riverside Racquet Club", message.HtmlBody, StringComparison.Ordinal);
             }
         }

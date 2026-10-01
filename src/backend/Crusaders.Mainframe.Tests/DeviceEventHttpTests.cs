@@ -80,7 +80,7 @@ public abstract partial class DeviceEventHttpTests
     /// <c>UtcNow</c> — and the next walk-up test written would not have named one either.
     /// </para>
     /// </summary>
-    private static async Task<Box> SeedAsync(TestWebAppFactory factory, decimal topUpCredits = 200m, int[]? courtNumbers = null)
+    private static async Task<Box> SeedAsync(TestWebAppFactory factory, int topUpMinutes = 200, int[]? courtNumbers = null)
     {
         courtNumbers ??= [1];
         using var scope = factory.Services.CreateScope();
@@ -104,7 +104,7 @@ public abstract partial class DeviceEventHttpTests
         });
 
         var courts = courtNumbers
-            .Select(n => new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m })
+            .Select(n => new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}" })
             .ToList();
         db.Courts.AddRange(courts);
 
@@ -132,14 +132,14 @@ public abstract partial class DeviceEventHttpTests
         };
         db.Devices.Add(device);
 
-        if (topUpCredits > 0)
+        if (topUpMinutes > 0)
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = tenant.Id,
                 UserId = member.Id,
                 Type = LedgerEntryType.TopUp,
-                AmountCredits = topUpCredits,
+                AmountMinutes = topUpMinutes,
                 ActorUserId = member.Id,
                 Reason = "seed",
             });
@@ -274,7 +274,7 @@ public abstract partial class DeviceEventHttpTests
     /// <summary>A live code minted by a different club, for one of its own members.</summary>
     private static async Task<string> ForeignCodeAsync(TestWebAppFactory factory)
     {
-        var other = await SeedAsync(factory, topUpCredits: 0m);
+        var other = await SeedAsync(factory, topUpMinutes: 0);
         return await TestAccessCodes.MintIdentAsync(factory.Services, other.TenantId, other.Slug, other.MemberId);
     }
 
@@ -308,7 +308,7 @@ public abstract partial class DeviceEventHttpTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = 15,
             SliceCount = Math.Max(1, minutes / 15),
-            AmountChargedCredits = 8m * Math.Max(1, minutes / 15),
+            AmountChargedMinutes = 8 * Math.Max(1, minutes / 15),
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };
@@ -318,7 +318,7 @@ public abstract partial class DeviceEventHttpTests
             TenantId = box.TenantId,
             UserId = box.MemberId,
             Type = LedgerEntryType.BookingCharge,
-            AmountCredits = -booking.AmountChargedCredits,
+            AmountMinutes = -booking.AmountChargedMinutes,
             ActorUserId = box.MemberId,
             RelatedBookingId = booking.Id,
             Reason = "seed charge",
@@ -382,7 +382,7 @@ public abstract partial class DeviceEventHttpTests
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        return await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.UserId == userId).SumAsync(l => l.AmountCredits);
+        return await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.UserId == userId).SumAsync(l => l.AmountMinutes);
     }
 
     /// <summary>Whole seconds, so a value that round-trips through timestamptz compares equal to itself.</summary>
@@ -403,8 +403,8 @@ public abstract partial class DeviceEventHttpTests
         Assert.Null(swept.CheckedInAt);
 
         var settled = await LedgerAsync(factory, booked.BookingId);
-        Assert.Equal(24m, Assert.Single(settled, l => l.Type == LedgerEntryType.CancellationRefund).AmountCredits);
-        Assert.True(Assert.Single(settled, l => l.Type == LedgerEntryType.NoShowPenalty).AmountCredits < 0);
+        Assert.Equal(24, Assert.Single(settled, l => l.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
+        Assert.True(Assert.Single(settled, l => l.Type == LedgerEntryType.NoShowPenalty).AmountMinutes < 0);
         return (booked, swept);
     }
 
@@ -423,11 +423,11 @@ public abstract partial class DeviceEventHttpTests
         var penalties = ledger.Where(l => l.Type == LedgerEntryType.NoShowPenalty).ToList();
         Assert.Equal(2, refunds.Count);
         Assert.Equal(2, penalties.Count);
-        Assert.Equal(0m, refunds.Sum(l => l.AmountCredits));
-        Assert.Equal(0m, penalties.Sum(l => l.AmountCredits));
+        Assert.Equal(0, refunds.Sum(l => l.AmountMinutes));
+        Assert.Equal(0, penalties.Sum(l => l.AmountMinutes));
 
-        var refundReversal = Assert.Single(refunds, l => l.AmountCredits < 0);
-        var penaltyReversal = Assert.Single(penalties, l => l.AmountCredits > 0);
+        var refundReversal = Assert.Single(refunds, l => l.AmountMinutes < 0);
+        var penaltyReversal = Assert.Single(penalties, l => l.AmountMinutes > 0);
         Assert.Equal(BookingService.NoShowReversalReference(bookingId, "refund"), refundReversal.ExternalReference);
         Assert.Equal(BookingService.NoShowReversalReference(bookingId, "penalty"), penaltyReversal.ExternalReference);
         Assert.All(ledger, l => Assert.False(string.IsNullOrWhiteSpace(l.Reason)));
@@ -460,7 +460,7 @@ public abstract partial class DeviceEventHttpTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = 15,
             SliceCount = Math.Max(1, minutes / 15),
-            AmountChargedCredits = 8m * Math.Max(1, minutes / 15),
+            AmountChargedMinutes = 8 * Math.Max(1, minutes / 15),
             Status = status,
             ChargedAt = charged ? DateTimeOffset.UtcNow : null,
         };
@@ -470,7 +470,7 @@ public abstract partial class DeviceEventHttpTests
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.BookingCharge,
-                AmountCredits = -booking.AmountChargedCredits, ActorUserId = userId, RelatedBookingId = booking.Id, Reason = "seed charge",
+                AmountMinutes = -booking.AmountChargedMinutes, ActorUserId = userId, RelatedBookingId = booking.Id, Reason = "seed charge",
             });
         }
         if (status == BookingStatus.NoShow)
@@ -479,12 +479,12 @@ public abstract partial class DeviceEventHttpTests
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.CancellationRefund,
-                AmountCredits = booking.AmountChargedCredits, ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show — booking refunded",
+                AmountMinutes = booking.AmountChargedMinutes, ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show — booking refunded",
             });
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.NoShowPenalty,
-                AmountCredits = -Math.Round(booking.AmountChargedCredits * 0.3m, 2), ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show penalty",
+                AmountMinutes = -(int)Math.Floor(booking.AmountChargedMinutes * 0.3m), ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show penalty",
             });
         }
         await db.SaveChangesAsync();
@@ -495,7 +495,7 @@ public abstract partial class DeviceEventHttpTests
     }
 
     /// <summary>A second funded member of the box's club.</summary>
-    private static async Task<Guid> AnotherMemberAsync(TestWebAppFactory factory, Box box, decimal credits = 200m)
+    private static async Task<Guid> AnotherMemberAsync(TestWebAppFactory factory, Box box, int credits = 200)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -508,7 +508,7 @@ public abstract partial class DeviceEventHttpTests
         });
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = box.TenantId, UserId = other.Id, Type = LedgerEntryType.TopUp, AmountCredits = credits, ActorUserId = other.Id, Reason = "seed",
+            TenantId = box.TenantId, UserId = other.Id, Type = LedgerEntryType.TopUp, AmountMinutes = credits, ActorUserId = other.Id, Reason = "seed",
         });
         await db.SaveChangesAsync();
         return other.Id;

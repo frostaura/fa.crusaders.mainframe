@@ -25,18 +25,18 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
 
     private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
-    /// <summary>The club, with the member holding <paramref name="memberCredits"/>.</summary>
-    private static async Task<DoorClub> SeedAsync(TestWebAppFactory factory, string prefix, decimal memberCredits)
+    /// <summary>The club, with the member holding <paramref name="memberMinutes"/>.</summary>
+    private static async Task<DoorClub> SeedAsync(TestWebAppFactory factory, string prefix, int memberMinutes)
     {
         var club = await DoorClub.SeedAsync(factory, prefix);
-        if (memberCredits == 0m) return club;
+        if (memberMinutes == 0) return club;
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         db.LedgerEntries.Add(new LedgerEntry
         {
             TenantId = club.TenantId, UserId = club.MemberUserId, Type = LedgerEntryType.TopUp,
-            AmountCredits = memberCredits, ActorUserId = Guid.Empty, Reason = "fixture float",
+            AmountMinutes = memberMinutes, ActorUserId = Guid.Empty, Reason = "fixture float",
         });
         await db.SaveChangesAsync();
         return club;
@@ -62,18 +62,18 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmcredit", memberCredits: 40m);
-        var other = await SeedAsync(factory, "gmcredx", memberCredits: 0m);
+        var club = await SeedAsync(factory, "gmcredit", memberMinutes: 40);
+        var other = await SeedAsync(factory, "gmcredx", memberMinutes: 0);
         var admin = club.AdminClient(factory);
         var path = $"/api/v1/admin/credit/{club.MemberUserId}/adjust";
 
         var adjusted = await admin.PostAsJsonAsync(path, new
         {
-            amountCredits = 10m, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
+            amountMinutes = 10, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
         });
         var toppedUp = await admin.PostAsJsonAsync(path, new
         {
-            amountCredits = 100m, reason = "Paid cash at the bar", reasonCode = "top_up_cash", zarReceived = 100m, idempotencyKey = "gm_top",
+            amountMinutes = 100, reason = "Paid cash at the bar", reasonCode = "top_up_cash", zarReceived = 100m, idempotencyKey = "gm_top",
         });
         Assert.Equal(HttpStatusCode.OK, adjusted.StatusCode);
         Assert.Equal(HttpStatusCode.OK, toppedUp.StatusCode);
@@ -89,19 +89,19 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         using (var before = JsonDocument.Parse(adjust.BeforeJson!))
         using (var after = JsonDocument.Parse(adjust.AfterJson!))
         {
-            Assert.Equal(40m, before.RootElement.GetProperty("balance_credits").GetDecimal());
-            Assert.Equal(50m, after.RootElement.GetProperty("balance_credits").GetDecimal());
+            Assert.Equal(40m, before.RootElement.GetProperty("balance_minutes").GetDecimal());
+            Assert.Equal(50m, after.RootElement.GetProperty("balance_minutes").GetDecimal());
             Assert.Equal("goodwill", after.RootElement.GetProperty("reason_code").GetString());
         }
         using (var after = JsonDocument.Parse(topUp.AfterJson!))
         {
-            Assert.Equal(150m, after.RootElement.GetProperty("balance_credits").GetDecimal());
+            Assert.Equal(150m, after.RootElement.GetProperty("balance_minutes").GetDecimal());
         }
 
         // A replayed click is not a second decision.
         await admin.PostAsJsonAsync(path, new
         {
-            amountCredits = 10m, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
+            amountMinutes = 10, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
         });
         Assert.Single(await ChangesAsync(factory, club.TenantId), r => r.Action == AdminChangeActions.CreditAdjusted);
 
@@ -120,8 +120,8 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmgroup", memberCredits: 0m);
-        var other = await SeedAsync(factory, "gmgroupx", memberCredits: 0m);
+        var club = await SeedAsync(factory, "gmgroup", memberMinutes: 0);
+        var other = await SeedAsync(factory, "gmgroupx", memberMinutes: 0);
         var admin = club.AdminClient(factory);
         const string Groups = "/api/v1/admin/member-groups";
 

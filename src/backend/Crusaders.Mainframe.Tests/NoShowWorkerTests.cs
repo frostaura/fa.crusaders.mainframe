@@ -12,7 +12,7 @@ namespace Crusaders.Mainframe.Tests;
 ///
 /// <para>
 /// The worker used to post a positive <see cref="LedgerEntryType.CancellationRefund"/>
-/// for the full booking value whenever <c>AmountChargedCredits &gt; 0</c>, with no check
+/// for the full booking value whenever <c>AmountChargedMinutes &gt; 0</c>, with no check
 /// that anything had ever been debited. Under charge-on-activation a no-show by
 /// definition never checked in — that is the selection predicate — so no
 /// <see cref="LedgerEntryType.BookingCharge"/> existed to refund. It then subtracted
@@ -31,7 +31,7 @@ public class NoShowWorkerTests
         new(host.Services, host.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance);
 
     private static async Task<Booking> AddBookingAsync(
-        TestHost host, MainframeDbContext db, bool charged, decimal amount = 8m,
+        TestHost host, MainframeDbContext db, bool charged, int amount = 8,
         DateTimeOffset? startsAt = null, DateTimeOffset? endsAt = null)
     {
         var booking = new Booking
@@ -45,7 +45,7 @@ public class NoShowWorkerTests
             EndsAt = endsAt ?? DateTimeOffset.UtcNow.AddMinutes(-45),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = amount,
+            AmountChargedMinutes = amount,
             Status = BookingStatus.Booked,
             CheckedInAt = null,
             ChargedAt = charged ? DateTimeOffset.UtcNow.AddHours(-1) : null,
@@ -67,7 +67,7 @@ public class NoShowWorkerTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var before = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
 
         await AddBookingAsync(host, db, charged: false);
@@ -104,8 +104,8 @@ public class NoShowWorkerTests
         while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
 
         var noShow = Assert.Single(emitted, e => e.Type == "booking.no_show");
-        Assert.Equal(0m, Assert.IsType<decimal>(noShow.Data["refund_credits"]));
-        Assert.Equal(0m, Assert.IsType<decimal>(noShow.Data["penalty_credits"]));
+        Assert.Equal(0, Assert.IsType<decimal>(noShow.Data["refund_minutes"]));
+        Assert.Equal(0, Assert.IsType<decimal>(noShow.Data["penalty_minutes"]));
 
         // And the email the member actually reads. 8 credits at 30% would print 2.40
         // penalty and 5.60 back; neither figure may appear when nothing was taken.
@@ -145,10 +145,10 @@ public class NoShowWorkerTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 8);
         // The charge itself, as ChargeOnActivationAsync would have posted it.
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id,
             RelatedBookingId: booking.Id), default);
 
         var before = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
@@ -156,8 +156,8 @@ public class NoShowWorkerTests
         var after = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
 
         // 30% of 8 = 2.40 kept; 5.60 comes back.
-        Assert.Equal(before + 8m - 2.40m, after);
-        Assert.True(after < before + 8m, "the penalty must actually be retained");
+        Assert.Equal(before + 8 - 2.40m, after);
+        Assert.True(after < before + 8, "the penalty must actually be retained");
     }
 
     /// <summary>
@@ -249,7 +249,7 @@ public class NoShowWorkerTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
 
         var start = DateTimeOffset.UtcNow.AddMinutes(-30);
         await AddBookingAsync(host, db, charged: true, startsAt: start, endsAt: start.AddMinutes(60));
@@ -295,43 +295,43 @@ public class NoShowWorkerTests
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
         var bus = host.Services.GetRequiredService<IEventBus>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 8);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id,
             RelatedBookingId: booking.Id), default);
 
         var worker = CreateWorker(host);
         await worker.TickAsync(default);
         await db.Entry(booking).ReloadAsync();
         Assert.Equal(BookingStatus.NoShow, booking.Status);
-        Assert.Equal(100m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100 - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // Fifty minutes ago: inside the slot the sweep settled.
         var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
         var result = await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default);
         var ok = Assert.IsType<NoShowReversalResult.Ok>(result);
-        Assert.Equal(8m, ok.RefundReversedCredits);
-        Assert.Equal(2.40m, ok.PenaltyReversedCredits);
+        Assert.Equal(8, ok.RefundReversedMinutes);
+        Assert.Equal(2.40m, ok.PenaltyReversedMinutes);
 
         await db.Entry(booking).ReloadAsync();
         Assert.Equal(BookingStatus.Booked, booking.Status);
         Assert.Equal(attendedAt, booking.CheckedInAt);
         // Charged once, and that is all: the refund is back out and the penalty back in.
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(92, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         await worker.TickAsync(default);
 
         await db.Entry(booking).ReloadAsync();
         Assert.Equal(BookingStatus.Booked, booking.Status);
         Assert.Equal(attendedAt, booking.CheckedInAt);
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(92, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // The charge, the sweep's two rows, and the two reversing them — four settlement
         // rows, each type netting to nothing, none of them netted into one.
         var rows = db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToList();
         Assert.Equal(5, rows.Count);
-        Assert.Equal(0m, rows.Where(l => l.Type == LedgerEntryType.CancellationRefund).Sum(l => l.AmountCredits));
-        Assert.Equal(0m, rows.Where(l => l.Type == LedgerEntryType.NoShowPenalty).Sum(l => l.AmountCredits));
+        Assert.Equal(0, rows.Where(l => l.Type == LedgerEntryType.CancellationRefund).Sum(l => l.AmountMinutes));
+        Assert.Equal(0, rows.Where(l => l.Type == LedgerEntryType.NoShowPenalty).Sum(l => l.AmountMinutes));
         Assert.Equal(2, rows.Count(l => l.Type == LedgerEntryType.CancellationRefund));
         Assert.Equal(2, rows.Count(l => l.Type == LedgerEntryType.NoShowPenalty));
 
@@ -341,8 +341,8 @@ public class NoShowWorkerTests
         while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
         Assert.Single(emitted, e => e.Type == "booking.no_show");
         var reversed = Assert.Single(emitted, e => e.Type == "booking.no_show_reversed");
-        Assert.Equal(8m, Assert.IsType<decimal>(reversed.Data["refund_credits"]));
-        Assert.Equal(2.40m, Assert.IsType<decimal>(reversed.Data["penalty_credits"]));
+        Assert.Equal(8, Assert.IsType<decimal>(reversed.Data["refund_minutes"]));
+        Assert.Equal(2.40m, Assert.IsType<decimal>(reversed.Data["penalty_minutes"]));
         Assert.Equal(booking.Id, reversed.Data["booking_id"]);
     }
 
@@ -359,51 +359,11 @@ public class NoShowWorkerTests
     /// </para>
     /// </summary>
     [Fact]
-    public async Task A_desk_penalty_refund_nets_the_penalty_leg_and_the_refund_still_reverses()
+    public Task A_desk_penalty_refund_nets_the_penalty_leg_and_the_refund_still_reverses()
     {
-        await using var host = await TestHost.CreateAsync();
-        using var scope = host.NewScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
-
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
-            RelatedBookingId: booking.Id), default);
-
-        await CreateWorker(host).TickAsync(default);
-        await db.Entry(booking).ReloadAsync();
-        Assert.Equal(BookingStatus.NoShow, booking.Status);
-        Assert.Equal(100m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
-
-        // The desk compensates by hand, naming the booking — the penalty back, say.
-        var adjustment = await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 2.40m, host.AdminUser.Id,
-            RelatedBookingId: booking.Id, Reason: "Sorry — the box was offline"), default);
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
-
-        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
-        var result = await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default);
-        var ok = Assert.IsType<NoShowReversalResult.Ok>(result);
-        Assert.True(ok.ManuallyCompensated);
-        Assert.Equal(8m, ok.RefundReversedCredits);     // the refund always comes back out
-        Assert.Equal(0m, ok.PenaltyReversedCredits);    // the desk already returned it
-
-        await db.Entry(booking).ReloadAsync();
-        Assert.Equal(BookingStatus.Booked, booking.Status);
-        Assert.Equal(attendedAt, booking.CheckedInAt);
-
-        // 100 seeded − 8 charged: the member played, and owes the court once.
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
-        var refunds = db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund).ToList();
-        Assert.Equal(2, refunds.Count);
-        Assert.Equal(0m, refunds.Sum(l => l.AmountCredits));
-        // One penalty row only — the sweep's. The desk's adjustment is what returned it.
-        Assert.Single(db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.NoShowPenalty));
-
-        var audit = Assert.Single(db.AuditLogs.Where(a => a.Action == "booking.no_show_reversed"));
-        Assert.Contains("manual_compensation", audit.DetailsJson);
-        Assert.Contains(adjustment.Id.ToString(), audit.DetailsJson);   // the ids the netting used
+        // P13-B1: the fixture's penalty is a fraction of a credit (2.40); the penalty is floor(charged x pct / 100) in whole minutes (§1.2)
+        Assert.Fail($"P13-B1: the fixture's penalty is a fraction of a credit (2.40); the penalty is floor(charged x pct / 100) in whole minutes (§1.2)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -419,38 +379,11 @@ public class NoShowWorkerTests
     /// </para>
     /// </summary>
     [Fact]
-    public async Task A_desk_correction_in_the_other_direction_is_netted_and_not_applied_twice()
+    public Task A_desk_correction_in_the_other_direction_is_netted_and_not_applied_twice()
     {
-        await using var host = await TestHost.CreateAsync();
-        using var scope = host.NewScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
-
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
-            RelatedBookingId: booking.Id), default);
-
-        await CreateWorker(host).TickAsync(default);
-        await db.Entry(booking).ReloadAsync();
-        Assert.Equal(100m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
-
-        // The desk undoes the whole settlement by hand: refund out, penalty back, net −5.60.
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, -5.60m, host.AdminUser.Id,
-            RelatedBookingId: booking.Id, Reason: "Box was offline — putting the sweep back"), default);
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
-
-        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
-        var ok = Assert.IsType<NoShowReversalResult.Ok>(
-            await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default));
-        Assert.Equal(2.40m, ok.RefundReversedCredits);
-        Assert.Equal(2.40m, ok.PenaltyReversedCredits);
-
-        // Still 92. The member is not corrected twice.
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
-        await db.Entry(booking).ReloadAsync();
-        Assert.Equal(BookingStatus.Booked, booking.Status);
+        // P13-B1: the fixture's penalty is a fraction of a credit (2.40); the penalty is floor(charged x pct / 100) in whole minutes (§1.2)
+        Assert.Fail($"P13-B1: the fixture's penalty is a fraction of a credit (2.40); the penalty is floor(charged x pct / 100) in whole minutes (§1.2)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -460,34 +393,11 @@ public class NoShowWorkerTests
     /// pins the service against rows that predate that validation.
     /// </summary>
     [Fact]
-    public async Task An_adjustment_on_another_members_wallet_does_not_net_this_payers_legs()
+    public Task An_adjustment_on_another_members_wallet_does_not_net_this_payers_legs()
     {
-        await using var host = await TestHost.CreateAsync();
-        using var scope = host.NewScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
-
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
-            RelatedBookingId: booking.Id), default);
-
-        await CreateWorker(host).TickAsync(default);
-        await db.Entry(booking).ReloadAsync();
-        Assert.Equal(BookingStatus.NoShow, booking.Status);
-
-        // The desk credits the admin's own wallet while pasting this member's booking id.
-        await ledger.PostAsync(new LedgerPosting(host.AdminUser.Id, LedgerEntryType.AdminAdjustment, 2.40m, host.AdminUser.Id,
-            RelatedBookingId: booking.Id, Reason: "wrong wallet"), default);
-
-        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
-        var ok = Assert.IsType<NoShowReversalResult.Ok>(
-            await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default));
-        Assert.False(ok.ManuallyCompensated);
-        Assert.Equal(8m, ok.RefundReversedCredits);
-        Assert.Equal(2.40m, ok.PenaltyReversedCredits);
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        // P13-B1: the fixture's penalty is a fraction of a credit (2.40); the penalty is floor(charged x pct / 100) in whole minutes (§1.2)
+        Assert.Fail($"P13-B1: the fixture's penalty is a fraction of a credit (2.40); the penalty is floor(charged x pct / 100) in whole minutes (§1.2)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -511,7 +421,7 @@ public class NoShowWorkerTests
             EndsAt = DateTimeOffset.UtcNow.AddDays(-400).AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = BookingStatus.Booked,
         };
         db.Bookings.Add(ancient);
@@ -539,7 +449,7 @@ public class NoShowWorkerTests
     /// </para>
     ///
     /// <para>
-    /// Mutation-proved: restoring <c>b.AmountChargedCredits - penalty</c> in <c>SweepOneAsync</c>
+    /// Mutation-proved: restoring <c>b.AmountChargedMinutes - penalty</c> in <c>SweepOneAsync</c>
     /// puts 35.00 back into both the mail and the event, and this test fails on the refund
     /// figure in each. The fixture varies the price so the arithmetic cannot coincide — at
     /// 50 credits and 30% the gross (50), the net (35) and the penalty (15) are three distinct
@@ -555,17 +465,17 @@ public class NoShowWorkerTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var bus = host.Services.GetRequiredService<IEventBus>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        var booking = await AddBookingAsync(host, db, charged: true, amount: 50m);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -50m, host.PlayerUser.Id,
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 50);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -50, host.PlayerUser.Id,
             RelatedBookingId: booking.Id), default);
 
         await CreateWorker(host).TickAsync(default);
 
         // What the ledger actually holds: two rows, never netted.
         var rows = db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToList();
-        Assert.Equal(50m, Assert.Single(rows, l => l.Type == LedgerEntryType.CancellationRefund).AmountCredits);
-        Assert.Equal(-15m, Assert.Single(rows, l => l.Type == LedgerEntryType.NoShowPenalty).AmountCredits);
+        Assert.Equal(50, Assert.Single(rows, l => l.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
+        Assert.Equal(-15, Assert.Single(rows, l => l.Type == LedgerEntryType.NoShowPenalty).AmountMinutes);
 
         var mail = Assert.Single(host.EmailService.Sent, m => m.Subject.StartsWith("Missed booking", StringComparison.Ordinal));
 
@@ -583,7 +493,7 @@ public class NoShowWorkerTests
         var emitted = new List<DomainEvent>();
         while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
         var noShow = Assert.Single(emitted, e => e.Type == "booking.no_show");
-        Assert.Equal(50m, Assert.IsType<decimal>(noShow.Data["refund_credits"]));
-        Assert.Equal(15m, Assert.IsType<decimal>(noShow.Data["penalty_credits"]));
+        Assert.Equal(50, Assert.IsType<decimal>(noShow.Data["refund_minutes"]));
+        Assert.Equal(15, Assert.IsType<decimal>(noShow.Data["penalty_minutes"]));
     }
 }

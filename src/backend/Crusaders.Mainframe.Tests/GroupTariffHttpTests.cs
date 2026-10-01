@@ -317,7 +317,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         {
             (null, TestHost.LeagueCreditsPerZar, false, true, leagueId, null),
             (TestHost.LeagueCreditsPerZar, 2.0m, true, true, coachingId, null),
-            (2.0m, 2.0m, true, false, null, leagueId),
+            (2, 2, true, false, null, leagueId),
         };
         for (var i = 0; i < expected.Length; i++)
         {
@@ -491,7 +491,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
                 TenantId = club.TenantId,
                 UserId = club.MemberUserId,
                 Type = LedgerEntryType.TopUp,
-                AmountCredits = 500m,
+                AmountMinutes = 500,
                 ActorUserId = Guid.Empty,
                 Reason = "fixture float",
             });
@@ -548,7 +548,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var league = await db.MemberGroups.IgnoreQueryFilters().FirstAsync(g => g.Id == leagueId);
-        Assert.Equal(TestHost.LeagueCreditsPerZar, league.CreditsPerZar);
+        Assert.Null(league.PackageDiscountBps);
         Assert.True(league.PeakPriority);
         Assert.True(await db.MemberGroupMembers.IgnoreQueryFilters().AnyAsync(m => m.GroupId == leagueId && m.UserId == club.MemberUserId));
         Assert.False(await db.MemberGroupMembers.IgnoreQueryFilters().AnyAsync(m => m.GroupId == leagueId && m.UserId == other.MemberUserId));

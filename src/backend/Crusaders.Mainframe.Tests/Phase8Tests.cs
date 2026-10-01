@@ -19,70 +19,27 @@ public class Phase8Tests
     // ---- 8.2 Credits + class-driven conversion ----
 
     [Fact]
-    public async Task Top_up_for_regular_member_converts_R100_to_160_credits()
+    public Task Top_up_for_regular_member_converts_R100_to_160_credits()
     {
-        await using var host = await TestHost.CreateAsync();
-        using var scope = host.NewScope();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var settings = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
-        var s = await settings.GetAsync(default);
-
-        // Simulate the TopUp callback's conversion logic: the member's groups' tariff (D2).
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var tariff = await MemberTariffs.ForAsync(db, host.PlayerUser.Id, s, default);
-        var rate = tariff.TopUpRate;
-        var credits = 100m * rate;
-
-        await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.TopUp, credits, host.PlayerUser.Id,
-            ZarPaid: 100m, ConversionRate: rate, Reason: "test top-up"), default);
-
-        var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Null(tariff.RateGroup);
-        Assert.Equal(1.6m, rate);
-        Assert.Equal(160m, balance);
+        // P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)
+        Assert.Fail($"P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)");
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task Top_up_for_league_member_converts_R100_to_240_credits()
+    public Task Top_up_for_league_member_converts_R100_to_240_credits()
     {
-        await using var host = await TestHost.CreateAsync();
-        using var scope = host.NewScope();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var settings = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
-        var s = await settings.GetAsync(default);
-
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var tariff = await MemberTariffs.ForAsync(db, host.LeaguePlayerUser.Id, s, default);
-        var rate = tariff.TopUpRate;
-        var credits = 100m * rate;
-
-        await ledger.PostAsync(new LedgerPosting(
-            host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, credits, host.LeaguePlayerUser.Id,
-            ZarPaid: 100m, ConversionRate: rate, Reason: "test top-up"), default);
-
-        var balance = await ledger.GetBalanceAsync(host.LeaguePlayerUser.Id, default);
-        Assert.Equal(MemberGroupSystemKeys.League, tariff.RateGroup?.SystemKey);
-        Assert.Equal(2.4m, rate);
-        Assert.Equal(240m, balance);
+        // P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)
+        Assert.Fail($"P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)");
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task Ledger_records_zar_paid_and_conversion_rate_on_topup_rows()
+    public Task Ledger_records_zar_paid_and_conversion_rate_on_topup_rows()
     {
-        await using var host = await TestHost.CreateAsync();
-        using var scope = host.NewScope();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-
-        await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.TopUp, 160m, host.PlayerUser.Id,
-            ZarPaid: 100m, ConversionRate: 1.6m, Reason: "R100 → 160c"), default);
-
-        var entry = await db.LedgerEntries.SingleAsync();
-        Assert.Equal(100m, entry.ZarPaid);
-        Assert.Equal(1.6m, entry.ConversionRate);
-        Assert.Equal(160m, entry.AmountCredits); // legacy column name, holds credits now
+        // P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)
+        Assert.Fail($"P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)");
+        return Task.CompletedTask;
     }
 
     // ---- 8.3 Charge at booking ----
@@ -101,7 +58,7 @@ public class Phase8Tests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         // Fund the player with 100 credits; slice price is 8.
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id, ZarPaid: 62.50m, ConversionRate: 1.6m), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id, ZarPaid: 62.50m), default);
 
         var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
@@ -110,14 +67,14 @@ public class Phase8Tests
         // 100 in, 8 out. The balance the caller is handed is post-charge, because that is
         // the number the confirmation email quotes.
         var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Equal(92m, balance);
-        Assert.Equal(92m, ok.BalanceAfterCredits);
+        Assert.Equal(92, balance);
+        Assert.Equal(92, ok.BalanceAfterMinutes);
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var entries = await db.LedgerEntries.Where(l => l.UserId == host.PlayerUser.Id).ToListAsync();
         Assert.Equal(2, entries.Count);
         var charge = Assert.Single(entries, e => e.Type == LedgerEntryType.BookingCharge);
-        Assert.Equal(-8m, charge.AmountCredits);
+        Assert.Equal(-8, charge.AmountMinutes);
         Assert.Equal(ok.Booking.Id, charge.RelatedBookingId);
         Assert.NotNull(ok.Booking.ChargedAt);
     }
@@ -137,7 +94,7 @@ public class Phase8Tests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(2);
         // Written directly, with no ledger entry and no ChargedAt: the shape of a row from
         // before charge-at-booking. Built rather than un-charged, because deleting a ledger
@@ -155,21 +112,21 @@ public class Phase8Tests
             EndsAt = startsAt.AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = BookingStatus.Booked,
             ChargedAt = null,
         };
         db.Bookings.Add(reserved);
         await db.SaveChangesAsync();
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         var charge = await booking.ChargeOnActivationAsync(reserved.Id, payerOverrideUserId: null, actorUserId: host.PlayerUser.Id, default);
         var ok = Assert.IsType<ChargeResult.Ok>(charge);
         Assert.Equal(host.PlayerUser.Id, ok.ChargedUserId);
-        Assert.Equal(8m, ok.AmountCredits);
+        Assert.Equal(8, ok.AmountMinutes);
 
         var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Equal(92m, balance);
+        Assert.Equal(92, balance);
 
         var fresh = await db.Bookings.AsNoTracking().FirstAsync(b => b.Id == reserved.Id);
         Assert.NotNull(fresh.ChargedAt);
@@ -183,7 +140,7 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(2);
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
@@ -193,10 +150,10 @@ public class Phase8Tests
         {
             var result = await booking.ChargeOnActivationAsync(created.Booking.Id, null, host.PlayerUser.Id, default);
             var already = Assert.IsType<ChargeResult.AlreadyCharged>(result);
-            Assert.Equal(8m, already.AmountCredits);
+            Assert.Equal(8, already.AmountMinutes);
         }
 
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(92, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -212,15 +169,15 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(3); // outside penalty window
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
-        Assert.Equal(8m, cancelled.RefundedCredits);
-        Assert.Equal(0m, cancelled.PenaltyCredits);
+        Assert.Equal(8, cancelled.RefundedMinutes);
+        Assert.Equal(0, cancelled.PenaltyMinutes);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // Net zero, but visibly so: charge and refund both on the statement.
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -244,7 +201,7 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
 
         // 5 min in the future — well within the 15-minute penalty window — so it ends in
         // twenty, and from 23:41 local onwards the fixture's midnight close refuses it
@@ -256,16 +213,16 @@ public class Phase8Tests
 
         // Use admin actor so the "can't self-cancel after start" guard doesn't trip on edge timing.
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
-        Assert.Equal(8m, cancelled.RefundedCredits);     // the booking charge, in full
-        Assert.Equal(2.4m, cancelled.PenaltyCredits);    // 30% of 8 credits = 2.4
+        Assert.Equal(8, cancelled.RefundedMinutes);     // the booking charge, in full
+        Assert.Equal(2.4m, cancelled.PenaltyMinutes);    // 30% of 8 credits = 2.4
 
         // Balance: 100 - 8 + 8 - 2.4 = 97.6
         Assert.Equal(97.6m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var entries = await db.LedgerEntries.Where(l => l.UserId == host.PlayerUser.Id).ToListAsync();
-        Assert.Equal(-2.4m, Assert.Single(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty).AmountCredits);
-        Assert.Equal(8m, Assert.Single(entries, e => e.Type == LedgerEntryType.CancellationRefund).AmountCredits);
+        Assert.Equal(-2.4m, Assert.Single(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty).AmountMinutes);
+        Assert.Equal(8, Assert.Single(entries, e => e.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
     }
 
     // ---- 8.4 Per-day cap + peak-hours ----
@@ -278,7 +235,7 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
 
         // Tomorrow at 09:00 + 10:00 + 11:00 + 12:00 — five 15-min slices on tomorrow's date.
         var tomorrow = DateTime.UtcNow.Date.AddDays(2);
@@ -314,7 +271,7 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
 
         var tomorrow = DateTime.UtcNow.Date.AddDays(2);
         // Pile in 5 bookings — admin acts on behalf, so the cap doesn't apply.
@@ -339,7 +296,7 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
 
         // Pick a slot inside 16:00–19:00 UTC tomorrow (test fixture uses UTC timezone).
         var tomorrowPeak = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(1).AddHours(17), TimeSpan.Zero);
@@ -355,7 +312,7 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 200m, host.LeaguePlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 200, host.LeaguePlayerUser.Id), default);
         var tomorrowPeak = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(1).AddHours(17), TimeSpan.Zero);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.LeaguePlayerUser.Id, host.LeaguePlayerUser.Id, tomorrowPeak, 1, default);
         Assert.IsType<BookingResult.Ok>(result);
@@ -369,7 +326,7 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
 
         // peak_advance_hours_for_regular = 1 by default in the test fixture.
         // If "now" is currently within peak hours, this slot will be inside the 1h window; otherwise we skip.
@@ -391,8 +348,8 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100m, host.LeaguePlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100, host.LeaguePlayerUser.Id), default);
 
         // Booked by PlayerUser (Regular). Use an admin actor so peak-hours/per-day cap don't
         // interfere — STATED now rather than inferred from actorId != userId (D2-B13), which is
@@ -406,8 +363,8 @@ public class Phase8Tests
         var ok = Assert.IsType<ChargeResult.Ok>(charge);
         Assert.Equal(host.LeaguePlayerUser.Id, ok.ChargedUserId);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));    // booker untouched
-        Assert.Equal(92m, await ledger.GetBalanceAsync(host.LeaguePlayerUser.Id, default)); // payer debited
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));    // booker untouched
+        Assert.Equal(92, await ledger.GetBalanceAsync(host.LeaguePlayerUser.Id, default)); // payer debited
     }
 
     [Fact]
@@ -419,7 +376,7 @@ public class Phase8Tests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(2);
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 

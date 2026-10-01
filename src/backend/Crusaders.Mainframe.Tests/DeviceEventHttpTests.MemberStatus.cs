@@ -125,7 +125,7 @@ public abstract partial class DeviceEventHttpTests
             if (sold)
             {
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-                Assert.Equal(184m, await BalanceAsync(factory, box.MemberId));
+                Assert.Equal(184, await BalanceAsync(factory, box.MemberId));
                 return;
             }
 
@@ -138,7 +138,7 @@ public abstract partial class DeviceEventHttpTests
             using var scope = factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             Assert.Empty(await db.Bookings.IgnoreQueryFilters().Where(b => b.UserId == box.MemberId).ToListAsync());
-            Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200, await BalanceAsync(factory, box.MemberId));
         }
 
         /// <summary>

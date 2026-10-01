@@ -285,7 +285,7 @@ public abstract partial class DeviceEventHttpTests
 
             // Charged exactly once throughout.
             Assert.Single(await LedgerAsync(factory, bookingId));
-            Assert.Equal(200m - 32m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200 - 32, await BalanceAsync(factory, box.MemberId));
         }
 
         // ---- lighting a booked court from the box -------------------------------
@@ -321,7 +321,7 @@ public abstract partial class DeviceEventHttpTests
                     EndsAt = startsAt.AddMinutes(45),
                     SliceMinutes = 15,
                     SliceCount = 3,
-                    AmountChargedCredits = 24m,
+                    AmountChargedMinutes = 24,
                     Status = BookingStatus.Booked,
                     ChargedAt = DateTimeOffset.UtcNow,
                 };

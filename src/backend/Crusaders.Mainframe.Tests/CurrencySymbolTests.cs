@@ -124,8 +124,8 @@ public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
     public void A_topup_confirmation_is_denominated_in_the_clubs_own_currency()
     {
         var mail = EmailTemplates.TopUpConfirmation(Club, "member@test.local", new TopUpReceipt(
-            AmountZar: 100m, CreditsAdded: 160m, ConversionRate: 1.6m,
-            BalanceAfterCredits: 210m, Reference: "1089250", CurrencySymbol: "CHF"));
+            AmountZar: 100m, MinutesAdded: 160, ConversionRate: 1.6m,
+            BalanceAfterMinutes: 210, Reference: "1089250", CurrencySymbol: "CHF"));
 
         Assert.Contains("CHF100.00", mail.HtmlBody);
         // The rate is quoted per ONE of the club's own currency, not per a hardcoded rand.
@@ -169,10 +169,10 @@ public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
     {
         var confirmation = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
-            AmountCredits: 50m, BalanceAfterCredits: 60m,
+            AmountMinutes: 50, BalanceAfterMinutes: 60,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
-        var cancellation = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
-        var adjustment = EmailTemplates.CreditAdjustment(Club, "member@test.local", 25m, 145m, "desk credit");
+        var cancellation = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50, 15);
+        var adjustment = EmailTemplates.CreditAdjustment(Club, "member@test.local", 25, 145, "desk credit");
 
         foreach (var mail in new[] { confirmation, cancellation, adjustment })
         {
@@ -355,7 +355,7 @@ public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
         var body = new Dictionary<string, object?>
         {
             ["sliceMinutes"] = 15,
-            ["slicePriceCredits"] = 8m,
+            ["slicePriceCredits"] = 8,
             ["advanceBookingDays"] = 14,
             ["dayStartMinute"] = 360,
             ["dayEndMinute"] = 1320,

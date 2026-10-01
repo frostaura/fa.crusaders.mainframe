@@ -247,10 +247,10 @@ public sealed class TraceKindsTests
     {
         var system = TraceKinds.Headline(
             TraceKinds.WalletPenalised,
-            new TraceFacts { ActorKind = TraceActors.System, AmountCredits = 9m });
+            new TraceFacts { ActorKind = TraceActors.System, AmountMinutes = 9 });
         var person = TraceKinds.Headline(
             TraceKinds.WalletPenalised,
-            new TraceFacts { ActorKind = TraceActors.Admin, AmountCredits = 9m });
+            new TraceFacts { ActorKind = TraceActors.Admin, AmountMinutes = 9 });
 
         Assert.NotEqual(person, system);
         Assert.Contains("automatic", system, StringComparison.OrdinalIgnoreCase);

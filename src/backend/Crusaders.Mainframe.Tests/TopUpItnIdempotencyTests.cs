@@ -150,7 +150,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var rows = await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).ToListAsync();
-        return (rows.Sum(r => r.AmountCredits), rows.Count);
+        return (rows.Sum(r => r.AmountMinutes), rows.Count);
     }
 
     // ---- D2-B01: an ITN with no pf_payment_id --------------------------------
@@ -177,7 +177,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var checkoutId = await RegisterAsync(client, 100m);
+        var checkoutId = await RegisterAsync(client, 100);
 
         var first = await client.PostAsync($"{CallbackPath}?tenant={seeded.Slug}", Itn(checkoutId, "100.00", pfPaymentId: null));
         Assert.Equal(HttpStatusCode.BadRequest, first.StatusCode);
@@ -190,7 +190,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 
         var (balance, rows) = await LedgerAsync(factory, seeded);
         Assert.Equal(0, rows);
-        Assert.Equal(0m, balance);
+        Assert.Equal(0, balance);
 
         // And the row is still Pending, so a properly-formed retry can still complete it.
         using var scope = factory.Services.CreateScope();
@@ -208,7 +208,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var checkoutId = await RegisterAsync(client, 100m);
+        var checkoutId = await RegisterAsync(client, 100);
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -218,7 +218,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 
         var (balance, rows) = await LedgerAsync(factory, seeded);
         Assert.Equal(1, rows);
-        Assert.Equal(160m, balance);
+        Assert.Equal(160, balance);
     }
 
     /// <summary>
@@ -236,7 +236,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var checkoutId = await RegisterAsync(client, 100m);
+        var checkoutId = await RegisterAsync(client, 100);
 
         var both = await Task.WhenAll(
             client.PostAsync($"{CallbackPath}?tenant={seeded.Slug}", Itn(checkoutId, "100.00", "5150002")),
@@ -246,7 +246,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 
         var (balance, rows) = await LedgerAsync(factory, seeded);
         Assert.Equal(1, rows);
-        Assert.Equal(160m, balance);
+        Assert.Equal(160, balance);
     }
 
     /// <summary>
@@ -276,8 +276,8 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
 
-        var firstCheckout = await RegisterAsync(client, 100m);
-        var secondCheckout = await RegisterAsync(client, 100m);
+        var firstCheckout = await RegisterAsync(client, 100);
+        var secondCheckout = await RegisterAsync(client, 100);
 
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(
             $"{CallbackPath}?tenant={seeded.Slug}", Itn(firstCheckout, "100.00", "5150030"))).StatusCode);
@@ -300,7 +300,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         // And the member was credited exactly once for the one payment that exists.
         var (balance, rows) = await LedgerAsync(factory, seeded);
         Assert.Equal(1, rows);
-        Assert.Equal(160m, balance);
+        Assert.Equal(160, balance);
     }
 
     // ---- D2-B02: the reference is not tenant-namespaced -----------------------
@@ -324,8 +324,8 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 
         const string sharedPaymentId = "1000001";
 
-        var checkoutA = await RegisterAsync(MemberClient(factory, clubA), 100m);
-        var checkoutB = await RegisterAsync(MemberClient(factory, clubB), 100m);
+        var checkoutA = await RegisterAsync(MemberClient(factory, clubA), 100);
+        var checkoutB = await RegisterAsync(MemberClient(factory, clubB), 100);
 
         var a = await factory.CreateClient().PostAsync(
             $"{CallbackPath}?tenant={clubA.Slug}", Itn(checkoutA, "100.00", sharedPaymentId));
@@ -335,8 +335,8 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         Assert.Equal(HttpStatusCode.OK, a.StatusCode);
         Assert.Equal(HttpStatusCode.OK, b.StatusCode);
 
-        Assert.Equal((160m, 1), await LedgerAsync(factory, clubA));
-        Assert.Equal((160m, 1), await LedgerAsync(factory, clubB));
+        Assert.Equal((160, 1), await LedgerAsync(factory, clubA));
+        Assert.Equal((160, 1), await LedgerAsync(factory, clubB));
     }
 
     /// <summary>The reference actually stored carries the tenant, so the two clubs' keys can never meet.</summary>
@@ -348,7 +348,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var checkoutId = await RegisterAsync(client, 100m);
+        var checkoutId = await RegisterAsync(client, 100);
 
         Assert.Equal(HttpStatusCode.OK,
             (await client.PostAsync($"{CallbackPath}?tenant={seeded.Slug}", Itn(checkoutId, "100.00", "5150003"))).StatusCode);
@@ -385,7 +385,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var checkoutId = await RegisterAsync(client, 100m);
+        var checkoutId = await RegisterAsync(client, 100);
 
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(
             $"{CallbackPath}?tenant={seeded.Slug}", Itn(checkoutId, "100.00", "5150004", terminalStatus))).StatusCode);
@@ -400,7 +400,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 
         var (balance, rows) = await LedgerAsync(factory, seeded);
         Assert.Equal(0, rows);
-        Assert.Equal(0m, balance);
+        Assert.Equal(0, balance);
     }
 
     /// <summary>
@@ -416,7 +416,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var checkoutId = await RegisterAsync(client, 1000m);
+        var checkoutId = await RegisterAsync(client, 1000);
 
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync(
             $"{CallbackPath}?tenant={seeded.Slug}", Itn(checkoutId, "1.00", "5150006"))).StatusCode);
@@ -427,7 +427,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 
         var (balance, rows) = await LedgerAsync(factory, seeded);
         Assert.Equal(0, rows);
-        Assert.Equal(0m, balance);
+        Assert.Equal(0, balance);
     }
 
     // ---- D2-B05: the cap is per MEMBER, not per transaction --------------------
@@ -456,7 +456,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         // Two registrations, settled, take the member to R200 of a R300 ceiling.
         foreach (var payment in new[] { "5150010", "5150011" })
         {
-            var checkoutId = await RegisterAsync(client, 100m);
+            var checkoutId = await RegisterAsync(client, 100);
             Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(
                 $"{CallbackPath}?tenant={seeded.Slug}", Itn(checkoutId, "100.00", payment))).StatusCode);
         }
@@ -490,7 +490,7 @@ public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory, SettingsJson(maxZar: 100m));
         var client = MemberClient(factory, seeded);
 
-        var checkoutId = await RegisterAsync(client, 100m);
+        var checkoutId = await RegisterAsync(client, 100);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(
             $"{CallbackPath}?tenant={seeded.Slug}", Itn(checkoutId, "100.00", "5150020", "FAILED"))).StatusCode);
 

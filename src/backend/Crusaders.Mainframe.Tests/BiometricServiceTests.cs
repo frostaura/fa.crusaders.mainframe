@@ -86,7 +86,7 @@ public class BiometricServiceTests
             EndsAt = startsAt.AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = BookingStatus.Booked,
             ChargedAt = charged ? DateTimeOffset.UtcNow : null,
         };
@@ -165,7 +165,7 @@ public class BiometricServiceTests
         Assert.True(match.Matched);
         var refused = Assert.IsType<ActivationResult.InsufficientBalance>(activation);
         Assert.Equal(host.PlayerUser.Id, refused.PayerUserId);
-        Assert.Equal(8m, refused.Required);
+        Assert.Equal(8, refused.Required);
 
         // Refused means refused: no attendance stamp, no lights.
         var fresh = await db.Bookings.AsNoTracking().SingleAsync();

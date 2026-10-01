@@ -41,7 +41,7 @@ public sealed class AdminSettingsRecordAndBlockReportTests : IClassFixture<Postg
     private static Dictionary<string, object?> BaseSave() => new()
     {
         ["sliceMinutes"] = 15,
-        ["slicePriceCredits"] = 8m,
+        ["slicePriceCredits"] = 8,
         ["advanceBookingDays"] = 14,
         ["dayStartMinute"] = 0,
         ["dayEndMinute"] = 1440,
@@ -290,7 +290,7 @@ public sealed class AdminSettingsRecordAndBlockReportTests : IClassFixture<Postg
         var day = DateTimeOffset.UtcNow.AddDays(-1).Date;
         var slot = new DateTimeOffset(day.AddHours(9), TimeSpan.Zero);
 
-        await SeedAsync(factory, club, slot, BookingStatus.Booked, charged: 32m);
+        await SeedAsync(factory, club, slot, BookingStatus.Booked, charged: 32);
         var client = club.AdminClient(factory);
         var window = $"?from={day:yyyy-MM-dd}&to={day.AddDays(1):yyyy-MM-dd}";
 
@@ -328,7 +328,7 @@ public sealed class AdminSettingsRecordAndBlockReportTests : IClassFixture<Postg
         var day = DateTimeOffset.UtcNow.AddDays(-1).Date;
         var window = $"?from={day:yyyy-MM-dd}&to={day.AddDays(1):yyyy-MM-dd}";
 
-        await SeedAsync(factory, club, new DateTimeOffset(day.AddHours(9), TimeSpan.Zero), BookingStatus.NoShow, 32m);
+        await SeedAsync(factory, club, new DateTimeOffset(day.AddHours(9), TimeSpan.Zero), BookingStatus.NoShow, 32);
         var client = club.AdminClient(factory);
 
         var before = await client.GetFromJsonAsync<JsonElement>("/api/v1/admin/reports/no-shows" + window);
@@ -346,7 +346,7 @@ public sealed class AdminSettingsRecordAndBlockReportTests : IClassFixture<Postg
 
     private static async Task SeedAsync(
         TestWebAppFactory factory, DoorClub club, DateTimeOffset startsAt,
-        BookingStatus status, decimal charged = 0m)
+        BookingStatus status, int charged = 0)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -364,7 +364,7 @@ public sealed class AdminSettingsRecordAndBlockReportTests : IClassFixture<Postg
             EndsAt = startsAt.AddHours(1).ToUniversalTime(),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = charged,
+            AmountChargedMinutes = charged,
             Status = status,
             BlockLabel = isBlock ? "Maintenance" : null,
         });

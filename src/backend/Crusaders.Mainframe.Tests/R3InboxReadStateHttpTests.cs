@@ -27,17 +27,17 @@ public sealed class R3InboxReadStateHttpTests(PostgresFixture pg) : IClassFixtur
         Skip.IfNot(pg.Available, Skipped);
         await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r3i9inbox");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { userId = club.Alex }]);
 
         var samInvite = Assert.Single(await LinesAsync(f, club.Sam, bookingId), n => n.Kind == MemberEventCatalogue.Invited);
         Assert.Null(samInvite.ReadAt);
 
         var seat = PlayersClub.SeatOf(body, 2);
-        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareCredits;
+        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareMinutes;
         Assert.True((await club.Client(f, club.Sam).PostAsJsonAsync(
-            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = shown })).IsSuccessStatusCode);
+            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = shown })).IsSuccessStatusCode);
 
         var sam = await LinesAsync(f, club.Sam, bookingId);
         var invite = Assert.Single(sam, n => n.Kind == MemberEventCatalogue.Invited);

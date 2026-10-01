@@ -148,7 +148,7 @@ public class RealtimeOutboxTests
 public class RealtimeBusTests
 {
     private static RealtimeMessage Frame(decimal balance)
-        => new(string.Empty, JsonSerializer.Serialize(new { balance_credits = balance }));
+        => new(string.Empty, JsonSerializer.Serialize(new { balance_minutes = balance }));
 
     /// <summary>
     /// <b>D2-B22, and the test shape D2 §8.5 asks for: assert SILENCE, not a different payload.</b>
@@ -165,7 +165,7 @@ public class RealtimeBusTests
         var clubB = RealtimeTopic.Wallet(Guid.NewGuid(), userId);
 
         var channel = bus.Subscribe(clubA);
-        bus.Publish(clubB, Frame(1000m));
+        bus.Publish(clubB, Frame(1000));
 
         Assert.False(channel.Reader.TryRead(out _), "a frame published by another club reached this club's stream");
     }
@@ -226,7 +226,7 @@ public class RealtimeBusTests
         Assert.Equal(0, bus.TopicCount);
 
         // And publishing to a topic nobody holds is a no-op rather than a resurrection.
-        bus.Publish(topic, Frame(1m));
+        bus.Publish(topic, Frame(1));
         Assert.Equal(0, bus.TopicCount);
     }
 }
@@ -250,7 +250,7 @@ public class LedgerActorTests
         UserId = subject,
         ActorUserId = actor,
         Type = LedgerEntryType.NoShowPenalty,
-        AmountCredits = -3m,
+        AmountMinutes = -3,
     };
 
     /// <summary>The finding: a system posting is a system posting, not an admin.</summary>

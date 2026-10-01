@@ -35,18 +35,18 @@ public class AdminOverdraftBookingTests
 {
     // TestHost fixture: slice_minutes 15, court price 8 credits, penalty_pct 30,
     // penalty_window_minutes 15.
-    private const decimal SlicePriceCredits = 8m;
+    private const int SlicePriceCredits = 8;
 
     /// <summary>Seeds the member with less than one slice costs, and hands back the pieces every test needs.</summary>
     private static async Task<(BookingService Bookings, LedgerService Ledger, MainframeDbContext Db)> ArrangeAsync(
-        TestHost host, IServiceScope scope, decimal seedCredits)
+        TestHost host, IServiceScope scope, int seedMinutes)
     {
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        if (seedCredits != 0m)
+        if (seedMinutes != 0)
         {
             await ledger.PostAsync(
-                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, seedCredits, host.PlayerUser.Id), default);
+                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, seedMinutes, host.PlayerUser.Id), default);
         }
 
         return (scope.ServiceProvider.GetRequiredService<BookingService>(), ledger, db);
@@ -62,7 +62,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedCredits: 3m);
+        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedMinutes: 3);
 
         var result = await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -70,12 +70,12 @@ public class AdminOverdraftBookingTests
             TestHost.BookableSlot(2), sliceCount: 1, default);
 
         var refusal = Assert.IsType<BookingResult.InsufficientBalance>(result);
-        Assert.Equal(3m, refusal.CurrentCredits);
-        Assert.Equal(SlicePriceCredits, refusal.RequiredCredits);
+        Assert.Equal(3, refusal.CurrentMinutes);
+        Assert.Equal(SlicePriceCredits, refusal.RequiredMinutes);
 
         // Nothing moved and nothing was reserved: a refusal that left a row behind would be
         // a court sold for no money.
-        Assert.Equal(3m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(3, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.Empty(await db.Bookings.IgnoreQueryFilters().ToListAsync());
     }
 
@@ -88,7 +88,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedCredits: 3m);
+        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedMinutes: 3);
 
         var result = await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -101,8 +101,8 @@ public class AdminOverdraftBookingTests
         Assert.Equal(host.AdminUser.Id, ok.Booking.ActorUserId);
 
         // 3 − 8 = −5, and the figure the response quotes is the figure the ledger holds.
-        Assert.Equal(-5m, ok.BalanceAfterCredits);
-        Assert.Equal(-5m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(-5, ok.BalanceAfterMinutes);
+        Assert.Equal(-5, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // settlement-model.md S1: Owed(b) = P, posted as ONE BookingCharge at the quoted
         // price. An override that discounted the court, or split the debit, would satisfy
@@ -111,10 +111,10 @@ public class AdminOverdraftBookingTests
             .Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync();
         var charge = Assert.Single(rows);
         Assert.Equal(LedgerEntryType.BookingCharge, charge.Type);
-        Assert.Equal(-SlicePriceCredits, charge.AmountCredits);
+        Assert.Equal(-SlicePriceCredits, charge.AmountMinutes);
         Assert.Equal(host.PlayerUser.Id, charge.UserId);
         Assert.Equal(host.AdminUser.Id, charge.ActorUserId);
-        Assert.Equal(SlicePriceCredits, ok.Booking.AmountChargedCredits);
+        Assert.Equal(SlicePriceCredits, ok.Booking.AmountChargedMinutes);
     }
 
     /// <summary>
@@ -130,7 +130,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedCredits: 0m);
+        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedMinutes: 0);
 
         var result = await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -139,13 +139,13 @@ public class AdminOverdraftBookingTests
 
         var ok = Assert.IsType<BookingResult.Ok>(result);
         Assert.Equal(host.AdminUser.Id, ok.Booking.UserId);
-        Assert.Equal(-SlicePriceCredits, ok.BalanceAfterCredits);
+        Assert.Equal(-SlicePriceCredits, ok.BalanceAfterMinutes);
         Assert.Equal(-SlicePriceCredits, await ledger.GetBalanceAsync(host.AdminUser.Id, default));
 
         // Still one BookingCharge at the full price: god mode moves the wallet, never the price.
         var charge = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync());
-        Assert.Equal(-SlicePriceCredits, charge.AmountCredits);
+        Assert.Equal(-SlicePriceCredits, charge.AmountMinutes);
     }
 
     /// <summary>
@@ -158,7 +158,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, ledger, _) = await ArrangeAsync(host, scope, seedCredits: 3m);
+        var (bookings, ledger, _) = await ArrangeAsync(host, scope, seedMinutes: 3);
 
         var result = await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -166,7 +166,7 @@ public class AdminOverdraftBookingTests
             TestHost.BookableSlot(2), sliceCount: 1, default);
 
         Assert.IsType<BookingResult.InsufficientBalance>(result);
-        Assert.Equal(3m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(3, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -180,7 +180,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 0m);
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedMinutes: 0);
 
         var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -196,8 +196,8 @@ public class AdminOverdraftBookingTests
 
         using var before = JsonDocument.Parse(row.BeforeJson!);
         using var after = JsonDocument.Parse(row.AfterJson!);
-        Assert.Equal(0m, before.RootElement.GetProperty("balance_credits").GetDecimal());
-        Assert.Equal(-SlicePriceCredits, after.RootElement.GetProperty("balance_credits").GetDecimal());
+        Assert.Equal(0m, before.RootElement.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(-SlicePriceCredits, after.RootElement.GetProperty("balance_minutes").GetDecimal());
         Assert.True(after.RootElement.GetProperty("self").GetBoolean());
         Assert.Equal(ok.Booking.Id, after.RootElement.GetProperty("booking_id").GetGuid());
     }
@@ -212,7 +212,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 3m);
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedMinutes: 3);
 
         Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -226,7 +226,7 @@ public class AdminOverdraftBookingTests
 
         // The member's own booking, funded: nothing new in the change record.
         await host.NewScope().ServiceProvider.GetRequiredService<LedgerService>().PostAsync(
-            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         // The OTHER court: BookableSlot(2) and BookableSlot(3) both step out of peak to the
         // same 19:xx when the suite runs between 13:00 and 16:00 UTC, and on one court the
         // second booking was then refused slot_taken — red every afternoon, green otherwise.
@@ -255,7 +255,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 200m);
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedMinutes: 200);
 
         var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -282,7 +282,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedCredits: 3m);
+        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedMinutes: 3);
 
         var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -300,10 +300,10 @@ public class AdminOverdraftBookingTests
 
         using var details = JsonDocument.Parse(audit.DetailsJson!);
         Assert.True(details.RootElement.GetProperty("overdrawn").GetBoolean());
-        Assert.Equal(3m, details.RootElement.GetProperty("balance_before_credits").GetDecimal());
+        Assert.Equal(3m, details.RootElement.GetProperty("balance_before_minutes").GetDecimal());
         Assert.Equal(
             await ledger.GetBalanceAsync(host.PlayerUser.Id, default),
-            details.RootElement.GetProperty("balance_after_credits").GetDecimal());
+            details.RootElement.GetProperty("balance_after_minutes").GetDecimal());
         Assert.Equal(ok.Booking.Id, details.RootElement.GetProperty("booking_id").GetGuid());
     }
 
@@ -318,7 +318,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedCredits: 200m);
+        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedMinutes: 200);
 
         Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
@@ -331,7 +331,7 @@ public class AdminOverdraftBookingTests
 
         using var details = JsonDocument.Parse(audit.DetailsJson!);
         Assert.False(details.RootElement.GetProperty("overdrawn").GetBoolean());
-        Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -345,22 +345,22 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedCredits: 3m);
+        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedMinutes: 3);
 
         // Far enough out to be outside the 15-minute penalty window.
         var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
             new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
             TestHost.BookableSlot(5), sliceCount: 1, default));
-        Assert.Equal(-5m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(-5, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         var cancelled = await bookings.CancelAsync(
             ok.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
 
         var done = Assert.IsType<CancellationResult.Ok>(cancelled);
-        Assert.Equal(SlicePriceCredits, done.RefundedCredits);
-        Assert.Equal(0m, done.PenaltyCredits);
-        Assert.Equal(3m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(SlicePriceCredits, done.RefundedMinutes);
+        Assert.Equal(0, done.PenaltyMinutes);
+        Assert.Equal(3, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // I11: the refund is its own row, not an edit of the charge.
         var rows = await db.LedgerEntries.IgnoreQueryFilters()
@@ -379,9 +379,9 @@ public class AdminOverdraftBookingTests
         var club = new Crusaders.Mainframe.Api.Email.ClubIdentity(
             "Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
         var overdrawn = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, -5m, 15, 30m));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 8, -5, 15, 30));
         var ordinary = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, 192m, 15, 30m));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 8, 192, 15, 30));
 
         // Both bodies: the explanation is worth nothing in the half the member is not shown.
         foreach (var body in new[] { overdrawn.HtmlBody, MailText.Unwrap(overdrawn.PlainBody) })
@@ -404,7 +404,7 @@ public class AdminOverdraftBookingTests
         var club = new Crusaders.Mainframe.Api.Email.ClubIdentity(
             "Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
         var own = EmailTemplates.BookingConfirmation(club, "desk@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, -8m, 15, 30m, MadeByClub: false));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 8, -8, 15, 30, MadeByClub: false));
 
         foreach (var body in new[] { own.HtmlBody, MailText.Unwrap(own.PlainBody) })
         {
@@ -426,7 +426,7 @@ public class AdminOverdraftBookingTests
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
-        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 0m);
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedMinutes: 0);
 
         Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,

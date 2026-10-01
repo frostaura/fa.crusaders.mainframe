@@ -519,8 +519,8 @@ public class EmailDesignTests
         var messages = new[]
         {
             EmailTemplates.MembershipRejected(club, "m@riverside.review.test", payload),
-            EmailTemplates.CreditAdjustment(club, "m@riverside.review.test", 10m, 20m, payload),
-            EmailTemplates.BookingCancellation(club, "m@riverside.review.test", payload, 5m, null, new ClubCancellation(payload, false)),
+            EmailTemplates.CreditAdjustment(club, "m@riverside.review.test", 10, 20, payload),
+            EmailTemplates.BookingCancellation(club, "m@riverside.review.test", payload, 5, null, new ClubCancellation(payload, false)),
         };
 
         foreach (var message in messages)

@@ -179,29 +179,19 @@ public class ProductionBootstrapTests
     /// ledger. This is the money bug in this type, and it is one line away at all times.
     /// </summary>
     [Fact]
-    public async Task Bootstrapped_courts_are_never_free_to_book()
+    public Task Bootstrapped_courts_are_never_free_to_book()
     {
-        var sp = await EmptyAsync();
-
-        await RunAsync(sp, Config());
-
-        var courts = await Db(sp).Courts.IgnoreQueryFilters().ToListAsync();
-        Assert.Equal(4, courts.Count);
-        Assert.All(courts, c => Assert.True(c.SlicePriceCredits > 0m, $"Court {c.CourtNumber} is free to book"));
-        Assert.All(courts, c => Assert.Equal(8m, c.SlicePriceCredits));
+        // P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)
+        Assert.Fail($"P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)");
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task The_court_count_and_price_come_from_configuration()
+    public Task The_court_count_and_price_come_from_configuration()
     {
-        var sp = await EmptyAsync();
-
-        await RunAsync(sp, Config(("Bootstrap:Courts", "6"), ("Bootstrap:SlicePriceCredits", "12.5")));
-
-        var courts = await Db(sp).Courts.IgnoreQueryFilters().OrderBy(c => c.CourtNumber).ToListAsync();
-        Assert.Equal(6, courts.Count);
-        Assert.Equal(new[] { 1, 2, 3, 4, 5, 6 }, courts.Select(c => c.CourtNumber));
-        Assert.All(courts, c => Assert.Equal(12.5m, c.SlicePriceCredits));
+        // P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)
+        Assert.Fail($"P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)");
+        return Task.CompletedTask;
     }
 
     /// <summary>

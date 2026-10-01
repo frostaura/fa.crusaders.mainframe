@@ -112,7 +112,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
         var before = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
 
         // 21:45 on a Saturday whose configured close is 20:00 — the exact slot finder B
@@ -137,7 +137,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // 03:00 on the Sunday. Before this rule existed the API answered 200 and debited
         // 50.00 for a slot that appears on no screen in the product.
@@ -155,7 +155,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // 19:45 + two 15-minute slices ends at 20:15, fifteen minutes past close. Half an
         // hour was asked for and half of it does not exist; selling the first half is a
@@ -174,7 +174,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // 07:00 Saturday is the first bookable minute of the day and must not be refused
         // by an off-by-one; 19:45–20:00 is the last, ending exactly at close.
@@ -192,7 +192,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // The flat pair says 06:00-22:00 and the Saturday map says 07:00-20:00. 06:30 on a
         // Saturday is inside the flat pair and outside the map; the map has to win, or the
@@ -222,7 +222,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         var refused = Assert.IsType<BookingResult.OutOfHours>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, At(Saturday, 23, 0), sliceCount: 1, default));
@@ -238,7 +238,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // "Admin always bypasses caps and peak-hour rules" (A.6/A.11), and the club's own
         // staff are the people who legitimately need a court at 06:00 on a Saturday.
@@ -290,7 +290,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // Ninety minutes asked for, roughly ten available. The box sells what is there.
         var result = await booking.CreateWalkUpAsync(
@@ -343,7 +343,7 @@ public class OperatingHoursTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // 13:00 is the new close, so the 13:00 slice is the first one that no longer exists.
         var refused = Assert.IsType<BookingResult.OutOfHours>(await booking.CreateAsync(

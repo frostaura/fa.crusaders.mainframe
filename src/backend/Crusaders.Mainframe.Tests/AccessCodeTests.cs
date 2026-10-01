@@ -96,7 +96,7 @@ public sealed class AccessCodeTests : IClassFixture<PostgresFixture>
             EndsAt = startsAt.AddMinutes(30),
             SliceMinutes = 15,
             SliceCount = 2,
-            AmountChargedCredits = 16m,
+            AmountChargedMinutes = 16,
             Status = BookingStatus.Booked,
         };
         db.Bookings.Add(booking);
@@ -257,7 +257,7 @@ public sealed class AccessCodeTests : IClassFixture<PostgresFixture>
 
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id, Reason: "seed"), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id, Reason: "seed"), default);
 
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
         var result = await bookings.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, TestHost.BookableSlot(), 2, default);
@@ -496,7 +496,7 @@ public sealed class AccessCodeTests : IClassFixture<PostgresFixture>
             db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = """{"timezone":"UTC"}""" });
             var user = new User { TenantId = tenant.Id, Email = $"{slug}@test.local", PasswordHash = "x", EmailVerified = true };
             db.Users.Add(user);
-            var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
+            var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
             db.Courts.Add(court);
             var startsAt = DateTimeOffset.UtcNow.AddHours(1);
             booking = new Booking
@@ -511,7 +511,7 @@ public sealed class AccessCodeTests : IClassFixture<PostgresFixture>
                 EndsAt = startsAt.AddMinutes(30),
                 SliceMinutes = 15,
                 SliceCount = 2,
-                AmountChargedCredits = 16m,
+                AmountChargedMinutes = 16,
             };
             db.Bookings.Add(booking);
             await db.SaveChangesAsync();

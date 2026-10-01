@@ -180,7 +180,7 @@ public sealed class TopUpAbandonedTests(PostgresFixture pg) : IClassFixture<Post
         var member = Client(factory, seeded, seeded.MemberUserId);
 
         var reg = await RegisterAsync(member);
-        Assert.Equal(0m, await RemainingAsync(member));
+        Assert.Equal(0, await RemainingAsync(member));
 
         // Somebody else's id is a stranger's: 404, and the row is untouched.
         await CancelReturnAsync(Client(factory, seeded, seeded.OtherUserId), reg.TopUpId, HttpStatusCode.NotFound);
@@ -194,7 +194,7 @@ public sealed class TopUpAbandonedTests(PostgresFixture pg) : IClassFixture<Post
         var again = await CancelReturnAsync(member, reg.TopUpId);
         Assert.Equal("Cancelled", again.GetProperty("status").GetString());
 
-        Assert.Equal(100m, await RemainingAsync(member));
+        Assert.Equal(100, await RemainingAsync(member));
         await RegisterAsync(member);
     }
 
@@ -269,7 +269,7 @@ public sealed class TopUpAbandonedTests(PostgresFixture pg) : IClassFixture<Post
         var row = await RowAsync(factory, reg.TopUpId);
         Assert.Equal(TopUpStatus.Completed, row.Status);
         Assert.Null(row.FailureReason);
-        Assert.Equal(160m, Assert.Single(await LedgerAsync(factory, seeded)).AmountCredits);
+        Assert.Equal(160, Assert.Single(await LedgerAsync(factory, seeded)).AmountMinutes);
 
         // And a cancel return after the completion does not undo it.
         var late = await CancelReturnAsync(member, reg.TopUpId);
@@ -286,11 +286,11 @@ public sealed class TopUpAbandonedTests(PostgresFixture pg) : IClassFixture<Post
 
         var abandoned = await RegisterAsync(member);
         await BackdateAsync(factory, abandoned.TopUpId, TimeSpan.FromMinutes(59));
-        Assert.Equal(0m, await RemainingAsync(member));
+        Assert.Equal(0, await RemainingAsync(member));
 
         // Past the lifetime it stops counting at once — before any sweep has run.
         await BackdateAsync(factory, abandoned.TopUpId, TimeSpan.FromMinutes(2));
-        Assert.Equal(100m, await RemainingAsync(member));
+        Assert.Equal(100, await RemainingAsync(member));
         var fresh = await RegisterAsync(member);
 
         // The sweep closes the old row, not the fresh one, and a second pass finds nothing.
@@ -378,6 +378,6 @@ public sealed class TopUpAbandonedTests(PostgresFixture pg) : IClassFixture<Post
             .Select(_ => member.PostAsJsonAsync("/api/v1/credit/topup", new { amountZar = 100m })));
 
         Assert.Equal(2, answers.Count(a => a.StatusCode == HttpStatusCode.OK));
-        Assert.Equal(0m, await RemainingAsync(member));
+        Assert.Equal(0, await RemainingAsync(member));
     }
 }

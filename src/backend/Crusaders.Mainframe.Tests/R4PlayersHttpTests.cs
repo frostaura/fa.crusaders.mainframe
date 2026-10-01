@@ -21,8 +21,8 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
 
     private static async Task AcceptAsync(PlayersClub club, TestWebAppFactory f, Guid who, Guid bookingId, Guid seat)
     {
-        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareCredits;
-        var response = await club.Client(f, who).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = shown });
+        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareMinutes;
+        var response = await club.Client(f, who).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = shown });
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
     }
 
@@ -42,8 +42,8 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
     private static async Task<(PlayersClub Club, Guid BookingId, Guid SamSeat)> PaidGameAsync(TestWebAppFactory f, string prefix)
     {
         var club = await PlayersClub.SeedAsync(f, prefix);
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var samSeat = PlayersClub.SeatOf(body, 2);
         await AcceptAsync(club, f, club.Sam, bookingId, samSeat);
@@ -126,7 +126,7 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
 
         var detail = await (await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}")).Content.ReadFromJsonAsync<JsonElement>();
         var sam = detail.GetProperty("players").EnumerateArray().Single(p => p.GetProperty("participant_id").GetString() == samSeat.ToString());
-        Assert.Equal(10m, sam.GetProperty("returned_credits").GetDecimal());
+        Assert.Equal(10m, sam.GetProperty("returned_minutes").GetDecimal());
     }
 
     // ---- M4-5: an unanswered invitee is not mailed a cancellation -----------------------------
@@ -137,8 +137,8 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4quietcancel");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { userId = club.Alex }]);
         await AcceptAsync(club, f, club.Sam, bookingId, PlayersClub.SeatOf(body, 2));
 
@@ -162,7 +162,7 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
     {
         var detail = await (await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}")).Content.ReadFromJsonAsync<JsonElement>();
         return detail.GetProperty("players").EnumerateArray().Single(p => p.GetProperty("seat").GetInt32() == 1)
-            .GetProperty("share_credits").GetDecimal();
+            .GetProperty("share_minutes").GetDecimal();
     }
 
     [SkippableFact]
@@ -171,24 +171,24 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4absorb");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Jo, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Jo, 100);
 
         // 32 among four: 8 each.
         var (bookingId, body) = await club.BookWithPlayersAsync(f,
             [new { userId = club.Sam }, new { userId = club.Alex }, new { userId = club.Jo }]);
-        Assert.Equal(8m, await OrganiserShareAsync(club, f, bookingId));
+        Assert.Equal(8, await OrganiserShareAsync(club, f, bookingId));
 
         await OkAsync(club.Client(f, club.Organiser).DeleteAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}"));
-        Assert.Equal(16m, await OrganiserShareAsync(club, f, bookingId));
+        Assert.Equal(16, await OrganiserShareAsync(club, f, bookingId));
 
         await OkAsync(club.Client(f, club.Alex).PostAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 3)}/decline", null));
-        Assert.Equal(24m, await OrganiserShareAsync(club, f, bookingId));
+        Assert.Equal(24, await OrganiserShareAsync(club, f, bookingId));
 
         var joSeat = PlayersClub.SeatOf(body, 4);
         await AcceptAsync(club, f, club.Jo, bookingId, joSeat);
         await OkAsync(club.Client(f, club.Jo).PostAsync($"/api/v1/bookings/{bookingId}/players/{joSeat}/withdraw", null));
-        Assert.Equal(32m, await OrganiserShareAsync(club, f, bookingId));
+        Assert.Equal(32, await OrganiserShareAsync(club, f, bookingId));
     }
 
     /// <summary>Two partners declining at once both land, and the organiser's figure counts both.</summary>
@@ -198,7 +198,7 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4absorbrace");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f,
             [new { userId = club.Sam }, new { userId = club.Alex }, new { userId = club.Jo }]);
 
@@ -206,6 +206,6 @@ public sealed class R4PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
             club.Client(f, club.Sam).PostAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}/decline", null),
             club.Client(f, club.Alex).PostAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 3)}/decline", null));
         Assert.All(answers, a => Assert.Equal(HttpStatusCode.OK, a.StatusCode));
-        Assert.Equal(24m, await OrganiserShareAsync(club, f, bookingId));
+        Assert.Equal(24, await OrganiserShareAsync(club, f, bookingId));
     }
 }

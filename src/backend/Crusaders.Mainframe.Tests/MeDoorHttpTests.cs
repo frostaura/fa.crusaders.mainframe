@@ -216,7 +216,7 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
                 BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
                 StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
                 SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -261,7 +261,7 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
                 BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
                 StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
                 SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -299,7 +299,7 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
                 BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
                 StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
                 SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -621,7 +621,7 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
                 BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
                 StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
                 SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }
@@ -675,7 +675,7 @@ public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
                 BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
                 StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
                 SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
-                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+                AmountChargedMinutes = 16, ChargedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync();
         }

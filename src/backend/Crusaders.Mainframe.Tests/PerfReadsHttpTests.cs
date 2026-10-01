@@ -81,7 +81,7 @@ public sealed class PerfReadsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var all = whole.EnumerateArray().Select(r => r.GetProperty("membership_id").GetGuid()).ToList();
         Assert.Equal(6, all.Count);
         // The fields the console reads are all still there.
-        foreach (var key in new[] { "user_id", "email", "full_name", "photo_url", "status", "groups", "is_admin", "balance_credits" })
+        foreach (var key in new[] { "user_id", "email", "full_name", "photo_url", "status", "groups", "is_admin", "balance_minutes" })
         {
             Assert.True(whole[0].TryGetProperty(key, out _), key);
         }
@@ -145,11 +145,11 @@ public sealed class PerfReadsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "perfwallet");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var accept = await club.Client(f, club.Sam).PostAsJsonAsync(
-            $"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}/accept", new { expectedShareCredits = 16m });
+            $"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}/accept", new { expectedShareMinutes = 16 });
         Assert.True(accept.IsSuccessStatusCode, await accept.Content.ReadAsStringAsync());
         var olive = club.Client(f, club.Organiser);
 
@@ -167,13 +167,13 @@ public sealed class PerfReadsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         // The frontend's own summary of the detail: members other than the organiser, with what they paid.
         var expected = detail.GetProperty("players").EnumerateArray()
             .Where(p => p.GetProperty("kind").GetString() == "member" && p.GetProperty("user_id").GetGuid() != club.Organiser)
-            .Select(p => (p.GetProperty("user_id").GetGuid(), p.GetProperty("name").GetString(), p.GetProperty("paid_credits").GetDecimal()))
+            .Select(p => (p.GetProperty("user_id").GetGuid(), p.GetProperty("name").GetString(), p.GetProperty("paid_minutes").GetDecimal()))
             .ToList();
         var actual = summary.GetProperty("partners").EnumerateArray()
-            .Select(p => (p.GetProperty("user_id").GetGuid(), p.GetProperty("name").GetString(), p.GetProperty("paid_credits").GetDecimal()))
+            .Select(p => (p.GetProperty("user_id").GetGuid(), p.GetProperty("name").GetString(), p.GetProperty("paid_minutes").GetDecimal()))
             .ToList();
         Assert.Equal(expected, actual);
-        Assert.Equal([(club.Sam, "Sam Partner", 16m)], actual);
+        Assert.Equal([(club.Sam, "Sam Partner", 16)], actual);
 
         // Somebody the booking is nothing to reads null, as the detail's 404.
         var stranger = await club.InClubAsync(f, sp => sp.GetRequiredService<PlayersQuery>()
@@ -212,7 +212,7 @@ public sealed class PerfReadsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         await using var app = f.WithWebHostBuilder(b => b.ConfigureTestServices(s =>
             s.ConfigureDbContext<MainframeDbContext>(o => o.AddInterceptors(recorder))));
         var club = await PlayersClub.SeedAsync(app, "perfsharen1");
-        await club.CreditAsync(app, club.Organiser, 200m);
+        await club.CreditAsync(app, club.Organiser, 200);
         object[] three = [new { userId = club.Sam }, new { userId = club.Alex }, new { userId = club.Jo }];
         var (first, _) = await club.BookWithPlayersAsync(app, three, at: PlayersClub.Tomorrow(8));
         var (second, _) = await club.BookWithPlayersAsync(app, three, at: PlayersClub.Tomorrow(8).AddDays(1));

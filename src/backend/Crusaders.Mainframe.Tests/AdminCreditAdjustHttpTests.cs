@@ -119,7 +119,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         return await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId)
-            .SumAsync(l => (decimal?)l.AmountCredits) ?? 0m;
+            .SumAsync(l => (decimal?)l.AmountMinutes) ?? 0;
     }
 
     private static async Task<int> AdjustmentRowCountAsync(TestWebAppFactory factory, Seeded s)
@@ -137,7 +137,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
     {
         return client.PostAsJsonAsync($"/api/v1/admin/credit/{s.MemberUserId}/adjust", new
         {
-            amountCredits = amount,
+            amountMinutes = amount,
             reason,
             idempotencyKey,
         });
@@ -157,8 +157,8 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var client = AdminClient(factory, seeded);
         var key = Guid.NewGuid().ToString("N");
 
-        var first = await AdjustAsync(client, seeded, 7m, "fast dblclick probe", key);
-        var second = await AdjustAsync(client, seeded, 7m, "fast dblclick probe", key);
+        var first = await AdjustAsync(client, seeded, 7, "fast dblclick probe", key);
+        var second = await AdjustAsync(client, seeded, 7, "fast dblclick probe", key);
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
@@ -171,8 +171,8 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(firstBody.GetProperty("entry_id").GetGuid(), secondBody.GetProperty("entry_id").GetGuid());
 
         Assert.Equal(1, await AdjustmentRowCountAsync(factory, seeded));
-        Assert.Equal(7m, await BalanceAsync(factory, seeded));
-        Assert.Equal(7m, secondBody.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(7, await BalanceAsync(factory, seeded));
+        Assert.Equal(7m, secondBody.GetProperty("balance_after_minutes").GetDecimal());
     }
 
     /// <summary>
@@ -192,16 +192,16 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var key = Guid.NewGuid().ToString("N");
 
         var responses = await Task.WhenAll(
-            AdjustAsync(client, seeded, 11m, "double submit probe", key),
-            AdjustAsync(client, seeded, 11m, "double submit probe", key),
-            AdjustAsync(client, seeded, 11m, "double submit probe", key),
-            AdjustAsync(client, seeded, 11m, "double submit probe", key));
+            AdjustAsync(client, seeded, 11, "double submit probe", key),
+            AdjustAsync(client, seeded, 11, "double submit probe", key),
+            AdjustAsync(client, seeded, 11, "double submit probe", key),
+            AdjustAsync(client, seeded, 11, "double submit probe", key));
 
         Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
 
         // 44 credits granted where 11 were typed is the finding, verbatim.
         Assert.Equal(1, await AdjustmentRowCountAsync(factory, seeded));
-        Assert.Equal(11m, await BalanceAsync(factory, seeded));
+        Assert.Equal(11, await BalanceAsync(factory, seeded));
     }
 
     /// <summary>
@@ -218,11 +218,11 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        await AdjustAsync(client, seeded, 7m, "coaching credit", Guid.NewGuid().ToString("N"));
-        await AdjustAsync(client, seeded, 7m, "coaching credit", Guid.NewGuid().ToString("N"));
+        await AdjustAsync(client, seeded, 7, "coaching credit", Guid.NewGuid().ToString("N"));
+        await AdjustAsync(client, seeded, 7, "coaching credit", Guid.NewGuid().ToString("N"));
 
         Assert.Equal(2, await AdjustmentRowCountAsync(factory, seeded));
-        Assert.Equal(14m, await BalanceAsync(factory, seeded));
+        Assert.Equal(14, await BalanceAsync(factory, seeded));
     }
 
     /// <summary>
@@ -238,12 +238,12 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var blank = await AdjustAsync(client, seeded, 5m, "typo", "   ");
+        var blank = await AdjustAsync(client, seeded, 5, "typo", "   ");
         Assert.Equal(HttpStatusCode.BadRequest, blank.StatusCode);
         Assert.Equal("idempotency_key_invalid",
             (await blank.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
 
-        var enormous = await AdjustAsync(client, seeded, 5m, "typo", new string('k', 201));
+        var enormous = await AdjustAsync(client, seeded, 5, "typo", new string('k', 201));
         Assert.Equal(HttpStatusCode.BadRequest, enormous.StatusCode);
 
         // Nothing moved on a refusal.
@@ -266,8 +266,8 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var clubB = await SeedAsync(factory);
         var key = Guid.NewGuid().ToString("N");
 
-        var a = await AdjustAsync(AdminClient(factory, clubA), clubA, 9m, "welcome credit", key);
-        var b = await AdjustAsync(AdminClient(factory, clubB), clubB, 9m, "welcome credit", key);
+        var a = await AdjustAsync(AdminClient(factory, clubA), clubA, 9, "welcome credit", key);
+        var b = await AdjustAsync(AdminClient(factory, clubB), clubB, 9, "welcome credit", key);
 
         Assert.Equal(HttpStatusCode.OK, a.StatusCode);
 
@@ -279,14 +279,14 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         {
             var bEntry = (await b.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("entry_id").GetGuid();
             Assert.NotEqual(aEntry, bEntry);
-            Assert.Equal(9m, await BalanceAsync(factory, clubB));
+            Assert.Equal(9, await BalanceAsync(factory, clubB));
         }
         else
         {
-            Assert.Equal(0m, await BalanceAsync(factory, clubB));
+            Assert.Equal(0, await BalanceAsync(factory, clubB));
         }
 
-        Assert.Equal(9m, await BalanceAsync(factory, clubA));
+        Assert.Equal(9, await BalanceAsync(factory, clubA));
     }
 
     /// <summary>
@@ -303,10 +303,10 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await AdjustAsync(client, seeded, -5m, "bar tab", null);
+        var res = await AdjustAsync(client, seeded, -5, "bar tab", null);
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        Assert.Equal(-5m, await BalanceAsync(factory, seeded));
+        Assert.Equal(-5, await BalanceAsync(factory, seeded));
     }
 
     // ---- "Admins top me up" — the capability, made honest -------------------
@@ -316,7 +316,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
     {
         return client.PostAsJsonAsync($"/api/v1/admin/credit/{s.MemberUserId}/adjust", new
         {
-            amountCredits = amount,
+            amountMinutes = amount,
             reason = "R200 cash at the desk, receipt 0412",
             reasonCode,
             zarReceived = 200m,
@@ -357,18 +357,18 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, 200m, code);
+        var res = await TopUpAsync(client, seeded, 200, code);
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
 
         var body = await res.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("AdminTopUp", body.GetProperty("type").GetString());
         Assert.Equal(code, body.GetProperty("reason_code").GetString());
-        Assert.Equal(200m, body.GetProperty("amount_credits").GetDecimal());
+        Assert.Equal(200m, body.GetProperty("amount_minutes").GetDecimal());
 
         // The admin reads back where they took the member FROM and TO, in one answer, rather
         // than composing it client-side from a figure fetched before the movement.
-        Assert.Equal(0m, body.GetProperty("balance_before_credits").GetDecimal());
-        Assert.Equal(200m, body.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(0m, body.GetProperty("balance_before_minutes").GetDecimal());
+        Assert.Equal(200m, body.GetProperty("balance_after_minutes").GetDecimal());
 
         Assert.Equal(LedgerEntryType.AdminTopUp, await LastTypeAsync(factory, seeded));
         Assert.Contains(LedgerEntryType.AdminTopUp, LedgerEntryTypes.Funding);
@@ -388,7 +388,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, 50m, code);
+        var res = await TopUpAsync(client, seeded, 50, code);
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         Assert.Equal("AdminAdjustment",
             (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("type").GetString());
@@ -409,11 +409,11 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, -200m, "top_up_cash");
+        var res = await TopUpAsync(client, seeded, -200, "top_up_cash");
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
         Assert.Equal("amount_must_be_positive_for_top_up",
             (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
-        Assert.Equal(0m, await BalanceAsync(factory, seeded));
+        Assert.Equal(0, await BalanceAsync(factory, seeded));
     }
 
     /// <summary>An unknown code is refused with the whole valid set, so a client never has to guess.</summary>
@@ -426,7 +426,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, 200m, "cash-ish");
+        var res = await TopUpAsync(client, seeded, 200, "cash-ish");
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
 
         var body = await res.Content.ReadFromJsonAsync<JsonElement>();
@@ -447,7 +447,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await AdjustAsync(client, seeded, 11m, "an older console", idempotencyKey: null);
+        var res = await AdjustAsync(client, seeded, 11, "an older console", idempotencyKey: null);
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
 
         var body = await res.Content.ReadFromJsonAsync<JsonElement>();
@@ -467,7 +467,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 
         var res = await client.PostAsJsonAsync($"/api/v1/admin/credit/{seeded.MemberUserId}/adjust", new
         {
-            amountCredits = 200m,
+            amountMinutes = 200,
             reason = "cash at the desk",
             reason_code = "top_up_cash",
             zar_received = 200m,
@@ -480,7 +480,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 
     /// <summary>
     /// <b>D2-B10.</b> The replay matched on the reference alone, so +11 under key k1 followed by
-    /// +110 under k1 answered 200 with <c>amount_credits: 11</c> — the admin corrected the amount,
+    /// +110 under k1 answered 200 with <c>amount_minutes: 11</c> — the admin corrected the amount,
     /// pressed Apply, and was told it had been applied.
     /// </summary>
     [SkippableFact]
@@ -492,17 +492,17 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        Assert.Equal(HttpStatusCode.OK, (await AdjustAsync(client, seeded, 11m, "typo", "k1")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await AdjustAsync(client, seeded, 11, "typo", "k1")).StatusCode);
 
-        var corrected = await AdjustAsync(client, seeded, 110m, "the amount I meant", "k1");
+        var corrected = await AdjustAsync(client, seeded, 110, "the amount I meant", "k1");
         Assert.Equal(HttpStatusCode.Conflict, corrected.StatusCode);
 
         var body = await corrected.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("idempotency_key_reused", body.GetProperty("error").GetString());
-        Assert.Equal(11m, body.GetProperty("stored").GetProperty("amount_credits").GetDecimal());
+        Assert.Equal(11m, body.GetProperty("stored").GetProperty("amount_minutes").GetDecimal());
 
         // And nothing moved on the second attempt.
-        Assert.Equal(11m, await BalanceAsync(factory, seeded));
+        Assert.Equal(11, await BalanceAsync(factory, seeded));
     }
 
     /// <summary>The same key with the same payload is still a retry, and still replays.</summary>
@@ -515,16 +515,16 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        Assert.Equal(HttpStatusCode.OK, (await AdjustAsync(client, seeded, 11m, "once", "k1")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await AdjustAsync(client, seeded, 11, "once", "k1")).StatusCode);
 
-        var again = await AdjustAsync(client, seeded, 11m, "once", "k1");
+        var again = await AdjustAsync(client, seeded, 11, "once", "k1");
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
 
         var body = await again.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(11m, body.GetProperty("amount_credits").GetDecimal());
-        Assert.Equal(0m, body.GetProperty("balance_before_credits").GetDecimal());
-        Assert.Equal(11m, body.GetProperty("balance_after_credits").GetDecimal());
-        Assert.Equal(11m, await BalanceAsync(factory, seeded));
+        Assert.Equal(11m, body.GetProperty("amount_minutes").GetDecimal());
+        Assert.Equal(0m, body.GetProperty("balance_before_minutes").GetDecimal());
+        Assert.Equal(11m, body.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(11, await BalanceAsync(factory, seeded));
     }
 
     /// <summary>
@@ -542,7 +542,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200m, "top_up_cash")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200, "top_up_cash")).StatusCode);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -555,8 +555,8 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var details = JsonDocument.Parse(row.DetailsJson!).RootElement;
         Assert.Equal("AdminTopUp", details.GetProperty("entry_type").GetString());
         Assert.Equal("top_up_cash", details.GetProperty("reason_code").GetString());
-        Assert.Equal(0m, details.GetProperty("balance_before_credits").GetDecimal());
-        Assert.Equal(200m, details.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(0m, details.GetProperty("balance_before_minutes").GetDecimal());
+        Assert.Equal(200m, details.GetProperty("balance_after_minutes").GetDecimal());
     }
 
     /// <summary>
@@ -580,13 +580,13 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 
         try
         {
-            Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200m, "top_up_cash")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200, "top_up_cash")).StatusCode);
 
             var frames = new List<Crusaders.Mainframe.Api.Services.Realtime.RealtimeMessage>();
             while (channel.Reader.TryRead(out var frame)) frames.Add(frame);
 
             var named = Assert.Single(frames, f => f.Event == "balance");
-            Assert.Contains("\"delta_credits\":200", named.JsonPayload);
+            Assert.Contains("\"delta_minutes\":200", named.JsonPayload);
             Assert.Contains("\"reason\":\"admin_top_up\"", named.JsonPayload);
         }
         finally

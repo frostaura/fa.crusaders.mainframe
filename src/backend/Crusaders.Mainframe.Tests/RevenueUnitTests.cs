@@ -18,7 +18,7 @@ namespace Crusaders.Mainframe.Tests;
 /// <c>CLAUDE.md</c> says a ledger field whose name implies one unit while the column holds
 /// another is a defect that must never be added a second time. It had been, three times
 /// over, and this endpoint was the expensive one: <c>gross_topups_zar</c>,
-/// <c>reversals_zar</c> and <c>net_zar</c> were all summed from <c>AmountCredits</c>, and
+/// <c>reversals_zar</c> and <c>net_zar</c> were all summed from <c>AmountMinutes</c>, and
 /// the admin page printed them with a rand sign.
 /// </para>
 ///
@@ -74,13 +74,13 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
                 new LedgerEntry
                 {
                     TenantId = tenant.Id, UserId = regular.Id, Type = LedgerEntryType.TopUp,
-                    AmountCredits = 1600m, ZarPaid = 1000m, ConversionRate = 1.6m,
+                    AmountMinutes = 1600, ZarPaid = 1000m,
                     ActorUserId = regular.Id, Reason = "regular top-up",
                 },
                 new LedgerEntry
                 {
                     TenantId = tenant.Id, UserId = league.Id, Type = LedgerEntryType.TopUp,
-                    AmountCredits = 2400m, ZarPaid = 1000m, ConversionRate = 2.4m,
+                    AmountMinutes = 2400, ZarPaid = 1000m,
                     ActorUserId = league.Id, Reason = "league top-up",
                 },
                 // Court time spent is neither: it funds nothing and reverses nothing, so it
@@ -88,7 +88,7 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
                 new LedgerEntry
                 {
                     TenantId = tenant.Id, UserId = regular.Id, Type = LedgerEntryType.BookingCharge,
-                    AmountCredits = -200m, ActorUserId = regular.Id, Reason = "a court",
+                    AmountMinutes = -200, ActorUserId = regular.Id, Reason = "a court",
                 });
 
             await db.SaveChangesAsync();
@@ -125,7 +125,7 @@ public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
         Assert.Equal(2000m, root.GetProperty("net_zar").GetDecimal());
 
         // What it issued in exchange, reported separately rather than under a rand name.
-        Assert.Equal(4000m, root.GetProperty("gross_topups_credits").GetDecimal());
-        Assert.Equal(4000m, root.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(4000m, root.GetProperty("gross_topups_minutes").GetDecimal());
+        Assert.Equal(4000m, root.GetProperty("net_minutes").GetDecimal());
     }
 }

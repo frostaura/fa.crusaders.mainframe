@@ -69,7 +69,7 @@ public class TenantIsolationTests
         {
             var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
             var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-            await ledger.PostAsync(new LedgerPosting(hostA.PlayerUser.Id, LedgerEntryType.TopUp, 200m, hostA.PlayerUser.Id), default);
+            await ledger.PostAsync(new LedgerPosting(hostA.PlayerUser.Id, LedgerEntryType.TopUp, 200, hostA.PlayerUser.Id), default);
             await booking.CreateAsync(hostA.Courts[0].Id, hostA.PlayerUser.Id, hostA.PlayerUser.Id, TestHost.BookableSlot(2), 1, default);
         }
 
@@ -106,7 +106,7 @@ public class TenantIsolationTests
         using (var scope = hostA.NewScope())
         {
             var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-            await ledger.PostAsync(new LedgerPosting(hostA.PlayerUser.Id, LedgerEntryType.TopUp, 500m, hostA.PlayerUser.Id), default);
+            await ledger.PostAsync(new LedgerPosting(hostA.PlayerUser.Id, LedgerEntryType.TopUp, 500, hostA.PlayerUser.Id), default);
         }
 
         using (var scope = hostB.NewScope())
@@ -116,10 +116,10 @@ public class TenantIsolationTests
             // Asked for tenant A's user id while acting as tenant B: the id is real and
             // the rows exist, which is exactly the shape of a cross-tenant probe.
             var leaked = await ledger.GetBalanceAsync(hostA.PlayerUser.Id, default);
-            Assert.Equal(0m, leaked);
+            Assert.Equal(0, leaked);
 
             var own = await ledger.GetBalanceAsync(hostB.PlayerUser.Id, default);
-            Assert.Equal(0m, own);
+            Assert.Equal(0, own);
         }
     }
 
@@ -349,8 +349,7 @@ public class TenantIsolationTests
             {
                 TenantId = hostA.Tenant.Id,
                 Name = "Alpha league",
-                PricingMode = GroupPricingMode.Multiplier,
-                PriceMultiplierBps = 50_000,
+                PackageDiscountBps = 5_000,
             };
             db.MemberGroups.Add(group);
             db.MemberGroupWindows.Add(new MemberGroupWindow
@@ -398,8 +397,7 @@ public class TenantIsolationTests
             {
                 TenantId = hostA.Tenant.Id,
                 Name = "Alpha premium",
-                PricingMode = GroupPricingMode.Multiplier,
-                PriceMultiplierBps = 500_000,
+                PackageDiscountBps = 9_000,
             };
             db.MemberGroups.Add(group);
             // The same USER id in the other club's membership row — the shape an injected id
@@ -419,7 +417,10 @@ public class TenantIsolationTests
             var groups = await rules.GroupsForAsync(hostB.PlayerUser.Id, DayOfWeek.Tuesday, settings, default);
 
             Assert.Empty(groups);
-            Assert.Equal(8m, GroupRules.PriceFor(groups, 8m));
+            // P13: groups no longer price a booking; the other club's discount must not reach here either.
+            var tariff = await MemberTariffs.ForAsync(
+                scope.ServiceProvider.GetRequiredService<MainframeDbContext>(), hostB.PlayerUser.Id, settings, default);
+            Assert.Null(tariff.PackageDiscountBps);
         }
     }
 }

@@ -24,14 +24,14 @@ public sealed class R4LedgerTotalsHttpTests(PostgresFixture pg) : IClassFixture<
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            foreach (var (amount, i) in new[] { 10m, 5.5m, -3.25m }.Select((a, i) => (a, i)))
+            foreach (var (amount, i) in new[] { 10, 5, -3 }.Select((a, i) => (a, i)))
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
                     TenantId = club.TenantId,
                     UserId = club.MemberUserId,
                     Type = amount > 0 ? LedgerEntryType.TopUp : LedgerEntryType.BookingCharge,
-                    AmountCredits = amount,
+                    AmountMinutes = amount,
                     ActorUserId = club.MemberUserId,
                     CreatedAt = now.AddMinutes(-10 + i).ToUniversalTime(),
                 });
@@ -45,9 +45,9 @@ public sealed class R4LedgerTotalsHttpTests(PostgresFixture pg) : IClassFixture<
         Assert.Single(first.GetProperty("items").EnumerateArray());
         var totals = first.GetProperty("totals");
         Assert.Equal(3, totals.GetProperty("count").GetInt32());
-        Assert.Equal(15.5m, totals.GetProperty("credits").GetDecimal());
-        Assert.Equal(3.25m, totals.GetProperty("debits").GetDecimal());
-        Assert.Equal(12.25m, totals.GetProperty("net").GetDecimal());
+        Assert.Equal(15, totals.GetProperty("in_minutes").GetInt32());
+        Assert.Equal(3, totals.GetProperty("out_minutes").GetInt32());
+        Assert.Equal(12, totals.GetProperty("net_minutes").GetInt32());
 
         var cursor = first.GetProperty("next_cursor").GetString();
         var second = await client.GetFromJsonAsync<JsonElement>(

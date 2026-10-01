@@ -842,7 +842,7 @@ public sealed class DoorTruthR3HttpTests : IClassFixture<PostgresFixture>
                 SliceMinutes = 15,
                 SliceCount = 2,
                 Status = BookingStatus.Booked,
-                AmountChargedCredits = 16m,
+                AmountChargedMinutes = 16,
             });
             await db.SaveChangesAsync();
         }

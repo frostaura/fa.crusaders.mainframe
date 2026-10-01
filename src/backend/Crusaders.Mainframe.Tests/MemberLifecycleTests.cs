@@ -242,7 +242,7 @@ public class MemberLifecycleTests
             EndsAt = now.AddMinutes(17),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = BookingStatus.Booked,
         });
         await db.SaveChangesAsync();

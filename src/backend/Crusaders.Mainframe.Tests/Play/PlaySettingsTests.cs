@@ -6,7 +6,7 @@ namespace Crusaders.Mainframe.Tests.Play;
 public sealed class PlaySettingsTests
 {
     private static TenantSettingsView View() =>
-        new(15, 8m, 30m, 5, 15, 14, "UTC", 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
+        new(15, 30, 5, 15, 14, "UTC", 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
 
     [Fact]
     public void The_defaults_are_the_spec_s()

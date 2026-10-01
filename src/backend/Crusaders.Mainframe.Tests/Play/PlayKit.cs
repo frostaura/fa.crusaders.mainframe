@@ -39,8 +39,8 @@ public static class PlayKit
         var bookingId = await club.InsertBookingAsync(f, startsAt, organiser: organiser);
         if (partners.Count > 0)
         {
-            await club.InsertSeatAsync(f, bookingId, 1, organiser, ParticipantStatus.Accepted, 0m);
-            for (var i = 0; i < partners.Count; i++) await club.InsertSeatAsync(f, bookingId, i + 2, partners[i], ParticipantStatus.Accepted, 0m);
+            await club.InsertSeatAsync(f, bookingId, 1, organiser, ParticipantStatus.Accepted, 0);
+            for (var i = 0; i < partners.Count; i++) await club.InsertSeatAsync(f, bookingId, i + 2, partners[i], ParticipantStatus.Accepted, 0);
         }
         if (checkIn) await club.CheckInAsync(f, bookingId, startsAt.AddMinutes(2));
         return bookingId;

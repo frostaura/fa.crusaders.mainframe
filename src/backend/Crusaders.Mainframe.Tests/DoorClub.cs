@@ -115,7 +115,7 @@ public sealed record DoorClub(
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settingsJson });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         var admin = Person(db, tenant.Id, $"{slug}-a", "Door Admin", isAdmin: true);

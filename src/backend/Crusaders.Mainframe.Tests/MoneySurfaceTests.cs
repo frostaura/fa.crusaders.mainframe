@@ -39,7 +39,7 @@ public class MoneySurfaceTests
     {
         var mail = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
-            AmountCredits: 50m, BalanceAfterCredits: 60m,
+            AmountMinutes: 50, BalanceAfterMinutes: 60,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
 
         Assert.Contains("50.00 credits", mail.HtmlBody);
@@ -51,7 +51,7 @@ public class MoneySurfaceTests
     [Fact]
     public void The_cancellation_email_states_credits_and_never_rand()
     {
-        var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
+        var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50, 15);
 
         Assert.Contains("50.00 credits", mail.HtmlBody);
         Assert.Contains("15.00 credits", mail.HtmlBody);
@@ -67,7 +67,7 @@ public class MoneySurfaceTests
     public void The_booking_confirmation_quotes_the_tenants_penalty_policy_not_a_literal()
     {
         var mail = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
-            "Court 3", "Wed 16 Sep 10:00", "15 min", 50m, 60m,
+            "Court 3", "Wed 16 Sep 10:00", "15 min", 50, 60,
             PenaltyWindowMinutes: 30, PenaltyPct: 50m));
 
         // Both bodies, because the plain-text half is the one nobody looks at and therefore
@@ -133,7 +133,7 @@ public class MoneySurfaceTests
             var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
 
             await ledger.PostAsync(new LedgerPosting(
-                host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+                host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
             var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
                 host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
                 TestHost.BookableSlot(2), sliceCount: 1, default));
@@ -144,7 +144,7 @@ public class MoneySurfaceTests
             // whole grant. This is the row the release is about to reduce.
             var booking = await db.Bookings.FirstAsync(b => b.Id == created.Booking.Id);
             await ledger.PostAsync(new LedgerPosting(
-                host.PlayerUser.Id, LedgerEntryType.LightsPurchase, -booking.AmountChargedCredits,
+                host.PlayerUser.Id, LedgerEntryType.LightsPurchase, -booking.AmountChargedMinutes,
                 host.PlayerUser.Id, RelatedBookingId: booking.Id,
                 Reason: "Lights on a cancelled booking"), default);
 
@@ -156,13 +156,13 @@ public class MoneySurfaceTests
             var reason = (await db.LedgerEntries
                 .Where(l => l.RelatedBookingId == booking.Id
                             && l.Type == LedgerEntryType.LightsPurchase
-                            && l.AmountCredits > 0)
+                            && l.AmountMinutes > 0)
                 .OrderByDescending(l => l.CreatedAt)
                 .FirstAsync()).Reason;
 
             Assert.NotNull(reason);
-            var invariant = settled.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture);
-            var ambient = settled.AmountCredits.ToString("0.00", commaDecimal);
+            var invariant = settled.AmountMinutes.ToString("0.00", CultureInfo.InvariantCulture);
+            var ambient = settled.AmountMinutes.ToString("0.00", commaDecimal);
             // Guard the premise before asserting on it. If the two spellings ever coincide,
             // the pair below stops being a test and becomes a contradiction — which is exactly
             // how this failed on CI while passing here.
@@ -184,7 +184,7 @@ public class MoneySurfaceTests
         try
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("af-ZA");
-            var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
+            var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50, 15);
             Assert.Contains("50.00 credits", mail.HtmlBody);
             Assert.DoesNotContain("50,00", mail.HtmlBody);
         }
@@ -200,8 +200,8 @@ public class MoneySurfaceTests
     public void A_topup_confirmation_shows_the_rand_paid_the_rate_and_the_credits_received()
     {
         var mail = EmailTemplates.TopUpConfirmation(Club, "member@test.local", new TopUpReceipt(
-            AmountZar: 100m, CreditsAdded: 160m,
-            ConversionRate: 1.6m, BalanceAfterCredits: 210m, Reference: "1089250",
+            AmountZar: 100m, MinutesAdded: 160,
+            ConversionRate: 1.6m, BalanceAfterMinutes: 210, Reference: "1089250",
             // A club on the default symbol. What happens when it is NOT the default is
             // CurrencySymbolTests' — this case is here to hold the shape of the mail itself.
             CurrencySymbol: CurrencySymbol.Default));
@@ -216,9 +216,9 @@ public class MoneySurfaceTests
     [Theory]
     [InlineData(25, "Credit added")]
     [InlineData(-10, "Credit deducted")]
-    public void A_credit_adjustment_email_says_which_way_the_money_went(double amount, string expectedSubject)
+    public void A_credit_adjustment_email_says_which_way_the_money_went(int amount, string expectedSubject)
     {
-        var mail = EmailTemplates.CreditAdjustment(Club, "member@test.local", (decimal)amount, 145m, "desk credit");
+        var mail = EmailTemplates.CreditAdjustment(Club, "member@test.local", amount, 145, "desk credit");
 
         Assert.StartsWith(expectedSubject, mail.Subject);
         Assert.Contains("145.00 credits", mail.HtmlBody);
@@ -235,7 +235,7 @@ public class MoneySurfaceTests
     [Theory]
     [InlineData(-10, "Naledi Khoza", LedgerRowMapper.Treasury)]
     [InlineData(25, LedgerRowMapper.Treasury, "Naledi Khoza")]
-    public void An_admin_adjustment_names_the_club_as_the_counterparty(double amount, string from, string to)
+    public void An_admin_adjustment_names_the_club_as_the_counterparty(int amount, string from, string to)
     {
         var member = Guid.NewGuid();
         var admin = Guid.NewGuid();
@@ -245,7 +245,7 @@ public class MoneySurfaceTests
                 UserId = member,
                 ActorUserId = admin,
                 Type = LedgerEntryType.AdminAdjustment,
-                AmountCredits = (decimal)amount,
+                AmountMinutes = amount,
                 Reason = "desk credit",
             },
             id => id == member ? "Naledi Khoza" : "Crusaders Admin");
@@ -259,7 +259,7 @@ public class MoneySurfaceTests
     // ---- F12 / F16: what an adjustment endpoint will accept ---------------
 
     /// <summary>
-    /// <c>ledger_entries.AmountCredits</c> is <c>numeric(10,2)</c>. Above it, an unvalidated
+    /// <c>ledger_entries.AmountMinutes</c> is <c>numeric(10,2)</c>. Above it, an unvalidated
     /// insert answered a member-facing 500 with a Postgres overflow dump; below it, 0.005 was
     /// stored as 0.01 and echoed back as 0.005 — half a cent from nothing and an API response
     /// disagreeing with the ledger it had just written.
@@ -270,25 +270,27 @@ public class MoneySurfaceTests
     [InlineData(0.005)]
     [InlineData(1.001)]
     public void An_adjustment_outside_what_the_column_holds_is_refused(double amount)
-        => Assert.NotNull(WalletEndpoints.RefuseAmount((decimal)amount));
+        // P13-B2: the adjustment is whole minutes (amountMinutes int, bound 999999, §3.7); amount_not_whole_cents is gone
+        => Assert.Fail($"P13-B2: rewrite for whole-minute adjustments ({amount})");
 
     [Theory]
     [InlineData(0.01)]
     [InlineData(-10.5)]
     [InlineData(99999999.99)]
     public void An_adjustment_the_column_holds_exactly_is_accepted(double amount)
-        => Assert.Null(WalletEndpoints.RefuseAmount((decimal)amount));
+        // P13-B2: the adjustment is whole minutes (amountMinutes int, bound 999999, §3.7); amount_not_whole_cents is gone
+        => Assert.Fail($"P13-B2: rewrite for whole-minute adjustments ({amount})");
 
     // ---- F6: the presets a screen may offer -------------------------------
 
     [Fact]
     public void Presets_are_derived_from_the_tenants_block_and_cap()
     {
-        Assert.Equal([100m, 200m, 500m, 1000m], TopUpEndpoints.Presets(100m, 1000m));
-        Assert.Equal([50m, 100m, 250m, 300m], TopUpEndpoints.Presets(50m, 300m));
+        Assert.Equal([100, 200, 500, 1000], TopUpEndpoints.Presets(100, 1000));
+        Assert.Equal([50, 100, 250, 300], TopUpEndpoints.Presets(50, 300));
         // Nothing above the cap, and nothing that is not a whole block.
-        Assert.Equal([100m, 200m], TopUpEndpoints.Presets(100m, 200m));
-        Assert.Empty(TopUpEndpoints.Presets(0m, 1000m));
+        Assert.Equal([100, 200], TopUpEndpoints.Presets(100, 200));
+        Assert.Empty(TopUpEndpoints.Presets(0, 1000));
     }
 
     // ---- F2: the process URL is configurable ------------------------------
@@ -310,7 +312,7 @@ public class MoneySurfaceTests
         var provider = new PayFastProvider(NullLogger<PayFastProvider>.Instance, config);
         var result = await provider.RegisterCheckoutAsync(new RegisterCheckoutRequest(
             new PerTenantCredentials("10000100", "46f0cd694581a", "pass", "test"),
-            Guid.NewGuid(), Guid.NewGuid(), "member@test.local", 100m, "tu_x",
+            Guid.NewGuid(), Guid.NewGuid(), "member@test.local", 100, "tu_x",
             "https://club.example/return", "https://club.example/notify"), default);
 
         Assert.Equal("http://127.0.0.1:4545/eng/process", result.RedirectUrl);
@@ -319,7 +321,7 @@ public class MoneySurfaceTests
         var plain = new PayFastProvider(NullLogger<PayFastProvider>.Instance);
         var live = await plain.RegisterCheckoutAsync(new RegisterCheckoutRequest(
             new PerTenantCredentials("10000100", "46f0cd694581a", "pass", "production"),
-            Guid.NewGuid(), Guid.NewGuid(), "member@test.local", 100m, "tu_x",
+            Guid.NewGuid(), Guid.NewGuid(), "member@test.local", 100, "tu_x",
             "https://club.example/return", "https://club.example/notify"), default);
         Assert.Equal(PayFastProvider.Live, live.RedirectUrl);
     }
@@ -336,18 +338,18 @@ public class MoneySurfaceTests
     public void The_wallet_report_accounts_for_every_movement_in_the_window()
     {
         var user = Guid.NewGuid();
-        LedgerEntry E(LedgerEntryType type, decimal credits) =>
-            new() { UserId = user, ActorUserId = user, Type = type, AmountCredits = credits };
+        LedgerEntry E(LedgerEntryType type, int credits) =>
+            new() { UserId = user, ActorUserId = user, Type = type, AmountMinutes = credits };
 
         var entries = new List<LedgerEntry>
         {
-            E(LedgerEntryType.AdminAdjustment, 500m),      // opening balance
-            E(LedgerEntryType.AdminAdjustment, 2000m),     // desk credit
-            E(LedgerEntryType.TopUp, 160m),
-            E(LedgerEntryType.BookingCharge, -850m),
-            E(LedgerEntryType.LightsPurchase, -100m),
-            E(LedgerEntryType.CancellationRefund, 100m),
-            E(LedgerEntryType.LateCancellationPenalty, -15m),
+            E(LedgerEntryType.AdminAdjustment, 500),      // opening balance
+            E(LedgerEntryType.AdminAdjustment, 2000),     // desk credit
+            E(LedgerEntryType.TopUp, 160),
+            E(LedgerEntryType.BookingCharge, -850),
+            E(LedgerEntryType.LightsPurchase, -100),
+            E(LedgerEntryType.CancellationRefund, 100),
+            E(LedgerEntryType.LateCancellationPenalty, -15),
         };
 
         var report = ReportingEndpoints.BuildWalletReport(
@@ -355,18 +357,18 @@ public class MoneySurfaceTests
             attendedBookings: 2, minutesOnCourt: 75);
 
         var json = System.Text.Json.JsonSerializer.SerializeToElement(report);
-        Assert.Equal(160m, json.GetProperty("top_ups_credits").GetDecimal());
-        Assert.Equal(950m, json.GetProperty("spent_credits").GetDecimal());
-        Assert.Equal(100m, json.GetProperty("refunds_credits").GetDecimal());
-        Assert.Equal(15m, json.GetProperty("penalties_credits").GetDecimal());
-        Assert.Equal(2500m, json.GetProperty("adjustments_credits").GetDecimal());
+        Assert.Equal(160m, json.GetProperty("top_ups_minutes").GetDecimal());
+        Assert.Equal(950m, json.GetProperty("spent_minutes").GetDecimal());
+        Assert.Equal(100m, json.GetProperty("refunds_minutes").GetDecimal());
+        Assert.Equal(15m, json.GetProperty("penalties_minutes").GetDecimal());
+        Assert.Equal(2500m, json.GetProperty("adjustments_minutes").GetDecimal());
         Assert.Equal(1, json.GetProperty("penalty_count").GetInt32());
         Assert.Equal(75, json.GetProperty("minutes_on_court").GetInt32());
 
         // The reconciliation itself: in − out + adjustments is the balance the wallet shows.
-        var net = json.GetProperty("net_movement_credits").GetDecimal();
-        Assert.Equal(1795m, net);
-        Assert.Equal(entries.Sum(e => e.AmountCredits), net);
+        var net = json.GetProperty("net_movement_minutes").GetDecimal();
+        Assert.Equal(1795, net);
+        Assert.Equal(entries.Sum(e => e.AmountMinutes), net);
     }
 
     // ---- F10 / B-F7: ledger comments in the club's wall clock -------------
@@ -392,7 +394,7 @@ public class MoneySurfaceTests
 
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
 
         // The slot is chosen in the CLUB's clock, not in UTC.
         //
@@ -439,7 +441,7 @@ public class MoneySurfaceTests
     /// <para>
     /// Both halves are false for a walk-up. The session has started, and cancelling returns
     /// <b>nothing</b>, not 70%: <c>settlement-model.md</c> S4, and the server's own quote for
-    /// exactly these bookings answers <c>refundCredits 0 / checkedIn true</c>. A member who
+    /// exactly these bookings answers <c>refundMinutes 0 / checkedIn true</c>. A member who
     /// acted on that sentence would be asking the club for 35 credits that were never coming.
     /// </para>
     /// </summary>
@@ -447,7 +449,7 @@ public class MoneySurfaceTests
     public void A_walk_up_confirmation_does_not_offer_a_refund_the_server_will_not_pay()
     {
         var walkUp = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
-            "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
+            "Court 2", "Sun 06 Sep 22:51", "15 min", 50, 100,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m, IsWalkUp: true));
 
         // The text part as well as the HTML: a promise the server will not keep is no less
@@ -469,7 +471,7 @@ public class MoneySurfaceTests
         // And an ordinary reservation keeps the heads-up it is entitled to — the flag defaults
         // to false, so nothing that is not a walk-up loses it.
         var reservation = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
-            "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
+            "Court 2", "Sun 06 Sep 22:51", "15 min", 50, 100,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
         Assert.Contains("30% of the price", reservation.HtmlBody);
         Assert.Contains(">Starts</th>", reservation.HtmlBody);
@@ -503,7 +505,7 @@ public class MoneySurfaceTests
         // A walk-up is sold from UtcNow and truncated at the club's closing time, so move the
         // club rather than the purchase — see TestHost.ClearOfClosingAsync.
         await TestHost.ClearOfClosingAsync(db, host.Tenant.Id, 15);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
 
         var result = await bookings.CreateWalkUpAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, 15, $"walkup:test:{Guid.NewGuid():N}", default);
@@ -534,7 +536,7 @@ public class MoneySurfaceTests
     public void A_club_cancellation_names_the_club_the_reason_and_the_waiver()
     {
         var byClub = EmailTemplates.BookingCancellation(
-            Club, "member@test.local", "Court 4", 50m, null,
+            Club, "member@test.local", "Court 4", 50, null,
             new ClubCancellation("Court double-booked by the desk", PenaltyWaived: true));
 
         Assert.Contains("The club cancelled your booking", byClub.HtmlBody);
@@ -545,7 +547,7 @@ public class MoneySurfaceTests
 
         // A member cancelling their own court is a different event and keeps its own mail —
         // no actor, because there is nobody to name.
-        var self = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
+        var self = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50, 15);
         Assert.DoesNotContain("The club cancelled", self.HtmlBody);
         Assert.DoesNotContain("waived", self.HtmlBody);
         Assert.Equal("Booking cancelled — Court 4", self.Subject);
@@ -579,7 +581,7 @@ public class MoneySurfaceTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
         var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
             TestHost.BookableSlot(2), sliceCount: 1, default));
@@ -595,7 +597,7 @@ public class MoneySurfaceTests
         var cancelled = await bookings.CancelAsync(
             row.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: true, default, reason);
         var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
-        Assert.Equal(0m, ok.PenaltyCredits);
+        Assert.Equal(0, ok.PenaltyMinutes);
 
         var mail = await PollMail(host, m => m.Subject.Contains("club", StringComparison.Ordinal));
         Assert.NotNull(mail);
@@ -647,7 +649,7 @@ public class MoneySurfaceTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
         var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
             TestHost.BookableSlot(2), sliceCount: 1, default));
@@ -659,8 +661,8 @@ public class MoneySurfaceTests
         var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
 
         // Nothing was waived because nothing was owed. The refund is the whole price.
-        Assert.Equal(0m, ok.PenaltyCredits);
-        Assert.Equal(created.Booking.AmountChargedCredits, ok.RefundedCredits);
+        Assert.Equal(0, ok.PenaltyMinutes);
+        Assert.Equal(created.Booking.AmountChargedMinutes, ok.RefundedMinutes);
 
         var audit = await db.AuditLogs
             .Where(a => a.Action == "booking.cancelled")
@@ -732,7 +734,7 @@ public class MoneySurfaceTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
         var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
             TestHost.BookableSlot(2), sliceCount: 1, default));
@@ -748,7 +750,7 @@ public class MoneySurfaceTests
         var quote = await bookings.QuoteCancellationAsync(row.Id, host.AdminUser.Id, actorIsAdmin: true, default);
         Assert.NotNull(quote);
         // The precondition for the whole race: the desk saw a penalty, so it saw the control.
-        Assert.True(quote!.PenaltyCredits > 0m);
+        Assert.True(quote!.PenaltyMinutes > 0);
 
         // …and the member scans in at the box before Confirm is pressed.
         row.CheckedInAt = TestHost.Storable(DateTimeOffset.UtcNow);
@@ -759,8 +761,8 @@ public class MoneySurfaceTests
         var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
 
         // The lights have been on: no refund, no penalty, and therefore nothing waived.
-        Assert.Equal(0m, ok.RefundedCredits);
-        Assert.Equal(0m, ok.PenaltyCredits);
+        Assert.Equal(0, ok.RefundedMinutes);
+        Assert.Equal(0, ok.PenaltyMinutes);
 
         var audit = await db.AuditLogs
             .Where(a => a.Action == "booking.cancelled")

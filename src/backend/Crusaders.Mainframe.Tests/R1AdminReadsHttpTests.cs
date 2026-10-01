@@ -14,33 +14,11 @@ namespace Crusaders.Mainframe.Tests;
 public sealed class R1AdminReadsHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     [SkippableFact]
-    public async Task Group_prices_are_the_courts_own_not_the_retired_club_default()
+    public Task Group_prices_are_the_courts_own_not_the_retired_club_default()
     {
-        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = pg.SharedHost;
-        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
-        var club = await MemberCodeClub.SeedAsync(app, "r1prices");
-        // The retired club default says 40; the courts say 8, and one says 12.
-        await club.SetAsync(app, "slice_price_credits", 40);
-        await club.WriteAsync(app, async db =>
-            (await db.Courts.IgnoreQueryFilters().FirstAsync(c => c.Id == club.Courts[1])).SlicePriceCredits = 12m);
-        var admin = club.Member(app, club.AdminId, "admin");
-
-        var groups = await MemberCodeClub.JsonAsync(await admin.GetAsync("/api/v1/admin/member-groups"));
-        foreach (var g in groups.GetProperty("groups").EnumerateArray().Where(g => g.GetProperty("pricing").GetProperty("mode").GetString() != "flat"))
-        {
-            var pricing = g.GetProperty("pricing");
-            Assert.NotEqual(40m, pricing.GetProperty("effective_example_credits").GetDecimal());
-            Assert.Equal(4, pricing.GetProperty("effective_by_court").GetArrayLength());
-        }
-
-        var rules = await MemberCodeClub.JsonAsync(await admin.GetAsync($"/api/v1/admin/members/{club.Olga}/booking-rules"));
-        Assert.Equal(8m, rules.GetProperty("slice_price_credits").GetDecimal());
-        Assert.Equal(8m, rules.GetProperty("slice_price_range_credits").GetProperty("min").GetDecimal());
-        Assert.Equal(12m, rules.GetProperty("slice_price_range_credits").GetProperty("max").GetDecimal());
-        var byCourt = rules.GetProperty("slice_prices_by_court").EnumerateArray().ToList();
-        Assert.Equal(4, byCourt.Count);
-        Assert.Contains(byCourt, c => c.GetProperty("credits").GetDecimal() == 12m);
+        // P13-B2: group price previews are gone (§3.8)
+        Assert.Fail($"P13-B2: group price previews are gone (§3.8)");
+        return Task.CompletedTask;
     }
 
     [SkippableFact]

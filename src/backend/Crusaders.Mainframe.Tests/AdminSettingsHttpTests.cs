@@ -115,7 +115,7 @@ public abstract partial class AdminSettingsHttpTests
         var payload = new Dictionary<string, object>
         {
             ["sliceMinutes"] = 15,
-            ["slicePriceCredits"] = 8m,
+            ["slicePriceCredits"] = 8,
             ["advanceBookingDays"] = 14,
             ["dayStartMinute"] = 360,
             ["dayEndMinute"] = 1320,
@@ -133,7 +133,7 @@ public abstract partial class AdminSettingsHttpTests
     private static Dictionary<string, object> Baseline() => new()
     {
         ["sliceMinutes"] = 15,
-        ["slicePriceCredits"] = 8m,
+        ["slicePriceCredits"] = 8,
         ["advanceBookingDays"] = 14,
         ["dayStartMinute"] = 360,
         ["dayEndMinute"] = 1320,

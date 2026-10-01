@@ -12,13 +12,13 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public sealed class WalletReportTests
 {
-    private static LedgerEntry Row(LedgerEntryType type, decimal amount) => new()
+    private static LedgerEntry Row(LedgerEntryType type, int amount) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = Guid.NewGuid(),
         UserId = Guid.NewGuid(),
         Type = type,
-        AmountCredits = amount,
+        AmountMinutes = amount,
         Reason = "test",
         CreatedAt = DateTimeOffset.UtcNow,
     };
@@ -34,8 +34,8 @@ public sealed class WalletReportTests
     public void A_reversed_no_show_penalty_is_not_counted_twice()
     {
         var report = Report(
-            Row(LedgerEntryType.NoShowPenalty, -8m),
-            Row(LedgerEntryType.NoShowPenalty, 8m));
+            Row(LedgerEntryType.NoShowPenalty, -8),
+            Row(LedgerEntryType.NoShowPenalty, 8));
 
         Assert.Equal(1, report.GetProperty("penalty_count").GetInt32());
         Assert.Equal(2, report.GetProperty("count").GetInt32());
@@ -45,8 +45,8 @@ public sealed class WalletReportTests
     public void Every_penalty_charged_counts_once()
     {
         var report = Report(
-            Row(LedgerEntryType.NoShowPenalty, -8m),
-            Row(LedgerEntryType.LateCancellationPenalty, -4m));
+            Row(LedgerEntryType.NoShowPenalty, -8),
+            Row(LedgerEntryType.LateCancellationPenalty, -4));
 
         Assert.Equal(2, report.GetProperty("penalty_count").GetInt32());
     }

@@ -111,7 +111,6 @@ public sealed record ControlBoardClub(Guid TenantId, string Slug, Guid AdminUser
             TenantId = TenantId,
             CourtNumber = number,
             Name = name ?? $"Court {number}",
-            SlicePriceCredits = 8m,
             IsActive = isActive,
         };
         db.Courts.Add(court);
@@ -184,7 +183,7 @@ public sealed record ControlBoardClub(Guid TenantId, string Slug, Guid AdminUser
     public async Task<Guid> AddBookingAsync(
         TestWebAppFactory factory, Guid courtId, DateTimeOffset startsAt, DateTimeOffset endsAt,
         Guid? userId = null, BookingStatus status = BookingStatus.Booked, string? blockLabel = null,
-        decimal amountCredits = 36m, DateTimeOffset? checkedInAt = null, bool walkUp = false)
+        int amountMinutes = 36, DateTimeOffset? checkedInAt = null, bool walkUp = false)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -201,7 +200,7 @@ public sealed record ControlBoardClub(Guid TenantId, string Slug, Guid AdminUser
             EndsAt = endsAt.ToUniversalTime(),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = amountCredits,
+            AmountChargedMinutes = amountMinutes,
             Status = status,
             BlockLabel = blockLabel,
             CheckedInAt = checkedInAt?.ToUniversalTime(),
@@ -864,7 +863,7 @@ public sealed class ControlBoardHttpTests : IClassFixture<PostgresFixture>
 
         var current = await club.AddBookingAsync(
             factory, courtId, now.AddMinutes(-4), now.AddMinutes(11), club.MemberUserId,
-            checkedInAt: now.AddMinutes(-3), amountCredits: 36m);
+            checkedInAt: now.AddMinutes(-3), amountMinutes: 36);
         var next = await club.AddBookingAsync(
             factory, courtId, now.AddMinutes(41), now.AddMinutes(56), club.AdminUserId);
         // A later one, to prove "next" is the EARLIEST future slot rather than the last row read.
@@ -877,7 +876,7 @@ public sealed class ControlBoardHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(current, cur.GetProperty("booking_id").GetGuid());
         Assert.Equal("booked", cur.GetProperty("status").GetString());
         Assert.Equal("booking", cur.GetProperty("kind").GetString());
-        Assert.Equal(36m, cur.GetProperty("amount_credits").GetDecimal());
+        Assert.Equal(36m, cur.GetProperty("amount_minutes").GetDecimal());
         Assert.NotEqual(JsonValueKind.Null, cur.GetProperty("checked_in_at").ValueKind);
 
         var nxt = court.GetProperty("next");
@@ -922,7 +921,7 @@ public sealed class ControlBoardHttpTests : IClassFixture<PostgresFixture>
         var now = DateTimeOffset.UtcNow;
         await club.AddBookingAsync(
             factory, courtId, now.AddMinutes(-4), now.AddMinutes(11), userId: null,
-            status: BookingStatus.AdminBlock, blockLabel: "League night", amountCredits: 0m);
+            status: BookingStatus.AdminBlock, blockLabel: "League night", amountMinutes: 0);
 
         var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(BoardPath);
         var cur = CourtNumbered(body, 1).GetProperty("current");

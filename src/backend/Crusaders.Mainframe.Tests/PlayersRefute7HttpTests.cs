@@ -24,28 +24,28 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
     {
         var bookingId = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-daysAgo));
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == bookingId).Status = BookingStatus.Completed);
-        await club.InsertSeatAsync(f, bookingId, 1, club.Organiser, ParticipantStatus.Accepted, 16m);
-        var seat = await club.InsertSeatAsync(f, bookingId, 2, partner, ParticipantStatus.Removed, 16m);
+        await club.InsertSeatAsync(f, bookingId, 1, club.Organiser, ParticipantStatus.Accepted, 16);
+        var seat = await club.InsertSeatAsync(f, bookingId, 2, partner, ParticipantStatus.Removed, 16);
         await club.WriteAsync(f, db =>
         {
             db.Bookings.IgnoreQueryFilters().First(b => b.Id == bookingId).ShareDeadlineAt = DateTimeOffset.UtcNow.AddDays(2 - daysAgo);
-            db.BookingParticipants.IgnoreQueryFilters().First(p => p.Id == seat).ConsentedCredits = 16m;
-            foreach (var posting in ShareLedger.Pair(new Booking { Id = bookingId }, new ShareMove(seat, partner, club.Organiser, 16m, 1), partner))
+            db.BookingParticipants.IgnoreQueryFilters().First(p => p.Id == seat).ConsentedMinutes = 16;
+            foreach (var posting in ShareLedger.Pair(new Booking { Id = bookingId }, new ShareMove(seat, partner, club.Organiser, 16, 1), partner))
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
                     TenantId = club.TenantId,
                     UserId = posting.UserId,
                     Type = posting.Type,
-                    AmountCredits = posting.AmountCredits,
+                    AmountMinutes = posting.AmountMinutes,
                     ActorUserId = posting.ActorUserId,
                     RelatedBookingId = bookingId,
                     ExternalReference = posting.ExternalReference,
                 });
             }
         });
-        await club.CreditAsync(f, club.Organiser, 16m);   // the court paid, the share spent: 0
-        await club.CreditAsync(f, partner, 16m);
+        await club.CreditAsync(f, club.Organiser, 16);   // the court paid, the share spent: 0
+        await club.CreditAsync(f, partner, 16);
         await club.InClubAsync(f, sp => sp.GetRequiredService<ShareLedger>().ReconcileAsync(bookingId, default));
         return bookingId;
     }
@@ -63,16 +63,16 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
         var sams = await WaitingAsync(club, f, club.Sam, daysAgo: 10);
         await Task.Delay(20);
         await WaitingAsync(club, f, club.Jo, daysAgo: 11);
-        Assert.Equal(0m, await PlayersClub.BalanceAsync(f, club.Organiser));
+        Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Organiser));
 
         await using (await ShareSabotage.InstallAsync(f, sams))
         {
             var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-                new { amountCredits = 32m, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
+                new { amountMinutes = 32, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
             Assert.True(topUp.IsSuccessStatusCode, await topUp.Content.ReadAsStringAsync());
         }
 
-        Assert.Equal(16m, await PlayersClub.BalanceAsync(f, club.Jo));
+        Assert.Equal(16, await PlayersClub.BalanceAsync(f, club.Jo));
         Assert.NotNull(await PlayersClub.ReadAsync(f, db => db.Bookings.IgnoreQueryFilters().Where(b => b.Id == sams).Select(b => b.ShareReconcileDueAt).FirstAsync()));
     }
 
@@ -87,7 +87,7 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r7noseats");
         var bare = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-30));
-        await club.InsertSeatAsync(f, bare, 1, club.Organiser, ParticipantStatus.Accepted, 32m);
+        await club.InsertSeatAsync(f, bare, 1, club.Organiser, ParticipantStatus.Accepted, 32);
         await club.WriteAsync(f, db =>
         {
             var b = db.Bookings.IgnoreQueryFilters().First(x => x.Id == bare);
@@ -119,9 +119,9 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r7fcfs");
-        await club.CreditAsync(f, club.Sam, 50m);
-        await club.CreditAsync(f, club.Jo, 50m);
-        await club.CreditAsync(f, club.Organiser, 64m);
+        await club.CreditAsync(f, club.Sam, 50);
+        await club.CreditAsync(f, club.Jo, 50);
+        await club.CreditAsync(f, club.Organiser, 64);
         var organiser = club.Client(f, club.Organiser);
         async Task<Guid> GameAsync(Guid who, decimal share, int day)
         {
@@ -130,28 +130,28 @@ public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<
                 new { players = new object[] { new { userId = who, amount = share } }, splitMode = "amount" });
             Assert.True(add.IsSuccessStatusCode, await add.Content.ReadAsStringAsync());
             var seat = (await add.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("participants")[0].GetProperty("participant_id").GetGuid();
-            Assert.True((await club.Client(f, who).PostAsJsonAsync($"/api/v1/bookings/{id}/players/{seat}/accept", new { expectedShareCredits = share })).IsSuccessStatusCode);
+            Assert.True((await club.Client(f, who).PostAsJsonAsync($"/api/v1/bookings/{id}/players/{seat}/accept", new { expectedShareMinutes = share })).IsSuccessStatusCode);
             await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == id).ShareDeadlineAt = DateTimeOffset.UtcNow.AddMinutes(-1));
             return seat;
         }
-        var sam = await GameAsync(club.Sam, 16m, 1);
-        var jo = await GameAsync(club.Jo, 4m, 2);
-        await club.CreditAsync(f, club.Organiser, -20m);    // the 20 received (held no longer), spent
-        Assert.Equal(0m, await PlayersClub.BalanceAsync(f, club.Organiser));
+        var sam = await GameAsync(club.Sam, 16, 1);
+        var jo = await GameAsync(club.Jo, 4, 2);
+        await club.CreditAsync(f, club.Organiser, -20);    // the 20 received (held no longer), spent
+        Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Organiser));
         var samBooking = (await PlayersClub.ReadAsync(f, db => db.BookingParticipants.IgnoreQueryFilters().FirstAsync(p => p.Id == sam))).BookingId;
         var joBooking = (await PlayersClub.ReadAsync(f, db => db.BookingParticipants.IgnoreQueryFilters().FirstAsync(p => p.Id == jo))).BookingId;
 
         Assert.True((await club.Client(f, club.Sam).PostAsync($"/api/v1/bookings/{samBooking}/players/{sam}/withdraw", null)).IsSuccessStatusCode);
         await Task.Delay(20);
         Assert.True((await club.Client(f, club.Jo).PostAsync($"/api/v1/bookings/{joBooking}/players/{jo}/withdraw", null)).IsSuccessStatusCode);
-        Assert.Equal(34m, await PlayersClub.BalanceAsync(f, club.Sam));
-        Assert.Equal(46m, await PlayersClub.BalanceAsync(f, club.Jo));
+        Assert.Equal(34, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(46, await PlayersClub.BalanceAsync(f, club.Jo));
 
         var topUp = await club.Client(f, club.Admin, admin: true).PostAsJsonAsync($"/api/v1/admin/credit/{club.Organiser}/adjust",
-            new { amountCredits = 4m, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
+            new { amountMinutes = 4, reason = "Cash at the desk", reasonCode = "top_up_cash", zarReceived = 10m });
         Assert.True(topUp.IsSuccessStatusCode, await topUp.Content.ReadAsStringAsync());
 
-        Assert.Equal(46m, await PlayersClub.BalanceAsync(f, club.Jo));
-        Assert.Equal(34m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(46, await PlayersClub.BalanceAsync(f, club.Jo));
+        Assert.Equal(34, await PlayersClub.BalanceAsync(f, club.Sam));
     }
 }

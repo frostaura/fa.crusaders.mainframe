@@ -125,7 +125,7 @@ public sealed class BadgeRulesTests
         foreach (var file in new[] { "BadgeRules.cs", "BadgeCatalogue.cs", "PlayEvaluator.cs", "AttendanceQuery.cs", "PlayStats.cs", "PlayRecord.cs" })
         {
             var text = File.ReadAllText(Path.Combine(play, file));
-            foreach (var money in new[] { "LedgerEntr", "AmountCharged", "ShareCredits", "Topup", "TopUp", "Credits" })
+            foreach (var money in new[] { "LedgerEntr", "AmountCharged", "ShareMinutes", "Topup", "TopUp", "Credits" })
             {
                 Assert.False(text.Contains(money, StringComparison.Ordinal), $"{file} mentions {money}");
             }

@@ -29,7 +29,7 @@ namespace Crusaders.Mainframe.Tests;
 public class WalkUpBookingTests
 {
     // TestHost fixture: 15-minute slices at 8 credits, so 0.5333… credits per minute.
-    private const decimal SlicePriceCredits = 8m;
+    private const int SlicePriceCredits = 8;
     private const int SliceMinutes = 15;
 
     private sealed record Fixture(
@@ -52,16 +52,16 @@ public class WalkUpBookingTests
             TestHost.BookableSlotAt(ClubZone, hoursAhead);
     }
 
-    private static async Task<Fixture> CreateAsync(decimal topUpCredits = 200m)
+    private static async Task<Fixture> CreateAsync(int topUpMinutes = 200)
     {
         var host = await TestHost.CreateAsync();
         var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        if (topUpCredits > 0)
+        if (topUpMinutes > 0)
         {
             await ledger.PostAsync(
-                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpCredits, host.PlayerUser.Id), default);
+                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpMinutes, host.PlayerUser.Id), default);
         }
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -114,7 +114,7 @@ public class WalkUpBookingTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = SliceMinutes,
             SliceCount = minutes / SliceMinutes,
-            AmountChargedCredits = SlicePriceCredits * (minutes / SliceMinutes),
+            AmountChargedMinutes = SlicePriceCredits * (minutes / SliceMinutes),
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         });
@@ -383,8 +383,8 @@ public class WalkUpBookingTests
 
         var ok = Assert.IsType<BookingResult.Ok>(await WalkUpAsync(f, 60));
 
-        Assert.Equal(32m, ok.Booking.AmountChargedCredits);   // 4 slices at 8
-        Assert.Equal(200m - 32m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(32, ok.Booking.AmountChargedMinutes);   // 4 slices at 8
+        Assert.Equal(200 - 32, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
         Assert.Equal(60, (int)(ok.Booking.EndsAt - ok.Booking.StartsAt).TotalMinutes);
     }
 
@@ -406,8 +406,8 @@ public class WalkUpBookingTests
         var ok = Assert.IsType<BookingResult.Ok>(await WalkUpAsync(f, 60));
 
         Assert.Equal(20, (int)(ok.Booking.EndsAt - ok.Booking.StartsAt).TotalMinutes);
-        Assert.Equal(10.67m, ok.Booking.AmountChargedCredits);
-        Assert.Equal(200m - 10.67m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(10.67m, ok.Booking.AmountChargedMinutes);
+        Assert.Equal(200 - 10.67m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -446,7 +446,7 @@ public class WalkUpBookingTests
         await AddBookingAsync(f, startsInMinutes: -5, minutes: 30, plusSeconds: 0);
 
         Assert.IsType<BookingResult.SlotTaken>(await WalkUpAsync(f, 30));
-        Assert.Equal(200m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -467,7 +467,7 @@ public class WalkUpBookingTests
 
         var refused = Assert.IsType<BookingResult.NoTimeAvailable>(await WalkUpAsync(f, 30));
         Assert.Equal(30, refused.RequestedMinutes);
-        Assert.Equal(200m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>A cancelled booking is history, not an obstruction — its slot is on sale.</summary>
@@ -513,7 +513,7 @@ public class WalkUpBookingTests
         var charge = Assert.Single(await f.Db.LedgerEntries
             .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.LightsPurchase)
             .ToListAsync());
-        Assert.Equal(-16m, charge.AmountCredits);
+        Assert.Equal(-16, charge.AmountMinutes);
 
         Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "booking.walk_up_created").ToListAsync());
     }
@@ -547,7 +547,7 @@ public class WalkUpBookingTests
         Assert.Single(await f.Db.LedgerEntries
             .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.LightsPurchase)
             .ToListAsync());
-        Assert.Equal(200m - 16m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200 - 16, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -557,16 +557,16 @@ public class WalkUpBookingTests
     [Fact]
     public async Task A_walk_up_the_member_cannot_afford_is_refused_and_writes_nothing()
     {
-        var f = await CreateAsync(topUpCredits: 5m);
+        var f = await CreateAsync(topUpMinutes: 5);
         await using var _ = f.Host;
         using var __ = f.Scope;
 
         var refused = Assert.IsType<BookingResult.InsufficientBalance>(await WalkUpAsync(f, 30));
-        Assert.Equal(5m, refused.CurrentCredits);
-        Assert.Equal(16m, refused.RequiredCredits);
+        Assert.Equal(5, refused.CurrentMinutes);
+        Assert.Equal(16, refused.RequiredMinutes);
 
         Assert.Empty(await f.Db.Bookings.ToListAsync());
-        Assert.Equal(5m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(5, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -609,7 +609,7 @@ public class WalkUpBookingTests
 
         // Both still count as money spent, so the member's balance is unaffected by which
         // name the row carries.
-        Assert.True(walkUpEntry.AmountCredits < 0 && bookedEntry.AmountCredits < 0);
+        Assert.True(walkUpEntry.AmountMinutes < 0 && bookedEntry.AmountMinutes < 0);
     }
 
     /// <summary>
@@ -750,7 +750,7 @@ public class WalkUpBookingTests
         Assert.Equal(booking.Id, body.GetProperty("booking_id").GetGuid());
 
         // Charged for court B, and the audit row says so.
-        Assert.Equal(200m - 16m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200 - 16, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
         var activated = Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
         Assert.Contains($"\"court_number\":{courtB.CourtNumber}", activated.DetailsJson);
     }
@@ -796,7 +796,7 @@ public class WalkUpBookingTests
         Assert.Equal(400, status);
         Assert.Equal("court_not_on_device", body.GetProperty("error").GetString());
         Assert.Empty(await f.Db.Bookings.ToListAsync());
-        Assert.Equal(200m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -882,13 +882,13 @@ public class WalkUpBookingTests
         Assert.True(second.GetProperty("replayed").GetBoolean());
         Assert.Equal(first.GetProperty("booking_id").GetGuid(), second.GetProperty("booking_id").GetGuid());
         Assert.Equal(first.GetProperty("granted_minutes").GetInt32(), second.GetProperty("granted_minutes").GetInt32());
-        Assert.Equal(first.GetProperty("amount_credits").GetDecimal(), second.GetProperty("amount_credits").GetDecimal());
+        Assert.Equal(first.GetProperty("amount_minutes").GetDecimal(), second.GetProperty("amount_minutes").GetDecimal());
 
         // One booking, one debit, and the reference on it.
         var booking = Assert.Single(await f.Db.Bookings.Where(b => b.UserId == f.Host.PlayerUser.Id).ToListAsync());
         var charge = Assert.Single(await f.Db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToListAsync());
         Assert.Equal(DeviceEventEndpoints.WalkUpReference(box.Id, nonce), charge.ExternalReference);
-        Assert.Equal(200m - 16m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200 - 16, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
         Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
     }
 
@@ -936,11 +936,11 @@ public class WalkUpBookingTests
     // ---- R9: a court priced at zero, which nothing exercised ----
 
     /// <summary>Prices a court at nothing, the way a club runs an open morning.</summary>
-    private static async Task FreeCourtAsync(Fixture f, int index)
+    // P13-B1: courts carry no price (§2.2); a free court cannot be expressed. Rewrite the R9 cases.
+    private static Task FreeCourtAsync(Fixture f, int index)
     {
-        var court = await f.Db.Courts.FirstAsync(c => c.Id == f.Host.Courts[index].Id);
-        court.SlicePriceCredits = 0m;
-        await f.Db.SaveChangesAsync();
+        Assert.Fail($"P13-B1: courts carry no price; rewrite this zero-price scenario ({f.Host.Courts[index].Id})");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -974,8 +974,8 @@ public class WalkUpBookingTests
             box, Request(await CodeAsync(f), court: 2, minutes: 30, nonce), ServicesOf(f), default));
 
         Assert.Equal(200, status);
-        Assert.Equal(0m, body.GetProperty("amount_credits").GetDecimal());
-        Assert.Equal(200m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(0m, body.GetProperty("amount_minutes").GetDecimal());
+        Assert.Equal(200, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
 
         var booking = await f.Db.Bookings.AsNoTracking().SingleAsync(b => b.UserId == f.Host.PlayerUser.Id);
         Assert.NotNull(booking.CheckedInAt);
@@ -985,7 +985,7 @@ public class WalkUpBookingTests
         var charge = Assert.Single(
             await f.Db.LedgerEntries.AsNoTracking().Where(l => l.RelatedBookingId == booking.Id).ToListAsync());
         Assert.Equal(LedgerEntryType.LightsPurchase, charge.Type);
-        Assert.Equal(0m, charge.AmountCredits);
+        Assert.Equal(0, charge.AmountMinutes);
         Assert.Equal(DeviceEventEndpoints.WalkUpReference(box.Id, nonce), charge.ExternalReference);
     }
 
@@ -1077,12 +1077,12 @@ public class WalkUpBookingTests
         var booking = await f.Db.Bookings.AsNoTracking().SingleAsync(b => b.UserId == f.Host.PlayerUser.Id);
         var rows = await f.Db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId == booking.Id)
-            .OrderBy(l => l.AmountCredits)
+            .OrderBy(l => l.AmountMinutes)
             .ToListAsync();
         Assert.Equal(2, rows.Count);
         Assert.All(rows, r => Assert.Equal(LedgerEntryType.LightsPurchase, r.Type));
-        Assert.Equal(-rows[0].AmountCredits, rows[1].AmountCredits);
-        Assert.True(rows[1].AmountCredits > 0m);
+        Assert.Equal(-rows[0].AmountMinutes, rows[1].AmountMinutes);
+        Assert.True(rows[1].AmountMinutes > 0);
 
         // The slot is released and was never attended, so no sweep can reach it.
         Assert.Equal(BookingStatus.Cancelled, booking.Status);

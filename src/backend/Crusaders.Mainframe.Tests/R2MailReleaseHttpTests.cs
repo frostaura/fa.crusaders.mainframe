@@ -148,7 +148,7 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await QuietClubAsync(f, "r2rel-cx");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, _) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var release = await ReleaseAtAsync(f, club);
 
@@ -174,7 +174,7 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await QuietClubAsync(f, "r2rel-dec");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var release = await ReleaseAtAsync(f, club);
         var decline = await club.Client(f, club.Sam)
@@ -203,11 +203,11 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await QuietClubAsync(f, "r2rel-split");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { userId = club.Alex }]);
         var sam = PlayersClub.SeatOf(body, 2);
         var organiser = club.Client(f, club.Organiser);
-        foreach (var amount in new[] { 16m, 4m })
+        foreach (var amount in new[] { 16, 4 })
         {
             var split = await organiser.PutAsJsonAsync($"/api/v1/bookings/{bookingId}/split",
                 new { mode = "amount", seats = new[] { new { participantId = sam, amount } } });
@@ -222,10 +222,10 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(2, sent.Count);
         Assert.Contains("invited you to play", sent[0].Subject);
         Assert.StartsWith("Your share has changed", sent[1].Subject);
-        var four = MoneyFormat.Credits(4m);
+        var four = MoneyFormat.Minutes(4);
         Assert.Contains(four, MailText.Unwrap(sent[0].PlainBody));
         Assert.Contains($"Your share now: {four}", MailText.Unwrap(sent[1].PlainBody).Replace("\n", " "));
-        Assert.DoesNotContain(MoneyFormat.Credits(16m), string.Join(" ", sent.Select(m => MailText.Unwrap(m.PlainBody))));
+        Assert.DoesNotContain(MoneyFormat.Minutes(16), string.Join(" ", sent.Select(m => MailText.Unwrap(m.PlainBody))));
         var changes = (await MemberOutboxAsync(f, club, club.Sam)).Where(n => n.Kind == MemberEventCatalogue.GameChanged).ToList();
         Assert.Equal($"dropped: {MemberMailRelease.Superseded}", changes[0].LastError);
         Assert.Equal(AdminNotificationState.Sent, changes[1].State);
@@ -243,7 +243,7 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await QuietClubAsync(f, "r2rel-order");
-        await club.CreditAsync(f, club.Organiser, 500m);
+        await club.CreditAsync(f, club.Organiser, 500);
         var hours = new[] { 8, 9, 10, 11, 12 };
         foreach (var hour in hours)
         {
@@ -270,12 +270,12 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await QuietClubAsync(f, "r2rel-paid");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
         var accept = await club.Client(f, club.Sam).PostAsJsonAsync(
-            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = 16m });
+            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = 16 });
         Assert.True(accept.IsSuccessStatusCode, await accept.Content.ReadAsStringAsync());
 
         await club.InClubAsync(f, async sp =>
@@ -286,7 +286,7 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
             var row = await db.BookingParticipants.FirstAsync(p => p.Id == seat);
             MemberNotices.Stage(db, club.TenantId, await PlayerNotices.ReminderAsync(db, booking, row, settings, new ReminderKey(true, "r2-reminder"), default), settings);
             MemberNotices.Stage(db, club.TenantId, new MemberNotice(club.Sam, MemberEventCatalogue.ReturnWaiting, "r2-return",
-                new ReturnWaitingPayload(bookingId, "Olive", "Court 1", "Thu 1 Oct, 08:00", 4m, false, seat), "waiting", null, bookingId), settings);
+                new ReturnWaitingPayload(bookingId, "Olive", "Court 1", "Thu 1 Oct, 08:00", 4, false, seat), "waiting", null, bookingId), settings);
             return await db.SaveChangesAsync();
         });
 
@@ -310,7 +310,7 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await QuietClubAsync(f, "r2rel-open");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var release = await ReleaseAtAsync(f, club);
 
@@ -320,6 +320,6 @@ public sealed class R2MailReleaseHttpTests(PostgresFixture pg) : IClassFixture<P
 
         var invite = Assert.Single(To(mail, "sam.partner"));
         Assert.Contains("invited you to play", invite.Subject);
-        Assert.Contains(MoneyFormat.Credits(16m), MailText.Unwrap(invite.PlainBody));
+        Assert.Contains(MoneyFormat.Minutes(16), MailText.Unwrap(invite.PlainBody));
     }
 }

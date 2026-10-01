@@ -67,14 +67,14 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
 
     // The four probes every assertion below is built from. Amounts are distinct so a figure
     // landing in the wrong bucket, or a row landing on the wrong day, reads as itself.
-    private const decimal DayBeforeCredits = 111m;   // 2026-02-28, outside on the `from` side
-    private const decimal FirstInstantCredits = 22m; // 2026-03-01 00:00:00 club, the first second in
-    private const decimal LastDayCredits = 777m;     // 2026-03-06 10:00 club, the day `to` names
-    private const decimal DayAfterCredits = 999m;    // 2026-03-07 10:00 club, outside on the `to` side
+    private const int DayBeforeMinutes = 111;   // 2026-02-28, outside on the `from` side
+    private const int FirstInstantMinutes = 22; // 2026-03-01 00:00:00 club, the first second in
+    private const int LastDayMinutes = 777;     // 2026-03-06 10:00 club, the day `to` names
+    private const int DayAfterMinutes = 999;    // 2026-03-07 10:00 club, outside on the `to` side
 
-    private const decimal LastDayTopUpCredits = 300m;
+    private const int LastDayTopUpMinutes = 300;
     private const decimal LastDayTopUpZar = 187.50m;
-    private const decimal DayAfterTopUpCredits = 500m;
+    private const int DayAfterTopUpMinutes = 500;
     private const decimal DayAfterTopUpZar = 312.50m;
 
     private const string DayBeforeReason = "on the day before the range";
@@ -122,20 +122,20 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
             rows.Select(r => r.GetProperty("date").GetString()).ToArray());
 
         var byDate = rows.ToDictionary(r => r.GetProperty("date").GetString()!);
-        decimal Adjustments(string date) => byDate[date].GetProperty("adjustments_credits").GetDecimal();
+        decimal Adjustments(string date) => byDate[date].GetProperty("adjustments_minutes").GetDecimal();
 
         // IN: a movement at 10:00 on the day `to` names, which no reading of `to` as an
         // instant would have included.
-        Assert.Equal(LastDayCredits, Adjustments("2026-03-06"));
-        Assert.Equal(LastDayTopUpCredits, byDate["2026-03-06"].GetProperty("top_ups_credits").GetDecimal());
+        Assert.Equal(LastDayMinutes, Adjustments("2026-03-06"));
+        Assert.Equal(LastDayTopUpMinutes, byDate["2026-03-06"].GetProperty("top_ups_minutes").GetDecimal());
         // IN: the first instant of the first club day.
-        Assert.Equal(FirstInstantCredits, Adjustments("2026-03-01"));
+        Assert.Equal(FirstInstantMinutes, Adjustments("2026-03-01"));
 
         // OUT, both sides, asserted as a SUM so a row appearing anywhere with the excluded
         // money in it fails here even if the date list above were relaxed.
         Assert.Equal(
-            FirstInstantCredits + LastDayCredits,
-            rows.Sum(r => r.GetProperty("adjustments_credits").GetDecimal()));
+            FirstInstantMinutes + LastDayMinutes,
+            rows.Sum(r => r.GetProperty("adjustments_minutes").GetDecimal()));
 
         // And the sentence reporting.md makes out of all this: the two shapes of `to` a
         // caller can write for the same date name the SAME window. The page sends the
@@ -177,7 +177,7 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         var byDate = rows.ToDictionary(r => r.GetProperty("date").GetString()!);
 
         // The top-up on the last day is in.
-        Assert.Equal(LastDayTopUpCredits, byDate["2026-03-06"].GetProperty("top_ups_credits").GetDecimal());
+        Assert.Equal(LastDayTopUpMinutes, byDate["2026-03-06"].GetProperty("top_ups_minutes").GetDecimal());
         // And the booking played on the last day is in, on the row for that day.
         Assert.Equal(1, byDate["2026-03-06"].GetProperty("bookings").GetInt32());
         Assert.Equal(0, byDate["2026-03-05"].GetProperty("bookings").GetInt32());
@@ -187,8 +187,8 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         // it and none outside. A window that reached into 7 March would end 999.00 + 500.00
         // higher; one that stopped at midnight on the 6th would end 777.00 + 300.00 lower.
         Assert.Equal(
-            DayBeforeCredits + FirstInstantCredits + LastDayCredits + LastDayTopUpCredits,
-            rows[^1].GetProperty("balance_credits").GetDecimal());
+            DayBeforeMinutes + FirstInstantMinutes + LastDayMinutes + LastDayTopUpMinutes,
+            rows[^1].GetProperty("balance_minutes").GetDecimal());
     }
 
     // ---- The five surfaces that had no range test at all ----
@@ -225,10 +225,10 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         // Three rows in, five seeded. The last day's two are the ones that decide it.
         Assert.Equal(3, wallet.RootElement.GetProperty("count").GetInt32());
         Assert.Equal(
-            FirstInstantCredits + LastDayCredits + LastDayTopUpCredits,
-            wallet.RootElement.GetProperty("net_movement_credits").GetDecimal());
-        Assert.Equal(LastDayTopUpCredits, wallet.RootElement.GetProperty("top_ups_credits").GetDecimal());
-        Assert.Equal(FirstInstantCredits + LastDayCredits, wallet.RootElement.GetProperty("adjustments_credits").GetDecimal());
+            FirstInstantMinutes + LastDayMinutes + LastDayTopUpMinutes,
+            wallet.RootElement.GetProperty("net_movement_minutes").GetDecimal());
+        Assert.Equal(LastDayTopUpMinutes, wallet.RootElement.GetProperty("top_ups_minutes").GetDecimal());
+        Assert.Equal(FirstInstantMinutes + LastDayMinutes, wallet.RootElement.GetProperty("adjustments_minutes").GetDecimal());
     }
 
     /// <summary>
@@ -275,9 +275,9 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         using var revenue = await GetJsonAsync(admin, $"/api/v1/admin/reports/revenue?{Range}");
         AssertWindow(revenue.RootElement);
 
-        Assert.Equal(LastDayTopUpCredits, revenue.RootElement.GetProperty("gross_topups_credits").GetDecimal());
+        Assert.Equal(LastDayTopUpMinutes, revenue.RootElement.GetProperty("gross_topups_minutes").GetDecimal());
         Assert.Equal(LastDayTopUpZar, revenue.RootElement.GetProperty("gross_topups_zar").GetDecimal());
-        Assert.Equal(LastDayTopUpCredits, revenue.RootElement.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(LastDayTopUpMinutes, revenue.RootElement.GetProperty("net_minutes").GetDecimal());
     }
 
     /// <summary>
@@ -406,21 +406,21 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
         var member = new User { TenantId = tenant.Id, Email = $"m-{slug}@test.local", PasswordHash = "x", EmailVerified = true };
         db.Users.AddRange(admin, member);
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
-        void Adjustment(DateTimeOffset at, decimal credits, string reason) =>
+        void Adjustment(DateTimeOffset at, int credits, string reason) =>
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.AdminAdjustment,
-                AmountCredits = credits, ActorUserId = admin.Id, Reason = reason, CreatedAt = at,
+                AmountMinutes = credits, ActorUserId = admin.Id, Reason = reason, CreatedAt = at,
             });
 
-        void TopUp(DateTimeOffset at, decimal credits, decimal zar, string reason) =>
+        void TopUp(DateTimeOffset at, int credits, decimal zar, string reason) =>
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp,
-                AmountCredits = credits, ZarPaid = zar, ConversionRate = 1.6m,
+                AmountMinutes = credits, ZarPaid = zar,
                 ActorUserId = member.Id, Reason = reason, CreatedAt = at,
             });
 
@@ -430,25 +430,25 @@ public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
                 TenantId = tenant.Id, CourtId = court.Id, UserId = member.Id,
                 BookedByUserId = member.Id, PaidByUserId = member.Id, ActorUserId = member.Id,
                 StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
-                SliceMinutes = 30, SliceCount = 1, AmountChargedCredits = 16m,
+                SliceMinutes = 30, SliceCount = 1, AmountChargedMinutes = 16,
                 Status = status, ChargedAt = startsAt.AddDays(-1),
             });
 
         // Outside, on the `from` side. It is also what seeds the member report's running
         // balance, so its absence from the rows and its presence in the opening figure are
         // asserted by the same number.
-        Adjustment(ClubTime(First.AddDays(-1), 10, 0, timezone), DayBeforeCredits, DayBeforeReason);
+        Adjustment(ClubTime(First.AddDays(-1), 10, 0, timezone), DayBeforeMinutes, DayBeforeReason);
         // The first instant of the first club day — 00:00 local, which is 22:00Z the evening
         // before and is the edge the `from` half of the fix was written for.
-        Adjustment(ClubTime(First, 0, 0, timezone), FirstInstantCredits, FirstInstantReason);
+        Adjustment(ClubTime(First, 0, 0, timezone), FirstInstantMinutes, FirstInstantReason);
         // The day `to` names, loaded. This is the whole point of the file: the two
         // pre-existing tests that send this URL seed nothing here.
-        Adjustment(ClubTime(Last, 10, 0, timezone), LastDayCredits, LastDayReason);
-        TopUp(ClubTime(Last, 10, 30, timezone), LastDayTopUpCredits, LastDayTopUpZar, LastDayReason + " (top-up)");
+        Adjustment(ClubTime(Last, 10, 0, timezone), LastDayMinutes, LastDayReason);
+        TopUp(ClubTime(Last, 10, 30, timezone), LastDayTopUpMinutes, LastDayTopUpZar, LastDayReason + " (top-up)");
         Booking(ClubTime(Last, 9, 0, timezone), BookingStatus.NoShow);
         // The day after, which must be in nothing.
-        Adjustment(ClubTime(Last.AddDays(1), 10, 0, timezone), DayAfterCredits, DayAfterReason);
-        TopUp(ClubTime(Last.AddDays(1), 10, 30, timezone), DayAfterTopUpCredits, DayAfterTopUpZar, DayAfterReason + " (top-up)");
+        Adjustment(ClubTime(Last.AddDays(1), 10, 0, timezone), DayAfterMinutes, DayAfterReason);
+        TopUp(ClubTime(Last.AddDays(1), 10, 30, timezone), DayAfterTopUpMinutes, DayAfterTopUpZar, DayAfterReason + " (top-up)");
         Booking(ClubTime(Last.AddDays(1), 9, 0, timezone), BookingStatus.Booked);
 
         await db.SaveChangesAsync();

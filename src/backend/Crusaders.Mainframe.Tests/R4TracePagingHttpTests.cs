@@ -33,7 +33,7 @@ public sealed class R4TracePagingHttpTests(PostgresFixture pg) : IClassFixture<P
                     TenantId = club.TenantId,
                     UserId = club.MemberUserId,
                     Type = LedgerEntryType.TopUp,
-                    AmountCredits = 10m,
+                    AmountMinutes = 10,
                     ActorUserId = club.MemberUserId,
                     CreatedAt = now.AddMinutes(-30 + i).ToUniversalTime(),
                 });

@@ -42,8 +42,8 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
     private const string MemberBookingsPath = "/api/v1/bookings/";
     private const string AdminBookingsPath = "/api/v1/admin/bookings/";
-    private const decimal SlicePriceCredits = 50m;
-    private const decimal MemberFloatCredits = 500m;
+    private const int SlicePriceCredits = 50;
+    private const int MemberFloatMinutes = 500;
 
     /// <summary>Hours wide open and no peak window, so nothing here depends on when the suite runs.</summary>
     private const string SettingsJson = """
@@ -75,7 +75,7 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
             new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin", MembershipNumber = $"{slug}-A", Status = MembershipStatus.Active },
             new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Mia Bekker", MembershipNumber = $"{slug}-M", Status = memberStatus });
 
-        db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = SlicePriceCredits });
+        db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" });
 
         // Funded well past the price on purpose. A refusal has to be the membership rule and
         // not `insufficient_balance` wearing a different name — the fixture that would let
@@ -86,7 +86,7 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
             UserId = member.Id,
             ActorUserId = admin.Id,
             Type = LedgerEntryType.AdminAdjustment,
-            AmountCredits = MemberFloatCredits,
+            AmountMinutes = MemberFloatMinutes,
             Reason = "Seed float",
         });
 
@@ -146,7 +146,7 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
 
         var rows = await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).ToListAsync();
-        Assert.Equal(MemberFloatCredits, rows.Sum(l => l.AmountCredits));
+        Assert.Equal(MemberFloatMinutes, rows.Sum(l => l.AmountMinutes));
         Assert.DoesNotContain(rows, l => l.Type == LedgerEntryType.BookingCharge);
 
         Assert.Empty(await db.Bookings.IgnoreQueryFilters()
@@ -247,12 +247,12 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
         var (ownCode, ownBody) = await PostAsync(member, MemberBookingsPath,
             new { courtId = s.CourtId, startsAt = SlotAt(9), sliceCount = 1 });
         Assert.Equal(HttpStatusCode.OK, ownCode);
-        Assert.Equal(MemberFloatCredits - SlicePriceCredits, ownBody.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(MemberFloatMinutes - SlicePriceCredits, ownBody.GetProperty("balance_after_minutes").GetDecimal());
 
         var admin = ClientFor(factory, s, s.AdminUserId, isAdmin: true);
         var (deskCode, deskBody) = await PostAsync(admin, AdminBookingsPath,
             new { courtId = s.CourtId, userId = s.MemberUserId, startsAt = SlotAt(11), sliceCount = 1 });
         Assert.Equal(HttpStatusCode.OK, deskCode);
-        Assert.Equal(MemberFloatCredits - (2 * SlicePriceCredits), deskBody.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(MemberFloatMinutes - (2 * SlicePriceCredits), deskBody.GetProperty("balance_after_minutes").GetDecimal());
     }
 }

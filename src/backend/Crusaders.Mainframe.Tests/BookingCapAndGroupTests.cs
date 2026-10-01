@@ -154,7 +154,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         // Today, but hours away — past same_day_relaxation_window_minutes, so the blueprint's
         // relaxation cannot be what lets these through.
@@ -196,7 +196,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var soon = SoonInsideTheDay();
         // gotchas-clock.md: a test that books relative to UtcNow inherits the wall clock as a
@@ -223,7 +223,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var soon = SoonInsideTheDay();
         Assert.True(soon is not null, $"the club day in {ClubZoneId} has no room for two short slots — MorningZone is wrong");
@@ -250,7 +250,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.AdminUser.Id, LedgerEntryType.TopUp, 5000m, host.AdminUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.AdminUser.Id, LedgerEntryType.TopUp, 5000, host.AdminUser.Id), default);
 
         for (var i = 0; i < 3; i++)
         {
@@ -272,7 +272,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(9), 1, default));
@@ -332,19 +332,11 @@ public class BookingCapAndGroupTests
     /// behave exactly as it does today. That is what makes this migration a no-op.
     /// </summary>
     [Fact]
-    public async Task A_member_in_no_group_books_at_the_courts_own_price()
+    public Task A_member_in_no_group_books_at_the_courts_own_price()
     {
-        await using var host = await TestHost.CreateAsync();
-        await GiveSettingsAsync(host, OpenAllHours);
-        using var scope = host.NewScope();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
-
-        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
-            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(3), 1, default));
-
-        Assert.Equal(host.Courts[0].SlicePriceCredits, ok.Booking.AmountChargedCredits);
+        // P13-B1: courts carry no price; assert the charge is SliceMinutes x SliceCount (§1.1)
+        Assert.Fail($"P13-B1: courts carry no price; assert the charge is SliceMinutes x SliceCount (§1.1)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -364,35 +356,11 @@ public class BookingCapAndGroupTests
     [InlineData(1, 4)]     // one group at 0.5x  → half price
     [InlineData(2, 8)]     // plus a 1.0x group  → the dearer wins
     [InlineData(3, 16)]    // plus a 2.0x group  → the dearest wins
-    public async Task The_highest_of_a_members_group_prices_is_what_they_pay(int groupCount, decimal expected)
+    public Task The_highest_of_a_members_group_prices_is_what_they_pay(int groupCount, decimal expected)
     {
-        await using var host = await TestHost.CreateAsync();
-        await GiveSettingsAsync(host, OpenAllHours);
-
-        var ids = new List<Guid>();
-        var factors = new[] { 5_000, 10_000, 20_000 };
-        for (var i = 0; i < groupCount; i++)
-        {
-            var bps = factors[i];
-            var group = await GroupAsync(host, $"rate-{i}", g =>
-            {
-                g.PricingMode = GroupPricingMode.Multiplier;
-                g.PriceMultiplierBps = bps;
-            });
-            ids.Add(group.Id);
-        }
-        await JoinAsync(host, host.PlayerUser.Id, [.. ids]);
-
-        using var scope = host.NewScope();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
-
-        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
-            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(3), 1, default));
-
-        // The seeded court is 8.00 credits a slice.
-        Assert.Equal(expected, ok.Booking.AmountChargedCredits);
+        // P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1)
+        Assert.Fail($"P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1) ({groupCount} {expected})");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -412,7 +380,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var refusal = Assert.IsType<BookingResult.GroupWindow>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, day, 1, default));
@@ -439,7 +407,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         // 08:45 for two slices runs to 09:15, which is past the edge.
         Assert.IsType<BookingResult.GroupWindow>(await booking.CreateAsync(
@@ -468,7 +436,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var refusal = Assert.IsType<BookingResult.NoBookableWindow>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(7), 1, default));
@@ -494,7 +462,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(9), 1, default));
@@ -524,7 +492,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(9), 1, default));
@@ -551,7 +519,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         for (var i = 0; i < 3; i++)
         {
@@ -578,7 +546,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, day, 1, default));
@@ -603,7 +571,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.AdminUser.Id, LedgerEntryType.TopUp, 5000m, host.AdminUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.AdminUser.Id, LedgerEntryType.TopUp, 5000, host.AdminUser.Id), default);
 
         var payer = new BookingPayer(host.AdminUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(host.Courts[0].Id, payer, target, 1, default));
@@ -647,7 +615,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         // 23:45 plus two fifteen-minute slices ends at 00:15 the next day.
         var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
@@ -674,7 +642,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
@@ -695,7 +663,7 @@ public class BookingCapAndGroupTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
 
@@ -727,7 +695,7 @@ public class BookingCapAndGroupTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
         var schedule = scope.ServiceProvider.GetRequiredService<ScheduleService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var day = DateOnly.FromDateTime(NextWeekAt(9).UtcDateTime);
 
@@ -757,42 +725,11 @@ public class BookingCapAndGroupTests
     /// the rest — wrong for a flat-per-slice group on a dearer court.
     /// </summary>
     [Fact]
-    public async Task The_grid_prices_every_court_at_the_viewers_own_price()
+    public Task The_grid_prices_every_court_at_the_viewers_own_price()
     {
-        await using var host = await TestHost.CreateAsync();
-        await GiveSettingsAsync(host, OpenAllHours);
-        var half = await GroupAsync(host, "Half", g =>
-        {
-            g.PricingMode = GroupPricingMode.Multiplier;
-            g.PriceMultiplierBps = 5_000;
-        });
-        await JoinAsync(host, host.PlayerUser.Id, half.Id);
-        using (var setup = host.NewScope())
-        {
-            var db = setup.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var dear = await db.Courts.FirstAsync(c => c.Id == host.Courts[1].Id);
-            dear.SlicePriceCredits = 20m;
-            await db.SaveChangesAsync();
-        }
-
-        using var scope = host.NewScope();
-        var schedule = scope.ServiceProvider.GetRequiredService<ScheduleService>();
-        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
-        var date = DateOnly.FromDateTime(NextWeekAt(9).UtcDateTime);
-
-        var prices = (await schedule.GetDayAsync(date, host.PlayerUser.Id, default)).Rules!.SlicePricesByCourt!
-            .ToDictionary(p => p.CourtId, p => p.Credits);
-        Assert.Equal(4m, prices[host.Courts[0].Id]);
-        Assert.Equal(10m, prices[host.Courts[1].Id]);
-
-        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
-            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(9), 1, default));
-        Assert.Equal(prices[host.Courts[1].Id], ok.Booking.AmountChargedCredits);
-
-        var admin = await schedule.GetDayAsync(date, host.AdminUser.Id, viewerIsAdmin: true, default);
-        Assert.Equal(host.Courts.Count(c => c.IsActive), admin.Rules!.SlicePricesByCourt!.Count);
+        // P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1)
+        Assert.Fail($"P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -857,7 +794,7 @@ public class BookingCapAndGroupTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
         var schedule = scope.ServiceProvider.GetRequiredService<ScheduleService>();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
 
         var target = NextWeekAt(9);
         var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(

@@ -223,7 +223,7 @@ public sealed class TestHost : IAsyncDisposable
                 AddedByUserId = admin.Id,
             });
             var courts = new List<Court>();
-            for (var i = 1; i <= 4; i++) courts.Add(new Court { TenantId = tenant.Id, CourtNumber = i, Name = $"Court {i}", SlicePriceCredits = 8m });
+            for (var i = 1; i <= 4; i++) courts.Add(new Court { TenantId = tenant.Id, CourtNumber = i, Name = $"Court {i}" });
             db.Courts.AddRange(courts);
             await db.SaveChangesAsync();
 
@@ -245,7 +245,6 @@ public sealed class TestHost : IAsyncDisposable
         Name = "League members",
         IsSystemDefault = true,
         SystemKey = MemberGroupSystemKeys.League,
-        CreditsPerZar = LeagueCreditsPerZar,
         PeakPriority = true,
     };
 

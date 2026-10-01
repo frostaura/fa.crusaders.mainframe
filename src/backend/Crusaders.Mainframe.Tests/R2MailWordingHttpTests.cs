@@ -52,7 +52,7 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2cxdate");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var at = PlayersClub.Tomorrow(10).AddMinutes(15);
         var slot = $"Court 1 · {at.ToString(Api.Services.ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture)}";
 
@@ -79,7 +79,7 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2collect");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
         var admin = club.Client(f, club.Admin, admin: true);
@@ -103,11 +103,11 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2clubrm");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
-        Assert.True((await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = 16m })).IsSuccessStatusCode);
+        Assert.True((await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = 16 })).IsSuccessStatusCode);
         await DeliverAsync(f, club);
         mail.Sent.Clear();
 
@@ -137,11 +137,11 @@ public sealed class R2MailWordingHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "r2ownrm");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
-        Assert.True((await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = 16m })).IsSuccessStatusCode);
+        Assert.True((await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = 16 })).IsSuccessStatusCode);
         await DeliverAsync(f, club);
         mail.Sent.Clear();
 

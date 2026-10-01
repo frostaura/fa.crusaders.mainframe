@@ -35,14 +35,14 @@ public sealed class R2AdminMemberGamesHttpTests(PostgresFixture pg) : IClassFixt
         var now = DateTimeOffset.UtcNow;
 
         var ahead = await club.InsertBookingAsync(f, PlayersClub.Tomorrow(8));
-        await club.InsertSeatAsync(f, ahead, 1, club.Organiser, ParticipantStatus.Accepted, 16m);
-        await club.InsertSeatAsync(f, ahead, 2, club.Sam, ParticipantStatus.Accepted, 16m);
+        await club.InsertSeatAsync(f, ahead, 1, club.Organiser, ParticipantStatus.Accepted, 16);
+        await club.InsertSeatAsync(f, ahead, 2, club.Sam, ParticipantStatus.Accepted, 16);
         var played = await club.InsertBookingAsync(f, now.AddDays(-2));
-        await club.InsertSeatAsync(f, played, 1, club.Organiser, ParticipantStatus.Accepted, 16m);
-        await club.InsertSeatAsync(f, played, 2, club.Sam, ParticipantStatus.Accepted, 16m);
+        await club.InsertSeatAsync(f, played, 1, club.Organiser, ParticipantStatus.Accepted, 16);
+        await club.InsertSeatAsync(f, played, 2, club.Sam, ParticipantStatus.Accepted, 16);
         var onlyAsked = await club.InsertBookingAsync(f, PlayersClub.Tomorrow(12));
-        await club.InsertSeatAsync(f, onlyAsked, 1, club.Organiser, ParticipantStatus.Accepted, 16m);
-        await club.InsertSeatAsync(f, onlyAsked, 2, club.Sam, ParticipantStatus.Invited, 16m);
+        await club.InsertSeatAsync(f, onlyAsked, 1, club.Organiser, ParticipantStatus.Accepted, 16);
+        await club.InsertSeatAsync(f, onlyAsked, 2, club.Sam, ParticipantStatus.Invited, 16);
         var own = await club.InsertBookingAsync(f, PlayersClub.Tomorrow(15), organiser: club.Sam);
 
         var admin = club.Client(f, club.Admin, admin: true);

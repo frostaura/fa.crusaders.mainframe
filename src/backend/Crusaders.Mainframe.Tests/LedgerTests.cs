@@ -15,12 +15,12 @@ public class LedgerTests
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id, Reason: "TopUp"), default);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -50m, host.PlayerUser.Id, Reason: "Booking"), default);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 25m, host.AdminUser.Id, Reason: "Goodwill"), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id, Reason: "TopUp"), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -50, host.PlayerUser.Id, Reason: "Booking"), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 25, host.AdminUser.Id, Reason: "Goodwill"), default);
 
         var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Equal(475m, balance);
+        Assert.Equal(475, balance);
     }
 
     [Fact]
@@ -31,12 +31,12 @@ public class LedgerTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -25m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -25, host.PlayerUser.Id), default);
 
         var rows = await db.LedgerEntries.OrderBy(l => l.CreatedAt).ToListAsync();
         Assert.Equal(2, rows.Count);
-        Assert.Equal(100m, rows[0].AmountCredits);
-        Assert.Equal(-25m, rows[1].AmountCredits);
+        Assert.Equal(100, rows[0].AmountMinutes);
+        Assert.Equal(-25, rows[1].AmountMinutes);
     }
 }

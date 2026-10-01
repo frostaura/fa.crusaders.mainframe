@@ -170,7 +170,6 @@ public sealed class PlayAdminHttpTests(PostgresFixture pg) : IClassFixture<Postg
             return new Dictionary<string, object>
             {
                 ["sliceMinutes"] = settings.GetProperty("slice_minutes").GetInt32(),
-                ["slicePriceCredits"] = settings.GetProperty("slice_price_credits").GetDecimal(),
                 ["advanceBookingDays"] = settings.GetProperty("advance_booking_days").GetInt32(),
                 ["dayStartMinute"] = settings.GetProperty("day_start_minute").GetInt32(),
                 ["dayEndMinute"] = settings.GetProperty("day_end_minute").GetInt32(),

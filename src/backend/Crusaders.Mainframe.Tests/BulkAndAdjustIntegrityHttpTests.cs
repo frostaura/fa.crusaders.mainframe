@@ -37,7 +37,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
 
     private static List<JsonElement> Results(JsonElement body) => body.GetProperty("results").EnumerateArray().ToList();
 
-    private static async Task CreditAsync(TestWebAppFactory factory, Guid tenantId, Guid userId, decimal credits)
+    private static async Task CreditAsync(TestWebAppFactory factory, Guid tenantId, Guid userId, int credits)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -46,7 +46,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
             TenantId = tenantId,
             UserId = userId,
             Type = LedgerEntryType.TopUp,
-            AmountCredits = credits,
+            AmountMinutes = credits,
             ActorUserId = Guid.Empty,
             Reason = "fixture float",
         });
@@ -79,13 +79,11 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         return user.Id;
     }
 
-    private static async Task SetCourtPriceAsync(TestWebAppFactory factory, Guid courtId, decimal slicePrice)
+    // P13-B1: courts carry no price (§2.2). A test that needs a price must be rewritten in minutes.
+    private static Task SetCourtPriceAsync(TestWebAppFactory factory, Guid courtId, int slicePrice)
     {
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var court = await db.Courts.IgnoreQueryFilters().FirstAsync(c => c.Id == courtId);
-        court.SlicePriceCredits = slicePrice;
-        await db.SaveChangesAsync();
+        Assert.Fail($"P13-B1: court prices are gone; rewrite this scenario in minutes ({courtId} {slicePrice})");
+        return Task.CompletedTask;
     }
 
     private static async Task<List<LedgerEntry>> LedgerAsync(TestWebAppFactory factory, Guid tenantId, Guid userId)
@@ -146,7 +144,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         var club = await DoorClub.SeedAsync(factory, "f1adjust");
         var admin = club.AdminClient(factory);
         var path = $"/api/v1/admin/credit/{club.MemberUserId}/adjust";
-        object Body() => new { amountCredits = 25m, reason = "Lights failed", reasonCode = "goodwill" };
+        object Body() => new { amountMinutes = 25, reason = "Lights failed", reasonCode = "goodwill" };
 
         await using (await ChangeLogSabotage.InstallAsync(factory, club.TenantId, "credit."))
         {
@@ -162,7 +160,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
 
         // The fault cleared: one adjust is one movement and one record.
         Assert.True(await SucceededAsync(() => admin.PostAsJsonAsync(path, Body())));
-        Assert.Equal(25m, (await LedgerAsync(factory, club.TenantId, club.MemberUserId)).Sum(l => l.AmountCredits));
+        Assert.Equal(25, (await LedgerAsync(factory, club.TenantId, club.MemberUserId)).Sum(l => l.AmountMinutes));
         Assert.Single(await ChangesAsync(factory, club.TenantId));
     }
 
@@ -182,7 +180,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "f2bulk");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 500m);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 500);
         var admin = club.AdminClient(factory);
 
         await using (await ChangeLogSabotage.InstallAsync(factory, club.TenantId, "bookings.bulk_booked"))
@@ -227,8 +225,8 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "f3payer");
         var memberB = await AddMemberAsync(factory, club, "Second Member");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 200m);
-        await CreditAsync(factory, club.TenantId, memberB, 200m);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 200);
+        await CreditAsync(factory, club.TenantId, memberB, 200);
         var admin = club.AdminClient(factory);
 
         var first = await admin.PostAsJsonAsync(AdminBulkPath, new
@@ -260,8 +258,8 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         var bBookings = await BookingsAsync(factory, club.TenantId, memberB);
         var booked = Assert.Single(bBookings);
         Assert.Equal(Morning(2, 14), booked.StartsAt);
-        Assert.Equal(-16m, (await LedgerAsync(factory, club.TenantId, memberB))
-            .Where(l => l.Type == LedgerEntryType.BookingCharge).Sum(l => l.AmountCredits));
+        Assert.Equal(-16, (await LedgerAsync(factory, club.TenantId, memberB))
+            .Where(l => l.Type == LedgerEntryType.BookingCharge).Sum(l => l.AmountMinutes));
     }
 
     /// <summary>
@@ -275,7 +273,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "f3list");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 200m);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 200);
         var admin = club.AdminClient(factory);
 
         object Batch(int hour) => new
@@ -308,7 +306,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "f4member");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 100m);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 100);
         var member = club.MemberClient(factory);
         var body = new
         {
@@ -337,7 +335,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "f4admin");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 100m);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 100);
         var admin = club.AdminClient(factory);
         var body = new
         {
@@ -375,7 +373,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "f5free");
-        await SetCourtPriceAsync(factory, club.CourtId, 0m);
+        await SetCourtPriceAsync(factory, club.CourtId, 0);
         var member = club.MemberClient(factory);
         var admin = club.AdminClient(factory);
 

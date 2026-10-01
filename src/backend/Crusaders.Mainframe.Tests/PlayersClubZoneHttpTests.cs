@@ -38,7 +38,7 @@ public sealed class PlayersClubZoneHttpTests(PostgresFixture pg) : IClassFixture
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "plzone", SettingsIn("Africa/Johannesburg"));
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { link = true }]);
         var token = PlayersClub.TokenOf(body, 3)!;
 
@@ -64,7 +64,7 @@ public sealed class PlayersClubZoneHttpTests(PostgresFixture pg) : IClassFixture
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "plzonebad", SettingsIn("Africa/Johanesburg"));
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, _) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
 
         // The times on the wire are computed in UTC for such a club, so the label must say UTC:

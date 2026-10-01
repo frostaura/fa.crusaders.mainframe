@@ -35,7 +35,7 @@ public sealed class BookingConfirmationOffPathHttpTests(PostgresFixture pg) : IC
         await using var f = CapturingMail.On(baseFactory, mail).WithWebHostBuilder(b => b.ConfigureServices(s =>
             s.ConfigureDbContext<MainframeDbContext>(o => o.AddInterceptors(gate))));
         var club = await PlayersClub.SeedAsync(f, "confoff");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var olive = club.Client(f, club.Organiser);
 
         var answered = await olive.PostAsJsonAsync("/api/v1/bookings", new

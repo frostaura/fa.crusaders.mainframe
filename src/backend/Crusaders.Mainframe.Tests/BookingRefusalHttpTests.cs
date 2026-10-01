@@ -46,7 +46,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
     private const string BookingsPath = "/api/v1/bookings/";
 
     /// <summary>Slice price in the fixture below; a whole number so a wrong figure is obvious in a failure message.</summary>
-    private const decimal SlicePriceCredits = 50m;
+    private const decimal SlicePriceCredits = 50;
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid LeagueUserId, Guid CourtId, Guid SecondCourtId);
 
@@ -88,8 +88,8 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         db.MemberGroups.Add(leagueGroup);
         db.MemberGroupMembers.Add(new MemberGroupMember { TenantId = tenant.Id, GroupId = leagueGroup.Id, UserId = league.Id, AddedByUserId = admin.Id });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = SlicePriceCredits };
-        var court2 = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = SlicePriceCredits };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
+        var court2 = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2" };
         db.Courts.AddRange(court, court2);
 
         // Plenty of credit, so an insufficient-balance answer can never be mistaken for a
@@ -102,7 +102,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
                 UserId = u.Id,
                 ActorUserId = admin.Id,
                 Type = LedgerEntryType.AdminAdjustment,
-                AmountCredits = 5000m,
+                AmountMinutes = 5000,
                 Reason = "Seed float",
             });
         }
@@ -316,8 +316,8 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
 
         Assert.False(quote.GetProperty("insidePenaltyWindow").GetBoolean());
         Assert.False(quote.GetProperty("checkedIn").GetBoolean());
-        Assert.Equal(SlicePriceCredits, quote.GetProperty("refundCredits").GetDecimal());
-        Assert.Equal(0m, quote.GetProperty("penaltyCredits").GetDecimal());
+        Assert.Equal(SlicePriceCredits, quote.GetProperty("refundMinutes").GetDecimal());
+        Assert.Equal(0m, quote.GetProperty("penaltyMinutes").GetDecimal());
     }
 
     [SkippableFact]
@@ -347,8 +347,8 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         // 30% of 50.00 is kept; 35.00 is what actually lands back in the wallet. The
         // member was shown neither figure before this existed — the confirmation was a
         // button that changed its own label.
-        Assert.Equal(15m, quote.GetProperty("penaltyCredits").GetDecimal());
-        Assert.Equal(35m, quote.GetProperty("refundCredits").GetDecimal());
+        Assert.Equal(15m, quote.GetProperty("penaltyMinutes").GetDecimal());
+        Assert.Equal(35m, quote.GetProperty("refundMinutes").GetDecimal());
         Assert.Equal(30m, quote.GetProperty("penaltyPct").GetDecimal());
     }
 
@@ -376,9 +376,9 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         // the member scanned in at the box, cancelled from the sofa, lost the entire price
         // and was told "Booking cancelled — refund pending."
         Assert.True(quote.GetProperty("checkedIn").GetBoolean());
-        Assert.Equal(0m, quote.GetProperty("refundCredits").GetDecimal());
-        Assert.Equal(0m, quote.GetProperty("penaltyCredits").GetDecimal());
-        Assert.Equal(SlicePriceCredits, quote.GetProperty("amountChargedCredits").GetDecimal());
+        Assert.Equal(0m, quote.GetProperty("refundMinutes").GetDecimal());
+        Assert.Equal(0m, quote.GetProperty("penaltyMinutes").GetDecimal());
+        Assert.Equal(SlicePriceCredits, quote.GetProperty("amountChargedMinutes").GetDecimal());
     }
 
     [SkippableFact]
@@ -421,7 +421,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         // in the product could have shown attendance even if it wanted to.
         var mine = await Slot(ClientFor(factory, s, s.MemberUserId));
         Assert.True(mine.GetProperty("checkedIn").GetBoolean());
-        Assert.Equal(SlicePriceCredits, mine.GetProperty("amountChargedCredits").GetDecimal());
+        Assert.Equal(SlicePriceCredits, mine.GetProperty("amountChargedMinutes").GetDecimal());
 
         // The admin sees it.
         Assert.True((await Slot(ClientFor(factory, s, s.AdminUserId, isAdmin: true))).GetProperty("checkedIn").GetBoolean());
@@ -430,7 +430,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         // another member's attendance and spend are no more theirs to read than an email.
         var theirs = await Slot(ClientFor(factory, s, s.LeagueUserId));
         Assert.Equal(JsonValueKind.Null, theirs.GetProperty("checkedIn").ValueKind);
-        Assert.Equal(JsonValueKind.Null, theirs.GetProperty("amountChargedCredits").ValueKind);
+        Assert.Equal(JsonValueKind.Null, theirs.GetProperty("amountChargedMinutes").ValueKind);
 
         async Task<JsonElement> Slot(HttpClient client)
         {

@@ -124,7 +124,7 @@ public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
         // typo cannot register a relay that can never light.
         for (var n = 1; n <= (twoCourtsOnly ? 2 : 4); n++)
         {
-            db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m });
+            db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}" });
         }
         await db.SaveChangesAsync();
         return new Seeded(tenant.Id, slug, admin.Id, tenant.DeviceApiKey!);

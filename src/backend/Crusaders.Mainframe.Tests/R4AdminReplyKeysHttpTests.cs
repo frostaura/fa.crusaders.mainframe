@@ -48,7 +48,7 @@ public sealed class R4AdminReplyKeysHttpTests(PostgresFixture pg) : IClassFixtur
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = club.TenantId, UserId = club.MemberUserId, Type = LedgerEntryType.TopUp,
-                AmountCredits = 10m, ActorUserId = club.MemberUserId, CreatedAt = now.AddMinutes(-5).ToUniversalTime(),
+                AmountMinutes = 10, ActorUserId = club.MemberUserId, CreatedAt = now.AddMinutes(-5).ToUniversalTime(),
             });
             await db.SaveChangesAsync();
         });

@@ -9,7 +9,7 @@ namespace Crusaders.Mainframe.Tests;
 /// Before this, adding an enum member was silently dangerous. There is no database CHECK
 /// constraint on the column, <c>LedgerRow.type</c> is a bare <c>string</c> in TypeScript,
 /// and <c>LedgerService.PostAsync</c> is type-blind — so a new member moved balances
-/// correctly and appeared in <c>net_credits</c>, while being invisible in fifteen
+/// correctly and appeared in <c>net_minutes</c>, while being invisible in fifteen
 /// <c>Where(Type == X)</c> bucket sums across two endpoint files. Nothing failed to
 /// compile. No test failed. The month-end columns simply stopped summing to the total, and
 /// the first person to notice would be an admin reconciling by hand.

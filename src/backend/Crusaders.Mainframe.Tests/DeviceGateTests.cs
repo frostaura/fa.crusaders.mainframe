@@ -97,7 +97,7 @@ public class DeviceGateTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = 15,
             SliceCount = Math.Max(1, minutes / 15),
-            AmountChargedCredits = 8m * Math.Max(1, minutes / 15),
+            AmountChargedMinutes = 8 * Math.Max(1, minutes / 15),
             Status = BookingStatus.Booked,
             ChargedAt = startsAt,
         };
@@ -413,7 +413,7 @@ public class DeviceGateTests
         await using var _ = f.Host;
         using var __ = f.Scope;
 
-        var court5 = new Court { TenantId = f.Host.Tenant.Id, CourtNumber = 5, Name = "Court 5", SlicePriceCredits = 8m };
+        var court5 = new Court { TenantId = f.Host.Tenant.Id, CourtNumber = 5, Name = "Court 5" };
         f.Db.Courts.Add(court5);
         await f.Db.SaveChangesAsync();
 

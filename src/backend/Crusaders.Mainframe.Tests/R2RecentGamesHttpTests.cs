@@ -47,8 +47,8 @@ public sealed class R2RecentGamesHttpTests(PostgresFixture pg) : IClassFixture<P
         var cancelled = await club.GameAsync(f, now.AddHours(-6), club.Organiser, [club.Sam]);
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == cancelled).Status = BookingStatus.Cancelled);
         var invitedOnly = await club.InsertBookingAsync(f, now.AddHours(-8));
-        await club.InsertSeatAsync(f, invitedOnly, 1, club.Organiser, ParticipantStatus.Accepted, 0m);
-        await club.InsertSeatAsync(f, invitedOnly, 2, club.Alex, ParticipantStatus.Invited, 16m);
+        await club.InsertSeatAsync(f, invitedOnly, 1, club.Organiser, ParticipantStatus.Accepted, 0);
+        await club.InsertSeatAsync(f, invitedOnly, 2, club.Alex, ParticipantStatus.Invited, 16);
 
         var olive = await RecentAsync(club.Client(f, club.Organiser));
         Assert.Equal("Africa/Johannesburg", olive.GetProperty("timezone").GetString());
@@ -105,7 +105,7 @@ public sealed class R2RecentGamesHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(ahead, item.GetProperty("booking_id").GetGuid());
         Assert.False(item.TryGetProperty("result_status", out _));
         Assert.False(item.TryGetProperty("can_record", out _));
-        foreach (var key in new[] { "court_name", "starts_at", "ends_at", "role", "status", "players", "my_share_credits", "needs_action" })
+        foreach (var key in new[] { "court_name", "starts_at", "ends_at", "role", "status", "players", "my_share_minutes", "needs_action" })
         {
             Assert.True(item.TryGetProperty(key, out _), key);
         }

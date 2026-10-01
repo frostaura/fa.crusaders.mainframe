@@ -41,7 +41,8 @@ public abstract partial class AdminSettingsHttpTests
 
                 // Before the fix these differed: 30 vs 15 and 50 vs 8.
                 Assert.Equal(engine.SliceMinutes, shown.GetProperty("slice_minutes").GetInt32());
-                Assert.Equal(engine.DefaultSlicePriceCredits, shown.GetProperty("slice_price_credits").GetDecimal());
+                // P13: slice_price_credits is no longer served (§3.9).
+                Assert.False(shown.TryGetProperty("slice_price_credits", out _));
                 Assert.Equal(engine.PenaltyPct, shown.GetProperty("penalty_pct").GetDecimal());
                 Assert.Equal(engine.GraceWindowMinutes, shown.GetProperty("grace_window_minutes").GetInt32());
                 Assert.Equal(engine.PenaltyWindowMinutes, shown.GetProperty("penalty_window_minutes").GetInt32());
@@ -53,7 +54,6 @@ public abstract partial class AdminSettingsHttpTests
             var save = await client.PutAsJsonAsync(SettingsPath, new
             {
                 sliceMinutes = shown.GetProperty("slice_minutes").GetInt32(),
-                slicePriceCredits = shown.GetProperty("slice_price_credits").GetDecimal(),
                 advanceBookingDays = shown.GetProperty("advance_booking_days").GetInt32(),
                 dayStartMinute = shown.GetProperty("day_start_minute").GetInt32(),
                 dayEndMinute = shown.GetProperty("day_end_minute").GetInt32(),
@@ -70,7 +70,6 @@ public abstract partial class AdminSettingsHttpTests
                 var after = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
 
                 Assert.Equal(15, after.SliceMinutes);
-                Assert.Equal(8m, after.DefaultSlicePriceCredits);
             }
         }
 
@@ -117,7 +116,6 @@ public abstract partial class AdminSettingsHttpTests
             var body = new Dictionary<string, object?>
             {
                 ["sliceMinutes"] = shown.GetProperty("slice_minutes").GetInt32(),
-                ["slicePriceCredits"] = shown.GetProperty("slice_price_credits").GetDecimal(),
                 ["advanceBookingDays"] = shown.GetProperty("advance_booking_days").GetInt32(),
                 ["dayStartMinute"] = shown.GetProperty("day_start_minute").GetInt32(),
                 ["dayEndMinute"] = shown.GetProperty("day_end_minute").GetInt32(),
@@ -256,7 +254,7 @@ public abstract partial class AdminSettingsHttpTests
                 var body = new Dictionary<string, object?>
                 {
                     ["sliceMinutes"] = 15,
-                    ["slicePriceCredits"] = 8m,
+                    ["slicePriceCredits"] = 8,
                     ["advanceBookingDays"] = 14,
                     ["dayStartMinute"] = 360,
                     ["dayEndMinute"] = 1320,

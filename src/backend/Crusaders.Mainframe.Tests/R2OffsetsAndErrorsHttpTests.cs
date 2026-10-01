@@ -25,7 +25,7 @@ public sealed class R2OffsetsAndErrorsHttpTests(PostgresFixture pg) : IClassFixt
         Skip.IfNot(pg.Available, Skipped);
         await using var f = pg.SharedHost;
         var club = await PlayersClub.SeedAsync(f, "r2offset");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var utc = PlayersClub.Tomorrow(8);
         var sast = utc.ToOffset(TimeSpan.FromHours(2)).ToString("yyyy-MM-dd'T'HH:mm:sszzz");
 

@@ -361,7 +361,7 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<Postgr
             DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
         };
         db.Tenants.Add(tenant);
-        db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m });
+        db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" });
 
         var mac = Guid.NewGuid().ToString("N")[..12];
         db.Devices.Add(new Device

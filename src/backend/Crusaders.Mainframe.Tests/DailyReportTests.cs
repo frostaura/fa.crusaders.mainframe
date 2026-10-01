@@ -84,14 +84,14 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
         // buckets fails here too.
         foreach (var (date, row) in byDate)
         {
-            var expected = date == expectedTopUpDay ? 300m : 0m;
-            Assert.Equal(expected, row.GetProperty("top_ups_credits").GetDecimal());
+            var expected = date == expectedTopUpDay ? 300 : 0;
+            Assert.Equal(expected, row.GetProperty("top_ups_minutes").GetDecimal());
         }
 
         // The 50-credit charge is an hour earlier and stays on 2 March under BOTH zones. So
         // in Johannesburg the two rows are split by the club's midnight, and in UTC they are
         // not — which is the whole difference between the two cases.
-        Assert.Equal(50m, byDate["2026-03-02"].GetProperty("booking_charges_credits").GetDecimal());
+        Assert.Equal(50m, byDate["2026-03-02"].GetProperty("booking_charges_minutes").GetDecimal());
     }
 
     [SkippableFact]
@@ -119,16 +119,16 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
         var byDate = doc.RootElement.EnumerateArray().ToDictionary(e => e.GetProperty("date").GetString()!);
 
         // K-F10: the desk's own movements, on the club's report, at all.
-        Assert.Equal(125.50m, byDate["2026-03-03"].GetProperty("adjustments_credits").GetDecimal());
+        Assert.Equal(125, byDate["2026-03-03"].GetProperty("adjustments_minutes").GetDecimal());
         // A day with none reads zero rather than being absent — the charts index every day.
-        Assert.Equal(0m, byDate["2026-03-05"].GetProperty("adjustments_credits").GetDecimal());
+        Assert.Equal(0m, byDate["2026-03-05"].GetProperty("adjustments_minutes").GetDecimal());
 
         // The two clocks, stated. The court is charged for on the 2nd (local) and played on
         // the 4th, so the money column and the courts column of one row are not about the
         // same booking — which is exactly what the screen now says under the table.
-        Assert.Equal(50m, byDate["2026-03-02"].GetProperty("booking_charges_credits").GetDecimal());
+        Assert.Equal(50m, byDate["2026-03-02"].GetProperty("booking_charges_minutes").GetDecimal());
         Assert.Equal(0, byDate["2026-03-02"].GetProperty("bookings").GetInt32());
-        Assert.Equal(0m, byDate["2026-03-04"].GetProperty("booking_charges_credits").GetDecimal());
+        Assert.Equal(0m, byDate["2026-03-04"].GetProperty("booking_charges_minutes").GetDecimal());
         Assert.Equal(1, byDate["2026-03-04"].GetProperty("bookings").GetInt32());
     }
 
@@ -177,13 +177,13 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
         // admin picking two dates is thinking in.
         var first = new DateOnly(2026, 9, 1);
         var last = new DateOnly(2026, 9, 3);
-        var probes = new (string Label, DateTimeOffset At, decimal Credits)[]
+        var probes = new (string Label, DateTimeOffset At, int Credits)[]
         {
-            ("the day before, at 23:30", ClubTime(first.AddDays(-1), 23, 30, 0, tz), 99m),
-            ("the first instant of the first day", ClubTime(first, 0, 0, 0, tz), 11m),
-            ("00:30 on the first day", ClubTime(first, 0, 30, 0, tz), 111m),
-            ("the last instant of the last day", ClubTime(last, 23, 59, 59, tz), 13m),
-            ("00:30 on the day after", ClubTime(last.AddDays(1), 0, 30, 0, tz), 222m),
+            ("the day before, at 23:30", ClubTime(first.AddDays(-1), 23, 30, 0, tz), 99),
+            ("the first instant of the first day", ClubTime(first, 0, 0, 0, tz), 11),
+            ("00:30 on the first day", ClubTime(first, 0, 30, 0, tz), 111),
+            ("the last instant of the last day", ClubTime(last, 23, 59, 59, tz), 13),
+            ("00:30 on the day after", ClubTime(last.AddDays(1), 0, 30, 0, tz), 222),
         };
 
         var (tenantId, slug, adminId) = await SeedProbesAsync(factory, timezone, probes);
@@ -206,15 +206,15 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
             rows.Select(r => r.GetProperty("date").GetString()).ToArray());
 
         var byDate = rows.ToDictionary(e => e.GetProperty("date").GetString()!);
-        decimal Adjustments(string date) => byDate[date].GetProperty("adjustments_credits").GetDecimal();
+        decimal Adjustments(string date) => byDate[date].GetProperty("adjustments_minutes").GetDecimal();
 
         // Both edges of the club's own days are inside, and nothing outside them is.
-        Assert.Equal(122m, Adjustments("2026-09-01"));   // 11.00 at 00:00:00 + 111.00 at 00:30
-        Assert.Equal(0m, Adjustments("2026-09-02"));
-        Assert.Equal(13m, Adjustments("2026-09-03"));    // 23:59:59, the club's last second
+        Assert.Equal(122, Adjustments("2026-09-01"));   // 11.00 at 00:00:00 + 111.00 at 00:30
+        Assert.Equal(0, Adjustments("2026-09-02"));
+        Assert.Equal(13, Adjustments("2026-09-03"));    // 23:59:59, the club's last second
         // 99.00 the evening before and 222.00 the morning after are in no row at all, so the
         // three days sum to exactly what fell on them.
-        Assert.Equal(135m, rows.Sum(r => r.GetProperty("adjustments_credits").GetDecimal()));
+        Assert.Equal(135m, rows.Sum(r => r.GetProperty("adjustments_minutes").GetDecimal()));
     }
 
     /// <summary>
@@ -268,17 +268,17 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
             .Single(r => r.GetProperty("date").GetString() == "2026-09-02");
         decimal Get(string name) => row.GetProperty(name).GetDecimal();
 
-        // The type-blind total first: it is what the member's own `net_movement_credits`
+        // The type-blind total first: it is what the member's own `net_movement_minutes`
         // means, and what the club's card now claims to print.
         var posted = probes.Sum(x => x.Credits);
-        Assert.Equal(posted, Get("net_movement_credits"));
+        Assert.Equal(posted, Get("net_movement_minutes"));
 
         // And the buckets, which must be the same number by a different route. Charges and
         // penalties are reported as positive magnitudes, hence the subtractions — the same
         // arithmetic the card spells out under the figure.
-        var bucketed = Get("top_ups_credits") - Get("booking_charges_credits") + Get("refunds_credits")
-            - Get("penalties_credits") + Get("adjustments_credits") + Get("reversals_credits")
-            + Get("share_transfers_credits");
+        var bucketed = Get("top_ups_minutes") - Get("booking_charges_minutes") + Get("refunds_minutes")
+            - Get("penalties_minutes") + Get("adjustments_minutes") + Get("reversals_minutes")
+            + Get("share_transfers_minutes");
         Assert.True(
             bucketed == posted,
             $"The club's daily buckets sum to {bucketed} but {posted} moved. Some member of "
@@ -288,7 +288,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
             + "/daily row, and check the totals card's copy still tells the truth.");
 
         // The one that was actually missing, named, so a regression reads as itself.
-        Assert.Equal(AmountFor(LedgerEntryType.PaymentReversal), Get("reversals_credits"));
+        Assert.Equal(AmountFor(LedgerEntryType.PaymentReversal), Get("reversals_minutes"));
     }
 
     /// <summary>
@@ -296,9 +296,9 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
     /// Derived from the enum rather than listed, so a member added later gets one too — an
     /// amount of zero would let an unbucketed type pass the arithmetic.
     /// </summary>
-    private static decimal AmountFor(LedgerEntryType type)
+    private static int AmountFor(LedgerEntryType type)
     {
-        var magnitude = 10m + ((int)type * 3.25m);
+        var magnitude = 10 + ((int)type * 3);
         var leavesTheWallet = LedgerEntryTypes.Spend.Contains(type)
             || LedgerEntryTypes.Penalty.Contains(type)
             || LedgerEntryTypes.Reversal.Contains(type);
@@ -322,7 +322,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
     /// </summary>
     private static async Task<(Guid TenantId, string Slug, Guid AdminId)> SeedProbesAsync(
         TestWebAppFactory factory, string timezone,
-        (string Label, DateTimeOffset At, decimal Credits)[] probes,
+        (string Label, DateTimeOffset At, int Credits)[] probes,
         LedgerEntryType[]? types = null)
     {
         using var scope = factory.Services.CreateScope();
@@ -349,7 +349,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
                 TenantId = tenant.Id,
                 UserId = member.Id,
                 Type = types is null ? LedgerEntryType.AdminAdjustment : types[i],
-                AmountCredits = probes[i].Credits,
+                AmountMinutes = probes[i].Credits,
                 ActorUserId = admin.Id,
                 Reason = probes[i].Label,
                 CreatedAt = probes[i].At,
@@ -385,7 +385,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
         var member = new User { TenantId = tenant.Id, Email = $"m-{slug}@test.local", PasswordHash = "x", EmailVerified = true };
         db.Users.AddRange(admin, member);
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 50m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         var booking = new Booking
@@ -398,7 +398,7 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
             EndsAt = new DateTimeOffset(2026, 3, 4, 8, 30, 0, TimeSpan.Zero),
             SliceMinutes = 30,
             SliceCount = 1,
-            AmountChargedCredits = 50m,
+            AmountChargedMinutes = 50,
             Status = BookingStatus.Booked,
         };
         db.Bookings.Add(booking);
@@ -407,19 +407,19 @@ public sealed class DailyReportTests : IClassFixture<PostgresFixture>
             new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp,
-                AmountCredits = 300m, ZarPaid = 187.50m, ConversionRate = 1.6m,
+                AmountMinutes = 300, ZarPaid = 187.50m,
                 ActorUserId = member.Id, Reason = "top-up just after midnight", CreatedAt = lateNight,
             },
             new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.BookingCharge,
-                AmountCredits = -50m, RelatedBookingId = booking.Id,
+                AmountMinutes = -50, RelatedBookingId = booking.Id,
                 ActorUserId = member.Id, Reason = "court paid for two days ahead", CreatedAt = evening,
             },
             new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.AdminAdjustment,
-                AmountCredits = 125.50m, ActorUserId = admin.Id, Reason = "goodwill",
+                AmountMinutes = 125, ActorUserId = admin.Id, Reason = "goodwill",
                 CreatedAt = new DateTimeOffset(2026, 3, 3, 10, 0, 0, TimeSpan.Zero),
             });
 

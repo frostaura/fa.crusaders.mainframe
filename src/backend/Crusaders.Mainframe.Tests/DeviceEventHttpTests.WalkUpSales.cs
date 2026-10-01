@@ -42,7 +42,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal(30, body.GetProperty("granted_minutes").GetInt32());
-            Assert.Equal(16m, body.GetProperty("amount_credits").GetDecimal());
+            Assert.Equal(16m, body.GetProperty("amount_minutes").GetDecimal());
             Assert.False(body.GetProperty("replayed").GetBoolean());
 
             using var scope = factory.Services.CreateScope();
@@ -78,7 +78,7 @@ public abstract partial class DeviceEventHttpTests
                     EndsAt = startsAt.AddMinutes(30),
                     SliceMinutes = 15,
                     SliceCount = 2,
-                    AmountChargedCredits = 16m,
+                    AmountChargedMinutes = 16,
                     Status = BookingStatus.Booked,
                     ChargedAt = DateTimeOffset.UtcNow,
                 });
@@ -95,7 +95,7 @@ public abstract partial class DeviceEventHttpTests
             // 10.67 — the first fractional price in the system, and the reason this endpoint
             // exists on the server rather than on the box.
             Assert.Equal(20, body.GetProperty("granted_minutes").GetInt32());
-            Assert.Equal(10.67m, body.GetProperty("amount_credits").GetDecimal());
+            Assert.Equal(10.67m, body.GetProperty("amount_minutes").GetDecimal());
         }
 
         /// <summary>
@@ -145,7 +145,7 @@ public abstract partial class DeviceEventHttpTests
         /// proves the truncation at the service level, in a window of "roughly ten minutes", with
         /// <c>Assert.InRange(minutes, 1, 11)</c> and no assertion about price at all. What was
         /// untested is the pair the box actually receives — <c>granted_minutes</c> and
-        /// <c>amount_credits</c> together, over HTTP, against a named closing instant. Five tests
+        /// <c>amount_minutes</c> together, over HTTP, against a named closing instant. Five tests
         /// in this class met that pair by accident: they asserted a
         /// figure and got what was left of the club's day instead, for the last half-hour of
         /// every UTC day. At 23:51 UTC on 2026-09-07 the box sold eight minutes for 4.27 credits,
@@ -222,8 +222,8 @@ public abstract partial class DeviceEventHttpTests
 
             // 8 credits per 15 minutes, rounded the way the ledger rounds.
             Assert.Equal(
-                Math.Round(8m * granted / 15m, 2, MidpointRounding.AwayFromZero),
-                body.GetProperty("amount_credits").GetDecimal());
+                Math.Round(8m * granted / 15, 2, MidpointRounding.AwayFromZero), // P13-B1: now `granted` (§1.2)
+                body.GetProperty("amount_minutes").GetDecimal());
 
             using var scope = factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -247,7 +247,7 @@ public abstract partial class DeviceEventHttpTests
             Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
             await using var factory = CreateFactory();
-            var box = await SeedAsync(factory, topUpCredits: 5m);
+            var box = await SeedAsync(factory, topUpMinutes: 5);
             var client = factory.CreateClient();
 
             var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box))));
@@ -255,8 +255,8 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             // Both numbers, so the box can say "5.00 of 16.00" rather than "no".
-            Assert.Equal(5m, body.GetProperty("current_credits").GetDecimal());
-            Assert.Equal(16m, body.GetProperty("required_credits").GetDecimal());
+            Assert.Equal(5m, body.GetProperty("current_minutes").GetDecimal());
+            Assert.Equal(16m, body.GetProperty("required_minutes").GetDecimal());
         }
 
         [SkippableFact]
@@ -280,7 +280,7 @@ public abstract partial class DeviceEventHttpTests
                     EndsAt = DateTimeOffset.UtcNow.AddMinutes(25),
                     SliceMinutes = 15,
                     SliceCount = 2,
-                    AmountChargedCredits = 16m,
+                    AmountChargedMinutes = 16,
                     Status = BookingStatus.Booked,
                     ChargedAt = DateTimeOffset.UtcNow,
                 });
@@ -312,7 +312,7 @@ public abstract partial class DeviceEventHttpTests
             using (var scope = factory.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-                db.Courts.Add(new Court { TenantId = box.TenantId, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = 8m });
+                db.Courts.Add(new Court { TenantId = box.TenantId, CourtNumber = 2, Name = "Court 2" });
                 await db.SaveChangesAsync();
             }
 
@@ -354,7 +354,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(closesAt, body.GetProperty("closes_at").GetString());
 
             // Refused, so nothing was sold and nothing was charged.
-            Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200, await BalanceAsync(factory, box.MemberId));
         }
 
         // ---- the club's walk-up cap reaches the box (finding M-F1) ------------------------

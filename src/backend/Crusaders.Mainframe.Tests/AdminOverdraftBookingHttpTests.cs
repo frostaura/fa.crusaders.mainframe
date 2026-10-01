@@ -38,8 +38,8 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
     private const string AdminBookingsPath = "/api/v1/admin/bookings/";
 
     /// <summary>Whole numbers throughout, so a wrong figure is obvious in a failure message.</summary>
-    private const decimal SlicePriceCredits = 50m;
-    private const decimal MemberFloatCredits = 10m;
+    private const int SlicePriceCredits = 50;
+    private const int MemberFloatMinutes = 10;
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid CourtId);
 
@@ -74,7 +74,7 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
             new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin", MembershipNumber = $"{slug}-A", Status = MembershipStatus.Active },
             new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Naledi Khoza", MembershipNumber = $"{slug}-M", Status = MembershipStatus.Active });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = SlicePriceCredits };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         // Short, deliberately: 10 credits against a 50-credit court is the exact situation
@@ -86,7 +86,7 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
             UserId = member.Id,
             ActorUserId = admin.Id,
             Type = LedgerEntryType.AdminAdjustment,
-            AmountCredits = MemberFloatCredits,
+            AmountMinutes = MemberFloatMinutes,
             Reason = "Seed float",
         });
 
@@ -158,8 +158,8 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
 
         Assert.Equal(HttpStatusCode.PaymentRequired, status);
         Assert.Equal("insufficient_balance", body.GetProperty("error").GetString());
-        Assert.Equal(MemberFloatCredits, body.GetProperty("current_credits").GetDecimal());
-        Assert.Equal(SlicePriceCredits, body.GetProperty("required_credits").GetDecimal());
+        Assert.Equal(MemberFloatMinutes, body.GetProperty("current_minutes").GetDecimal());
+        Assert.Equal(SlicePriceCredits, body.GetProperty("required_minutes").GetDecimal());
     }
 
     /// <summary>
@@ -188,7 +188,7 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
 
         Assert.Equal(HttpStatusCode.OK, status);
         var bookingId = body.GetProperty("booking_id").GetGuid();
-        Assert.Equal(MemberFloatCredits - SlicePriceCredits, body.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(MemberFloatMinutes - SlicePriceCredits, body.GetProperty("balance_after_minutes").GetDecimal());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -197,9 +197,9 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
             .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).ToListAsync();
         var charge = Assert.Single(rows, l => l.RelatedBookingId == bookingId);
         Assert.Equal(LedgerEntryType.BookingCharge, charge.Type);
-        Assert.Equal(-SlicePriceCredits, charge.AmountCredits);
+        Assert.Equal(-SlicePriceCredits, charge.AmountMinutes);
         Assert.Equal(s.AdminUserId, charge.ActorUserId);
-        Assert.Equal(MemberFloatCredits - SlicePriceCredits, rows.Sum(l => l.AmountCredits));
+        Assert.Equal(MemberFloatMinutes - SlicePriceCredits, rows.Sum(l => l.AmountMinutes));
 
         // The admin's own wallet is untouched — the whole point of "charges that member's
         // credit" is that the desk is not the payer.
@@ -213,8 +213,8 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
 
         using var details = JsonDocument.Parse(audit.DetailsJson!);
         Assert.True(details.RootElement.GetProperty("overdrawn").GetBoolean());
-        Assert.Equal(MemberFloatCredits - SlicePriceCredits,
-            details.RootElement.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(MemberFloatMinutes - SlicePriceCredits,
+            details.RootElement.GetProperty("balance_after_minutes").GetDecimal());
     }
 
     /// <summary>
@@ -247,8 +247,8 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         Assert.Empty(await db.Bookings.IgnoreQueryFilters().Where(b => b.TenantId == s.TenantId).ToListAsync());
-        Assert.Equal(MemberFloatCredits, await db.LedgerEntries.IgnoreQueryFilters()
-            .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).SumAsync(l => l.AmountCredits));
+        Assert.Equal(MemberFloatMinutes, await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).SumAsync(l => l.AmountMinutes));
     }
 
     /// <summary>
@@ -279,14 +279,14 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
         });
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(-SlicePriceCredits, body.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(-SlicePriceCredits, body.GetProperty("balance_after_minutes").GetDecimal());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var charge = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == s.TenantId && l.UserId == s.AdminUserId).ToListAsync());
         Assert.Equal(LedgerEntryType.BookingCharge, charge.Type);
-        Assert.Equal(-SlicePriceCredits, charge.AmountCredits);
+        Assert.Equal(-SlicePriceCredits, charge.AmountMinutes);
 
         var row = Assert.Single(await db.AdminChangeLogs.IgnoreQueryFilters()
             .Where(a => a.TenantId == s.TenantId).ToListAsync());
@@ -294,7 +294,7 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
         Assert.Equal(s.AdminUserId, row.ActorUserId);
         Assert.Equal(s.AdminUserId, row.SubjectId);
         using var after = JsonDocument.Parse(row.AfterJson!);
-        Assert.Equal(-SlicePriceCredits, after.RootElement.GetProperty("balance_credits").GetDecimal());
+        Assert.Equal(-SlicePriceCredits, after.RootElement.GetProperty("balance_minutes").GetDecimal());
         Assert.True(after.RootElement.GetProperty("self").GetBoolean());
     }
 
@@ -360,12 +360,12 @@ public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixtu
             UserId = s.MemberUserId,
             ActorUserId = s.MemberUserId,
             Type = LedgerEntryType.TopUp,
-            AmountCredits = 100m,
+            AmountMinutes = 100,
             Reason = "Clearing the overdraft",
         });
         await db.SaveChangesAsync();
 
-        Assert.Equal(MemberFloatCredits - SlicePriceCredits + 100m, await db.LedgerEntries.IgnoreQueryFilters()
-            .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).SumAsync(l => l.AmountCredits));
+        Assert.Equal(MemberFloatMinutes - SlicePriceCredits + 100, await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).SumAsync(l => l.AmountMinutes));
     }
 }

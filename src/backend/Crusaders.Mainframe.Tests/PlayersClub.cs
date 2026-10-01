@@ -60,7 +60,7 @@ public sealed class PlayersClub
         };
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settings });
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         var club = new PlayersClub
@@ -121,17 +121,17 @@ public sealed class PlayersClub
 
     // ------------------------------------------------------------------ money and rows
 
-    public async Task CreditAsync(WebApplicationFactory<Program> factory, Guid userId, decimal credits)
+    public async Task CreditAsync(WebApplicationFactory<Program> factory, Guid userId, int credits)
     {
         await WriteAsync(factory, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = TenantId, UserId = userId, Type = LedgerEntryType.TopUp, AmountCredits = credits,
+            TenantId = TenantId, UserId = userId, Type = LedgerEntryType.TopUp, AmountMinutes = credits,
             ActorUserId = Guid.Empty, Reason = "fixture float",
         }));
     }
 
     public static async Task<decimal> BalanceAsync(WebApplicationFactory<Program> factory, Guid userId) =>
-        await ReadAsync(factory, db => db.LedgerEntries.IgnoreQueryFilters().Where(l => l.UserId == userId).SumAsync(l => l.AmountCredits));
+        await ReadAsync(factory, db => db.LedgerEntries.IgnoreQueryFilters().Where(l => l.UserId == userId).SumAsync(l => l.AmountMinutes));
 
     public async Task<List<LedgerEntry>> SharesAsync(WebApplicationFactory<Program> factory, Guid bookingId) =>
         await ReadAsync(factory, db => db.LedgerEntries.IgnoreQueryFilters()
@@ -154,7 +154,7 @@ public sealed class PlayersClub
             TenantId = TenantId, CourtId = CourtId, UserId = organiser ?? Organiser, BookedByUserId = organiser ?? Organiser,
             PaidByUserId = organiser ?? Organiser, ActorUserId = organiser ?? Organiser, StartsAt = startsAt,
             EndsAt = startsAt.AddMinutes(15 * slices), SliceMinutes = 15, SliceCount = slices,
-            AmountChargedCredits = 8m * slices, Status = BookingStatus.Booked, ChargedAt = startsAt.AddDays(-1),
+            AmountChargedMinutes = 8 * slices, Status = BookingStatus.Booked, ChargedAt = startsAt.AddDays(-1),
         };
         await WriteAsync(factory, db =>
         {
@@ -162,7 +162,7 @@ public sealed class PlayersClub
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = TenantId, UserId = booking.UserId!.Value, Type = LedgerEntryType.BookingCharge,
-                AmountCredits = -booking.AmountChargedCredits, ActorUserId = booking.UserId.Value, RelatedBookingId = booking.Id,
+                AmountMinutes = -booking.AmountChargedMinutes, ActorUserId = booking.UserId.Value, RelatedBookingId = booking.Id,
             });
         });
         return booking.Id;
@@ -171,12 +171,12 @@ public sealed class PlayersClub
     /// <summary>A seat written straight to the table, for states the API only reaches with time.</summary>
     public async Task<Guid> InsertSeatAsync(
         WebApplicationFactory<Program> factory, Guid bookingId, int seat, Guid? userId, ParticipantStatus status,
-        decimal share, DateTimeOffset? invitedAt = null)
+        int share, DateTimeOffset? invitedAt = null)
     {
         var row = new BookingParticipant
         {
             TenantId = TenantId, BookingId = bookingId, Seat = seat, UserId = userId, Status = status,
-            ShareCredits = share, ShareWeight = 1, SplitMode = seat == 1 ? SplitModes.Equal : null,
+            ShareMinutes = share, ShareWeight = 1, SplitMode = seat == 1 ? SplitModes.Equal : null,
             InvitedAt = invitedAt ?? DateTimeOffset.UtcNow, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
         };
         await WriteAsync(factory, db => db.BookingParticipants.Add(row));

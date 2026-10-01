@@ -192,7 +192,7 @@ public class PayFastProviderTests
         Assert.True(interp.Successful);
         Assert.Equal("tu_9f8e7d6c5b4a3210", interp.MerchantTransactionId);
         Assert.Equal("1089250", interp.PaymentId);
-        Assert.Equal(100.00m, interp.AmountGross);
+        Assert.Equal(100, interp.AmountGross);
     }
 
     /// <summary>
@@ -257,7 +257,7 @@ public class PayFastProviderTests
         var interp = await Provider().InterpretCallbackAsync(PayloadOf(SignedItn()), default);
 
         Assert.True(interp.SignatureValid);
-        Assert.Equal(100.00m, interp.AmountGross);
+        Assert.Equal(100, interp.AmountGross);
     }
 
     /// <summary>

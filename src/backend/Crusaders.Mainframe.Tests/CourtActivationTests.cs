@@ -46,16 +46,16 @@ public class CourtActivationTests
         TestHost Host, IServiceScope Scope, CourtActivationService Activation,
         LedgerService Ledger, BookingService Bookings, MainframeDbContext Db, StubEmailService Email);
 
-    private static async Task<Fixture> CreateAsync(decimal topUpCredits = 100m)
+    private static async Task<Fixture> CreateAsync(int topUpMinutes = 100)
     {
         var host = await TestHost.CreateAsync();
         var scope = host.NewScope();
 
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        if (topUpCredits > 0)
+        if (topUpMinutes > 0)
         {
             await ledger.PostAsync(
-                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpCredits, host.PlayerUser.Id), default);
+                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpMinutes, host.PlayerUser.Id), default);
         }
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -140,7 +140,7 @@ public class CourtActivationTests
             EndsAt = startsAt.AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = BookingStatus.Booked,
             ChargedAt = null,
         };
@@ -174,17 +174,17 @@ public class CourtActivationTests
             CourtOf(f), booking, f.Host.PlayerUser.Id, payerOverrideUserId: null, method, default);
 
         var activated = Assert.IsType<ActivationResult.Activated>(result);
-        Assert.Equal(8m, activated.AmountCredits);
+        Assert.Equal(8, activated.AmountMinutes);
 
         // 100 topped up, 8 for one 15-minute slice.
-        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(92, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
 
         var charges = await f.Db.LedgerEntries
             .Where(l => l.Type == LedgerEntryType.BookingCharge && l.RelatedBookingId == booking.Id)
             .ToListAsync();
 
         Assert.Single(charges);
-        Assert.Equal(-8m, charges[0].AmountCredits);
+        Assert.Equal(-8, charges[0].AmountMinutes);
     }
 
     /// <summary>
@@ -245,7 +245,7 @@ public class CourtActivationTests
     public async Task Insufficient_balance_refuses_and_cues_nothing(string method)
     {
         // A reservation carrying no debit, held by a member with nothing to pay it with.
-        var f = await CreateAsync(topUpCredits: 0m);
+        var f = await CreateAsync(topUpMinutes: 0);
         await using var _ = f.Host;
         using var __ = f.Scope;
 
@@ -255,8 +255,8 @@ public class CourtActivationTests
             CourtOf(f), booking, f.Host.PlayerUser.Id, null, method, default);
 
         var refused = Assert.IsType<ActivationResult.InsufficientBalance>(result);
-        Assert.Equal(8m, refused.Required);
-        Assert.Equal(0m, refused.Current);
+        Assert.Equal(8, refused.Required);
+        Assert.Equal(0, refused.Current);
 
         var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
 
@@ -283,7 +283,7 @@ public class CourtActivationTests
     [Fact]
     public async Task A_refused_activation_remains_visible_to_the_no_show_sweep()
     {
-        var f = await CreateAsync(topUpCredits: 0m);
+        var f = await CreateAsync(topUpMinutes: 0);
         await using var _ = f.Host;
         using var __ = f.Scope;
 
@@ -319,7 +319,7 @@ public class CourtActivationTests
         var second = await f.Activation.ActivateAsync(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", default);
         Assert.True(Assert.IsType<ActivationResult.Activated>(second).AlreadyActive);
 
-        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(92, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
 
         Assert.Single(await f.Db.LedgerEntries
             .Where(l => l.Type == LedgerEntryType.BookingCharge && l.RelatedBookingId == booking.Id)
@@ -358,7 +358,7 @@ public class CourtActivationTests
         Assert.False(Assert.IsType<ActivationResult.Activated>(live).AlreadyActive);
         Assert.Equal(scannedAt, booking.CheckedInAt);
         Assert.Equal(scannedAt, booking.LightsOnCuedAt);
-        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(92, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     // ---- Defect 3: one grace window ---------------------------------------
@@ -444,7 +444,7 @@ public class CourtActivationTests
             f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.AdminUser.Id,
             DateTimeOffset.UtcNow.AddMinutes(startsIn), 1, default);
         var booking = Assert.IsType<BookingResult.Ok>(created).Booking;
-        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(92, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
 
         // The booking IS in the forward window — the selectors find it.
         Assert.NotNull(await f.Activation.FindForUserAsync(CourtOf(f).Id, f.Host.PlayerUser.Id, DateTimeOffset.UtcNow, default));
@@ -463,9 +463,9 @@ public class CourtActivationTests
         // Not stamped, so the member can still change their mind and be made whole.
         var cancelled = await f.Bookings.CancelAsync(booking.Id, f.Host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
         var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
-        Assert.Equal(8m, ok.RefundedCredits);
-        Assert.Equal(0m, ok.PenaltyCredits);
-        Assert.Equal(100m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(8, ok.RefundedMinutes);
+        Assert.Equal(0, ok.PenaltyMinutes);
+        Assert.Equal(100, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>The cue window's edge is inclusive: a scan exactly at cue-minutes-before lights the court.</summary>
@@ -501,7 +501,7 @@ public class CourtActivationTests
         using var __ = f.Scope;
 
         await f.Ledger.PostAsync(new LedgerPosting(
-            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100m, f.Host.LeaguePlayerUser.Id), default);
+            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100, f.Host.LeaguePlayerUser.Id), default);
 
         var booking = await BookNowAsync(f);
 
@@ -513,8 +513,8 @@ public class CourtActivationTests
         Assert.Equal(f.Host.LeaguePlayerUser.Id, activated.PayerUserId);
 
         // The booker keeps their credits; the volunteer pays.
-        Assert.Equal(100m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
-        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.LeaguePlayerUser.Id, default));
+        Assert.Equal(100, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(92, await f.Ledger.GetBalanceAsync(f.Host.LeaguePlayerUser.Id, default));
     }
 
     /// <summary>
@@ -531,10 +531,10 @@ public class CourtActivationTests
         using var __ = f.Scope;
 
         await f.Ledger.PostAsync(new LedgerPosting(
-            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100m, f.Host.LeaguePlayerUser.Id), default);
+            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100, f.Host.LeaguePlayerUser.Id), default);
 
         var booking = await BookNowAsync(f);
-        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(92, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
 
         await f.Activation.ActivateAsync(
             CourtOf(f), booking, f.Host.PlayerUser.Id,
@@ -543,14 +543,14 @@ public class CourtActivationTests
         var rows = await f.Db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToListAsync();
 
         // The booker: charged at booking, refunded at the court.
-        Assert.Equal(-8m, Assert.Single(rows, l =>
-            l.UserId == f.Host.PlayerUser.Id && l.Type == LedgerEntryType.BookingCharge).AmountCredits);
-        Assert.Equal(8m, Assert.Single(rows, l =>
-            l.UserId == f.Host.PlayerUser.Id && l.Type == LedgerEntryType.CancellationRefund).AmountCredits);
+        Assert.Equal(-8, Assert.Single(rows, l =>
+            l.UserId == f.Host.PlayerUser.Id && l.Type == LedgerEntryType.BookingCharge).AmountMinutes);
+        Assert.Equal(8, Assert.Single(rows, l =>
+            l.UserId == f.Host.PlayerUser.Id && l.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
 
         // The volunteer: charged once.
-        Assert.Equal(-8m, Assert.Single(rows, l =>
-            l.UserId == f.Host.LeaguePlayerUser.Id && l.Type == LedgerEntryType.BookingCharge).AmountCredits);
+        Assert.Equal(-8, Assert.Single(rows, l =>
+            l.UserId == f.Host.LeaguePlayerUser.Id && l.Type == LedgerEntryType.BookingCharge).AmountMinutes);
 
         var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
         Assert.Equal(f.Host.LeaguePlayerUser.Id, fresh.PaidByUserId);
@@ -576,7 +576,7 @@ public class CourtActivationTests
 
         // The volunteer is funded and then isn't — 4 credits against a 8-credit slice.
         await f.Ledger.PostAsync(new LedgerPosting(
-            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 4m, f.Host.LeaguePlayerUser.Id), default);
+            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 4, f.Host.LeaguePlayerUser.Id), default);
 
         var booking = await BookNowAsync(f);
 
@@ -586,12 +586,12 @@ public class CourtActivationTests
 
         var refused = Assert.IsType<ActivationResult.InsufficientBalance>(result);
         Assert.Equal(f.Host.LeaguePlayerUser.Id, refused.PayerUserId);
-        Assert.Equal(4m, refused.Current);
-        Assert.Equal(8m, refused.Required);
+        Assert.Equal(4, refused.Current);
+        Assert.Equal(8, refused.Required);
 
         // Nothing moved: no refund to the booker, no charge to the volunteer.
-        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
-        Assert.Equal(4m, await f.Ledger.GetBalanceAsync(f.Host.LeaguePlayerUser.Id, default));
+        Assert.Equal(92, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(4, await f.Ledger.GetBalanceAsync(f.Host.LeaguePlayerUser.Id, default));
 
         var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
         Assert.Equal(f.Host.PlayerUser.Id, fresh.PaidByUserId);
@@ -644,7 +644,7 @@ public class CourtActivationTests
                 EndsAt = startsAt.AddMinutes(15),
                 SliceMinutes = 15,
                 SliceCount = 1,
-                AmountChargedCredits = 8m,
+                AmountChargedMinutes = 8,
                 Status = BookingStatus.Booked,
                 ChargedAt = now,
             });

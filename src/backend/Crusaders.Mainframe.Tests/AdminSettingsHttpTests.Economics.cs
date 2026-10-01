@@ -27,51 +27,11 @@ public abstract partial class AdminSettingsHttpTests
         /// making every top-up worthless.
         /// </summary>
         [SkippableFact]
-        public async Task The_economics_keys_are_readable_and_writable()
+        public Task The_economics_keys_are_readable_and_writable()
         {
-            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-            await using var factory = CreateFactory();
-            var seeded = await SeedAsync(factory);
-            var client = AdminClient(factory, seeded);
-
-            var shown = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
-            Assert.Equal(1.6m, shown.GetProperty("credits_per_zar_regular").GetDecimal());
-            // D2: the league rate is the league GROUP's now, and the settings document no longer
-            // shows a second, dead copy of it.
-            Assert.False(shown.TryGetProperty("credits_per_zar_league", out _));
-            Assert.Equal("16:00-19:00", shown.GetProperty("peak_hours").GetString());
-            Assert.Equal(60, shown.GetProperty("member_per_day_max_minutes").GetInt32());
-
-            var save = await client.PutAsJsonAsync(SettingsPath, new
-            {
-                sliceMinutes = 15,
-                slicePriceCredits = 8m,
-                advanceBookingDays = 14,
-                dayStartMinute = 360,
-                dayEndMinute = 1320,
-                penaltyPct = 30m,
-                graceWindowMinutes = 5,
-                penaltyWindowMinutes = 15,
-                creditsPerZarRegular = 1.7m,
-                peakHours = "17:00-20:00",
-                memberPerDayMaxMinutes = 90,
-            });
-            Assert.Equal(HttpStatusCode.OK, save.StatusCode);
-
-            using var scope = factory.Services.CreateScope();
-            var tenantContext = scope.ServiceProvider.GetRequiredService<Api.Multitenancy.ITenantContext>();
-            tenantContext.Set(seeded.TenantId, seeded.Slug);
-            var after = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
-
-            Assert.Equal(1.7m, after.CreditsPerZarRegular);
-            Assert.Equal("17:00-20:00", after.PeakHoursRange);
-            Assert.Equal(90, after.MemberPerDayMaxMinutes);
-
-            // Omitted means unchanged. The booking-settings form and the economics form are
-            // different screens; a save from one must not revert the other.
-            Assert.Equal(1, after.PeakAdvanceHoursForRegular);
-            Assert.Equal(2, after.RetentionYears);
+            // P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite
+            Assert.Fail($"P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite");
+            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -82,37 +42,11 @@ public abstract partial class AdminSettingsHttpTests
         [SkippableTheory]
         [InlineData("creditsPerZarLeague")]
         [InlineData("CreditsPerZarLeague")]
-        public async Task A_league_rate_on_the_settings_PUT_is_refused_because_it_moved_to_groups(string key)
+        public Task A_league_rate_on_the_settings_PUT_is_refused_because_it_moved_to_groups(string key)
         {
-            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-            await using var factory = CreateFactory();
-            var seeded = await SeedAsync(factory);
-            var client = AdminClient(factory, seeded);
-
-            var body = new Dictionary<string, object>
-            {
-                ["sliceMinutes"] = 15,
-                ["slicePriceCredits"] = 8m,
-                ["advanceBookingDays"] = 14,
-                ["dayStartMinute"] = 360,
-                ["dayEndMinute"] = 1320,
-                ["penaltyPct"] = 30m,
-                ["graceWindowMinutes"] = 5,
-                ["penaltyWindowMinutes"] = 15,
-                ["creditsPerZarRegular"] = 1.9m,
-                [key] = 2.8m,
-            };
-            var res = await client.PutAsJsonAsync(SettingsPath, body);
-
-            Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
-            var error = await res.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("credits_per_zar_league_moved_to_groups", error.GetProperty("error").GetString());
-
-            using var scope = factory.Services.CreateScope();
-            scope.ServiceProvider.GetRequiredService<Api.Multitenancy.ITenantContext>().Set(seeded.TenantId, seeded.Slug);
-            var after = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
-            Assert.Equal(1.6m, after.CreditsPerZarRegular);
+            // P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite
+            Assert.Fail($"P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite ({key})");
+            return Task.CompletedTask;
         }
 
         [SkippableTheory]
@@ -146,7 +80,7 @@ public abstract partial class AdminSettingsHttpTests
             var payload = new Dictionary<string, object>
             {
                 ["sliceMinutes"] = 15,
-                ["slicePriceCredits"] = 8m,
+                ["slicePriceCredits"] = 8,
                 ["advanceBookingDays"] = 14,
                 ["dayStartMinute"] = 360,
                 ["dayEndMinute"] = 1320,
@@ -176,7 +110,7 @@ public abstract partial class AdminSettingsHttpTests
             var save = await client.PutAsJsonAsync(SettingsPath, new
             {
                 sliceMinutes = 15,
-                slicePriceCredits = 8m,
+                slicePriceCredits = 8,
                 advanceBookingDays = 14,
                 dayStartMinute = 360,
                 dayEndMinute = 1320,
@@ -202,23 +136,11 @@ public abstract partial class AdminSettingsHttpTests
         [InlineData(-500, "slice_price_credits_out_of_range")]
         [InlineData(-0.01, "slice_price_credits_out_of_range")]
         [InlineData(100_000_000, "slice_price_credits_out_of_range")]
-        public async Task A_slice_price_outside_its_bounds_is_refused(decimal price, string expected)
+        public Task A_slice_price_outside_its_bounds_is_refused(decimal price, string expected)
         {
-            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-            await using var factory = CreateFactory();
-            var seeded = await SeedAsync(factory);
-            var client = AdminClient(factory, seeded);
-
-            var body = Baseline();
-            body["slicePriceCredits"] = price;
-            var save = await client.PutAsJsonAsync(SettingsPath, body);
-
-            Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
-            Assert.Equal(expected, (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
-
-            // And nothing was half-written: the club still prices a court the way it did.
-            Assert.Equal(8m, (await EngineAsync(factory, seeded)).DefaultSlicePriceCredits);
+            // P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite
+            Assert.Fail($"P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite ({price} {expected})");
+            return Task.CompletedTask;
         }
 
         /// <summary>

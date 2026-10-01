@@ -56,7 +56,7 @@ public sealed class AttendanceEquivalenceTests(PostgresFixture pg) : IClassFixtu
             {
                 TenantId = club.TenantId, CourtId = club.CourtId, UserId = booker, BookedByUserId = booker, PaidByUserId = booker,
                 ActorUserId = booker ?? club.Admin, StartsAt = starts, EndsAt = starts.AddMinutes(45), SliceMinutes = 15, SliceCount = 3,
-                AmountChargedCredits = booker is null ? 0m : 24m,
+                AmountChargedMinutes = booker is null ? 0 : 24,
                 Status = booker is null ? BookingStatus.AdminBlock : (BookingStatus)rng.Next(4),
                 CheckedInAt = rng.Next(3) > 0 ? starts.AddMinutes(rng.Next(1, 10)) : null,
                 CancelledAt = rng.Next(5) == 0 ? starts.AddMinutes(rng.Next(-30, 60)) : null,

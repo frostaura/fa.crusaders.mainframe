@@ -76,7 +76,7 @@ public class DeviceMacIdentityTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
         // A fifth court exists; the relay bank has four positions, so it is left out.
-        db.Courts.Add(new Court { TenantId = host.Tenant.Id, CourtNumber = 5, Name = "Court 5", SlicePriceCredits = 8m });
+        db.Courts.Add(new Court { TenantId = host.Tenant.Id, CourtNumber = 5, Name = "Court 5" });
         await db.SaveChangesAsync();
 
         var device = await scope.ServiceProvider.GetRequiredService<DeviceRegistryService>()

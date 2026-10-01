@@ -22,7 +22,7 @@ public sealed class PlayIdorHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         await using var f = CreateFactory();
         var club = await SeedAsync(f, "id-routes");
         var booking = await club.GameAsync(f, DateTimeOffset.UtcNow.AddHours(-2).Storable(), club.Organiser, [club.Sam]);
-        await club.InsertSeatAsync(f, booking, 3, club.Jo, ParticipantStatus.Invited, 0m);
+        await club.InsertSeatAsync(f, booking, 3, club.Jo, ParticipantStatus.Invited, 0);
         var created = await (await RecordAsync(club.Client(f, club.Organiser), booking, [U(club.Organiser)], [U(club.Sam)])).JsonAsync();
         var version = created.GetProperty("version").GetInt32();
         var before = (await ResultRowAsync(f, booking))!;

@@ -95,7 +95,7 @@ internal sealed class MemberCodeClub
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settings });
 
         var courts = Enumerable.Range(1, 4)
-            .Select(n => new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m })
+            .Select(n => new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}" })
             .ToList();
         db.Courts.AddRange(courts);
 
@@ -129,7 +129,7 @@ internal sealed class MemberCodeClub
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = tenant.Id, UserId = p, Type = LedgerEntryType.TopUp, AmountCredits = 200m,
+                TenantId = tenant.Id, UserId = p, Type = LedgerEntryType.TopUp, AmountMinutes = 200,
                 ActorUserId = p, Reason = "seed",
             });
         }
@@ -285,13 +285,13 @@ internal sealed class MemberCodeClub
         {
             TenantId = TenantId, CourtId = Courts[courtIndex], UserId = user, BookedByUserId = user, PaidByUserId = user,
             ActorUserId = user, StartsAt = startsAt, EndsAt = startsAt.AddMinutes(minutes), SliceMinutes = 15,
-            SliceCount = minutes / 15, AmountChargedCredits = 8m * (minutes / 15), Status = BookingStatus.Booked,
+            SliceCount = minutes / 15, AmountChargedMinutes = 8 * (minutes / 15), Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow, CheckedInAt = checkedIn ? DateTimeOffset.UtcNow.Storable() : null,
         };
         db.Bookings.Add(booking);
         db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = TenantId, UserId = user, Type = LedgerEntryType.BookingCharge, AmountCredits = -booking.AmountChargedCredits,
+            TenantId = TenantId, UserId = user, Type = LedgerEntryType.BookingCharge, AmountMinutes = -booking.AmountChargedMinutes,
             ActorUserId = user, RelatedBookingId = booking.Id, Reason = "seed charge",
         });
         await db.SaveChangesAsync();
@@ -312,8 +312,8 @@ internal sealed class MemberCodeClub
         await db.SaveChangesAsync();
     }
 
-    public Task<decimal> BalanceAsync(WebApplicationFactory<Program> app, Guid user) =>
-        ReadAsync(app, db => db.LedgerEntries.IgnoreQueryFilters().Where(l => l.TenantId == TenantId && l.UserId == user).SumAsync(l => l.AmountCredits));
+    public Task<int> BalanceAsync(WebApplicationFactory<Program> app, Guid user) =>
+        ReadAsync(app, db => db.LedgerEntries.IgnoreQueryFilters().Where(l => l.TenantId == TenantId && l.UserId == user).SumAsync(l => l.AmountMinutes));
 
     public Task<int> UsesAsync(WebApplicationFactory<Program> app, string? useClass = null) =>
         ReadAsync(app, db => db.MemberCodeUses.IgnoreQueryFilters()

@@ -83,7 +83,7 @@ public sealed class PayerLockPublishTests : IClassFixture<PostgresFixture>
                 await ledger.PostAsync(new LedgerPosting(
                     UserId: seeded.MemberUserId,
                     Type: LedgerEntryType.TopUp,
-                    AmountCredits: 500m,
+                    AmountMinutes: 500,
                     ActorUserId: seeded.MemberUserId,
                     Reason: "a movement that is about to be rolled back"), default);
 
@@ -141,7 +141,7 @@ public sealed class PayerLockPublishTests : IClassFixture<PostgresFixture>
                 await ledger.PostAsync(new LedgerPosting(
                     UserId: seeded.MemberUserId,
                     Type: LedgerEntryType.TopUp,
-                    AmountCredits: 500m,
+                    AmountMinutes: 500,
                     ActorUserId: seeded.MemberUserId,
                     Reason: "a movement that commits"), default);
 
@@ -156,10 +156,10 @@ public sealed class PayerLockPublishTests : IClassFixture<PostgresFixture>
             Assert.Equal(2, frames.Count);
 
             var legacy = Assert.Single(frames, f => f.Event.Length == 0);
-            Assert.Contains("\"balance_credits\":500", legacy.JsonPayload);
+            Assert.Contains("\"balance_minutes\":500", legacy.JsonPayload);
 
             var named = Assert.Single(frames, f => f.Event == LedgerService.BalanceEvent);
-            Assert.Contains("\"delta_credits\":500", named.JsonPayload);
+            Assert.Contains("\"delta_minutes\":500", named.JsonPayload);
             Assert.Contains("\"reason\":\"top_up\"", named.JsonPayload);
         }
         finally

@@ -30,7 +30,7 @@ public class SettlementWindowTests
         EndsAt = T.AddMinutes(soldMinutes),
         SliceMinutes = sliceMinutes,
         SliceCount = soldMinutes / sliceMinutes,
-        AmountChargedCredits = 8m * (soldMinutes / sliceMinutes),
+        AmountChargedMinutes = 8 * (soldMinutes / sliceMinutes),
     };
 
     private static long Minutes(int m) => m * 60_000L;

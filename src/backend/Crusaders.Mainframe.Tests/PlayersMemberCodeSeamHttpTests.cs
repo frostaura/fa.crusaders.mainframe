@@ -39,12 +39,12 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
         var declined = await MemberAsync(app, club, "dee");
         var removed = await MemberAsync(app, club, "rae");
         await SeatsAsync(app, club, booking.Id,
-            (1, club.Olga, ParticipantStatus.Accepted, 8m),
-            (2, club.Pam, ParticipantStatus.Accepted, 8m),
-            (3, invited, ParticipantStatus.Invited, 8m),
-            (4, declined, ParticipantStatus.Declined, 8m));
+            (1, club.Olga, ParticipantStatus.Accepted, 8),
+            (2, club.Pam, ParticipantStatus.Accepted, 8),
+            (3, invited, ParticipantStatus.Invited, 8),
+            (4, declined, ParticipantStatus.Declined, 8));
         // A removed seat frees its seat number; the row stays, and it must not count.
-        await SeatsAsync(app, club, booking.Id, (4, removed, ParticipantStatus.Removed, 8m));
+        await SeatsAsync(app, club, booking.Id, (4, removed, ParticipantStatus.Removed, 8));
         return new Game(club, app, booking, invited, declined, removed);
     }
 
@@ -167,7 +167,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
         // Court 3: a partner who DECLINED, share and all, is not a split — the box may quote it (to
         // Pam, who is on court 2's game and not this one).
         var other = await c.BookAsync(app, c.Olga, courtIndex: 2, startsInMinutes: -5);
-        await SeatsAsync(app, c, other.Id, (1, c.Olga, ParticipantStatus.Accepted, 24m), (2, g.Declined, ParticipantStatus.Declined, 8m));
+        await SeatsAsync(app, c, other.Id, (1, c.Olga, ParticipantStatus.Accepted, 24), (2, g.Declined, ParticipantStatus.Declined, 8));
         var quote = JsonDocument.Parse(await (await device.SendAsync(c.PayFor(c.Code(c.Pam, at: clock.Now), 3, "3434343434343434", confirm: false))).Content.ReadAsStringAsync()).RootElement;
         Assert.True(quote.GetProperty("payable").GetBoolean());
     }
@@ -180,7 +180,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
         var c = await MemberCodeClub.SeedAsync(app, "seambarred");
         var booking = await c.BookAsync(app, c.Sid, courtIndex: 1, startsInMinutes: -5);
-        await SeatsAsync(app, c, booking.Id, (1, c.Sid, ParticipantStatus.Accepted, 24m), (2, c.Pam, ParticipantStatus.Accepted, 8m));
+        await SeatsAsync(app, c, booking.Id, (1, c.Sid, ParticipantStatus.Accepted, 24), (2, c.Pam, ParticipantStatus.Accepted, 8));
         await c.WriteAsync(app, async db =>
             (await db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.Id == c.SidMembership)).Status = MembershipStatus.Suspended);
         await c.SetPhaseAsync(app, MemberCodeSettings.V1);
@@ -233,7 +233,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
 
     private static Task SeatsAsync(
         WebApplicationFactory<Program> app, MemberCodeClub club, Guid bookingId,
-        params (int Seat, Guid User, ParticipantStatus Status, decimal Share)[] seats) =>
+        params (int Seat, Guid User, ParticipantStatus Status, int Share)[] seats) =>
         club.WriteAsync(app, db =>
         {
             var now = DateTimeOffset.UtcNow;
@@ -242,7 +242,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
                 db.BookingParticipants.Add(new BookingParticipant
                 {
                     TenantId = club.TenantId, BookingId = bookingId, Seat = seat, UserId = user, Status = status,
-                    ShareCredits = share, ConsentedCredits = status == ParticipantStatus.Accepted && seat > 1 ? share : 0m,
+                    ShareMinutes = share, ConsentedMinutes = status == ParticipantStatus.Accepted && seat > 1 ? share : 0,
                     ShareWeight = 1, SplitMode = seat == 1 ? SplitModes.Equal : null,
                     InvitedAt = now, CreatedAt = now, UpdatedAt = now,
                     RespondedAt = status == ParticipantStatus.Invited ? null : now,

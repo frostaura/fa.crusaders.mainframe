@@ -45,24 +45,24 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
 
         var quote = await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: false));
         Assert.Equal(HttpStatusCode.OK, quote.Status);
-        Assert.Equal("""{"payable":true,"reason":"ok","court_number":2,"amount_credits":32.0,"amount_label":"32"}""", quote.Body);
-        Assert.Equal(200m, await c.BalanceAsync(r.App, c.Pam));   // a quote moves nothing
+        Assert.Equal("""{"payable":true,"reason":"ok","court_number":2,"amount_minutes":32.0,"amount_label":"32"}""", quote.Body);
+        Assert.Equal(200, await c.BalanceAsync(r.App, c.Pam));   // a quote moves nothing
         Assert.Equal(0, await c.UsesAsync(r.App));
 
         var paid = await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: true, label: "32"));
         Assert.Equal(
-            """{"paid":true,"reason":"ok","court_number":2,"amount_credits":32.0,"amount_label":"32","balance_after_credits":168.0,"replayed":false,"granted_seconds":0}""",
+            """{"paid":true,"reason":"ok","court_number":2,"amount_minutes":32.0,"amount_label":"32","balance_after_minutes":168.0,"replayed":false,"granted_seconds":0}""",
             paid.Body);
 
-        Assert.Equal(168m, await c.BalanceAsync(r.App, c.Pam));
-        Assert.Equal(200m, await c.BalanceAsync(r.App, c.Olga));   // 200 − 32 at booking + 32 back
+        Assert.Equal(168, await c.BalanceAsync(r.App, c.Pam));
+        Assert.Equal(200, await c.BalanceAsync(r.App, c.Olga));   // 200 − 32 at booking + 32 back
         var rows = await c.ReadAsync(r.App, db => db.LedgerEntries.IgnoreQueryFilters()
-            .Where(l => l.TenantId == c.TenantId && l.RelatedBookingId == booking.Id).OrderBy(l => l.AmountCredits).ToListAsync());
+            .Where(l => l.TenantId == c.TenantId && l.RelatedBookingId == booking.Id).OrderBy(l => l.AmountMinutes).ToListAsync());
         Assert.Equal(3, rows.Count);   // the seed charge, the payer's debit, the booker's refund — nothing else
-        Assert.Equal(-32m, rows.Single(l => l.UserId == c.Pam).AmountCredits);
+        Assert.Equal(-32, rows.Single(l => l.UserId == c.Pam).AmountMinutes);
         Assert.Equal(c.Pam, rows.Single(l => l.UserId == c.Pam).ActorUserId);
-        Assert.Equal(32m, rows.Single(l => l.UserId == c.Olga && l.AmountCredits > 0).AmountCredits);
-        Assert.Equal(0m, rows.Sum(l => l.AmountCredits) + 32m);   // net across both members is the one original charge
+        Assert.Equal(32, rows.Single(l => l.UserId == c.Olga && l.AmountMinutes > 0).AmountMinutes);
+        Assert.Equal(0, rows.Sum(l => l.AmountMinutes) + 32);   // net across both members is the one original charge
 
         var stored = await c.ReadAsync(r.App, db => db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == booking.Id));
         Assert.Equal(c.Pam, stored.PaidByUserId);
@@ -90,10 +90,10 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
 
         Assert.Contains("\"replayed\":false", first.Body);
         Assert.Equal(
-            """{"paid":true,"reason":"ok","court_number":2,"amount_credits":32.0,"amount_label":"32","balance_after_credits":168.0,"replayed":true,"granted_seconds":0}""",
+            """{"paid":true,"reason":"ok","court_number":2,"amount_minutes":32.0,"amount_label":"32","balance_after_minutes":168.0,"replayed":true,"granted_seconds":0}""",
             again.Body);
         Assert.Contains("\"replayed\":true", third.Body);
-        Assert.Equal(168m, await c.BalanceAsync(r.App, c.Pam));
+        Assert.Equal(168, await c.BalanceAsync(r.App, c.Pam));
         Assert.Equal(2, r.Mail.Sent.Count(m => m.Subject.Contains("paid for", StringComparison.OrdinalIgnoreCase)));
     }
 
@@ -114,8 +114,8 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
 
         Assert.All(results, x => Assert.True(x.Status is HttpStatusCode.OK or HttpStatusCode.ServiceUnavailable, x.Body));
         Assert.Contains(results, x => x.Body.Contains("\"replayed\":false"));
-        Assert.Equal(168m, await c.BalanceAsync(r.App, c.Pam));
-        Assert.Equal(200m, await c.BalanceAsync(r.App, c.Olga));
+        Assert.Equal(168, await c.BalanceAsync(r.App, c.Pam));
+        Assert.Equal(200, await c.BalanceAsync(r.App, c.Olga));
     }
 
     [SkippableFact]
@@ -136,7 +136,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
         var stored = await c.ReadAsync(r.App, db => db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == booking.Id));
         Assert.NotNull(stored.CheckedInAt);
         Assert.Equal(c.Pam, stored.PaidByUserId);
-        Assert.Equal(176m, await c.BalanceAsync(r.App, c.Pam));
+        Assert.Equal(176, await c.BalanceAsync(r.App, c.Pam));
     }
 
     [SkippableFact]
@@ -167,18 +167,18 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
         // A price that moved between the presses: nothing charged, the current label returned.
         var changed = await SendAsync(r, c.PayFor(c.Code(c.Pam), 2, Nonce, confirm: true, label: "30"));
         Assert.Equal("""{"paid":false,"reason":"price_changed","court_number":2,"amount_label":"32"}""", changed.Body);
-        Assert.Equal(200m, await c.BalanceAsync(r.App, c.Pam));
+        Assert.Equal(200, await c.BalanceAsync(r.App, c.Pam));
 
         // Insufficient: Pam spends down to 20 first.
         await c.WriteAsync(r.App, db =>
         {
-            db.LedgerEntries.Add(new LedgerEntry { TenantId = c.TenantId, UserId = c.Pam, Type = LedgerEntryType.BookingCharge, AmountCredits = -180m, ActorUserId = c.Pam, Reason = "spent" });
+            db.LedgerEntries.Add(new LedgerEntry { TenantId = c.TenantId, UserId = c.Pam, Type = LedgerEntryType.BookingCharge, AmountMinutes = -180, ActorUserId = c.Pam, Reason = "spent" });
             return Task.CompletedTask;
         });
         Assert.Equal("insufficient_balance", await Quote(c.Code(c.Pam), 2));
         var poor = await SendAsync(r, c.PayFor(c.Code(c.Pam), 2, "0000000000000001", confirm: true, label: "32"));
         Assert.Equal("""{"paid":false,"reason":"insufficient_balance","court_number":2}""", poor.Body);
-        Assert.Equal(20m, await c.BalanceAsync(r.App, c.Pam));
+        Assert.Equal(20, await c.BalanceAsync(r.App, c.Pam));
 
         // Suspended payer.
         await c.WriteAsync(r.App, async db => (await db.Memberships.IgnoreQueryFilters().FirstAsync(m => m.Id == c.SidMembership)).Status = MembershipStatus.Suspended);
@@ -232,8 +232,8 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixtur
 
         Assert.Contains("\"replayed\":false", pa);
         Assert.Contains("\"replayed\":false", pb);
-        Assert.Equal(168m, await a.BalanceAsync(app, a.Pam));
-        Assert.Equal(168m, await b.BalanceAsync(app, b.Pam));
+        Assert.Equal(168, await a.BalanceAsync(app, a.Pam));
+        Assert.Equal(168, await b.BalanceAsync(app, b.Pam));
 
         // And one club's box cannot confirm with the other's key: the MAC is not a board of that club.
         var cross = await device.SendAsync(a.PayFor(a.Code(a.Pam), 2, "3333333333333333", true, "32", mac: b.BoxMac));

@@ -29,30 +29,30 @@ public sealed class PlayersRefute8HttpTests(PostgresFixture pg) : IClassFixture<
     {
         var bookingId = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-20));
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == bookingId).Status = BookingStatus.Completed);
-        await club.InsertSeatAsync(f, bookingId, 1, club.Organiser, ParticipantStatus.Accepted, 16m);
-        var seat = await club.InsertSeatAsync(f, bookingId, 2, club.Sam, ParticipantStatus.Accepted, 16m);
-        await club.CreditAsync(f, club.Sam, 16m);
-        await club.CreditAsync(f, club.Organiser, 16m);
+        await club.InsertSeatAsync(f, bookingId, 1, club.Organiser, ParticipantStatus.Accepted, 16);
+        var seat = await club.InsertSeatAsync(f, bookingId, 2, club.Sam, ParticipantStatus.Accepted, 16);
+        await club.CreditAsync(f, club.Sam, 16);
+        await club.CreditAsync(f, club.Organiser, 16);
         await club.WriteAsync(f, db =>
         {
             db.Bookings.IgnoreQueryFilters().First(b => b.Id == bookingId).ShareDeadlineAt = DateTimeOffset.UtcNow.AddDays(-18);
-            db.BookingParticipants.IgnoreQueryFilters().First(p => p.Id == seat).ConsentedCredits = 16m;
-            foreach (var posting in ShareLedger.Pair(new Booking { Id = bookingId }, new ShareMove(seat, club.Sam, club.Organiser, 16m, 1), club.Sam))
+            db.BookingParticipants.IgnoreQueryFilters().First(p => p.Id == seat).ConsentedMinutes = 16;
+            foreach (var posting in ShareLedger.Pair(new Booking { Id = bookingId }, new ShareMove(seat, club.Sam, club.Organiser, 16, 1), club.Sam))
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
                     TenantId = club.TenantId,
                     UserId = posting.UserId,
                     Type = posting.Type,
-                    AmountCredits = posting.AmountCredits,
+                    AmountMinutes = posting.AmountMinutes,
                     ActorUserId = posting.ActorUserId,
                     RelatedBookingId = bookingId,
                     ExternalReference = posting.ExternalReference,
                 });
             }
         });
-        Assert.Equal(0m, await PlayersClub.BalanceAsync(f, club.Sam));
-        Assert.Equal(0m, await PlayersClub.BalanceAsync(f, club.Organiser));
+        Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Organiser));
 
         // The desk's goodwill credit, committed through the app's own context — and then nothing:
         // the request that would have run the hook is gone.
@@ -64,7 +64,7 @@ public sealed class PlayersRefute8HttpTests(PostgresFixture pg) : IClassFixture<
                 TenantId = club.TenantId,
                 UserId = club.Organiser,
                 Type = LedgerEntryType.AdminAdjustment,
-                AmountCredits = 16m,
+                AmountMinutes = 16,
                 ActorUserId = club.Admin,
                 RelatedBookingId = bookingId,
                 Reason = "goodwill",
@@ -92,8 +92,8 @@ public sealed class PlayersRefute8HttpTests(PostgresFixture pg) : IClassFixture<
 
         await SweepAsync(club, f);
 
-        Assert.Equal(8m, await PlayersClub.BalanceAsync(f, club.Sam));
-        Assert.Equal(8m, await PlayersClub.BalanceAsync(f, club.Organiser));
+        Assert.Equal(8, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(8, await PlayersClub.BalanceAsync(f, club.Organiser));
         Assert.Null(await PlayersClub.ReadAsync(f, db => db.Bookings.IgnoreQueryFilters().Where(b => b.Id == bookingId).Select(b => b.ShareReconcileDueAt).FirstAsync()));
     }
 
@@ -116,10 +116,10 @@ public sealed class PlayersRefute8HttpTests(PostgresFixture pg) : IClassFixture<
             return 0;
         });
 
-        Assert.Equal(8m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(8, await PlayersClub.BalanceAsync(f, club.Sam));
         Assert.Null(await PlayersClub.ReadAsync(f, db => db.Bookings.IgnoreQueryFilters().Where(b => b.Id == bookingId).Select(b => b.ShareReconcileDueAt).FirstAsync()));
 
         await SweepAsync(club, f);
-        Assert.Equal(8m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(8, await PlayersClub.BalanceAsync(f, club.Sam));
     }
 }

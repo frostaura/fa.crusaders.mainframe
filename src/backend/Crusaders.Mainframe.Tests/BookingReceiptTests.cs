@@ -28,7 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// </remarks>
 public sealed class BookingReceiptTests
 {
-    private const decimal SlicePriceCredits = 8m;
+    private const decimal SlicePriceCredits = 8;
 
     /// <summary>The page content, as text. Uncompressed streams are readable; that is the point.</summary>
     private static string TextOf(byte[] pdf) => Encoding.Latin1.GetString(pdf);
@@ -38,7 +38,7 @@ public sealed class BookingReceiptTests
     {
         var pdf = ReceiptPdf.ForBooking(
             "Crusaders Squash Club", "Erin AgentE", "b1", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00");
+            "Sat 05 Sep 12:45", "15 min", 50, 450, "Thu 01 Jan 1970 00:00");
 
         var text = TextOf(pdf);
         Assert.StartsWith("%PDF-1.4", text, StringComparison.Ordinal);
@@ -59,7 +59,7 @@ public sealed class BookingReceiptTests
     {
         var pdf = ReceiptPdf.ForBooking(
             "Crusaders Squash Club", "Erin AgentE", "0f2b-booking-ref", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00");
+            "Sat 05 Sep 12:45", "15 min", 50, 450, "Thu 01 Jan 1970 00:00");
 
         var text = TextOf(pdf);
         Assert.Contains("Crusaders Squash Club", text, StringComparison.Ordinal);
@@ -89,7 +89,7 @@ public sealed class BookingReceiptTests
         // parse. Court names are admin-entered and a member's own name is on the page too.
         var pdf = ReceiptPdf.ForBooking(
             "Club (Pty) Ltd", @"O'Brien \ Smith", "b1", "Court 1 (old hall)",
-            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00");
+            "Sat 05 Sep 12:45", "15 min", 50, 450, "Thu 01 Jan 1970 00:00");
 
         var text = TextOf(pdf);
         Assert.Contains(@"Court 1 \(old hall\)", text, StringComparison.Ordinal);
@@ -106,7 +106,7 @@ public sealed class BookingReceiptTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
         var result = await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
             TestHost.BookableSlot(2), sliceCount: 1, default);
@@ -132,7 +132,7 @@ public sealed class BookingReceiptTests
         // itself doing "8,00" on a machine set that way, which is exactly the disagreement that
         // would otherwise ship as a receipt reading "8,00 cr" beside an email reading "8.00 cr".
         Assert.Contains($"{SlicePriceCredits.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
-        Assert.Contains($"{ok.BalanceAfterCredits.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
+        Assert.Contains($"{ok.BalanceAfterMinutes.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
         Assert.Contains(ok.Booking.Id.ToString(), text, StringComparison.Ordinal);
     }
 
@@ -193,7 +193,7 @@ public sealed class BookingReceiptTests
 
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
-        await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 200m, host.LeaguePlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 200, host.LeaguePlayerUser.Id), default);
 
         // Peak hours are evaluated in the CLUB's clock, so a UTC-chosen slot can land inside
         // 16:00-19:00 local — and a league/senior member is exempt from that rule anyway, which

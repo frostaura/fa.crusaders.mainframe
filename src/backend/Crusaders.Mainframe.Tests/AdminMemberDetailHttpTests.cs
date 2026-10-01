@@ -43,7 +43,7 @@ public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
             EndsAt = startsAt.AddMinutes(30).ToUniversalTime(),
             SliceMinutes = 15,
             SliceCount = 2,
-            AmountChargedCredits = 16m,
+            AmountChargedMinutes = 16,
             Status = status,
             ChargedAt = DateTimeOffset.UtcNow,
             CheckedInAt = checkedInAt?.ToUniversalTime(),
@@ -95,7 +95,7 @@ public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
                 TenantId = club.TenantId,
                 UserId = member,
                 Type = LedgerEntryType.TopUp,
-                AmountCredits = 120m,
+                AmountMinutes = 120,
                 ActorUserId = Guid.Empty,
                 Reason = "fixture",
             });
@@ -143,11 +143,11 @@ public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
         Assert.True(body.GetProperty("email_verified").GetBoolean());
         Assert.False(body.GetProperty("is_admin").GetBoolean());
         Assert.Equal(JsonValueKind.Null, body.GetProperty("admin_source").ValueKind);
-        Assert.Equal(120m, body.GetProperty("balance_credits").GetDecimal());
+        Assert.Equal(120m, body.GetProperty("balance_minutes").GetDecimal());
         // The member wallet's held / owed-back figures travel with the desk's view too (the same
         // LedgerService.GetHeldAsync); nothing is shared here, so both are zero and nothing releases.
-        Assert.Equal(0m, body.GetProperty("held_credits").GetDecimal());
-        Assert.Equal(0m, body.GetProperty("owed_back_credits").GetDecimal());
+        Assert.Equal(0m, body.GetProperty("held_minutes").GetDecimal());
+        Assert.Equal(0m, body.GetProperty("owed_back_minutes").GetDecimal());
         Assert.Equal(JsonValueKind.Null, body.GetProperty("held_until").ValueKind);
         Assert.Equal(1, body.GetProperty("passkey_count").GetInt32());
 
@@ -322,7 +322,7 @@ public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal("Door Admin", desk.GetProperty("name").GetString());
         Assert.False(desk.GetProperty("is_self").GetBoolean());
         Assert.True(items[1].GetProperty("booked_by").GetProperty("is_self").GetBoolean());
-        Assert.Equal(16m, items[1].GetProperty("charged_credits").GetDecimal());
+        Assert.Equal(16m, items[1].GetProperty("charged_minutes").GetDecimal());
     }
 
     [SkippableTheory]

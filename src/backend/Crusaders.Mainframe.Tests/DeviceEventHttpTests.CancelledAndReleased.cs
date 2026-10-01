@@ -51,7 +51,7 @@ public abstract partial class DeviceEventHttpTests
             var box = await SeedAsync(factory);
             var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);   // 45 min, 24 credits
             await CancelAsync(factory, box, booked.BookingId);
-            Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));   // charged 24, refunded 24
+            Assert.Equal(200, await BalanceAsync(factory, box.MemberId));   // charged 24, refunded 24
 
             var mail = new StubEmailService();
             await using var quiet = Quiet(factory, mail);
@@ -69,10 +69,10 @@ public abstract partial class DeviceEventHttpTests
 
             var ledger = await LedgerAsync(factory, booked.BookingId);
             var lit = Assert.Single(ledger, l => l.Type == LedgerEntryType.LightsPurchase);
-            Assert.Equal(-24m, lit.AmountCredits);                                     // 45 sold min at 8 credits / 15 min, not 48 granted
+            Assert.Equal(-24, lit.AmountMinutes);                                     // 45 sold min at 8 credits / 15 min, not 48 granted
             Assert.Equal(BookingService.CancelledLightsReference(booked.BookingId), lit.ExternalReference);
             Assert.Single(ledger, l => l.Type == LedgerEntryType.CancellationRefund);   // the refund stands, un-netted
-            Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200 - 24, await BalanceAsync(factory, box.MemberId));
 
             Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_after_cancel"));
             Assert.Single(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_charged"));
@@ -83,7 +83,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
                 Batch(Activation(2, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
             Assert.Single(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
-            Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200 - 24, await BalanceAsync(factory, box.MemberId));
         }
 
         /// <summary>The correction is posted whatever the balance: a member who spent the refund goes negative.</summary>
@@ -93,23 +93,23 @@ public abstract partial class DeviceEventHttpTests
             Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
             await using var factory = CreateFactory();
-            var box = await SeedAsync(factory, topUpCredits: 24m);
+            var box = await SeedAsync(factory, topUpMinutes: 24);
             var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
             await CancelAsync(factory, box, booked.BookingId);
             using (var scope = factory.Services.CreateScope())
             {
                 // The refund is spent elsewhere before the box reconnects.
                 var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-                db.LedgerEntries.Add(new LedgerEntry { TenantId = box.TenantId, UserId = box.MemberId, Type = LedgerEntryType.BookingCharge, AmountCredits = -20m, ActorUserId = box.MemberId, Reason = "elsewhere" });
+                db.LedgerEntries.Add(new LedgerEntry { TenantId = box.TenantId, UserId = box.MemberId, Type = LedgerEntryType.BookingCharge, AmountMinutes = -20, ActorUserId = box.MemberId, Reason = "elsewhere" });
                 await db.SaveChangesAsync();
             }
-            Assert.Equal(4m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(4, await BalanceAsync(factory, box.MemberId));
 
             await using var quiet = Quiet(factory, new StubEmailService());
             Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
                 FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
 
-            Assert.Equal(4m - 24m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(4 - 24, await BalanceAsync(factory, box.MemberId));
             Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_after_cancel"));
         }
 
@@ -138,17 +138,17 @@ public abstract partial class DeviceEventHttpTests
             // enough that a scan five minutes ago is still inside the cue window.
             var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 2);
             var cancellation = await CancelAsync(factory, box, booked.BookingId, waivePenalty: false);
-            Assert.Equal(24m, cancellation.RefundedCredits);
-            Assert.Equal(7.20m, cancellation.PenaltyCredits);
-            Assert.Equal(200m - 7.20m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(24, cancellation.RefundedMinutes);
+            Assert.Equal(7.20m, cancellation.PenaltyMinutes);
+            Assert.Equal(200 - 7.20m, await BalanceAsync(factory, box.MemberId));
 
             await using var quiet = Quiet(factory, new StubEmailService());
             Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(FromBox(box, EventsPath,
                 Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
 
             var lit = Assert.Single(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
-            Assert.Equal(-16.80m, lit.AmountCredits);                       // 24 gross, capped at 24 − 7.20
-            Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));   // the booking cost exactly its price
+            Assert.Equal(-16.80m, lit.AmountMinutes);                       // 24 gross, capped at 24 − 7.20
+            Assert.Equal(200 - 24, await BalanceAsync(factory, box.MemberId));   // the booking cost exactly its price
         }
 
         /// <summary>
@@ -165,7 +165,7 @@ public abstract partial class DeviceEventHttpTests
             var box = await SeedAsync(factory);
             var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 60);
             await CancelAsync(factory, box, booked.BookingId);
-            Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200, await BalanceAsync(factory, box.MemberId));
 
             // Scanned five minutes ago — sixty-five minutes before a cue window that opens ten
             // minutes before the slot.
@@ -174,7 +174,7 @@ public abstract partial class DeviceEventHttpTests
                 Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
 
             Assert.DoesNotContain(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
-            Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200, await BalanceAsync(factory, box.MemberId));
             Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_too_early"));
             Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_charged"));
         }
@@ -276,7 +276,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
                 Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
             Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
-                l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+                l => l.Type == LedgerEntryType.LightsPurchase).AmountMinutes);
 
             // The next request carries the release: the relay was closed for five minutes.
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
@@ -284,15 +284,15 @@ public abstract partial class DeviceEventHttpTests
 
             var lights = (await LedgerAsync(factory, booked.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase).ToList();
             Assert.Equal(2, lights.Count);
-            Assert.Equal(8.00m, Assert.Single(lights, l => l.AmountCredits > 0).AmountCredits);
-            Assert.Equal(-2.67m, lights.Sum(l => l.AmountCredits));          // 5 min at 8 credits / 15 min
+            Assert.Equal(8, Assert.Single(lights, l => l.AmountMinutes > 0).AmountMinutes);
+            Assert.Equal(-2.67m, lights.Sum(l => l.AmountMinutes));          // 5 min at 8 credits / 15 min
             Assert.Single(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
 
             // A second release does not pay it back twice.
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
                 Batch(Release(3, court: 0, heldMs: 300_000))))).StatusCode);
             Assert.Equal(-2.67m, (await LedgerAsync(factory, booked.BookingId))
-                .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountCredits));
+                .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountMinutes));
         }
 
         /// <summary>
@@ -314,7 +314,7 @@ public abstract partial class DeviceEventHttpTests
             var buyer = await AnotherMemberAsync(factory, box);
             var buyerBefore = await BalanceAsync(factory, buyer);
             var b = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 20, minutes: 15);
-            Assert.Equal(buyerBefore - 8m, await BalanceAsync(factory, buyer));
+            Assert.Equal(buyerBefore - 8, await BalanceAsync(factory, buyer));
 
             var mail = new StubEmailService();
             await using var quiet = Quiet(factory, mail);
@@ -338,10 +338,10 @@ public abstract partial class DeviceEventHttpTests
             Assert.True(a.EndsAt <= reinstated.StartsAt, $"A's end {a.EndsAt} must clear B's start {reinstated.StartsAt}");
 
             // Charged once for a booking they get to keep.
-            Assert.Equal(buyerBefore - 8m, await BalanceAsync(factory, buyer));
+            Assert.Equal(buyerBefore - 8, await BalanceAsync(factory, buyer));
             var refunds = (await LedgerAsync(factory, b.BookingId)).Where(l => l.Type == LedgerEntryType.CancellationRefund).ToList();
             Assert.Equal(2, refunds.Count);
-            Assert.Equal(0m, refunds.Sum(l => l.AmountCredits));
+            Assert.Equal(0, refunds.Sum(l => l.AmountMinutes));
 
             Assert.Single(await AuditAsync(factory, box.TenantId, "booking.lit_window_narrowed"));
             Assert.Single(await AuditAsync(factory, box.TenantId, "booking.displacement_reversed"));
@@ -377,12 +377,12 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
                 Batch(Activation(2, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
             Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
-                l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+                l => l.Type == LedgerEntryType.LightsPurchase).AmountMinutes);
 
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
                 Batch(Release(3, court: 0, heldMs: 300_000))))).StatusCode);
             Assert.Equal(-2.67m, (await LedgerAsync(factory, booked.BookingId))
-                .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountCredits));
+                .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountMinutes));
         }
 
         /// <summary>
@@ -414,7 +414,7 @@ public abstract partial class DeviceEventHttpTests
             var survivor = await BookingAsync(factory, b.BookingId);
             Assert.Equal(BookingStatus.Booked, survivor.Status);
             Assert.Null(survivor.CancellationReason);
-            Assert.Equal(buyerBefore - 8m, await BalanceAsync(factory, buyer));   // charged once, untouched
+            Assert.Equal(buyerBefore - 8, await BalanceAsync(factory, buyer));   // charged once, untouched
             Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.displaced"));
             Assert.DoesNotContain(mail.Sent, m => m.Subject.StartsWith("Booking refunded", StringComparison.Ordinal));
 
@@ -448,7 +448,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
                 Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
             Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
-                l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+                l => l.Type == LedgerEntryType.LightsPurchase).AmountMinutes);
 
             // One held minute, uploaded five minutes after the scan: the implied end is four
             // minutes adrift of the release's own time, so these two are not a pair.
@@ -457,7 +457,7 @@ public abstract partial class DeviceEventHttpTests
 
             Assert.Single(await AuditAsync(factory, box.TenantId, "device.release_unpaired"));
             Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
-                l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+                l => l.Type == LedgerEntryType.LightsPurchase).AmountMinutes);
             Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
         }
     }

@@ -489,10 +489,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The court's own box is healthy; the door beside it has been dark for an hour.
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
@@ -507,7 +507,7 @@ public class PeripheralHealthTests
         // 30% of 8 retained: the court was never dark.
         Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
-        Assert.Equal(2.40m, evt.Data["penalty_credits"]);
+        Assert.Equal(2.40m, evt.Data["penalty_minutes"]);
         Assert.Equal(false, evt.Data["peripheral_outage"]);
     }
 
@@ -861,10 +861,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
         var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1));
@@ -879,7 +879,7 @@ public class PeripheralHealthTests
 
         Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
-        Assert.Equal(2.40m, evt.Data["penalty_credits"]);
+        Assert.Equal(2.40m, evt.Data["penalty_minutes"]);
         Assert.Equal(false, evt.Data["peripheral_outage"]);
     }
 
@@ -900,10 +900,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The instants matter and are stated. The booking started an hour ago, so its grace
         // deadline — the instant the waiver is judged at — is 55 minutes ago. The box had been
@@ -924,16 +924,16 @@ public class PeripheralHealthTests
         await CreateNoShowWorker(host).TickAsync(default);
 
         // Refunded in full, no penalty: §6a. A door is not a court's evidence either way.
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
-        Assert.Equal(0m, evt.Data["penalty_credits"]);
+        Assert.Equal(0, evt.Data["penalty_minutes"]);
         Assert.Equal(true, evt.Data["peripheral_outage"]);
     }
 
     // ----- money: §6a's "auto-credited (no penalty)" -----------------------------------
 
     private static async Task<Booking> AddDueBookingAsync(
-        TestHost host, MainframeDbContext db, decimal amount = 8m, DateTimeOffset? startsAt = null)
+        TestHost host, MainframeDbContext db, int amount = 8, DateTimeOffset? startsAt = null)
     {
         var starts = startsAt ?? DateTimeOffset.UtcNow.AddHours(-1);
         var booking = new Booking
@@ -947,7 +947,7 @@ public class PeripheralHealthTests
             EndsAt = starts.AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = amount,
+            AmountChargedMinutes = amount,
             Status = BookingStatus.Booked,
             CheckedInAt = null,
             ChargedAt = DateTimeOffset.UtcNow.AddHours(-2),
@@ -984,10 +984,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90));
         await AddOutageAsync(host, db, box, booking.StartsAt.AddMinutes(-10), endedAt: null);
@@ -997,15 +997,15 @@ public class PeripheralHealthTests
         await CreateNoShowWorker(host).TickAsync(default);
 
         // Owed(b) = 0: the charge is fully back and nothing was retained.
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         var rows = await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync();
-        Assert.Contains(rows, l => l.Type == LedgerEntryType.CancellationRefund && l.AmountCredits == 8m);
+        Assert.Contains(rows, l => l.Type == LedgerEntryType.CancellationRefund && l.AmountMinutes == 8);
         Assert.DoesNotContain(rows, l => l.Type == LedgerEntryType.NoShowPenalty);
 
         var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
-        Assert.Equal(0m, evt.Data["penalty_credits"]);
-        Assert.Equal(8m, evt.Data["refund_credits"]);
+        Assert.Equal(0, evt.Data["penalty_minutes"]);
+        Assert.Equal(8, evt.Data["refund_minutes"]);
         Assert.Equal(true, evt.Data["peripheral_outage"]);
 
         // §6a: "players in the affected window get an email explaining the situation" — the
@@ -1016,7 +1016,7 @@ public class PeripheralHealthTests
 
         // THE FIGURE THE WORKER PASSED, not the figure a template renders when handed one. Every
         // other assertion here survives `Notice()` being changed to pass a constant: a verifier
-        // substituted a hard-coded `0m` for `refundedCredits` at the CALL SITE and the whole suite
+        // substituted a hard-coded `0m` for `refundedMinutes` at the CALL SITE and the whole suite
         // stayed green at 1019, so a member whose ledger holds +8.00 would have been mailed
         // "Refunded 0.00 credits" with nothing to notice it. The templates are pinned letter by
         // letter one layer down; this is the wiring, which is where the money actually travels.
@@ -1027,8 +1027,8 @@ public class PeripheralHealthTests
         var refund = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund)
             .ToListAsync());
-        Assert.Equal(8m, refund.AmountCredits);
-        Assert.Contains(refund.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture), notice.HtmlBody);
+        Assert.Equal(8, refund.AmountMinutes);
+        Assert.Contains(refund.AmountMinutes.ToString("0.00", CultureInfo.InvariantCulture), notice.HtmlBody);
         // …and the court and club it names are the ones this booking is on, which the same
         // substitution showed were equally free to be anything.
         Assert.Contains(host.Courts[0].Name, notice.HtmlBody);
@@ -1046,10 +1046,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
         Drain(host);
 
@@ -1058,7 +1058,7 @@ public class PeripheralHealthTests
         // 30% of 8 retained.
         Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
-        Assert.Equal(2.40m, evt.Data["penalty_credits"]);
+        Assert.Equal(2.40m, evt.Data["penalty_minutes"]);
         Assert.Equal(false, evt.Data["peripheral_outage"]);
     }
 
@@ -1074,10 +1074,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var elsewhere = host.Courts[0].CourtNumber + 40;
         var annex = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), true, null, elsewhere);
@@ -1101,10 +1101,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Back online right now, and dark across the booking's grace window.
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-10));
@@ -1112,7 +1112,7 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -1129,10 +1129,10 @@ public class PeripheralHealthTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-10));
         await AddOutageAsync(host, db, box,
@@ -1171,10 +1171,10 @@ public class PeripheralHealthTests
         var deadline = DateTimeOffset.UtcNow.AddMinutes(-deadlineMinutesAgo).AddSeconds(-1);
         var startsAt = deadline.AddMinutes(-settings.GraceWindowMinutes);
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db, startsAt: startsAt);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Two minutes of silence at the deadline. That is INSIDE offline_after_seconds (180 s at
         // the seeded heartbeat_seconds = 60), so at the deadline the box was still reachable by
@@ -1241,10 +1241,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Dark since half an hour before the booking even started, and nothing has noticed.
         await AddBoxAsync(host, db, booking.StartsAt.AddMinutes(-30));
@@ -1252,7 +1252,7 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
@@ -1279,10 +1279,10 @@ public class PeripheralHealthTests
         var deadline = DateTimeOffset.UtcNow.AddMinutes(-5).AddSeconds(-1);
         var startsAt = deadline.AddMinutes(-settings.GraceWindowMinutes);
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db, startsAt: startsAt);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Dark from ten minutes before the deadline — well past offline_after_seconds — and
         // back one minute after it.
@@ -1327,7 +1327,7 @@ public class PeripheralHealthTests
     [InlineData("RSH")]   // back, swept, and only then a health tick
     [InlineData("HRS")]   // a row opened, the box back, and the sweep beats the closing tick
     public async Task The_waiver_is_the_same_whether_the_box_came_back_before_or_after_the_sweep(string order)
-        => Assert.Equal(100m, await DarkThenRecoveredBalanceAsync(order));
+        => Assert.Equal(100, await DarkThenRecoveredBalanceAsync(order));
 
     /// <summary>
     /// A box that was dark, came back well BEFORE the booking's grace deadline, and has been
@@ -1346,11 +1346,11 @@ public class PeripheralHealthTests
         var now = DateTimeOffset.UtcNow;
         var deadline = now.AddMinutes(-6).AddSeconds(-1);
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(
             host, db, startsAt: deadline.AddMinutes(-settings.GraceWindowMinutes));
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Dark since twenty minutes ago; the health sweep notices and opens its row.
         var box = await AddBoxAsync(host, db, now.AddMinutes(-20));
@@ -1431,10 +1431,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The box that actually drives the court, heart-beating normally — and installed a
         // month ago, so it can speak for a deadline that closed an hour before this fixture ran.
@@ -1483,10 +1483,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The box that actually drives the court, dark right across the grace window.
         var live = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90));
@@ -1497,7 +1497,7 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
@@ -1537,10 +1537,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The only box on the court, switched off by an admin and installed long enough ago to
         // speak for this deadline.
@@ -1549,7 +1549,7 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
@@ -1603,10 +1603,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20), enabled: false,
             installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
@@ -1663,17 +1663,17 @@ public class PeripheralHealthTests
     [InlineData(-90, 100.00)]
     [InlineData(-1, 97.60)]
     public async Task A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for(
-        int lastSeenMinutes, decimal expectedBalance)
+        int lastSeenMinutes, int expectedBalance)
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(lastSeenMinutes), enabled: false,
             installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
@@ -1705,10 +1705,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20), enabled: false,
             installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
@@ -1744,10 +1744,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-30), enabled: false,
             installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
@@ -1756,7 +1756,7 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
@@ -1785,17 +1785,17 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, lastSeen: null, enabled: false,
             installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
@@ -1827,10 +1827,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), enabled: false,
             installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
@@ -1859,10 +1859,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90),
             installedAt: DateTimeOffset.UtcNow.AddDays(-30));
@@ -1882,8 +1882,8 @@ public class PeripheralHealthTests
         var refund = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund)
             .ToListAsync());
-        Assert.Equal(8m, refund.AmountCredits);
-        Assert.Contains(refund.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture), notice.HtmlBody);
+        Assert.Equal(8, refund.AmountMinutes);
+        Assert.Contains(refund.AmountMinutes.ToString("0.00", CultureInfo.InvariantCulture), notice.HtmlBody);
         Assert.Contains(host.Courts[0].Name, notice.HtmlBody);
     }
 
@@ -1907,10 +1907,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Switched off, installed long ago — but on the annex court, forty numbers away.
         var elsewhere = host.Courts[0].CourtNumber + 40;
@@ -1953,10 +1953,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Registered a minute ago, never heard from, already switched off. The booking's grace
         // window closed fifty-five minutes before this row existed.
@@ -1987,10 +1987,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The box that actually drives the court, heart-beating normally — and installed a
         // month ago, which is a separate fact from "last seen twenty seconds ago" and is now
@@ -2038,7 +2038,7 @@ public class PeripheralHealthTests
     [Fact]
     public async Task A_board_that_appeared_after_the_deadline_does_not_block_the_waiver()
     {
-        Assert.Equal(100m, await SpareBoardBalanceAsync(installedAt: null));
+        Assert.Equal(100, await SpareBoardBalanceAsync(installedAt: null));
     }
 
     /// <summary>
@@ -2069,10 +2069,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The court's own box, installed long ago and dark across the whole window.
         var live = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90),
@@ -2107,10 +2107,10 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db);
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var first = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90));
         await AddOutageAsync(host, db, first, booking.StartsAt.AddMinutes(-10), endedAt: null);
@@ -2119,7 +2119,7 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
@@ -2168,7 +2168,7 @@ public class PeripheralHealthTests
     [InlineData(-90, 100.00)]
     [InlineData(-30, 97.60)]
     public async Task A_court_is_out_of_service_from_the_instant_the_switch_was_thrown(
-        int switchedOffSecondsAgo, decimal expectedBalance)
+        int switchedOffSecondsAgo, int expectedBalance)
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -2176,12 +2176,12 @@ public class PeripheralHealthTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var now = DateTimeOffset.UtcNow;
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
 
         // Grace is 5 minutes, so the deadline is 60 seconds ago.
         var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false,
             installedAt: now.AddDays(-30), outOfServiceSince: now.AddSeconds(switchedOffSecondsAgo));
@@ -2208,10 +2208,10 @@ public class PeripheralHealthTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var now = DateTimeOffset.UtcNow;
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false,
             installedAt: now.AddDays(-30), outOfServiceSince: now.AddSeconds(-90));
@@ -2250,10 +2250,10 @@ public class PeripheralHealthTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var now = DateTimeOffset.UtcNow;
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false, installedAt: now.AddDays(-30));
         Assert.Null(box.OutOfServiceSince);
@@ -2338,7 +2338,7 @@ public class PeripheralHealthTests
     [InlineData(0, 97.60)]    // the deadline IS the switch-off instant — near side, penalty stands
     [InlineData(-1, 100.00)]  // one tick later than the switch — out of service, waived
     public async Task A_deadline_exactly_on_the_recorded_switch_off_instant_is_judged_by_the_silence_test(
-        long switchTicksBeforeDeadline, decimal expectedBalance)
+        long switchTicksBeforeDeadline, int expectedBalance)
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -2347,11 +2347,11 @@ public class PeripheralHealthTests
         var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
         var now = DateTimeOffset.UtcNow;
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
 
         var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // The instant the sweep will ask about, computed the way the sweep computes it.
         var deadline = booking.StartsAt.AddMinutes(settings.GraceWindowMinutes);
@@ -2407,11 +2407,11 @@ public class PeripheralHealthTests
 
         // The deadline sits 55 minutes ago, inside the off-period below.
         var deadline = now.AddMinutes(-55);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
         var booking = await AddDueBookingAsync(
             host, db, startsAt: deadline.AddMinutes(-settings.GraceWindowMinutes));
         await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         // Last heard from 70 minutes ago; the admin then takes it out of service and, later,
         // puts it back. The column carries nothing about the finished off-period afterwards.
@@ -2434,7 +2434,7 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
@@ -2478,7 +2478,7 @@ public class PeripheralHealthTests
     public void Every_sentence_of_the_out_of_service_waiver_mail()
     {
         var mail = EmailTemplates.BookingRefundedForOutOfServiceBox(
-            WaiverClub, "player@test.local", "Court 4", 8m);
+            WaiverClub, "player@test.local", "Court 4", 8);
         // Unwrapped: a DoesNotContain against a 72-column body passes whenever the phrase
         // it forbids happens to straddle a break. See MailText.
         var body = MailText.Unwrap(mail.PlainBody);
@@ -2525,7 +2525,7 @@ public class PeripheralHealthTests
     [Fact]
     public void Every_sentence_of_the_outage_waiver_mail()
     {
-        var mail = EmailTemplates.BookingRefundedForOutage(WaiverClub, "player@test.local", "Court 4", 8m);
+        var mail = EmailTemplates.BookingRefundedForOutage(WaiverClub, "player@test.local", "Court 4", 8);
         // Unwrapped: a DoesNotContain against a 72-column body passes whenever the phrase
         // it forbids happens to straddle a break. See MailText.
         var body = MailText.Unwrap(mail.PlainBody);
@@ -2559,7 +2559,7 @@ public class PeripheralHealthTests
     [Theory]
     [InlineData(12.5, "12.50 credits")]
     [InlineData(0, "0.00 credits")]
-    public void Both_waiver_mails_quote_the_bookings_own_refund(decimal refunded, string rendered)
+    public void Both_waiver_mails_quote_the_bookings_own_refund(int refunded, string rendered)
     {
         Assert.Contains(
             $"Refunded: {rendered}",

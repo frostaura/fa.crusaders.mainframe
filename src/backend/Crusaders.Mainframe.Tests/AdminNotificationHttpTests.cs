@@ -251,14 +251,14 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         var notice = Assert.Single(await NoticesAsync(app, club.TenantId, AdminEventCatalogue.OverdraftAuthorised));
         var payload = JsonSerializer.Deserialize<OverdraftPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
         Assert.True(payload.Self);
-        Assert.Equal(-8m, payload.BalanceAfterCredits);
+        Assert.Equal(-8, payload.BalanceAfterMinutes);
         Assert.Equal(club.AdminUserId, notice.ActorUserId);
         var balance = await PeopleClub.ReadAsync(app, db => db.LedgerEntries.IgnoreQueryFilters()
-            .Where(l => l.TenantId == club.TenantId && l.UserId == club.AdminUserId).SumAsync(l => l.AmountCredits));
-        Assert.Equal(balance, payload.BalanceAfterCredits);
+            .Where(l => l.TenantId == club.TenantId && l.UserId == club.AdminUserId).SumAsync(l => l.AmountMinutes));
+        Assert.Equal(balance, payload.BalanceAfterMinutes);
 
         // A member who can afford it: an on-behalf booking, no overdraft, no notice.
-        await FundAsync(app, club, club.MemberUserId, 100m);
+        await FundAsync(app, club, club.MemberUserId, 100);
         var onBehalf = await admin.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
             courtId = club.CourtId, userId = club.MemberUserId,
@@ -283,7 +283,7 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         var club = await DoorClub.SeedAsync(factory, "noticeodx");
         var admin = club.AdminClient(factory);
         var at = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(2).AddHours(10), TimeSpan.Zero);
-        await FundAsync(factory, club, club.MemberUserId, 100m);
+        await FundAsync(factory, club, club.MemberUserId, 100);
 
         var first = await admin.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
@@ -315,14 +315,14 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         return email;
     }
 
-    private static async Task FundAsync(WebApplicationFactory<Program> app, DoorClub club, Guid userId, decimal credits)
+    private static async Task FundAsync(WebApplicationFactory<Program> app, DoorClub club, Guid userId, int credits)
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         db.LedgerEntries.Add(new LedgerEntry
         {
             TenantId = club.TenantId, UserId = userId, Type = LedgerEntryType.TopUp,
-            AmountCredits = credits, ActorUserId = Guid.Empty, Reason = "fixture float",
+            AmountMinutes = credits, ActorUserId = Guid.Empty, Reason = "fixture float",
         });
         await db.SaveChangesAsync();
     }
@@ -462,7 +462,7 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         var actor = await club.AddAsync(app, "Acting Admin", isAdmin: true);
         var reader = await club.AddAsync(app, "Reading Admin", isAdmin: true);
         var member = await club.AddAsync(app, "Owing Member", isAdmin: false);
-        var payload = new OverdraftPayload(Guid.NewGuid(), "Acting Admin", "Owing Member", false, "Court 1", "Tue 29 Sep, 18:00", 8m, -8m);
+        var payload = new OverdraftPayload(Guid.NewGuid(), "Acting Admin", "Owing Member", false, "Court 1", "Tue 29 Sep, 18:00", 8, -8);
         await StageAsync(app, club.TenantId, AdminNotices.OverdraftAuthorised(Guid.NewGuid(), actor, member, payload));
         for (var i = 0; i < 10 && (await NoticesAsync(app, club.TenantId)).Any(n => n.State == AdminNotificationState.Pending); i++)
         {
@@ -615,7 +615,7 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         // The PUT carries the booking basics every save carries; the six ride along on it.
         Dictionary<string, object> Body() => new()
         {
-            ["sliceMinutes"] = 15, ["slicePriceCredits"] = 8m, ["advanceBookingDays"] = 14, ["dayStartMinute"] = 360,
+            ["sliceMinutes"] = 15, ["slicePriceCredits"] = 8, ["advanceBookingDays"] = 14, ["dayStartMinute"] = 360,
             ["dayEndMinute"] = 1320, ["penaltyPct"] = 30m, ["graceWindowMinutes"] = 5, ["penaltyWindowMinutes"] = 15,
         };
         var outOfRange = Body();

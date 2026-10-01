@@ -66,13 +66,13 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
             new Membership { TenantId = tenant.Id, UserId = victim.Id, FullName = "Victim Member", MembershipNumber = $"V-{slug}", Status = MembershipStatus.Active },
             new Membership { TenantId = tenant.Id, UserId = attacker.Id, FullName = "Other Member", MembershipNumber = $"X-{slug}", Status = MembershipStatus.Active });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 50m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         db.LedgerEntries.Add(new LedgerEntry
         {
             TenantId = tenant.Id, UserId = victim.Id, Type = LedgerEntryType.TopUp,
-            AmountCredits = 500m, ActorUserId = victim.Id, Reason = "seed",
+            AmountMinutes = 500, ActorUserId = victim.Id, Reason = "seed",
         });
 
         // Charged at booking, like every row CreateAsync writes.
@@ -82,14 +82,14 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
             TenantId = tenant.Id, CourtId = court.Id, UserId = victim.Id,
             BookedByUserId = victim.Id, PaidByUserId = victim.Id,
             StartsAt = startsAt, EndsAt = startsAt.AddMinutes(60),
-            SliceMinutes = 15, SliceCount = 4, AmountChargedCredits = 200m,
+            SliceMinutes = 15, SliceCount = 4, AmountChargedMinutes = 200,
             Status = BookingStatus.Booked, ChargedAt = DateTimeOffset.UtcNow,
         };
         db.Bookings.Add(booking);
         db.LedgerEntries.Add(new LedgerEntry
         {
             TenantId = tenant.Id, UserId = victim.Id, Type = LedgerEntryType.BookingCharge,
-            AmountCredits = -200m, ActorUserId = victim.Id, RelatedBookingId = booking.Id, Reason = "seed charge",
+            AmountMinutes = -200, ActorUserId = victim.Id, RelatedBookingId = booking.Id, Reason = "seed charge",
         });
 
         await db.SaveChangesAsync();
@@ -133,7 +133,7 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         return await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == tenantId && l.UserId == userId)
-            .SumAsync(l => (decimal?)l.AmountCredits) ?? 0m;
+            .SumAsync(l => (decimal?)l.AmountMinutes) ?? 0;
     }
 
     /// <summary>
@@ -341,10 +341,10 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
 
         using var admin = ClientFor(factory, club, club.AdminId, role: "admin");
         var response = await admin.PostAsJsonAsync(
-            $"/api/v1/admin/credit/{outsiderId}/adjust", new { amountCredits = 1000m, reason = "gift" });
+            $"/api/v1/admin/credit/{outsiderId}/adjust", new { amountMinutes = 1000, reason = "gift" });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.Equal(0m, await BalanceAsync(factory, club.TenantId, outsiderId));
+        Assert.Equal(0, await BalanceAsync(factory, club.TenantId, outsiderId));
     }
 
     /// <summary>
@@ -494,25 +494,25 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
         // The victim's booking id, pasted into an adjustment on the other member's wallet.
         var crossed = await admin.PostAsJsonAsync(
             $"/api/v1/admin/credit/{club.AttackerId}/adjust",
-            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = club.BookingId });
+            new { amountMinutes = 10, reason = "goodwill", relatedBookingId = club.BookingId });
         Assert.Equal(HttpStatusCode.BadRequest, crossed.StatusCode);
         Assert.Contains("booking_not_members", await crossed.Content.ReadAsStringAsync());
 
         // A booking id that is not one at all.
         var invented = await admin.PostAsJsonAsync(
             $"/api/v1/admin/credit/{club.AttackerId}/adjust",
-            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = Guid.NewGuid() });
+            new { amountMinutes = 10, reason = "goodwill", relatedBookingId = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.BadRequest, invented.StatusCode);
         Assert.Contains("booking_not_found", await invented.Content.ReadAsStringAsync());
 
         // Nothing was posted on either attempt.
-        Assert.Equal(0m, await BalanceAsync(factory, club.TenantId, club.AttackerId));
+        Assert.Equal(0, await BalanceAsync(factory, club.TenantId, club.AttackerId));
 
         // The member's own booking is accepted, so the refusal is about ownership and not
         // about the field.
         var owned = await admin.PostAsJsonAsync(
             $"/api/v1/admin/credit/{club.VictimId}/adjust",
-            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = club.BookingId });
+            new { amountMinutes = 10, reason = "goodwill", relatedBookingId = club.BookingId });
         Assert.Equal(HttpStatusCode.OK, owned.StatusCode);
     }
 }

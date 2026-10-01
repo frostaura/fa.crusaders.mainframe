@@ -277,10 +277,12 @@ public partial class MemberCodeCorpusTests
     private static void AssertLabelRule(string text, string id)
     {
         using var body = JsonDocument.Parse(text);
-        if (!body.RootElement.TryGetProperty("amount_credits", out var credits)) return;
+        if (!body.RootElement.TryGetProperty("amount_minutes", out var credits)) return;
         var label = body.RootElement.GetProperty("amount_label").GetString()!;
-        Assert.True(DevicePayForEndpoint.Label(credits.GetDecimal()) == label, $"'{id}': label {label}");
-        Assert.Equal(credits.GetRawText(), JsonSerializer.Serialize(DevicePayForEndpoint.WireCredits(credits.GetDecimal())));
+        // P13-B3: the corpus carries whole minutes once regenerated (§3.16); a "50.0" fails here until then.
+        Assert.True(credits.TryGetInt32(out var minutes), $"'{id}': amount {credits.GetRawText()} is not whole minutes");
+        Assert.True(DevicePayForEndpoint.Label(minutes) == label, $"'{id}': label {label}");
+        Assert.Equal(credits.GetRawText(), JsonSerializer.Serialize(minutes));
     }
 
     // ---- gate.json (door) ----------------------------------------------------------------------
@@ -422,7 +424,7 @@ public partial class MemberCodeCorpusTests
         [.. Enumerable.Range(0, keys).Select(i => MemberCodeWire.KeyElement(Ref(i), i % 2, new byte[12]))]);
 
     private static TenantSettingsView WidestSettings() => new(
-        240, 8m, 30m, 60, 15, 14, "Africa/Johannesburg", 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7,
+        240, 30, 60, 15, 14, "Africa/Johannesburg", 60, "16:00-19:00", 1, 2, 0, 1440, 7,
         ButtonMap.Default())
     {
         WalkUpMaxMinutes = 90, HeartbeatSeconds = 300,

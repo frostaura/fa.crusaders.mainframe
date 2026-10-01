@@ -21,8 +21,8 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
 
     private static async Task AcceptAsync(PlayersClub club, TestWebAppFactory f, Guid who, Guid bookingId, Guid seat)
     {
-        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareCredits;
-        var response = await club.Client(f, who).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = shown });
+        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareMinutes;
+        var response = await club.Client(f, who).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = shown });
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
     }
 
@@ -32,8 +32,8 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1upcoming");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { userId = club.Alex }]);
         await AcceptAsync(club, f, club.Sam, bookingId, PlayersClub.SeatOf(body, 2));
         var past = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-2));   // over: never upcoming
@@ -45,7 +45,7 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Assert.Equal("partner", item.GetProperty("role").GetString());
         Assert.Equal("booked", item.GetProperty("status").GetString());
         Assert.False(string.IsNullOrEmpty(item.GetProperty("court_name").GetString()));
-        Assert.Equal(10m, item.GetProperty("my_share_credits").GetDecimal());
+        Assert.Equal(10m, item.GetProperty("my_share_minutes").GetDecimal());
         Assert.False(item.GetProperty("needs_action").GetBoolean());
         Assert.Equal(3, item.GetProperty("players").GetArrayLength());
         var names = item.GetProperty("players").EnumerateArray().Select(p => p.GetProperty("name").GetString()).ToList();
@@ -59,7 +59,7 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var organiser = Assert.Single((await JsonAsync(await club.Client(f, club.Organiser).GetAsync("/api/v1/me/bookings/upcoming")))
             .GetProperty("items").EnumerateArray(), i => i.GetProperty("booking_id").GetGuid() == bookingId);
         Assert.Equal("organiser", organiser.GetProperty("role").GetString());
-        Assert.Equal(22m, organiser.GetProperty("my_share_credits").GetDecimal());
+        Assert.Equal(22m, organiser.GetProperty("my_share_minutes").GetDecimal());
         Assert.DoesNotContain((await JsonAsync(await club.Client(f, club.Organiser).GetAsync("/api/v1/me/bookings/upcoming")))
             .GetProperty("items").EnumerateArray(), i => i.GetProperty("booking_id").GetGuid() == past);
 
@@ -92,9 +92,9 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1splitcancel");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
-        await club.CreditAsync(f, club.Alex, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
+        await club.CreditAsync(f, club.Alex, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { userId = club.Alex }]);
         await AcceptAsync(club, f, club.Sam, bookingId, PlayersClub.SeatOf(body, 2));
         await AcceptAsync(club, f, club.Alex, bookingId, PlayersClub.SeatOf(body, 3));
@@ -102,8 +102,8 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var samBefore = await PlayersClub.BalanceAsync(f, club.Sam);
 
         var quote = await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}/cancellation-quote"));
-        Assert.Equal(32m, quote.GetProperty("refundCredits").GetDecimal());
-        Assert.Equal(12m, quote.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(32m, quote.GetProperty("refundMinutes").GetDecimal());
+        Assert.Equal(12m, quote.GetProperty("net_minutes").GetDecimal());
         var quoted = quote.GetProperty("partner_refunds").EnumerateArray().ToList();
         Assert.Equal(2, quoted.Count);
         Assert.All(quoted, r => Assert.Equal(10m, r.GetProperty("credits").GetDecimal()));
@@ -112,17 +112,17 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var cancel = await club.Client(f, club.Organiser).PostAsync($"/api/v1/bookings/{bookingId}/cancel", null);
         Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
         var answer = await JsonAsync(cancel);
-        Assert.Equal(32m, answer.GetProperty("refunded_credits").GetDecimal());
-        Assert.Equal(12m, answer.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(32m, answer.GetProperty("refunded_minutes").GetDecimal());
+        Assert.Equal(12m, answer.GetProperty("net_minutes").GetDecimal());
         Assert.Equal(20m, answer.GetProperty("partner_refunds").EnumerateArray().Sum(r => r.GetProperty("credits").GetDecimal()));
 
         // And the wallets agree with what was said.
-        Assert.Equal(organiserBefore + 12m, await PlayersClub.BalanceAsync(f, club.Organiser));
-        Assert.Equal(samBefore + 10m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(organiserBefore + 12, await PlayersClub.BalanceAsync(f, club.Organiser));
+        Assert.Equal(samBefore + 10, await PlayersClub.BalanceAsync(f, club.Sam));
     }
 
     /// <summary>
-    /// Review round 5 (M5-7, lane D1's ask): a LATE split cancel's <c>net_credits</c> is what the
+    /// Review round 5 (M5-7, lane D1's ask): a LATE split cancel's <c>net_minutes</c> is what the
     /// organiser's wallet actually moved — the gross refund less the penalty row less the partners'
     /// refunds. It left the penalty out, so the toast said "25 back" for a ledger that moved +10.
     /// Pinned on the member's cancel, the desk's and the desk's bulk cancel.
@@ -134,8 +134,8 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         await using var f = CreateFactory();
         var late = PlayersClub.Settings.Replace("\"penalty_window_minutes\":15", "\"penalty_window_minutes\":4320");
         var club = await PlayersClub.SeedAsync(f, "r5latenet", late);
-        await club.CreditAsync(f, club.Organiser, 300m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 300);
+        await club.CreditAsync(f, club.Sam, 100);
         var admin = club.Client(f, club.Admin, admin: true);
 
         async Task<Guid> SplitGameAsync(int hour)
@@ -151,14 +151,14 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
             var before = await PlayersClub.BalanceAsync(f, club.Organiser);
             var answer = await cancel(id);
             var moved = await PlayersClub.BalanceAsync(f, club.Organiser) - before;
-            Assert.True(answer.GetProperty("penalty_credits").GetDecimal() > 0m, "the cancel must be late");
-            Assert.Equal(moved, answer.GetProperty("net_credits").GetDecimal());
+            Assert.True(answer.GetProperty("penalty_minutes").GetDecimal() > 0m, "the cancel must be late");
+            Assert.Equal(moved, answer.GetProperty("net_minutes").GetDecimal());
 
             // The detail states the same settlement from the ledger (M5-3/M5-7): refund and penalty.
             var money = (await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{id}"))).GetProperty("money");
-            Assert.Equal(answer.GetProperty(answer.TryGetProperty("refunded_credits", out _) ? "refunded_credits" : "refund_credits").GetDecimal(),
-                money.GetProperty("refunded_credits").GetDecimal());
-            Assert.Equal(answer.GetProperty("penalty_credits").GetDecimal(), money.GetProperty("penalty_credits").GetDecimal());
+            Assert.Equal(answer.GetProperty(answer.TryGetProperty("refunded_minutes", out _) ? "refunded_minutes" : "refund_minutes").GetDecimal(),
+                money.GetProperty("refunded_minutes").GetDecimal());
+            Assert.Equal(answer.GetProperty("penalty_minutes").GetDecimal(), money.GetProperty("penalty_minutes").GetDecimal());
         }
 
         var member = club.Client(f, club.Organiser);
@@ -181,8 +181,8 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1deskcancel");
-        await club.CreditAsync(f, club.Organiser, 200m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 200);
+        await club.CreditAsync(f, club.Sam, 100);
         var admin = club.Client(f, club.Admin, admin: true);
 
         async Task<Guid> SplitGameAsync(int hour)
@@ -194,8 +194,8 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
 
         var single = await SplitGameAsync(8);
         var one = await JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/bookings/{single}/cancel", new { reason = "Court maintenance" }));
-        Assert.Equal(32m, one.GetProperty("refunded_credits").GetDecimal());
-        Assert.Equal(16m, one.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(32m, one.GetProperty("refunded_minutes").GetDecimal());
+        Assert.Equal(16m, one.GetProperty("net_minutes").GetDecimal());
         var partner = Assert.Single(one.GetProperty("partner_refunds").EnumerateArray());
         Assert.Equal(16m, partner.GetProperty("credits").GetDecimal());
         Assert.Equal("Sam Partner", partner.GetProperty("name").GetString());
@@ -206,7 +206,7 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
             idempotencyKey = "r1-bulk-split", reason = "Court resurfacing", items = new[] { new { bookingId = bulkOne } },
         }));
         var row = Assert.Single(bulk.GetProperty("results").EnumerateArray());
-        Assert.Equal(16m, row.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(16m, row.GetProperty("net_minutes").GetDecimal());
         Assert.Equal(16m, Assert.Single(row.GetProperty("partner_refunds").EnumerateArray()).GetProperty("credits").GetDecimal());
     }
 
@@ -216,11 +216,11 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1solocancel");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, _) = await club.BookWithPlayersAsync(f, []);
 
         var quote = await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}/cancellation-quote"));
-        Assert.Equal(quote.GetProperty("refundCredits").GetDecimal(), quote.GetProperty("net_credits").GetDecimal());
+        Assert.Equal(quote.GetProperty("refundMinutes").GetDecimal(), quote.GetProperty("net_minutes").GetDecimal());
         Assert.Empty(quote.GetProperty("partner_refunds").EnumerateArray());
     }
 
@@ -230,20 +230,20 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1linkunpaid");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, _) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { link = true }]);
 
         var detail = await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}"));
         // 32 split three ways: partners 10 each (floored), the organiser 12. Sam (invited) and the
         // unclaimed link seat each still owe 10.
-        Assert.Equal(20m, detail.GetProperty("money").GetProperty("unpaid_credits").GetDecimal());
+        Assert.Equal(20m, detail.GetProperty("money").GetProperty("unpaid_minutes").GetDecimal());
         var link = detail.GetProperty("players").EnumerateArray().Single(p => p.GetProperty("kind").GetString() == "open_link");
-        Assert.Equal(10m, link.GetProperty("unpaid_credits").GetDecimal());
+        Assert.Equal(10m, link.GetProperty("unpaid_minutes").GetDecimal());
 
         // Once the game is off, nothing is owed on it.
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().Single(b => b.Id == bookingId).Status = Crusaders.Mainframe.Api.Domain.BookingStatus.Cancelled);
         var cancelled = await JsonAsync(await club.Client(f, club.Organiser).GetAsync($"/api/v1/bookings/{bookingId}"));
-        Assert.Equal(0m, cancelled.GetProperty("money").GetProperty("unpaid_credits").GetDecimal());
+        Assert.Equal(0m, cancelled.GetProperty("money").GetProperty("unpaid_minutes").GetDecimal());
     }
 
     // ------------------------------------------------------------------ F2's asks: the invite reads
@@ -261,8 +261,8 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1preview");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { link = true }]);
         var token = PlayersClub.TokenOf(body, 2)!;
         var anon = Anonymous(f, club);
@@ -270,10 +270,10 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var preview = await anon.GetAsync($"/api/v1/invites/{token}/preview");
         Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
         var view = await JsonAsync(preview);
-        Assert.Equal(["court_name", "ends_at", "organiser_first_name", "share_credits", "starts_at", "timezone"],
+        Assert.Equal(["court_name", "ends_at", "organiser_first_name", "share_minutes", "starts_at", "timezone"],
             view.EnumerateObject().Select(p => p.Name).Order());
         Assert.Equal("Olive", view.GetProperty("organiser_first_name").GetString());
-        Assert.Equal(16m, view.GetProperty("share_credits").GetDecimal());
+        Assert.Equal(16m, view.GetProperty("share_minutes").GetDecimal());
         Assert.Equal("UTC", view.GetProperty("timezone").GetString());
 
         // Unknown, and another club's host: the same 404.
@@ -282,7 +282,7 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Assert.Equal(HttpStatusCode.NotFound, (await Anonymous(f, other).GetAsync($"/api/v1/invites/{token}/preview")).StatusCode);
 
         // Answered (Sam claims the link): nothing to preview any more.
-        var claimed = await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/invites/{token}/accept", new { expectedShareCredits = 16m });
+        var claimed = await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/invites/{token}/accept", new { expectedShareMinutes = 16 });
         Assert.True(claimed.IsSuccessStatusCode, await claimed.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/v1/invites/{token}/preview")).StatusCode);
         _ = bookingId;
@@ -294,7 +294,7 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1prevoff");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { link = true }]);
         var token = PlayersClub.TokenOf(body, 2)!;
         Assert.Equal(HttpStatusCode.OK, (await club.Client(f, club.Organiser).PostAsync($"/api/v1/bookings/{bookingId}/cancel", null)).StatusCode);
@@ -307,7 +307,7 @@ public sealed class R1PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1myseat");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
         var sam = club.Client(f, club.Sam);

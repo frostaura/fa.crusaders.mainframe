@@ -70,7 +70,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
             new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Court Admin", MembershipNumber = $"A-{slug}", Status = MembershipStatus.Active },
             new Membership { TenantId = tenant.Id, UserId = player.Id, FullName = "Court Player", MembershipNumber = $"P-{slug}", Status = MembershipStatus.Active });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         // Funded, so the charge succeeds and the test is about wiring rather than balance.
@@ -79,7 +79,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
             TenantId = tenant.Id,
             UserId = player.Id,
             Type = LedgerEntryType.TopUp,
-            AmountCredits = 100m,
+            AmountMinutes = 100,
             ActorUserId = player.Id,
             Reason = "seed",
         });
@@ -95,7 +95,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
             StartsAt = startsAt,
             EndsAt = startsAt.AddMinutes(15),
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = BookingStatus.Booked,
         };
         db.Bookings.Add(booking);
@@ -142,7 +142,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
 
         return await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.UserId == s.PlayerUserId)
-            .SumAsync(l => l.AmountCredits);
+            .SumAsync(l => l.AmountMinutes);
     }
 
     private static async Task<Booking> BookingAsync(TestWebAppFactory factory, Seeded s)
@@ -218,7 +218,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
 
         // The money is the point: a refused activation charges nothing and stamps nothing,
         // so the booking still reaches the no-show sweep as the absence it is.
-        Assert.Equal(activated ? 92m : 100m, await BalanceAsync(factory, s));
+        Assert.Equal(activated ? 92 : 100, await BalanceAsync(factory, s));
         Assert.Equal(activated, (await BookingAsync(factory, s)).CheckedInAt is not null);
     }
 
@@ -237,7 +237,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
         var s = await SeedAsync(factory);
         var client = AdminClient(factory, s);
 
-        Assert.Equal(100m, await BalanceAsync(factory, s));
+        Assert.Equal(100, await BalanceAsync(factory, s));
 
         var response = await client.PostAsJsonAsync($"/api/v1/court/{s.CourtNumber}/pin/match", new { Pin });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -245,9 +245,9 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         Assert.True(json.GetProperty("matched").GetBoolean());
         Assert.True(json.GetProperty("activated").GetBoolean());
-        Assert.Equal(8m, json.GetProperty("amount_credits").GetDecimal());
+        Assert.Equal(8m, json.GetProperty("amount_minutes").GetDecimal());
 
-        Assert.Equal(92m, await BalanceAsync(factory, s));
+        Assert.Equal(92, await BalanceAsync(factory, s));
 
         var booking = await BookingAsync(factory, s);
         Assert.NotNull(booking.CheckedInAt);
@@ -269,7 +269,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
         var json = JsonDocument.Parse(body).RootElement;
 
         Assert.False(json.GetProperty("matched").GetBoolean());
-        Assert.Equal(100m, await BalanceAsync(factory, s));
+        Assert.Equal(100, await BalanceAsync(factory, s));
         Assert.Null((await BookingAsync(factory, s)).CheckedInAt);
     }
 
@@ -298,7 +298,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
         Assert.True(json.GetProperty("matched").GetBoolean());
         Assert.True(json.GetProperty("activated").GetBoolean());
 
-        Assert.Equal(92m, await BalanceAsync(factory, s));
+        Assert.Equal(92, await BalanceAsync(factory, s));
 
         var booking = await BookingAsync(factory, s);
         Assert.NotNull(booking.CheckedInAt);
@@ -325,7 +325,7 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
             $"/api/v1/court/{s.CourtNumber}/qr/match", new { Token = "irrelevant" });
 
         Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(100m, await BalanceAsync(factory, s));
+        Assert.Equal(100, await BalanceAsync(factory, s));
     }
 
     /// <summary>Two scans, one charge — the box retrying must not cost the member twice.</summary>
@@ -344,6 +344,6 @@ public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
         var json = JsonDocument.Parse(await second.Content.ReadAsStringAsync()).RootElement;
         Assert.True(json.GetProperty("already_active").GetBoolean());
 
-        Assert.Equal(92m, await BalanceAsync(factory, s));
+        Assert.Equal(92, await BalanceAsync(factory, s));
     }
 }

@@ -41,8 +41,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
     private const string BulkBookPath = "/api/v1/admin/bookings/bulk";
 
     /// <summary>DoorClub's court is 8 credits a slice; the member's group charges 1.5× that.</summary>
-    private const decimal CourtSliceCredits = 8m;
-    private const decimal GroupSliceCredits = 12m;
+    private const int CourtSliceMinutes = 8;
+    private const int GroupSliceMinutes = 12;
 
     private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
@@ -72,8 +72,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
     private static async Task<(HttpStatusCode Status, JsonElement Body)> ReadAsync(Task<HttpResponseMessage> pending)
         => await ReadAsync(await pending);
 
-    /// <summary>The club, with the member in a 1.5× group and holding <paramref name="memberCredits"/>.</summary>
-    private static async Task<DoorClub> SeedAsync(TestWebAppFactory factory, string prefix, decimal memberCredits)
+    /// <summary>The club, with the member in a 1.5× group and holding <paramref name="memberMinutes"/>.</summary>
+    private static async Task<DoorClub> SeedAsync(TestWebAppFactory factory, string prefix, int memberMinutes)
     {
         var club = await DoorClub.SeedAsync(factory, prefix);
         using var scope = factory.Services.CreateScope();
@@ -83,8 +83,6 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         {
             TenantId = club.TenantId,
             Name = "League",
-            PricingMode = GroupPricingMode.Multiplier,
-            PriceMultiplierBps = 15_000,
             CreatedByUserId = club.AdminUserId,
         };
         db.MemberGroups.Add(group);
@@ -92,12 +90,12 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         {
             TenantId = club.TenantId, GroupId = group.Id, UserId = club.MemberUserId, AddedByUserId = club.AdminUserId,
         });
-        if (memberCredits != 0m)
+        if (memberMinutes != 0)
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = club.TenantId, UserId = club.MemberUserId, Type = LedgerEntryType.TopUp,
-                AmountCredits = memberCredits, ActorUserId = Guid.Empty, Reason = "fixture float",
+                AmountMinutes = memberMinutes, ActorUserId = Guid.Empty, Reason = "fixture float",
             });
         }
         await db.SaveChangesAsync();
@@ -134,15 +132,15 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmquote", memberCredits: 5m);
+        var club = await SeedAsync(factory, "gmquote", memberMinutes: 5);
         var admin = club.AdminClient(factory);
 
         var (status, quote) = await QuoteAsync(admin, club.CourtId, Slot(10), 4, club.MemberUserId);
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(GroupSliceCredits * 4, quote.GetProperty("price_credits").GetDecimal());
-        Assert.Equal(5m, quote.GetProperty("balance_credits").GetDecimal());
-        Assert.Equal(5m - GroupSliceCredits * 4, quote.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(GroupSliceMinutes * 4, quote.GetProperty("price_minutes").GetDecimal());
+        Assert.Equal(5m, quote.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(5m - GroupSliceMinutes * 4, quote.GetProperty("balance_after_minutes").GetDecimal());
         Assert.True(quote.GetProperty("overdraws").GetBoolean());
         Assert.Equal(club.MemberUserId, quote.GetProperty("user_id").GetGuid());
         // Credits only: the club's currency symbol is rand's and never fronts a credit figure.
@@ -156,10 +154,10 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
 
         Assert.Equal(HttpStatusCode.OK, bookStatus);
         var charge = Assert.Single(await ChargesAsync(factory, club.TenantId, club.MemberUserId));
-        Assert.Equal(-quote.GetProperty("price_credits").GetDecimal(), charge.AmountCredits);
+        Assert.Equal(-quote.GetProperty("price_minutes").GetDecimal(), charge.AmountMinutes);
         Assert.Equal(
-            quote.GetProperty("balance_after_credits").GetDecimal(),
-            booked.GetProperty("balance_after_credits").GetDecimal());
+            quote.GetProperty("balance_after_minutes").GetDecimal(),
+            booked.GetProperty("balance_after_minutes").GetDecimal());
 
         var actions = (await ChangesAsync(factory, club.TenantId)).Select(c => c.Action).ToList();
         Assert.Equal(2, actions.Count);
@@ -178,19 +176,19 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmself", memberCredits: 100m);
+        var club = await SeedAsync(factory, "gmself", memberMinutes: 100);
         var admin = club.AdminClient(factory);
 
         var (_, self) = await QuoteAsync(admin, club.CourtId, Slot(11), 4);
         var (_, other) = await QuoteAsync(admin, club.CourtId, Slot(11), 4, club.MemberUserId);
 
         Assert.Equal(club.AdminUserId, self.GetProperty("user_id").GetGuid());
-        Assert.Equal(CourtSliceCredits * 4, self.GetProperty("price_credits").GetDecimal());
-        Assert.Equal(0m, self.GetProperty("balance_credits").GetDecimal());
+        Assert.Equal(CourtSliceMinutes * 4, self.GetProperty("price_minutes").GetDecimal());
+        Assert.Equal(0m, self.GetProperty("balance_minutes").GetDecimal());
         Assert.True(self.GetProperty("overdraws").GetBoolean());
 
-        Assert.Equal(GroupSliceCredits * 4, other.GetProperty("price_credits").GetDecimal());
-        Assert.Equal(100m, other.GetProperty("balance_credits").GetDecimal());
+        Assert.Equal(GroupSliceMinutes * 4, other.GetProperty("price_minutes").GetDecimal());
+        Assert.Equal(100m, other.GetProperty("balance_minutes").GetDecimal());
         Assert.False(other.GetProperty("overdraws").GetBoolean());
 
         // And the admin's own booking, overdrawn, charges what the self-quote said.
@@ -201,7 +199,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         }));
         Assert.Equal(HttpStatusCode.OK, status);
         var charge = Assert.Single(await ChargesAsync(factory, club.TenantId, club.AdminUserId));
-        Assert.Equal(-self.GetProperty("price_credits").GetDecimal(), charge.AmountCredits);
+        Assert.Equal(-self.GetProperty("price_minutes").GetDecimal(), charge.AmountMinutes);
 
         // Self: an overdraft row, and no on-behalf row — the admin booked for nobody else.
         var row = Assert.Single(await ChangesAsync(factory, club.TenantId));
@@ -219,12 +217,12 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmedge", memberCredits: GroupSliceCredits * 4);
+        var club = await SeedAsync(factory, "gmedge", memberMinutes: GroupSliceMinutes * 4);
         var admin = club.AdminClient(factory);
 
         var (_, exact) = await QuoteAsync(admin, club.CourtId, Slot(8), 4, club.MemberUserId);
         Assert.False(exact.GetProperty("overdraws").GetBoolean());
-        Assert.Equal(0m, exact.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(0m, exact.GetProperty("balance_after_minutes").GetDecimal());
 
         var (_, exactBulk) = await ReadAsync(admin.PostAsJsonAsync(BulkQuotePath, new
         {
@@ -255,7 +253,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmrefuse", memberCredits: 500m);
+        var club = await SeedAsync(factory, "gmrefuse", memberMinutes: 500);
         var admin = club.AdminClient(factory);
 
         var (bookStatus, _) = await ReadAsync(admin.PostAsJsonAsync(BookPath, new
@@ -288,13 +286,13 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var clubA = await SeedAsync(factory, "gmxa", memberCredits: 10m);
-        var clubB = await SeedAsync(factory, "gmxb", memberCredits: 999m);
+        var clubA = await SeedAsync(factory, "gmxa", memberMinutes: 10);
+        var clubB = await SeedAsync(factory, "gmxb", memberMinutes: 999);
         var admin = clubA.AdminClient(factory);
 
         var (memberStatus, memberBody) = await QuoteAsync(admin, clubA.CourtId, Slot(9), 4, clubB.MemberUserId);
         Assert.Equal(HttpStatusCode.Forbidden, memberStatus);
-        Assert.False(memberBody.TryGetProperty("balance_credits", out _));
+        Assert.False(memberBody.TryGetProperty("balance_minutes", out _));
 
         var (courtStatus, courtBody) = await QuoteAsync(admin, clubB.CourtId, Slot(9), 4, clubA.MemberUserId);
         Assert.Equal(HttpStatusCode.NotFound, courtStatus);
@@ -326,7 +324,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmrole", memberCredits: 0m);
+        var club = await SeedAsync(factory, "gmrole", memberMinutes: 0);
         var member = club.MemberClient(factory);
 
         var (single, _) = await QuoteAsync(member, club.CourtId, Slot(9), 4);
@@ -354,7 +352,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmbulk", memberCredits: 50m);
+        var club = await SeedAsync(factory, "gmbulk", memberMinutes: 50);
         var admin = club.AdminClient(factory);
         var past = DateTimeOffset.UtcNow.AddHours(-3);
 
@@ -374,17 +372,17 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         var lines = quote.GetProperty("items").EnumerateArray().ToList();
         Assert.Equal(4, lines.Count);
         Assert.True(lines[0].GetProperty("bookable").GetBoolean());
-        Assert.Equal(GroupSliceCredits * 4, lines[0].GetProperty("price_credits").GetDecimal());
+        Assert.Equal(GroupSliceMinutes * 4, lines[0].GetProperty("price_minutes").GetDecimal());
         Assert.Equal(JsonValueKind.Null, lines[0].GetProperty("reason").ValueKind);
         Assert.False(lines[1].GetProperty("bookable").GetBoolean());
         Assert.Equal("slot_taken", lines[1].GetProperty("reason").GetString());
         Assert.True(lines[2].GetProperty("bookable").GetBoolean());
         Assert.Equal("past_time", lines[3].GetProperty("reason").GetString());
 
-        var total = quote.GetProperty("total_credits").GetDecimal();
-        Assert.Equal(GroupSliceCredits * 8, total);
-        Assert.Equal(50m, quote.GetProperty("balance_credits").GetDecimal());
-        Assert.Equal(50m - total, quote.GetProperty("balance_after_credits").GetDecimal());
+        var total = quote.GetProperty("total_minutes").GetDecimal();
+        Assert.Equal(GroupSliceMinutes * 8, total);
+        Assert.Equal(50m, quote.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(50m - total, quote.GetProperty("balance_after_minutes").GetDecimal());
         Assert.True(quote.GetProperty("overdraws").GetBoolean());
 
         // The same items through the bulk BOOK body's own spelling, with the override.
@@ -403,17 +401,17 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         }));
 
         Assert.Equal(HttpStatusCode.OK, bookStatus);
-        Assert.Equal(total, booked.GetProperty("total_charged_credits").GetDecimal());
+        Assert.Equal(total, booked.GetProperty("total_charged_minutes").GetDecimal());
         var results = booked.GetProperty("results").EnumerateArray().ToList();
         for (var i = 0; i < 4; i++)
         {
-            Assert.Equal(lines[i].GetProperty("price_credits").GetDecimal(), results[i].GetProperty("amount_credits").GetDecimal());
+            Assert.Equal(lines[i].GetProperty("price_minutes").GetDecimal(), results[i].GetProperty("amount_minutes").GetDecimal());
             if (!lines[i].GetProperty("bookable").GetBoolean())
             {
                 Assert.Equal(lines[i].GetProperty("reason").GetString(), results[i].GetProperty("error").GetString());
             }
         }
-        Assert.Equal(-total, (await ChargesAsync(factory, club.TenantId, club.MemberUserId)).Sum(c => c.AmountCredits));
+        Assert.Equal(-total, (await ChargesAsync(factory, club.TenantId, club.MemberUserId)).Sum(c => c.AmountMinutes));
 
         var actions = (await ChangesAsync(factory, club.TenantId)).Select(c => c.Action).ToList();
         Assert.Equal(1, actions.Count(a => a == AdminChangeActions.BookingsBulkBooked));
@@ -436,7 +434,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmspell", memberCredits: 0m);
+        var club = await SeedAsync(factory, "gmspell", memberMinutes: 0);
         var admin = club.AdminClient(factory);
 
         var (_, snake) = await ReadAsync(admin.PostAsJsonAsync(BulkQuotePath, new
@@ -450,8 +448,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
             items = new[] { new { courtId = club.CourtId, startsAt = Slot(15), sliceCount = 3 } },
         }));
 
-        Assert.Equal(GroupSliceCredits * 3, snake.GetProperty("total_credits").GetDecimal());
-        Assert.Equal(snake.GetProperty("total_credits").GetDecimal(), camel.GetProperty("total_credits").GetDecimal());
+        Assert.Equal(GroupSliceMinutes * 3, snake.GetProperty("total_minutes").GetDecimal());
+        Assert.Equal(snake.GetProperty("total_minutes").GetDecimal(), camel.GetProperty("total_minutes").GetDecimal());
         Assert.Equal(club.MemberUserId, camel.GetProperty("user_id").GetGuid());
 
         var (bad, badBody) = await ReadAsync(admin.PostAsJsonAsync(BulkQuotePath, new
@@ -472,7 +470,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmbself", memberCredits: 0m);
+        var club = await SeedAsync(factory, "gmbself", memberMinutes: 0);
         var admin = club.AdminClient(factory);
         object Items() => new[] { new { courtId = club.CourtId, startsAt = Slot(7), sliceCount = 4 } };
 
@@ -487,7 +485,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
             idempotencyKey = "gm_self_2", allowNegativeBalance = true, items = Items(),
         }));
         Assert.Equal("booked", booked.GetProperty("results")[0].GetProperty("status").GetString());
-        Assert.Equal(-CourtSliceCredits * 4, booked.GetProperty("payer").GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(-CourtSliceMinutes * 4, booked.GetProperty("payer").GetProperty("balance_after_minutes").GetDecimal());
 
         var overdraft = Assert.Single(await ChangesAsync(factory, club.TenantId),
             c => c.Action == AdminChangeActions.BookingOverdraftAuthorised);
@@ -513,7 +511,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
             ConnectionString = _pg.ConnectionString,
             RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 10 },
         };
-        var club = await SeedAsync(factory, "gmquotelim", memberCredits: 500m);
+        var club = await SeedAsync(factory, "gmquotelim", memberMinutes: 500);
         var admin = club.AdminClient(factory);
 
         for (var i = 0; i < 6; i++)
@@ -549,7 +547,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmquotesp", memberCredits: 500m);
+        var club = await SeedAsync(factory, "gmquotesp", memberMinutes: 500);
         var admin = club.AdminClient(factory);
         var at = Iso(Slot(9));
 
@@ -563,8 +561,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(HttpStatusCode.OK, plain);
         Assert.Equal(HttpStatusCode.OK, camel);
         Assert.Equal(HttpStatusCode.OK, snake);
-        Assert.Equal(expected.GetProperty("price_credits").GetDecimal(), viaSliceCount.GetProperty("price_credits").GetDecimal());
-        Assert.Equal(expected.GetProperty("price_credits").GetDecimal(), viaSnake.GetProperty("price_credits").GetDecimal());
+        Assert.Equal(expected.GetProperty("price_minutes").GetDecimal(), viaSliceCount.GetProperty("price_minutes").GetDecimal());
+        Assert.Equal(expected.GetProperty("price_minutes").GetDecimal(), viaSnake.GetProperty("price_minutes").GetDecimal());
         Assert.Equal(club.MemberUserId, viaSnake.GetProperty("user_id").GetGuid());
 
         var (bad, refusal) = await ReadAsync(admin.GetAsync($"{QuotePath}?courtId=not-a-guid&startsAt={at}&slices=4"));

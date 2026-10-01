@@ -108,7 +108,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.Null(reversed.LightsOffCuedAt);   // the real lights-off is still ahead; the cue worker fires it once
 
             await AssertReversedLedgerAsync(factory, booked.BookingId);
-            Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200 - 24, await BalanceAsync(factory, box.MemberId));
 
             Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed"));
             Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_reversed_no_show"));
@@ -149,7 +149,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(stampedAt, booking.CheckedInAt);
 
             await AssertReversedLedgerAsync(factory, booked.BookingId);
-            Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200 - 24, await BalanceAsync(factory, box.MemberId));
             Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed"));
             Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_reversed_no_show"));
             Assert.Equal(2, (await AuditAsync(factory, box.TenantId, "device.activation")).Count);
@@ -293,7 +293,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.InRange(reversed.CheckedInAt!.Value, before.AddMilliseconds(-scannedAgoMs), after.AddMilliseconds(-scannedAgoMs));
 
             await AssertReversedLedgerAsync(factory, booked.BookingId);
-            Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+            Assert.Equal(200 - 24, await BalanceAsync(factory, box.MemberId));
             Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_reversed_no_show"));
             Assert.Empty(await AuditAsync(factory, box.TenantId, "device.activation_unresolved"));
             Assert.Empty(await AuditAsync(factory, box.TenantId, "device.event_time_clamped"));
@@ -365,7 +365,7 @@ public abstract partial class DeviceEventHttpTests
             Assert.True(displacedB.CancellationPenaltyWaived);
             Assert.Equal(BookingService.ResoldTailRefunded, displacedB.CancellationReason);
             var refundB = Assert.Single(await LedgerAsync(factory, b.BookingId), l => l.Type == LedgerEntryType.CancellationRefund);
-            Assert.Equal(8m, refundB.AmountCredits);
+            Assert.Equal(8, refundB.AmountMinutes);
             Assert.Contains(BookingService.ResoldTailRefunded, refundB.Reason);
             Assert.Equal(BookingService.DisplacedReference(a.Id, b.BookingId), refundB.ExternalReference);
 
@@ -373,11 +373,11 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(BookingStatus.Cancelled, displacedC.Status);
             var penaltiesC = (await LedgerAsync(factory, c.BookingId)).Where(l => l.Type == LedgerEntryType.NoShowPenalty).ToList();
             Assert.Equal(2, penaltiesC.Count);
-            Assert.Equal(0m, penaltiesC.Sum(l => l.AmountCredits));
+            Assert.Equal(0, penaltiesC.Sum(l => l.AmountMinutes));
             Assert.Single(await LedgerAsync(factory, c.BookingId), l => l.Type == LedgerEntryType.CancellationRefund);   // the sweep's; not a second one
 
             // B's charge back, C's penalty back: the buyer is where they started.
-            Assert.Equal(buyerBefore + 8m + 2.40m, await BalanceAsync(factory, buyer));
+            Assert.Equal(buyerBefore + 8 + 2.40m, await BalanceAsync(factory, buyer));
 
             Assert.Equal(2, (await AuditAsync(factory, box.TenantId, "booking.displaced")).Count);
             var reversal = Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed"));

@@ -62,7 +62,7 @@ public sealed class DeviceFaultIngestHttpTests : IClassFixture<PostgresFixture>
             TenantId = tenant.Id,
             SettingsJson = """{"slice_minutes":15,"timezone":"UTC","heartbeat_seconds":60}""",
         });
-        db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m });
+        db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" });
 
         var mac = Guid.NewGuid().ToString("N")[..12];
         var device = new Device

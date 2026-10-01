@@ -37,7 +37,7 @@ public class BookingTests
 {
     // TestHost fixture: slice_minutes 15, court price 8 credits, penalty_pct 30,
     // penalty_window_minutes 15.
-    private const decimal SlicePriceCredits = 8m;
+    private const decimal SlicePriceCredits = 8;
 
     [Fact]
     public async Task Booking_succeeds_when_balance_covers_cost_and_slot_free()
@@ -47,7 +47,7 @@ public class BookingTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 1, default);
 
@@ -57,8 +57,8 @@ public class BookingTests
         // Booking reserves the slot AND debits, in one unit of work. The balance
         // returned is what the member has left, which is what the confirmation email
         // and the booking.created event both quote.
-        Assert.Equal(200m - SlicePriceCredits, ok.BalanceAfterCredits);
-        Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(200 - SlicePriceCredits, ok.BalanceAfterMinutes);
+        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.NotNull(ok.Booking.ChargedAt);
     }
 
@@ -73,8 +73,8 @@ public class BookingTests
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var ib = Assert.IsType<BookingResult.InsufficientBalance>(result);
-        Assert.Equal(0m, ib.CurrentCredits);
-        Assert.Equal(SlicePriceCredits, ib.RequiredCredits);
+        Assert.Equal(0, ib.CurrentMinutes);
+        Assert.Equal(SlicePriceCredits, ib.RequiredMinutes);
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class BookingTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(2);
 
         // Two slices = 30 minutes, so a booking 15 minutes in genuinely overlaps.
@@ -104,7 +104,7 @@ public class BookingTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(2);
 
         Assert.IsType<BookingResult.Ok>(
@@ -123,7 +123,7 @@ public class BookingTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
 
         // Starts in 5 minutes — inside the 15-minute penalty window — and therefore ENDS in
         // twenty. That is a slot that cannot be moved without leaving the window the test is
@@ -141,15 +141,15 @@ public class BookingTests
         // its own movement rather than netted off the refund: a single net row cannot
         // answer "how much penalty did I pay?", which is the question a disputed
         // cancellation actually asks. 30% of 8 credits = 2.40.
-        Assert.Equal(SlicePriceCredits, cancelled.RefundedCredits);
-        Assert.Equal(2.40m, cancelled.PenaltyCredits);
-        Assert.Equal(200m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(SlicePriceCredits, cancelled.RefundedMinutes);
+        Assert.Equal(2.40m, cancelled.PenaltyMinutes);
+        Assert.Equal(200 - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // Both movements are on the statement, in full.
         var entries = await ledger.GetEntriesAsync(
             host.PlayerUser.Id, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), default);
-        Assert.Contains(entries, e => e.Type == LedgerEntryType.CancellationRefund && e.AmountCredits == SlicePriceCredits);
-        Assert.Contains(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty && e.AmountCredits == -2.40m);
+        Assert.Contains(entries, e => e.Type == LedgerEntryType.CancellationRefund && e.AmountMinutes == SlicePriceCredits);
+        Assert.Contains(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty && e.AmountMinutes == -2.40m);
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public class BookingTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
         var startsAt = TestHost.BookableSlot(3);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
@@ -168,9 +168,9 @@ public class BookingTests
 
         // Cancelled in good time: the booking charge comes straight back and no penalty
         // is taken, so the member is where they started.
-        Assert.Equal(SlicePriceCredits, cancelled.RefundedCredits);
-        Assert.Equal(0m, cancelled.PenaltyCredits);
-        Assert.Equal(200m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(SlicePriceCredits, cancelled.RefundedMinutes);
+        Assert.Equal(0, cancelled.PenaltyMinutes);
+        Assert.Equal(200, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -254,7 +254,7 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
         var db = scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Persistence.MainframeDbContext>();
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200, host.PlayerUser.Id), default);
 
         // Thirty minutes ahead of a raw UtcNow is thirty minutes past closing for the last
         // quarter-hour of the club's day: day_end_minute is 1440, the operating-hours rule is
@@ -266,7 +266,7 @@ public class BookingTests
         var now = await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, minutesNeeded: 45);
         var booked = (BookingResult.Ok)await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, now.AddMinutes(30), 1, default);
-        Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // They turned up and played. The clock is irrelevant; this stamp is not.
         var row = await db.Bookings.FirstAsync(b => b.Id == booked.Booking.Id);
@@ -276,9 +276,9 @@ public class BookingTests
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(
             booked.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
 
-        Assert.Equal(0m, cancelled.RefundedCredits);
-        Assert.Equal(0m, cancelled.PenaltyCredits);
-        Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(0, cancelled.RefundedMinutes);
+        Assert.Equal(0, cancelled.PenaltyMinutes);
+        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -301,39 +301,10 @@ public class BookingTests
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task A_court_priced_at_zero_books_the_slot_and_posts_no_ledger_row()
+    public Task A_court_priced_at_zero_books_the_slot_and_posts_no_ledger_row()
     {
-        await using var host = await TestHost.CreateAsync();
-        using var scope = host.NewScope();
-        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
-        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-
-        var court = await db.Courts.FirstAsync(c => c.Id == host.Courts[0].Id);
-        court.SlicePriceCredits = 0m;
-        await db.SaveChangesAsync();
-
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        var before = await db.LedgerEntries.CountAsync();
-
-        var startsAt = TestHost.BookableSlot(2);
-        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
-            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 1, default));
-
-        Assert.Equal(BookingStatus.Booked, ok.Booking.Status);
-        Assert.Equal(0m, ok.Booking.AmountChargedCredits);
-        Assert.Equal(200m, ok.BalanceAfterCredits);
-
-        // The row, named rather than counted by balance: a 0.00 entry moves no balance, so
-        // asserting the balance alone would pass with the phantom line still there.
-        Assert.Equal(before, await db.LedgerEntries.CountAsync());
-        Assert.Empty(await db.LedgerEntries.Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync());
-
-        // And the slot is genuinely held. The booking row flushes inside the try that
-        // catches the overlap violation, so a second booking on the same slice is refused
-        // here exactly as it is on a priced court — which is what would break if the
-        // insert were left to drift down to the SaveChanges after the audit row.
-        Assert.IsType<BookingResult.SlotTaken>(await booking.CreateAsync(
-            host.Courts[0].Id, host.LeaguePlayerUser.Id, host.LeaguePlayerUser.Id, startsAt, 1, default));
+        // P13-B1: courts carry no price; a booking always costs its length in minutes (§1.1)
+        Assert.Fail($"P13-B1: courts carry no price; a booking always costs its length in minutes (§1.1)");
+        return Task.CompletedTask;
     }
 }

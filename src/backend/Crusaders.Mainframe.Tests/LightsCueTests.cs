@@ -45,7 +45,7 @@ public class LightsCueTests
             StartsAt = startsAt,
             EndsAt = startsAt.AddMinutes(15),
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = status,
             CheckedInAt = checkedInAt,
         };
@@ -267,7 +267,7 @@ public class LightsCueTests
             EndsAt = DateTimeOffset.UtcNow.AddMinutes(-25),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = 32m,
+            AmountChargedMinutes = 32,
             Status = BookingStatus.NoShow,
             ChargedAt = startsAt,
         };

@@ -28,8 +28,8 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
     private static async Task<(PlayersClub Club, Guid BookingId, JsonElement Body)> GameAsync(TestWebAppFactory f, string prefix)
     {
         var club = await PlayersClub.SeedAsync(f, prefix);
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 50m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 50);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }, new { guestName = "Uncle Bob" }]);
         return (club, bookingId, body);
     }
@@ -54,10 +54,10 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(["organiser", "member", "guest"], players.Select(p => p.GetProperty("kind").GetString()));
         Assert.Equal(["A", "A", "B"], players.Select(p => p.GetProperty("team").GetString()));
         Assert.Equal("Uncle Bob", players[2].GetProperty("name").GetString());
-        Assert.Equal(0m, players[2].GetProperty("share_credits").GetDecimal());
-        Assert.Equal(16m, players[1].GetProperty("share_credits").GetDecimal());
+        Assert.Equal(0m, players[2].GetProperty("share_minutes").GetDecimal());
+        Assert.Equal(16m, players[1].GetProperty("share_minutes").GetDecimal());
         Assert.True(organiser.GetProperty("permissions").GetProperty("can_invite").GetBoolean());
-        Assert.Equal(32m, organiser.GetProperty("money").GetProperty("price_credits").GetDecimal());
+        Assert.Equal(32m, organiser.GetProperty("money").GetProperty("price_minutes").GetDecimal());
 
         // Photo and name only: nothing that identifies a member beyond what the grid shows.
         var member = players[1].EnumerateObject().Select(p => p.Name).ToList();
@@ -89,7 +89,7 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         var players = view.GetProperty("players").EnumerateArray().ToList();
         var only = Assert.Single(players);
         Assert.Equal("organiser", only.GetProperty("kind").GetString());
-        Assert.Equal(32m, only.GetProperty("share_credits").GetDecimal());
+        Assert.Equal(32m, only.GetProperty("share_minutes").GetDecimal());
         Assert.False(view.GetProperty("money").GetProperty("is_split").GetBoolean());
         Assert.Empty(await club.SeatsAsync(f, bookingId));
     }
@@ -235,7 +235,7 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
 
         Assert.Empty((await JsonAsync(await organiser.GetAsync("/api/v1/me/partners/recent"))).GetProperty("items").EnumerateArray());
         await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}/accept",
-            new { expectedShareCredits = 32m });
+            new { expectedShareMinutes = 32 });
 
         // Accepted, but not played yet: a game still ahead is not "played with" (review round 1, B11).
         Assert.Empty((await JsonAsync(await organiser.GetAsync("/api/v1/me/partners/recent"))).GetProperty("items").EnumerateArray());
@@ -282,7 +282,7 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
         var club = await PlayersClub.SeedAsync(f, "plinbox");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var sam = club.Client(f, club.Sam);
 
@@ -325,7 +325,7 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         var settings = PlayersClub.Settings.Replace("\"member_quiet_start_minute\":0,\"member_quiet_end_minute\":0",
             $"\"member_quiet_start_minute\":{(start + 1440) % 1440},\"member_quiet_end_minute\":{(start + 1439) % 1440}");
         var club = await PlayersClub.SeedAsync(f, "plquiet", settings);
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
 
         await PeopleClub.DeliverAdminNoticesAsync(f);
@@ -389,21 +389,21 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"{path}/accept", new { reason = "Told the desk he is playing" })).StatusCode);
         Assert.Equal(ParticipantStatus.Accepted, (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == samSeat).Status);
         Assert.Empty(await club.SharesAsync(f, bookingId));
-        Assert.Equal(50m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(50, await PlayersClub.BalanceAsync(f, club.Sam));
 
         // Collect only by name, with a reason — and then even below zero.
         await club.WriteAsync(f, db => db.LedgerEntries.Add(new LedgerEntry
         {
-            TenantId = club.TenantId, UserId = club.Sam, Type = LedgerEntryType.AdminAdjustment, AmountCredits = -45m, ActorUserId = club.Admin,
+            TenantId = club.TenantId, UserId = club.Sam, Type = LedgerEntryType.AdminAdjustment, AmountMinutes = -45, ActorUserId = club.Admin,
         }));
         Assert.Equal(PlayerErrors.OverdraftNotAuthorised, Error(await JsonAsync(await admin.PostAsJsonAsync($"{path}/collect", new { reason = "Owed" }))));
         var collect = await admin.PostAsJsonAsync($"{path}/collect", new { reason = "Paid in cash, took it off the wallet", allowNegativeBalance = true });
         Assert.Equal(HttpStatusCode.OK, collect.StatusCode);
-        Assert.Equal(5m - 16m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(5 - 16, await PlayersClub.BalanceAsync(f, club.Sam));
 
         // Settled outside the app after all: what was collected in the app goes back.
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"{path}/settle-outside", new { reason = "Cash at the desk" })).StatusCode);
-        Assert.Equal(5m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(5, await PlayersClub.BalanceAsync(f, club.Sam));
 
         var actions = await PlayersClub.ReadAsync(f, db => db.AdminChangeLogs.IgnoreQueryFilters()
             .Where(a => a.TenantId == club.TenantId).Select(a => a.Action).ToListAsync());

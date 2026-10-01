@@ -29,27 +29,27 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
     {
         var bookingId = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-10));
         await club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == bookingId).Status = BookingStatus.Completed);
-        await club.InsertSeatAsync(f, bookingId, 1, club.Organiser, ParticipantStatus.Accepted, 16m);
-        var seat = await club.InsertSeatAsync(f, bookingId, 2, club.Sam, ParticipantStatus.Accepted, 16m);
+        await club.InsertSeatAsync(f, bookingId, 1, club.Organiser, ParticipantStatus.Accepted, 16);
+        var seat = await club.InsertSeatAsync(f, bookingId, 2, club.Sam, ParticipantStatus.Accepted, 16);
         await club.WriteAsync(f, db =>
         {
             db.Bookings.IgnoreQueryFilters().First(b => b.Id == bookingId).ShareDeadlineAt = DateTimeOffset.UtcNow.AddDays(-8);
-            db.BookingParticipants.IgnoreQueryFilters().First(p => p.Id == seat).ConsentedCredits = 16m;
-            foreach (var posting in ShareLedger.Pair(new Booking { Id = bookingId }, new ShareMove(seat, club.Sam, club.Organiser, 16m, 1), club.Sam))
+            db.BookingParticipants.IgnoreQueryFilters().First(p => p.Id == seat).ConsentedMinutes = 16;
+            foreach (var posting in ShareLedger.Pair(new Booking { Id = bookingId }, new ShareMove(seat, club.Sam, club.Organiser, 16, 1), club.Sam))
             {
                 db.LedgerEntries.Add(new LedgerEntry
                 {
-                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountCredits = posting.AmountCredits,
+                    TenantId = club.TenantId, UserId = posting.UserId, Type = posting.Type, AmountMinutes = posting.AmountMinutes,
                     ActorUserId = posting.ActorUserId, RelatedBookingId = bookingId, ExternalReference = posting.ExternalReference,
                 });
             }
         });
-        await club.CreditAsync(f, club.Organiser, 32m);
-        await club.CreditAsync(f, club.Organiser, -16m);
-        await club.CreditAsync(f, club.Sam, 16m);
+        await club.CreditAsync(f, club.Organiser, 32);
+        await club.CreditAsync(f, club.Organiser, -16);
+        await club.CreditAsync(f, club.Sam, 16);
         await club.WriteAsync(f, db => db.BookingParticipants.IgnoreQueryFilters().First(p => p.Id == seat).Status = ParticipantStatus.Removed);
         await club.InClubAsync(f, sp => sp.GetRequiredService<ShareLedger>().ReconcileAsync(bookingId, default));
-        await club.CreditAsync(f, club.Organiser, 10m);
+        await club.CreditAsync(f, club.Organiser, 10);
     }
 
     [SkippableFact]
@@ -65,8 +65,8 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
         var quote = await (await desk.GetAsync(
             $"/api/v1/admin/bookings/quote?userId={club.Organiser}&courtId={club.CourtId}&startsAt={Uri.EscapeDataString(startsAt.ToString("o"))}&slices=1"))
             .Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(10m, quote.GetProperty("balance_credits").GetDecimal());
-        Assert.Equal(-6m, quote.GetProperty("spendable_credits").GetDecimal());
+        Assert.Equal(10m, quote.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(-6m, quote.GetProperty("spendable_minutes").GetDecimal());
 
         var booked = await desk.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
@@ -78,14 +78,14 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
         var notice = await PlayersClub.ReadAsync(f, db => db.AdminNotifications.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.OverdraftAuthorised));
         var payload = JsonSerializer.Deserialize<OverdraftPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
-        Assert.Equal(2m, payload.BalanceAfterCredits);
-        Assert.Equal(16m, payload.HeldCredits);
-        var spendableAfter = quote.GetProperty("spendable_credits").GetDecimal() - quote.GetProperty("price_credits").GetDecimal();
-        Assert.Equal(-14m, spendableAfter);
+        Assert.Equal(2, payload.BalanceAfterMinutes);
+        Assert.Equal(16, payload.HeldMinutes);
+        var spendableAfter = quote.GetProperty("spendable_minutes").GetDecimal() - quote.GetProperty("price_minutes").GetDecimal();
+        Assert.Equal(-14, spendableAfter);
 
         var mail = EmailTemplates.AdminOverdraftAuthorised(EmailCatalogue.Riverside, "x@test.local", new OverdraftNotice(
             payload.ActorName, payload.MemberName, payload.Self, payload.CourtName, payload.StartsAtLocal,
-            payload.AmountCredits, payload.BalanceAfterCredits, "https://club.test/admin/changes") { HeldCredits = payload.HeldCredits });
+            payload.AmountMinutes, payload.BalanceAfterMinutes, "https://club.test/admin/changes") { HeldMinutes = payload.HeldMinutes });
         var text = MailText.Unwrap(mail.PlainBody);
         Assert.Contains("Can spend after", text, StringComparison.Ordinal);
         Assert.Contains("−14.00 credits", text, StringComparison.Ordinal);
@@ -97,9 +97,9 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
             .SingleAsync(c => c.TenantId == club.TenantId && c.Action == AdminChangeActions.BookingOverdraftAuthorised));
         var before = JsonDocument.Parse(row.BeforeJson!).RootElement;
         var after = JsonDocument.Parse(row.AfterJson!).RootElement;
-        Assert.Equal(-6m, before.GetProperty("spendable_credits").GetDecimal());
-        Assert.Equal(-14m, after.GetProperty("spendable_credits").GetDecimal());
-        Assert.Equal(10m, before.GetProperty("balance_credits").GetDecimal());
-        Assert.Equal(2m, after.GetProperty("balance_credits").GetDecimal());
+        Assert.Equal(-6m, before.GetProperty("spendable_minutes").GetDecimal());
+        Assert.Equal(-14m, after.GetProperty("spendable_minutes").GetDecimal());
+        Assert.Equal(10m, before.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(2m, after.GetProperty("balance_minutes").GetDecimal());
     }
 }

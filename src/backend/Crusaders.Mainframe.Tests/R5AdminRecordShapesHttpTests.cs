@@ -48,7 +48,7 @@ public sealed class R5AdminRecordShapesHttpTests(PostgresFixture pg) : IClassFix
             EndsAt = startsAt.AddHours(1),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = member is null ? 0m : 32m,
+            AmountChargedMinutes = member is null ? 0 : 32,
             Status = status,
             ChargedAt = member is null ? null : DateTimeOffset.UtcNow,
             BlockLabel = label,
@@ -61,7 +61,7 @@ public sealed class R5AdminRecordShapesHttpTests(PostgresFixture pg) : IClassFix
                 TenantId = club.TenantId,
                 UserId = payer,
                 Type = LedgerEntryType.TopUp,
-                AmountCredits = 32m,
+                AmountMinutes = 32,
                 ActorUserId = Guid.Empty,
                 Reason = "fixture float",
             });

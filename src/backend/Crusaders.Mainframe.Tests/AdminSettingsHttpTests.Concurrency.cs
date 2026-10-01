@@ -171,7 +171,7 @@ public abstract partial class AdminSettingsHttpTests
             var save = await client.PutAsJsonAsync(SettingsPath, new
             {
                 operatingHours = shown.GetProperty("operating_hours"),
-                slicePriceCredits = 8m,
+                slicePriceCredits = 8,
                 version = shown.GetProperty("version").GetString(),
             });
             Assert.Equal(HttpStatusCode.OK, save.StatusCode);

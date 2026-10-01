@@ -70,7 +70,7 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
         });
 
         var courts = courtNumbers
-            .Select(n => new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m })
+            .Select(n => new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}" })
             .ToList();
         db.Courts.AddRange(courts);
 
@@ -128,7 +128,7 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
             EndsAt = now.AddMinutes(minutesRemaining),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = 32m,
+            AmountChargedMinutes = 32,
             Status = cancelled ? BookingStatus.Cancelled : BookingStatus.Booked,
             CheckedInAt = checkedIn ? now.AddMinutes(-10) : null,
             LightsOnCuedAt = checkedIn ? now.AddMinutes(-10) : null,
@@ -336,7 +336,7 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             var courts = new[] { 3, 4 }
-                .Select(n => new Court { TenantId = first.TenantId, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m })
+                .Select(n => new Court { TenantId = first.TenantId, CourtNumber = n, Name = $"Court {n}" })
                 .ToList();
             db.Courts.AddRange(courts);
 
@@ -556,7 +556,7 @@ public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
                 EndsAt = now.AddMinutes(35),
                 SliceMinutes = 15,
                 SliceCount = 3,
-                AmountChargedCredits = 24m,
+                AmountChargedMinutes = 24,
                 Status = BookingStatus.Booked,
                 CheckedInAt = now.AddMinutes(-5),
                 LightsOnCuedAt = now.AddMinutes(-5),

@@ -24,16 +24,16 @@ public class DeviceActivateTests
         TestHost Host, IServiceScope Scope, MainframeDbContext Db, AccessCodeService Codes,
         LedgerService Ledger, DeviceActivateServices Services);
 
-    private static async Task<Fixture> CreateAsync(decimal topUpCredits = 100m, string? sharedDb = null, string? slug = null)
+    private static async Task<Fixture> CreateAsync(int topUpMinutes = 100, string? sharedDb = null, string? slug = null)
     {
         var host = await TestHost.CreateAsync(slug, sharedDb);
         var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
 
-        if (topUpCredits > 0)
+        if (topUpMinutes > 0)
         {
             await ledger.PostAsync(
-                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpCredits, host.PlayerUser.Id), default);
+                new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpMinutes, host.PlayerUser.Id), default);
         }
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -82,7 +82,7 @@ public class DeviceActivateTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = 15,
             SliceCount = minutes / 15,
-            AmountChargedCredits = 8m * (minutes / 15),
+            AmountChargedMinutes = 8 * (minutes / 15),
             Status = BookingStatus.Booked,
             ChargedAt = charged ? DateTimeOffset.UtcNow : null,
         };
@@ -94,7 +94,7 @@ public class DeviceActivateTests
                 TenantId = f.Host.Tenant.Id,
                 UserId = f.Host.PlayerUser.Id,
                 Type = LedgerEntryType.BookingCharge,
-                AmountCredits = -booking.AmountChargedCredits,
+                AmountMinutes = -booking.AmountChargedMinutes,
                 ActorUserId = f.Host.PlayerUser.Id,
                 RelatedBookingId = booking.Id,
                 Reason = "seed charge",
@@ -509,7 +509,7 @@ public class DeviceActivateTests
     [Fact]
     public async Task An_unaffordable_booking_is_refused_with_insufficient_balance_and_nothing_stamped()
     {
-        var f = await CreateAsync(topUpCredits: 0m);
+        var f = await CreateAsync(topUpMinutes: 0);
         await using var _ = f.Host;
         using var __ = f.Scope;
 

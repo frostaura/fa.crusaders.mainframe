@@ -48,10 +48,11 @@ public class SettingsHardeningTests
 
     /// <summary>The decimal twin, for the same reason — this one prices a court.</summary>
     [Fact]
-    public async Task A_decimal_the_column_cannot_hold_falls_back_instead_of_throwing()
+    public Task A_decimal_the_column_cannot_hold_falls_back_instead_of_throwing()
     {
-        var view = await ReadAsync("""{"slice_price_credits": 1e308}""");
-        Assert.Equal(8m, view.DefaultSlicePriceCredits);
+        // P13-B2: the slice price setting is retired (§2.2, §3.9)
+        Assert.Fail($"P13-B2: the slice price setting is retired (§2.2, §3.9)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -123,10 +124,11 @@ public class SettingsHardeningTests
     /// it, because the PUT is not the only way a number reaches the column.
     /// </summary>
     [Fact]
-    public async Task A_negative_stored_slice_price_is_floored_on_read()
+    public Task A_negative_stored_slice_price_is_floored_on_read()
     {
-        var view = await ReadAsync("""{"slice_price_credits": -500}""");
-        Assert.Equal(0m, MoneySettings.SlicePriceCredits(view));
+        // P13-B2: the slice price setting is retired (§2.2, §3.9)
+        Assert.Fail($"P13-B2: the slice price setting is retired (§2.2, §3.9)");
+        return Task.CompletedTask;
     }
 
     /// <summary>Every new key in this wave answers its documented default on an empty document.</summary>

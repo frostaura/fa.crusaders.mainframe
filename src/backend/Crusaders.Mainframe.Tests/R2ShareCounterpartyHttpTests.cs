@@ -25,12 +25,12 @@ public sealed class R2ShareCounterpartyHttpTests(PostgresFixture pg) : IClassFix
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r2share");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
         var (bookingId, body) = await club.BookWithPlayersAsync(f, [new { userId = club.Sam }]);
         var seat = PlayersClub.SeatOf(body, 2);
         var accept = await club.Client(f, club.Sam).PostAsJsonAsync(
-            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = 16m });
+            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = 16 });
         Assert.True(accept.IsSuccessStatusCode, await accept.Content.ReadAsStringAsync());
 
         var olive = (await (await club.Client(f, club.Organiser).GetAsync("/api/v1/wallet")).Content.ReadFromJsonAsync<JsonElement>())

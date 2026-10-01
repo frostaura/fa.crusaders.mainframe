@@ -72,7 +72,7 @@ public abstract partial class DeviceGateHttpTests
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settingsJson });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         var member = new User { TenantId = tenant.Id, Email = $"{slug}@test.local", PasswordHash = "x", EmailVerified = true };
@@ -199,7 +199,7 @@ public abstract partial class DeviceGateHttpTests
             EndsAt = TestHost.Storable(startsAt.AddMinutes(minutes)),
             SliceMinutes = 15,
             SliceCount = Math.Max(1, minutes / 15),
-            AmountChargedCredits = 8m * Math.Max(1, minutes / 15),
+            AmountChargedMinutes = 8 * Math.Max(1, minutes / 15),
             Status = BookingStatus.Booked,
             ChargedAt = TestHost.UtcNowStorable(),
         };

@@ -76,12 +76,13 @@ public sealed class ApiBoundaryTests : IClassFixture<PostgresFixture>
     [InlineData("bookings", "BookedByUserId")]
     [InlineData("bookings", "PaidByUserId")]
     [InlineData("bookings", "ChargedAt")]
-    [InlineData("member_groups", "CreditsPerZar")]
+    // P13: member_groups.CreditsPerZar and ledger_entries.ConversionRate were dropped by MinutesReplaceCredits.
+    [InlineData("member_groups", "PackageDiscountBps")]
     [InlineData("member_groups", "PeakPriority")]
     [InlineData("member_groups", "SystemKey")]
     [InlineData("pending_topups", "GroupId")]
     [InlineData("ledger_entries", "ZarPaid")]
-    [InlineData("ledger_entries", "ConversionRate")]
+    [InlineData("ledger_entries", "AmountMinutes")]
     [InlineData("users", "PinHash")]
     public async Task Previously_orphaned_columns_are_in_the_migration(string table, string column)
     {
@@ -150,7 +151,7 @@ public sealed class ApiBoundaryTests : IClassFixture<PostgresFixture>
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO ledger_entries
-                    ("Id","TenantId","UserId","Type","AmountCredits","ActorUserId","Reason","ExternalReference","CreatedAt")
+                    ("Id","TenantId","UserId","Type","AmountMinutes","ActorUserId","Reason","ExternalReference","CreatedAt")
                 VALUES
                     (@id, @tenant, @user, 0, 1.00, @actor, 'boundary test', @ext, now())
                 """;
@@ -268,7 +269,7 @@ public sealed class ApiBoundaryTests : IClassFixture<PostgresFixture>
             cmd.CommandText = """
                 INSERT INTO bookings
                     ("Id","TenantId","CourtId","ActorUserId","StartsAt","EndsAt","SliceMinutes",
-                     "SliceCount","AmountChargedCredits","Status","CancellationPenaltyWaived","CreatedAt")
+                     "SliceCount","AmountChargedMinutes","Status","CancellationPenaltyWaived","CreatedAt")
                 VALUES
                     (@id, @tenant, @court, @actor, @starts, @ends, 15, 2, 16.00, @status, false, now())
                 """;

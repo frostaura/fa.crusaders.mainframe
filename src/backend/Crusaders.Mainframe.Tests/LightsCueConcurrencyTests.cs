@@ -45,7 +45,7 @@ public class LightsCueConcurrencyTests
         EndsAt = DateTimeOffset.UtcNow.AddMinutes(-minutesAgo),
         SliceMinutes = 15,
         SliceCount = 1,
-        AmountChargedCredits = 8m,
+        AmountChargedMinutes = 8,
         Status = BookingStatus.Booked,
         CheckedInAt = DateTimeOffset.UtcNow.AddMinutes(-minutesAgo - 14),
     };

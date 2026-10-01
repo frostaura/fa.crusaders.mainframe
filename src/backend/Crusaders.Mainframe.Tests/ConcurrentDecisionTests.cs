@@ -46,8 +46,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
     public ConcurrentDecisionTests(PostgresFixture pg) => _pg = pg;
 
-    private const decimal SlicePriceCredits = 8m;
-    private const decimal BookingCost = SlicePriceCredits * 4m;
+    private const int SlicePriceCredits = 8;
+    private const int BookingCost = SlicePriceCredits * 4;
 
     private sealed record Club(Guid TenantId, string Slug, Guid CourtId, Guid MemberId, Guid VolunteerId, Guid DeviceId);
 
@@ -89,8 +89,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Race Member", MembershipNumber = $"M-{slug}", Status = MembershipStatus.Active },
             new Membership { TenantId = tenant.Id, UserId = volunteer.Id, FullName = "Race Volunteer", MembershipNumber = $"V-{slug}", Status = MembershipStatus.Active });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = SlicePriceCredits };
-        var court2 = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = SlicePriceCredits };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
+        var court2 = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2" };
         db.Courts.AddRange(court, court2);
 
         // One box driving both courts, for the walk-up race.
@@ -106,8 +106,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         db.Devices.Add(device);
 
         db.LedgerEntries.AddRange(
-            new LedgerEntry { TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp, AmountCredits = 200m, ActorUserId = member.Id, Reason = "seed" },
-            new LedgerEntry { TenantId = tenant.Id, UserId = volunteer.Id, Type = LedgerEntryType.TopUp, AmountCredits = 200m, ActorUserId = volunteer.Id, Reason = "seed" });
+            new LedgerEntry { TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp, AmountMinutes = 200, ActorUserId = member.Id, Reason = "seed" },
+            new LedgerEntry { TenantId = tenant.Id, UserId = volunteer.Id, Type = LedgerEntryType.TopUp, AmountMinutes = 200, ActorUserId = volunteer.Id, Reason = "seed" });
 
         await db.SaveChangesAsync();
         return new Club(tenant.Id, slug, court.Id, member.Id, volunteer.Id, device.Id);
@@ -159,7 +159,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             EndsAt = startsAt.AddMinutes(60),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = BookingCost,
+            AmountChargedMinutes = BookingCost,
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };
@@ -167,7 +167,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         db.LedgerEntries.Add(new LedgerEntry
         {
             TenantId = club.TenantId, UserId = club.MemberId, Type = LedgerEntryType.BookingCharge,
-            AmountCredits = -BookingCost, ActorUserId = club.MemberId, RelatedBookingId = booking.Id, Reason = "seed charge",
+            AmountMinutes = -BookingCost, ActorUserId = club.MemberId, RelatedBookingId = booking.Id, Reason = "seed charge",
         });
         await db.SaveChangesAsync();
         return booking.Id;
@@ -202,7 +202,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
                 EndsAt = end,
                 SliceMinutes = 15,
                 SliceCount = 4,
-                AmountChargedCredits = BookingCost,
+                AmountChargedMinutes = BookingCost,
                 Status = BookingStatus.Booked,
                 ChargedAt = DateTimeOffset.UtcNow,
             };
@@ -210,7 +210,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = club.TenantId, UserId = club.MemberId, Type = LedgerEntryType.BookingCharge,
-                AmountCredits = -BookingCost, ActorUserId = club.MemberId, RelatedBookingId = booking.Id, Reason = "seed charge",
+                AmountMinutes = -BookingCost, ActorUserId = club.MemberId, RelatedBookingId = booking.Id, Reason = "seed charge",
             });
             ids.Add(booking.Id);
         }
@@ -249,7 +249,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         var club = await SeedAsync(factory);
         var bookingId = await BookAsync(factory, club);
 
-        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200 - BookingCost, await BalanceAsync(factory, club, club.MemberId));
 
         // Two requests, each holding the row as it read it — the state two concurrent
         // cancellations are in at the moment the second one writes.
@@ -267,7 +267,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         Assert.IsType<CancellationResult.NotFound>(second);
 
         // Back where they started, not a booking's worth better off.
-        Assert.Equal(200m, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200, await BalanceAsync(factory, club, club.MemberId));
         Assert.Equal(1, await CountAsync(factory, club, bookingId, LedgerEntryType.CancellationRefund));
     }
 
@@ -375,7 +375,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
         // Charged once, refunded once, penalised once.
         var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
-        Assert.Equal(200m - penalty, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200 - penalty, await BalanceAsync(factory, club, club.MemberId));
     }
 
     /// <summary>
@@ -402,7 +402,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
         await Worker(factory).TickAsync(default);
         var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
-        Assert.Equal(200m - penalty, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200 - penalty, await BalanceAsync(factory, club, club.MemberId));
 
         // Twenty minutes ago: inside the slot the sweep settled.
         var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeSeconds());
@@ -437,7 +437,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         Assert.True(results.Count(r => r is NoShowReversalResult.Lost) == 1, $"results were: {shape}");
 
         // Charged once, refunded once, penalised once, and each of those undone once.
-        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200 - BookingCost, await BalanceAsync(factory, club, club.MemberId));
         Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.CancellationRefund));
         Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.NoShowPenalty));
 
@@ -477,7 +477,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         // The sweep commits underneath it.
         await Worker(factory).TickAsync(default);
         var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
-        Assert.Equal(200m - penalty, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200 - penalty, await BalanceAsync(factory, club, club.MemberId));
 
         var scannedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeSeconds());
         var services = new DeviceEventServices(
@@ -498,7 +498,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             services, new LateActivation(court, stale, club.MemberId, "offline", scannedAt, 2_700_000), default);
 
         Assert.Equal("reversed_no_show", outcome);
-        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200 - BookingCost, await BalanceAsync(factory, club, club.MemberId));
         Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.CancellationRefund));
         Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.NoShowPenalty));
 
@@ -546,7 +546,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
         // The booker is made whole exactly once; the volunteer pays exactly once.
         Assert.Equal(bookerAfterBooking + BookingCost, await BalanceAsync(factory, club, club.MemberId));
-        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.VolunteerId));
+        Assert.Equal(200 - BookingCost, await BalanceAsync(factory, club, club.VolunteerId));
     }
 
     /// <summary>
@@ -695,7 +695,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         using (var scope = RequestScope(factory, club))
         {
             await scope.ServiceProvider.GetRequiredService<LedgerService>().PostAsync(
-                new LedgerPosting(club.MemberId, LedgerEntryType.AdminAdjustment, -(200m - BookingCost), club.MemberId,
+                new LedgerPosting(club.MemberId, LedgerEntryType.AdminAdjustment, -(200 - BookingCost), club.MemberId,
                     Reason: "spend down to one booking"), default);
         }
         Assert.Equal(BookingCost, await BalanceAsync(factory, club, club.MemberId));
@@ -730,8 +730,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
         // The invariant that actually matters, whichever way the race fell.
         var balance = await BalanceAsync(factory, club, club.MemberId);
-        Assert.True(balance >= 0m, $"balance went negative: {balance}");
-        Assert.Equal(0m, balance);
+        Assert.True(balance >= 0, $"balance went negative: {balance}");
+        Assert.Equal(0, balance);
 
         using var check = RequestScope(factory, club);
         var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -777,7 +777,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             EndsAt = startsAt.AddMinutes(60),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = BookingCost,
+            AmountChargedMinutes = BookingCost,
             Status = BookingStatus.Booked,
             ChargedAt = chargedBy is null ? null : DateTimeOffset.UtcNow,
         };
@@ -787,7 +787,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
             db.LedgerEntries.Add(new LedgerEntry
             {
                 TenantId = club.TenantId, UserId = payer, Type = LedgerEntryType.BookingCharge,
-                AmountCredits = -BookingCost, ActorUserId = payer, RelatedBookingId = booking.Id, Reason = "seed charge",
+                AmountMinutes = -BookingCost, ActorUserId = payer, RelatedBookingId = booking.Id, Reason = "seed charge",
             });
         }
         await db.SaveChangesAsync();
@@ -798,7 +798,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
     {
         using var scope = RequestScope(factory, club);
         await scope.ServiceProvider.GetRequiredService<LedgerService>().PostAsync(
-            new LedgerPosting(userId, LedgerEntryType.AdminAdjustment, -(200m - BookingCost), userId,
+            new LedgerPosting(userId, LedgerEntryType.AdminAdjustment, -(200 - BookingCost), userId,
                 Reason: "spend down to one booking"), default);
         Assert.Equal(BookingCost, await BalanceAsync(factory, club, userId));
     }
@@ -864,7 +864,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         Assert.All(results, r => Assert.Equal(60, r.Body.GetProperty("granted_minutes").GetInt32()));
 
         // One booking, one debit, one attendance stamp.
-        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(200 - BookingCost, await BalanceAsync(factory, club, club.MemberId));
         using var check = RequestScope(factory, club);
         var checkDb = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var booking = Assert.Single(await checkDb.Bookings.Where(b => b.UserId == club.MemberId).ToListAsync());
@@ -937,8 +937,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
                 DeviceEventEndpoints.VoidReference(DeviceEventEndpoints.WalkUpReference(club.DeviceId, nonce))).ToListAsync());
         Assert.Equal(LedgerEntryType.LightsPurchase, purchase.Type);
         Assert.Equal(LedgerEntryType.LightsPurchase, undo.Type);
-        Assert.Equal(-purchase.AmountCredits, undo.AmountCredits);
-        Assert.True(undo.AmountCredits > 0m);
+        Assert.Equal(-purchase.AmountMinutes, undo.AmountMinutes);
+        Assert.True(undo.AmountMinutes > 0);
 
         // The court was never lit, so nothing claims it was.
         Assert.Empty(await checkDb.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
@@ -984,8 +984,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         Assert.True(results.Count(r => r is ChargeResult.InsufficientBalance) == 1, $"results were: {shape}");
 
         var balance = await BalanceAsync(factory, club, club.MemberId);
-        Assert.True(balance >= 0m, $"balance went negative: {balance}");
-        Assert.Equal(0m, balance);
+        Assert.True(balance >= 0, $"balance went negative: {balance}");
+        Assert.Equal(0, balance);
 
         using var check = RequestScope(factory, club);
         var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -1030,8 +1030,8 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         Assert.True(results.Count(r => r is ChargeResult.InsufficientBalance) == 1, $"results were: {shape}");
 
         var volunteer = await BalanceAsync(factory, club, club.VolunteerId);
-        Assert.True(volunteer >= 0m, $"volunteer balance went negative: {volunteer}");
-        Assert.Equal(0m, volunteer);
+        Assert.True(volunteer >= 0, $"volunteer balance went negative: {volunteer}");
+        Assert.Equal(0, volunteer);
 
         // The booker is made whole for exactly one court.
         Assert.Equal(bookerBefore + BookingCost, await BalanceAsync(factory, club, club.MemberId));
@@ -1134,7 +1134,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
                 EndsAt = endsAt,
                 SliceMinutes = 15,
                 SliceCount = 4,
-                AmountChargedCredits = BookingCost,
+                AmountChargedMinutes = BookingCost,
                 Status = BookingStatus.Cancelled,
                 ChargedAt = DateTimeOffset.UtcNow,
             };

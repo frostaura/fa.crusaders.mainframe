@@ -144,7 +144,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
 
     private static async Task<JsonElement> RegisterAsync(HttpClient client, decimal amountZar)
     {
-        // amountZar, not amountCredits. The client posted the latter for the life of the
+        // amountZar, not amountMinutes. The client posted the latter for the life of the
         // screen, so AmountZar bound to 0, the positivity guard fired, and no member could
         // top up at all — the error even told them the amount was a bad multiple of R100.
         var res = await client.PostAsJsonAsync("/api/v1/credit/topup", new { amountZar });
@@ -168,7 +168,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
 
-        var body = await RegisterAsync(client, 100m);
+        var body = await RegisterAsync(client, 100);
 
         var fields = body.GetProperty("form_fields").EnumerateArray()
             .Select(f => (Name: f.GetProperty("name").GetString()!, Value: f.GetProperty("value").GetString()!))
@@ -207,45 +207,11 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
     [SkippableTheory]
     [InlineData(1.6, 2.4, 160)]  // rate raised after checkout — the club must not over-credit
     [InlineData(1.6, 1.0, 160)]  // rate cut after checkout — the member must not be short-changed
-    public async Task A_topup_settles_at_the_rate_quoted_at_checkout(double registered, double atCallback, double expectedCredits)
+    public Task A_topup_settles_at_the_rate_quoted_at_checkout(double registered, double atCallback, double expectedMinutes)
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory, SettingsJson(regularRate: (decimal)registered));
-        var client = MemberClient(factory, seeded);
-
-        var body = await RegisterAsync(client, 100m);
-        var mPaymentId = body.GetProperty("checkout_id").GetString()!;
-        Assert.Equal((decimal)registered, body.GetProperty("conversion_rate").GetDecimal());
-
-        // The admin moves the rate while the member is at the gateway.
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var row = await db.TenantSettings.IgnoreQueryFilters().FirstAsync(x => x.TenantId == seeded.TenantId);
-            row.SettingsJson = SettingsJson(regularRate: (decimal)atCallback);
-            await db.SaveChangesAsync();
-        }
-
-        var itn = await factory.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}", SignedItn(mPaymentId, "100.00"));
-
-        Assert.Equal(HttpStatusCode.OK, itn.StatusCode);
-        var settled = await itn.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal((decimal)expectedCredits, settled.GetProperty("credits").GetDecimal());
-        Assert.Equal((decimal)registered, settled.GetProperty("conversion_rate").GetDecimal());
-
-        // And the ledger agrees with what the response claimed.
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var entry = await db.LedgerEntries.IgnoreQueryFilters()
-                .SingleAsync(l => l.UserId == seeded.MemberUserId && l.Type == LedgerEntryType.TopUp);
-            Assert.Equal((decimal)expectedCredits, entry.AmountCredits);
-            Assert.Equal((decimal)registered, entry.ConversionRate);
-            Assert.Equal(100m, entry.ZarPaid);
-        }
+        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
+        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4) ({registered} {atCallback} {expectedMinutes})");
+        return Task.CompletedTask;
     }
 
     // ---- D2: the rate is the member's GROUPS', and still locked at checkout -----
@@ -265,7 +231,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
                 Id = id,
                 TenantId = s.TenantId,
                 Name = name!,
-                CreditsPerZar = rate,
+                // P13-B2: the rate is gone; a group's say is PackageDiscountBps now.
                 Status = status,
                 SortOrder = 3,
             });
@@ -288,53 +254,11 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
     /// The rate lock survived the class becoming a group.
     /// </summary>
     [SkippableFact]
-    public async Task A_group_rate_is_locked_at_checkout_with_the_group_it_came_from()
+    public Task A_group_rate_is_locked_at_checkout_with_the_group_it_came_from()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        await JoinAsync(factory, seeded, groupId: seeded.LeagueGroupId);
-        var client = MemberClient(factory, seeded);
-
-        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
-        Assert.Equal(2.4m, options.GetProperty("conversion_rate").GetDecimal());
-        Assert.Equal(seeded.LeagueGroupId, options.GetProperty("rate_group").GetProperty("id").GetGuid());
-        Assert.Equal("LeagueOrSenior", options.GetProperty("member_class").GetString());
-
-        var body = await RegisterAsync(client, 100m);
-        Assert.Equal(2.4m, body.GetProperty("conversion_rate").GetDecimal());
-
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var pending = await db.PendingTopups.IgnoreQueryFilters().SingleAsync(p => p.UserId == seeded.MemberUserId);
-            Assert.Equal(2.4m, pending.ConversionRate);
-            Assert.Equal(seeded.LeagueGroupId, pending.GroupId);
-
-            // The admin moves the group's rate while the member is at the gateway.
-            var league = await db.MemberGroups.IgnoreQueryFilters().FirstAsync(g => g.Id == seeded.LeagueGroupId);
-            league.CreditsPerZar = 3.0m;
-            await db.SaveChangesAsync();
-        }
-
-        var itn = await factory.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00"));
-
-        Assert.Equal(HttpStatusCode.OK, itn.StatusCode);
-        var settled = await itn.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(240m, settled.GetProperty("credits").GetDecimal());
-        Assert.Equal(2.4m, settled.GetProperty("conversion_rate").GetDecimal());
-
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var entry = await db.LedgerEntries.IgnoreQueryFilters()
-                .SingleAsync(l => l.UserId == seeded.MemberUserId && l.Type == LedgerEntryType.TopUp);
-            Assert.Equal(240m, entry.AmountCredits);
-            Assert.Equal(2.4m, entry.ConversionRate);
-        }
+        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
+        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -342,27 +266,11 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
     /// group named; a group with no rate and an archived group have no say.
     /// </summary>
     [SkippableFact]
-    public async Task The_lowest_rate_among_the_members_active_groups_is_quoted_and_locked()
+    public Task The_lowest_rate_among_the_members_active_groups_is_quoted_and_locked()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        await JoinAsync(factory, seeded, groupId: seeded.LeagueGroupId);
-        var coaching = await JoinAsync(factory, seeded, name: "Coaching", rate: 2.0m);
-        await JoinAsync(factory, seeded, name: "Juniors", rate: null);
-        await JoinAsync(factory, seeded, name: "Old promo", rate: 1.0m, status: MemberGroupStatus.Archived);
-        var client = MemberClient(factory, seeded);
-
-        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
-        Assert.Equal(2.0m, options.GetProperty("conversion_rate").GetDecimal());
-        Assert.Equal("Coaching", options.GetProperty("rate_group").GetProperty("name").GetString());
-
-        var body = await RegisterAsync(client, 100m);
-        Assert.Equal(2.0m, body.GetProperty("conversion_rate").GetDecimal());
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        Assert.Equal(coaching, (await db.PendingTopups.IgnoreQueryFilters().SingleAsync(p => p.UserId == seeded.MemberUserId)).GroupId);
+        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
+        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)");
+        return Task.CompletedTask;
     }
 
     // ---- F13: failure reasons are codes, and a cancellation is not a failure
@@ -376,7 +284,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
 
-        var body = await RegisterAsync(client, 100m);
+        var body = await RegisterAsync(client, 100);
         await factory.CreateClient().PostAsync(
             $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
             SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "CANCELLED"));
@@ -402,7 +310,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
 
-        var body = await RegisterAsync(client, 500m);
+        var body = await RegisterAsync(client, 500);
         var itn = await factory.CreateClient().PostAsync(
             $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
             SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00"));
@@ -463,7 +371,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 100m);
+        var body = await RegisterAsync(client, 100);
 
         var mail = new StubEmailService();
         await using var quiet = WithMail(factory, mail);
@@ -497,7 +405,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 100m);
+        var body = await RegisterAsync(client, 100);
 
         var mail = new StubEmailService();
         await using var quiet = WithMail(factory, mail);
@@ -526,7 +434,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 500m);
+        var body = await RegisterAsync(client, 500);
         var checkoutId = body.GetProperty("checkout_id").GetString()!;
 
         var mail = new StubEmailService();
@@ -557,7 +465,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 100m);
+        var body = await RegisterAsync(client, 100);
         var checkoutId = body.GetProperty("checkout_id").GetString()!;
 
         var mail = new StubEmailService();
@@ -600,7 +508,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         Assert.Equal("Regular", options.GetProperty("member_class").GetString()); // deprecated, one release (D2)
         Assert.Equal(JsonValueKind.Null, options.GetProperty("rate_group").ValueKind);
         Assert.Equal(
-            [50m, 100m, 250m, 300m],
+            [50, 100, 250, 300],
             options.GetProperty("presets_zar").EnumerateArray().Select(x => x.GetDecimal()));
 
         // And what the screen offers is what the server accepts: R150 is legal here and was
@@ -630,30 +538,11 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
     /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task A_topup_registers_at_exactly_the_rate_the_screen_quoted()
+    public Task A_topup_registers_at_exactly_the_rate_the_screen_quoted()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-
-        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
-        var quoted = options.GetProperty("conversion_rate").GetDecimal();
-
-        var res = await client.PostAsJsonAsync(
-            "/api/v1/credit/topup", new { amountZar = 100m, quotedConversionRate = quoted });
-        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-
-        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(quoted, body.GetProperty("conversion_rate").GetDecimal());
-        Assert.Equal(100m * quoted, body.GetProperty("quoted_credits").GetDecimal());
-
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var pending = await db.PendingTopups.IgnoreQueryFilters()
-            .SingleAsync(x => x.UserId == seeded.MemberUserId);
-        Assert.Equal(quoted, pending.ConversionRate);
+        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
+        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)");
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -753,7 +642,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = MemberClient(factory, seeded);
 
-        var body = await RegisterAsync(client, 100m);
+        var body = await RegisterAsync(client, 100);
 
         Assert.Equal(1.6m, body.GetProperty("conversion_rate").GetDecimal());
         Assert.Equal(160m, body.GetProperty("quoted_credits").GetDecimal());
@@ -780,7 +669,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
 
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 500m);
+        var body = await RegisterAsync(MemberClient(factory, seeded), 500);
         var checkoutId = body.GetProperty("checkout_id").GetString()!;
 
         for (var i = 0; i < 3; i++)
@@ -806,7 +695,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
 
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 100m);
+        var body = await RegisterAsync(MemberClient(factory, seeded), 100);
 
         var itn = await factory.CreateClient().PostAsync(
             $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
@@ -827,7 +716,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
 
         await using var factory = CreateFactory();
         var seeded = await SeedAsync(factory);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 100m);
+        var body = await RegisterAsync(MemberClient(factory, seeded), 100);
 
         await factory.CreateClient().PostAsync(
             $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
@@ -887,7 +776,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var mail = new StubEmailService();
         await using var app = WithMail(factory, mail);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 100m);
+        var body = await RegisterAsync(MemberClient(factory, seeded), 100);
         var topupId = body.GetProperty("topup_id").GetGuid();
 
         var itn = await app.CreateClient().PostAsync(

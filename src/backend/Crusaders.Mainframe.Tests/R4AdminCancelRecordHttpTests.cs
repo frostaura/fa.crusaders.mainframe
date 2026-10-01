@@ -33,7 +33,7 @@ public sealed class R4AdminCancelRecordHttpTests(PostgresFixture pg) : IClassFix
             EndsAt = DateTimeOffset.UtcNow.AddDays(2).AddHours(1),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = 32m,
+            AmountChargedMinutes = 32,
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };

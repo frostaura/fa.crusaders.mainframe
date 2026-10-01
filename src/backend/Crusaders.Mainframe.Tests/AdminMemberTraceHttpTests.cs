@@ -104,7 +104,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
     /// <summary>One ledger movement, written straight in so its actor and instant are the test's.</summary>
     private static async Task LedgerAsync(
         TestWebAppFactory factory, DoorClub club, Guid userId, LedgerEntryType type,
-        decimal amount, DateTimeOffset at, Guid actorUserId, Guid? bookingId = null, string? reason = null)
+        int amount, DateTimeOffset at, Guid actorUserId, Guid? bookingId = null, string? reason = null)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -113,7 +113,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
             TenantId = club.TenantId,
             UserId = userId,
             Type = type,
-            AmountCredits = amount,
+            AmountMinutes = amount,
             ActorUserId = actorUserId,
             RelatedBookingId = bookingId,
             Reason = reason,
@@ -138,7 +138,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
             EndsAt = startsAt.AddMinutes(15 * slices).ToUniversalTime(),
             SliceMinutes = 15,
             SliceCount = slices,
-            AmountChargedCredits = 16m,
+            AmountChargedMinutes = 16,
         };
         db.Bookings.Add(booking);
         await db.SaveChangesAsync();
@@ -200,7 +200,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
             factory, doorId, DeviceGateEndpoint.OpenedAction, now.AddMinutes(-70),
             subjectUserId: club.MemberUserId, gateKey: "side-door", doorName: "Side Door");
         await LedgerAsync(
-            factory, club, club.MemberUserId, LedgerEntryType.BookingCharge, -16m,
+            factory, club, club.MemberUserId, LedgerEntryType.BookingCharge, -16,
             now.AddMinutes(-119), club.MemberUserId, booking);
 
         var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(Trace(club.MemberUserId));
@@ -226,7 +226,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(1, summary.GetProperty("doors_entered").GetInt32());
         Assert.Equal(0, summary.GetProperty("doors_refused").GetInt32());
         Assert.Equal(1, summary.GetProperty("bookings_made").GetInt32());
-        Assert.Equal(16m, summary.GetProperty("credits_spent").GetDecimal());
+        Assert.Equal(16m, summary.GetProperty("minutes_spent").GetDecimal());
 
         // She was first SEEN at the door, not at the moment she booked from her sofa.
         Assert.Equal(
@@ -276,7 +276,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
 
         var club = await DoorClub.SeedAsync(factory, "trsys");
         await LedgerAsync(
-            factory, club, club.MemberUserId, LedgerEntryType.NoShowPenalty, -9m,
+            factory, club, club.MemberUserId, LedgerEntryType.NoShowPenalty, -9,
             DateTimeOffset.UtcNow.AddMinutes(-30), Guid.Empty, reason: "No-show penalty");
 
         var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(Trace(club.MemberUserId));
@@ -562,7 +562,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
         var theirs = await DoorClub.SeedAsync(factory, "trtb");
 
         await LedgerAsync(
-            factory, theirs, theirs.MemberUserId, LedgerEntryType.TopUp, 100m,
+            factory, theirs, theirs.MemberUserId, LedgerEntryType.TopUp, 100,
             DateTimeOffset.UtcNow.AddMinutes(-10), theirs.MemberUserId);
 
         var foreign = await ours.AdminClient(factory).GetAsync(Trace(theirs.MemberUserId));
@@ -610,10 +610,10 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
         var start = DoorClock.StartOfLocalDay(zone, day);
 
         await LedgerAsync(
-            factory, club, club.MemberUserId, LedgerEntryType.TopUp, 50m,
+            factory, club, club.MemberUserId, LedgerEntryType.TopUp, 50,
             start.AddHours(23).AddMinutes(30), club.MemberUserId);
         await LedgerAsync(
-            factory, club, club.MemberUserId, LedgerEntryType.TopUp, 50m,
+            factory, club, club.MemberUserId, LedgerEntryType.TopUp, 50,
             start.AddMinutes(-30), club.MemberUserId);
 
         var body = await club.AdminClient(factory)
@@ -728,7 +728,7 @@ public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
         for (var i = 0; i < 6; i++)
         {
             await LedgerAsync(
-                factory, club, club.MemberUserId, LedgerEntryType.TopUp, 10m,
+                factory, club, club.MemberUserId, LedgerEntryType.TopUp, 10,
                 now.AddMinutes(-60 + i), club.MemberUserId);
         }
 

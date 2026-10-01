@@ -75,7 +75,7 @@ public sealed class BookingHotPathQueryTests : IClassFixture<PostgresFixture>
                 TenantId = club.TenantId,
                 UserId = club.MemberUserId,
                 Type = LedgerEntryType.TopUp,
-                AmountCredits = 100m,
+                AmountMinutes = 100,
                 ActorUserId = Guid.Empty,
                 Reason = "fixture float",
             });

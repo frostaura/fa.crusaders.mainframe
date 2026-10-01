@@ -49,7 +49,7 @@ public sealed class PlayStatsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         var start = DateTimeOffset.UtcNow.AddDays(-3).Storable();
 
         var shared = await club.GameAsync(f, start, club.Organiser, [club.Sam]);
-        await club.InsertSeatAsync(f, shared, 3, club.Jo, ParticipantStatus.Invited, 0m);
+        await club.InsertSeatAsync(f, shared, 3, club.Jo, ParticipantStatus.Invited, 0);
 
         // Alex scanned his own seat on a booking the box never marked, then withdrew.
         var own = await club.GameAsync(f, start.AddDays(1), club.Organiser, [club.Alex], checkIn: false);

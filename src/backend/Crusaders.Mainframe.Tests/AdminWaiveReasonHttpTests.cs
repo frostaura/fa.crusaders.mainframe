@@ -40,8 +40,8 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
     public AdminWaiveReasonHttpTests(PostgresFixture pg) => _pg = pg;
 
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
-    private const decimal SlicePriceCredits = 50m;
-    private const decimal FloatCredits = 500m;
+    private const int SlicePriceCredits = 50;
+    private const int FloatMinutes = 500;
 
     /// <summary>Hours 00:00–24:00 and no reachable peak window, so the clock the suite runs at is irrelevant.</summary>
     private const string SettingsJson = """
@@ -80,7 +80,7 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
             new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin", MembershipNumber = $"{slug}-A", Status = MembershipStatus.Active },
             new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Naledi Khoza", MembershipNumber = $"{slug}-M", Status = MembershipStatus.Active });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = SlicePriceCredits };
+        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1" };
         db.Courts.Add(court);
 
         var starts = DateTimeOffset.UtcNow.AddMinutes(5);
@@ -96,7 +96,7 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
             EndsAt = starts.AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = SlicePriceCredits,
+            AmountChargedMinutes = SlicePriceCredits,
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };
@@ -106,12 +106,12 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
             new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, ActorUserId = admin.Id,
-                Type = LedgerEntryType.AdminAdjustment, AmountCredits = FloatCredits, Reason = "Seed float",
+                Type = LedgerEntryType.AdminAdjustment, AmountMinutes = FloatMinutes, Reason = "Seed float",
             },
             new LedgerEntry
             {
                 TenantId = tenant.Id, UserId = member.Id, ActorUserId = member.Id,
-                Type = LedgerEntryType.BookingCharge, AmountCredits = -SlicePriceCredits,
+                Type = LedgerEntryType.BookingCharge, AmountMinutes = -SlicePriceCredits,
                 RelatedBookingId = booking.Id, Reason = "Booking charge",
             });
 
@@ -186,8 +186,8 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
             new { waivePenalty = true, waiveReason = "Court flooded — club's fault" });
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(SlicePriceCredits, body.GetProperty("refunded_credits").GetDecimal());
-        Assert.Equal(0m, body.GetProperty("penalty_credits").GetDecimal());
+        Assert.Equal(SlicePriceCredits, body.GetProperty("refunded_minutes").GetDecimal());
+        Assert.Equal(0m, body.GetProperty("penalty_minutes").GetDecimal());
 
         var details = await CancellationAuditAsync(factory, s);
         Assert.True(details.GetProperty("waived").GetBoolean());
@@ -219,8 +219,8 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(BookingStatus.Booked, booking.Status);
         Assert.Empty(await db.AuditLogs.IgnoreQueryFilters()
             .Where(a => a.TenantId == s.TenantId && a.Action == "booking.cancelled").ToListAsync());
-        Assert.Equal(FloatCredits - SlicePriceCredits, await db.LedgerEntries.IgnoreQueryFilters()
-            .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).SumAsync(l => l.AmountCredits));
+        Assert.Equal(FloatMinutes - SlicePriceCredits, await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId).SumAsync(l => l.AmountMinutes));
     }
 
     /// <summary>
@@ -280,7 +280,7 @@ public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
             new { waivePenalty = false, waiveReason = "Court flooded" });
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(SlicePriceCredits * 0.30m, body.GetProperty("penalty_credits").GetDecimal());
+        Assert.Equal(SlicePriceCredits * 0.30m, body.GetProperty("penalty_minutes").GetDecimal());
 
         var details = await CancellationAuditAsync(factory, s);
         Assert.False(details.GetProperty("waived").GetBoolean());

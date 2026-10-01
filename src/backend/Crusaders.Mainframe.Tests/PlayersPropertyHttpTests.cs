@@ -196,7 +196,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
         {
             _club = await PlayersClub.SeedAsync(f, $"prop{seed}");
             // 100 each: four games at up to 16 a share must fit (round 7 — seed 20087 ran out at 60).
-            foreach (var who in Partners) await _club.CreditAsync(f, who, 100m);
+            foreach (var who in Partners) await _club.CreditAsync(f, who, 100);
             var games = _rng.Next(2, 5);
             for (var i = 0; i < games; i++) await AddGameAsync(i);
             Log.Add($"bias: {(_debt ? "debt" : "balanced")}");
@@ -213,11 +213,11 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             // LIVENESS at the end: top up to exactly every earmark plus every pending return, and
             // nothing may be left pending.
             var short_ = pre.Earmarked + pre.Seats.Sum(s => s.Pending) - pre.Balance;
-            if (short_ > 0m) await DeskAsync(short_, null, "top_up_cash");
+            if (short_ > 0) await DeskAsync(short_, null, "top_up_cash");
             await SweepAsync();
-            var end = await CheckAsync($"topped up by {Math.Max(0m, short_)}", pre);
-            Assert.True(end.Seats.All(s => s.Pending == 0m && s.Seat.ReturnPendingSince is null),
-                $"liveness: pending after topping up to earmarks + pending: {string.Join(",", end.Seats.Where(s => s.Pending > 0m).Select(s => $"{s.Seat.Id}={s.Pending}"))}");
+            var end = await CheckAsync($"topped up by {Math.Max(0, short_)}", pre);
+            Assert.True(end.Seats.All(s => s.Pending == 0 && s.Seat.ReturnPendingSince is null),
+                $"liveness: pending after topping up to earmarks + pending: {string.Join(",", end.Seats.Where(s => s.Pending > 0).Select(s => $"{s.Seat.Id}={s.Pending}"))}");
         }
 
         private Guid[] Partners => [_club.Sam, _club.Alex, _club.Jo];
@@ -231,7 +231,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
         private async Task AddGameAsync(int index)
         {
             var s4 = _rng.NextDouble() < 0.35;
-            await _club.CreditAsync(f, _club.Organiser, 32m);
+            await _club.CreditAsync(f, _club.Organiser, 32);
             var id = await _club.InsertBookingAsync(f, PlayersClub.Tomorrow(8).AddDays(index));
             var who = Partners.OrderBy(_ => _rng.Next()).Take(_rng.Next(1, 4)).ToList();
             // Multiples of 4, never more between them than the 32-credit court: up to 16 each for
@@ -239,7 +239,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             var most = Math.Min(4, 32 / (4 * who.Count));
             // Debt seeds spread the shares to the ends (4 or the most there is room for), so a big
             // return and a small one can wait side by side.
-            var amounts = who.Select(_ => _debt ? (_rng.Next(2) == 0 ? 4m : most * 4m) : (decimal)_rng.Next(1, most + 1) * 4m).ToList();
+            var amounts = who.Select(_ => _debt ? (_rng.Next(2) == 0 ? 4 : most * 4) : (decimal)_rng.Next(1, most + 1) * 4).ToList();
             var add = await Organiser.PostAsJsonAsync($"/api/v1/bookings/{id}/players", new
             {
                 players = who.Select((w, i) => (object)new { userId = w, amount = amounts[i] }).ToArray(),
@@ -251,7 +251,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             for (var i = 0; i < who.Count; i++)
             {
                 var accept = await _club.Client(f, who[i]).PostAsJsonAsync($"/api/v1/bookings/{id}/players/{seats[i]}/accept",
-                    new { expectedShareCredits = amounts[i] });
+                    new { expectedShareMinutes = amounts[i] });
                 Assert.True(accept.IsSuccessStatusCode, await accept.Content.ReadAsStringAsync());
             }
             if (s4)
@@ -296,7 +296,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 // served says it still waits. (Round 7: the shape that catches the FCFS mutant.)
                 _script.Enqueue(LateWithdrawAsync(biggest: true));
                 _script.Enqueue(LateWithdrawAsync(biggest: false));
-                _script.Enqueue(() => DeskAsync(4m, null, "top_up_cash"));
+                _script.Enqueue(() => DeskAsync(4, null, "top_up_cash"));
                 return await DeskAsync(-await ThinDebitAsync(), null, "correction");
             }
             var game = _games[_rng.Next(_games.Count)];
@@ -329,11 +329,11 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 case 4:
                     return await Status("organiser cancel", Organiser.PostAsJsonAsync($"/api/v1/bookings/{game.Id}/cancel", new { }));
                 case 5:
-                    return await DeskAsync(_rng.Next(1, 11) * 4m, _rng.NextDouble() < 0.5 ? game.Id : null, "goodwill");
+                    return await DeskAsync(_rng.Next(1, 11) * 4, _rng.NextDouble() < 0.5 ? game.Id : null, "goodwill");
                 case 6:
-                    return await DeskAsync(_debt ? _rng.Next(1, 3) * 4m : _rng.Next(1, 7) * 4m, null, "top_up_cash");
+                    return await DeskAsync(_debt ? _rng.Next(1, 3) * 4 : _rng.Next(1, 7) * 4, null, "top_up_cash");
                 case 7:
-                    return await DeskAsync(-(_debt ? await ThinDebitAsync() : _rng.Next(1, 11) * 4m), null, "correction");
+                    return await DeskAsync(-(_debt ? await ThinDebitAsync() : _rng.Next(1, 11) * 4), null, "correction");
                 case 8:
                     await _club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == game.Id).ShareDeadlineAt = DateTimeOffset.UtcNow.AddMinutes(-1));
                     return $"deadline passes on {game.Id}";
@@ -366,7 +366,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
         {
             var m = await ModelAsync();
             var free = m.Balance - m.Earmarked - m.OwedBack(m.Waiting());
-            return Math.Max(4m, Math.Ceiling(free / 4m) * 4m + _rng.Next(1, 6) * 4m);
+            return Math.Max(4, Math.Ceiling(free / 4) * 4 + _rng.Next(1, 6) * 4);
         }
 
         /// <summary>
@@ -379,12 +379,12 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
         private async Task<string?> OldSqueezeAsync()
         {
             var m = await ModelAsync();
-            var old = _games.FirstOrDefault(g => _old.Contains(g.Id) && m.Seats.Any(s => s.Seat.BookingId == g.Id && s.Paid > 0m));
-            var young = _games.Where(g => !_old.Contains(g.Id) && m.EarmarkOf(g.Id) > 0m && !m.PastDeadline.Contains(g.Id))
+            var old = _games.FirstOrDefault(g => _old.Contains(g.Id) && m.Seats.Any(s => s.Seat.BookingId == g.Id && s.Paid > 0));
+            var young = _games.Where(g => !_old.Contains(g.Id) && m.EarmarkOf(g.Id) > 0 && !m.PastDeadline.Contains(g.Id))
                 .OrderByDescending(g => m.EarmarkOf(g.Id)).FirstOrDefault();
             if (old is null || young is null) return null;
             _oldSqueezed = true;
-            _script.Enqueue(() => DeskAsync(16m, old.Id, "goodwill"));
+            _script.Enqueue(() => DeskAsync(16, old.Id, "goodwill"));
             _script.Enqueue(async () =>
             {
                 var now = await ModelAsync();
@@ -392,15 +392,15 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 if (first is null) return "old squeeze: nothing waits";
                 var free = now.Balance - now.Earmarked;
                 var topUp = first.Pending - now.EarmarkOf(young.Id) - free;
-                return topUp > 0m ? await DeskAsync(topUp, null, "top_up_cash") : "old squeeze: no top-up needed";
+                return topUp > 0 ? await DeskAsync(topUp, null, "top_up_cash") : "old squeeze: no top-up needed";
             });
             _script.Enqueue(async () =>
             {
                 await _club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == young.Id).ShareDeadlineAt = DateTimeOffset.UtcNow.AddMinutes(-1));
                 return $"old squeeze: deadline passes on {young.Id}";
             });
-            var debit = m.Balance - m.Earmarked - m.OwedBack(m.Waiting()) + 24m;
-            return debit > 0m ? "old squeeze: " + await DeskAsync(-debit, null, "correction") : "old squeeze: already short";
+            var debit = m.Balance - m.Earmarked - m.OwedBack(m.Waiting()) + 24;
+            return debit > 0 ? "old squeeze: " + await DeskAsync(-debit, null, "correction") : "old squeeze: already short";
         }
 
         /// <summary>
@@ -416,10 +416,10 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 live.AddRange((await _club.SeatsAsync(f, g.Id)).Where(p => p.Seat > 1 && p.Status == ParticipantStatus.Accepted).Select(p => (g, p)));
             }
             if (live.Count == 0) return "late withdraw: nobody left";
-            var ordered = live.OrderByDescending(x => x.Seat.ShareCredits).ToList();
+            var ordered = live.OrderByDescending(x => x.Seat.ShareMinutes).ToList();
             var pick = biggest ? ordered[0] : ordered.Where(x => x.Game.Id != ordered[0].Game.Id).DefaultIfEmpty(ordered[^1]).Last();
             await _club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == pick.Game.Id).ShareDeadlineAt = DateTimeOffset.UtcNow.AddMinutes(-1));
-            return $"late withdraw ({(biggest ? "biggest" : "smallest")} {pick.Seat.ShareCredits}): " + await Status("withdraw",
+            return $"late withdraw ({(biggest ? "biggest" : "smallest")} {pick.Seat.ShareMinutes}): " + await Status("withdraw",
                 _club.Client(f, pick.Seat.UserId!.Value).PostAsync($"/api/v1/bookings/{pick.Game.Id}/players/{pick.Seat.Id}/withdraw", null));
         };
 
@@ -428,7 +428,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
         {
             var m = await ModelAsync();
             var slices = _rng.Next(1, 3);
-            var price = 8m * slices;
+            var price = 8 * slices;
             var day = PlayersClub.Tomorrow(12).AddDays(4 + (_spends++ % 8));
             var response = await Organiser.PostAsJsonAsync("/api/v1/bookings", new { courtId = _club.CourtId, startsAt = day, sliceCount = slices });
             var text = await response.Content.ReadAsStringAsync();
@@ -457,11 +457,11 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
         private async Task<string> LowerAsync(Game game, Guid seat)
         {
             var live = (await _club.SeatsAsync(f, game.Id)).Where(p => p.Seat > 1 && p.IsLive).ToList();
-            if (!live.Any(p => p.Id == seat && p.ShareCredits >= 8m)) return "lower: nothing to lower";
+            if (!live.Any(p => p.Id == seat && p.ShareMinutes >= 8)) return "lower: nothing to lower";
             var response = await Organiser.PutAsJsonAsync($"/api/v1/bookings/{game.Id}/split", new
             {
                 mode = "amount",
-                seats = live.Select(p => new { participantId = p.Id, amount = p.Id == seat ? p.ShareCredits - 4m : p.ShareCredits }).ToArray(),
+                seats = live.Select(p => new { participantId = p.Id, amount = p.Id == seat ? p.ShareMinutes - 4m : p.ShareMinutes }).ToArray(),
             });
             return await Status($"lower {seat} by 4", Task.FromResult(response));
         }
@@ -477,7 +477,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             work.AddRange(_games.Select(g => (Task)_club.InClubAsync(f, sp => sp.GetRequiredService<ShareLedger>().ReconcileAsync(g.Id, default))));
             work.Add(SweepAsync());
             var credit = Admin.PostAsJsonAsync($"/api/v1/admin/credit/{_club.Organiser}/adjust",
-                new { amountCredits = _rng.Next(1, 6) * 4m, reason = "property step", reasonCode = "top_up_cash", zarReceived = 10m });
+                new { amountMinutes = _rng.Next(1, 6) * 4m, reason = "property step", reasonCode = "top_up_cash", zarReceived = 10m });
             var remove = Admin.PostAsJsonAsync($"/api/v1/admin/bookings/{game.Id}/players/{seat}/remove", new { reason = "property step" });
             work.Add(credit);
             work.Add(remove);
@@ -499,7 +499,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
         private async Task<string> DeskAsync(decimal amount, Guid? booking, string code)
         {
             var response = await Admin.PostAsJsonAsync($"/api/v1/admin/credit/{_club.Organiser}/adjust",
-                new { amountCredits = amount, reason = "property step", reasonCode = code, relatedBookingId = booking, zarReceived = 10m });
+                new { amountMinutes = amount, reason = "property step", reasonCode = code, relatedBookingId = booking, zarReceived = 10m });
             Assert.True(response.IsSuccessStatusCode, $"desk {amount}: {await response.Content.ReadAsStringAsync()}");
             if (amount < 0) _organiserFloor = Math.Min(_organiserFloor, await PlayersClub.BalanceAsync(f, _club.Organiser));
             return $"desk {code} {amount}{(booking is null ? "" : $" naming {booking}")}";
@@ -517,7 +517,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             // those stamped before it — exactly as the desk's pre-check asks it.
             var queue = before.Waiting();
             var earlier = row.Seat.ReturnPendingSince is null ? queue : queue.TakeWhile(w => w.Seat.Id != seat).ToList();
-            var covered = row.Paid <= 0m || before.Coverage(game.Id, seat, earlier) >= row.Paid;
+            var covered = row.Paid <= 0 || before.Coverage(game.Id, seat, earlier) >= row.Paid;
 
             var response = await Admin.PostAsJsonAsync($"/api/v1/admin/bookings/{game.Id}/players/{seat}/{action}", new { reason = "property step" });
             var text = await response.Content.ReadAsStringAsync();
@@ -548,23 +548,23 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             Log.Add(after);
             var m = await ModelAsync();
 
-            foreach (var p in Partners) Assert.True(await PlayersClub.BalanceAsync(f, p) >= 0m, $"{after}: partner {p} below zero");
-            Assert.True(m.Balance >= Math.Min(0m, _organiserFloor), $"{after}: organiser {m.Balance} below the desk's floor {_organiserFloor}");
+            foreach (var p in Partners) Assert.True(await PlayersClub.BalanceAsync(f, p) >= 0, $"{after}: partner {p} below zero");
+            Assert.True(m.Balance >= Math.Min(0, _organiserFloor), $"{after}: organiser {m.Balance} below the desk's floor {_organiserFloor}");
 
             // Exact out/in pairs, netting to zero.
             foreach (var pair in m.Shares.GroupBy(l => l.ExternalReference![..l.ExternalReference!.LastIndexOf(':')]))
             {
                 var legs = pair.ToList();
-                Assert.True(legs.Count == 2 && legs.Sum(l => l.AmountCredits) == 0m
+                Assert.True(legs.Count == 2 && legs.Sum(l => l.AmountMinutes) == 0
                             && legs.Any(l => l.ExternalReference!.EndsWith(":out")) && legs.Any(l => l.ExternalReference!.EndsWith(":in")),
                     $"{after}: broken share pair {pair.Key}");
             }
-            Assert.Equal(0m, m.Shares.Sum(l => l.AmountCredits));
+            Assert.Equal(0, m.Shares.Sum(l => l.AmountMinutes));
 
             // The wallet: raw balance, the model's held and owed-back, spendable their difference.
             var wallet = await Organiser.GetFromJsonAsync<JsonElement>("/api/v1/wallet");
-            var (balance, held, owed, spendable) = (wallet.GetProperty("balance_credits").GetDecimal(), wallet.GetProperty("held_credits").GetDecimal(),
-                wallet.GetProperty("owed_back_credits").GetDecimal(), wallet.GetProperty("spendable_credits").GetDecimal());
+            var (balance, held, owed, spendable) = (wallet.GetProperty("balance_minutes").GetDecimal(), wallet.GetProperty("held_minutes").GetDecimal(),
+                wallet.GetProperty("owed_back_minutes").GetDecimal(), wallet.GetProperty("spendable_minutes").GetDecimal());
             Assert.True(balance == m.Balance, $"{after}: wallet balance {balance} != ledger {m.Balance}");
             Assert.True(spendable == balance - held - owed, $"{after}: spendable {spendable} != {balance} - {held} - {owed}");
             Assert.True(held == m.Holds.Values.Sum(), $"{after}: held {held} != model {m.Holds.Values.Sum()}");
@@ -574,7 +574,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             foreach (var s in m.Seats)
             {
                 var waiting = s.Seat.ReturnPendingSince is not null;
-                Assert.True(waiting == (s.Pending > 0m), $"{after}: seat {s.Seat.Id} waiting={waiting} but pending {s.Pending}");
+                Assert.True(waiting == (s.Pending > 0), $"{after}: seat {s.Seat.Id} waiting={waiting} but pending {s.Pending}");
             }
             var queue = m.Waiting();
             foreach (var s in queue)
@@ -591,12 +591,12 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             }
 
             // No return row ever took the running balance below zero.
-            var running = 0m;
+            var running = 0;
             foreach (var group in m.OrganiserRows.GroupBy(l => l.CreatedAt).OrderBy(g => g.Key))
             {
-                running += group.Sum(l => l.AmountCredits);
-                var returned = group.Where(l => l.Type == LedgerEntryType.ShareTransfer && l.AmountCredits < 0m).ToList();
-                Assert.True(returned.Count == 0 || running >= 0m, $"{after}: a return at {group.Key:O} left the organiser on {running}");
+                running += group.Sum(l => l.AmountMinutes);
+                var returned = group.Where(l => l.Type == LedgerEntryType.ShareTransfer && l.AmountMinutes < 0).ToList();
+                Assert.True(returned.Count == 0 || running >= 0, $"{after}: a return at {group.Key:O} left the organiser on {running}");
             }
 
             if (pre is not null) CheckFirstComeFirstServed(after, pre, m);
@@ -615,7 +615,7 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             {
                 var now = post.Seats.Single(s => s.Seat.Id == before.Seat.Id);
                 var returned = before.Paid - now.Paid;
-                if (returned <= 0m) continue;
+                if (returned <= 0) continue;
                 var earlier = stillWaiting.Where(w => w.Seat.Id != before.Seat.Id
                     && (before.Seat.ReturnPendingSince is null
                         || w.Seat.ReturnPendingSince < before.Seat.ReturnPendingSince
@@ -624,8 +624,8 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
                 // The game's earmark as it stood — nothing, if the step itself released it (the
                 // deadline passed) or turned the game S4.
                 var game = before.Seat.BookingId;
-                var earmark = post.PastDeadline.Contains(game) || post.AfterCheckIn.Contains(game) ? 0m : pre.EarmarkOf(game);
-                var ownEarmark = Math.Max(0m, earmark - earlier.Where(e => e.Seat.BookingId == game).Sum(e => e.Pending));
+                var earmark = post.PastDeadline.Contains(game) || post.AfterCheckIn.Contains(game) ? 0 : pre.EarmarkOf(game);
+                var ownEarmark = Math.Max(0, earmark - earlier.Where(e => e.Seat.BookingId == game).Sum(e => e.Pending));
                 Assert.True(returned <= ownEarmark,
                     $"{after}: seat {before.Seat.Id} was paid {returned} beyond its game's earmark {ownEarmark} while {earlier.Count} earlier return(s) still wait");
             }
@@ -655,21 +655,21 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             public List<SeatRow> Waiting() => Seats.Where(s => s.Seat.ReturnPendingSince is not null)
                 .OrderBy(s => s.Seat.ReturnPendingSince).ThenBy(s => s.Seat.Id).ToList();
 
-            public decimal EarmarkOf(Guid booking) => AfterCheckIn.Contains(booking) ? 0m : Holds.GetValueOrDefault(booking);
+            public decimal EarmarkOf(Guid booking) => AfterCheckIn.Contains(booking) ? 0 : Holds.GetValueOrDefault(booking);
 
             public decimal OwedBack(IEnumerable<SeatRow> waiting) =>
-                waiting.GroupBy(w => w.Seat.BookingId).Sum(g => Math.Max(0m, g.Sum(w => w.Pending) - Holds.GetValueOrDefault(g.Key)));
+                waiting.GroupBy(w => w.Seat.BookingId).Sum(g => Math.Max(0, g.Sum(w => w.Pending) - Holds.GetValueOrDefault(g.Key)));
 
             /// <summary>§3's coverage, recomputed here from raw rows.</summary>
             public decimal Coverage(Guid booking, Guid seat, IEnumerable<SeatRow> earlier)
             {
                 var need = earlier.Where(e => e.Seat.Id != seat).GroupBy(e => e.Seat.BookingId).ToDictionary(g => g.Key, g => g.Sum(e => e.Pending));
                 var drawn = need.Sum(kv => Math.Min(kv.Value, EarmarkOf(kv.Key)));
-                var excess = need.Sum(kv => Math.Max(0m, kv.Value - EarmarkOf(kv.Key)));
+                var excess = need.Sum(kv => Math.Max(0, kv.Value - EarmarkOf(kv.Key)));
                 var earmarked = Holds.Keys.Sum(EarmarkOf);
-                var mine = Math.Max(0m, EarmarkOf(booking) - need.GetValueOrDefault(booking));
-                var backed = Math.Max(0m, Math.Min(Balance, earmarked) - drawn);
-                return Math.Min(mine, backed) + Math.Max(0m, Balance - earmarked - excess);
+                var mine = Math.Max(0, EarmarkOf(booking) - need.GetValueOrDefault(booking));
+                var backed = Math.Max(0, Math.Min(Balance, earmarked) - drawn);
+                return Math.Min(mine, backed) + Math.Max(0, Balance - earmarked - excess);
             }
         }
 
@@ -691,27 +691,27 @@ public abstract class PlayersPropertyHttpTests(PostgresFixture pg)
             var holds = new Dictionary<Guid, decimal>();
             foreach (var b in bookings)
             {
-                var owed = Math.Max(0m, -rows.Where(l => l.RelatedBookingId == b.Id && l.UserId == organiser && l.Type != LedgerEntryType.ShareTransfer).Sum(l => l.AmountCredits));
+                var owed = Math.Max(0, -rows.Where(l => l.RelatedBookingId == b.Id && l.UserId == organiser && l.Type != LedgerEntryType.ShareTransfer).Sum(l => l.AmountMinutes));
                 var mine = new List<SeatRow>();
                 foreach (var p in seats.Where(p => p.BookingId == b.Id && p.Seat > 1 && p.UserId is not null))
                 {
                     var prefix = ShareLedger.Prefix(p.Id);
-                    var paid = -rows.Where(l => l.UserId == p.UserId && l.Type == LedgerEntryType.ShareTransfer && l.ExternalReference!.StartsWith(prefix)).Sum(l => l.AmountCredits);
+                    var paid = -rows.Where(l => l.UserId == p.UserId && l.Type == LedgerEntryType.ShareTransfer && l.ExternalReference!.StartsWith(prefix)).Sum(l => l.AmountMinutes);
                     var closed = p.LapsedAt is not null || now >= PlayerSettings.ShareDeadline(b, settings);
                     var target = ShareLedger.TargetFor(b, p, owed, paid, closed);   // the rule table, pinned on its own
-                    mine.Add(new SeatRow(p, paid, Math.Max(0m, paid - target)));
+                    mine.Add(new SeatRow(p, paid, Math.Max(0, paid - target)));
                 }
                 seatRows.AddRange(mine);
                 // §3a: a game holds what its organiser received on it, net, until its deadline; a
                 // cancelled one only what it will still hand back, and never more than it received.
-                var received = rows.Where(l => l.RelatedBookingId == b.Id && l.UserId == organiser && l.Type == LedgerEntryType.ShareTransfer).Sum(l => l.AmountCredits);
-                if (now >= PlayerSettings.ShareDeadline(b, settings) || received <= 0m) continue;
+                var received = rows.Where(l => l.RelatedBookingId == b.Id && l.UserId == organiser && l.Type == LedgerEntryType.ShareTransfer).Sum(l => l.AmountMinutes);
+                if (now >= PlayerSettings.ShareDeadline(b, settings) || received <= 0) continue;
                 var hold = b.Status == BookingStatus.Cancelled ? Math.Min(mine.Sum(s => s.Pending), received) : received;
-                if (hold > 0m) holds[b.Id] = hold;
+                if (hold > 0) holds[b.Id] = hold;
             }
             return new Model
             {
-                Balance = rows.Where(l => l.UserId == organiser).Sum(l => l.AmountCredits),
+                Balance = rows.Where(l => l.UserId == organiser).Sum(l => l.AmountMinutes),
                 Shares = rows.Where(l => l.Type == LedgerEntryType.ShareTransfer).ToList(),
                 Seats = seatRows,
                 Holds = holds,

@@ -33,22 +33,22 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         // Every top-up code must say how much money changed hands.
         foreach (var code in new[] { "top_up_cash", "top_up_eft", "top_up_card_offline" })
         {
-            var missing = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountCredits = 240m, reason = "Cash at the bar", reasonCode = code });
+            var missing = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountMinutes = 240, reason = "Cash at the bar", reasonCode = code });
             Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
             Assert.Equal("zar_received_required", (await JsonAsync(missing)).GetProperty("error").GetString());
         }
-        var negative = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountCredits = 240m, reason = "Cash", reasonCode = "top_up_cash", zarReceived = -1m });
+        var negative = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountMinutes = 240, reason = "Cash", reasonCode = "top_up_cash", zarReceived = -1m });
         Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
-        Assert.Equal(0m, await PlayersClub.BalanceAsync(f, club.Sam));
+        Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Sam));
 
-        var ok = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountCredits = 240m, reason = "Cash at the bar, slip 12", reasonCode = "top_up_cash", zarReceived = 100m });
+        var ok = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountMinutes = 240, reason = "Cash at the bar, slip 12", reasonCode = "top_up_cash", zarReceived = 100m });
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         Assert.Equal(100m, (await JsonAsync(ok)).GetProperty("zar_received").GetDecimal());
-        var snake = await admin.PostAsJsonAsync(Adjust(club, club.Alex), new { amountCredits = 48m, reason = "EFT cleared", reason_code = "top_up_eft", zar_received = 20m });
+        var snake = await admin.PostAsJsonAsync(Adjust(club, club.Alex), new { amountMinutes = 48, reason = "EFT cleared", reason_code = "top_up_eft", zar_received = 20m });
         Assert.Equal(HttpStatusCode.OK, snake.StatusCode);
 
         // A goodwill credit is not money the club took: no rand asked, none stored.
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(Adjust(club, club.Jo), new { amountCredits = 10m, reason = "Sorry about the lights", reasonCode = "goodwill", zarReceived = 999m })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(Adjust(club, club.Jo), new { amountMinutes = 10, reason = "Sorry about the lights", reasonCode = "goodwill", zarReceived = 999m })).StatusCode);
 
         var rows = await PlayersClub.ReadAsync(f, db => db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == club.TenantId && l.ActorUserId == club.Admin).ToListAsync());
@@ -69,7 +69,7 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         var club = await PlayersClub.SeedAsync(f, "r1max");
         var admin = club.Client(f, club.Admin, admin: true);
 
-        var response = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountCredits = 99_999_999_999m, reason = "typo", reasonCode = "goodwill" });
+        var response = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountMinutes = 99_999_999_999, reason = "typo", reasonCode = "goodwill" });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await JsonAsync(response);
         Assert.Equal("amount_out_of_range", body.GetProperty("error").GetString());
@@ -82,12 +82,12 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r1actor");
-        await club.CreditAsync(f, club.Organiser, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
         var admin = club.Client(f, club.Admin, admin: true);
 
         // The member books their own court; the desk credits them; the desk books on their behalf.
         await club.BookWithPlayersAsync(f, []);
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(Adjust(club, club.Organiser), new { amountCredits = 5m, reason = "Sorry", reasonCode = "goodwill" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(Adjust(club, club.Organiser), new { amountMinutes = 5, reason = "Sorry", reasonCode = "goodwill" })).StatusCode);
         var onBehalf = await admin.PostAsJsonAsync("/api/v1/admin/bookings", new
         {
             courtId = club.CourtId, userId = club.Organiser, startsAt = PlayersClub.Tomorrow(12), sliceCount = 2,

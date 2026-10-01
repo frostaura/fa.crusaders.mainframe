@@ -10,7 +10,7 @@ namespace Crusaders.Mainframe.Tests;
 public class PlayerSettingsTests
 {
     private static TenantSettingsView View(string tz = "UTC") =>
-        new(15, 8m, 30m, 5, 15, 14, tz, 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
+        new(15, 30, 5, 15, 14, tz, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
 
     [Fact]
     public void Defaults_are_the_plans_numbers()

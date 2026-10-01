@@ -73,7 +73,7 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
     }
 
     private static async Task<Guid> SeedMemberBookingAsync(
-        TestWebAppFactory factory, DoorClub club, DateTimeOffset startsAt, decimal charged = 32m)
+        TestWebAppFactory factory, DoorClub club, DateTimeOffset startsAt, int charged = 32)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -89,7 +89,7 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
             EndsAt = startsAt.AddHours(1).ToUniversalTime(),
             SliceMinutes = 15,
             SliceCount = 4,
-            AmountChargedCredits = charged,
+            AmountChargedMinutes = charged,
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };
@@ -134,7 +134,7 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
         {
             Assert.Equal(BookingStatus.AdminBlock, r.Status);
             Assert.Null(r.UserId);
-            Assert.Equal(0m, r.AmountChargedCredits);
+            Assert.Equal(0, r.AmountChargedMinutes);
             Assert.Equal("League — Div 1", r.BlockLabel);
             Assert.NotNull(r.ScheduleId);
             Assert.NotNull(r.ScheduleOccurrenceDate);
@@ -246,7 +246,7 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
     /// <b>There is no force flag and there will not be one.</b> A member who paid must be
     /// refunded deliberately, through a cancellation — the rule <c>AdminBlockService</c> already
     /// enforces for a single block, restated at the scale of a season. The conflict list carries
-    /// <c>booking_id</c> and <c>would_refund_credits</c> so it can be pasted straight into
+    /// <c>booking_id</c> and <c>would_refund_minutes</c> so it can be pasted straight into
     /// bulk-cancel, which is the only reason items 5 and 14 were designed together.
     /// </para>
     /// </summary>
@@ -259,7 +259,7 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
         var club = await ClubAsync(factory, "schclash");
         var from = NextTuesday();
         var clashAt = new DateTimeOffset(from.ToDateTime(new TimeOnly(18, 0)), TimeSpan.Zero);
-        var theirs = await SeedMemberBookingAsync(factory, club, clashAt, charged: 36m);
+        var theirs = await SeedMemberBookingAsync(factory, club, clashAt, charged: 36);
 
         var response = await club.AdminClient(factory)
             .PostAsJsonAsync(Path + "/", Body(club, from, from.AddDays(14)));
@@ -272,8 +272,8 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(theirs, conflict.GetProperty("booking_id").GetGuid());
         Assert.Equal("booking", conflict.GetProperty("kind").GetString());
         Assert.Equal("Door Member", conflict.GetProperty("member_name").GetString());
-        Assert.Equal(36m, conflict.GetProperty("amount_credits").GetDecimal());
-        Assert.True(conflict.GetProperty("would_refund_credits").GetDecimal() > 0m);
+        Assert.Equal(36m, conflict.GetProperty("amount_minutes").GetDecimal());
+        Assert.True(conflict.GetProperty("would_refund_minutes").GetDecimal() > 0m);
 
         // 409 writes NOTHING — not the schedule, not its courts, not one occurrence.
         Assert.Empty(await OccurrenceRowsAsync(factory, club.TenantId));
@@ -337,7 +337,7 @@ public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
         var conflict = body.GetProperty("conflicts").EnumerateArray().First();
         Assert.Equal("schedule", conflict.GetProperty("kind").GetString());
         Assert.Equal("Div 1 league", conflict.GetProperty("label").GetString());
-        Assert.Equal(0m, conflict.GetProperty("would_refund_credits").GetDecimal());
+        Assert.Equal(0m, conflict.GetProperty("would_refund_minutes").GetDecimal());
     }
 
     // ------------------------------------------------------------------ refusals

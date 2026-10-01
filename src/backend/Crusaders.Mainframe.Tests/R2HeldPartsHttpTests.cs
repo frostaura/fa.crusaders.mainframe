@@ -6,7 +6,7 @@ namespace Crusaders.Mainframe.Tests;
 /// <summary>
 /// Review round 2, C4 (MJ-M): held credit showed ONE release date for money that frees on two
 /// days. <c>/wallet</c>, <c>/me/profile</c> and the wallet stream's frames carry <c>held_parts</c>
-/// — one part per share deadline, soonest first, summing to <c>held_credits</c>; <c>held_until</c>
+/// — one part per share deadline, soonest first, summing to <c>held_minutes</c>; <c>held_until</c>
 /// stays, as the soonest, for older clients.
 /// </summary>
 public sealed class R2HeldPartsHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
@@ -17,23 +17,23 @@ public sealed class R2HeldPartsHttpTests(PostgresFixture pg) : IClassFixture<Pos
 
     private static async Task AcceptAsync(PlayersClub club, TestWebAppFactory f, Guid bookingId, Guid seat)
     {
-        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareCredits;
+        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareMinutes;
         var accept = await club.Client(f, club.Sam).PostAsJsonAsync(
-            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = shown });
+            $"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareMinutes = shown });
         Assert.True(accept.IsSuccessStatusCode, await accept.Content.ReadAsStringAsync());
     }
 
-    private static void AssertParts(JsonElement body, params (decimal Credits, DateTimeOffset Until)[] expected)
+    private static void AssertParts(JsonElement body, params (int Credits, DateTimeOffset Until)[] expected)
     {
         var parts = body.GetProperty("held_parts").EnumerateArray()
-            .Select(p => (p.GetProperty("credits").GetDecimal(), p.GetProperty("until").GetDateTimeOffset())).ToList();
+            .Select(p => (p.GetProperty("minutes").GetInt32(), p.GetProperty("until").GetDateTimeOffset())).ToList();
         Assert.Equal(expected.Length, parts.Count);
         for (var i = 0; i < parts.Count; i++)
         {
             Assert.Equal(expected[i].Credits, parts[i].Item1);
             Assert.Equal(expected[i].Until, parts[i].Item2, TimeSpan.FromSeconds(1));
         }
-        Assert.Equal(body.GetProperty("held_credits").GetDecimal(), parts.Sum(p => p.Item1));
+        Assert.Equal(body.GetProperty("held_minutes").GetDecimal(), parts.Sum(p => p.Item1));
         Assert.Equal(parts[0].Item2, body.GetProperty("held_until").GetDateTimeOffset(), TimeSpan.FromSeconds(1));
     }
 
@@ -43,8 +43,8 @@ public sealed class R2HeldPartsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r2held");
-        await club.CreditAsync(f, club.Organiser, 100m);
-        await club.CreditAsync(f, club.Sam, 100m);
+        await club.CreditAsync(f, club.Organiser, 100);
+        await club.CreditAsync(f, club.Sam, 100);
 
         // Booked later-first, so "soonest first" is the server's ordering and not the insert order.
         var laterAt = PlayersClub.Tomorrow(9).AddDays(2);
@@ -55,7 +55,7 @@ public sealed class R2HeldPartsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         await AcceptAsync(club, f, sooner, PlayersClub.SeatOf(soonerBody, 2));
 
         // Sold end + 48 h (the default share_lapse_hours) — 4 slices for the later game, 2 for the sooner.
-        var expected = new[] { (8m, soonerAt.AddMinutes(30).AddHours(48)), (16m, laterAt.AddMinutes(60).AddHours(48)) };
+        var expected = new[] { (8, soonerAt.AddMinutes(30).AddHours(48)), (16, laterAt.AddMinutes(60).AddHours(48)) };
         var organiser = club.Client(f, club.Organiser);
         AssertParts(await (await organiser.GetAsync("/api/v1/wallet")).Content.ReadFromJsonAsync<JsonElement>(), expected);
         AssertParts(await (await organiser.GetAsync("/api/v1/me/profile")).Content.ReadFromJsonAsync<JsonElement>(), expected);
