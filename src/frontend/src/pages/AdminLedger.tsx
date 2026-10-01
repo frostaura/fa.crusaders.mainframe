@@ -7,6 +7,7 @@ import { clubDayRange, clubToday } from "../lib/clubDay";
 import { clubZoneIsKnown } from "../lib/clubZone";
 import { cn, formatSignedCredits } from "../lib/utils";
 import { LedgerTable } from "../components/LedgerTable";
+import { StaleNotice } from "../components/shell/StaleNotice";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -126,9 +127,10 @@ export default function AdminLedgerPage() {
           // 22rem at 1920 (3xl): every column of the book, the comment too, fits beside it.
           asideWidth="18rem"
         >
+          <StaleNotice stale={read.stale} readAt={readAt} />
           <StateBlock
             loading={loading && rows === null}
-            error={loadError}
+            error={read.stale ? null : loadError}
             action="read those movements"
             failedCaveat="Check the dates and try again."
             onRetry={() => void load()}
@@ -334,12 +336,18 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
   const [more, setMore] = useState<{ pending: boolean; error: unknown }>({ pending: false, error: null });
   const loadSeq = useRef(0);
   const filters = useRef<LedgerFilters>({});
+  /** The filters the rows on screen answer; a re-read of the SAME filters that fails keeps them. */
+  const shownFor = useRef<string | null>(null);
+  /** The rows on screen are from an earlier read: the last refresh of these filters failed. */
+  const [stale, setStale] = useState(false);
 
   const load = async () => {
     const seq = ++loadSeq.current;
     const current = () => seq === loadSeq.current;
+    const asked = `${from}|${to}|${type}|${userId}`;
     setLoading(true);
-    setTotals(null);
+    // New filters count again from nothing; a refresh of the same ones keeps its totals meanwhile.
+    if (shownFor.current !== asked) setTotals(null);
     try {
       // The club's day needs the club's zone; settings carry it (and the API layer notes it).
       if (!clubZoneIsKnown()) await endpoints.adminSettingsGet().catch(() => undefined);
@@ -359,15 +367,19 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
       setTotals(start.totals);
       setMore({ pending: false, error: null });
       setLoadError(null);
+      setStale(false);
+      shownFor.current = asked;
       setReadAt(Date.now());
     } catch (e) {
       if (!current()) return;
-      // And the stale rows go with it. Showing the last successful answer under a failed
-      // filter is worse than showing nothing, because nothing on screen says it is stale.
-      // The failure is ON the page, with a retry, where the table was: a toast floats away,
-      // and an empty table under a failed read reads "no movements" (R12).
-      setRows(null);
       setLoadError(e);
+      // A refresh of the filters the rows already answer keeps them, under "Couldn't refresh —
+      // showing what we had at …" (R4, D's StaleNotice): blanking a book already on screen
+      // tells the admin less than before. A NEW filter that fails takes the rows with it —
+      // the last answer under filters it does not answer is a wrong answer nothing marks (R12).
+      if (shownFor.current === asked) { setStale(true); return; }
+      setRows(null);
+      setStale(false);
     }
     finally { if (current()) setLoading(false); }
   };
@@ -397,7 +409,7 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [from, to, type, userId]);
 
-  return { rows, loading, loadError, readAt, totals, next, more, load, loadMore };
+  return { rows, loading, loadError, readAt, totals, next, more, load, loadMore, stale };
 }
 
 /**

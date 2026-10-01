@@ -29,6 +29,8 @@ export function useMembersList() {
   /** While the club is still being read page by page: how many so far, of how many. Null once whole. */
   const [reading, setReading] = useState<{ read: number; total: number | null } | null>(null);
   const seq = useRef(0);
+  /** Whether a WHOLE club has been read once: a re-read then keeps it on screen until it is whole too. */
+  const whole = useRef(false);
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
@@ -44,11 +46,15 @@ export function useMembersList() {
         const answer = await membersPage(cursor);
         if (mine !== seq.current) return;
         rows.push(...(answer.items as MemberRow[]));
-        setMembers(rows.slice());
+        // The first read shows its pages as they come; a RE-read keeps the whole club on screen
+        // until it is whole again — 200 of 282 drawn as the club is a smaller club (R4).
+        if (!whole.current) setMembers(rows.slice());
         if (!answer.next_cursor) break;
-        setReading({ read: rows.length, total: answer.total ?? null });
+        if (!whole.current) setReading({ read: rows.length, total: answer.total ?? null });
         cursor = answer.next_cursor;
       }
+      setMembers(rows);
+      whole.current = true;
       setReading(null);
       setReadAt(Date.now());
       // The one place the pending set is known to have moved, because this is the one place it
@@ -58,7 +64,8 @@ export function useMembersList() {
       notifyPendingApplicationsChanged();
     } catch (err) {
       if (mine !== seq.current) return;
-      // State only, no toast: the panel says it for as long as the screen is wrong.
+      // State only, no toast: the panel says it for as long as the screen is wrong. A club read
+      // whole before stays on screen under "Couldn't refresh" (the page decides, by `readAt`).
       setReading(null);
       setError(err);
     } finally {

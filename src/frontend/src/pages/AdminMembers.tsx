@@ -17,6 +17,7 @@ import { useCreditAdjust } from "../components/members/useCreditAdjust";
 import { useMemberLifecycle } from "../components/members/useMemberLifecycle";
 import { useFingerprints, useGroupMemberships, useMembersList, type GroupsState } from "../components/members/useMembersData";
 import { Alert } from "../components/Alert";
+import { StaleNotice } from "../components/shell/StaleNotice";
 import { Button } from "../components/ui/button";
 import { Users } from "../components/ui/icons";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
@@ -236,9 +237,12 @@ type PickerBodyProps = {
 /** The list pane beside a record: failed · loading · empty · the dense rows, as the table's body says them. */
 function PickerBody(props: PickerBodyProps) {
   const { list, rows, shown, onMore, filtered, onClearFilters } = props;
-  if (list.error) return <ListFailed error={list.error} retrying={list.loading} onRetry={() => void list.load()} />;
+  const kept = keepsRows(list);
+  if (list.error && !kept) return <ListFailed error={list.error} retrying={list.loading} onRetry={() => void list.load()} />;
   const state = bodyState(list.members, rows, filtered);
   return (
+    <>
+    <StaleNotice stale={kept} readAt={list.readAt} />
     <StateBlock
       action={COPY.loadAction}
       loading={list.members === null}
@@ -251,6 +255,7 @@ function PickerBody(props: PickerBodyProps) {
     >
       <MemberPicker rows={rows} total={state.total} shown={shown} onMore={onMore} />
     </StateBlock>
+    </>
   );
 }
 
@@ -281,13 +286,24 @@ function bodyState(members: MemberRow[] | null, rows: MemberRow[], filtered: boo
 }
 
 /** Failed · loading · empty · no match · the rows — in that order of precedence, always. */
+/**
+ * A re-read that failed over a club already read whole: the rows stay, under "Couldn't refresh —
+ * showing what we had at 18:04" (R4 wave B, D's StaleNotice). Only a club never read whole is a
+ * failure in place of the list — blanking rows already on screen tells the admin less than before.
+ */
+function keepsRows(list: ReturnType<typeof useMembersList>): boolean {
+  return Boolean(list.error) && list.members !== null && list.readAt !== null;
+}
+
 function MembersBody(props: BodyProps) {
   const { list, rows, groups, onClearFilters } = props;
-  if (list.error) return <ListFailed error={list.error} retrying={list.loading} onRetry={() => void list.load()} />;
+  const kept = keepsRows(list);
+  if (list.error && !kept) return <ListFailed error={list.error} retrying={list.loading} onRetry={() => void list.load()} />;
   const state = bodyState(list.members, rows, props.filtered);
   const read = list.members !== null;
   return (
     <>
+      <StaleNotice stale={kept} readAt={list.readAt} />
       {read ? <p className="-mt-1 text-sm text-text-secondary" aria-live="polite">{membersCount(rows.length, state.total)}</p> : null}
       {list.reading ? <p className="text-sm text-text-muted" role="status">{COPY.readingRest(list.reading.read, list.reading.total)}</p> : null}
       {read && groups.state.status === "failed" ? <GroupsFailed onRetry={() => void groups.retry()} /> : null}
