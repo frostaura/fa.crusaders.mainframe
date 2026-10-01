@@ -45,7 +45,7 @@ public sealed class LightsCueWorker : BackgroundService
         // It used to, on a pure clock: any Booked row whose start had passed, with no
         // reference to attendance, payment or balance. So a court lit itself for a member
         // who never arrived, for a booking that was never paid for, and for a no-show whose
-        // credits were about to be refunded — every one of them, every fifteen seconds.
+        // minutes were about to be refunded — every one of them, every fifteen seconds.
         //
         // Lights-on now belongs to CourtActivationService, which fires it when somebody
         // actually identifies themselves at the court AND the charge succeeds. That is

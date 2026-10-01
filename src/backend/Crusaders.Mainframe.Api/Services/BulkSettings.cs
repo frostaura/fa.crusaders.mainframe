@@ -27,7 +27,7 @@ public static class BulkSettings
     /// <summary>Five hundred, past which one request is a denial of service on the club's own booking table.</summary>
     public const int MaxMaxItems = 500;
 
-    /// <summary>Longest idempotency key accepted, matching the credit-adjust endpoint's.</summary>
+    /// <summary>Longest idempotency key accepted, matching the minutes-adjust endpoint's.</summary>
     public const int MaxIdempotencyKeyLength = 200;
 
     /// <summary>Longest reason a batch may carry.</summary>

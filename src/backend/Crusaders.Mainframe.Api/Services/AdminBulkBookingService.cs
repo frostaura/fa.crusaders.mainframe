@@ -58,7 +58,7 @@ public sealed class AdminBulkBookingService
     /// <para>
     /// <b>The tenant prefix is not optional.</b> The unique index on
     /// <c>ledger_entries.ExternalReference</c> carries no <c>TenantId</c>, which is why the
-    /// credit-adjust endpoint prefixes its own keys by hand. Two clubs whose consoles mint the
+    /// minutes-adjust endpoint prefixes its own keys by hand. Two clubs whose consoles mint the
     /// same key would otherwise collide, and the loser's cancellation would fail to post a
     /// refund for money that had been taken.
     /// </para>
@@ -196,7 +196,7 @@ public sealed class AdminBulkBookingService
     /// <b>except</b> <c>insufficient_balance</c>, which halts.
     ///
     /// <para>
-    /// A payer who has run out of credit mid-batch is different from a slot that was taken:
+    /// A payer who has run out of minutes mid-batch is different from a slot that was taken:
     /// continuing would produce a jagged half-booked league night and a member who cannot cover
     /// it. The response then carries <c>halted_at</c> and <c>halted_reason</c> alongside the
     /// results so far, and the admin retries with <c>allow_negative_balance</c> <b>under the

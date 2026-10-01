@@ -30,7 +30,7 @@ public class SettlementWindowTests
         EndsAt = T.AddMinutes(soldMinutes),
         SliceMinutes = sliceMinutes,
         SliceCount = soldMinutes / sliceMinutes,
-        AmountChargedMinutes = 8 * (soldMinutes / sliceMinutes),
+        AmountChargedMinutes = soldMinutes,
     };
 
     private static long Minutes(int m) => m * 60_000L;
@@ -138,12 +138,33 @@ public class SettlementWindowTests
         Assert.Equal(0, w.Minutes);
     }
 
-    /// <summary>Part-minutes round up: a member who used a minute is billed for one.</summary>
+    /// <summary>
+    /// A part-minute is two numbers. The court WAS lit into its second minute, so the board and
+    /// the audit say 2; but the charge keeps the remainder with whoever pays (contract §1.2,
+    /// §12.6), so the money path bills 1.
+    /// </summary>
     [Fact]
-    public void A_part_minute_rounds_up()
+    public void A_part_minute_is_shown_rounded_up_and_charged_rounded_down()
     {
         var w = DeviceEventEndpoints.LitWindowOf(Sold(60), T, 90_000L, heldMs: null);
 
         Assert.Equal(2, w.Minutes);
+        Assert.Equal(1, w.ChargeMinutes);
+    }
+
+    /// <summary>
+    /// A measured release of 44 min 59 s on a 45-minute court charges 44, never 45 — and a
+    /// release just under one minute charges nothing at all.
+    /// </summary>
+    [Theory]
+    [InlineData(44 * 60_000L + 59_000L, 45, 44)]
+    [InlineData(59_000L, 1, 0)]
+    [InlineData(20 * 60_000L, 20, 20)]
+    public void The_charge_rounds_a_measured_release_down(long heldMs, int shown, int charged)
+    {
+        var w = DeviceEventEndpoints.LitWindowOf(Sold(45), T, Minutes(45), heldMs);
+
+        Assert.Equal(shown, w.Minutes);
+        Assert.Equal(charged, w.ChargeMinutes);
     }
 }

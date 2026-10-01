@@ -52,7 +52,7 @@ public static class AdminCourtEndpoints
         var (db, tenant) = (deps.Db, deps.Tenant);
         if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new { error = "name_required" });
         // No price on a court (P13): a booking costs its length in minutes. An old console's
-        // slicePriceCredits is an unknown member now, and ignored rather than refused.
+        // per-slice price is an unknown member now, and ignored rather than refused.
 
         var maxNo = await db.Courts.IgnoreQueryFilters().Where(c => c.TenantId == tenant.TenantId).MaxAsync(c => (int?)c.CourtNumber, ct) ?? 0;
         var court = new Court

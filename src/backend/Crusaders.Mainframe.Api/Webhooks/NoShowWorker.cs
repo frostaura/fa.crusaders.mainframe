@@ -93,7 +93,7 @@ public sealed class NoShowWorker : BackgroundService
     /// </summary>
     private static int PenaltyFor(Booking b, TenantSettingsView settings, bool wasCharged, bool courtWasDark)
         => wasCharged && !courtWasDark
-            // P13-B1: floor(charged × penalty_pct ÷ 100) — rounded down, in favour of the member.
+            // floor(charged × penalty_pct ÷ 100): rounded down, in favour of the member (§1.2).
             ? (int)Math.Floor(b.AmountChargedMinutes * settings.PenaltyPct / 100m)
             : 0;
 
@@ -119,8 +119,8 @@ public sealed class NoShowWorker : BackgroundService
     /// <para>
     /// <paramref name="refundedMinutes"/> is the <b>gross</b> <c>CancellationRefund</c> leg, not
     /// that leg less the penalty. This used to pass the net figure into the cancellation
-    /// template's gross slot, so a member whose ledger held <c>+50.00</c> and <c>-15.00</c> — the
-    /// two rows I11 requires — was mailed "Refunded 35.00 credits", a number that appears nowhere
+    /// template's gross slot, so a member whose ledger held <c>+50</c> and <c>-15</c> — the
+    /// two rows I11 requires — was mailed "Refunded 35", a number that appears nowhere
     /// in the ledger and which, read beside the penalty line, deducts the 15 twice.
     /// </para>
     /// </summary>
@@ -177,7 +177,7 @@ public sealed class NoShowWorker : BackgroundService
         // up, and gets the slot back less the penalty — the blueprint's own words.
         //
         // The guard is not therefore redundant. A reservation carrying no debit still
-        // reaches this sweep, and refunding one credits a player for a slot nobody
+        // reaches this sweep, and refunding one pays a player for a slot nobody
         // paid for. That was live once: the refund ran on AmountChargedMinutes > 0
         // alone, so under the old charge-on-activation model — where a no-show by
         // definition never checked in and so was never charged — failing to turn up
@@ -236,7 +236,7 @@ public sealed class NoShowWorker : BackgroundService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountMinutes: -penalty,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
-                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Cr(b.AmountChargedMinutes)})"));
+                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Min(b.AmountChargedMinutes)})"));
         }
 
         // Status FIRST, then one save carrying it and both movements together.

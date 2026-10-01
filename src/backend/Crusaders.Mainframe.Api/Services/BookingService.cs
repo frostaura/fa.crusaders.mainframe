@@ -144,7 +144,7 @@ public sealed class BookingService
     /// <para>
     /// <b>Optional, and used only by the admin BULK route.</b> A single booking needs none —
     /// the member is looking at the answer — but a batch of forty is retried as a unit after a
-    /// payer runs out of credit mid-way, and without a per-item reference that retry books the
+    /// payer runs out of minutes mid-way, and without a per-item reference that retry books the
     /// items that already landed a second time. Same mechanism the walk-up already relies on
     /// (<see cref="CreateWalkUpAsync"/>), reached from the other end.
     /// </para>
@@ -167,7 +167,7 @@ public sealed class BookingService
         var (court, settings, endsAt, rules, totalCost) = priced;
 
         // §8's third admin action: "Book on behalf of any member (charges that member's
-        // credit; if insufficient, admin can override and create a negative balance,
+        // balance; if insufficient, admin can override and create a negative balance,
         // logged)." — widened by decision R19 (2026-09-23, "admin god mode") to the admin's
         // OWN wallet as well.
         //
@@ -175,8 +175,8 @@ public sealed class BookingService
         //
         // Deliberate: it is never implied by being an admin. It has to be asked for by name,
         // and the console now asks the quote endpoint first (GET /admin/bookings/quote) so the
-        // admin reads "this takes X to −16 cr" before sending it. An admin who mis-picks a
-        // member from a dropdown must not silently put a stranger 50 credits in the red.
+        // admin reads "this takes X to −16 min" before sending it. An admin who mis-picks a
+        // member from a dropdown must not silently put a stranger 50 minutes in the red.
         //
         // Admin-only: ActorIsAdmin is the route group's role claim, and the flag only exists on
         // the admin request records. A member's own POST carries no such field, and even a
@@ -273,7 +273,7 @@ public sealed class BookingService
         // predicate cannot match an inverted range, the per-day cap sees negative minutes
         // and passes, totalCost comes out negative, and the balance guard `balance <
         // totalCost` reads 0 < -200 and passes too. The debit is posted as -(-200), which
-        // CREDITS the member 200 for a booking they did not pay for.
+        // GIVES the member 200 for a booking they did not pay for.
         //
         // The only thing standing in the way today is Postgres refusing tstzrange(lower >
         // upper) when it maintains the exclusion-constraint index — SQLSTATE 22000, which is
@@ -309,7 +309,8 @@ public sealed class BookingService
         var verdict = await _rules.EvaluateAsync(subject, slot, settings, ct);
         if (verdict is RuleVerdict.Refused fastRefusal) return (null, fastRefusal.Result);
 
-        // P13-B1: a booking costs exactly its length in minutes — no court or group price.
+        // A booking costs exactly its length in minutes (contract §1.1): no court price, no group
+        // price, no peak multiplier. The group rules above still decide WHETHER it may be booked.
         var totalCost = settings.SliceMinutes * sliceCount;
         return (new PricedSlot(court, settings, endsAt, (subject, slot), totalCost), null);
     }
@@ -326,11 +327,10 @@ public sealed class BookingService
     /// <para>
     /// Two things are its own. It is <b>truncated at the next booking</b> — asking for an
     /// hour at 17:40 when someone has 18:00 gets twenty minutes, not a collision — and it is
-    /// therefore <b>charged pro rata</b>, which is the first fractional price in the system.
-    /// <c>SliceCount</c> is an integer and the tariff is a flat multiple of it, so the
-    /// arithmetic could not have been expressed before: the row carries one slice of the
-    /// length actually sold, which keeps <c>SliceMinutes × SliceCount</c> equal to
-    /// <c>EndsAt − StartsAt</c> the way every other booking does.
+    /// therefore <b>charged for what it grants</b>: the whole minutes sold, rounded down off the
+    /// wall clock so the member keeps the part-minute (contract §1.2). The row carries one
+    /// slice of the length actually sold, which keeps <c>SliceMinutes × SliceCount</c> equal
+    /// to <c>EndsAt − StartsAt</c> — and to the charge — the way every other booking does.
     /// </para>
     ///
     /// <para>
@@ -380,9 +380,8 @@ public sealed class BookingService
 
         endsAt = now.AddMinutes(grantedMinutes);
 
-        // GOAL item 3: a walk-up carries the MEMBER'S price, not the court's. A member who pays
-        // 12 credits online and 8 at the box has found a discount nobody designed, and the box is
-        // the club. It must also honour the group WINDOW, because that is the club's access rule
+        // GOAL item 3: a walk-up is priced exactly as an online booking is — its minutes — so
+        // the box is no back door to a different tariff. It must also honour the group WINDOW, because that is the club's access rule
         // — see BookingRules, and walk_up_honours_day_cap for the cap half, which is off by
         // default because the member is standing at a court that is about to go unlit.
         var walkUpSubject = await SubjectAsync(
@@ -392,7 +391,7 @@ public sealed class BookingService
         var walkUpVerdict = await _rules.EvaluateAsync(walkUpSubject, walkUpSlot, settings, ct);
         if (walkUpVerdict is RuleVerdict.Refused walkUpRefusal) return walkUpRefusal.Result;
 
-        // P13-B1: the granted minutes, already whole (floored above) — the member keeps the part-minute.
+        // The granted minutes, already whole (floored above): the member keeps the part-minute.
         var totalCost = grantedMinutes;
 
         var balance = await _ledger.GetSpendableAsync(userId, ct);
@@ -535,7 +534,7 @@ public sealed class BookingService
     /// booking then refuses as <c>court_in_use</c>. At the grace deadline
     /// <c>NoShowWorker</c> settles it as an ordinary no-show — the court is not dark, the box
     /// is plainly reporting — and takes the club's no-show penalty off a member who was
-    /// refused. A refusal after a charge must not strand credits.
+    /// refused. A refusal after a charge must not strand minutes.
     /// </para>
     ///
     /// <para>
@@ -812,8 +811,9 @@ public sealed class BookingService
         // one outcome.
         try
         {
-            // I10 — a posting of zero credits is not written. A court priced at zero
-            // charges nothing, and a 0.00 row moves nothing while reading on the member's
+            // I10 — a posting of zero minutes is not written. No booking costs zero since
+            // P13 (a booking costs its length in minutes, §1.1), so this is a defence rather
+            // than a path: a zero row moves nothing while reading on the member's
             // statement as a movement that did not happen. The booking row still has to
             // flush here rather than at the SaveChanges below, because the overlap
             // constraint is what decides the slot race and the catch for it is on this try.
@@ -933,7 +933,7 @@ public sealed class BookingService
             .ToString(ClubDate.Format, System.Globalization.CultureInfo.InvariantCulture);
         // The figures are fixed here; the message is composed and sent in the background (see
         // MailConfirmationAsync) so neither the receipt nor SMTP latency holds the response.
-        // Credits, not rand — the template printed a rand sign over both of these. The penalty
+        // Minutes, not rand — the template printed a rand sign over both of these. The penalty
         // policy travels with them for the same reason: it was hardcoded "15 minutes / 30%" and
         // went on saying so after an admin moved the club.
         // IsWalkUp travels with them because it decides what the mail may promise. A walk-up
@@ -1098,7 +1098,7 @@ public sealed class BookingService
     /// beside the change-log row, after the slot race has already been decided, so it flushes in
     /// the same save as the booking and the debit and commits with them in the payer-lock
     /// transaction; a save that is refused takes it down with them. The acting admin is not mailed;
-    /// they are looking at the result. The figures are credits and the balance after is the one
+    /// they are looking at the result. The figures are minutes and the balance after is the one
     /// the change record states.
     /// </summary>
     private async Task StageOverdraftNoticeAsync(NewBooking spec, OpeningFigures opening, string? memberName, CancellationToken ct)
@@ -1175,7 +1175,7 @@ public sealed class BookingService
         if (lightsHaveBeenOn) return (0, 0);
 
         var penalty = insidePenaltyWindow && !waivePenalty
-            // P13-B1: floor(charged × penalty_pct ÷ 100) — rounded down, in favour of the member who pays.
+            // floor(charged × penalty_pct ÷ 100): rounded down, in favour of the member who pays (§1.2).
             ? (int)Math.Floor(booking.AmountChargedMinutes * settings.PenaltyPct / 100m)
             : 0;
 
@@ -1512,7 +1512,7 @@ public sealed class BookingService
     ///
     /// <para>
     /// <b>Two new rows, never an edit.</b> The ledger is append-only and the sweep's rows are
-    /// what happened; this posts a debit reversing the refund and a credit reversing the
+    /// what happened; this posts a debit reversing the refund and a deposit reversing the
     /// penalty, each tied to the booking and to its own reference, and each read back off
     /// the ledger rather than recomputed from settings that may since have changed. The
     /// same two types with the opposite sign, so every report bucket sums back to the
@@ -1649,8 +1649,8 @@ public sealed class BookingService
     /// outstanding after a sweep is always negative — the member holds a full refund less a
     /// penalty for a court they played — so a <i>positive</i> adjustment can never be the
     /// whole correction, and matching on sign alone matched only the wrong-direction ones.
-    /// A desk that returned the 2.40 penalty made the whole 8-credit court free; a desk that
-    /// posted the correct −7.60 was not <c>&gt; 0</c>, so the reversal ran on top of it and
+    /// A desk that returned the 4-minute penalty made the whole 15-minute court free; a desk that
+    /// posted the correct −11 was not <c>&gt; 0</c>, so the reversal ran on top of it and
     /// charged the member twice.
     /// </para>
     ///
@@ -1667,10 +1667,10 @@ public sealed class BookingService
     /// </code>
     ///
     /// <para>
-    /// A desk that returned the 2.40 penalty leaves <c>penaltyBack = 0</c> and the full
-    /// refund reversal, ending at 92 on an 8-credit court — the honest owed. A desk that
-    /// posted the whole correction by hand as −5.60 leaves 2.40 either way, which nets to
-    /// nothing and also ends at 92. Neither can be reached by matching on sign alone.
+    /// A desk that returned the 4-minute penalty leaves <c>penaltyBack = 0</c> and the full
+    /// refund reversal, ending at 85 on a 15-minute court — the honest owed. A desk that
+    /// posted the whole correction by hand as −11 leaves 4 either way, which nets to
+    /// nothing and also ends at 85. Neither can be reached by matching on sign alone.
     /// </para>
     ///
     /// <para>
@@ -2001,7 +2001,7 @@ public sealed class BookingService
     /// a punctual member on a 60-minute court was billed 68 minutes. <b>The relay hard
     /// cap</b>, which was already there. And <b>the price ceiling</b>: a booking cancelled
     /// inside the penalty window has already cost its member the penalty, and charging the
-    /// full lit time on top of that billed 143 credits for a 100-credit court. What is left
+    /// full lit time on top of that billed 143 minutes for a 100-minute court. What is left
     /// to charge is <c>P − retained penalty</c>, and never more.
     /// </para>
     ///
@@ -2020,7 +2020,8 @@ public sealed class BookingService
         var minutes = Math.Clamp(litMinutes, 0, Math.Min(soldMinutes, RelayHardCap.Minutes));
         if (minutes <= 0) return null;
 
-        // P13-B1: one lit minute costs one minute; B1 owns floor-vs-ceiling of litMinutes (contract §12.6).
+        // One lit minute costs one minute. litMinutes arrives already rounded DOWN
+        // (LitWindow.ChargeMinutes, contract §12.6): the payer keeps the part-minute.
         var gross = minutes;
         var retained = await RetainedPenaltyAsync(booking, payerUserId, ct);
         var amount = Math.Min(gross, booking.AmountChargedMinutes - retained);
@@ -2219,7 +2220,7 @@ public sealed class BookingService
             {
                 booking_id = booking.Id,
                 charged_minutes = charged,
-                // P13-B0: was measured_credits; renamed apart from measured_minutes (the lit time) below.
+                // The measured charge, kept apart from measured_minutes (the lit time) below.
                 measured_charge_minutes = priced?.Amount ?? 0,
                 returned_minutes = back,
                 measured_minutes = litMinutes,
@@ -2490,7 +2491,7 @@ public sealed class BookingService
             // the balance read below is an unlocked SUM otherwise, and two scans at two
             // courts naming the same volunteer both saw enough and both charged (the same
             // race CommitAsync closes for a booker). The booker's refund needs no lock:
-            // credit never overspends. The advisory lock is per transaction and reentrant
+            // a deposit never overspends. The advisory lock is per transaction and reentrant
             // within it, so a caller already holding a lock on this payer — the walk-up
             // path commits and releases the booker's before activating, but a future
             // caller that does not would simply nest — cannot deadlock against itself.
@@ -2533,7 +2534,7 @@ public sealed class BookingService
             // Worse, it was not idempotent. On a rescan with the same volunteer, the
             // guard above compares reassignTo against a currentPayer that the failed attempt
             // never committed, so it looked like a fresh reassignment: the booker was
-            // refunded a SECOND time. Over the two attempts they netted 200 credits from
+            // refunded a SECOND time. Over the two attempts they netted 200 minutes from
             // nothing against a single charge. Two concurrent scans carrying the same payer
             // produced the same result with no failure at all, both reading state the other
             // had not committed yet.
@@ -2577,7 +2578,7 @@ public sealed class BookingService
         var payerUserId = payerOverrideUserId ?? currentPayer;
 
         // Locked for the same reason CommitAsync locks the booker: the balance read is an
-        // unlocked SUM, and a member with one booking's worth of credits holding two
+        // unlocked SUM, and a member with one booking's worth of minutes holding two
         // uncharged bookings could otherwise have both activated at once and finish
         // negative. Same reentrancy note as the volunteer lock above. A refusal below
         // returns without committing, which rolls back — nothing to unwind.
@@ -2798,7 +2799,7 @@ public sealed class BookingService
 /// Who a booking is charged to, who is making it, and whether the desk has explicitly
 /// authorised pushing that member below zero.
 /// </summary>
-/// <param name="UserId">The member whose credit pays and whose booking it is.</param>
+/// <param name="UserId">The member whose minutes pay and whose booking it is.</param>
 /// <param name="ActorId">
 /// Who pressed the button. Equal to <paramref name="UserId"/> for a member's own booking;
 /// the admin's id when the club desk is acting for somebody. The difference is what
@@ -3053,7 +3054,7 @@ public abstract record CancellationResult
 public abstract record NoShowReversalResult
 {
     /// <summary>
-    /// Reversed: the refund debited back and the penalty credited back, the row <c>Booked</c>
+    /// Reversed: the refund debited back and the penalty paid back, the row <c>Booked</c>
     /// and checked in. Both amounts are zero when an admin had already compensated the
     /// member by hand (<see cref="ManuallyCompensated"/>) — attendance is restored, money
     /// is not moved twice. <see cref="DisplacedBookingIds"/> names the later bookings on

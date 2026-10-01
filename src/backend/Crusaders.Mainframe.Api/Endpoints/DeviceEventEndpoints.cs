@@ -1099,7 +1099,8 @@ public static class DeviceEventEndpoints
         // Grant zero: the release carries the measurement, and the sold window is the only
         // other bound that applies to it.
         var window = LitWindowOf(booking, session.OccurredAt, grantMs: 0, heldMs: e.DurationMs);
-        var settled = await bookings.SettleReleaseAsync(booking, window.Minutes, window.End, Guid.Empty, ct);
+        // The charge's minutes, rounded down: the release may only move money the payer's way.
+        var settled = await bookings.SettleReleaseAsync(booking, window.ChargeMinutes, window.End, Guid.Empty, ct);
         var code = settled.Code == ReleaseSettlement.NotApplicable.Code ? ActivationOutcome.Ok : settled.Code;
 
         // The lights are believed OFF, and the MEASURED end is kept on the row so the control
@@ -1181,7 +1182,7 @@ public static class DeviceEventEndpoints
             // Settlement model I7. The cue gate is the rule on every settled branch, not
             // just the no-show one. It was present above the reversal and absent one branch
             // below it, which made the cancelled-then-lit charge the single path a box with
-            // a drifted clock could still spend a member's credits down.
+            // a drifted clock could still spend a member's minutes down.
             if (t.Booking.Status is BookingStatus.NoShow or BookingStatus.Cancelled
                 && t.OccurredAt is { } scannedAt
                 && scannedAt < t.Booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes))
@@ -1237,7 +1238,7 @@ public static class DeviceEventEndpoints
     {
         var window = LitWindowOf(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, t.DurationMs, heldMs: null);
         var lit = await bookings.ChargeLitCancelledBookingAsync(
-            t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, window.Minutes, ct);
+            t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, window.ChargeMinutes, ct);
         return lit switch
         {
             CancelledLightsResult.Displaced d => new SettleOutcome(ActivationOutcome.DisplacedCollision, d.DisplacedByBookingId),
@@ -1246,8 +1247,19 @@ public static class DeviceEventEndpoints
         };
     }
 
-    /// <summary>The interval the relay is believed to have been closed for, and its whole minutes.</summary>
-    internal sealed record LitWindow(DateTimeOffset Start, DateTimeOffset End, int Minutes);
+    /// <summary>
+    /// The interval the relay is believed to have been closed for, and its whole minutes two ways.
+    ///
+    /// <para>
+    /// <see cref="Minutes"/> rounds a part-minute UP: it is what the control board, the night
+    /// trace and the audit row say the court was lit for, and a court lit for 61 seconds was
+    /// lit into its second minute. <see cref="ChargeMinutes"/> rounds the same interval DOWN:
+    /// it is what a lit-time charge may bill, because every remainder in the money path is
+    /// kept by whoever pays (contract §1.2, §12.6). Two numbers rather than one so neither
+    /// use bends the other.
+    /// </para>
+    /// </summary>
+    internal sealed record LitWindow(DateTimeOffset Start, DateTimeOffset End, int Minutes, int ChargeMinutes);
 
     /// <summary>
     /// The lit window, bounded every way the settlement model requires (I6).
@@ -1281,9 +1293,12 @@ public static class DeviceEventEndpoints
         }
         if (end > soldEnd) end = soldEnd;
 
-        var soldMinutes = booking.SliceMinutes * booking.SliceCount;
-        var minutes = end <= start ? 0 : (int)Math.Ceiling((end - start).TotalMinutes);
-        return new LitWindow(start, end, Math.Clamp(minutes, 0, Math.Min(soldMinutes, RelayHardCap.Minutes)));
+        var bound = Math.Min(booking.SliceMinutes * booking.SliceCount, RelayHardCap.Minutes);
+        var lit = end <= start ? 0d : (end - start).TotalMinutes;
+        return new LitWindow(
+            start, end,
+            Minutes: Math.Clamp((int)Math.Ceiling(lit), 0, bound),
+            ChargeMinutes: Math.Clamp((int)Math.Floor(lit), 0, bound));
     }
 
     /// <summary>The row as the database has it now: reloaded in place if still tracked, else read fresh.</summary>
@@ -1587,7 +1602,7 @@ public static class DeviceEventEndpoints
         // refuses with `member_suspended`, and the activation paths and the cached roster
         // both drop a barred member's bookings — but a walk-up CREATES its booking, so it
         // never met a candidate set and never met a filter. A member suspended at the desk
-        // walked up, was charged fifty credits and had the court lit, twice, while the
+        // walked up, was charged fifty minutes and had the court lit, twice, while the
         // console's own suspend modal promised they could not "open a court at the box".
         //
         // Checked BEFORE CreateWalkUpAsync, not after: everything below this line commits

@@ -4,9 +4,9 @@
 
 This document exists because the money path had no single statement of it. Round-3 findings
 2, 3, 14, 16 and 17 were five symptoms of that absence: each fix was locally reasonable and
-they contradicted each other, so a played court could come out free (2), a 100-credit court
+they contradicted each other, so a played court could come out free (2), a 100-minute court
 could bill 143 (3), a member who could have played was refunded and locked out (14), two
-members were charged for one court (16), and one member's desk credit suppressed another
+members were charged for one court (16), and one member's desk adjustment suppressed another
 member's settlement (17). None of those is reachable from the rules below.
 
 It is normative. Where code and this document disagree, one of them is a defect; say which.
@@ -18,10 +18,11 @@ It is normative. Where code and this document disagree, one of them is a defect;
 | Term | Definition |
 | --- | --- |
 | **Payer** `u` | `booking.PaidByUserId ?? booking.UserId`. Never the booker, when the two differ. |
-| **Price** `P` | `booking.AmountChargedCredits` — quoted and locked at booking, never recomputed from settings that may since have moved. |
+| **Price** `P` | `booking.AmountChargedMinutes`, a whole number of minutes — locked at booking and read from the row, never recomputed from settings that may since have moved. Since P13 it equals `M` on every booking: a booking costs its length in minutes (`minutes-and-packages.md` §1.1). |
 | **Sold window** | `[StartsAt, OriginalEndsAt)` where `OriginalEndsAt = StartsAt + SliceMinutes × SliceCount`. |
 | **Sold minutes** `M` | `SliceMinutes × SliceCount`. Never changes. `EndsAt` may be truncated by the sweep; `M` is not. |
-| **Tariff** | `proRata(m) = round(court.SlicePriceCredits × m / settings.SliceMinutes, 2, AwayFromZero)`. Away-from-zero everywhere, so the club never rounds in its own favour in one place and against itself in another. |
+| **Tariff** | `proRata(m) = m`: a minute of court costs a minute. There are no court or group prices. |
+| **Rounding** | Every remainder is kept by whoever pays (`minutes-and-packages.md` §1.2): a percentage of minutes is rounded **down** to a whole minute, and so is a measured lit duration when it is charged. One rule everywhere, so the club never rounds in its own favour in one place and against itself in another. |
 | **Cue window** | `activation_cue_window_minutes` before `StartsAt`. The earliest a scan may light a court. |
 | **Grant** | `duration_ms` on an `activation` event: what the box's relay was *told* to run for. An upper bound on the lit time, never a measurement of it. |
 | **Held** | `duration_ms` on the matching `release` event (`heldMs`): what the relay *actually* ran. The measurement. |
@@ -45,12 +46,12 @@ inside that sum, not outside it (§6).
 | --- | --- | --- |
 | S1 | `Booked` / `Completed` — attended, or not yet decided | `P` |
 | S2 | `Cancelled` before check-in, **outside** the penalty window | `0` |
-| S3 | `Cancelled` before check-in, **inside** the penalty window | `penalty = round(P × PenaltyPct/100, 2)` |
+| S3 | `Cancelled` before check-in, **inside** the penalty window | `penalty = floor(P × PenaltyPct/100)` |
 | S4 | `Cancelled` after check-in | `P` — nothing back once the lights have been on |
-| S5 | `NoShow` — swept, no attendance evidence | `noShowPenalty = round(P × PenaltyPct/100, 2)` |
+| S5 | `NoShow` — swept, no attendance evidence | `noShowPenalty = floor(P × PenaltyPct/100)` |
 | S5a | `NoShow` — swept while the court had **no reachable box** | `0` — refunded in full, no penalty (`feature-spec.md` §6a) |
 | S6 | `NoShow` reversed by late attendance evidence | `P` (returns to S1) |
-| S7 | S2/S3 **and** the court was later lit on this booking's own code | `min(P, priorOwed + proRata(litMinutes))` |
+| S7 | S2/S3 **and** the court was later lit on this booking's own code | `min(P, priorOwed + chargeMinutes)` (§4) |
 | S8 | **Displaced** (`ResoldTailRefunded`) | `0`, unconditionally |
 | S9 | `AdminBlock`, or `UserId is null` | not settled — no money path |
 
@@ -227,7 +228,7 @@ itself was already refused on every route it calls: a member whose court the clu
 a minute earlier was charged the full `penalty_pct` and mailed the plain no-show notice. Bounding it at
 `LastSeenAt` exactly — the other obvious candidate — closes that and reopens the retroactive
 switch for every deadline in `(LastSeenAt, LastSeenAt + offline_after_seconds)`. Both were run: with
-the second rule in place a sixty-second-old deadline moved from `97.60` to `100.00` on the click
+the second rule in place a sixty-second-old deadline moved from `87` to `100` on the click
 alone and the whole backend suite stayed green. Only the recorded instant answers both.
 
 **What the column cannot carry, stated rather than implied.** It is one instant, not a history.
@@ -410,7 +411,7 @@ a defect, not a trade-off.
 A booking never costs more than the price quoted when it was made, in any sequence of
 events. **Why:** the price was quoted and accepted at booking; everything afterwards is a
 correction of who owes what, not a second sale. Finding 3 billed granted minutes *plus* a
-retained late-cancel penalty and reached 143 for a 100-credit court, with an email asserting
+retained late-cancel penalty and reached 143 for a 100-minute court, with an email asserting
 the lights ran 68 minutes whether the relay ran 30 seconds or the full hour.
 
 ### I2 — A court that was played is never free
@@ -468,11 +469,11 @@ always negative, so a positive adjustment can never be the whole correction — 
 refund reversal, making a played court free. Meanwhile the *correct* negative repair was not
 `> 0`, so the reversal ran on top of it and charged the member twice.
 
-Worked, on an 8-credit court at 30% with 100 seeded: charge −8, sweep +8 −2.40 → 97.60.
-A desk that hands back the 2.40 penalty → 100; the reversal posts `refundBack 8`,
-`penaltyBack 0` → **92**. A desk that posts the whole correction as −5.60 → 92; the reversal
-posts `refundBack 2.40`, `penaltyBack 2.40`, netting to nothing → **92**. No desk action at
-all → −8 +2.40 → **92**. All three land on `Owed = P = 8`.
+Worked, on a 45-minute booking at 30% with 100 seeded: charge −45, sweep +45 −13 (13.5 rounded
+down) → 87. A desk that hands back the 13 penalty → 100; the reversal posts `refundBack 45`,
+`penaltyBack 0` → **55**. A desk that posts the whole correction as −32 → 55; the reversal
+posts `refundBack 13`, `penaltyBack 13`, netting to nothing → **55**. No desk action at
+all → −45 +13 → **55**. All three land on `Owed = P = 45`.
 
 The netting is capped at each leg. An admin who moves more than the leg is worth is making a
 decision the model does not claw back; the excess stands on the ledger under their name.
@@ -482,7 +483,7 @@ decision the model does not claw back; the excess stands on the ledger under the
 `AdjustRequest.RelatedBookingId` must resolve to a booking in the same tenant whose payer is
 the member being adjusted — otherwise `400 booking_not_found` / `400 booking_not_members`.
 The compensation query carries `l.UserId == payerUserId` as well, so a row that predates the
-validation cannot cross members either. **Why:** without it, a desk crediting member U while
+validation cannot cross members either. **Why:** without it, a desk adjusting member U while
 pasting member V's booking id silently changed V's settlement, and nothing on V's ledger
 explained it (finding 17).
 
@@ -508,8 +509,10 @@ clean up — which would have deleted the discriminator this invariant is define
 ### I6 — The lit window is bounded three ways, and measured when the measurement arrives
 
 `litEnd = min(scan + grant, OriginalEndsAt, scan + heldMs when the release has landed)`, and
-`litStart = max(scan, StartsAt)`. Minutes charged are `ceil(litEnd − litStart)` clamped to
-`[0, min(M, RelayHardCap.Minutes)]`. **Why:** the grant is `closesAt − scan` measured from a
+`litStart = max(scan, StartsAt)`. Minutes **charged** are `floor(litEnd − litStart)` clamped to
+`[0, min(M, RelayHardCap.Minutes)]` — the payer keeps the part-minute; the minutes **shown** (the
+control board, the night trace, the audit row) are the same interval rounded up, because a court
+lit for 61 seconds was lit into its second minute. `LitWindow` carries both. **Why:** the grant is `closesAt − scan` measured from a
 roster window that *opens* at `StartsAt − cue`, so it includes cue-window minutes the member
 never bought; and it is what the relay was told, not what it ran. Three separate bounds
 because each fails differently: the grant bounds a box that lit for less than the slot, the
@@ -522,7 +525,7 @@ A scan earlier than `StartsAt − cue` is `too_early` on the `NoShow` and `Cance
 exactly as it is on the live one. **Why:** the cue gate is what stops a box with a drifted
 clock from buying court time before the window opens. It was present on the `NoShow` branch
 and absent one branch below it, so the cancelled-then-lit charge was the one path a drifted
-box could still spend a member's credits on.
+box could still spend a member's minutes on.
 
 ### I8 — A reversal restores the window it can prove
 
@@ -553,33 +556,35 @@ Reinstatement is bounded to bookings that have not yet started, because a member
 told their court was gone and did not come cannot be un-told after the fact, and because a
 booking they replaced by re-booking the same slot themselves must not collide.
 
-### I10 — A posting of zero credits is not written
+### I10 — A posting of zero minutes is not written
 
 **Why:** a zero row moves nothing, burns its idempotency `ExternalReference` so the real
 posting can never be made under it, and reads on a member's statement as a movement that did
-not happen. A never-charged displaced booking was posting a zero-credit `CancellationRefund`.
+not happen. A never-charged displaced booking was posting a zero `CancellationRefund`.
 
 **The one exception, and what makes it one.** A posting *whose `ExternalReference` is the only
 record the transaction has* is written even at zero. That is the walk-up charge and nothing
 else: the box's nonce becomes the reference, `ReplayAsync` finds the purchase by reading that
 reference off the ledger, and no second posting is ever made under it — the undo uses a
 suffixed reference of its own. So the middle clause of the "why" above, which is the harm this
-invariant is named for, cannot arise; and on a court priced at zero, dropping the row costs a
-member their court. Measured, not argued: with the row suppressed, a box whose response was
-lost retries the same nonce, finds no purchase to replay, books again, collides with the
-member's own live booking and is answered **`court_in_use` — 409 where it should be 200**. The
-glass then reads COURT NOT FREE about a court the member has already bought and cannot get
-into, which is the H3 defect the nonce exists to prevent. Pinned in both directions by
-`WalkUpBookingTests.A_free_court_is_bought_once_and_replays_to_the_same_purchase` and
-`A_free_court_charges_nothing_and_still_leaves_a_record_of_the_purchase`.
+invariant is named for, cannot arise; and a dropped row would cost a member their court.
+Measured, not argued (when courts could be priced at zero): with the row suppressed, a box whose
+response was lost retries the same nonce, finds no purchase to replay, books again, collides with
+the member's own live booking and is answered **`court_in_use` — 409 where it should be 200**.
 
-Everywhere else the invariant is absolute, and that includes the ordinary booking charge: a
-court priced at zero posts no `BookingCharge` row at all. **A bulk book's per-item reference is
-not the walk-up's exception**, although it arrives on the same parameter: the member and admin
-bulk routes find an earlier item by its reference only when it was charged, and find a free
-court's item by the payer's live uncharged booking on that court at that start
-(`BulkReplay.FindAsync`). The booking row is the record there, so a 0.00 row would be the
-phantom statement line this invariant forbids.
+**Since P13 no booking costs zero** — a booking costs its length in minutes and every booking is
+at least one minute long — so neither the exception nor the zero-row skip is reachable from a
+priced booking any more. Both stay in `CommitAsync` as a defence, not a path. What the exception
+protected, the purchase row under the box's nonce and its replay, is pinned by
+`WalkUpBookingTests.A_walk_up_on_any_court_charges_its_granted_minutes_under_the_box_reference`
+and `A_retried_walk_up_with_the_same_nonce_returns_the_original_grant_and_charges_once`.
+
+Everywhere else the invariant is absolute. **A bulk book's per-item reference is not the
+walk-up's exception**, although it arrives on the same parameter: the member and admin bulk
+routes find an earlier item by its reference when it was charged, and an uncharged item by the
+payer's live booking on that court at that start (`BulkReplay.FindAsync`). The booking row is the
+record there, so a zero row would be the phantom statement line this invariant forbids. Pinned by
+`BulkAndAdjustIntegrityHttpTests.Each_bulk_route_charges_its_minutes_once_and_replays_without_a_second_charge`.
 
 ### I11 — Two rows, never a netted one, and never an edit
 
@@ -590,7 +595,7 @@ answer "how much penalty did I pay?", which is the question a disputed settlemen
 type and opposite sign is also what makes every report bucket net back to the truth.
 
 **Consequence, accepted:** a period bucket can be negative when a sweep falls in one day's
-bucket and its reversal in another's. `refunds_credits` and `penalties_credits` are *net*
+bucket and its reversal in another's. `refunds_minutes` and `penalties_minutes` are *net*
 figures, not gross ones; a negative day means more was reversed than posted. This is the
 netting working, not a defect. Only `penalty_count` counts gross, and it counts debits only.
 
@@ -624,7 +629,13 @@ booking, so it is paired by device, relay and time:
 | activation only, `grant > 0` | `min(scan + grant, OriginalEndsAt)` |
 | activation only, `grant == 0` | `OriginalEndsAt` |
 
-`litStart = max(scan, StartsAt)`. `litMinutes = clamp(ceil(litEnd − litStart), 0, min(M, 90))`.
+`litStart = max(scan, StartsAt)`. Two minute counts come off the one interval
+(`DeviceEventEndpoints.LitWindow`):
+
+- `chargeMinutes = clamp(floor(litEnd − litStart), 0, min(M, 90))` — what S7 and the release
+  correction bill. Rounded down: the payer keeps the part-minute (§1, *Rounding*).
+- `litMinutes = clamp(ceil(litEnd − litStart), 0, min(M, 90))` — what the court is shown and
+  audited as having been lit for. Never money.
 
 ---
 
@@ -641,9 +652,9 @@ booking, so it is paired by device, relay and time:
 | No-show sweep | `Booked`, no `CheckedInAt`, past grace | `CancellationRefund +P`, `NoShowPenalty −penalty`, `EndsAt := now`, `Status := NoShow`. `Owed = penalty`. |
 | No-show sweep, court had no reachable box at the grace deadline | as above **and** at least one enabled box drives the court and **every** box that drives it had been silent longer than `offline_after_seconds` at that instant | `CancellationRefund +P` only — no penalty leg (I10 forbids the zero row). `EndsAt := now`, `Status := NoShow`. `Owed = 0`. |
 | Late activation on a `NoShow` | scan ≥ cue open (I7) | `CancellationRefund −refundBack`, `NoShowPenalty +penaltyBack` (I3), `Status := Booked`, `CheckedInAt := scan`, `NoShowReversedAt := now`, `EndsAt := provisional litEnd` (I8), displacement (I9). `Owed = P`. |
-| Late activation on a `Cancelled` row | scan ≥ cue open (I7); **not** displaced (I5); no `CheckedInAt` | `LightsPurchase −min(proRata(litMinutes), P − retainedPenalty)` (I1, I6). `Owed ≤ P`. |
+| Late activation on a `Cancelled` row | scan ≥ cue open (I7); **not** displaced (I5); no `CheckedInAt` | `LightsPurchase −min(chargeMinutes, P − retainedPenalty)` (I1, I6). `Owed ≤ P`. |
 | Late activation on a **displaced** row | — | nothing posted; audit `device.activation_displaced_collision`. `Owed = 0`. |
-| `release` paired to a cancelled-then-lit charge | `litEnd` earlier than charged | `LightsPurchase +difference`. `Owed` falls to the true pro rata. |
+| `release` paired to a cancelled-then-lit charge | `litEnd` earlier than charged | `LightsPurchase +difference`. `Owed` falls to the measured `chargeMinutes`. |
 | `release` paired to a reversed no-show | `litEnd < EndsAt` | `EndsAt := max(litEnd, StartsAt)`; displaced bookings starting after `litEnd` and not yet started are reinstated (I9). |
 | Admin adjustment naming a booking | booking exists in tenant, payer is the member (I4) | `AdminAdjustment ±x`. Netted into the next reversal per leg (I3). |
 
@@ -655,7 +666,7 @@ booking, so it is paired by device, relay and time:
 - **The payer override** (`I'll pay` at the court). It moves the whole charge from one member
   to another as a refund/charge pair; `Owed(b)` is unchanged, only `u` is.
 - **Share transfers between players (D11).** A `ShareTransfer` pair names the booking but moves
-  credits between two members, never between a member and the club; `Owed(b)` is computed over
+  minutes between two members, never between a member and the club; `Owed(b)` is computed over
   the payer's non-transfer rows, and a partner's share is a fraction of it
   (`players-and-splits.md` §3). The shares an organiser receives are **held** — not spendable —
   until the share deadline (`players-and-splits.md` §3a); that is a derived limit on spending,
@@ -670,7 +681,7 @@ booking, so it is paired by device, relay and time:
   courts owes `P₁ + P₂`, each still inside its own `[0, P]`. Cancelling one behaves exactly
   as S2/S3 say, and an ordinary top-up nets against the rest, because the wallet is the sum
   of the ledger and there is no separate debt record for it to disagree with. It was already
-  reachable before §8's override existed — a `release` correction landing on credit the
+  reachable before §8's override existed — a `release` correction landing on minutes the
   member had since spent does the same thing.
 
 ---
@@ -680,7 +691,7 @@ booking, so it is paired by device, relay and time:
 Recorded here rather than left for the next reviewer to rediscover.
 
 1. **An over-generous adjustment is not clawed back.** I3 nets only up to each leg. A desk
-   that credits 100 for a 2.40 penalty leaves the member 97.60 up, visibly, under the admin's
+   that pays back 100 for a 13-minute penalty leaves the member 87 up, visibly, under the admin's
    own actor id, and a desk that posts the same correction twice leaves them short by it.
 2. **A displaced booking that has already started is not reinstated** even when the release
    proves the court was free (I9). The member was told and did not come; the ledger already

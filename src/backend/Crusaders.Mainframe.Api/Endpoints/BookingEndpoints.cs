@@ -55,7 +55,7 @@ public static class BookingEndpoints
             .RequireAuthorization(p => p.RequireRole("admin"))
             .RequireRateLimiting(Security.RateLimitPolicies.Writes);
 
-        // §8: "Book on behalf of any member (charges that member's credit; if insufficient,
+        // §8: "Book on behalf of any member (charges that member's balance; if insufficient,
         // admin can override and create a negative balance, logged)."
         //
         // `allowNegativeBalance` is the override, and it exists on THIS request record and
@@ -70,7 +70,7 @@ public static class BookingEndpoints
             // The PAYER, not the desk. This route tested membership status not at all, so an
             // admin could book for an unapproved applicant: charged, absent from the box
             // roster, refused `no_booking` at every courtside door, then swept as a no-show
-            // with the 30% penalty. Driven end to end — 50 credits for a court that cannot open.
+            // with the 30% penalty. Driven end to end — 50 minutes for a court that cannot open.
             if (await BookingMembershipGate.RefuseIfBarredAsync(db, req.UserId, ct) is { } refused) return refused;
 
             var actorId = ctx.User.Id() ?? Guid.Empty;
@@ -277,9 +277,9 @@ public static class BookingEndpoints
     /// </para>
     ///
     /// <para>
-    /// <b>No <c>currency_symbol</c>.</b> Every figure here is credits, and
+    /// <b>No <c>currency_symbol</c>.</b> Every figure here is minutes, and
     /// <see cref="CurrencySymbol"/> records the decision that the club's symbol is rand's and
-    /// never goes in front of a credit figure.
+    /// never goes in front of a minutes figure.
     /// </para>
     ///
     /// <para>
