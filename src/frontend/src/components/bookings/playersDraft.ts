@@ -2,8 +2,8 @@ import type { PickedPlayer } from "@/components/players/PlayerPicker";
 import { MAX_SEATS, type PlayerSpec, type PlayersPayload, type SplitMode, type SplitPreviewRequest } from "@/lib/playersApi";
 import { BOOK_PLAYERS, firstName, type SentenceSeat } from "@/lib/playersCopy";
 import { BOOK_SEATS } from "@/lib/bookingsCopy";
-import { parseAmount as parseSharedAmount, type AmountProblem } from "@/lib/amount";
-import { hasTwoPlaces, splitShares, type MathResult, type MathSeat } from "./splitMath";
+import { parseMinutesAmount, type AmountProblem } from "@/lib/amount";
+import { splitShares, type MathResult, type MathSeat } from "./splitMath";
 
 /**
  * The players a member is booking with, before anything is sent — the BookSheet's Players and
@@ -98,21 +98,22 @@ export function parseWeight(text: string): number | null {
 }
 
 /**
- * What is wrong with a share typed in credits, or null. Blank is "ask them for nothing" — not a
- * problem. Everything else goes through the product's one amount parser (`lib/amount`): a
- * decimal comma is fine, an exponent is not, and "1,000" is refused as ambiguous.
+ * What is wrong with a share typed in minutes, or null. Blank is "ask them for nothing" — not a
+ * problem. Everything else goes through the product's one amount parser (`lib/amount`) with the
+ * minutes rules (P13 §7.1): whole numbers only — "22,5" is refused as too precise, never rounded —
+ * an exponent is refused, and "1,000" is refused as ambiguous.
  */
 export function amountProblem(text: string): AmountProblem | null {
   if (text.trim() === "") return null;
-  const parsed = parseSharedAmount(text, { decimals: 2, allowZero: true });
+  const parsed = parseMinutesAmount(text, { allowZero: true });
   return parsed.ok ? null : parsed.problem;
 }
 
-/** Credits ≥ 0 to at most two places, or null. Blank reads as 0 — "ask them for nothing". */
+/** Whole minutes ≥ 0, or null. Blank reads as 0 — "ask them for nothing". */
 export function parseAmount(text: string): number | null {
   if (text.trim() === "") return 0;
-  const parsed = parseSharedAmount(text, { decimals: 2, allowZero: true });
-  return parsed.ok && hasTwoPlaces(parsed.value) ? parsed.value : null;
+  const parsed = parseMinutesAmount(text, { allowZero: true });
+  return parsed.ok && Number.isInteger(parsed.value) ? parsed.value : null;
 }
 
 type Parsed = { ok: true; organiserWeight: number; seats: MathSeat[] } | { ok: false; error: string };
@@ -184,7 +185,7 @@ export function withMode(draft: PlayersDraft, mode: SplitMode, price: number | n
   const shareOf = (seat: number) => equal.shares.find((s) => s.seat === seat)?.share ?? 0;
   return {
     ...next,
-    seats: draft.seats.map((s) => (isPaying(s) ? { ...s, amount: shareOf(s.seat).toFixed(2) } : s)),
+    seats: draft.seats.map((s) => (isPaying(s) ? { ...s, amount: String(shareOf(s.seat)) } : s)),
   };
 }
 

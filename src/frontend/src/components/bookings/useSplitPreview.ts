@@ -5,8 +5,8 @@ import { localSplit, previewBody, type PlayersDraft } from "./playersDraft";
 /**
  * The Split step's live totals bar, and the Confirm sentence's figures: the server's own split
  * (`POST /players/split-preview`) for every DISTINCT price among the slots being booked — usually
- * one; a bulk booking applies the split per booking, so a 50 cr slot and a 60 cr slot are two
- * previews, never one of 110.
+ * one; a bulk booking applies the split per booking, so a 45 min slot and a 1 h slot are two
+ * previews, never one of 1 h 45 min.
  *
  * <p>
  * <b>Checked on the phone first.</b> A split the mirror (`splitMath`) refuses is never sent: the
@@ -16,6 +16,13 @@ import { localSplit, previewBody, type PlayersDraft } from "./playersDraft";
  * slow answer to "2" that lands after the answer to "25" is ignored, and no "loading" is ever set
  * by hand.
  * </p>
+ *
+ * <p>
+ * <b>Never a blank bar while the server answers.</b> The split is whole-minute arithmetic the
+ * phone mirrors exactly (`splitMath`), so "loading" carries the phone's own figures (`local`):
+ * the totals bar always shows shares that add up to the price, and the server's answer replaces
+ * them a debounce later — identical, unless the club's rules moved under it.
+ * </p>
  */
 
 export const PREVIEW_DEBOUNCE_MS = 250;
@@ -23,7 +30,8 @@ export const PREVIEW_DEBOUNCE_MS = 250;
 export type PreviewState =
   | { status: "idle" }
   | { status: "invalid"; error: string }
-  | { status: "loading" }
+  /** `local`: the phone's own split (the server's rules, mirrored) to show until the answer lands. */
+  | { status: "loading"; local: SplitPreview[] }
   | { status: "ready"; previews: SplitPreview[] }
   | { status: "error"; error: unknown };
 
@@ -31,6 +39,16 @@ type Answer = { key: string; ok: true; previews: SplitPreview[] } | { key: strin
 
 export function distinctPrices(prices: readonly number[]): number[] {
   return [...new Set(prices)].sort((a, b) => a - b);
+}
+
+/** The phone's split of every price — as the server would answer it, seat for seat. */
+function localPreviews(prices: readonly number[], draft: PlayersDraft): SplitPreview[] {
+  return prices.flatMap((price) => {
+    const result = localSplit(price, draft);
+    if (!result.ok) return [];
+    const shares = result.shares.map((s) => ({ seat: s.seat, team: s.seat <= 2 ? "A" as const : "B" as const, share_minutes: s.share, weight: s.weight }));
+    return [{ price_minutes: price, shares }];
+  });
 }
 
 function localProblem(prices: readonly number[], draft: PlayersDraft): string | null {
@@ -74,7 +92,7 @@ export function useSplitPreview(prices: readonly number[], draft: PlayersDraft, 
   let state: PreviewState;
   if (!enabled) state = { status: "idle" };
   else if (problem) state = { status: "invalid", error: problem };
-  else if (!answer || answer.key !== requestKey) state = { status: "loading" };
+  else if (!answer || answer.key !== requestKey) state = { status: "loading", local: localPreviews(priceKey.split(",").map(Number), draft) };
   else state = answer.ok ? { status: "ready", previews: answer.previews } : { status: "error", error: answer.error };
 
   return { state, retry: () => setAttempt((n) => n + 1) };

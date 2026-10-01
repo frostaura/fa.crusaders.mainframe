@@ -1,7 +1,7 @@
 import { ApiError } from "@/lib/api";
 import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_ADMIN } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { minutesCompact } from "@/lib/minutes";
 import { collectable, type AdminAct } from "../detail/detailModel";
 
 /**
@@ -38,7 +38,7 @@ export type ActSpec = {
 function waitingReturn(answer: unknown): { amount: string | null } | null {
   const a = answer as { return_waiting?: unknown; return_minutes?: unknown } | null;
   if (a?.return_waiting !== true) return null;
-  return { amount: typeof a.return_minutes === "number" ? formatCredits(a.return_minutes) : null };
+  return { amount: typeof a.return_minutes === "number" ? minutesCompact(a.return_minutes) : null };
 }
 
 function collectedOf(answer: unknown): number {
@@ -79,7 +79,7 @@ export const ACTS: Record<AdminAct, ActSpec> = {
     alwaysOverdraft: true, mayOverdraft: true, tone: "primary",
     call: (r) => playersEndpoints.adminCollect(r.bookingId, r.participantId, r.reason),
     landed: (was, now) => (now && now.paid_minutes > was.paid_minutes ? { collected_minutes: now.paid_minutes - was.paid_minutes } : null),
-    done: (name, answer) => DETAIL_ADMIN.collected(name, formatCredits(collectedOf(answer))),
+    done: (name, answer) => DETAIL_ADMIN.collected(name, minutesCompact(collectedOf(answer))),
   },
 };
 
@@ -94,7 +94,7 @@ function returnFigures(refusal: unknown, partner: string) {
   const covered = refusal.detail("covered_minutes");
   if (typeof returned !== "number" || typeof covered !== "number") return undefined;
   return {
-    returned: formatCredits(returned), covered: formatCredits(covered), short: formatCredits(Math.max(0, returned - covered)), partner,
+    returned: minutesCompact(returned), covered: minutesCompact(covered), short: minutesCompact(Math.max(0, returned - covered)), partner,
   };
 }
 
@@ -105,7 +105,7 @@ function returnFigures(refusal: unknown, partner: string) {
  */
 export function overdraftSentence(act: AdminAct, player: DetailPlayer, detail: BookingDetail, refusal: unknown): string {
   const partner = fullName(player.name, DETAIL_ADMIN.title);
-  if (act === "collect") return DETAIL_ADMIN.overdraftCollect(formatCredits(collectable(player)), partner);
+  if (act === "collect") return DETAIL_ADMIN.overdraftCollect(minutesCompact(collectable(player)), partner);
   const organiser = fullName(detail.organiser.name, DETAIL_ADMIN.title);
   return DETAIL_ADMIN.overdraftReturn(organiser, returnFigures(refusal, partner));
 }

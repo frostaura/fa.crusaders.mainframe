@@ -57,7 +57,7 @@ describe("a cancelled booking (R1 F2.10)", () => {
     expect(screen.queryByText(DETAIL_COPY.freeSeat)).toBeNull();
   });
 
-  it("the money says what came back — no deadline, no 'not paid yet', no 'Paid 0.00 of'", async () => {
+  it("the money says what came back — no deadline, no 'not paid yet', no 'Paid 0 min of'", async () => {
     serve({ detail: cancelled() });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
@@ -66,15 +66,15 @@ describe("a cancelled booking (R1 F2.10)", () => {
     expect(within(money).queryByText(DETAIL_CANCELLED.refunded(null))).toBeNull();
     expect(within(money).getByText(DETAIL_CANCELLED.splitRefundNote(null))).toBeInTheDocument();
     expect(within(money).getAllByText(DETAIL_CANCELLED.nothingToPay).length).toBeGreaterThan(0);
-    expect(money).not.toHaveTextContent(/Shares close|Not paid yet|Paid 0\.00|lapses|Asked for/);
+    expect(money).not.toHaveTextContent(/Shares close|Not paid yet|Paid 0 min|Paid 0\.00|lapses|Asked for/);
   });
 
-  it("R2 F2-4: each partner's row says what came back to them — '25.00 cr back', not 'nothing owed'", async () => {
+  it("R2 F2-4: each partner's row says what came back to them — '25 min back', not 'nothing owed'", async () => {
     serve({ detail: cancelled({ players: [seat(), { ...SAM_SEAT, paid_minutes: 0, target_minutes: 0, returned_minutes: 25 }, ALEX_SEAT] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
     const sam = within(money).getByText("Sam").closest("li")!;
-    expect(sam).toHaveTextContent(DETAIL_CANCELLED.returnedRow("25.00 cr"));
+    expect(sam).toHaveTextContent(DETAIL_CANCELLED.returnedRow("25 min"));
     expect(sam).not.toHaveTextContent(DETAIL_CANCELLED.nothingToPay);
     // Alex never paid: nothing came back, and the row says so.
     expect(within(money).getByText("Alex").closest("li")!).toHaveTextContent(DETAIL_CANCELLED.nothingToPay);
@@ -111,7 +111,7 @@ describe("a cancelled booking (R1 F2.10)", () => {
     }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(within(money).getByText(DETAIL_CANCELLED.paidRow("25.00 cr"))).toBeInTheDocument();
+    expect(within(money).getByText(DETAIL_CANCELLED.paidRow("25 min"))).toBeInTheDocument();
     expect(within(money).queryByText(DETAIL_CANCELLED.refunded(null))).toBeNull();
     expect(screen.getByText(DETAIL_ATTENDANCE.checkedInAt("18:02"))).toBeInTheDocument();
   });
@@ -128,7 +128,7 @@ describe("a cancelled booking nobody split (R2 F2-4)", () => {
     }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(within(money).getByText(DETAIL_CANCELLED.refunded(null)).nextSibling).toHaveTextContent("100.00 cr");
+    expect(within(money).getByText(DETAIL_CANCELLED.refunded(null)).nextSibling).toHaveTextContent("1 h 40 min");
     expect(within(money).queryByText(DETAIL_CANCELLED.splitRefundNote(null))).toBeNull();
   });
 });

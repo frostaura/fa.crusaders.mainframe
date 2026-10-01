@@ -15,7 +15,7 @@ import type { Landed } from "@/lib/lostReply";
  * <p>
  * <b>Consent is to the figure shown.</b> Accept sends `expectedShareMinutes = share_minutes` —
  * the server compares it with the seat's current share (`PlayersService.Member.cs`,
- * `seat.ShareCredits > expected` → `409 share_changed`). A risen share is never retried for the
+ * `seat.ShareMinutes > expected` → `409 share_changed`). A risen share is never retried for the
  * member: the invite is read again, the new figure is shown with the reason, and Accept waits
  * for a fresh tap on the new label.
  * </p>

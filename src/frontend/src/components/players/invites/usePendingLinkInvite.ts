@@ -7,7 +7,7 @@ import { clearPendingInvite, invitePathOf, pendingInvite } from "@/lib/playersPe
 /**
  * R1 F2.3 / F2.5 — the invite link this member opened and has not answered, read again so it can
  * be offered beside their other invites: an open seat is nobody's until it is accepted, so the
- * club's own list (`/me/invites`) cannot hold it — a member who left to top up, or who joined the
+ * club's own list (`/me/invites`) cannot hold it — a member who left to buy minutes, or who joined the
  * club in between, would otherwise never find it again.
  *
  * <p>

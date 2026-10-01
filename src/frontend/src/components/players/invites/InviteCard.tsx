@@ -6,7 +6,8 @@ import { Interactable } from "@/components/ui/interactable";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY, invitedLine, payByLine, playersCount } from "@/lib/playersCopy";
-import { cn, formatCredits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
 import { inviteStatus, inviteWhen, organiserName } from "./inviteFacts";
 
 /**
@@ -99,7 +100,7 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
         </span>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
           <span className="text-sm font-semibold tabular-nums text-text-primary">
-            {`${INVITES_COPY.yourShare} ${formatCredits(invite.share_minutes)}`}
+            {INVITES_COPY.yourShare} <Minutes value={invite.share_minutes} />
           </span>
           <Badge tone={status.tone}>{status.text}</Badge>
         </span>

@@ -98,7 +98,7 @@ describe("review", () => {
       players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", share_minutes: 30, consented_minutes: 25, paid_minutes: 25, unpaid_minutes: 5, needs_consent: true }],
     }) });
     renderDetail();
-    expect(await screen.findByText(DETAIL_PLAYER.askedAgain("30.00 cr"))).toBeInTheDocument();
+    expect(await screen.findByText(DETAIL_PLAYER.askedAgain("30 min"))).toBeInTheDocument();
     expect(screen.getByRole("listitem", { name: "Alex (you), Asked again" })).toBeInTheDocument();
   });
 });

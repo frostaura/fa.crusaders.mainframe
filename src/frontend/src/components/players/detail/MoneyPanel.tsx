@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Section } from "@/components/ui/page-shell";
-import { cn, formatCredits } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
+import { minutesCompact } from "@/lib/minutes";
+import { cn } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_MONEY, DETAIL_NO_SHOW, playersWhen } from "@/lib/playersCopy";
 import { isCancelled, isLive, isNoShow, keepAmounts, organiserName, seatName, settlementOf, statusKey } from "./detailModel";
@@ -50,14 +52,14 @@ function Row({ term, value, total = false }: { term: string; value: number; tota
   return (
     <div className={cn(PAIR, total ? "border-t border-border pt-2 font-semibold text-text-primary" : "text-text-secondary")}>
       <dt className="min-w-0 break-words">{term}</dt>
-      <dd className={cn(PAIR_RIGHT, "whitespace-nowrap")}>{formatCredits(value)}</dd>
+      <dd className={cn(PAIR_RIGHT, "whitespace-nowrap")}><Minutes value={value} /></dd>
     </div>
   );
 }
 
 /** One line per seat: what it was asked, what it paid, and what is still to come. */
 function lineFor(p: DetailPlayer): string {
-  const share = formatCredits(p.share_minutes);
+  const share = minutesCompact(p.share_minutes);
   const key = statusKey(p);
   // R2 F2-3 — a share changed after money moved: say the difference, not the booking-time words.
   // ("Asked again" already names the new share beside what they said yes to.)
@@ -69,27 +71,27 @@ function lineFor(p: DetailPlayer): string {
     case "settled_outside": return DETAIL_MONEY.settledRow;
     case "lapsed": return DETAIL_MONEY.lapsedRow;
     case "invited": case "open_link": return DETAIL_MONEY.invitedRow(share);
-    case "needs_consent": return DETAIL_MONEY.askedAgainRow(share, formatCredits(p.consented_minutes));
+    case "needs_consent": return DETAIL_MONEY.askedAgainRow(share, minutesCompact(p.consented_minutes));
     case "not_agreed": return DETAIL_MONEY.notAgreedRow(share);
-    default: return p.unpaid_minutes > 0 ? DETAIL_MONEY.unpaidRow(share) : DETAIL_MONEY.paidRow(formatCredits(p.paid_minutes), share);
+    default: return p.unpaid_minutes > 0 ? DETAIL_MONEY.unpaidRow(share) : DETAIL_MONEY.paidRow(minutesCompact(p.paid_minutes), share);
   }
 }
 
 /** Part-paid and asked for more, or paid more than the share now asks — null otherwise. */
 function movedLine(p: DetailPlayer): string | null {
   if (p.paid_minutes <= 0) return null;
-  const paid = formatCredits(p.paid_minutes);
+  const paid = minutesCompact(p.paid_minutes);
   if (p.share_minutes < p.paid_minutes) {
-    return DETAIL_MONEY.goingBackRow(paid, formatCredits(p.paid_minutes - p.share_minutes));
+    return DETAIL_MONEY.goingBackRow(paid, minutesCompact(p.paid_minutes - p.share_minutes));
   }
-  if (p.unpaid_minutes > 0) return DETAIL_MONEY.askedMoreRow(paid, formatCredits(p.unpaid_minutes));
+  if (p.unpaid_minutes > 0) return DETAIL_MONEY.askedMoreRow(paid, minutesCompact(p.unpaid_minutes));
   return null;
 }
 
 /** The sentence under the list for a seat still owing: nothing paid yet, or asked for more. */
 function unpaidSentence(p: DetailPlayer, name: string, deadline: string, toWhom: string): string {
   if (p.paid_minutes > 0) {
-    return DETAIL_MONEY.askedMoreSentence(name, formatCredits(p.paid_minutes), formatCredits(p.unpaid_minutes), deadline, toWhom);
+    return DETAIL_MONEY.askedMoreSentence(name, minutesCompact(p.paid_minutes), minutesCompact(p.unpaid_minutes), deadline, toWhom);
   }
   return DETAIL_MONEY.unpaidSentence(name, deadline, toWhom);
 }
@@ -125,14 +127,14 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
 
 /** What one partner's row says on a cancelled game: paid and standing, came back (R2 F2-4), or nothing owed. */
 function cancelledSeatWords(p: BookingDetail["players"][number]): string {
-  if (p.paid_minutes > 0) return DETAIL_CANCELLED.paidRow(formatCredits(p.paid_minutes));
-  if ((p.returned_minutes ?? 0) > 0) return DETAIL_CANCELLED.returnedRow(formatCredits(p.returned_minutes ?? 0));
+  if (p.paid_minutes > 0) return DETAIL_CANCELLED.paidRow(minutesCompact(p.paid_minutes));
+  if ((p.returned_minutes ?? 0) > 0) return DETAIL_CANCELLED.returnedRow(minutesCompact(p.returned_minutes ?? 0));
   return DETAIL_CANCELLED.nothingToPay;
 }
 
 /**
  * R1 F2.10 — the money on a cancelled game: what came back and what was paid in the end. No
- * deadline, no "not paid yet", no "Paid 0.00 of 40.00": nothing on it is still being asked.
+ * deadline, no "not paid yet", no "Paid 0 min of 40 min": nothing on it is still being asked.
  *
  * <p>
  * R5 M5-7 — a late cancellation says its penalty here as the cancel sheet did, as the ledger's own
@@ -160,7 +162,7 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
       {refunded > 0 && money.is_split ? (
         <p className="text-sm text-text-secondary" data-split-refund="">
           {penalty > 0
-            ? keepAmounts(DETAIL_CANCELLED.splitRefundPenaltyNote(who, formatCredits(penalty)))
+            ? keepAmounts(DETAIL_CANCELLED.splitRefundPenaltyNote(who, minutesCompact(penalty)))
             : DETAIL_CANCELLED.splitRefundNote(who)}
         </p>
       ) : null}
@@ -197,8 +199,8 @@ function noShowSeatWords(p: DetailPlayer): string {
   if (p.settled_outside) return DETAIL_MONEY.settledRow;
   const back = p.returned_minutes ?? 0;
   const paidIn = p.paid_minutes + back;
-  if (back > 0) return DETAIL_NO_SHOW.paidBackRow(formatCredits(paidIn), formatCredits(back));
-  return paidIn > 0 ? DETAIL_NO_SHOW.paidRow(formatCredits(paidIn)) : DETAIL_NO_SHOW.nothingRow;
+  if (back > 0) return DETAIL_NO_SHOW.paidBackRow(minutesCompact(paidIn), minutesCompact(back));
+  return paidIn > 0 ? DETAIL_NO_SHOW.paidRow(minutesCompact(paidIn)) : DETAIL_NO_SHOW.nothingRow;
 }
 
 /**

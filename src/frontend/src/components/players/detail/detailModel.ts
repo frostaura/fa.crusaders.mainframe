@@ -190,9 +190,10 @@ export function adminActs(p: DetailPlayer): AdminAct[] {
 }
 
 /**
- * R5 V5-7 — a figure never breaks mid-value ("100.00 / cr" at 390 / 200 %): a lone figure does not
- * wrap at all, and inside a sentence each "N cr" is held together by a no-break space.
+ * R5 V5-7 — a figure never breaks mid-value ("1 h / 30 min" at 390 / 200 %): a lone figure does
+ * not wrap at all, and inside a sentence each minutes figure ("1 d 6 h 15 min") is held together
+ * by no-break spaces — between a number and its unit, and between one part and the next.
  */
 export function keepAmounts(text: string): string {
-  return text.replace(/(\d) cr\b/g, "$1\u00a0cr");
+  return text.replace(/(\d) (d|h|min)\b/g, "$1\u00a0$2").replace(/\b(d|h) (?=\d)/g, "$1\u00a0");
 }

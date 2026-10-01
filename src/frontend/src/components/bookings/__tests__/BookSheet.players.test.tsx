@@ -10,7 +10,6 @@ import type { BalanceTransport } from "@/lib/liveBalance";
 import { refuse, signIn, signOut, stubFetch, type StubCall, type StubRoute } from "@/test/harness";
 import { BOOK_SEATS, BOOK_SHEET } from "@/lib/bookingsCopy";
 import { amountProblemSentence } from "@/lib/amountCopy";
-import { formatCredits } from "@/lib/utils";
 import {
   BOOK_CONFIRM, BOOK_PLAYERS, BOOK_SPLIT, PICKER, PLAYERS_REFUSAL, heldLine, owedBackLine,
 } from "@/lib/playersCopy";
@@ -61,7 +60,7 @@ function open(props: Partial<BookSheetProps> = {}) {
   render(
     <BookSheet
       open onOpenChange={vi.fn()} slots={[C1]} timezone={TZ} sliceMinutes={15}
-      isAdmin={false} actorUserId={ME} balanceCredits={500} onBooked={onBooked} {...props}
+      isAdmin={false} actorUserId={ME} balanceMinutes={500} onBooked={onBooked} {...props}
     />,
     { wrapper: Providers, reactStrictMode: true },
   );
@@ -117,7 +116,9 @@ describe("BookSheet — Players", () => {
     const summary = () => screen.getByRole("list", { name: BOOK_SHEET.summaryLabel });
     expect(within(summary()).getByText("Court 1")).toBeTruthy();
     expect(within(summary()).getByText("Court 2")).toBeTruthy();
-    expect(within(summary()).getAllByText(formatCredits(100))).toHaveLength(2);
+    // P13 — what each slot takes, in minutes (100 → "1 h 40 min"), read aloud in words.
+    expect(within(summary()).getAllByText("1 h 40 min")).toHaveLength(2);
+    expect(within(summary()).getAllByText("1 hour 40 minutes")).toHaveLength(2);
 
     await addSamAndALink();
     await next();
@@ -211,7 +212,7 @@ describe("BookSheet — Players", () => {
     fireEvent.click(screen.getByRole("button", { name: PICKER.guestAdd }));
     expect(screen.getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(1, 2, BOOK_SHEET.steps.players));
     await next();
-    expect(screen.getByText("You pay 50.00 cr now. Jo (guest) plays free.")).toBeTruthy();
+    expect(screen.getByText("You pay 50 min now. Jo (guest) plays free.")).toBeTruthy();
   });
 });
 
@@ -222,10 +223,10 @@ describe("BookSheet — Split", () => {
     await addSamAndALink();
     await next();
     const totals = await screen.findByRole("region", { name: BOOK_SPLIT.totalsLabel });
-    await waitFor(() => expect(totals).toHaveTextContent(BOOK_SPLIT.youPayNow("100.00 cr", "66.00 cr")));
-    expect(totals).toHaveTextContent("You34.00 cr");
-    expect(totals).toHaveTextContent("Sam33.00 cr");
-    expect(totals).toHaveTextContent(`${BOOK_PLAYERS.linkName}33.00 cr`);
+    await waitFor(() => expect(totals).toHaveTextContent(BOOK_SPLIT.youPayNow("1 h 40 min", "1 h 6 min")));
+    expect(totals).toHaveTextContent("You34 min");
+    expect(totals).toHaveTextContent("Sam33 min");
+    expect(totals).toHaveTextContent(`${BOOK_PLAYERS.linkName}33 min`);
     const [sent] = posts(stub.calls, "/api/v1/players/split-preview");
     expect(sent.body).toEqual({ priceMinutes: 100, splitMode: "equal", players: [{ userId: "sam", seat: 2 }, { link: true, seat: 4 }] });
   });
@@ -251,9 +252,9 @@ describe("BookSheet — Split", () => {
     fireEvent.change(screen.getByLabelText(BOOK_SPLIT.weightLabel("Sam")), { target: { value: "2" } });
     const totals = screen.getByRole("region", { name: BOOK_SPLIT.totalsLabel });
     // Σw = 1 + 2 + 1: Sam ⌊200/4⌋ = 50, the link 25, you the rest.
-    await waitFor(() => expect(totals).toHaveTextContent(BOOK_SPLIT.youPayNow("100.00 cr", "75.00 cr")));
+    await waitFor(() => expect(totals).toHaveTextContent(BOOK_SPLIT.youPayNow("1 h 40 min", "1 h 15 min")));
     await act(async () => { releaseEqual(); await pause(50); });
-    expect(totals).toHaveTextContent(BOOK_SPLIT.youPayNow("100.00 cr", "75.00 cr"));
+    expect(totals).toHaveTextContent(BOOK_SPLIT.youPayNow("1 h 40 min", "1 h 15 min"));
   });
 
   it("F1.18 — the split method is a radio group that selects as the arrows move", async () => {
@@ -278,10 +279,10 @@ describe("BookSheet — Split", () => {
     await userEvent.setup().click(screen.getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
     const sam = screen.getByLabelText(BOOK_SPLIT.amountLabel("Sam"));
     fireEvent.change(sam, { target: { value: "1,000" } });
-    expect(screen.getByText(amountProblemSentence({ kind: "ambiguous" }, "credits"))).toBeTruthy();
+    expect(screen.getByText(amountProblemSentence({ kind: "ambiguous" }, "minutes"))).toBeTruthy();
     expect(sam).toHaveAttribute("aria-invalid", "true");
     fireEvent.change(sam, { target: { value: "12,50" } });
-    expect(screen.queryByText(amountProblemSentence({ kind: "ambiguous" }, "credits"))).toBeNull();
+    expect(screen.queryByText(amountProblemSentence({ kind: "ambiguous" }, "minutes"))).toBeNull();
   });
 
   it("says amounts past the price at once, asks the server nothing, and will not continue", async () => {
@@ -291,7 +292,7 @@ describe("BookSheet — Split", () => {
     await next();
     await userEvent.setup().click(screen.getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
     // Starts from the equal split, so the fields already add up.
-    expect(screen.getByLabelText(BOOK_SPLIT.amountLabel("Sam"))).toHaveValue("33.00");
+    expect(screen.getByLabelText(BOOK_SPLIT.amountLabel("Sam"))).toHaveValue("33");
     const before = posts(stub.calls, "/api/v1/players/split-preview").length;
     fireEvent.change(screen.getByLabelText(BOOK_SPLIT.amountLabel("Sam")), { target: { value: "80" } });
     fireEvent.change(screen.getByLabelText(BOOK_SPLIT.amountLabel(BOOK_PLAYERS.linkName)), { target: { value: "30" } });
@@ -328,9 +329,9 @@ describe("BookSheet — Confirm and the booking", () => {
     open();
     await addSamAndALink();
     await next();
-    await screen.findByText(BOOK_SPLIT.youPayNow("100.00 cr", "66.00 cr"));
+    await screen.findByText(BOOK_SPLIT.youPayNow("1 h 40 min", "1 h 6 min"));
     await next();
-    const sentence = "You pay 100.00 cr now; Sam and whoever takes your link are asked for 33.00 cr each.";
+    const sentence = "You pay 1 h 40 min now; Sam and whoever takes your link are asked for 33 min each.";
     expect(await screen.findByText(sentence)).toBeTruthy();
     expect(screen.getByRole("region", { name: BOOK_CONFIRM.playersLabel })).toHaveTextContent(BOOK_CONFIRM.playersLine(["Sam", BOOK_CONFIRM.linkInLine]));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(3, 100, null) }));
@@ -367,7 +368,7 @@ describe("BookSheet — Confirm and the booking", () => {
     await tab(PICKER.link);
     fireEvent.click(screen.getByRole("button", { name: PICKER.linkAdd }));
     await next();
-    await screen.findByText(BOOK_SPLIT.youPayNow("100.00 cr", "50.00 cr"));
+    await screen.findByText(BOOK_SPLIT.youPayNow("1 h 40 min", "50 min"));
     await next();
     fireEvent.click(await screen.findByRole("button", { name: BOOK_SHEET.primary(3, 100, null) }));
     const shareButton = await screen.findByRole("button", { name: BOOK_CONFIRM.shareLink });
@@ -407,7 +408,7 @@ describe("BookSheet — Confirm and the booking", () => {
     await next();
     expect(await screen.findByText(BOOK_SPLIT.eachBooking)).toBeTruthy();
     await next();
-    expect(await screen.findByText("On each booking you pay 100.00 cr now; Sam is asked for 50.00 cr.")).toBeTruthy();
+    expect(await screen.findByText("On each booking you pay 1 h 40 min now; Sam is asked for 50 min.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(6, 200, null) }));
     expect(await screen.findByText(PLAYERS_REFUSAL.member_not_found)).toBeTruthy();
     const [call] = posts(stub.calls, "/api/v1/bookings/bulk");
@@ -425,14 +426,14 @@ describe("BookSheet — Confirm and the booking", () => {
       },
     ]);
     signIn({ isAdmin: false });
-    open({ balanceCredits: 120 });
+    open({ balanceMinutes: 120 });
     await next();
     const money = await waitFor(() => {
       const dl = document.querySelector("dl")!;
-      expect(dl).toHaveTextContent(`${BOOK_SHEET.availableNow}100.00 cr`);
+      expect(dl).toHaveTextContent(`${BOOK_SHEET.availableNow}1 h 40 min`);
       return dl;
     });
-    expect(money).toHaveTextContent(`${BOOK_SHEET.availableAfter}0.00 cr`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.availableAfter}0 min`);
     expect(screen.getByText(heldLine(20, "2030-09-10T18:00:00Z", TZ))).toBeTruthy();
   });
 
@@ -445,15 +446,15 @@ describe("BookSheet — Confirm and the booking", () => {
       },
     ]);
     signIn({ isAdmin: false });
-    open({ balanceCredits: 10 });
+    open({ balanceMinutes: 10 });
     await next();
     const money = await waitFor(() => {
       const dl = document.querySelector("dl")!;
-      expect(dl).toHaveTextContent(`${BOOK_SHEET.availableNow}−6.00 cr`);
+      expect(dl).toHaveTextContent(`${BOOK_SHEET.availableNow}−6 min`);
       return dl;
     });
     // 100 to pay from −6: 106 still needed — the rows add up.
-    expect(money).toHaveTextContent(`${BOOK_SHEET.stillNeeded}106.00 cr`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.stillNeeded}1 h 46 min`);
     expect(screen.getByText(owedBackLine(16))).toBeTruthy();
     expect(document.querySelector("[data-held-line]")).toBeNull();
   });

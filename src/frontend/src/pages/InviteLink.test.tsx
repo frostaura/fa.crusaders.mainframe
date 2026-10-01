@@ -52,7 +52,7 @@ describe("an open link", () => {
     openLink([{ path: OPEN, body: invite() }]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.linkTitle })).toBeInTheDocument();
     expect(screen.getByText(invitedLine("Nomsa", true))).toBeInTheDocument();
-    expect(screen.getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("55.00 cr");
+    expect(screen.getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("55 min");
     // An open seat has no one to say no to: the link's decline answers 404 for it.
     expect(screen.queryByRole("button", { name: INVITES_COPY.decline })).toBeNull();
   });
@@ -142,7 +142,7 @@ describe("R2 F2-6 — the claimer's own link after the organiser cancelled", () 
       { path: OPEN, status: 409, body: { error: "invite_closed", booking_id: BOOKING } },
       { path: `/api/v1/bookings/${BOOKING}`, body: claimedDetail() },
     ]);
-    expect(await screen.findByText(INVITES_COPY.linkCancelledBack("10.00 cr"))).toBeInTheDocument();
+    expect(await screen.findByText(INVITES_COPY.linkCancelledBack("10 min"))).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: INVITES_COPY.fateCancelledTitle })).toBeInTheDocument();
     expect(screen.queryByText(INVITES_COPY.refusedTitle)).toBeNull();
     expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
@@ -185,7 +185,7 @@ describe("R1 F2.3 / F2.4 — opened signed out", () => {
     const box = facts.closest("[data-invite-preview]") as HTMLElement;
     // 18:00 in the club's zone (UTC+2), whatever zone the test runner is in.
     expect(box).toHaveTextContent("Court 2 · Thu 1 Oct, 18:00–18:45");
-    expect(box).toHaveTextContent(`${INVITES_COPY.yourShare} 25.00 cr`);
+    expect(box).toHaveTextContent(`${INVITES_COPY.yourShare} 25 min`);
     // R2 F2-7 — the facts are on screen: the subtitle never says "sign in to see" them.
     expect(screen.getByText(INVITES_COPY.signedOutBodyShown)).toBeInTheDocument();
     expect(screen.queryByText(INVITES_COPY.signedOutBody)).toBeNull();
@@ -227,8 +227,8 @@ describe("R1 F2.5 / F2.7 — the link is remembered until it is answered", () =>
     await screen.findByText(invitedLine("Nomsa", true));
     await waitForPending(TOKEN);
     expect(pendingInvite(ME)?.userId).toBe(ME);
-    expect(screen.getByRole("link", { name: INVITES_COPY.topUp }).getAttribute("href"))
-      .toBe(`/wallet/topup?returnTo=${encodeURIComponent(`/j/${TOKEN}`)}`);
+    expect(screen.getByRole("link", { name: INVITES_COPY.buyMinutes }).getAttribute("href"))
+      .toBe(`/wallet/buy?returnTo=${encodeURIComponent(`/j/${TOKEN}`)}`);
   });
 
   it("an accept forgets it", async () => {

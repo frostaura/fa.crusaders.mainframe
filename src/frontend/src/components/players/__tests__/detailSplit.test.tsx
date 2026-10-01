@@ -19,7 +19,7 @@ vi.mock("@/components/players/PlayerPicker", () => ({
 /**
  * R1 F2.1 — the organiser can change the split of a booking that already stands (the BookSheet's
  * own Split step), and a player added to an amount or ratio split is asked for a share first —
- * never seated at "Asked for 0.00 cr".
+ * never seated at "Asked for 0 min".
  */
 
 beforeEach(() => { signOut(); });
@@ -52,7 +52,7 @@ describe("change the split (R1 F2.1)", () => {
     fireEvent.click(within(dialog).getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
     // Started from the shares as they stand, never four zeroes.
     const sam = within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") });
-    expect(sam).toHaveValue("25.00");
+    expect(sam).toHaveValue("25");
     fireEvent.change(sam, { target: { value: "30" } });
     const save = within(dialog).getByRole("button", { name: CHANGE_SPLIT.save });
     await waitFor(() => expect(save).toBeEnabled());
@@ -112,10 +112,10 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
     fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
     const ask = await screen.findByRole("dialog", { name: SHARE_ASK.title("Jo") });
-    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("60.00 cr"));
+    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("1 h"));
     const field = within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") });
     // Offered the equal share among three payers, in whole credits: ⌊100 / 3⌋.
-    expect(field).toHaveValue("33.00");
+    expect(field).toHaveValue("33");
     fireEvent.change(field, { target: { value: "30" } });
     fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));
     await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_ACTIONS.invited("Jo")));
@@ -131,9 +131,9 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
     fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
     const ask = await screen.findByRole("dialog", { name: SHARE_ASK.title("Jo") });
-    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("60.00 cr"));
+    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("1 h"));
     // ⌊100 / 3⌋, no longer capped at the stale 30.
-    expect(within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") })).toHaveValue("33.00");
+    expect(within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") })).toHaveValue("33");
   });
 
   it("refuses more than the organiser covers, in the field, and sends nothing", async () => {
@@ -148,10 +148,10 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     expect(stub.calls.some((c) => c.method === "POST" && c.path === `${DETAIL_PATH}/players`)).toBe(false);
   });
 
-  it("reads the amount with the club's one money parser: a decimal comma is fine, '1e3' is refused in words (R1, from F3)", async () => {
+  it("reads the amount with the club's one amount parser, whole minutes only: '1e3' and '12,5' are refused in words (R1, P13)", async () => {
     const stub = serve({ detail: amountSplit(), extra: [{
       method: "POST", path: `${DETAIL_PATH}/players`,
-      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 3, user_id: "u-jo", guest_name: null, status: "invited", share_minutes: 12.5, invite_token: null, invite_path: null }] },
+      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 3, user_id: "u-jo", guest_name: null, status: "invited", share_minutes: 12, invite_token: null, invite_path: null }] },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
@@ -160,11 +160,16 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     const field = within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") });
     fireEvent.change(field, { target: { value: "1e3" } });
     fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));
-    expect(within(ask).getByText(AMOUNT_COPY.notANumber("credits"))).toBeInTheDocument();
+    expect(within(ask).getByText(AMOUNT_COPY.notANumber("minutes"))).toBeInTheDocument();
+    // A fraction of a minute is refused as too precise — never rounded under the organiser's thumb.
     fireEvent.change(field, { target: { value: "12,5" } });
     fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));
+    expect(within(ask).getByText(AMOUNT_COPY.tooPrecise("minutes"))).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.method === "POST" && c.path === `${DETAIL_PATH}/players`)).toBe(false);
+    fireEvent.change(field, { target: { value: "12" } });
+    fireEvent.click(within(ask).getByRole("button", { name: SHARE_ASK.confirm("Jo") }));
     await waitFor(() => expect(stub.calls.find((c) => c.method === "POST" && c.path === `${DETAIL_PATH}/players`)?.body)
-      .toEqual({ players: [{ userId: "u-jo", amount: 12.5 }] }));
+      .toEqual({ players: [{ userId: "u-jo", amount: 12 }] }));
   });
 
   it("a guest plays free, so nothing is asked", async () => {
@@ -203,11 +208,11 @@ describe("after the booking stands (R2 F2-3)", () => {
     fireEvent.click(within(dialog).getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
     fireEvent.change(within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") }), { target: { value: "37" } });
     const effects = await within(dialog).findByRole("region", { name: CHANGE_SPLIT.effectsTitle });
-    expect(effects).toHaveTextContent(CHANGE_SPLIT.askedMore("Sam", "12.00 cr", true));
-    expect(effects).toHaveTextContent(CHANGE_SPLIT.youCover("13.00 cr"));
+    expect(effects).toHaveTextContent(CHANGE_SPLIT.askedMore("Sam", "12 min", true));
+    expect(effects).toHaveTextContent(CHANGE_SPLIT.youCover("13 min"));
     fireEvent.change(within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") }), { target: { value: "20" } });
     await waitFor(() => expect(within(dialog).getByRole("region", { name: CHANGE_SPLIT.effectsTitle }))
-      .toHaveTextContent(CHANGE_SPLIT.goesBack("Sam", "5.00 cr")));
+      .toHaveTextContent(CHANGE_SPLIT.goesBack("Sam", "5 min")));
   });
 
   it("the change sheet's totals say no 'You pay … now' — the booking is paid for; the effects box says what moves", async () => {
@@ -221,7 +226,7 @@ describe("after the booking stands (R2 F2-3)", () => {
     const totals = within(dialog).getByRole("region", { name: BOOK_SPLIT.totalsLabel });
     await waitFor(() => expect(totals.querySelector("[data-totals]")).not.toBeNull());
     expect(totals).not.toHaveTextContent(/You pay .* now/);
-    expect(totals).toHaveTextContent(BOOK_SPLIT.addsUp("100.00 cr"));
+    expect(totals).toHaveTextContent(BOOK_SPLIT.addsUp("1 h 40 min"));
   });
 
   it("the money box says a part-paid partner is asked for more — never 'hasn't paid yet'", async () => {
@@ -229,8 +234,8 @@ describe("after the booking stands (R2 F2-3)", () => {
     serve({ detail: detail({ players: [seat(), bob] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(money).toHaveTextContent(DETAIL_MONEY.askedMoreRow("25.00 cr", "12.00 cr"));
-    expect(money).toHaveTextContent(/Sam has paid 25\.00 cr and is asked for 12\.00 cr more/);
+    expect(money).toHaveTextContent(DETAIL_MONEY.askedMoreRow("25 min", "12 min"));
+    expect(money).toHaveTextContent(/Sam has paid 25 min and is asked for 12 min more/);
     expect(money).not.toHaveTextContent(/hasn't paid yet/);
   });
 
@@ -239,6 +244,6 @@ describe("after the booking stands (R2 F2-3)", () => {
     serve({ detail: detail({ players: [seat(), eve] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(money).toHaveTextContent(DETAIL_MONEY.goingBackRow("25.00 cr", "5.00 cr"));
+    expect(money).toHaveTextContent(DETAIL_MONEY.goingBackRow("25 min", "5 min"));
   });
 });

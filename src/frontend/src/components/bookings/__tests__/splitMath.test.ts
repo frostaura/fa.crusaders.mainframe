@@ -8,8 +8,8 @@ import {
 import type { SplitMode } from "@/lib/playersApi";
 
 /**
- * The phone's mirror of the backend's `SplitCalculator` (D11 §2), the Confirm sentence and the
- * request bodies. The server's preview stays the displayed truth; these pin that the mirror
+ * The phone's mirror of the backend's `SplitCalculator` (D11 §2, P13 §1.2 — whole minutes), the
+ * Confirm sentence and the request bodies. The server's preview stays the displayed truth; these pin that the mirror
  * agrees with it — the table cases are the spec's, the property run is the backend's own
  * "sums to P exactly, always" held over thousands of generated splits.
  */
@@ -19,17 +19,25 @@ const ALEX = { kind: "member", userId: "alex", name: "Alex Naidoo", photoUrl: nu
 const JO = { kind: "guest", name: "Jo" } as const;
 const LINK = { kind: "link" } as const;
 
-const cents = (n: number) => Math.round(n * 100);
-
 describe("splitShares — the spec's table", () => {
-  it("equal: partners floor to whole credits, the organiser takes the odd credit", () => {
+  it("equal: partners floor to whole minutes, the organiser takes the odd minute", () => {
     const r = splitShares(100, "equal", 1, [{ seat: 2, isGuest: false }, { seat: 3, isGuest: false }]);
     expect(r).toEqual({ ok: true, shares: [{ seat: 1, share: 34, weight: 1 }, { seat: 2, share: 33, weight: 1 }, { seat: 3, share: 33, weight: 1 }] });
   });
 
-  it("equal: a fractional price leaves the fraction with the organiser", () => {
-    const r = splitShares(50.5, "equal", 1, [{ seat: 2, isGuest: false }]);
-    expect(r.ok && r.shares.map((s) => s.share)).toEqual([25.5, 25]);
+  it("equal: an odd price leaves the odd minute with the organiser", () => {
+    const r = splitShares(45, "equal", 1, [{ seat: 2, isGuest: false }]);
+    expect(r.ok && r.shares.map((s) => s.share)).toEqual([23, 22]);
+  });
+
+  it("refuses a price that is not whole minutes — the mirror never invents a fraction", () => {
+    expect(splitShares(50.5, "equal", 1, [{ seat: 2, isGuest: false }])).toEqual({ ok: false, error: "split_amount_invalid" });
+  });
+
+  it("ratio: every remainder is the organiser's — partners are floored, never rounded", () => {
+    // 90 × 1/7 = 12.86 → 12 each for three partners at weight 1; the organiser (weight 4) keeps 54.
+    const r = splitShares(90, "ratio", 4, [1, 2, 3].map((k) => ({ seat: k + 1, isGuest: false, weight: 1 })));
+    expect(r.ok && r.shares.map((s) => s.share)).toEqual([54, 12, 12, 12]);
   });
 
   it("guests carry 0 and are not a head", () => {
@@ -48,12 +56,13 @@ describe("splitShares — the spec's table", () => {
     expect(splitShares(100, "ratio", 1, [{ seat: 2, isGuest: false, weight: 1.5 }])).toEqual({ ok: false, error: "split_weight_invalid" });
   });
 
-  it("amount: the figures as given, the organiser the rest; more than the price is refused", () => {
-    const r = splitShares(100, "amount", 0, [{ seat: 2, isGuest: false, amount: 30.25 }, { seat: 3, isGuest: false, amount: 20 }]);
-    expect(r.ok && r.shares.map((s) => s.share)).toEqual([49.75, 30.25, 20]);
-    expect(splitShares(100, "amount", 0, [{ seat: 2, isGuest: false, amount: 60 }, { seat: 3, isGuest: false, amount: 40.01 }]))
+  it("amount: whole minutes as given, the organiser the rest; more than the price is refused", () => {
+    const r = splitShares(100, "amount", 0, [{ seat: 2, isGuest: false, amount: 30 }, { seat: 3, isGuest: false, amount: 20 }]);
+    expect(r.ok && r.shares.map((s) => s.share)).toEqual([50, 30, 20]);
+    expect(splitShares(100, "amount", 0, [{ seat: 2, isGuest: false, amount: 60 }, { seat: 3, isGuest: false, amount: 41 }]))
       .toEqual({ ok: false, error: "split_exceeds_price" });
-    expect(splitShares(100, "amount", 0, [{ seat: 2, isGuest: false, amount: 1.234 }])).toEqual({ ok: false, error: "split_amount_invalid" });
+    // A fraction of a minute is not a share: refused, never truncated (P13 §1.2).
+    expect(splitShares(100, "amount", 0, [{ seat: 2, isGuest: false, amount: 30.5 }])).toEqual({ ok: false, error: "split_amount_invalid" });
     expect(splitShares(100, "amount", 0, [{ seat: 2, isGuest: false, amount: -1 }])).toEqual({ ok: false, error: "split_amount_invalid" });
   });
 
@@ -77,34 +86,37 @@ describe("splitShares — sums to the price exactly, always (5 000 generated spl
     const next = rng(20260928);
     const modes: SplitMode[] = ["equal", "ratio", "amount"];
     for (let i = 0; i < 5000; i++) {
-      const price = Math.round(next() * 50000) / 100; // 0.00 – 500.00, two places
+      const price = Math.floor(next() * 501); // 0 – 500 whole minutes
       const mode = modes[Math.floor(next() * 3)];
       const count = 1 + Math.floor(next() * 3);
       const partners: MathSeat[] = Array.from({ length: count }, (_, k) => ({
         seat: k + 2,
         isGuest: next() < 0.25,
         weight: Math.floor(next() * 101),
-        amount: Math.round(next() * (price / count) * 100) / 100,
+        amount: Math.floor(next() * (price / count + 1)),
       }));
       const organiserWeight = 1 + Math.floor(next() * 100);
       const r = splitShares(price, mode, organiserWeight, partners);
       if (!r.ok) {
         // The only refusals a generated case may earn, each only when it is TRUE: every weight
-        // zero (ratio), or amounts that — rounded to cents — pass the price (amount).
-        const asked = partners.filter((p) => !p.isGuest).reduce((n, p) => n + cents(p.amount ?? 0), 0);
-        if (r.error === "split_exceeds_price") expect(asked, `case ${i}`).toBeGreaterThan(cents(price));
+        // zero (ratio), or amounts that pass the price (amount).
+        const asked = partners.filter((p) => !p.isGuest).reduce((n, p) => n + (p.amount ?? 0), 0);
+        if (r.error === "split_exceeds_price") expect(asked, `case ${i}`).toBeGreaterThan(price);
         else expect(r.error, `case ${i}`).toBe("split_weight_invalid");
         continue;
       }
-      const sum = r.shares.reduce((n, s) => n + cents(s.share), 0);
-      expect(sum, `case ${i}: ${JSON.stringify({ price, mode, partners })}`).toBe(cents(price));
+      const sum = r.shares.reduce((n, s) => n + s.share, 0);
+      expect(sum, `case ${i}: ${JSON.stringify({ price, mode, partners })}`).toBe(price);
+      // Whole minutes everywhere — the organiser's remainder included.
+      expect(r.shares.every((s) => Number.isInteger(s.share)), `case ${i}`).toBe(true);
       expect(r.shares[0].seat).toBe(1);
       expect(r.shares[0].share).toBeGreaterThanOrEqual(0);
       for (const s of r.shares.slice(1)) {
         const seat = partners.find((p) => p.seat === s.seat)!;
         if (seat.isGuest) expect(s.share).toBe(0);
-        else if (mode !== "amount") expect(Number.isInteger(s.share), `case ${i}`).toBe(true);
-        else expect(s.share).toBe(seat.amount);
+        else if (mode === "amount") expect(s.share).toBe(seat.amount);
+        // Equal / ratio: floored, so a partner is never asked for more than their exact part.
+        else expect(s.share, `case ${i}`).toBeLessThanOrEqual(price);
       }
     }
   });
@@ -148,7 +160,7 @@ describe("the draft → request bodies", () => {
 
   it("switching to Amount starts from the equal split, and sends amounts", () => {
     const d = withMode(draft(), "amount", 100);
-    expect(d.seats.map((s) => s.amount)).toEqual(["33.00", "33.00", ""]);
+    expect(d.seats.map((s) => s.amount)).toEqual(["33", "33", ""]);
     expect(playersPayload(d)?.players).toEqual([
       { userId: "sam", seat: 2, amount: 33 }, { link: true, seat: 3, amount: 33 }, { guestName: "Jo", seat: 4 },
     ]);
@@ -167,13 +179,17 @@ describe("the draft → request bodies", () => {
     expect(parseWeight("101")).toBeNull();
     expect(parseWeight("2.5")).toBeNull();
     expect(parseAmount("")).toBe(0);
-    expect(parseAmount("12,5")).toBe(12.5);
+    expect(parseAmount("12")).toBe(12);
+    // Whole minutes only (P13): a decimal is refused, never rounded.
+    expect(parseAmount("12,5")).toBeNull();
     expect(parseAmount("12.345")).toBeNull();
     expect(parseAmount("-1")).toBeNull();
   });
 
-  it("reads a share through the product's one amount parser (lib/amount)", () => {
-    expect(parseAmount("12,50")).toBe(12.5);
+  it("reads a share through the product's one amount parser (lib/amount), with the minutes rules", () => {
+    expect(parseAmount("90")).toBe(90);
+    expect(parseAmount("12,50")).toBeNull();
+    expect(amountProblem("22,5")).toEqual({ kind: "too_precise", decimals: 0 });
     expect(parseAmount("1e2")).toBeNull();
     expect(parseAmount("1,000")).toBeNull();
     expect(amountProblem("1,000")).toEqual({ kind: "ambiguous" });
@@ -190,7 +206,7 @@ describe("the draft → request bodies", () => {
   });
 
   it("partnersTotal is what comes back as they accept", () => {
-    expect(partnersTotal([{ seat: 1, share_minutes: 25.5 }, { seat: 2, share_minutes: 25 }, { seat: 3, share_minutes: 0.1 }])).toBe(25.1);
+    expect(partnersTotal([{ seat: 1, share_minutes: 26 }, { seat: 2, share_minutes: 25 }, { seat: 3, share_minutes: 4 }])).toBe(29);
   });
 });
 
@@ -200,26 +216,26 @@ describe("the Confirm sentence", () => {
   it("names members by first name, groups an equal ask, and lets a guest play free", () => {
     const d = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), ALEX, 3), JO, 4);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 25], [3, 25], [4, 0]))))
-      .toBe("You pay 100.00 cr now; Sam and Alex are asked for 25.00 cr each. Jo (guest) plays free.");
+      .toBe("You pay 1 h 40 min now; Sam and Alex are asked for 25 min each. Jo (guest) plays free.");
   });
 
   it("says who takes an open seat, and a single partner in the singular", () => {
     const d = addPlayer(EMPTY_DRAFT, LINK, 2);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 50]))))
-      .toBe("You pay 100.00 cr now; whoever takes your link is asked for 50.00 cr.");
+      .toBe("You pay 1 h 40 min now; whoever takes your link is asked for 50 min.");
     const two = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), LINK, 3), LINK, 4);
     expect(confirmPlayersSentence(100, sentenceSeats(two, shares([1, 34], [2, 33], [3, 33], [4, 33]))))
-      .toBe("You pay 100.00 cr now; Sam and the 2 people who take your links are asked for 33.00 cr each.");
+      .toBe("You pay 1 h 40 min now; Sam and the 2 people who take your links are asked for 33 min each.");
   });
 
   it("lists different asks one by one, and says 'each booking' for a batch", () => {
     const d = addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), LINK, 3);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 30], [3, 20])), true))
-      .toBe("On each booking you pay 100.00 cr now; Sam is asked for 30.00 cr and whoever takes your link for 20.00 cr.");
+      .toBe("On each booking you pay 1 h 40 min now; Sam is asked for 30 min and whoever takes your link for 20 min.");
   });
 
   it("guests only: you pay, they play free", () => {
     const d = addPlayer(addPlayer(EMPTY_DRAFT, JO, 2), { kind: "guest", name: "Lee" }, 3);
-    expect(confirmPlayersSentence(50, sentenceSeats(d, []))).toBe("You pay 50.00 cr now. Jo (guest) and Lee (guest) play free.");
+    expect(confirmPlayersSentence(50, sentenceSeats(d, []))).toBe("You pay 50 min now. Jo (guest) and Lee (guest) play free.");
   });
 });

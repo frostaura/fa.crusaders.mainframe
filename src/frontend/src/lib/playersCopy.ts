@@ -2,7 +2,8 @@ import { INBOX_TITLE } from "./bellCopy";
 import { ApiError } from "./api";
 import { clubCalendarDate, clubClock, clubShortDate } from "./clubClock";
 import { describeFailure } from "./errors";
-import { formatCredits } from "./utils";
+import { minutesCompact } from "./minutes";
+import { BUY_MINUTES_ACTION } from "./gridCopy";
 import { unsureSentence, type UnsureWords } from "./lostReply";
 import { LOST_REPLY, unsureWords } from "./lostReplyCopy";
 
@@ -85,9 +86,9 @@ export function playersWhen(iso: string | number | Date, timezone?: string): str
   return `${clubShortDate(iso, timezone)}, ${clubClock(iso, timezone)}`;
 }
 
-/** "12.00 cr held until Sat 27 Sep, 20:00" — wherever the balance is explained (§3a). */
-export function heldLine(heldCredits: number, until: string | null | undefined, timezone?: string): string {
-  const amount = formatCredits(heldCredits);
+/** "12 min held until Sat 27 Sep, 20:00" — wherever the balance is explained (§3a). */
+export function heldLine(heldMinutes: number, until: string | null | undefined, timezone?: string): string {
+  const amount = minutesCompact(heldMinutes);
   return until ? `${amount} held until ${playersWhen(until, timezone)}` : `${amount} held`;
 }
 
@@ -96,22 +97,22 @@ export const HELD_EXPLAINER =
   "Shares your partners paid you are held until 48 hours after each game, in case one comes back. They're yours — you just can't spend them yet.";
 
 /**
- * P11 — "16.00 cr owed back to partners — paid from your next credit". Owed back has no date:
- * it clears when credit comes in, so the line says that instead of an "until".
+ * P11 — "16 min owed back to partners — paid from the next minutes you buy". Owed back has no
+ * date: it clears when minutes come in, so the line says that instead of an "until".
  */
-export function owedBackLine(owedBackCredits: number): string {
-  return `${formatCredits(owedBackCredits)} owed back to partners — paid from your next credit`;
+export function owedBackLine(owedBackMinutes: number): string {
+  return `${minutesCompact(owedBackMinutes)} owed back to partners — paid from the next minutes you buy`;
 }
 
 /** Why a balance owes partners — the sentence under an owed-back line. */
 export const OWED_BACK_EXPLAINER =
-  "A partner's share came back to them after you'd already spent it, so their credits are waiting on your balance. The next credits you get go to them first, then to you.";
+  "A partner's share came back to them after you'd already spent it, so their minutes are waiting on your balance. The next minutes you get go to them first, then to you.";
 
 /** For an admin reading a quote: the same fact, about whoever pays. */
-export function owedBackQuoteLine(owedBackCredits: number, name: string | null): string {
+export function owedBackQuoteLine(owedBackMinutes: number, name: string | null): string {
   const who = name ?? "You";
   const owes = name ? "owes" : "owe";
-  return `${who} ${owes} ${formatCredits(owedBackCredits)} back to partners — that comes out of the next credit first.`;
+  return `${who} ${owes} ${minutesCompact(owedBackMinutes)} back to partners — that comes out of the next minutes first.`;
 }
 
 /* ═══════════════════════════════════ REFUSALS ═══════════════════════════════════ */
@@ -158,7 +159,7 @@ export const PLAYERS_REFUSAL: Record<string, string> = {
   notification_not_found: "That notification has gone.",
 };
 
-function creditsDetail(e: ApiError, key: string): number | null {
+function numberDetail(e: ApiError, key: string): number | null {
   const value = e.detail(key);
   return typeof value === "number" ? value : null;
 }
@@ -168,13 +169,13 @@ function capSentence(e: ApiError): string {
   // R4 X4-9 — the club day arrives as `YYYY-MM-DD`: said as "Wed 30 Sep", never printed raw.
   const when = typeof day === "string" ? ` on ${clubCalendarDate(day)}` : " that day";
   if (e.detail("cap") === "slots") {
-    const cap = creditsDetail(e, "cap_slots");
+    const cap = numberDetail(e, "cap_slots");
     return cap === null
       ? `Saying yes would take you past your daily limit${when}.`
       : `Saying yes would take you past your limit of ${cap} slots a day${when}.`;
   }
   if (e.detail("cap") === "minutes") {
-    const cap = creditsDetail(e, "cap_minutes");
+    const cap = numberDetail(e, "cap_minutes");
     return cap === null
       ? `Saying yes would take you past your daily limit${when}.`
       : `Saying yes would take you past your limit of ${cap} minutes on court a day${when}.`;
@@ -185,16 +186,16 @@ function capSentence(e: ApiError): string {
 function withFigures(e: ApiError, timezone?: string): string | null {
   switch (e.code) {
     case "share_changed": {
-      const share = creditsDetail(e, "share_minutes");
+      const share = numberDetail(e, "share_minutes");
       return share === null
         ? "Your share has changed since you opened this. Check the new figure and say yes again."
-        : `Your share is now ${formatCredits(share)}. Check it and say yes again if you're happy.`;
+        : `Your share is now ${minutesCompact(share)}. Check it and say yes again if you're happy.`;
     }
     case "insufficient_balance": {
-      const have = creditsDetail(e, "current_minutes");
-      const need = creditsDetail(e, "required_minutes");
-      if (have === null || need === null) return "You don't have enough credits to spend for this. Top up and try again.";
-      return `You need ${formatCredits(need)} and have ${formatCredits(have)} to spend. Top up ${formatCredits(Math.max(0, need - have))} and try again.`;
+      const have = numberDetail(e, "current_minutes");
+      const need = numberDetail(e, "required_minutes");
+      if (have === null || need === null) return "You don't have enough minutes to spend for this. Buy a package and try again.";
+      return `You need ${minutesCompact(need)} and have ${minutesCompact(have)} to spend — ${minutesCompact(Math.max(0, need - have))} short. Buy a package and try again.`;
     }
     case "partner_cap_exceeded": return capSentence(e);
     case "withdraw_window_closed": {
@@ -204,7 +205,7 @@ function withFigures(e: ApiError, timezone?: string): string | null {
         : "It's too close to the game to pull out. Talk to the organiser.";
     }
     case "nudge_limit": {
-      const limit = creditsDetail(e, "limit");
+      const limit = numberDetail(e, "limit");
       const until = e.detail("retry_after");
       const count = limit === null ? "the most reminders" : `${limit} reminder${limit === 1 ? "" : "s"}`;
       return typeof until === "string"
@@ -212,13 +213,13 @@ function withFigures(e: ApiError, timezone?: string): string | null {
         : `You've sent ${count} today. Try again tomorrow.`;
     }
     case "player_invite_limit": {
-      const limit = creditsDetail(e, "limit");
+      const limit = numberDetail(e, "limit");
       return limit === null
         ? "This booking has had as many invites as it can."
         : `A booking can send ${limit} invites in all, and this one has used them. Share an existing link instead.`;
     }
     case "directory_rate_limited": {
-      const seconds = creditsDetail(e, "retry_after_seconds");
+      const seconds = numberDetail(e, "retry_after_seconds");
       return seconds === null
         ? "That's a lot of searching — wait a moment and try again."
         : `That's a lot of searching — try again in ${seconds} second${seconds === 1 ? "" : "s"}.`;
@@ -335,12 +336,12 @@ export const BOOK_SPLIT = {
   modeLabel: "How to split",
   modes: { equal: "Equal", ratio: "Ratio", amount: "Amount" },
   modeHint: {
-    equal: "Everyone who pays gets the same share in whole credits. You take any odd credit.",
-    ratio: "Give each player a weight from 0 to 100 — shares follow the weights.",
-    amount: "Ask each player for an amount. You cover whatever is left.",
+    equal: "Everyone who pays gets the same share in whole minutes. You take any odd minute.",
+    ratio: "Give each player a weight from 0 to 100 — shares follow the weights, in whole minutes. You take any odd minute.",
+    amount: "Ask each player for a number of minutes. You cover whatever is left.",
   },
   weightLabel: (name: string) => `Weight for ${name}`,
-  amountLabel: (name: string) => `Amount for ${name}`,
+  amountLabel: (name: string) => `Minutes for ${name}`,
   theRest: "The rest",
   playsFree: "Plays free",
   sharesLabel: "Shares",
@@ -367,21 +368,21 @@ function askClause(paying: readonly SentenceSeat[]): string {
   if (same) {
     const who = listNames([...members.map((s) => s.name), ...(links.length ? [linkTakers(links.length)] : [])]);
     const plural = members.length + links.length > 1;
-    return `${who} ${plural ? "are" : "is"} asked for ${formatCredits(paying[0].share)}${plural ? " each" : ""}`;
+    return `${who} ${plural ? "are" : "is"} asked for ${minutesCompact(paying[0].share)}${plural ? " each" : ""}`;
   }
   const parts = paying.map((s, i) => {
     const who = s.kind === "link" ? linkTakers(1) : s.name;
-    return i === 0 ? `${who} is asked for ${formatCredits(s.share)}` : `${who} for ${formatCredits(s.share)}`;
+    return i === 0 ? `${who} is asked for ${minutesCompact(s.share)}` : `${who} for ${minutesCompact(s.share)}`;
   });
   return listNames(parts);
 }
 
 /**
- * The Confirm step's one sentence: "You pay 100.00 cr now; Sam and Alex are asked for 25.00 cr
+ * The Confirm step's one sentence: "You pay 1 h 30 min now; Sam and Alex are asked for 22 min
  * each. Jo (guest) plays free." `price` is what the organiser is charged now (the whole court).
  */
 export function confirmPlayersSentence(price: number, seats: readonly SentenceSeat[], eachBooking = false): string {
-  const lead = `${eachBooking ? "On each booking you" : "You"} pay ${formatCredits(price)} now`;
+  const lead = `${eachBooking ? "On each booking you" : "You"} pay ${minutesCompact(price)} now`;
   const paying = seats.filter((s) => s.kind !== "guest");
   const guests = seats.filter((s) => s.kind === "guest").map((s) => BOOK_PLAYERS.guestShort(s.name));
   const ask = paying.length ? `; ${askClause(paying)}` : "";
@@ -506,9 +507,9 @@ export const SHARE_ASK = {
   title: (who: string) => `What should ${who} pay?`,
   amountBody: (covered: string) => `You cover ${covered} now. What you ask for comes off that.`,
   ratioBody: "Shares follow the weights. Give them a weight from 0 to 100.",
-  amountLabel: (who: string) => `Amount for ${who}`,
+  amountLabel: (who: string) => `Minutes for ${who}`,
   weightLabel: (who: string) => `Weight for ${who}`,
-  amountHint: "In credits, up to two decimal places. 0 means you cover them.",
+  amountHint: "In whole minutes. 0 means you cover them.",
   weightHint: "A whole number from 0 to 100.",
   confirm: (who: string) => `Invite ${who}`,
   cancel: "Cancel",
@@ -577,7 +578,7 @@ export const DETAIL_MONEY = {
   unpaidRow: (share: string) => `Not paid yet · ${share}`,
   invitedRow: (share: string) => `Asked for ${share}`,
   askedAgainRow: (share: string, consented: string) => `Asked again: ${share} (said yes to ${consented})`,
-  /** R1 F2.13 — nothing was ever agreed (accepted by the club): no "said yes to 0.00 cr". */
+  /** R1 F2.13 — nothing was ever agreed (accepted by the club): no "said yes to 0 min". */
   notAgreedRow: (share: string) => `Share of ${share} not agreed — nothing collected`,
   settledRow: "Settled with the club",
   coversRow: "Covers the court",
@@ -607,14 +608,14 @@ export const DETAIL_CANCELLED = {
   nothingToPay: "Nothing owed · any share paid went back",
   /**
    * R2 F2-4 — on a SPLIT booking the gross refund to the organiser is not what they kept: the
-   * partners' shares went back to the partners out of it. Never "Refunded to you 50.00" beside a
-   * cancel sheet that said "You keep 15.00".
+   * partners' shares went back to the partners out of it. Never "Refunded to you 50 min" beside a
+   * cancel sheet that said "You keep 15 min".
    */
   splitRefundNote: (who: string | null) => who
     ? `${who} got back what they paid for the court, less the shares partners had paid them — those went straight back to the partners.`
     : "You got back what you paid for the court, less the shares your partners had paid you — those went straight back to them.",
   paidRow: (paid: string) => `Paid ${paid}`,
-  /** R2 F2-4 — a partner's share that went back when the game was cancelled: "25.00 cr back". */
+  /** R2 F2-4 — a partner's share that went back when the game was cancelled: "25 min back". */
   returnedRow: (returned: string) => `${returned} back`,
   partnerNothing: "The game was cancelled, so there's nothing for you to pay — any share you'd paid went back to you.",
   partnerPaid: (paid: string) => `The game was cancelled after check-in, so the ${paid} you paid stands.`,
@@ -650,7 +651,7 @@ export const DETAIL_GONE = {
 /**
  * R5 M5-3 — a game nobody checked in on (a no-show): the court was refunded and the club kept the
  * no-show penalty from it; each partner's share came down with it. Said as the ledger's rows: what
- * was paid at booking, the refund, the penalty — never "paid at booking 15.00" for a 50.00 court.
+ * was paid at booking, the refund, the penalty — never "paid at booking 15 min" for a 50 min court.
  */
 export const DETAIL_NO_SHOW = {
   moneyNote: (split: boolean) => split
@@ -687,7 +688,7 @@ export const DETAIL_PLAYER = {
   withdrawBody: "You come off the booking and anything you paid comes back to you.",
   withdrawConfirm: "Pull out",
   withdrawKeep: "Stay in",
-  withdrawn: "You've pulled out. Anything you paid is back in your credit.",
+  withdrawn: "You've pulled out. Anything you paid is back on your balance.",
   withdrawAction: "pull out",
   decline: "Decline",
   declineTitle: "Say no to this game?",
@@ -715,7 +716,7 @@ export const DETAIL_CANCEL = {
   cancelled: "The booking is cancelled.",
 } as const;
 
-/** "Their 16.00 cr is waiting on Naledi's balance and goes back as soon as it's covered." */
+/** "Their 16 min is waiting on Naledi's balance and goes back as soon as it's covered." */
 function returnWaiting(amount: string | null, organiser: string): string {
   const what = amount ? `Their ${amount} is` : "What they paid is";
   return `${what} waiting on ${organiser}'s balance and goes back as soon as it's covered.`;
@@ -846,8 +847,9 @@ export const INVITES_COPY = {
     `Declining is final — ${organiser} is told, and can't ask you into this game again.`,
   cancel: "Cancel",
   done: "Done",
-  topUp: "Top up",
-  shortBody: "Top up, then come back — the invite waits for you until it lapses.",
+  /** P13 — the short-balance way out is a package; the verb is "buy" (§6). */
+  buyMinutes: BUY_MINUTES_ACTION,
+  shortBody: "Buy a package, then come back — the invite waits for you until it lapses.",
   capBlocked: "You can't accept this one while it would break your limit.",
   acceptedTitle: "You're in",
   seeBooking: "See the booking",
@@ -889,7 +891,7 @@ export const INVITES_COPY = {
   fateCancelledTitle: "This game was cancelled",
   fateCancelledBody: "Nothing more is needed from you. The booking shows what happened to any share.",
   /** R2 F2-6 — the claimer's own link, after the organiser cancelled. */
-  linkCancelledBack: (amount: string) => `This game was cancelled — your ${amount} is back in your credit.`,
+  linkCancelledBack: (amount: string) => `This game was cancelled — your ${amount} is back on your balance.`,
   linkCancelledNothing: "This game was cancelled — nothing was taken from you for it.",
   fateGoneTitle: "You're no longer on this game",
   fateGoneBody: "You declined it, pulled out or were taken off it — or its invite lapsed. Your bookings have the latest.",
@@ -905,9 +907,9 @@ export function signedInAsLine(name: string): string {
   return `You're signed in as ${name}.`;
 }
 
-/** "Accept and pay 25.00 cr" — or plain "Accept" when nothing is collected now. */
+/** "Accept and pay 22 min" — or plain "Accept" when nothing is collected now. */
 export function acceptLabel(toPay: number): string {
-  return toPay > 0 ? `Accept and pay ${formatCredits(toPay)}` : "Accept";
+  return toPay > 0 ? `Accept and pay ${minutesCompact(toPay)}` : "Accept";
 }
 
 /** "2 invites waiting" — the Bookings badge's accessible name. */
@@ -915,14 +917,14 @@ export function invitesWaitingLabel(count: number): string {
   return `${count} ${count === 1 ? "invite" : "invites"} waiting`;
 }
 
-/** "Accepted — 5.00 cr still to pay". */
+/** "Accepted — 5 min still to pay". */
 export function acceptedUnpaidLine(toPay: number): string {
-  return `Accepted — ${formatCredits(toPay)} still to pay`;
+  return `Accepted — ${minutesCompact(toPay)} still to pay`;
 }
 
-/** R4 M4-8 — "Sam changed the split: your share is now 30.00 cr. Check it and say yes again." */
+/** R4 M4-8 — "Sam changed the split: your share is now 30 min. Check it and say yes again." */
 export function askedAgainLine(organiser: string, share: number): string {
-  return `${organiser} changed the split: your share is now ${formatCredits(share)}. Check it and say yes again.`;
+  return `${organiser} changed the split: your share is now ${minutesCompact(share)}. Check it and say yes again.`;
 }
 
 /** "Sam invited you to take a seat" (open link) · "Sam invited you to play". */
@@ -940,9 +942,9 @@ export function payByLine(deadline: string, timezone?: string): string {
   return `Pay by ${playersWhen(deadline, timezone)}`;
 }
 
-/** "You need 12.50 cr more to spend to accept this." */
+/** "You need 12 min more to spend to accept this." */
 export function shortByLine(shortBy: number): string {
-  return `You need ${formatCredits(shortBy)} more to spend to accept this.`;
+  return `You need ${minutesCompact(shortBy)} more to spend to accept this.`;
 }
 
 /** "4 players" / "2 players". */
@@ -950,9 +952,9 @@ export function playersCount(count: number): string {
   return `${count} ${count === 1 ? "player" : "players"}`;
 }
 
-/** The calm confirmation's line: "25.00 cr paid to Sam. See you on court." */
+/** The calm confirmation's line: "22 min paid to Sam. See you on court." */
 export function acceptedLine(paid: number, organiser: string): string {
-  return paid > 0 ? `${formatCredits(paid)} paid to ${organiser}. See you on court.` : "See you on court.";
+  return paid > 0 ? `${minutesCompact(paid)} paid to ${organiser}. See you on court.` : "See you on court.";
 }
 
 /** "Sam's been told." — after a decline. */
@@ -1049,7 +1051,7 @@ export const REPORT_SHARES_COPY = {
   memberNetCourt: "What court time cost you, after shares",
   memberFootnote: "Shares are what partners paid you, less what you paid as a partner.",
   clubShares: "Shares between players",
-  clubCaption: "Shares move credit from one member to another, so across the club they always add up to zero.",
+  clubCaption: "Shares move minutes from one member to another, so across the club they always add up to zero.",
 } as const;
 
 /**

@@ -9,9 +9,9 @@ import {
   heldLine, HELD_EXPLAINER, INVITE_UNSURE, INVITES_COPY, OWED_BACK_EXPLAINER, acceptedLine, deadlineLine, declinedLine, owedBackLine, playersCount,
   shortByLine,
 } from "@/lib/playersCopy";
-import { signedCredits } from "@/lib/bookingsCopy";
 import { useBalance } from "@/lib/balance";
-import { formatCredits } from "@/lib/utils";
+import { BUY_MINUTES_PATH } from "@/lib/gridCopy";
+import { Minutes } from "@/components/Minutes";
 import { inviteCapSentence, inviteRefusal, inviteWhen, organiserName } from "./inviteFacts";
 import type { AcceptFlow } from "./useAcceptFlow";
 
@@ -22,7 +22,7 @@ import type { AcceptFlow } from "./useAcceptFlow";
  * <p>
  * <b>Every money figure is SPENDABLE</b> (`inviteMoney`): the balance less what is held for the
  * member's own partners, because that is what the accept checks. The held part is named beside
- * it with the reason, so a member who can see 120 cr on their chip is not puzzled by "100 to spend".
+ * it with the reason, so a member who can see 2 h on their chip is not puzzled by "1 h 40 min to spend".
  * What they owe back to partners (P11) is subtracted too and named the same way.
  * </p>
  */
@@ -88,11 +88,12 @@ function GameFacts({ flow }: { flow: AcceptFlow }) {
   );
 }
 
-function MoneyRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+/** One figure of the accept: whole minutes, read aloud in words (`<Minutes>`), never "h" or "min". */
+function MoneyRow({ label, value, strong = false }: { label: string; value: number; strong?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
       <dt className={strong ? "text-sm font-semibold text-text-primary" : "text-sm text-text-secondary"}>{label}</dt>
-      <dd className={strong ? "text-base font-semibold tabular-nums text-text-primary" : "text-sm tabular-nums text-text-primary"}>{value}</dd>
+      <dd className={strong ? "text-base font-semibold text-text-primary" : "text-sm text-text-primary"}><Minutes value={value} /></dd>
     </div>
   );
 }
@@ -103,12 +104,12 @@ function MoneyFacts({ flow }: { flow: AcceptFlow }) {
   return (
     <div className="flex flex-col gap-2">
       <dl className="flex flex-col gap-2" data-money="">
-        <MoneyRow label={INVITES_COPY.yourShare} value={formatCredits(invite.share_minutes)} strong />
-        {money.toPay !== invite.share_minutes ? <MoneyRow label={INVITES_COPY.toPayNow} value={formatCredits(money.toPay)} /> : null}
+        <MoneyRow label={INVITES_COPY.yourShare} value={invite.share_minutes} strong />
+        {money.toPay !== invite.share_minutes ? <MoneyRow label={INVITES_COPY.toPayNow} value={money.toPay} /> : null}
         {/* Signed, not clamped: owing partners more than the balance is real, and "short by" adds up from it. */}
-        <MoneyRow label={INVITES_COPY.spendable} value={signedCredits(money.spendable)} />
+        <MoneyRow label={INVITES_COPY.spendable} value={money.spendable} />
         {/* Short, there is no "after" — a negative figure would read as an overdraft the accept never allows. */}
-        {money.shortBy > 0 ? null : <MoneyRow label={INVITES_COPY.balanceAfter} value={formatCredits(money.after)} strong />}
+        {money.shortBy > 0 ? null : <MoneyRow label={INVITES_COPY.balanceAfter} value={money.after} strong />}
       </dl>
       {money.held > 0 ? (
         <div className="rounded-lg bg-bg-muted p-3 text-sm text-text-secondary" data-held="">
@@ -116,17 +117,17 @@ function MoneyFacts({ flow }: { flow: AcceptFlow }) {
           <p>{HELD_EXPLAINER}</p>
         </div>
       ) : null}
-      <OwedBack credits={money.owedBack} />
+      <OwedBack minutes={money.owedBack} />
     </div>
   );
 }
 
-/** P11 — what the member owes back to their own partners, which the next credit pays first. */
-function OwedBack({ credits }: { credits: number }) {
-  if (credits <= 0) return null;
+/** P11 — what the member owes back to their own partners, which the next minutes bought pay first. */
+function OwedBack({ minutes }: { minutes: number }) {
+  if (minutes <= 0) return null;
   return (
     <div className="rounded-lg bg-bg-muted p-3 text-sm text-text-secondary" data-owed-back="">
-      <p className="font-medium text-text-primary">{owedBackLine(credits)}</p>
+      <p className="font-medium text-text-primary">{owedBackLine(minutes)}</p>
       <p>{OWED_BACK_EXPLAINER}</p>
     </div>
   );
@@ -149,17 +150,18 @@ function CapEffect({ flow, reasonId }: { flow: AcceptFlow; reasonId: string }) {
 }
 
 /**
- * The top-up link, carrying the way back to this invite (R1 F2.5): `returnTo` for the top-up
- * screens to offer. The invite is also remembered, so Invites resurfaces it whatever they do.
+ * The "Buy minutes" link — the package shelf (P13) — carrying the way back to this invite
+ * (R1 F2.5): `returnTo` for the buying screens to offer. The invite is also remembered, so
+ * Invites resurfaces it whatever they do.
  */
-function useTopUpPath(): string {
+function useBuyPath(): string {
   const { pathname, search } = useLocation();
-  return `/wallet/topup?returnTo=${encodeURIComponent(`${pathname}${search}`)}`;
+  return `${BUY_MINUTES_PATH}?returnTo=${encodeURIComponent(`${pathname}${search}`)}`;
 }
 
 /** Short of the share: what they need, and the way to get it. The sentence describes Accept. */
 function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string }) {
-  const topUp = useTopUpPath();
+  const buy = useBuyPath();
   return (
     <div role="status" data-short="" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-warning-strong/30 bg-warning-soft p-3 text-warning-strong">
       <Warning size={20} weight="bold" aria-hidden="true" className="shrink-0" />
@@ -168,15 +170,15 @@ function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string 
         <span>{INVITES_COPY.shortBody}</span>
       </p>
       <Button asChild variant="outline" size="sm" className="ml-auto shrink-0">
-        <Link to={topUp}>{INVITES_COPY.topUp}</Link>
+        <Link to={buy}>{INVITES_COPY.buyMinutes}</Link>
       </Button>
     </div>
   );
 }
 
-/** The last answer that was not a yes: a risen share asks again; a short balance offers a top-up. */
+/** The last answer that was not a yes: a risen share asks again; a short balance offers a package. */
 function Problem({ flow }: { flow: AcceptFlow }) {
-  const topUp = useTopUpPath();
+  const buy = useBuyPath();
   if (!flow.error) return null;
   const action = flow.declineAction.error ? INVITES_COPY.declineAction : INVITES_COPY.acceptAction;
   const sentence = inviteRefusal(flow.error, action);
@@ -184,7 +186,7 @@ function Problem({ flow }: { flow: AcceptFlow }) {
   return (
     <div className="flex flex-col items-start gap-2">
       <Alert tone="danger" className="w-full">{sentence}</Alert>
-      {flow.errorCode === "insufficient_balance" ? <TextLink to={topUp} variant="standalone">{INVITES_COPY.topUp}</TextLink> : null}
+      {flow.errorCode === "insufficient_balance" ? <TextLink to={buy} variant="standalone">{INVITES_COPY.buyMinutes}</TextLink> : null}
     </div>
   );
 }

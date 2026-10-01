@@ -4,19 +4,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { SplitPreview } from "@/lib/playersApi";
 import { BOOK_SHEET } from "@/lib/bookingsCopy";
 import { BOOK_SPLIT, PLAYERS_COPY, PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
+import { minutesCompact } from "@/lib/minutes";
 import { seatName, type PlayersDraft } from "./playersDraft";
 import { partnersTotal } from "./splitMath";
 import type { SplitEditor } from "./usePlayersStep";
 
 /**
  * The live totals bar: each seat's share as the SERVER splits it, and what that means for the
- * organiser — "You pay 100.00 cr now · you get 75.00 cr back as they accept". One block per
- * distinct slot price; a batch applies the split per booking, so it says "Each booking".
+ * organiser — "You pay 1 h 30 min now · you get 45 min back as they accept". One block per
+ * distinct slot length; a batch applies the split per booking, so it says "Each booking".
+ * The shares always add up to the price — whole minutes, the organiser keeping any remainder.
  *
  * <p>
  * A split the phone already knows cannot work is said at once, in the refusal's own sentence;
- * a split that is being worked out shows the rows as skeletons, never a figure it has not read.
+ * a split the server is still working out shows the phone's own figures — the same whole-minute
+ * rules, mirrored (`splitMath`) — marked busy, so the bar is never blank while the organiser types.
  * </p>
  */
 
@@ -27,7 +30,7 @@ function nameOfSeat(draft: PlayersDraft, seat: number): string {
 }
 
 function heading(preview: SplitPreview, count: number, bulk: boolean): string | null {
-  if (count > 1) return BOOK_SPLIT.perPrice(formatCredits(preview.price_minutes));
+  if (count > 1) return BOOK_SPLIT.perPrice(minutesCompact(preview.price_minutes));
   return bulk ? BOOK_SPLIT.eachBooking : null;
 }
 
@@ -42,24 +45,23 @@ function TotalsBlock({ preview, draft, title, hidePayNow }: TotalsBlockProps) {
         {preview.shares.map((s) => (
           <div key={s.seat} className="flex items-baseline justify-between gap-4">
             <dt className="truncate text-text-secondary">{nameOfSeat(draft, s.seat)}</dt>
-            <dd className="font-medium tabular-nums text-text-primary">{formatCredits(s.share_minutes)}</dd>
+            <dd className="font-medium text-text-primary"><Minutes value={s.share_minutes} /></dd>
           </div>
         ))}
       </dl>
       {hidePayNow ? null : (
         <p className="border-t border-border pt-2 font-semibold text-text-primary">
-          {BOOK_SPLIT.youPayNow(formatCredits(preview.price_minutes), formatCredits(back))}
+          {BOOK_SPLIT.youPayNow(minutesCompact(preview.price_minutes), minutesCompact(back))}
         </p>
       )}
-      <p className="text-xs text-text-secondary">{BOOK_SPLIT.addsUp(formatCredits(preview.price_minutes))}</p>
+      <p className="text-xs text-text-secondary">{BOOK_SPLIT.addsUp(minutesCompact(preview.price_minutes))}</p>
     </div>
   );
 }
 
 function TotalsSkeleton({ rows }: { rows: number }) {
   return (
-    <div aria-busy="true" className="grid gap-2">
-      <span role="status" className="sr-only">{BOOK_SPLIT.reading}</span>
+    <div aria-hidden="true" className="grid gap-2">
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex justify-between gap-4">
           <Skeleton className="h-4 w-20 rounded-sm" />
@@ -89,13 +91,19 @@ export function SplitTotals({ players, hidePayNow = false }: { players: SplitEdi
       </div>
     );
   }
+  const previews = state.status === "ready" ? state.previews : state.status === "loading" ? state.local : [];
+  const reading = state.status !== "ready";
   return (
-    <section aria-label={BOOK_SPLIT.totalsLabel} data-split-totals="" className="grid gap-4 rounded-xl bg-bg-muted p-4 text-sm">
-      {state.status === "ready"
-        ? state.previews.map((p) => (
+    <section
+      aria-label={BOOK_SPLIT.totalsLabel} aria-busy={reading || undefined} data-split-totals=""
+      data-split-source={reading ? "phone" : "club"} className="grid gap-4 rounded-xl bg-bg-muted p-4 text-sm"
+    >
+      {reading ? <span role="status" className="sr-only">{BOOK_SPLIT.reading}</span> : null}
+      {previews.length
+        ? previews.map((p) => (
           <TotalsBlock
             key={p.price_minutes} preview={p} draft={players.draft} hidePayNow={hidePayNow}
-            title={heading(p, state.previews.length, players.bulk)}
+            title={heading(p, previews.length, players.bulk)}
           />
         ))
         : <TotalsSkeleton rows={players.draft.seats.length + 1} />}

@@ -61,7 +61,7 @@ async function openSheet() {
 }
 
 /** R1 F2.5 — the top-up carries the way back to the invite. */
-const TOP_UP = `/wallet/topup?returnTo=${encodeURIComponent("/bookings/invites")}`;
+const TOP_UP = `/wallet/buy?returnTo=${encodeURIComponent("/bookings/invites")}`;
 
 const acceptCalls = (stub: FetchStub) => stub.calls.filter((c) => c.method === "POST" && c.path === ACCEPT);
 
@@ -76,10 +76,10 @@ describe("the list", () => {
     expect(cards[0]).toHaveTextContent("Sam invited you to play");
     expect(cards[0]).toHaveTextContent("Court 1");
     expect(cards[0]).toHaveTextContent("4 players");
-    expect(cards[0]).toHaveTextContent("Your share 25.00 cr");
+    expect(cards[0]).toHaveTextContent("Your share 25 min");
     expect(cards[0]).toHaveTextContent(INVITES_COPY.statusWaiting);
     expect(cards[1]).toHaveTextContent(INVITES_COPY.statusAskedAgain);
-    expect(cards[2]).toHaveTextContent("Accepted — 10.00 cr still to pay");
+    expect(cards[2]).toHaveTextContent("Accepted — 10 min still to pay");
     // First names between members — never the surname.
     expect(list).not.toHaveTextContent("Petersen");
   });
@@ -178,11 +178,11 @@ describe("the accept sheet", () => {
     const sheet = await openSheet();
     expect(sheet).toHaveTextContent("Court 1");
     expect(sheet).toHaveTextContent("Sam");
-    expect(within(sheet).getByText(INVITES_COPY.yourShare).nextSibling).toHaveTextContent("25.00 cr");
+    expect(within(sheet).getByText(INVITES_COPY.yourShare).nextSibling).toHaveTextContent("25 min");
     // Spendable (100), not the raw balance (120): 100 − 25 = 75.
-    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("100.00 cr");
-    expect(within(sheet).getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("75.00 cr");
-    expect(sheet).toHaveTextContent("20.00 cr held");
+    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("1 h 40 min");
+    expect(within(sheet).getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("1 h 15 min");
+    expect(sheet).toHaveTextContent("20 min held");
     expect(sheet).toHaveTextContent(/held until 48 hours after each game/);
     expect(sheet).toHaveTextContent(/lapses to Sam — no debt either way/);
     expect(sheet).toHaveTextContent(INVITES_COPY.capCounts);
@@ -208,7 +208,7 @@ describe("the accept sheet", () => {
     expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
     expect(acceptCalls(stub)).toHaveLength(1);
     expect(acceptCalls(stub)[0].body).toEqual({ expectedShareMinutes: 25 });
-    expect(sheet).toHaveTextContent("25.00 cr paid to Sam");
+    expect(sheet).toHaveTextContent("25 min paid to Sam");
     expect(within(sheet).getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
     await waitFor(() => expect(walletReads()).toBeGreaterThan(before));
     // The list is read again — and the sheet keeps its confirmation although the seat left it.
@@ -247,7 +247,7 @@ describe("the accept sheet", () => {
     openInvites({ invites: [invite({ balance_minutes: 10, held_minutes: 0, owed_back_minutes: 16, spendable_minutes: -6, to_pay_minutes: 25 })] });
     const sheet = await openSheet();
     // −6 to spend and 25 to pay: 31 short, and the sheet's figures agree with each other.
-    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("−6.00 cr");
+    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("−6 min");
     const accept = within(sheet).getByRole("button", { name: acceptLabel(25) });
     expect(accept).toHaveAccessibleDescription(new RegExp(shortByLine(31).replace(/\./g, "\\.")));
     const owed = sheet.querySelector("[data-owed-back]");
@@ -268,7 +268,7 @@ describe("the accept sheet", () => {
     const accept = within(sheet).getByRole("button", { name: acceptLabel(25) });
     expect(accept).toHaveAttribute("aria-disabled", "true");
     expect(accept).toHaveAccessibleDescription(new RegExp(shortByLine(15).replace(/\./g, "\\.")));
-    expect(within(sheet).getByRole("link", { name: INVITES_COPY.topUp })).toHaveAttribute("href", TOP_UP);
+    expect(within(sheet).getByRole("link", { name: INVITES_COPY.buyMinutes })).toHaveAttribute("href", TOP_UP);
     // No "balance after" below zero — the accept never overdraws.
     expect(within(sheet).queryByText(INVITES_COPY.balanceAfter)).toBeNull();
     fireEvent.click(accept);
@@ -305,7 +305,7 @@ describe("the accept sheet", () => {
     expect(within(sheet).getByRole("heading", { name: INVITES_COPY.askedAgainTitle })).toBeInTheDocument();
     expect(within(sheet).queryByRole("heading", { name: INVITES_COPY.sheetTitle })).toBeNull();
     expect(within(sheet).getByText(askedAgainLine("Sam", 30))).toBeInTheDocument();
-    expect(within(sheet).getByText(INVITES_COPY.toPayNow).nextSibling).toHaveTextContent("5.00 cr");
+    expect(within(sheet).getByText(INVITES_COPY.toPayNow).nextSibling).toHaveTextContent("5 min");
     expect(within(sheet).getByRole("button", { name: acceptLabel(5) })).toBeInTheDocument();
     // Only an invited seat can be declined.
     expect(within(sheet).queryByRole("button", { name: INVITES_COPY.decline })).toBeNull();
@@ -355,7 +355,7 @@ describe("the accept sheet", () => {
     expect(await within(sheet).findByText(expected)).toBeInTheDocument();
     expect(sheet).not.toHaveTextContent(code);
     if (code === "insufficient_balance") {
-      expect(within(sheet).getByRole("link", { name: INVITES_COPY.topUp })).toHaveAttribute("href", TOP_UP);
+      expect(within(sheet).getByRole("link", { name: INVITES_COPY.buyMinutes })).toHaveAttribute("href", TOP_UP);
     }
   });
 });
@@ -386,7 +386,7 @@ describe("an accept whose reply was lost (R2 F2-1)", () => {
     const before = walletReads();
     fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
     expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
-    expect(sheet).toHaveTextContent("25.00 cr paid to Sam");
+    expect(sheet).toHaveTextContent("25 min paid to Sam");
     expect(within(sheet).getByText(INVITE_UNSURE.provenNote)).toBeInTheDocument();
     expect(sheet).not.toHaveTextContent(/Couldn't accept/);
     expect(stub.calls.some((c) => c.path === MY_SEAT)).toBe(true);

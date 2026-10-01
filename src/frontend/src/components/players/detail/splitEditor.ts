@@ -2,11 +2,11 @@ import type { PickedPlayer } from "@/components/players/PlayerPicker";
 import { parseAmount, parseWeight, type DraftSeat, type PlayersDraft } from "@/components/bookings/playersDraft";
 // `parseAmount` above reads the Split step's own draft fields (the BookSheet's rule); a figure
 // typed into the share ask goes through the shared money parser instead.
-import { parseAmount as parseTypedAmount } from "@/lib/amount";
+import { parseMinutesAmount } from "@/lib/amount";
 import { amountProblemSentence } from "@/lib/amountCopy";
 import type { BookingDetail, DetailPlayer, PlayerSpec, SplitChange, SplitPreviewShare } from "@/lib/playersApi";
 import { CHANGE_SPLIT, PLAYERS_REFUSAL } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { minutesCompact } from "@/lib/minutes";
 import { isLive, seatName } from "./detailModel";
 
 /**
@@ -31,7 +31,7 @@ function partnerSeats(d: BookingDetail): DetailPlayer[] {
 export function draftOf(d: BookingDetail): PlayersDraft {
   const organiser = d.players.find((p) => p.kind === "organiser");
   const seats: DraftSeat[] = partnerSeats(d).map((p) => ({
-    seat: p.seat, player: pickedOf(p), weight: String(p.weight), amount: p.share_minutes.toFixed(2),
+    seat: p.seat, player: pickedOf(p), weight: String(p.weight), amount: String(p.share_minutes),
   }));
   return { seats, mode: d.split_mode, organiserWeight: String(organiser?.weight ?? 1) };
 }
@@ -81,18 +81,18 @@ export function splitEffects(d: BookingDetail, shares: readonly SplitPreviewShar
     if (next === undefined) continue;
     const name = seatName(p, d.players);
     if (p.status !== "accepted") {
-      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.askedFor(name, formatCredits(next)));
+      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.askedFor(name, minutesCompact(next)));
     } else if (next > p.paid_minutes) {
       if (next !== p.share_minutes || p.unpaid_minutes > 0) {
-        lines.push(CHANGE_SPLIT.askedMore(name, formatCredits(next - p.paid_minutes), next > p.consented_minutes));
+        lines.push(CHANGE_SPLIT.askedMore(name, minutesCompact(next - p.paid_minutes), next > p.consented_minutes));
       }
     } else if (next < p.paid_minutes) {
-      lines.push(CHANGE_SPLIT.goesBack(name, formatCredits(p.paid_minutes - next)));
+      lines.push(CHANGE_SPLIT.goesBack(name, minutesCompact(p.paid_minutes - next)));
     }
   }
   if (lines.length === 0) return [CHANGE_SPLIT.noChange];
   const organiser = shares.find((s) => s.seat === 1);
-  if (organiser) lines.push(CHANGE_SPLIT.youCover(formatCredits(organiser.share_minutes)));
+  if (organiser) lines.push(CHANGE_SPLIT.youCover(minutesCompact(organiser.share_minutes)));
   return lines;
 }
 
@@ -110,36 +110,36 @@ export function organiserShare(d: BookingDetail): number {
   if (d.split_mode !== "amount") return own;
   // R4 M4-6 — an amount split's organiser covers what the live partner seats are NOT asked for.
   // Derived here, not read off the organiser's seat: that figure went stale after a removal
-  // ("You cover 30.00 cr now" beside a Money panel saying 50) and capped the ask with it.
+  // ("You cover 30 min now" beside a Money panel saying 50) and capped the ask with it.
   const asked = partnerSeats(d).reduce((sum, p) => sum + p.share_minutes, 0);
-  return Math.max(0, Math.round((d.money.price_minutes - asked) * 100) / 100);
+  return Math.max(0, d.money.price_minutes - asked);
 }
 
 /**
  * The figure the ask starts from: an amount split offers the equal share of the price among the
- * payers after the add, in whole credits, capped by what the organiser covers now; a ratio split
+ * payers after the add, in whole minutes, capped by what the organiser covers now; a ratio split
  * offers weight 1.
  */
 export function defaultAsk(d: BookingDetail): string {
   if (d.split_mode === "ratio") return "1";
   const payers = partnerSeats(d).filter((p) => p.kind !== "guest").length + 2;
   const equal = Math.floor(d.money.price_minutes / payers);
-  return Math.max(0, Math.min(equal, Math.floor(organiserShare(d)))).toFixed(2);
+  return String(Math.max(0, Math.min(equal, organiserShare(d))));
 }
 
 /**
  * The figure typed, as a spec's `weight` / `amount`, or the sentence saying why not. An amount
- * goes through the club's ONE money parser (`lib/amount`, F3.18): a decimal comma is fine,
- * "1e3" and "1,000" are refused with their own reasons, and 0 is allowed — it means the
- * organiser covers them.
+ * goes through the club's ONE amount parser (`lib/amount`, F3.18) with the minutes rules: whole
+ * minutes only ("22,5" is refused as too precise, never rounded), "1e3" and "1,000" are refused
+ * with their own reasons, and 0 is allowed — it means the organiser covers them.
  */
 export function askedFigure(d: BookingDetail, text: string): { ok: true; spec: Pick<PlayerSpec, "weight" | "amount"> } | { ok: false; error: string } {
   if (d.split_mode === "ratio") {
     const weight = parseWeight(text);
     return weight === null ? { ok: false, error: PLAYERS_REFUSAL.split_weight_invalid } : { ok: true, spec: { weight } };
   }
-  const parsed = parseTypedAmount(text, { allowZero: true, decimals: 2 });
-  if (!parsed.ok) return { ok: false, error: amountProblemSentence(parsed.problem, "credits") };
+  const parsed = parseMinutesAmount(text, { allowZero: true });
+  if (!parsed.ok) return { ok: false, error: amountProblemSentence(parsed.problem, "minutes") };
   if (parsed.value > organiserShare(d)) return { ok: false, error: PLAYERS_REFUSAL.split_exceeds_price };
   return { ok: true, spec: { amount: parsed.value } };
 }

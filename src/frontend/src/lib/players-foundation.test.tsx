@@ -38,12 +38,12 @@ describe("playersRefusal — every code is a sentence, never the generic fallbac
 
   it("share_changed names the new figure and asks again", () => {
     expect(playersRefusal(refusal(409, { error: "share_changed", share_minutes: 30 })))
-      .toBe("Your share is now 30.00 cr. Check it and say yes again if you're happy.");
+      .toBe("Your share is now 30 min. Check it and say yes again if you're happy.");
   });
 
   it("insufficient_balance says what is needed, what can be spent, and the gap", () => {
     expect(playersRefusal(refusal(402, { error: "insufficient_balance", current_minutes: 10, required_minutes: 25 })))
-      .toBe("You need 25.00 cr and have 10.00 cr to spend. Top up 15.00 cr and try again.");
+      .toBe("You need 25 min and have 10 min to spend — 15 min short. Buy a package and try again.");
   });
 
   it("player_invite_limit carries the limit", () => {
@@ -105,15 +105,15 @@ describe("held credits (§3a)", () => {
   });
 
   it("the owed-back line and its explainer say what it is and what pays it", () => {
-    expect(owedBackLine(16)).toBe("16.00 cr owed back to partners — paid from your next credit");
-    expect(OWED_BACK_EXPLAINER).toMatch(/next credits you get go to them first/);
-    expect(owedBackQuoteLine(16, "Naledi")).toBe("Naledi owes 16.00 cr back to partners — that comes out of the next credit first.");
-    expect(owedBackQuoteLine(16, null)).toBe("You owe 16.00 cr back to partners — that comes out of the next credit first.");
+    expect(owedBackLine(16)).toBe("16 min owed back to partners — paid from the next minutes you buy");
+    expect(OWED_BACK_EXPLAINER).toMatch(/next minutes you get go to them first/);
+    expect(owedBackQuoteLine(16, "Naledi")).toBe("Naledi owes 16 min back to partners — that comes out of the next minutes first.");
+    expect(owedBackQuoteLine(16, null)).toBe("You owe 16 min back to partners — that comes out of the next minutes first.");
   });
 
   it("the held line names the figure and the release", () => {
-    expect(heldLine(20, "2026-10-02T18:45:00Z", "Africa/Johannesburg")).toBe("20.00 cr held until Fri 2 Oct, 20:45");
-    expect(heldLine(20, null)).toBe("20.00 cr held");
+    expect(heldLine(20, "2026-10-02T18:45:00Z", "Africa/Johannesburg")).toBe("20 min held until Fri 2 Oct, 20:45");
+    expect(heldLine(20, null)).toBe("20 min held");
   });
 
   it("an invite's balance-after is built on SPENDABLE, never on the raw balance", () => {

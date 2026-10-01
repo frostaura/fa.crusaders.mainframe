@@ -10,7 +10,7 @@ import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { playersEndpoints } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { minutesCompact } from "@/lib/minutes";
 import { clearPendingInvite, pendingInvite, savePendingInvite } from "@/lib/playersPending";
 
 /**
@@ -25,8 +25,8 @@ import { clearPendingInvite, pendingInvite, savePendingInvite } from "@/lib/play
  * </p>
  *
  * <p>
- * <b>The link is remembered until it is answered</b> (R1 F2.5): a member short of credit who goes
- * to top up finds it again on Invites and the Bookings badge. An answer or a refusal forgets it.
+ * <b>The link is remembered until it is answered</b> (R1 F2.5): a member short of minutes who goes
+ * to buy a package finds it again on Invites and the Bookings badge. An answer or a refusal forgets it.
  * </p>
  */
 const OPEN_REFUSAL: Record<string, string> = {
@@ -97,7 +97,7 @@ function notOpenPage(code: string | null, closedGame: ClosedGame, errorBooking: 
   }
   if (closedGame.kind === "cancelled") {
     const sentence = closedGame.back > 0
-      ? INVITES_COPY.linkCancelledBack(formatCredits(closedGame.back)) : INVITES_COPY.linkCancelledNothing;
+      ? INVITES_COPY.linkCancelledBack(minutesCompact(closedGame.back)) : INVITES_COPY.linkCancelledNothing;
     return <InviteGone title={INVITES_COPY.fateCancelledTitle} sentence={sentence} bookingId={closedGame.bookingId} />;
   }
   if (!code || !(code in OPEN_REFUSAL)) return null;

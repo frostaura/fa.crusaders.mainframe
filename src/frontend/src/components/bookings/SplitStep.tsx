@@ -86,7 +86,7 @@ function SeatFigure({ seat, players }: { seat: DraftSeat; players: SplitEditor }
   return (
     <FigureField
       label={BOOK_SPLIT.amountLabel(name)} name={name} value={seat.amount}
-      error={problem ? amountProblemSentence(problem, "credits") : undefined}
+      error={problem ? amountProblemSentence(problem, "minutes") : undefined}
       onChange={(v) => players.setAmount(seat.seat, v)}
     />
   );
@@ -116,9 +116,10 @@ function FigureField(props: FigureFieldProps) {
       <Input
         aria-label={label}
         value={value}
-        inputMode={numeric ? "numeric" : "decimal"}
+        // Weights and shares are both whole numbers (P13: whole minutes only), so both get the digit pad.
+        inputMode="numeric"
         autoComplete="off"
-        maxLength={numeric ? 3 : 12}
+        maxLength={numeric ? 3 : 6}
         className="w-24 text-right tabular-nums"
         onChange={(e) => onChange(e.target.value)}
       />

@@ -8,7 +8,7 @@ import { clubClock } from "@/lib/clubClock";
 import { playersEndpoints, type InvitePreview } from "@/lib/playersApi";
 import { clearPendingInvite, savePendingInvite } from "@/lib/playersPending";
 import { INVITES_COPY, firstName, playersWhen } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { Minutes } from "@/components/Minutes";
 
 /**
  * R1 F2.3 / F2.4 — an invite opened by somebody who is not signed in: a member on a new phone,
@@ -74,7 +74,7 @@ function PreviewFacts({ preview }: { preview: InvitePreview }) {
       </p>
       <p className="break-words text-sm text-text-secondary">{`${preview.court_name ?? INVITES_COPY.court} · ${when}`}</p>
       <p className="text-sm font-semibold tabular-nums text-text-primary">
-        {`${INVITES_COPY.yourShare} ${formatCredits(preview.share_minutes)}`}
+        {INVITES_COPY.yourShare} <Minutes value={preview.share_minutes} />
       </p>
     </div>
   );

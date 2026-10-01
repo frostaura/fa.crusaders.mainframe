@@ -8,7 +8,8 @@ import type { BookingDetail, MySeat } from "@/lib/playersApi";
 import {
   DETAIL_ATTENDANCE, DETAIL_CANCELLED, DETAIL_COPY, DETAIL_GONE, DETAIL_MONEY, DETAIL_NO_SHOW, DETAIL_PLAYER,
 } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { minutesCompact, minutesSpoken } from "@/lib/minutes";
+import { keepAmounts } from "@/components/players/detail/detailModel";
 import {
   ALEX, BOOKING, DETAIL_PATH, PID, SAM, SAM_SEAT, STARTS, detail, playerView, renderDetail, seat, serve,
 } from "./detailKit";
@@ -26,6 +27,8 @@ beforeEach(() => { signOut(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 const NBSP = " ";
+/** A `<Minutes>` figure's text: the compact form the eye reads, then the words a screen reader hears. */
+const fig = (n: number) => `${minutesCompact(n)}${minutesSpoken(n)}`;
 const money = () => document.querySelector<HTMLElement>("[data-money-panel]") as HTMLElement;
 /** A `dl` row's figure, by its term. */
 function figure(term: string): string | null {
@@ -62,27 +65,29 @@ describe("F5 — the invitee's answer is docked in thumb reach on a phone", () =
 });
 
 describe("V5-7 — money never wraps mid-value", () => {
-  it("a lone figure does not wrap, and every 'N cr' in a sentence is held together", async () => {
+  it("a lone figure does not wrap, and every minutes figure in a sentence is held together", async () => {
     serve({ detail: playerView({ players: [seat({ user_id: SAM, name: "Sam Petersen" }), SAM_SEAT, { ...SAM_SEAT, participant_id: PID.alex, seat: 3, user_id: ALEX, name: "Alex Naidoo" }] }) });
     renderDetail();
     await screen.findByText(DETAIL_PLAYER.toPay);
     for (const dd of document.querySelectorAll("dd")) expect(dd.className).toContain("whitespace-nowrap");
-    const [line] = within(money()).getAllByText((_, el) => el?.tagName === "SPAN" && /^Paid 25\.00/.test(el.textContent ?? ""));
-    expect(line.textContent).toBe(`Paid 25.00${NBSP}cr of 25.00${NBSP}cr`);
+    const [line] = within(money()).getAllByText((_, el) => el?.tagName === "SPAN" && /^Paid 25/.test(el.textContent ?? ""));
+    expect(line.textContent).toBe(`Paid 25${NBSP}min of 25${NBSP}min`);
+    expect(keepAmounts("Paid 1 h 30 min of 2 d 3 h")).toBe(`Paid 1${NBSP}h${NBSP}30${NBSP}min of 2${NBSP}d${NBSP}3${NBSP}h`);
   });
 });
 
 /**
- * Olga's no-show (the review's own figures): a 50 cr court, Pieter and Thandi asked 16 each and
+ * Olga's no-show, in whole minutes (P13): a 50 min court, Pieter and Thandi asked 16 each and
  * paid; nobody checked in. The sweep refunded 50 and kept 15 (30 %); each partner's share came
- * down to 4.80, so 11.20 went back to each. The sweep truncated ends_at to its own clock.
+ * down to ⌊15 × 16 ÷ 50⌋ = 4 (rounded down, §1.2), so 12 went back to each, and Olga kept the
+ * rest. The sweep truncated ends_at to its own clock.
  */
 const SOLD_END = "2026-09-30T16:15:00Z";
 const SWEPT_END = "2026-09-30T16:05:00Z";
 function partner(pid: string, n: number, name: string) {
   return seat({
     participant_id: pid, seat: n, team: n <= 2 ? "A" : "B", kind: "member", user_id: `u-${n}`, name,
-    share_minutes: 16, consented_minutes: 16, paid_minutes: 4.8, target_minutes: 4.8, returned_minutes: 11.2,
+    share_minutes: 16, consented_minutes: 16, paid_minutes: 4, target_minutes: 4, returned_minutes: 12,
   });
 }
 function noShow(overrides: Partial<BookingDetail> = {}): BookingDetail {
@@ -90,7 +95,7 @@ function noShow(overrides: Partial<BookingDetail> = {}): BookingDetail {
     status: "no_show", ends_at: SWEPT_END, sold_ends_at: SOLD_END,
     players: [seat({ name: "Olga Petrova" }), partner(PID.sam, 2, "Pieter Botha"), partner(PID.alex, 3, "Thandi Third")],
     money: {
-      price_minutes: 50, organiser_owed_minutes: 15, shares_received_minutes: 9.6, organiser_net_minutes: 5.4,
+      price_minutes: 50, organiser_owed_minutes: 15, shares_received_minutes: 8, organiser_net_minutes: 7,
       unpaid_minutes: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: true,
     },
     permissions: {
@@ -102,19 +107,19 @@ function noShow(overrides: Partial<BookingDetail> = {}): BookingDetail {
 }
 
 describe("M5-3 — a no-show has its own money view", () => {
-  it("organiser: paid at booking 50, refunded 50, penalty 15, shares 9.60, cost 5.40; each partner's 11.20 back", async () => {
+  it("organiser: paid at booking 50, refunded 50, penalty 15, shares 8, cost 7; each partner's 12 back", async () => {
     serve({ detail: noShow() });
     renderDetail();
     await screen.findByText(DETAIL_NO_SHOW.moneyNote(true));
-    expect(figure(DETAIL_MONEY.price)).toBe(formatCredits(50));
-    expect(figure(DETAIL_MONEY.organiserPaid(null))).toBe(formatCredits(50));
-    expect(figure(DETAIL_NO_SHOW.refunded(null))).toBe(formatCredits(50));
-    expect(figure(DETAIL_NO_SHOW.penalty)).toBe(formatCredits(-15));
-    expect(figure(DETAIL_MONEY.received)).toBe(formatCredits(9.6));
-    expect(figure(DETAIL_MONEY.net(null))).toBe(formatCredits(5.4));
-    // 50 − 50 + 15 − 9.60 = 5.40: the rows add up to the total.
-    expect(money()).toHaveTextContent(DETAIL_NO_SHOW.paidBackRow(formatCredits(16), formatCredits(11.2)));
-    expect(money()).not.toHaveTextContent(DETAIL_MONEY.paidRow(formatCredits(4.8), formatCredits(16)));
+    expect(figure(DETAIL_MONEY.price)).toBe(fig(50));
+    expect(figure(DETAIL_MONEY.organiserPaid(null))).toBe(fig(50));
+    expect(figure(DETAIL_NO_SHOW.refunded(null))).toBe(fig(50));
+    expect(figure(DETAIL_NO_SHOW.penalty)).toBe(fig(-15));
+    expect(figure(DETAIL_MONEY.received)).toBe(fig(8));
+    expect(figure(DETAIL_MONEY.net(null))).toBe(fig(7));
+    // 50 − 50 + 15 − 8 = 7: the rows add up to the total, in whole minutes.
+    expect(money()).toHaveTextContent(DETAIL_NO_SHOW.paidBackRow(minutesCompact(16), minutesCompact(12)));
+    expect(money()).not.toHaveTextContent(DETAIL_MONEY.paidRow(minutesCompact(4), minutesCompact(16)));
     expect(money()).not.toHaveTextContent(/Shares close|not paid yet/);
     expect(screen.getByText(DETAIL_NO_SHOW.attendance)).toBeInTheDocument();
     expect(screen.queryByText(DETAIL_ATTENDANCE.notYet)).toBeNull();
@@ -133,11 +138,11 @@ describe("M5-3 — a no-show has its own money view", () => {
     renderDetail();
     await screen.findByText(DETAIL_NO_SHOW.moneyNote(true));
     const own = document.querySelector("[data-no-show-share]");
-    expect(own?.textContent).toBe(DETAIL_NO_SHOW.partnerBack(formatCredits(16), formatCredits(11.2), formatCredits(4.8)).replace(/ cr/g, `${NBSP}cr`));
+    expect(own?.textContent).toBe(keepAmounts(DETAIL_NO_SHOW.partnerBack(minutesCompact(16), minutesCompact(12), minutesCompact(4))));
     expect(screen.queryByText(DETAIL_PLAYER.toPay)).toBeNull();
     expect(screen.queryByText(DETAIL_PLAYER.paidAll)).toBeNull();
     expect(screen.queryByRole("link", { name: DETAIL_PLAYER.review })).toBeNull();
-    expect(figure(DETAIL_MONEY.organiserPaid("Olga"))).toBe(formatCredits(50));
+    expect(figure(DETAIL_MONEY.organiserPaid("Olga"))).toBe(fig(50));
   });
 
   it("a waived no-show (the box was dark) says it all came back, with no penalty row", async () => {
@@ -148,7 +153,7 @@ describe("M5-3 — a no-show has its own money view", () => {
     renderDetail();
     await screen.findByText(DETAIL_NO_SHOW.moneyNoteFree);
     expect(within(money()).queryByText(DETAIL_NO_SHOW.penalty)).toBeNull();
-    expect(figure(DETAIL_MONEY.net(null))).toBe(formatCredits(0));
+    expect(figure(DETAIL_MONEY.net(null))).toBe(fig(0));
   });
 });
 
@@ -165,9 +170,9 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
     }) });
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
-    expect(figure(DETAIL_CANCELLED.refunded(null))).toBe(formatCredits(50));
-    expect(figure(DETAIL_CANCELLED.penalty)).toBe(formatCredits(-15));
-    expect(figure(DETAIL_MONEY.net(null))).toBe(formatCredits(15));
+    expect(figure(DETAIL_CANCELLED.refunded(null))).toBe(fig(50));
+    expect(figure(DETAIL_CANCELLED.penalty)).toBe(fig(-15));
+    expect(figure(DETAIL_MONEY.net(null))).toBe(fig(15));
     expect(within(money()).queryByText(DETAIL_CANCELLED.kept(null))).toBeNull();
   });
 
@@ -179,10 +184,10 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
     }) });
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
-    expect(figure(DETAIL_CANCELLED.penalty)).toBe(formatCredits(-15));
-    expect(money()).toHaveTextContent(DETAIL_CANCELLED.splitRefundPenaltyNote(null, formatCredits(15)));
-    expect(money()).toHaveTextContent(DETAIL_CANCELLED.returnedRow(formatCredits(25)));
-    expect(figure(DETAIL_MONEY.net(null))).toBe(formatCredits(15));
+    expect(figure(DETAIL_CANCELLED.penalty)).toBe(fig(-15));
+    expect(money()).toHaveTextContent(DETAIL_CANCELLED.splitRefundPenaltyNote(null, minutesCompact(15)));
+    expect(money()).toHaveTextContent(DETAIL_CANCELLED.returnedRow(minutesCompact(25)));
+    expect(figure(DETAIL_MONEY.net(null))).toBe(fig(15));
   });
 
   it("after a check-in nothing is a penalty: what was paid stands", async () => {
@@ -194,7 +199,7 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
     expect(within(money()).queryByText(DETAIL_CANCELLED.penalty)).toBeNull();
-    expect(figure(DETAIL_CANCELLED.kept(null))).toBe(formatCredits(50));
+    expect(figure(DETAIL_CANCELLED.kept(null))).toBe(fig(50));
   });
 });
 

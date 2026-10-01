@@ -8,12 +8,12 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import type { BookingDetail, PlayerSpec } from "@/lib/playersApi";
 import { DETAIL_ACTIONS, SHARE_ASK, firstName } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { minutesCompact } from "@/lib/minutes";
 import { askedFigure, defaultAsk, organiserShare } from "./splitEditor";
 
 /**
  * R1 F2.1 — a player added to an amount or ratio split is asked for a share the organiser names.
- * Without it the server seats them at amount 0 (or weight 1): "Asked for 0.00 cr", and the
+ * Without it the server seats them at amount 0 (or weight 1): "Asked for 0 min", and the
  * organiser covering a seat they meant to split.
  */
 type Props = {
@@ -43,14 +43,14 @@ export function ShareAskDialog({ detail, pick, onCancel, onAsk }: Props) {
       <DialogContent data-dialog="share-ask">
         <DialogHeader>
           <DialogTitle>{SHARE_ASK.title(who)}</DialogTitle>
-          <DialogDescription>{ratio ? SHARE_ASK.ratioBody : SHARE_ASK.amountBody(formatCredits(organiserShare(detail)))}</DialogDescription>
+          <DialogDescription>{ratio ? SHARE_ASK.ratioBody : SHARE_ASK.amountBody(minutesCompact(organiserShare(detail)))}</DialogDescription>
         </DialogHeader>
         <DialogBody className="pb-4">
           <Field invalid={Boolean(error)}>
             <FieldLabel>{ratio ? SHARE_ASK.weightLabel(who) : SHARE_ASK.amountLabel(who)}</FieldLabel>
             <Input
               value={text}
-              inputMode={ratio ? "numeric" : "decimal"}
+              inputMode="numeric"
               autoComplete="off"
               maxLength={ratio ? 3 : 9}
               className="w-32 tabular-nums"
