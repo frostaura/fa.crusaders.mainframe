@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { takeMyInvites } from "@/lib/earlyInvites";
 import { playersEndpoints, type Invite } from "@/lib/playersApi";
 
 /**
@@ -46,13 +47,17 @@ export function useMyInvites(options: { enabled?: boolean } = {}): MyInvites {
     setLoading(false);
   }, []);
 
-  /** The read itself. Sets no state before its first await, so an effect may start it. */
-  const read = useCallback(async (): Promise<Invite[] | null> => {
+  /**
+   * The read itself. Sets no state before its first await, so an effect may start it. The FIRST
+   * read may join the one started at the press of a link here (R5, `lib/earlyInvites`); a re-read
+   * (focus, after an answer) always asks the club — it must never be handed a list from before.
+   */
+  const read = useCallback(async (first = false): Promise<Invite[] | null> => {
     const mine = ++seq.current;
     let list: Invite[] | null = null;
     let failure: unknown = null;
     try {
-      const answer = await playersEndpoints.myInvites();
+      const answer = await ((first ? takeMyInvites() : null) ?? playersEndpoints.myInvites());
       list = Array.isArray(answer?.items) ? answer.items : [];
     } catch (thrown) {
       failure = thrown;
@@ -63,7 +68,7 @@ export function useMyInvites(options: { enabled?: boolean } = {}): MyInvites {
 
   const refresh = useCallback(() => {
     setLoading(true);
-    return read();
+    return read(false);
   }, [read]);
 
   useEffect(() => {
@@ -74,7 +79,7 @@ export function useMyInvites(options: { enabled?: boolean } = {}): MyInvites {
 
   useEffect(() => {
     if (!enabled) return undefined;
-    void read();
+    void read(true);
     const onFocus = () => { void refresh(); };
     const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
     window.addEventListener("focus", onFocus);
