@@ -8,6 +8,7 @@ import { failureOf, knownUnchanged, markAllOrProve, markReadOrProve } from "./in
 import { memberReads } from "@/lib/offline/memberReads";
 import { useCachedRead } from "@/lib/offline/useCachedRead";
 import { useUnreadCount } from "./useUnreadCount";
+import { dropMark, heldRead, holdMark, releaseMarks, settleMark, useHeldMarks, type HeldMarks } from "./heldMarks";
 
 /**
  * The member's inbox as one read (P11): the newest page, older pages appended by keyset cursor,
@@ -38,12 +39,13 @@ function useOlderPages(base: MemberNotificationPage | null) {
   return { items: follows ? older.items : [], cursor, more };
 }
 
-function useMarks(base: MemberNotificationPage | null) {
+function useMarks(base: MemberNotificationPage | null, readAt: number | null, held: HeldMarks) {
   const [marks, setMarks] = useState<Marks>(NO_MARKS);
   const current = marks.base === base ? marks : NO_MARKS;
+  // A tapped notice's mark outlives this page (`heldMarks`): laid over a list read before it.
   const isUnread = useCallback(
-    (n: MemberNotification) => n.read_at === null && !current.all && !current.ids.has(n.id),
-    [current],
+    (n: MemberNotification) => n.read_at === null && !current.all && !current.ids.has(n.id) && !heldRead(held, n.id, readAt),
+    [current, readAt, held],
   );
   const markId = useCallback((id: string, on: boolean) => setMarks((prev) => {
     const ids = new Set(prev.base === base ? prev.ids : []);
@@ -65,12 +67,21 @@ export function useInbox() {
   const unread = useUnreadCount();
   const { set: setCount, refresh: refreshCount } = unread;
   const older = useOlderPages(base);
-  const marks = useMarks(base);
+  const readAt = read.readAt;
+  const held = useHeldMarks();
+  const marks = useMarks(base, readAt, held);
 
-  // The page's figure is the server's own — the bell reads it too.
+  // The page's figure is the server's own — the bell reads it too — less the tapped notices this
+  // list was read too early to know about. Only a NEW list sets it: a mark made here moves the
+  // count itself (`noteRead`).
+  const heldNow = useRef(held);
+  useEffect(() => { heldNow.current = held; }, [held]);
   useEffect(() => {
-    if (base) setCount(base.unread_count);
-  }, [base, setCount]);
+    if (!base) return;
+    const early = (base.items ?? []).filter((n) => n.read_at === null && heldRead(heldNow.current, n.id, readAt)).length;
+    setCount(Math.max(0, base.unread_count - early));
+  }, [base, readAt, setCount]);
+  useEffect(() => { if (base) releaseMarks(base.items ?? [], readAt); }, [base, readAt]);
 
   const count = unread.count ?? base?.unread_count ?? 0;
   const countRef = useRef(count);
@@ -87,8 +98,16 @@ export function useInbox() {
   const openedUnread = useCallback((n: MemberNotification) => {
     if (!marks.isUnread(n)) return;
     noteRead(n, true);
+    // On a phone this page is about to go: the mark is held past it until the club has it.
+    holdMark(n.id);
     // Lost-reply audit (R3): a lost reply is read back; only a mark known not to have landed is undone.
-    markReadOrProve(n.id).catch((error: unknown) => { if (knownUnchanged(error)) marks.markId(n.id, false); void refreshCount(); });
+    markReadOrProve(n.id).then(
+      () => settleMark(n.id, true),
+      (error: unknown) => {
+        if (knownUnchanged(error)) { dropMark(n.id); marks.markId(n.id, false); } else settleMark(n.id, false);
+        void refreshCount();
+      },
+    );
   }, [marks, noteRead, refreshCount]);
 
   const before = useRef(0);
