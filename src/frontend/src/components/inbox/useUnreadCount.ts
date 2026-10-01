@@ -2,6 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/auth";
 import { useBalance } from "@/lib/balance";
 import { playersEndpoints } from "@/lib/playersApi";
+import { heldOverCount } from "./heldMarks";
 
 /**
  * The member inbox's unread count (P11, D11) — ONE module-level store the bell in the top bar
@@ -88,9 +89,12 @@ export function setUnread(count: number) {
 export function readUnread(): Promise<void> {
   if (inFlight) return inFlight;
   const asked = version;
+  const askedAt = Date.now();
   const read = playersEndpoints.unreadCount()
     .then((answer) => {
-      if (asked === version && typeof answer?.unread_count === "number") publish(answer.unread_count);
+      // R5 I5-4 — less the tapped notices the club's figure may still count: their rows are
+      // drawn read (`heldMarks`), and the bell said "1 unread" beside them.
+      if (asked === version && typeof answer?.unread_count === "number") publish(answer.unread_count - heldOverCount(askedAt));
     })
     .catch(() => { /* silent by design — see the module note */ })
     .finally(() => { if (inFlight === read) inFlight = null; });

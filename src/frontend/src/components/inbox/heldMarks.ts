@@ -73,6 +73,20 @@ export function releaseMarks(items: readonly { id: string; read_at: string | nul
   if (any) changed();
 }
 
+/**
+ * R5 I5-4 — how many held marks a server unread count asked at `askedAt` (ms) cannot be trusted to
+ * know about, so the bell agrees with the rows drawn read: a mark still out; one whose outcome is
+ * unknown (the write and its read-back both failed — the row stays read until a list says
+ * otherwise); or one that landed only after the count was asked.
+ */
+export function heldOverCount(askedAt: number): number {
+  let n = 0;
+  for (const mark of held.values()) {
+    if (mark.settled === null || !mark.landed || mark.settled >= askedAt) n += 1;
+  }
+  return n;
+}
+
 function subscribe(fn: () => void) {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
