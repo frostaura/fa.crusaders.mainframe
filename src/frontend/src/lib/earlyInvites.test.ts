@@ -13,7 +13,7 @@ const BOB = "55555555-5555-5555-5555-555555555555";
 const never = () => new Promise<never>(() => {});
 
 function invitesCalls() {
-  const fetchSpy = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ items: [], count: 0 }), { status: 200 })));
+  const fetchSpy = vi.fn((_input: RequestInfo | URL) => Promise.resolve(new Response(JSON.stringify({ items: [], count: 0 }), { status: 200 })));
   vi.stubGlobal("fetch", fetchSpy);
   for (const name of Object.keys(routeChunks) as (keyof typeof routeChunks)[]) vi.spyOn(routeChunks, name).mockImplementation(never);
   return () => fetchSpy.mock.calls.map(([input]) => String(input)).filter((path) => path.startsWith("/api/v1/me/invites"));
