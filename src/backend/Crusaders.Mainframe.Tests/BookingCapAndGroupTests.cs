@@ -298,7 +298,11 @@ public class BookingCapAndGroupTests
         {
             db.MemberGroupWindows.Add(new MemberGroupWindow
             {
-                TenantId = host.Tenant.Id, GroupId = group.Id, DayOfWeek = day, StartMinute = start, EndMinute = end,
+                TenantId = host.Tenant.Id,
+                GroupId = group.Id,
+                DayOfWeek = day,
+                StartMinute = start,
+                EndMinute = end,
             });
         }
         await db.SaveChangesAsync();
@@ -313,7 +317,9 @@ public class BookingCapAndGroupTests
         {
             db.MemberGroupMembers.Add(new MemberGroupMember
             {
-                TenantId = host.Tenant.Id, GroupId = groupId, UserId = userId,
+                TenantId = host.Tenant.Id,
+                GroupId = groupId,
+                UserId = userId,
             });
         }
         await db.SaveChangesAsync();

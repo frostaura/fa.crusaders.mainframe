@@ -169,6 +169,20 @@ function firstAmount(o: Options): string {
   return left >= o.min_zar ? String(left) : "";
 }
 
+/**
+ * The figures a cap refusal restates (M4-2): what is left and what is in; since M5-2 also paid and
+ * waiting apart, so the field never calls unpaid money "used". Only the ones the refusal carries.
+ */
+function capFigures(payload: Record<string, unknown>): Partial<Options> {
+  const figures: Partial<Options> = { remaining_zar: Number(payload.remaining_zar) };
+  if (typeof payload.already_zar === "number") figures.already_zar = payload.already_zar;
+  if (typeof payload.paid_zar === "number" && typeof payload.waiting_zar === "number") {
+    figures.paid_zar = payload.paid_zar;
+    figures.waiting_zar = payload.waiting_zar;
+  }
+  return figures;
+}
+
 /** Whether a cap refusal says checkouts still waiting on PayFast hold part of the limit (M5-2). */
 function heldByWaiting(err: unknown): boolean {
   const payload = err instanceof ApiError && isRecord(err.payload) ? err.payload : null;
@@ -195,12 +209,7 @@ function refusalFor(
     return null;
   }
   if (code === "amount_exceeds_member_cap" && payload && typeof payload.remaining_zar === "number") {
-    const remaining = payload.remaining_zar;
-    const already = typeof payload.already_zar === "number" ? payload.already_zar : undefined;
-    // M5-2: the refusal's paid-and-waiting split, so the field never calls unpaid money "used".
-    const split = typeof payload.paid_zar === "number" && typeof payload.waiting_zar === "number"
-      ? { paid_zar: payload.paid_zar, waiting_zar: payload.waiting_zar } : {};
-    setOptions((o) => (o ? { ...o, remaining_zar: remaining, ...(already === undefined ? {} : { already_zar: already }), ...split } : o));
+    setOptions((o) => (o ? { ...o, ...capFigures(payload) } : o));
     return LIMIT_TAKEN;
   }
   return START_ERRORS[code] ?? (err instanceof ApiError ? NOT_STARTED : UNREACHABLE);
