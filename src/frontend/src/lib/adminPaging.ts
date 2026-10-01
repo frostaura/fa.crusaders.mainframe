@@ -44,7 +44,7 @@ export function totalsOver(rows: readonly LedgerRow[]): LedgerTotals {
 /**
  * The range's first page and its totals (review round 4, carry-over): Transactions asked for
  * `limit=1000` and summed what came back, so a range holding 1664 movements read "MOVEMENTS 1000"
- * with credits, debits and net over a truncated set. The server now totals the whole range on the
+ * with minutes in, minutes out and net over a truncated set. The server now totals the whole range on the
  * first page; the rows come a page at a time ("Show more"). An API that sends no totals is read
  * to the end instead (up to `cap`), and totals are taken only over a complete read — null past it.
  */
@@ -72,3 +72,6 @@ export async function membersPage(cursor = "", limit = 200): Promise<Page<AdminM
   const answer = await api.get<Page<AdminMember> | AdminMember[]>(`/api/v1/admin/members/${query({ cursor, limit, photos: "url" })}`);
   return Array.isArray(answer) ? { items: answer, next_cursor: null, total: answer.length } : answer;
 }
+
+/** The Transactions page's four total tiles, in words (P13 §3.2: `in_minutes`, `out_minutes`, `net_minutes`). */
+export const LEDGER_TOTALS = { count: "Movements", in: "Minutes in", out: "Minutes out", net: "Net" } as const;

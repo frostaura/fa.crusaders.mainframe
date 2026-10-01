@@ -139,7 +139,8 @@ describe("AdminWebhooks", () => {
       "booking.completed", "booking.no_show_reversed",
       "booking.displaced", "booking.displacement_reversed",
       "booking.cancelled_lights_charged",
-      "credit.topped_up", "credit.refunded", "credit.penalty_applied", "credit.adjusted",
+      // P13 §5: the money events are named for minutes; the old unit's names are gone.
+      "minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk",
       "member.registered", "member.approved", "member.rejected",
       "member.suspended", "member.reactivated",
       // The last of the nine, reinstated. It was absent because §9 asserted no liveness
@@ -148,6 +149,8 @@ describe("AdminWebhooks", () => {
     ]) {
       expect(await screen.findByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}$`) })).toBeInTheDocument();
     }
+
+    expect(screen.queryByRole("button", { name: /^credit\./ })).toBeNull();
 
     // "And nothing the bus cannot fire" used to be asserted here, as
     // `queryByRole({ name: /peripheral\.faulted/ })).not.toBeInTheDocument()`. That string

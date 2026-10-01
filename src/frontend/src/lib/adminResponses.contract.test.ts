@@ -168,10 +168,10 @@ describe("member groups (the rest)", () => {
   it("the list, and every group in it", () => {
     exact(only(ok(FILE, "ListAsync")), F.memberGroupsList());
     exact(only(ok(FILE, "Wire")), F.memberGroupWire());
-    exact(only(at(FILE, "Wire", "pricing = ")), F.memberGroupPricing());
+    // P13 §3.8: the group's `pricing` block and its per-court prices are gone from the wire; the
+    // package discount (`package_discount_bps`) is pinned in the group itself above.
     exact(only(at(FILE, "Wire", "caps = ")), F.memberGroupCaps());
     exact(only(at(FILE, "Wire", "Select(w => ")), { day: "", start: "", end: "" });
-    exact(only(at("Endpoints/MemberGroupEndpoints.cs", "PerCourt", "(object)")), F.coursePrice());
   });
 
   it("create and edit answer the id and the name only", () => {
@@ -370,7 +370,9 @@ describe("devices, courts and doors (lib/api.ts)", () => {
   it("courts", () => {
     const FILE = "Endpoints/AdminCourtEndpoints.cs";
     expect(serverBody(FILE, "MapAdminCourtEndpoints")).toContain('courts.MapDelete("/{id:guid}", DeactivateAsync)');
-    reads(only(at(FILE, "ListAsync", "Select(c => ")), F.adminCourt());
+    // P13 §3.9: a court carries no price. Pinned without the retired `slice_price_credits`, which
+    // `adminCourt()` keeps only while the deprecated type requires it (integrator's fixture).
+    reads(only(at(FILE, "ListAsync", "Select(c => ")), { id: "", court_number: 0, name: "", court_type: "", is_active: false });
     reads(last(ok(FILE, "CreateAsync")), F.courtCreateAnswer());
     reads(last(ok(FILE, "UpdateAsync")), F.courtUpdateAnswer());
     reads(last(ok(FILE, "DeactivateAsync")), F.courtDeleteAnswer());

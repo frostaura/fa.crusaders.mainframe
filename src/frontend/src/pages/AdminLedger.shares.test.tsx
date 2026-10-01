@@ -33,8 +33,8 @@ describe("Admin ledger — shares of a split booking", () => {
     // Both legs, ungrouped: the pair nets to zero and the totals say so.
     expect(screen.getAllByText("Share of a split booking").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByRole("button", { name: /Shares for|Your share/ })).toBeNull();
-    const net = [...document.querySelectorAll("[data-ledger-total]")].map((n) => n.textContent);
-    expect(net).toEqual(["2", "+25.00 cr", "−25.00 cr", "0.00 cr"]);
+    const net = [...document.querySelectorAll("[data-ledger-total]")].map((n) => (n.querySelector("[aria-hidden='true']") ?? n).textContent);
+    expect(net).toEqual(["2", "+25 min", "−25 min", "0 min"]);
   // The page renders two date pickers and a Radix select; under a loaded runner that is slow.
   }, 15_000);
 

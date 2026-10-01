@@ -1,8 +1,8 @@
 import { settingDef } from "./settingsSchema";
 import { clubCurrencySymbol } from "./currency";
-import { ADJUST_REASON_CODES, type AdjustReasonCode } from "./adminApi";
-import { reasonLabel } from "./topUpCopy";
-import { formatCredits, formatMoney } from "./utils";
+import { isDeskReasonCode, percentOfBps, reasonLabel } from "./deskMinutesCopy";
+import { formatMoney } from "./utils";
+import { minutesCompact } from "./minutes";
 import { clubCalendarDate, clubDayAndClock } from "./clubClock";
 
 /**
@@ -11,7 +11,7 @@ import { clubCalendarDate, clubDayAndClock } from "./clubClock";
  * <p>
  * The headline and the diff are composed on the SERVER from a closed dictionary; this module
  * only covers what the server's words leave raw. A settings change's diff names the stored key
- * (`credits_per_zar_regular`), which is the one name an admin never sees on the Settings page —
+ * (`penalty_pct`), which is the one name an admin never sees on the Settings page —
  * so a setting is labelled with the Settings page's own caption, and anything else falls back to
  * the server's label, then to the key in words.
  * </p>
@@ -39,6 +39,8 @@ export function changeFieldLabel(
   change: { field: string; label?: string | null },
 ): string {
   const isSetting = row.area === "setting" || (row.action ?? "").startsWith("settings.");
+  const retired = LEGACY_LABEL[change.field];
+  if (isSetting && retired) return retired;
   const def = isSetting ? settingDef(change.field) : undefined;
   if (def) return def.label.replaceAll("{currency}", clubCurrencySymbol());
   return change.label || inWords(change.field);
@@ -51,7 +53,7 @@ export function changeFieldLabel(
 /**
  * The server renders a diff from whatever the writer stored, and the writers store keys and
  * tokens: the reviewer read `pending_approval`, `top_up_cash`, "Zar received 125.5", entry and
- * booking UUIDs, "Balance credits 0.0 → 200.00", a collection whose balance pair and seat sat in
+ * booking UUIDs, a balance as "0.0 → 200.00", a collection whose balance pair and seat sat in
  * the wrong columns, and schedule keys (`end_minute`, `days_of_week`). This layer is the last
  * step before the page: labels a volunteer uses, money formatted as money, ids hidden, the
  * balance pair joined into one row, and facts that are not a before → after (a seat, the amount
@@ -65,15 +67,15 @@ type RawChange = { field: string; label?: string | null; before?: string | null;
 
 const FIELD_LABEL: Record<string, string> = {
   status: "Status",
-  balance_credits: "Balance",
+  balance_minutes: "Balance",
   /** R3 A-8: what the member may spend — the balance less shares held — the figure the confirm used. */
-  spendable_credits: "Can spend",
+  spendable_minutes: "Can spend",
   /** R3 A-5: a webhook added or removed — where it sends (scheme and host only), what, and its name. */
   destination: "Sends to",
   event_filter: "Events",
   description: "Description",
-  amount_credits: "Amount",
-  collected_credits: "Collected",
+  amount_minutes: "Amount",
+  collected_minutes: "Collected",
   reason_code: "Reason",
   zar_received: "Money received",
   is_admin: "Admin rights",
@@ -99,8 +101,8 @@ const FIELD_LABEL: Record<string, string> = {
   part_of_batch: "Part of a batch",
   self: "Their own booking",
   // R4 A4-6: group snapshots and the privacy-view rows, in a volunteer's words.
-  pricing_mode: "Price",
-  multiplier_bps: "Price multiplier",
+  /** P13 §3.8: a group's say on club-package prices, "10% off packages" or "no say". */
+  package_discount_bps: "Package discount",
   windows: "Booking times",
   added: "Added",
   removed: "Removed",
@@ -114,8 +116,12 @@ const FIELD_LABEL: Record<string, string> = {
   requested: "Bookings requested",
   succeeded: "Done",
   failed: "Not done",
-  total_refunded_credits: "Refunded in all",
-  total_penalty_credits: "Penalties in all",
+  total_refunded_minutes: "Refunded in all",
+  total_penalty_minutes: "Penalties in all",
+  // P13 §3.5: a minutes package's before/after.
+  price_zar: "Price",
+  group: "Group",
+  sort_order: "Place on the shelf",
 };
 
 /** Membership and result states as the Members page says them. */
@@ -140,7 +146,34 @@ const STATE_WORDS: Record<string, string> = {
   voided: "Voided",
 };
 
-/** Group pricing, as the Groups screen says it (R4 A4-6: the record read "InheritCourt"). */
+/**
+ * Keys only OLD rows carry (contract §2.5): the record is append-only and survives the P13 money
+ * reset, so a row written before minutes still names the retired unit's keys. Each gets a caption
+ * that says it is history; its figures are shown as the bare numbers they were, with no unit,
+ * because the unit no longer exists. Every retired money key lives here and nowhere else.
+ */
+const LEGACY_LABEL: Record<string, string> = {
+  balance_credits: "Balance (before minutes)",
+  balance_before_credits: "Balance before (before minutes)",
+  balance_after_credits: "Balance after (before minutes)",
+  spendable_credits: "Can spend (before minutes)",
+  amount_credits: "Amount (before minutes)",
+  collected_credits: "Collected (before minutes)",
+  total_refunded_credits: "Refunded in all (before minutes)",
+  total_penalty_credits: "Penalties in all (before minutes)",
+  credits_per_zar: "Top-up rate (retired)",
+  flat_slice_price_credits: "Flat price per slot (retired)",
+  slice_price_credits: "Price per slot (retired)",
+  pricing_mode: "Price (retired)",
+  multiplier_bps: "Price multiplier (retired)",
+  // Settings P13 retired (§3.6, §3.9): bound and ignored now, but named by old settings rows.
+  credits_per_zar_regular: "Top-up rate for members (retired)",
+  credits_per_zar_league: "League top-up rate (retired)",
+  topup_block_zar: "Top-up block (retired)",
+  topup_max_zar_per_member: "Top-up cap per member (retired)",
+};
+
+/** Group pricing as it was (retired by P13; R4 A4-6: the record read "InheritCourt"). */
 const PRICING_WORDS: Record<string, string> = {
   inheritcourt: "The court’s own price",
   inherit_court: "The court’s own price",
@@ -161,7 +194,7 @@ const DAY_WORD: Record<string, string> = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Fields that are the subject's own state; anything else on one side only is a fact. */
-const STATE_FIELDS = new Set(["status", "balance_credits", "is_admin", "must_change_password"]);
+const STATE_FIELDS = new Set(["status", "balance_minutes", "balance_credits", "is_admin", "must_change_password"]);
 
 function isIdField(field: string, change: RawChange): boolean {
   if (field === "id" || field.endsWith("_id") || field.endsWith("_ids")) return true;
@@ -179,22 +212,47 @@ function isSettingsDiff(row: { area?: string | null; action?: string | null }): 
   return row.area === "setting" || action.startsWith("settings.");
 }
 
+/** A minutes package's row (P13 §3.5): its `minutes` is the amount sold, not a booking's length. */
+function isPackageRow(row: { action?: string | null }): boolean {
+  return (row.action ?? "").startsWith("package.");
+}
+
 /** A label for a field: the Settings caption, ours, the server's without its unit, or the key. */
 function labelFor(row: { area?: string | null; action?: string | null }, change: RawChange): string {
   if (isSettingsDiff(row)) return changeFieldLabel(row, change);
-  const known = FIELD_LABEL[change.field];
+  if (isPackageRow(row) && change.field === "minutes") return "Minutes";
+  const known = FIELD_LABEL[change.field] ?? LEGACY_LABEL[change.field];
   if (known) return known;
-  // A group's top-up rate: its value says the unit ("1.6 cr per R1", R5 A5-3), so the caption is the rate's name.
-  if (change.field === "credits_per_zar") return "Top-up rate";
-  const server = change.label?.replace(/\s+(credits|zar)$/i, "").trim();
+  // The server's label without its unit word ("Max minutes" stays: there the unit is the point).
+  const server = change.label?.replace(/\s+zar$/i, "").trim();
   return server || inWords(change.field);
 }
 
+/**
+ * A stored amount of minutes, however the server printed it: "300", "-45", "300 minutes",
+ * "1 minute" (`AdminChangeDiff.Number` words a `*_minutes` field) — and "100.00" from a fixture
+ * or a row written mid-migration. Whole minutes, truncated toward zero.
+ */
+const MINUTES_TEXT = /^([-−]?\d+)(?:\.\d+)?(?:\s+minutes?)?$/;
+
+/** "300 minutes" → 300; null for anything that is not an amount of minutes. */
+export function minutesIn(value: string): number | null {
+  const m = MINUTES_TEXT.exec(value.trim());
+  return m ? Number(m[1].replace("−", "-")) : null;
+}
+
 function money(field: string, value: string): string | null {
+  if (value.trim() === "") return null;
+  if (field.endsWith("_minutes")) {
+    const minutes = minutesIn(value);
+    return minutes === null ? null : minutesCompact(minutes);
+  }
   const n = Number(value);
-  if (!Number.isFinite(n) || value.trim() === "") return null;
-  if (field.endsWith("_credits")) return formatCredits(n);
-  if (field.endsWith("_zar") || field.startsWith("zar_")) return formatMoney(n);
+  if (!Number.isFinite(n)) return null;
+  // `topup_max_zar_per_member` (retired) was rand too, with its unit mid-key.
+  if (field.endsWith("_zar") || field.startsWith("zar_") || field.includes("_zar_per_")) return formatMoney(n);
+  // An old row's figure in the retired unit: the number as it was, without a unit (§2.5).
+  if (field in LEGACY_LABEL) return Number.isInteger(n) ? String(n) : n.toFixed(2);
   return null;
 }
 
@@ -260,6 +318,13 @@ function windowsInWords(token: string): string {
   return token.replace(/\b(mon|tue|wed|thu|fri|sat|sun)\b/g, (d) => DAY_WORD[d]).replace(/(\d{2}:\d{2})-(\d{2}:\d{2})/g, "$1–$2");
 }
 
+/** "1000" → "10% off packages", "1250" → "12.5% off packages" (P13 §3.8: a group's package discount). */
+function discountInWords(token: string): string | null {
+  const n = Number(token);
+  if (token === "" || !Number.isFinite(n)) return null;
+  return `${percentOfBps(n)} off packages`;
+}
+
 /** One basis point: 10000 bps is ×1.00. */
 const BPS = 0.0001;
 
@@ -270,11 +335,11 @@ function multiplierInWords(token: string): string | null {
   return "×" + (n * BPS).toFixed(2) + " the court’s price";
 }
 
-/** "1.6" → "1.6 cr per R1": a group's top-up RATE, which money formatting read as "R1.60" (R5 A5-3). */
+/** An old row's group rate, "1.6" → "1.6 per R1" — a rate, never money ("R1.60", R5 A5-3). Retired by P13. */
 function rateInWords(token: string): string | null {
   const n = Number(token);
   if (token === "" || !Number.isFinite(n)) return null;
-  return `${Number(n.toFixed(2))} cr per ${clubCurrencySymbol()}1`;
+  return `${Number(n.toFixed(2))} per ${clubCurrencySymbol()}1`;
 }
 
 /** What happened to one item of a batch (R5 A5-2), as the line ends it. */
@@ -287,8 +352,8 @@ const BATCH_ITEM_WORDS: Record<string, string> = {
 
 type BatchItem = {
   member_name?: string | null; block_label?: string | null; court?: number | null; starts_at?: string | null;
-  status?: string | null; error?: string | null; refund_credits?: number | null; penalty_credits?: number | null;
-  amount_credits?: number | null;
+  status?: string | null; error?: string | null; refund_minutes?: number | null; penalty_minutes?: number | null;
+  amount_minutes?: number | null;
 };
 
 /** "Court 2, Sat 3 Oct, 18:00". */
@@ -302,22 +367,22 @@ function batchItemWhere(item: BatchItem, timezone?: string): string {
 function batchItemOutcome(item: BatchItem): string {
   const status = item.status ?? "";
   if (status === "refused" || status === "failed") {
-    const verb = item.amount_credits !== undefined ? "not booked" : "not cancelled";
+    const verb = item.amount_minutes !== undefined ? "not booked" : "not cancelled";
     return item.error ? `${verb} (${inWords(item.error)})` : verb;
   }
   return BATCH_ITEM_WORDS[status] ?? (status ? inWords(status).toLowerCase() : "");
 }
 
-/** "50.00 cr back", "15.00 cr penalty", or a booked item's price. */
+/** "50 min back", "15 min penalty", or a booked item's price. */
 function batchItemMoney(item: BatchItem): string[] {
   const money: string[] = [];
-  if (item.status === "booked" && item.amount_credits) money.push(formatCredits(item.amount_credits));
-  if (item.refund_credits) money.push(`${formatCredits(item.refund_credits)} back`);
-  if (item.penalty_credits) money.push(`${formatCredits(item.penalty_credits)} penalty`);
+  if (item.status === "booked" && item.amount_minutes) money.push(minutesCompact(item.amount_minutes));
+  if (item.refund_minutes) money.push(`${minutesCompact(item.refund_minutes)} back`);
+  if (item.penalty_minutes) money.push(`${minutesCompact(item.penalty_minutes)} penalty`);
   return money;
 }
 
-/** "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50.00 cr back". */
+/** "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50 min back". */
 function batchItemInWords(item: BatchItem, timezone?: string): string {
   const who = item.member_name ?? (item.block_label ? `${item.block_label} (club hold)` : null);
   const end = [batchItemOutcome(item), ...batchItemMoney(item)].filter(Boolean).join(", ");
@@ -341,7 +406,10 @@ function batchInWords(token: string, timezone?: string): string | null {
 function fieldInWords(field: string, token: string, timezone?: string): string | null | undefined {
   switch (field) {
     case "bookings": return batchInWords(token, timezone);
-    case "credits_per_zar": return rateInWords(token);
+    case "package_discount_bps": return discountInWords(token);
+    case "credits_per_zar":
+    case "credits_per_zar_regular":
+    case "credits_per_zar_league": return rateInWords(token);
     case "windows": return windowsInWords(token);
     case "pricing_mode": return PRICING_WORDS[token.toLowerCase()] ?? inWords(token);
     case "multiplier_bps": return multiplierInWords(token);
@@ -373,9 +441,7 @@ export function changeValueInWords(field: string, value: string | null | undefin
 
 /** A reason code, a state token or a bare snake_case code, in words; null for anything else. */
 function codeInWords(field: string, token: string): string | null {
-  if (field === "reason_code" && (ADJUST_REASON_CODES as readonly string[]).includes(token)) {
-    return reasonLabel(token as AdjustReasonCode);
-  }
+  if (field === "reason_code" && isDeskReasonCode(token)) return reasonLabel(token);
   const state = STATE_WORDS[token.toLowerCase()];
   if (state && (field === "status" || field.endsWith("_status"))) return state;
   // A bare snake_case token is a code, not a sentence: say it in words ("best_of_5" too).
@@ -386,13 +452,14 @@ function codeInWords(field: string, token: string): string | null {
 type Row = { area?: string | null; action?: string | null; changes?: RawChange[] | null };
 
 /**
- * A group field whose EMPTY value is itself a setting (R5 A5-3): a peak say cleared is "no say",
- * a rate cleared is the club's. On an edit the empty side is said, so the row reads as the change
+ * A group field whose EMPTY value is itself a setting (R5 A5-3): a peak say or a package discount
+ * cleared is "no say" (an old row's rate cleared was the club's). On an edit the empty side is said, so the row reads as the change
  * it was ("yes → no say") — a one-sided value was listed as a fact ("Peak priority — yes"), which
  * reads as the change being TO yes.
  */
 const GROUP_EMPTY_WORDS: Record<string, string> = {
   peak_priority: "no say",
+  package_discount_bps: "no say",
   credits_per_zar: "the club's rate",
 };
 
@@ -402,18 +469,18 @@ function clearedGroupValue(row: Row, field: string): string | null {
 
 /** A collection or adjustment stores its balance as two AFTER fields; they are one change. */
 function balancePair(byField: Map<string, RawChange>): ChangeLine | null {
-  const before = byField.get("balance_before_credits");
-  const after = byField.get("balance_after_credits");
+  const before = byField.get("balance_before_minutes");
+  const after = byField.get("balance_after_minutes");
   if (!before && !after) return null;
   return {
-    field: "balance_credits",
-    label: FIELD_LABEL.balance_credits,
-    before: changeValueInWords("balance_credits", before?.after ?? before?.before),
-    after: changeValueInWords("balance_credits", after?.after ?? after?.before),
+    field: "balance_minutes",
+    label: FIELD_LABEL.balance_minutes,
+    before: changeValueInWords("balance_minutes", before?.after ?? before?.before),
+    after: changeValueInWords("balance_minutes", after?.after ?? after?.before),
   };
 }
 
-const BALANCE_HALVES = new Set(["balance_before_credits", "balance_after_credits"]);
+const BALANCE_HALVES = new Set(["balance_before_minutes", "balance_after_minutes"]);
 
 /** One stored change as a line, a fact, or nothing (an id, a balance half, an emptied value, a repeated total). */
 function presentOne(
@@ -422,8 +489,10 @@ function presentOne(
   if (BALANCE_HALVES.has(c.field)) return null;
   if (c.field === "total" && repeatsACount(c, byField)) return null;
   const label = labelFor(row, c);
-  let was = changeValueInWords(c.field, c.before, timezone);
-  let is = changeValueInWords(c.field, c.after, timezone);
+  // A package's `minutes` is an amount ("5 h"), read like every other `*_minutes` figure.
+  const valueField = isPackageRow(row) && c.field === "minutes" ? "package_minutes" : c.field;
+  let was = changeValueInWords(valueField, c.before, timezone);
+  let is = changeValueInWords(valueField, c.after, timezone);
   if (was === null && is === null) return null;
   const cleared = clearedGroupValue(row, c.field);
   if (cleared !== null) {

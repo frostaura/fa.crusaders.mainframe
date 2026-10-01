@@ -14,39 +14,40 @@ describe("the change record in words", () => {
     expect(changed).toEqual([{ field: "status", label: "Status", before: "Awaiting approval", after: "Turned down" }]);
   });
 
-  it("formats a desk top-up's money, names its reason and hides the ledger id", () => {
+  it("says a desk sale's minutes and money, names its reason and hides the ledger id", () => {
     const { changed, facts } = presentChanges({
       area: "credit", action: "credit.topped_up",
       changes: [
         { field: "entry_id", label: "Entry id", before: null, after: "ce45e706-b3ee-458e-abe2-8b69d932be6f" },
         { field: "reason_code", label: "Reason code", before: null, after: "top_up_cash" },
         { field: "zar_received", label: "Zar received", before: null, after: "125.5" },
-        { field: "amount_credits", label: "Amount credits", before: null, after: "200" },
-        { field: "balance_credits", label: "Balance credits", before: "0.0", after: "200.00" },
+        // What `AdminChangeDiff.Number` prints for a `*_minutes` figure.
+        { field: "amount_minutes", label: "Amount minutes", before: null, after: "300 minutes" },
+        { field: "balance_minutes", label: "Balance minutes", before: "0 minutes", after: "300 minutes" },
       ],
     });
-    expect(changed).toEqual([{ field: "balance_credits", label: "Balance", before: "0.00 cr", after: "200.00 cr" }]);
+    expect(changed).toEqual([{ field: "balance_minutes", label: "Balance", before: "0 min", after: "5 h" }]);
     expect(facts.map((f) => `${f.label}: ${f.value}`)).toEqual([
-      "Reason: Cash paid at the desk", "Money received: R125.50", "Amount: 200.00 cr",
+      "Reason: Cash paid at the desk", "Money received: R125.50", "Amount: 5 h",
     ]);
-    expect(JSON.stringify({ changed, facts })).not.toMatch(/ce45e706|top_up_cash|125\.5"|Zar/);
+    expect(JSON.stringify({ changed, facts })).not.toMatch(/ce45e706|top_up_cash|125\.5"|Zar|\.00|cr\b/);
   });
 
   it("joins a collection's balance pair into one row the right way round, and lists its facts as facts", () => {
     const { changed, facts } = presentChanges({
       area: "booking", action: "players.share_collected",
       changes: [
-        { field: "collected_credits", label: "Collected credits", before: null, after: "100.00" },
-        { field: "balance_after_credits", label: "Balance after credits", before: null, after: "-100.00" },
-        { field: "balance_before_credits", label: "Balance before credits", before: null, after: "0.00" },
+        { field: "collected_minutes", label: "Collected minutes", before: null, after: "100 minutes" },
+        { field: "balance_after_minutes", label: "Balance after minutes", before: null, after: "-100 minutes" },
+        { field: "balance_before_minutes", label: "Balance before minutes", before: null, after: "0 minutes" },
         { field: "seat", label: "Seat", before: "2", after: null },
         { field: "booking_id", label: "Booking id", before: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", after: null },
         { field: "participant_id", label: "Participant id", before: "1efc8f32-2aae-46d5-87a4-808a5818e8de", after: null },
       ],
     });
-    expect(changed).toEqual([{ field: "balance_credits", label: "Balance", before: "0.00 cr", after: "−100.00 cr" }]);
+    expect(changed).toEqual([{ field: "balance_minutes", label: "Balance", before: "0 min", after: "−1 h 40 min" }]);
     expect(facts).toEqual([
-      { field: "collected_credits", label: "Collected", value: "100.00 cr" },
+      { field: "collected_minutes", label: "Collected", value: "1 h 40 min" },
       { field: "seat", label: "Seat", value: "2" },
     ]);
   });
@@ -94,15 +95,15 @@ describe("times, dates and counts in the club's words (R3 A-7)", () => {
 
 /** Review round 3, A-8: the overdraft row carries what the member may spend beside the balance. */
 describe("the overdraft row's two figures (R3 A-8)", () => {
-  it("labels spendable credits 'Can spend' and pairs it before → after, like the balance", () => {
+  it("labels spendable minutes 'Can spend' and pairs it before → after, like the balance", () => {
     const { changed } = presentChanges({
       area: "booking", action: "booking.overdraft_authorised",
       changes: [
-        { field: "balance_credits", before: "50", after: "0" },
-        { field: "spendable_credits", before: "20", after: "-30" },
+        { field: "balance_minutes", before: "50 minutes", after: "0 minutes" },
+        { field: "spendable_minutes", before: "20 minutes", after: "-30 minutes" },
       ],
     });
-    expect(changed).toContainEqual({ field: "spendable_credits", label: "Can spend", before: "20.00 cr", after: "−30.00 cr" });
+    expect(changed).toContainEqual({ field: "spendable_minutes", label: "Can spend", before: "20 min", after: "−30 min" });
     expect(changed.map((c) => c.label)).toEqual(["Balance", "Can spend"]);
   });
 });
@@ -150,23 +151,49 @@ describe("a group edit's cleared values and its rate (R5 A5-3)", () => {
     expect(changed).toEqual([{ field: "peak_priority", label: "Peak priority", before: "yes", after: "no say" }]);
   });
 
-  it("says a group's top-up rate as a rate, and a cleared one as the club's rate", () => {
+  /** P13 §3.8: "no say → 10%", in the console's words — never "Package discount bps 1000". */
+  it("says a group's package discount as a percentage off, and a cleared one as 'no say'", () => {
     const { changed, facts } = presentChanges({
       area: "group", action: "group.updated",
-      changes: [{ field: "credits_per_zar", label: "Credits per zar", before: "1.6", after: null }],
+      changes: [
+        { field: "package_discount_bps", label: "Package discount bps", before: null, after: "1000" },
+        { field: "max_slots_per_day", label: "Max slots per day", before: "2", after: "3" },
+      ],
     });
     expect(facts).toEqual([]);
-    expect(changed).toEqual([{ field: "credits_per_zar", label: "Top-up rate", before: "1.6 cr per R1", after: "the club's rate" }]);
-    expect(JSON.stringify(changed)).not.toContain("R1.60");
+    expect(changed).toContainEqual({ field: "package_discount_bps", label: "Package discount", before: "no say", after: "10% off packages" });
+    const cleared = presentChanges({
+      area: "group", action: "group.updated",
+      changes: [{ field: "package_discount_bps", before: "1250", after: null }],
+    });
+    expect(cleared.changed).toEqual([{ field: "package_discount_bps", label: "Package discount", before: "12.5% off packages", after: "no say" }]);
   });
 
   it("keeps a NEW group's values as facts — nothing was cleared", () => {
     const { changed, facts } = presentChanges({
       area: "group", action: "group.created",
-      changes: [{ field: "credits_per_zar", before: null, after: "2" }],
+      changes: [{ field: "package_discount_bps", before: null, after: "0" }],
     });
     expect(changed).toEqual([]);
-    expect(facts).toEqual([{ field: "credits_per_zar", label: "Top-up rate", value: "2 cr per R1" }]);
+    expect(facts).toEqual([{ field: "package_discount_bps", label: "Package discount", value: "0% off packages" }]);
+  });
+
+  /**
+   * The record is append-only and outlives the P13 money reset (contract §2.5): a row written
+   * before minutes still reads in words, said as history, its figures bare — no retired unit.
+   */
+  it("still reads an old row's retired rate and balance, as history, without the old unit", () => {
+    const { changed } = presentChanges({
+      area: "group", action: "group.updated",
+      changes: [{ field: "credits_per_zar", label: "Credits per zar", before: "1.6", after: null }],
+    });
+    expect(changed).toEqual([{ field: "credits_per_zar", label: "Top-up rate (retired)", before: "1.6 per R1", after: "the club's rate" }]);
+    const old = presentChanges({
+      area: "credit", action: "credit.adjusted",
+      changes: [{ field: "balance_credits", label: "Balance credits", before: "0.0", after: "200.00" }],
+    });
+    expect(old.changed).toEqual([{ field: "balance_credits", label: "Balance (before minutes)", before: "0", after: "200" }]);
+    expect(JSON.stringify([changed, old])).not.toMatch(/\bcr\b|R1\.60/);
   });
 });
 
@@ -189,41 +216,87 @@ describe("a batch's bookings, each named once (R5 A5-2)", () => {
   const ZONE = "Africa/Johannesburg";
   it("says each cancelled booking's member, court, time and what came back", () => {
     const items = [
-      { booking_id: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: "Olga Smith", block_label: null, court: 2, starts_at: "2026-10-03T16:00:00Z", status: "cancelled", refund_credits: 50, penalty_credits: 0 },
-      { booking_id: "b5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: null, block_label: "Coaching", court: 3, starts_at: "2026-10-03T16:00:00Z", status: "block_lifted", refund_credits: 0, penalty_credits: 0 },
-      { booking_id: "c5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: "Ben Ng", block_label: null, court: 1, starts_at: "2026-10-03T16:30:00Z", status: "already_cancelled", refund_credits: 0, penalty_credits: 0 },
+      { booking_id: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: "Olga Smith", block_label: null, court: 2, starts_at: "2026-10-03T16:00:00Z", status: "cancelled", refund_minutes: 50, penalty_minutes: 0 },
+      { booking_id: "b5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: null, block_label: "Coaching", court: 3, starts_at: "2026-10-03T16:00:00Z", status: "block_lifted", refund_minutes: 0, penalty_minutes: 0 },
+      { booking_id: "c5604dd3-1204-4b67-bc6b-cfca1804fa4f", member_name: "Ben Ng", block_label: null, court: 1, starts_at: "2026-10-03T16:30:00Z", status: "already_cancelled", refund_minutes: 0, penalty_minutes: 0 },
     ];
     const { facts } = presentChanges({
       area: "booking", action: "bookings.bulk_cancelled",
       changes: [
         { field: "bookings", label: "Bookings", before: null, after: items.map((i) => JSON.stringify(i)).join(", ") },
         { field: "booking_ids", label: "Booking ids", before: null, after: items.map((i) => i.booking_id).join(", ") },
-        { field: "total_refunded_credits", label: "Total refunded credits", before: null, after: "50.00" },
+        { field: "total_refunded_minutes", label: "Total refunded minutes", before: null, after: "50 minutes" },
       ],
     }, ZONE);
     const bookings = facts.find((f) => f.field === "bookings")!;
     expect(bookings.label).toBe("Bookings");
     expect(bookings.value.split("\n")).toEqual([
-      "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50.00 cr back",
+      "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50 min back",
       "Coaching (club hold) — Court 3, Sat 3 Oct, 18:00 — hold lifted",
       "Ben Ng — Court 1, Sat 3 Oct, 18:30 — already cancelled",
     ]);
     expect(facts.map((f) => f.value).join(" ")).not.toMatch(/a5604dd3|booking_id|\{/);
-    expect(facts.find((f) => f.field === "total_refunded_credits")).toEqual({ field: "total_refunded_credits", label: "Refunded in all", value: "50.00 cr" });
+    expect(facts.find((f) => f.field === "total_refunded_minutes")).toEqual({ field: "total_refunded_minutes", label: "Refunded in all", value: "50 min" });
   });
 
   it("says each booking of a bulk book, and a refused one with its reason", () => {
     const items = [
-      { index: 0, booking_id: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", court: 2, starts_at: "2026-10-03T16:00:00Z", status: "booked", error: null, amount_credits: 50 },
-      { index: 1, booking_id: null, court: 2, starts_at: "2026-10-03T16:15:00Z", status: "refused", error: "slot_taken", amount_credits: 0 },
+      { index: 0, booking_id: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", court: 2, starts_at: "2026-10-03T16:00:00Z", status: "booked", error: null, amount_minutes: 50 },
+      { index: 1, booking_id: null, court: 2, starts_at: "2026-10-03T16:15:00Z", status: "refused", error: "slot_taken", amount_minutes: 0 },
     ];
     const { facts } = presentChanges({
       area: "booking", action: "bookings.bulk_booked",
       changes: [{ field: "bookings", before: null, after: items.map((i) => JSON.stringify(i)).join(", ") }],
     }, ZONE);
     expect(facts[0].value.split("\n")).toEqual([
-      "Court 2, Sat 3 Oct, 18:00 — booked, 50.00 cr",
+      "Court 2, Sat 3 Oct, 18:00 — booked, 50 min",
       "Court 2, Sat 3 Oct, 18:15 — not booked (Slot taken)",
     ]);
+  });
+});
+
+/** P13 §3.6, §3.9: a settings row written before the retired settings went still reads in words. */
+describe("an old settings row's retired keys (P13)", () => {
+  it("names each as retired and says the rate as a rate, the block and cap as money", () => {
+    const { changed } = presentChanges({
+      area: "setting", action: "settings.updated",
+      changes: [
+        { field: "credits_per_zar_regular", label: "Credits per zar regular", before: "1.6", after: "2" },
+        { field: "topup_block_zar", label: "Topup block zar", before: "100", after: "50" },
+        { field: "topup_max_zar_per_member", label: "Topup max zar per member", before: "1000", after: "2000" },
+      ],
+    });
+    expect(changed).toEqual([
+      { field: "credits_per_zar_regular", label: "Top-up rate for members (retired)", before: "1.6 per R1", after: "2 per R1" },
+      { field: "topup_block_zar", label: "Top-up block (retired)", before: "R100.00", after: "R50.00" },
+      { field: "topup_max_zar_per_member", label: "Top-up cap per member (retired)", before: "R1000.00", after: "R2000.00" },
+    ]);
+  });
+});
+
+/** P13 §3.5, §4.5: a minutes package's record says its minutes as an amount and its price as money. */
+describe("a minutes package's record (P13)", () => {
+  it("says the minutes as an amount, the price in rand and the shelf place in words", () => {
+    const { changed } = presentChanges({
+      area: "credit", action: "package.updated",
+      changes: [
+        { field: "minutes", label: "Minutes", before: "300", after: "330" },
+        { field: "price_zar", label: "Price zar", before: "550.00", after: "600.00" },
+        { field: "sort_order", label: "Sort order", before: "1", after: "2" },
+      ],
+    });
+    expect(changed).toEqual([
+      { field: "minutes", label: "Minutes", before: "5 h", after: "5 h 30 min" },
+      { field: "price_zar", label: "Price", before: "R550.00", after: "R600.00" },
+      { field: "sort_order", label: "Place on the shelf", before: "1", after: "2" },
+    ]);
+  });
+
+  it("names the group a package belongs to, never its JSON", () => {
+    const { facts } = presentChanges({
+      area: "credit", action: "package.created",
+      changes: [{ field: "group", before: null, after: "{\"id\": \"ce45e706-b3ee-458e-abe2-8b69d932be6f\", \"name\": \"League\"}" }],
+    });
+    expect(facts).toEqual([{ field: "group", label: "Group", value: "League" }]);
   });
 });

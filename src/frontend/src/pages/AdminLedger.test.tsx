@@ -26,7 +26,7 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
 
   const ROWS = [
     ledgerRowFixture({ id: "r1", comment: "Booking charge", signedAmountMinutes: -24, amountMinutes: 24 }),
-    ledgerRowFixture({ id: "r2", comment: "Desk credit", type: "AdminAdjustment", signedAmountMinutes: 40, amountMinutes: 40 }),
+    ledgerRowFixture({ id: "r2", comment: "Desk goodwill", type: "AdminAdjustment", signedAmountMinutes: 40, amountMinutes: 40 }),
   ];
 
   const routes = (over: Parameters<typeof stubFetch>[0] = []) => [
@@ -40,7 +40,7 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminLedgerPage />);
 
-    await screen.findByText("Desk credit");
+    await screen.findByText("Desk goodwill");
     // The date filters are club-day DatePickers (P3, R7); "unbounded" is their clear ×.
     fireEvent.click(screen.getByRole("button", { name: "Clear From" }));
 
@@ -57,7 +57,7 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
   it("clears the table when a filter fails, instead of leaving the last answer on screen", async () => {
     stubFetch(routes());
     renderPage(<AdminLedgerPage />);
-    await screen.findByText("Desk credit");
+    await screen.findByText("Desk goodwill");
 
     // Re-stubbed rather than sequenced, because the second answer differs in STATUS and a
     // sequence entry cannot carry one. This is the rejected range the API really returns.
@@ -69,7 +69,7 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear To" }));
 
     // Nothing stale survives: not the rows, and not the totals computed from them.
-    await vi.waitFor(() => expect(screen.queryByText("Desk credit")).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByText("Desk goodwill")).not.toBeInTheDocument());
     expect(screen.queryByText("Booking charge")).not.toBeInTheDocument();
     expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger")).length).toBeGreaterThan(0);
     // And the admin is told ON THE PAGE, where the table was, in a sentence that says what to
@@ -178,23 +178,19 @@ describe("Admin ledger — the filters are the URL", () => {
 });
 
 /**
- * Zero is neither a credit nor a debit.
+ * Zero is neither money in nor money out.
  *
  * <p>
- * The four totals above the club's book were composed as a literal sign wrapped around
- * {@link formatCredits} — <code>`+${formatCredits(totals.credits)}`</code> and its minus-sign
- * twin — so the sign was decided by which tile it was rather than by the figure in it. A
- * filter that matched nothing therefore rendered <b>+0.00 cr</b> and <b>−0.00 cr</b>, side by
- * side, on the one screen in the product whose entire job is reconciling money. A signed zero
+ * The four totals above the club's book were composed as a literal sign wrapped around an
+ * unsigned formatter, so the sign was decided by which tile it was rather than by the figure in
+ * it. A filter that matched nothing therefore rendered a "+0" and a "−0", side by side, on the one screen in the product whose entire job is reconciling money. A signed zero
  * reads as a movement that did not happen, and an admin chasing a discrepancy reads two of
  * them.
  * </p>
  *
  * <p>
- * This is the same defect `formatSignedCredits` was written for, and its own comment records
- * the reports card that hardcoded a minus around `formatCredits` rather than coming through
- * it. That card was fixed; this one was not, because nothing connected them — which is the
- * argument for the totals going through the formatter rather than around it. Fixing it at the
+ * The totals go through the signed minutes formatter (`<Minutes signed>`, P13), whose zero has no
+ * sign, rather than around it. Fixing it at the
  * formatter boundary is also what makes a genuine zero-valued row right, rather than only the
  * empty filter that made it visible.
  * </p>
@@ -208,44 +204,46 @@ describe("Admin ledger — the totals are signed by their value, not by their la
   ];
 
   /**
-   * The four figures above the table, in document order: movements, credits, debits, net.
-   * Found by their data attribute (P3 set them in tabular Figtree rather than the monospace
-   * face this selected on).
+   * The four figures above the table, in document order: movements, minutes in, minutes out,
+   * net — as the eye reads them (`<Minutes>` pairs the compact form with a spoken one).
    */
-  const totals = () => [...document.querySelectorAll("[data-ledger-total]")].map((p) => p.textContent ?? "");
+  const shown = (p: Element) => (p.querySelector("[aria-hidden='true']") ?? p).textContent ?? "";
+  const totals = () => [...document.querySelectorAll("[data-ledger-total]")].map(shown);
 
   /** The same four, as `{ text, className }` — because the colour is the sign said again. */
   const tiles = () => [...document.querySelectorAll("[data-ledger-total]")]
-    .map((p) => ({ text: p.textContent ?? "", cls: p.className }));
+    .map((p) => ({ text: shown(p), cls: p.className }));
 
   it("puts no sign on a total of nothing", async () => {
     stubFetch(routes([]));
     renderPage(<AdminLedgerPage />);
 
     await screen.findByText("No movements match these filters.");
-    expect(totals()).toContain("0.00 cr");
+    expect(totals()).toContain("0 min");
     // The two that were there. U+2212 as well as the hyphen, because the minus this screen
     // draws is the typographic one.
-    expect(totals()).not.toContain("+0.00 cr");
-    expect(totals()).not.toContain("−0.00 cr");
-    expect(totals()).not.toContain("-0.00 cr");
+    expect(totals()).not.toContain("+0 min");
+    expect(totals()).not.toContain("−0 min");
+    expect(totals()).not.toContain("-0 min");
+    // And a screen reader hears no sign on it either.
+    expect(document.querySelector("[data-ledger-total] .sr-only")).toHaveTextContent("0 minutes");
   });
 
   it("signs a genuine zero-valued row the same way, not just the empty filter", async () => {
     // A zero-valued adjustment is a real row the API can return — a desk correction that
-    // nets out. It lands in neither the credit nor the debit bucket, so both totals are zero
+    // nets out. It lands in neither the "in" nor the "out" bucket, so both totals are zero
     // while the table below is emphatically not empty. Special-casing "no rows" would leave
     // this one wrong.
     stubFetch(routes([ledgerRowFixture({ id: "z1", comment: "Nets out", type: "AdminAdjustment", signedAmountMinutes: 0, amountMinutes: 0 })]));
     renderPage(<AdminLedgerPage />);
 
     await screen.findByText("Nets out");
-    expect(totals()).not.toContain("+0.00 cr");
-    expect(totals()).not.toContain("−0.00 cr");
+    expect(totals()).not.toContain("+0 min");
+    expect(totals()).not.toContain("−0 min");
   });
 
   it("does not paint a total of nothing in a direction either", async () => {
-    // The "+" one layer down. Credits was unconditionally green, Debits unconditionally
+    // The "+" one layer down. Money in was unconditionally green, money out unconditionally
     // amber and Net asked `>= 0`, so a period in which the club had neither taken nor given
     // anything was painted as though it had come out ahead. Leaving that would have put an
     // unsigned figure inside a coloured one, which is the disagreement the sign fix removes.
@@ -253,7 +251,7 @@ describe("Admin ledger — the totals are signed by their value, not by their la
     renderPage(<AdminLedgerPage />);
 
     await screen.findByText("No movements match these filters.");
-    for (const tile of tiles().filter((t) => t.text === "0.00 cr")) {
+    for (const tile of tiles().filter((t) => t.text === "0 min")) {
       expect(tile.cls).not.toMatch(/text-success-strong|text-warning-strong/);
     }
   });
@@ -263,39 +261,40 @@ describe("Admin ledger — the totals are signed by their value, not by their la
     // information on this table; it just has to come from the number.
     stubFetch(routes([
       ledgerRowFixture({ id: "r1", comment: "Booking charge", signedAmountMinutes: -24, amountMinutes: 24 }),
-      ledgerRowFixture({ id: "r2", comment: "Desk credit", type: "AdminAdjustment", signedAmountMinutes: 40, amountMinutes: 40 }),
+      ledgerRowFixture({ id: "r2", comment: "Desk goodwill", type: "AdminAdjustment", signedAmountMinutes: 40, amountMinutes: 40 }),
     ]));
     renderPage(<AdminLedgerPage />);
 
-    await screen.findByText("Desk credit");
-    expect(totals()).toContain("+40.00 cr");
-    expect(totals()).toContain("−24.00 cr");
+    await screen.findByText("Desk goodwill");
+    expect(totals()).toContain("+40 min");
+    expect(totals()).toContain("−24 min");
     // Net: 40 in, 24 out.
-    expect(totals()).toContain("+16.00 cr");
+    expect(totals()).toContain("+16 min");
 
     // And the colour still agrees with the sign, in both directions.
-    expect(tiles().find((t) => t.text === "+40.00 cr")!.cls).toMatch(/text-success-strong/);
-    expect(tiles().find((t) => t.text === "−24.00 cr")!.cls).toMatch(/text-warning-strong/);
+    expect(tiles().find((t) => t.text === "+40 min")!.cls).toMatch(/text-success-strong/);
+    expect(tiles().find((t) => t.text === "−24 min")!.cls).toMatch(/text-warning-strong/);
   });
 
   /**
    * The varied setup value: the SIZE of the movements, which ought not to change any of this.
    * A single fixture at 40 against 24 would pass against arithmetic that happened to be right
    * only for two rows of those magnitudes, and a club whose debits outweigh its credits is the
-   * period this screen is opened for.
+   * period this screen is opened for. Whole minutes, said the way every amount is (P13).
    */
   it("signs a net that has gone the other way", async () => {
     stubFetch(routes([
-      ledgerRowFixture({ id: "r1", comment: "Big charge", signedAmountMinutes: -1250.5, amountMinutes: 1250.5 }),
-      ledgerRowFixture({ id: "r2", comment: "Small credit", type: "AdminAdjustment", signedAmountMinutes: 0.5, amountMinutes: 0.5 }),
+      ledgerRowFixture({ id: "r1", comment: "Big charge", signedAmountMinutes: -1500, amountMinutes: 1500 }),
+      ledgerRowFixture({ id: "r2", comment: "Small goodwill", type: "AdminAdjustment", signedAmountMinutes: 1, amountMinutes: 1 }),
     ]));
     renderPage(<AdminLedgerPage />);
 
     await screen.findByText("Big charge");
-    expect(totals()).toContain("+0.50 cr");
-    expect(totals()).toContain("−1250.50 cr");
-    expect(totals()).toContain("−1250.00 cr");
-    expect(tiles().find((t) => t.text === "−1250.00 cr")!.cls).toMatch(/text-warning-strong/);
+    expect(totals()).toContain("+1 min");
+    expect(totals()).toContain("−1 d 1 h");
+    expect(totals()).toContain("−1 d 59 min");
+    expect(tiles().find((t) => t.text === "−1 d 59 min")!.cls).toMatch(/text-warning-strong/);
+    expect(totals().join(" ")).not.toMatch(/\.\d|cr\b/);
   });
 });
 
@@ -368,7 +367,8 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
   const row = (n: number) => ledgerRowFixture({
     id: `r${n}`, comment: `Charge ${n}`, signedAmountMinutes: -10, amountMinutes: 10,
   });
-  const totalsShown = () => Array.from(document.querySelectorAll("[data-ledger-total]")).map((el) => el.textContent);
+  const totalsShown = () => Array.from(document.querySelectorAll("[data-ledger-total]"))
+    .map((el) => (el.querySelector("[aria-hidden='true']") ?? el).textContent);
 
   it("shows the server's totals for the whole range, and the rows a page at a time", async () => {
     rememberClubZone("Africa/Johannesburg");
@@ -408,7 +408,7 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
     renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
     await screen.findByText("Charge 3");
     await vi.waitFor(() => expect(totalsShown()[0]).toBe("3"));
-    expect(totalsShown()[2]).toMatch(/30\.00/);
+    expect(totalsShown()[2]).toBe("−30 min");
   });
 
   it("shows no total at all when an API with no totals holds too many to read whole", async () => {

@@ -1,7 +1,8 @@
 import type { LedgerRow } from "@/lib/api";
 import { clubDayAndClock } from "@/lib/clubClock";
 import { LEDGER_COPY, ledgerCategory, ledgerDoneBy } from "@/lib/ledgerCopy";
-import { formatSignedCredits } from "@/lib/utils";
+import { minutesSigned } from "@/lib/minutes";
+import { Minutes } from "@/components/Minutes";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { X } from "@/components/ui/icons";
@@ -41,7 +42,7 @@ export function LedgerDetailSheet({ row, onClose }: { row: LedgerRow | null; onC
 }
 
 function rowTitle(row: LedgerRow): string {
-  return `${ledgerCategory(row)} · ${formatSignedCredits(row.signedAmountMinutes)}`;
+  return `${ledgerCategory(row)} · ${minutesSigned(row.signedAmountMinutes)}`;
 }
 
 /**
@@ -83,7 +84,7 @@ export function LedgerDetailPanel({ row, onClose }: { row: LedgerRow | null; onC
 function LedgerFacts({ row }: { row: LedgerRow }) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-      <Fact term={LEDGER_COPY.amount}>{formatSignedCredits(row.signedAmountMinutes)}</Fact>
+      <Fact term={LEDGER_COPY.amount}><Minutes value={row.signedAmountMinutes} signed /></Fact>
       <Fact term={LEDGER_COPY.categoryHeader}>{ledgerCategory(row)}</Fact>
       <Fact term={LEDGER_COPY.actorHeader}>{ledgerDoneBy(row)}</Fact>
       <Fact term={LEDGER_COPY.fromTo}>{`${row.from} → ${row.to}`}</Fact>

@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { endpoints, type LedgerRow } from "../lib/api";
 import { describeFailure } from "../lib/errors";
-import { ledgerPage, readLedgerStart, totalsOver, type LedgerFilters, type LedgerTotals as Totals } from "../lib/adminPaging";
+import {
+  LEDGER_TOTALS, ledgerPage, readLedgerStart, totalsOver, type LedgerFilters, type LedgerTotals as Totals,
+} from "../lib/adminPaging";
 import { clubDayRange, clubToday } from "../lib/clubDay";
 import { clubZoneIsKnown } from "../lib/clubZone";
-import { cn, formatSignedCredits } from "../lib/utils";
+import { cn } from "../lib/utils";
+import { Minutes } from "../components/Minutes";
 import { LedgerTable } from "../components/LedgerTable";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { Badge } from "../components/ui/badge";
@@ -84,7 +87,7 @@ export default function AdminLedgerPage() {
     <PageShell width="full">
       <PageHeader
         title="Transactions"
-        description="Every credit movement across the club — top-ups, charges, refunds, penalties and manual adjustments."
+        description="Every movement of minutes across the club — packages bought and sold, charges, refunds, penalties and adjustments."
         actions={<RefreshButton onRefresh={() => void load()} loading={loading} />}
         freshness={<Freshness at={readAt} />}
       />
@@ -249,23 +252,19 @@ function shownTotals(range: Totals | null, filtered: LedgerRow[], query: string,
 
 /** The four totals (R4 carry-over), or why there are none. */
 function LedgerTotals({ totals, loading, searching }: { totals: Totals | null; loading: boolean; searching: boolean }) {
-  // Every signed figure through formatSignedCredits, never a sign composed around
-  // formatCredits.
+  // Every signed figure through the signed minutes formatter (`<Minutes signed>`), never a
+  // sign composed around an unsigned one.
   //
-  // These two read "+" + formatCredits(...) and "−" + formatCredits(...), so the sign
-  // was decided by which tile it was rather than by the figure in it, and a filter
-  // that matched nothing rendered "+0.00 cr" beside "−0.00 cr" on the one screen whose
-  // whole job is reconciling money. A signed zero reads as a movement that did not
-  // happen. formatSignedCredits already answers this — its own comment records the
-  // reports card that made the identical mistake and was brought through it — and its
-  // zero arm is why the fix is here at the formatter boundary rather than in a guard on
-  // the empty case: a genuine zero-valued adjustment row is wrong in exactly the same
-  // way, with a table full of rows underneath it.
+  // These two once read "+" + figure and "−" + figure, so the sign was decided by which tile
+  // it was rather than by the figure in it, and a filter that matched nothing rendered a
+  // signed zero beside a signed zero on the one screen whose whole job is reconciling money.
+  // A signed zero reads as a movement that did not happen; the formatter's zero arm has no
+  // sign, which is why the fix is at the formatter boundary rather than in a guard on the
+  // empty case: a genuine zero-valued row is wrong in exactly the same way.
   //
-  // Debits are summed as a MAGNITUDE (amountMinutes of the rows whose signed amount
-  // is negative), so the negation is what tells the formatter which direction this tile
-  // is counting. The sign on screen is then the sign of a number, which is the property
-  // that cannot drift.
+  // Minutes out are summed as a MAGNITUDE (`out_minutes`), so the negation is what tells the
+  // formatter which direction this tile is counting. The sign on screen is then the sign of a
+  // number, which is the property that cannot drift.
   //
   if (!totals && !loading) {
     return <p className="col-span-full text-text-secondary">{searching ? LEDGER_SEARCH_PARTIAL : LEDGER_TOO_MANY}</p>;
@@ -274,14 +273,14 @@ function LedgerTotals({ totals, loading, searching }: { totals: Totals | null; l
 }
 
 /** The four tiles: a figure each, or null (a skeleton) while the totals are not known. */
-function tilesOf(totals: Totals | null): Array<{ label: string; value: string | null; tone?: "success" | "warning" }> {
-  if (!totals) return ["Movements", "Credits", "Debits", "Net"].map((label) => ({ label, value: null }));
+function tilesOf(totals: Totals | null): Array<{ label: string; value: ReactNode | null; tone?: "success" | "warning" }> {
+  const labels = [LEDGER_TOTALS.count, LEDGER_TOTALS.in, LEDGER_TOTALS.out, LEDGER_TOTALS.net];
+  if (!totals) return labels.map((label) => ({ label, value: null }));
   return [
-    { label: "Movements", value: String(totals.count) },
-    // P13-F3: the words "Credits"/"Debits" and the formatter are F3's; the keys are §3.2's.
-    { label: "Credits", value: formatSignedCredits(totals.in_minutes), tone: toneOf(totals.in_minutes) },
-    { label: "Debits", value: formatSignedCredits(-totals.out_minutes), tone: toneOf(-totals.out_minutes) },
-    { label: "Net", value: formatSignedCredits(totals.net_minutes), tone: toneOf(totals.net_minutes) },
+    { label: LEDGER_TOTALS.count, value: String(totals.count) },
+    { label: LEDGER_TOTALS.in, value: <Minutes value={totals.in_minutes} signed />, tone: toneOf(totals.in_minutes) },
+    { label: LEDGER_TOTALS.out, value: <Minutes value={-totals.out_minutes} signed />, tone: toneOf(-totals.out_minutes) },
+    { label: LEDGER_TOTALS.net, value: <Minutes value={totals.net_minutes} signed />, tone: toneOf(totals.net_minutes) },
   ];
 }
 
@@ -419,7 +418,7 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
  * The colour of a total, taken from its sign — for the same reason the sign is.
  *
  * <p>
- * The tiles were coloured by which tile they were: Credits always `success`, Debits always
+ * The tiles were coloured by which tile they were: money in always `success`, money out always
  * `warning`, and Net asked <code>>= 0</code>, so a club that had neither taken nor given
  * anything in the period was painted green as though it had come out ahead. That is the "+"
  * defect one layer down — a colour is a claim about direction, and zero has no direction —
@@ -427,7 +426,7 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
  * </p>
  *
  * <p>
- * <code>-0 === 0</code> in JavaScript, so a negated zero arriving from the Debits tile lands
+ * <code>-0 === 0</code> in JavaScript, so a negated zero arriving from the "Minutes out" tile lands
  * on the same arm as a plain one rather than on the negative branch.
  * </p>
  */
@@ -437,14 +436,15 @@ function toneOf(value: number): "success" | "warning" | undefined {
 }
 
 /** A total, or a skeleton while the range is still being read — never a sum over part of it. */
-function Stat({ label, value, tone }: { label: string; value: string | null; tone?: "success" | "warning" }) {
+function Stat({ label, value, tone }: { label: string; value: ReactNode | null; tone?: "success" | "warning" }) {
   const toneClass = tone === "success" ? "text-success-strong" : tone === "warning" ? "text-warning-strong" : "text-text-primary";
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</p>
       {value === null
         ? <Skeleton className="mt-1 h-7 w-24 max-w-full" aria-label={`${label}: still counting`} />
-        : <p data-ledger-total="" className={`text-lg font-semibold tabular-nums ${toneClass}`}>{value}</p>}
+        // `[&_*]:text-inherit`: the figure wears the TILE's tone, which is the tone of its sign.
+        : <p data-ledger-total="" className={`text-lg font-semibold tabular-nums [&_*]:text-inherit ${toneClass}`}>{value}</p>}
     </div>
   );
 }
