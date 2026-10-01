@@ -67,7 +67,7 @@ function routes() {
   return [
     { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
     { path: "/api/v1/schedule", body: DAY },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 100 } },
   ];
 }
 
@@ -114,7 +114,7 @@ describe("every slot in the booking grid says what it is", () => {
     // same court, instant and price the cell's own name announced.
     expect(await screen.findByRole("dialog", { name: "Book sheet" })).toBeInTheDocument();
     expect(sheets.book?.slots).toEqual([
-      { courtId: "court-1", courtName: "Court 1", startsAt: at("06:00"), sliceCount: 1, priceCredits: 50 },
+      { courtId: "court-1", courtName: "Court 1", startsAt: at("06:00"), sliceCount: 1, priceMinutes: 50 },
     ]);
   });
 });

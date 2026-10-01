@@ -22,7 +22,7 @@ const PROFILE = { user_id: SESSION_MEMBER.user_id, email: "nomsa@club.test", ful
 function baseRoutes(): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/profile", body: PROFILE },
     { path: "/api/v1/me/preferences", body: {} },
     { path: "/api/v1/webauthn/credentials", body: [] },
@@ -170,7 +170,7 @@ function game(n: number) {
   return {
     booking_id: `bbbbbbbb-0000-4000-8000-00000000000${n}`, court_name: `Court ${n}`,
     starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3_600_000).toISOString(),
-    role: "organiser", status: "Confirmed", players: [], my_share_credits: 50, needs_action: false,
+    role: "organiser", status: "Confirmed", players: [], my_share_minutes: 50, needs_action: false,
   };
 }
 
@@ -301,19 +301,19 @@ test.describe("Booking detail (SPEC 3.3)", () => {
 test.describe("Wallet and Wallet activity (SPEC 3.4)", () => {
   const LEDGER = Array.from({ length: 6 }, (_, i) => ({
     id: `e000000${i}`, at: new Date(Date.now() - i * 86_400_000).toISOString(), from: i % 2 ? "Nomsa" : "Club treasury",
-    to: i % 2 ? "Club treasury" : "Nomsa", amountCredits: i % 2 ? 50 : 100, signedAmountCredits: i % 2 ? -50 : 100,
+    to: i % 2 ? "Club treasury" : "Nomsa", amountMinutes: i % 2 ? 50 : 100, signedAmountMinutes: i % 2 ? -50 : 100,
     type: i % 2 ? "BookingCharge" : "TopUp", comment: i % 2 ? "Booking Court 1" : "", subjectUserId: SESSION_MEMBER.user_id,
     subjectName: "Nomsa", actorUserId: SESSION_MEMBER.user_id, actorName: "Nomsa", relatedBookingId: null,
   }));
   const walletRoutes = (): ApiRoute[] => [
-    ...memberShellRoutes({ wallet: { balance_credits: 300, held_credits: 0, spendable_credits: 300, entries: LEDGER, total_entries: LEDGER.length, limit: 50 } }),
+    ...memberShellRoutes({ wallet: { balance_minutes: 300, held_minutes: 0, spendable_minutes: 300, entries: LEDGER, total_entries: LEDGER.length, limit: 50 } }),
   ];
-  const day = (n: number) => ({ date: inDays(-n), top_ups_credits: 0, spent_credits: 50, refunds_credits: 0, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 300 });
+  const day = (n: number) => ({ date: inDays(-n), top_ups_minutes: 0, spent_minutes: 50, refunds_minutes: 0, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 300 });
   const activityRoutes = (): ApiRoute[] => [
     ...walletRoutes(),
     { path: "/api/v1/reports/me/wallet", body: {
-      from: inDays(-30), to: inDays(0), top_ups_credits: 300, spent_credits: 150, refunds_credits: 0, penalties_credits: 0,
-      adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 150, penalty_count: 0, attended_bookings: 3,
+      from: inDays(-30), to: inDays(0), top_ups_minutes: 300, spent_minutes: 150, refunds_minutes: 0, penalties_minutes: 0,
+      adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 150, penalty_count: 0, attended_bookings: 3,
       bookings: 3, minutes_on_court: 135, count: 6,
     } },
     { path: "/api/v1/reports/me/daily", body: [day(3), day(2), day(1)] },
@@ -562,7 +562,7 @@ test.describe("the app bar follows the page frame (SPEC 2.1)", () => {
   const adminRoutes = (): ApiRoute[] => [
     { path: "/api/v1/whoami", body: { ...SESSION_MEMBER, is_admin: true } },
     { path: "/api/v1/me/profile", body: { ...PROFILE, is_admin: true } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/doors", body: { doors: [], timezone: "Africa/Johannesburg", shut_all_at: null } },
     { path: "/api/v1/admin/courts/", body: [] },

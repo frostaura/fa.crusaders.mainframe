@@ -71,7 +71,7 @@ export function ShareGroupRows(props: ShareGroupRowsProps) {
         <TableRow key={row.id} id={childIds[i]} hidden={!open} data-share-row="" className="bg-bg-muted/40">
           {columns.map((column) => (
             <Fragment key={column}>
-              {CELL[column](row, column === "comment" ? shareRowSentence({ side, signed: row.signedAmountCredits, place: booking, other: otherParty(row, side, booking) }) : undefined)}
+              {CELL[column](row, column === "comment" ? shareRowSentence({ side, signed: row.signedAmountMinutes, place: booking, other: otherParty(row, side, booking) }) : undefined)}
             </Fragment>
           ))}
         </TableRow>

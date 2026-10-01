@@ -124,7 +124,7 @@ type Burst = { from: number | null; last: number | null; at: number; startedAt: 
 
 /**
  * What the flyout says: the NET change of the figure the chip shows, across the current burst —
- * not the last frame's `delta_credits`. That read "−33.00" while the chip counted 235 → 335. Null
+ * not the last frame's `delta_minutes`. That read "−33.00" while the chip counted 235 → 335. Null
  * when there is no movement to show, or the burst nets to nothing the chip shows (a partner's paid
  * share that is only HELD moves the balance but not the spendable figure on the chip).
  *

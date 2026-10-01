@@ -93,12 +93,12 @@ describe("AdminMembers — adjust credit", () => {
       // Three rows, two bookings' worth: the penalty and the charge are the same booking, and a
       // top-up is not a booking at all. One option, then.
       body: [
-        ledgerRowFixture({ id: "1", type: "NoShowPenalty", amountCredits: 7.2, signedAmountCredits: -7.2, relatedBookingId: BOOKING, at: "2026-09-02T18:00:00Z" }),
-        ledgerRowFixture({ id: "2", type: "BookingCharge", amountCredits: 24, signedAmountCredits: -24, relatedBookingId: BOOKING, at: "2026-09-01T10:00:00Z" }),
-        ledgerRowFixture({ id: "3", type: "TopUp", amountCredits: 160, signedAmountCredits: 160, relatedBookingId: null }),
+        ledgerRowFixture({ id: "1", type: "NoShowPenalty", amountMinutes: 7.2, signedAmountMinutes: -7.2, relatedBookingId: BOOKING, at: "2026-09-02T18:00:00Z" }),
+        ledgerRowFixture({ id: "2", type: "BookingCharge", amountMinutes: 24, signedAmountMinutes: -24, relatedBookingId: BOOKING, at: "2026-09-01T10:00:00Z" }),
+        ledgerRowFixture({ id: "3", type: "TopUp", amountMinutes: 160, signedAmountMinutes: 160, relatedBookingId: null }),
       ],
     },
-    { method: "POST", path: `/api/v1/admin/credit/${USER}/adjust`, body: { entry_id: "9", amount_credits: 24, balance_after_credits: 144 } },
+    { method: "POST", path: `/api/v1/admin/minutes/${USER}/adjust`, body: { entry_id: "9", amount_minutes: 24, balance_after_minutes: 144 } },
   ];
 
   /**
@@ -150,9 +150,9 @@ describe("AdminMembers — adjust credit", () => {
 
     await waitFor(() => {
       const post = stub.calls.find((c) => c.method === "POST");
-      expect(post?.path).toBe(`/api/v1/admin/credit/${USER}/adjust`);
+      expect(post?.path).toBe(`/api/v1/admin/minutes/${USER}/adjust`);
       expect(post?.body).toEqual(expect.objectContaining({
-        amountCredits: 24, reason: "Box was offline; no-show was wrong",
+        amountMinutes: 24, reason: "Box was offline; no-show was wrong",
         relatedBookingId: BOOKING, reasonCode: "goodwill",
       }));
       expect(typeof (post?.body as Record<string, unknown>).idempotencyKey).toBe("string");
@@ -175,7 +175,7 @@ describe("AdminMembers — adjust credit", () => {
 
     await waitFor(() => {
       const post = stub.calls.find((c) => c.method === "POST");
-      expect(post?.body).toEqual(expect.objectContaining({ amountCredits: -10, reason: "Bar tab", reasonCode: "correction" }));
+      expect(post?.body).toEqual(expect.objectContaining({ amountMinutes: -10, reason: "Bar tab", reasonCode: "correction" }));
       // Absent, not null: plain money, invisible to the no-show reversal by design.
       expect(post?.raw).not.toContain("relatedBookingId");
     });
@@ -207,7 +207,7 @@ describe("AdminMembers — adjust credit", () => {
   /** The same screen, with the adjust POST refused for the named reason. */
   const refusedRoutes = (error: string) => [
     ...routes().filter((r) => r.method !== "POST"),
-    { method: "POST", path: `/api/v1/admin/credit/${USER}/adjust`, status: 400, body: { error } },
+    { method: "POST", path: `/api/v1/admin/minutes/${USER}/adjust`, status: 400, body: { error } },
   ];
 
   async function applyForBooking() {
@@ -279,7 +279,7 @@ describe("AdminMembers — adjust credit", () => {
     await toCheck();
     await apply();
     await waitFor(() => {
-      expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual(expect.objectContaining({ amountCredits: 24, reason: "Compensation", relatedBookingId: other }));
+      expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual(expect.objectContaining({ amountMinutes: 24, reason: "Compensation", relatedBookingId: other }));
     });
   });
 });
@@ -298,13 +298,13 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const USER = "44444444-4444-4444-4444-444444444444";
-  const ADJUST = `/api/v1/admin/credit/${USER}/adjust`;
+  const ADJUST = `/api/v1/admin/minutes/${USER}/adjust`;
 
   const routes = (adjust: Partial<StubRoute> = {}): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture()] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
     { path: "/api/v1/admin/ledger/", body: [] },
-    { method: "POST", path: ADJUST, body: { entry_id: "9", amount_credits: 7, balance_after_credits: 127 }, ...adjust },
+    { method: "POST", path: ADJUST, body: { entry_id: "9", amount_minutes: 7, balance_after_minutes: 127 }, ...adjust },
   ];
 
   async function fill(amount: string, reason: string) {
@@ -370,7 +370,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
       return [
         { path: "/api/v1/admin/members/", body: [memberFixture()] },
         { path: "/api/v1/admin/biometric/enrollments", body: [] },
-        { path: DETAIL, respond: () => ({ ...memberFixture(), balance_credits: 120 + ledger.length * 7 }) },
+        { path: DETAIL, respond: () => ({ ...memberFixture(), balance_minutes: 120 + ledger.length * 7 }) },
         {
           path: "/api/v1/admin/ledger/", status: ledgerStatus,
           respond: () => (ledgerStatus === 200 ? ledger : { error: "server_error" }),
@@ -380,8 +380,8 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
           respond: (req: { body: unknown }) => {
             const b = req.body as Record<string, unknown>;
             ledger.push(ledgerRowFixture({
-              id: `row-${ledger.length}`, type: "AdminAdjustment", amountCredits: b.amountCredits,
-              signedAmountCredits: b.amountCredits, comment: b.reason, subjectUserId: USER,
+              id: `row-${ledger.length}`, type: "AdminAdjustment", amountMinutes: b.amountMinutes,
+              signedAmountMinutes: b.amountMinutes, comment: b.reason, subjectUserId: USER,
             }));
             return refuse(504, { error: "gateway_timeout" });
           },
@@ -438,7 +438,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   it("names what already landed when the server answers idempotency_key_reused", async () => {
     stubFetch(routes({
       status: 409,
-      body: { error: "idempotency_key_reused", stored: { amount_credits: 7, type: "AdminAdjustment", reason: "coaching credit", at: "2026-09-30T08:00:00Z" } },
+      body: { error: "idempotency_key_reused", stored: { amount_minutes: 7, type: "AdminAdjustment", reason: "coaching credit", at: "2026-09-30T08:00:00Z" } },
     }));
     renderPage(<AdminMembersPage />);
 
@@ -457,12 +457,12 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   it("re-reads the balance after idempotency_key_reused, and never says it didn't go through", async () => {
     stubFetch([
       { path: "/api/v1/admin/members/", body: [memberFixture()] },
-      { path: `/api/v1/admin/members/${USER}`, body: { ...memberFixture(), balance_credits: 127 } },
+      { path: `/api/v1/admin/members/${USER}`, body: { ...memberFixture(), balance_minutes: 127 } },
       { path: "/api/v1/admin/biometric/enrollments", body: [] },
       { path: "/api/v1/admin/ledger/", body: [] },
       {
         method: "POST", path: ADJUST, status: 409,
-        body: { error: "idempotency_key_reused", stored: { amount_credits: 7, type: "AdminAdjustment", reason: "coaching credit" } },
+        body: { error: "idempotency_key_reused", stored: { amount_minutes: 7, type: "AdminAdjustment", reason: "coaching credit" } },
       },
     ]);
     renderPage(<AdminMembersPage />);

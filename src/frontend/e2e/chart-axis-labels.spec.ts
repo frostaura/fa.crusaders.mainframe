@@ -43,8 +43,8 @@ const FIGTREE = readFileSync(
  * wrapping or overhanging.
  */
 const DAILY = [
-  { date: "2026-09-01", top_ups_credits: 200, booking_charges_credits: 30, refunds_credits: 8, penalties_credits: -1350, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: -1172, bookings: 4, no_shows: 1 },
-  { date: "2026-09-02", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 0, penalties_credits: 12, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 124, bookings: 3, no_shows: 0 },
+  { date: "2026-09-01", top_ups_minutes: 200, booking_charges_minutes: 30, refunds_minutes: 8, penalties_minutes: -1350, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: -1172, bookings: 4, no_shows: 1 },
+  { date: "2026-09-02", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 0, penalties_minutes: 12, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 124, bookings: 3, no_shows: 0 },
 ];
 
 async function openReports(page: Parameters<typeof serveApi>[0]) {
@@ -52,10 +52,10 @@ async function openReports(page: Parameters<typeof serveApi>[0]) {
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-    { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0, penalty_count: 0, count: 0, minutes_on_court: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [] } },
+    { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: 0, penalty_count: 0, count: 0, minutes_on_court: 0 } },
     { path: "/api/v1/reports/me/daily", body: [] },
-    { path: "/api/v1/admin/reports/revenue", body: { from: "2026-09-01T00:00:00Z", to: "2026-09-03T00:00:00Z", gross_topups_zar: 1000, reversals_zar: 0, net_zar: 1000, gross_topups_credits: 1600, reversals_credits: 0, net_credits: 1600 } },
+    { path: "/api/v1/admin/reports/revenue", body: { from: "2026-09-01T00:00:00Z", to: "2026-09-03T00:00:00Z", gross_topups_zar: 1000, reversals_zar: 0, net_zar: 1000, gross_topups_minutes: 1600, reversals_minutes: 0, net_minutes: 1600 } },
     { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
     { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 0, no_show: 0, no_show_pct: 0 } },
     { path: "/api/v1/admin/reports/daily", body: DAILY },

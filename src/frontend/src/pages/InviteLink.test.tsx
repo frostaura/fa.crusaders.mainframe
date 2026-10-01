@@ -27,8 +27,8 @@ function invite(overrides: Record<string, unknown> = {}): Record<string, unknown
     participant_id: "p0000000-0000-0000-0000-000000000004", booking_id: BOOKING, status: "invited", seat: 4, team: "B",
     open_link: true, court_name: "Court 2", starts_at: at(24), ends_at: at(24.75),
     organiser: { user_id: "55555555-5555-5555-5555-555555555555", name: "Nomsa Khumalo", photo_url: null },
-    players: 3, share_credits: 25, to_pay_credits: 25, needs_consent: false,
-    balance_credits: 80, spendable_credits: 80, held_credits: 0, balance_after_credits: 55, short_by_credits: 0,
+    players: 3, share_minutes: 25, to_pay_minutes: 25, needs_consent: false,
+    balance_minutes: 80, spendable_minutes: 80, held_minutes: 0, balance_after_minutes: 55, short_by_minutes: 0,
     share_deadline: at(26.75), cap: null,
     ...overrides,
   };
@@ -38,7 +38,7 @@ function openLink(routes: StubRoute[], token = TOKEN): FetchStub {
   const stub = stubFetch([
     ...routes,
     { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-    { path: "/api/v1/wallet", body: { balance_credits: 80, held_credits: 0, spendable_credits: 80, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 80, held_minutes: 0, spendable_minutes: 80, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
   ]);
   renderPage(<Routes><Route path="/j/:token" element={<InviteLinkPage />} /></Routes>, {
@@ -61,24 +61,24 @@ describe("an open link", () => {
     const stub = openLink([
       { path: OPEN, body: invite() },
       { method: "POST", path: `${OPEN}/accept`, body: {
-        participant_id: "p4", booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 55,
+        participant_id: "p4", booking_id: BOOKING, status: "accepted", share_minutes: 25, consented_minutes: 25, paid_minutes: 25, balance_minutes: 55,
       } },
     ]);
     fireEvent.click(await screen.findByRole("button", { name: acceptLabel(25) }));
     expect(await screen.findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
     const sent = stub.calls.filter((c) => c.method === "POST" && c.path === `${OPEN}/accept`);
-    expect(sent.map((c) => c.body)).toEqual([{ expectedShareCredits: 25 }]);
+    expect(sent.map((c) => c.body)).toEqual([{ expectedShareMinutes: 25 }]);
     expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
   });
 
   it("a risen share on the link is shown, re-read and asked again", async () => {
     let raised = false;
     const stub = openLink([
-      { path: OPEN, respond: () => (raised ? invite({ share_credits: 34, to_pay_credits: 34 }) : invite()) },
-      { method: "POST", path: `${OPEN}/accept`, respond: () => { raised = true; return refuse(409, { error: "share_changed", share_credits: 34 }); } },
+      { path: OPEN, respond: () => (raised ? invite({ share_minutes: 34, to_pay_minutes: 34 }) : invite()) },
+      { method: "POST", path: `${OPEN}/accept`, respond: () => { raised = true; return refuse(409, { error: "share_changed", share_minutes: 34 }); } },
     ]);
     fireEvent.click(await screen.findByRole("button", { name: acceptLabel(25) }));
-    expect(await screen.findByText(playersRefusal(new ApiError(409, { error: "share_changed", share_credits: 34 })))).toBeInTheDocument();
+    expect(await screen.findByText(playersRefusal(new ApiError(409, { error: "share_changed", share_minutes: 34 })))).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: acceptLabel(34) })).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.method === "POST").filter((c) => c.path.endsWith("/accept"))).toHaveLength(1);
   });
@@ -127,10 +127,10 @@ describe("R2 F2-6 — the claimer's own link after the organiser cancelled", () 
       organiser: { user_id: "u-nomsa", name: "Nomsa Khumalo", photo_url: null },
       players: [{
         participant_id: "p-eve", seat: 4, team: "B", kind: "member", user_id: "44444444-4444-4444-4444-444444444444", name: "Eve",
-        photo_url: null, status: "accepted", share_credits: 10, weight: 1, consented_credits: 10, paid_credits: 0, target_credits: 0,
-        unpaid_credits: 0, needs_consent: false, settled_outside: false, lapsed: false, checked_in_at: null, invited_at: null, responded_at: null,
+        photo_url: null, status: "accepted", share_minutes: 10, weight: 1, consented_minutes: 10, paid_minutes: 0, target_minutes: 0,
+        unpaid_minutes: 0, needs_consent: false, settled_outside: false, lapsed: false, checked_in_at: null, invited_at: null, responded_at: null,
       }],
-      money: { price_credits: 40, organiser_owed_credits: 0, shares_received_credits: 0, organiser_net_credits: 0, unpaid_credits: 0, share_deadline: at(26), is_split: true },
+      money: { price_minutes: 40, organiser_owed_minutes: 0, shares_received_minutes: 0, organiser_net_minutes: 0, unpaid_minutes: 0, share_deadline: at(26), is_split: true },
       attendance: { checked_in_at: null, players_checked_in: 0 },
       permissions: { can_invite: false, can_change_split: false, can_cancel: false, can_accept: false, can_decline: false, can_withdraw: false, withdraw_closes_at: at(20) },
       ...overrides,
@@ -164,7 +164,7 @@ describe("R1 F2.3 / F2.4 — opened signed out", () => {
   const FACTS = {
     organiser_first_name: "Nomsa", court_name: "Court 2",
     starts_at: "2026-10-01T16:00:00Z", ends_at: "2026-10-01T16:45:00Z",
-    share_credits: 25, timezone: "Africa/Johannesburg",
+    share_minutes: 25, timezone: "Africa/Johannesburg",
   };
 
   function openSignedOut(routes: StubRoute[] = [{ path: PREVIEW, body: FACTS }]) {
@@ -223,7 +223,7 @@ describe("R1 F2.3 / F2.4 — opened signed out", () => {
 
 describe("R1 F2.5 / F2.7 — the link is remembered until it is answered", () => {
   it("opened and not answered (short of credit), it is kept for this member", async () => {
-    openLink([{ path: OPEN, body: invite({ spendable_credits: 5, balance_credits: 5 }) }]);
+    openLink([{ path: OPEN, body: invite({ spendable_minutes: 5, balance_minutes: 5 }) }]);
     await screen.findByText(invitedLine("Nomsa", true));
     await waitForPending(TOKEN);
     expect(pendingInvite(ME)?.userId).toBe(ME);
@@ -236,7 +236,7 @@ describe("R1 F2.5 / F2.7 — the link is remembered until it is answered", () =>
     openLink([
       { path: OPEN, body: invite() },
       { method: "POST", path: `${OPEN}/accept`, body: {
-        participant_id: "p4", booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 55,
+        participant_id: "p4", booking_id: BOOKING, status: "accepted", share_minutes: 25, consented_minutes: 25, paid_minutes: 25, balance_minutes: 55,
       } },
     ]);
     fireEvent.click(await screen.findByRole("button", { name: acceptLabel(25) }));

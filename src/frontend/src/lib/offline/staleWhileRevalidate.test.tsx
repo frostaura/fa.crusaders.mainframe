@@ -43,7 +43,7 @@ function memberRoutes(list: StubRoute, whoami: unknown): StubRoute[] {
   return [
     list,
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 1 } },
   ];
@@ -80,7 +80,7 @@ describe("a refresh that fails keeps what is on screen", () => {
       dispatchEvent: () => false,
     }) as unknown as MediaQueryList);
     let refusing = false;
-    const wallet = { balance_credits: 412.5, total_entries: 1, offset: 0, limit: 100, entries: [ledgerRowFixture()] };
+    const wallet = { balance_minutes: 412.5, total_entries: 1, offset: 0, limit: 100, entries: [ledgerRowFixture()] };
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: "/api/v1/wallet", respond: () => (refusing ? refuse(429, { error: "rate_limited" }) : wallet) },

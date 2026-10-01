@@ -66,7 +66,7 @@ describe("ScrollArea", () => {
 function ledgerRow(id: string): LedgerRow {
   return {
     id, at: "2026-09-05T10:00:00Z", from: "Club treasury", to: "Erin AgentE",
-    amountCredits: 50, signedAmountCredits: -50, type: "BookingCharge",
+    amountMinutes: 50, signedAmountMinutes: -50, type: "BookingCharge",
     comment: "Booking charge", subjectUserId: "u", subjectName: "Erin AgentE",
     actorUserId: "u", actorName: "Erin AgentE", relatedBookingId: null,
   };

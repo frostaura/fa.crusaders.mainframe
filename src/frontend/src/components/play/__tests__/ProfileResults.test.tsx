@@ -54,7 +54,7 @@ describe("games waiting for a result", () => {
   const RECENT = "/api/v1/me/bookings/recent";
   const game = (id: string, overrides = {}) => ({
     booking_id: id, court_name: "Court 1", starts_at: STARTS, ends_at: "2026-09-30T16:45:00Z", role: "organiser", status: "completed",
-    players: [], my_share_credits: 50, needs_action: false, result_status: "none", can_record: true, ...overrides,
+    players: [], my_share_minutes: 50, needs_action: false, result_status: "none", can_record: true, ...overrides,
   });
   const empty = { path: LIST, body: { timezone: "Africa/Johannesburg", items: [], next_cursor: null } };
 

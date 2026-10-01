@@ -59,12 +59,12 @@ describe("the member page's desk credit (R5 I5-3)", () => {
     expect(screen.getByText("sheet open")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("leave"));
-    await act(async () => { land({ balance_after_credits: 250 }); });
+    await act(async () => { land({ balance_after_minutes: 250 }); });
     expect(await screen.findByText(doneSentence("Sam", 250))).toBeInTheDocument();
   });
 });
 
-const ROW = { user_id: "u-1", full_name: "Sam", email: "sam@x.test", balance_credits: 200 } as unknown as MemberRow;
+const ROW = { user_id: "u-1", full_name: "Sam", email: "sam@x.test", balance_minutes: 200 } as unknown as MemberRow;
 
 function ListProbe() {
   const credit = useCreditAdjust(() => {});
@@ -88,7 +88,7 @@ describe("the members list's desk credit (R5 I5-3)", () => {
     expect(screen.getByText("sheet open")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("leave"));
-    await act(async () => { land({ balance_after_credits: 250 }); });
+    await act(async () => { land({ balance_after_minutes: 250 }); });
     expect(await screen.findByText(doneSentence("Sam", 250))).toBeInTheDocument();
   });
 });

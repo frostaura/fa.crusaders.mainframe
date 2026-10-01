@@ -76,7 +76,7 @@ describe("invite", () => {
   it("sends the pick as one player spec and says who is invited", async () => {
     const stub = serve({ detail: three(), extra: [{
       method: "POST", path: `${DETAIL_PATH}/players`,
-      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 4, user_id: "u-jo", guest_name: null, status: "invited", share_credits: 25, invite_token: "t", invite_path: "/j/t" }] },
+      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 4, user_id: "u-jo", guest_name: null, status: "invited", share_minutes: 25, invite_token: "t", invite_path: "/j/t" }] },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
@@ -91,7 +91,7 @@ describe("invite", () => {
   it("offers the new open seat's one-time link at once", async () => {
     serve({ detail: three(), extra: [{
       method: "POST", path: `${DETAIL_PATH}/players`,
-      body: { booking_id: "b", participants: [{ participant_id: "p-new", seat: 4, user_id: null, guest_name: null, status: "invited", share_credits: 25, invite_token: "tok123", invite_path: "/j/tok123" }] },
+      body: { booking_id: "b", participants: [{ participant_id: "p-new", seat: 4, user_id: null, guest_name: null, status: "invited", share_minutes: 25, invite_token: "tok123", invite_path: "/j/tok123" }] },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));

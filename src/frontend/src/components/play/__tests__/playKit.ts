@@ -127,7 +127,7 @@ export function serve(routes: StubRoute[] = [], options: { admin?: boolean } = {
   const session = signIn({ isAdmin: options.admin ?? false });
   return stubFetch([
     { path: "/api/v1/whoami", body: session },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, held_credits: 0, spendable_credits: 100, held_until: null, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, held_minutes: 0, spendable_minutes: 100, held_until: null, entries: [] } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
     ...routes,

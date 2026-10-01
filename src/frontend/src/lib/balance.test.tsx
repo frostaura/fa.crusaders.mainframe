@@ -52,7 +52,7 @@ class FakeEventSource {
 
   /** A balance push. */
   push(balanceCredits: number) {
-    this.onmessage?.({ data: JSON.stringify({ balance_credits: balanceCredits }) } as MessageEvent);
+    this.onmessage?.({ data: JSON.stringify({ balance_minutes: balanceCredits }) } as MessageEvent);
   }
 }
 
@@ -61,7 +61,7 @@ const WHOAMI = {
   user_id: "44444444-4444-4444-4444-444444444444", is_authenticated: true, is_admin: false,
 };
 
-const WALLET = { balance_credits: 450, entries: [], total_entries: 0, offset: 0, limit: 100 };
+const WALLET = { balance_minutes: 450, entries: [], total_entries: 0, offset: 0, limit: 100 };
 
 afterEach(() => {
   vi.unstubAllGlobals();

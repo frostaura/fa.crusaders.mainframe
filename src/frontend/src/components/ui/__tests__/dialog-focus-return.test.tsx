@@ -47,14 +47,14 @@ afterEach(() => {
 const TZ = "Africa/Johannesburg";
 const ME = "44444444-4444-4444-4444-444444444444";
 const MEMBER = "66666666-6666-6666-6666-666666666666";
-const SLOT: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceCredits: 50 };
+const SLOT: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceMinutes: 50 };
 const MINE: GridBooking = {
   bookingId: "bk-1", courtId: "c1", courtName: "Court 1",
   startsAt: SLOT.startsAt, endsAt: "2030-09-09T16:15:00.000Z", whenLabel: "Mon 9 Sep, 18:00",
-  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedCredits: 50, timezone: TZ,
+  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedMinutes: 50, timezone: TZ,
 };
 const QUOTE = {
-  bookingId: "bk-1", amountChargedCredits: 50, refundCredits: 50, penaltyCredits: 0, penaltyPct: 30,
+  bookingId: "bk-1", amountChargedMinutes: 50, refundMinutes: 50, penaltyMinutes: 0, penaltyPct: 30,
   penaltyWindowMinutes: 15, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false,
 };
 
@@ -66,8 +66,8 @@ const INVITE = {
   participant_id: "p0000000-0000-0000-0000-000000000003", booking_id: "b0000000-0000-0000-0000-000000000001",
   status: "invited", seat: 3, team: "B", open_link: false, court_name: "Court 1", starts_at: at(24), ends_at: at(24.75),
   organiser: { user_id: "55555555-5555-5555-5555-555555555555", name: "Sam Petersen", photo_url: null },
-  players: 4, share_credits: 25, to_pay_credits: 25, needs_consent: false,
-  balance_credits: 120, spendable_credits: 100, held_credits: 20, balance_after_credits: 95, short_by_credits: 0,
+  players: 4, share_minutes: 25, to_pay_minutes: 25, needs_consent: false,
+  balance_minutes: 120, spendable_minutes: 100, held_minutes: 20, balance_after_minutes: 95, short_by_minutes: 0,
   share_deadline: at(26.75), cap: null,
 } as Invite;
 

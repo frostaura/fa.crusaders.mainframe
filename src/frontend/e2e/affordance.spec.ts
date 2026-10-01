@@ -40,20 +40,20 @@ const SESSION_MEMBER = {
 
 const DAILY = ["2026-08-30", "2026-08-31", "2026-09-01", "2026-09-02"].map((date, i) => ({
   date,
-  top_ups_credits: i * 100,
-  spent_credits: i * 20,
-  refunds_credits: 0,
+  top_ups_minutes: i * 100,
+  spent_minutes: i * 20,
+  refunds_minutes: 0,
   bookings: i,
   attended: i,
   minutes_on_court: i * 60,
-  balance_credits: 500 - i * 20,
+  balance_minutes: 500 - i * 20,
 }));
 
 const WALLET_REPORT = {
   from: "2026-08-30", to: "2026-09-02",
-  top_ups_credits: 1600, spent_credits: 400, refunds_credits: 0,
-  penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
-  net_movement_credits: 1200, penalty_count: 0, attended_bookings: 3, minutes_on_court: 180,
+  top_ups_minutes: 1600, spent_minutes: 400, refunds_minutes: 0,
+  penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0,
+  net_movement_minutes: 1200, penalty_count: 0, attended_bookings: 3, minutes_on_court: 180,
 };
 
 /** Hover and read back what the engine settled on, once the transition has finished. */
@@ -77,7 +77,7 @@ test("a control marked .no-lift really does not lift, and one that is not marked
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
     { path: "/api/v1/reports/me/daily", body: DAILY },
     { path: "/api/v1/reports/me/wallet", body: WALLET_REPORT },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/profile", body: { full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1" } },
   ]);
 
@@ -139,7 +139,7 @@ test("the focus ring is the product's accent, not an undefined variable's fallba
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/profile", body: { full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1" } },
   ]);
 

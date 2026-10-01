@@ -13,8 +13,8 @@ describe("Admin ledger — shares of a split booking", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
   const PAIR = [
-    ledgerRowFixture({ id: "out", type: "ShareTransfer", comment: "Share of a split booking", signedAmountCredits: -25, amountCredits: 25, relatedBookingId: "b1" }),
-    ledgerRowFixture({ id: "in", type: "ShareTransfer", comment: "Share of a split booking", signedAmountCredits: 25, amountCredits: 25, relatedBookingId: "b1" }),
+    ledgerRowFixture({ id: "out", type: "ShareTransfer", comment: "Share of a split booking", signedAmountMinutes: -25, amountMinutes: 25, relatedBookingId: "b1" }),
+    ledgerRowFixture({ id: "in", type: "ShareTransfer", comment: "Share of a split booking", signedAmountMinutes: 25, amountMinutes: 25, relatedBookingId: "b1" }),
   ];
 
   it("lists the type by its name and asks the API for it", async () => {
@@ -46,14 +46,14 @@ describe("Admin ledger — shares of a split booking", () => {
   it("reads member to member, and names the partner who paid as who did it", async () => {
     const SAM = "5a5a5a5a-0000-0000-0000-000000000001";
     const ALICE = "a11ce000-0000-0000-0000-000000000002";
-    const shared = { type: "ShareTransfer", comment: "Share of a split booking", amountCredits: 25, relatedBookingId: "b1", actorUserId: SAM, actorName: "Sam Partner", actor_name: null };
+    const shared = { type: "ShareTransfer", comment: "Share of a split booking", amountMinutes: 25, relatedBookingId: "b1", actorUserId: SAM, actorName: "Sam Partner", actor_name: null };
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
       {
         path: "/api/v1/admin/ledger",
         body: [
-          ledgerRowFixture({ ...shared, id: "out", from: "Sam Partner", to: "Alice Organiser", signedAmountCredits: -25, subjectUserId: SAM, subjectName: "Sam Partner", counterparty_name: "Alice Organiser", counterparty_user_id: ALICE }),
-          ledgerRowFixture({ ...shared, id: "in", from: "Sam Partner", to: "Alice Organiser", signedAmountCredits: 25, subjectUserId: ALICE, subjectName: "Alice Organiser", counterparty_name: "Sam Partner", counterparty_user_id: SAM }),
+          ledgerRowFixture({ ...shared, id: "out", from: "Sam Partner", to: "Alice Organiser", signedAmountMinutes: -25, subjectUserId: SAM, subjectName: "Sam Partner", counterparty_name: "Alice Organiser", counterparty_user_id: ALICE }),
+          ledgerRowFixture({ ...shared, id: "in", from: "Sam Partner", to: "Alice Organiser", signedAmountMinutes: 25, subjectUserId: ALICE, subjectName: "Alice Organiser", counterparty_name: "Sam Partner", counterparty_user_id: SAM }),
         ],
       },
     ]);
@@ -72,7 +72,7 @@ describe("Admin ledger — shares of a split booking", () => {
   it("names a desk top-up in words and can filter by it", async () => {
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
-      { path: "/api/v1/admin/ledger", body: [ledgerRowFixture({ id: "desk", type: "AdminTopUp", comment: "R200 cash", signedAmountCredits: 200, amountCredits: 200 })] },
+      { path: "/api/v1/admin/ledger", body: [ledgerRowFixture({ id: "desk", type: "AdminTopUp", comment: "R200 cash", signedAmountMinutes: 200, amountMinutes: 200 })] },
     ]);
     renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
     await screen.findAllByText(LEDGER_TYPE_LABEL.AdminTopUp);

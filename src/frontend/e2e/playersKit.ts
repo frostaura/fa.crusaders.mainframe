@@ -29,7 +29,7 @@ export const CLUB_ZONE = "Africa/Johannesburg";
 export const PROFILE_ME = {
   user_id: ME, email: "nomsa@club.review.test", is_admin: false, tenant_slug: "crusaders",
   full_name: "Nomsa Khumalo", membership_number: "P-1", photo_url: null, status: "Active",
-  held_credits: 0, held_until: null,
+  held_minutes: 0, held_until: null,
   // The club's zone, as the real /me/profile sends it: the app knows the club's day from boot.
   timezone: CLUB_ZONE,
 };
@@ -55,7 +55,7 @@ export function seat(overrides: Seat = {}): Seat {
   return {
     participant_id: "p0000000-0000-0000-0000-000000000001", seat: 1, team: "A", kind: "organiser",
     user_id: ME, name: PEOPLE.me.name, photo_url: null, status: "accepted",
-    share_credits: 25, weight: 1, consented_credits: 0, paid_credits: 0, target_credits: 0, unpaid_credits: 0,
+    share_minutes: 25, weight: 1, consented_minutes: 0, paid_minutes: 0, target_minutes: 0, unpaid_minutes: 0,
     needs_consent: false, settled_outside: false, lapsed: false, checked_in_at: null,
     invited_at: new Date().toISOString(), responded_at: new Date().toISOString(),
     ...overrides,
@@ -74,15 +74,15 @@ export function detailFixture(overrides: Record<string, unknown> = {}): Record<s
     players: [
       seat(),
       seat({ participant_id: "p0000000-0000-0000-0000-000000000002", seat: 2, kind: "member", user_id: SAM, name: PEOPLE.sam.name,
-        status: "accepted", consented_credits: 25, paid_credits: 25, target_credits: 25 }),
+        status: "accepted", consented_minutes: 25, paid_minutes: 25, target_minutes: 25 }),
       seat({ participant_id: "p0000000-0000-0000-0000-000000000003", seat: 3, team: "B", kind: "member", user_id: ALEX, name: PEOPLE.alex.name,
-        status: "invited", unpaid_credits: 25 }),
+        status: "invited", unpaid_minutes: 25 }),
       seat({ participant_id: "p0000000-0000-0000-0000-000000000004", seat: 4, team: "B", kind: "open_link", user_id: null, name: null,
         status: "invited" }),
     ],
     money: {
-      price_credits: 100, organiser_owed_credits: 100, shares_received_credits: 25, organiser_net_credits: 75,
-      unpaid_credits: 25, share_deadline: tomorrowAt(20, 45), is_split: true,
+      price_minutes: 100, organiser_owed_minutes: 100, shares_received_minutes: 25, organiser_net_minutes: 75,
+      unpaid_minutes: 25, share_deadline: tomorrowAt(20, 45), is_split: true,
     },
     attendance: { checked_in_at: null, players_checked_in: 0 },
     permissions: {
@@ -100,8 +100,8 @@ export function inviteFixture(overrides: Record<string, unknown> = {}): Record<s
     participant_id: "p0000000-0000-0000-0000-000000000003", booking_id: BOOKING, status: "invited",
     seat: 3, team: "B", open_link: false, court_name: "Court 1",
     starts_at: tomorrowAt(18), ends_at: tomorrowAt(18, 45),
-    organiser: PEOPLE.me, players: 4, share_credits: 25, to_pay_credits: 25, needs_consent: false,
-    balance_credits: 120, spendable_credits: 100, held_credits: 20, balance_after_credits: 75, short_by_credits: 0,
+    organiser: PEOPLE.me, players: 4, share_minutes: 25, to_pay_minutes: 25, needs_consent: false,
+    balance_minutes: 120, spendable_minutes: 100, held_minutes: 20, balance_after_minutes: 75, short_by_minutes: 0,
     share_deadline: tomorrowAt(20, 45), cap: null, timezone: CLUB_ZONE,
     ...overrides,
   };
@@ -119,7 +119,7 @@ export function memberShellRoutes(options: { unread?: number; invites?: unknown[
     {
       path: "/api/v1/wallet",
       body: {
-        balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: tomorrowAt(20, 45),
+        balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, held_until: tomorrowAt(20, 45),
         entries: [], total_entries: 0, offset: 0, limit: 100, ...(options.wallet ?? {}),
       },
     },

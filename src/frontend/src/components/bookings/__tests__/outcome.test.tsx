@@ -28,7 +28,7 @@ vi.setConfig({ testTimeout: 15_000 });
 const TZ = "Africa/Johannesburg";
 const ME = "44444444-4444-4444-4444-444444444444";
 const NALEDI = "bbbbbbbb-0000-4000-8000-00000000000b";
-const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceCredits: 50 };
+const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceMinutes: 50 };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -58,7 +58,7 @@ function day(slots: Partial<ScheduleDay["slots"][number]>[]): ScheduleDay {
     slots: slots.map((s) => ({
       courtId: "c1", courtNumber: 1, startsAtUtc: C1.startsAt, endsAtUtc: "2030-09-09T16:15:00.000Z",
       status: "booked", ownerUserId: null, ownerFirstName: null, ownerPhotoUrl: null, isMine: false,
-      bookingId: "bk-real", blockLabel: null, checkedIn: false, amountChargedCredits: 50, ...s,
+      bookingId: "bk-real", blockLabel: null, checkedIn: false, amountChargedMinutes: 50, ...s,
     })),
   } as ScheduleDay;
 }
@@ -141,10 +141,10 @@ describe("F1.1 — a booking whose answer was lost is checked against the schedu
 const MINE: GridBooking = {
   bookingId: "bk-1", courtId: "c1", courtName: "Court 1",
   startsAt: C1.startsAt, endsAt: "2030-09-09T16:15:00.000Z", whenLabel: "Mon 9 Sep, 18:00",
-  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedCredits: 50, timezone: TZ,
+  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedMinutes: 50, timezone: TZ,
 };
 const QUOTE = {
-  bookingId: "bk-1", amountChargedCredits: 50, refundCredits: 50, penaltyCredits: 0, penaltyPct: 30,
+  bookingId: "bk-1", amountChargedMinutes: 50, refundMinutes: 50, penaltyMinutes: 0, penaltyPct: 30,
   penaltyWindowMinutes: 15, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false,
 };
 
@@ -205,9 +205,9 @@ describe("F1.3 — Confirm and Done say the same figure", () => {
       { path: "/api/v1/whoami", body: { tenant_slug: "crusaders", tenant_id: "t", user_id: ME, is_authenticated: true, is_admin: false } },
       {
         path: "/api/v1/wallet",
-        body: { balance_credits: 350, held_credits: 50, spendable_credits: 300, held_until: "2030-09-10T18:00:00Z", entries: [], total_entries: 0, offset: 0, limit: 100 },
+        body: { balance_minutes: 350, held_minutes: 50, spendable_minutes: 300, held_until: "2030-09-10T18:00:00Z", entries: [], total_entries: 0, offset: 0, limit: 100 },
       },
-      { method: "POST", path: BOOK_POST, body: { booking_id: "bk-9", balance_after_credits: 300 } },
+      { method: "POST", path: BOOK_POST, body: { booking_id: "bk-9", balance_after_minutes: 300 } },
     ]);
     signIn({ isAdmin: false });
     openBook({ balanceCredits: 350 });
@@ -226,8 +226,8 @@ describe("F1.4 — the desk's quote reads the member's spendable credits", () =>
       path: "/api/v1/admin/bookings/quote",
       body: {
         user_id: NALEDI, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, ends_at: null, slices: 1,
-        price_credits: 50, balance_credits: 85, balance_after_credits: 35, spendable_credits: -40, held_credits: 125,
-        owed_back_credits: 0, overdraws: true,
+        price_minutes: 50, balance_minutes: 85, balance_after_minutes: 35, spendable_minutes: -40, held_minutes: 125,
+        owed_back_minutes: 0, overdraws: true,
       },
     }]);
     openBook({ isAdmin: true, members: [{ id: NALEDI, name: "Naledi Khumalo", balance: 85 }], bookAsUserId: NALEDI });
@@ -315,7 +315,7 @@ describe("F1.10 — Confirm states the cancellation terms before anything is cha
 });
 
 describe("F1.13 — a split booking's cancel says who gets what back", () => {
-  const split = { ...QUOTE, amountChargedCredits: 100, refundCredits: 100, net_credits: 50, partner_refunds: [{ name: "Sam", credits: 50 }] };
+  const split = { ...QUOTE, amountChargedMinutes: 100, refundMinutes: 100, net_minutes: 50, partner_refunds: [{ name: "Sam", minutes: 50 }] };
 
   it("names each partner's share and what the organiser keeps — the quote's camelCase or snake_case", async () => {
     stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: split }]);
@@ -330,8 +330,8 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
 
   it("the toast after it says the same", async () => {
     stubFetch([
-      { path: "/api/v1/bookings/bk-1/cancellation-quote", body: { ...QUOTE, netCredits: 50, partnerRefunds: [{ name: "Sam", credits: 50 }] } },
-      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_credits: 100, penalty_credits: 0, net_credits: 50, partner_refunds: [{ name: "Sam", credits: 50 }] } },
+      { path: "/api/v1/bookings/bk-1/cancellation-quote", body: { ...QUOTE, netMinutes: 50, partnerRefunds: [{ name: "Sam", minutes: 50 }] } },
+      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_minutes: 100, penalty_minutes: 0, net_minutes: 50, partner_refunds: [{ name: "Sam", minutes: 50 }] } },
     ]);
     openCancel();
     await screen.findByText(`${SPLIT_CANCEL.youKeep}`);
@@ -348,16 +348,16 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
 });
 
 describe("F1.13 — the desk cancelling a split booking says the truth even when its route does not", () => {
-  const ADM: GridBooking = { ...MINE, mine: false, memberFirstName: "Adm", amountChargedCredits: 250 };
+  const ADM: GridBooking = { ...MINE, mine: false, memberFirstName: "Adm", amountChargedMinutes: 250 };
   const splitQuote = {
-    ...QUOTE, amountChargedCredits: 250, refundCredits: 250, net_credits: 125, partner_refunds: [{ name: "Sam", credits: 125 }],
+    ...QUOTE, amountChargedMinutes: 250, refundMinutes: 250, net_minutes: 125, partner_refunds: [{ name: "Sam", minutes: 125 }],
   };
 
   it("never '250.00 cr back to Adm' when 125 of it went to the partner", async () => {
     stubFetch([
       { path: "/api/v1/bookings/bk-1/cancellation-quote", body: splitQuote },
       // The desk's route answers the gross figures only.
-      { method: "POST", path: "/api/v1/admin/bookings/bk-1/cancel", body: { refunded_credits: 250, penalty_credits: 0 } },
+      { method: "POST", path: "/api/v1/admin/bookings/bk-1/cancel", body: { refunded_minutes: 250, penalty_minutes: 0 } },
     ]);
     openCancel({ bookings: [ADM], isAdmin: true });
     await screen.findByText(CANCEL_SHEET.free("Adm"));

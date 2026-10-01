@@ -36,7 +36,7 @@ describe("a member whose group pays less than the court", () => {
     const stub = openBookings({
       balance: 40,
       day: dayFixture({ rules: JUNIORS }),
-      routes: [{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-new", balance_after_credits: 10 } }],
+      routes: [{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-new", balance_after_minutes: 10 } }],
     });
     // The cell and the header say the member's price.
     const cell = await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00", 30) });

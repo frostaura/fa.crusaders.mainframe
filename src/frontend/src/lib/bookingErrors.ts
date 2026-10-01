@@ -335,13 +335,13 @@ export function provesStaleGrid(e: unknown): boolean {
 
 /**
  * R5 M5-7 — what came back to the organiser on a split cancel. `refunded` is the GROSS refund and
- * the penalty is its own ledger row; a server whose `net_credits` is `refunded − partners` left
+ * the penalty is its own ledger row; a server whose `net_minutes` is `refunded − partners` left
  * the penalty out ("25.00 cr back" for a ledger +50 −15 −25 = +10). Such a net is corrected here;
  * a net that already counts the penalty (or one from the quote) is taken as it is.
  */
 function splitBack(refunded: number, penalty: number, split: SplitCancel): number {
   if (penalty <= 0) return split.net;
-  const partners = split.partners.reduce((n, p) => n + p.credits, 0);
+  const partners = split.partners.reduce((n, p) => n + p.minutes, 0);
   return Math.abs(split.net - (refunded - partners)) < 0.005 ? split.net - penalty : split.net;
 }
 
@@ -383,7 +383,7 @@ export function cancellationOutcome(
       : "Booking cancelled. Nothing was refunded — the lights had already been on.";
   }
   // F1.13 — a split booking: what the organiser keeps, and each partner's share, by name.
-  const partners = split ? `; ${split.partners.map((p) => `${formatCredits(p.credits)} to ${p.name}`).join(", ")}` : "";
+  const partners = split ? `; ${split.partners.map((p) => `${formatCredits(p.minutes)} to ${p.name}`).join(", ")}` : "";
   const back = split ? splitBack(refunded, penalty, split) : refunded - (penalty > 0 ? penalty : 0);
   if (penalty > 0) {
     return `Booking cancelled. ${formatCredits(back)} back to ${whose}${partners}, `

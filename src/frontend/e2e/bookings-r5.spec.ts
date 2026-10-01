@@ -28,7 +28,7 @@ function game(n: number) {
   return {
     booking_id: `bbbbbbbb-0000-4000-8000-00000000000${n}`, court_name: `Court ${n}`,
     starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3_600_000).toISOString(),
-    role: "organiser", status: "Confirmed", players: [], my_share_credits: 50, needs_action: false,
+    role: "organiser", status: "Confirmed", players: [], my_share_minutes: 50, needs_action: false,
   };
 }
 

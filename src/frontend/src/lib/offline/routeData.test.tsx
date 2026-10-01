@@ -21,7 +21,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); tokenStore.clear(
 function apiCalls() {
   const fetchSpy = vi.fn((input: RequestInfo | URL) => {
     const path = String(input);
-    const body = path.startsWith("/api/v1/wallet") ? { balance_credits: 1, entries: [], total_entries: 0, offset: 0, limit: 100 } : { items: [] };
+    const body = path.startsWith("/api/v1/wallet") ? { balance_minutes: 1, entries: [], total_entries: 0, offset: 0, limit: 100 } : { items: [] };
     return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
   });
   vi.stubGlobal("fetch", fetchSpy);

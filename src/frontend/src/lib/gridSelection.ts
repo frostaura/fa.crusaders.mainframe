@@ -314,7 +314,7 @@ export function toSelectedSlots(
       if (!run) return;
       out.push({
         courtId: court.id, courtName: court.name, startsAt: new Date(run.from).toISOString(),
-        sliceCount: run.count, priceCredits: priceOf(court) * run.count,
+        sliceCount: run.count, priceMinutes: priceOf(court) * run.count,
       });
     };
     for (const ms of starts) {
@@ -354,7 +354,7 @@ export function gridBookingOf(slot: ScheduleDay["slots"][number], day: ScheduleD
     memberFirstName: slot.isMine ? null : slot.ownerFirstName,
     memberPhotoUrl: slot.isMine ? null : slot.ownerPhotoUrl,
     checkedIn: slot.checkedIn,
-    amountChargedCredits: slot.amountChargedCredits,
+    amountChargedMinutes: slot.amountChargedMinutes,
     timezone: day.timezone,
   };
 }

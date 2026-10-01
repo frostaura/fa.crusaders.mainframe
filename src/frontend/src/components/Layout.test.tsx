@@ -34,7 +34,7 @@ const PROFILE = {
   full_name: "Club Desk", membership_number: "M-1", photo_url: null, status: "active",
 };
 
-const WALLET = { balance_credits: 120, entries: [], total_entries: 0, offset: 0, limit: 100 };
+const WALLET = { balance_minutes: 120, entries: [], total_entries: 0, offset: 0, limit: 100 };
 
 beforeEach(() => {
   vi.stubGlobal("EventSource", class { close() {} addEventListener() {} } as unknown as typeof EventSource);

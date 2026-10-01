@@ -26,12 +26,12 @@ function detail(overrides: Record<string, unknown> = {}) {
     created_at: "2026-03-01T08:00:00Z", last_login_at: "2026-09-22T17:30:00Z", photo_url: null,
     is_admin: false, admin_source: null,
     groups: [{ id: "g1", name: "League" }, { id: "g2", name: "Juniors coaching" }],
-    balance_credits: -16,
+    balance_minutes: -16,
     passkey_count: 1,
     fingerprints: { count: 1, enrolments: [{ template_id: "t1", finger_label: "right-index", enrolled_at: "2026-04-02T10:00:00Z" }] },
     next_bookings: [{
       booking_id: "b1", court_id: "c1", court_name: "Court 2", starts_at: "2099-09-23T16:00:00Z", ends_at: "2099-09-23T16:45:00Z",
-      status: "booked", charged_credits: 24, checked_in_at: null, cancelled_at: null,
+      status: "booked", charged_minutes: 24, checked_in_at: null, cancelled_at: null,
       booked_by: { user_id: SESSION_ADMIN.user_id, name: "Crusaders Admin", is_self: false },
     }],
     counts_30d: { bookings: 6, no_shows: 1, sessions_played: 5 },
@@ -42,7 +42,7 @@ function detail(overrides: Record<string, unknown> = {}) {
 function routes(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },

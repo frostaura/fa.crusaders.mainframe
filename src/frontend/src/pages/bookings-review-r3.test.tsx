@@ -21,7 +21,7 @@ function game(overrides: Record<string, unknown>) {
     booking_id: "bk-1", court_name: "Court 1", starts_at: "2030-09-09T14:00:00Z", ends_at: "2030-09-09T14:30:00Z",
     role: "organiser", status: "booked",
     players: [{ name: "Dean Martin", photo_url: null, status: "accepted" }],
-    my_share_credits: 50, needs_action: false, ...overrides,
+    my_share_minutes: 50, needs_action: false, ...overrides,
   };
 }
 const upcoming = (items: unknown[]) => ({ path: "/api/v1/me/bookings/upcoming", body: { timezone: "Africa/Johannesburg", items } });
@@ -64,7 +64,7 @@ describe("R3 M-3 — the game lists name only the players who said yes", () => {
 
 describe("R3 V-9 — the share never trails the names behind a separator that can dangle", () => {
   it("puts the share on its own line, and keeps the names' separator glued to the name before it", async () => {
-    openBookings({ routes: [upcoming([game({ players: [{ name: "Dean Martin", photo_url: null, status: "accepted" }, INVITED_SAM], my_share_credits: 25 })])] });
+    openBookings({ routes: [upcoming([game({ players: [{ name: "Dean Martin", photo_url: null, status: "accepted" }, INVITED_SAM], my_share_minutes: 25 })])] });
     const region = await screen.findByRole("region", { name: UPCOMING.title });
     const share = within(region).getByText(UPCOMING.share(25));
     expect(share.textContent?.startsWith("·")).toBe(false);
@@ -75,7 +75,7 @@ describe("R3 V-9 — the share never trails the names behind a separator that ca
 describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the day back", () => {
   const HELD = dayFixture({
     slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(17), endsAtUtc: sast(17, 30), status: "adminblock",
-      bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedCredits: null })],
+      bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedMinutes: null })],
   });
   const LIFT = "Lift the League night hold on Court 1 at 17:00";
 
@@ -133,7 +133,7 @@ describe("R3 lost-reply audit — lifting a hold whose answer was lost reads the
 
 describe("R3 M-3 — the card says what the game has cost, not the share it would be", () => {
   it("an organiser whose partner never accepted has paid the whole price", async () => {
-    openBookings({ routes: [upcoming([game({ players: [{ name: "Dean Martin", photo_url: null, status: "accepted" }, INVITED_SAM], my_share_credits: 25, my_paid_credits: 50, my_owing_credits: 0 })])] });
+    openBookings({ routes: [upcoming([game({ players: [{ name: "Dean Martin", photo_url: null, status: "accepted" }, INVITED_SAM], my_share_minutes: 25, my_paid_minutes: 50, my_owing_minutes: 0 })])] });
     const region = await screen.findByRole("region", { name: UPCOMING.title });
     const card = within(region).getByRole("link", { name: /^Court 1/ });
     expect(card).toHaveTextContent(UPCOMING.paid(50));
@@ -141,13 +141,13 @@ describe("R3 M-3 — the card says what the game has cost, not the share it woul
   });
 
   it("a partner who has not paid yet is told what they owe", async () => {
-    openBookings({ routes: [upcoming([game({ role: "partner", my_share_credits: 25, my_paid_credits: 0, my_owing_credits: 25, needs_action: true })])] });
+    openBookings({ routes: [upcoming([game({ role: "partner", my_share_minutes: 25, my_paid_minutes: 0, my_owing_minutes: 25, needs_action: true })])] });
     const region = await screen.findByRole("region", { name: UPCOMING.title });
     expect(within(region).getByRole("link", { name: /^Court 1/ })).toHaveTextContent(UPCOMING.owe(25));
   });
 
   it("a server without the figures still gets the share line", async () => {
-    openBookings({ routes: [upcoming([game({ my_share_credits: 40 })])] });
+    openBookings({ routes: [upcoming([game({ my_share_minutes: 40 })])] });
     const region = await screen.findByRole("region", { name: UPCOMING.title });
     expect(within(region).getByRole("link", { name: /^Court 1/ })).toHaveTextContent(UPCOMING.share(40));
   });

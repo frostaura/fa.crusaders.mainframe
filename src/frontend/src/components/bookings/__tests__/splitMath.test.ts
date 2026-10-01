@@ -152,7 +152,7 @@ describe("the draft → request bodies", () => {
     expect(playersPayload(d)?.players).toEqual([
       { userId: "sam", seat: 2, amount: 33 }, { link: true, seat: 3, amount: 33 }, { guestName: "Jo", seat: 4 },
     ]);
-    expect(previewBody(100, d)).toEqual({ priceCredits: 100, splitMode: "amount", players: playersPayload(d)?.players });
+    expect(previewBody(100, d)).toEqual({ priceMinutes: 100, splitMode: "amount", players: playersPayload(d)?.players });
   });
 
   it("guests alone are nothing to split: the mode goes as equal", () => {
@@ -190,12 +190,12 @@ describe("the draft → request bodies", () => {
   });
 
   it("partnersTotal is what comes back as they accept", () => {
-    expect(partnersTotal([{ seat: 1, share_credits: 25.5 }, { seat: 2, share_credits: 25 }, { seat: 3, share_credits: 0.1 }])).toBe(25.1);
+    expect(partnersTotal([{ seat: 1, share_minutes: 25.5 }, { seat: 2, share_minutes: 25 }, { seat: 3, share_minutes: 0.1 }])).toBe(25.1);
   });
 });
 
 describe("the Confirm sentence", () => {
-  const shares = (...pairs: [number, number][]) => pairs.map(([seat, share_credits]) => ({ seat, share_credits }));
+  const shares = (...pairs: [number, number][]) => pairs.map(([seat, share_minutes]) => ({ seat, share_minutes }));
 
   it("names members by first name, groups an equal ask, and lets a guest play free", () => {
     const d = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), ALEX, 3), JO, 4);

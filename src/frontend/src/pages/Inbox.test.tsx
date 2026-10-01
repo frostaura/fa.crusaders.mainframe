@@ -40,7 +40,7 @@ function setup(options: Setup = {}): FetchStub {
     // A test's own routes first: among equal prefixes the first declared answers.
     ...(options.extra ?? []),
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: unread } },
     options.list ?? {

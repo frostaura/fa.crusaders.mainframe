@@ -85,7 +85,7 @@ export type TopUpSheetProps = {
   bookingError: string | null;
   /** Signed: this component decides the sign from the DIRECTION — no field in the flow carries one. */
   onApply: (
-    amountCredits: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
+    amountMinutes: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
   ) => Promise<ApplyResult>;
   onClose: () => void;
   /** The "for a booking" field, rendered on the reason step. */

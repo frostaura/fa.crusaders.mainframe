@@ -15,19 +15,19 @@ import { expect, serveApi, SESSION_ADMIN, signIn, test } from "./fixtures";
 const MEMBER = { ...SESSION_ADMIN, is_admin: false };
 const PROFILE = { full_name: "Nomsa Khumalo", email: "n@club.review.test", photo_url: null, membership_number: "P-1" };
 const DAYS_ME = [
-  { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
-  { date: "2026-09-02", top_ups_credits: 0, spent_credits: 24, refunds_credits: -8, bookings: 1, attended: 0, minutes_on_court: 0, balance_credits: 104 },
+  { date: "2026-09-01", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 136 },
+  { date: "2026-09-02", top_ups_minutes: 0, spent_minutes: 24, refunds_minutes: -8, bookings: 1, attended: 0, minutes_on_court: 0, balance_minutes: 104 },
 ];
 const WALLET_REPORT = {
-  from: "", to: "", top_ups_credits: 160, spent_credits: 48, refunds_credits: 0, penalties_credits: 0,
-  adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 112, penalty_count: 0, attended_bookings: 1, minutes_on_court: 45, count: 3,
+  from: "", to: "", top_ups_minutes: 160, spent_minutes: 48, refunds_minutes: 0, penalties_minutes: 0,
+  adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 112, penalty_count: 0, attended_bookings: 1, minutes_on_court: 45, count: 3,
 };
 
 function memberRoutes() {
   return [
     { path: "/api/v1/whoami", body: MEMBER },
     { path: "/api/v1/me/profile", body: PROFILE },
-    { path: "/api/v1/wallet", body: { balance_credits: 104, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 104, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     { path: "/api/v1/me/door", body: { doors: true, doors_shut: "none" } },
     { path: "/api/v1/me/door/history", body: { items: [], has_more: false, retention_days: 45 } },
     { path: "/api/v1/me/webauthn/credentials", body: [] },

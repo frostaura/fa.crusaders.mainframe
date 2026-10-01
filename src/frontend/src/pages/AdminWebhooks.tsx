@@ -79,19 +79,19 @@ const EVENTS: EventDef[] = [
     name: "booking.created",
     label: "Booking created",
     description: "A member (or admin on their behalf) booked a court slot.",
-    vars: ["booking_id", "court_id", "court_number", "court_name", "user_id", "starts_at", "ends_at", "slice_count", "amount_charged_credits", "balance_after_credits"],
+    vars: ["booking_id", "court_id", "court_number", "court_name", "user_id", "starts_at", "ends_at", "slice_count", "amount_charged_minutes", "balance_after_minutes"],
   },
   {
     name: "booking.cancelled",
     label: "Booking cancelled",
     description: "A booking was cancelled with no penalty.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_credits", "penalty_credits"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_minutes", "penalty_minutes"],
   },
   {
     name: "booking.late_cancellation",
     label: "Late cancellation",
     description: "Cancelled inside the penalty window — penalty applied.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_credits", "penalty_credits"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_minutes", "penalty_minutes"],
   },
   {
     name: "booking.lights_on",
@@ -109,19 +109,19 @@ const EVENTS: EventDef[] = [
     name: "booking.no_show",
     label: "No-show",
     description: "Player did not biometric-authenticate within the grace window. `peripheral_outage` is true when the court's box was unreachable, in which case no penalty was charged.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "penalty_credits", "refund_credits", "peripheral_outage"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "penalty_minutes", "refund_minutes", "peripheral_outage"],
   },
   {
     name: "booking.completed",
     label: "Booking completed",
     description: "A slot ran to its end with the member actually there. Unlike \"lights off\", this does not fire for a no-show.",
-    vars: ["booking_id", "court_id", "court_number", "court_name", "user_id", "starts_at", "ends_at", "checked_in_at", "amount_charged_credits"],
+    vars: ["booking_id", "court_id", "court_number", "court_name", "user_id", "starts_at", "ends_at", "checked_in_at", "amount_charged_minutes"],
   },
   {
     name: "booking.no_show_reversed",
     label: "No-show reversed",
     description: "A late upload from a court box proved the member did attend, so a settled no-show was undone.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "attended_at", "refund_credits", "penalty_credits"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "attended_at", "refund_minutes", "penalty_minutes"],
   },
   {
     name: "booking.displaced",
@@ -139,7 +139,7 @@ const EVENTS: EventDef[] = [
     name: "booking.cancelled_lights_charged",
     label: "Cancelled but lit",
     description: "A cancelled booking was lit anyway from an offline box's cached roster, and charged pro rata for the minutes burned.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "lit_minutes", "amount_credits", "occurred_at"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "lit_minutes", "amount_minutes", "occurred_at"],
   },
   {
     name: "credit.topped_up",
@@ -151,25 +151,25 @@ const EVENTS: EventDef[] = [
     name: "credit.refunded",
     label: "Credit refunded",
     description: "A refund was written to a member's ledger — by a cancellation, a no-show reversal or a displacement.",
-    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
     name: "credit.penalty_applied",
     label: "Penalty charged",
     description: "A no-show or late-cancellation penalty was taken off a member. Says how much moved, where the booking event only says what happened.",
-    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
     name: "credit.adjusted",
     label: "Credit adjusted by hand",
     description: "An admin credited or debited a member from the console — a goodwill gesture, a correction, or a refund made outside the system. NOT money the club took: that is credit.topped_up_by_admin.",
-    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
     name: "credit.topped_up_by_admin",
     label: "Topped up at the desk",
     description: "An admin took money over the counter — cash, an EFT that cleared, or a card on the club's own terminal — and converted it to credits. It is revenue, exactly like a PayFast top-up, which is why it is a separate event from credit.adjusted.",
-    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
     name: "member.registered",
@@ -1021,7 +1021,7 @@ function VariableCatalogCard() {
 
 function VarChip({ name }: { name: string }) {
   return (
-    // May break anywhere (R3 X-4): "{amount_charged_credits}" at 200% text was wider than a phone.
+    // May break anywhere (R3 X-4): "{amount_charged_minutes}" at 200% text was wider than a phone.
     <span className="max-w-full rounded-md border border-border bg-bg-muted px-2 py-0.5 font-mono text-xs text-text-secondary [overflow-wrap:anywhere]">
       {`{${name}}`}
     </span>

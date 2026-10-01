@@ -123,7 +123,7 @@ function routes(doors: Record<string, unknown>[], extra: ApiRoute[] = [], option
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], count: 0 } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
     { path: `/api/v1/admin/devices/${DOOR_ID}/activity`, body: { items: [], events: [] } },

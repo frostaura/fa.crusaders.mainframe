@@ -47,7 +47,7 @@ function stubDay(day: unknown, extra: { path: string; method?: string; body?: un
   return stubFetch([
     { path: "/api/v1/schedule", body: day },
     { path: "/api/v1/admin/members/", body: [] },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total: 0 } },
     ...extra,
   ]);
 }
@@ -141,7 +141,7 @@ describe("the grid's cells", () => {
       startsAtUtc: "2030-09-07T06:00:00.000Z", endsAtUtc: "2030-09-07T06:15:00.000Z",
       status: "adminblock", ownerUserId: null, ownerFirstName: null, ownerPhotoUrl: null,
       isMine: false, bookingId: "b-block", blockLabel: "League night",
-      checkedIn: null, amountChargedCredits: null,
+      checkedIn: null, amountChargedMinutes: null,
     }] as never;
     return day;
   }

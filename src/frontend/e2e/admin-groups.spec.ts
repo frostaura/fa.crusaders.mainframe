@@ -53,7 +53,7 @@ const OLD = group({ id: "g-old", name: "Winter league 2025", status: "archived",
 function routes(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
@@ -62,7 +62,7 @@ function routes(extra: ApiRoute[] = []): ApiRoute[] {
       body: [{
         membership_id: "cccccccc-0000-4000-8000-00000000000c", user_id: USER, email: "naledi@example.com",
         full_name: "Naledi Khumalo", membership_number: "CR-0184", photo_url: null, status: "Active",
-        created_at: "2026-03-01T08:00:00Z", rejection_reason: null, balance_credits: 120, email_verified: true,
+        created_at: "2026-03-01T08:00:00Z", rejection_reason: null, balance_minutes: 120, email_verified: true,
         groups: [{ id: "g-social", name: "Social evenings", system_key: null, credits_per_zar: null, peak_priority: false }],
       }],
     },

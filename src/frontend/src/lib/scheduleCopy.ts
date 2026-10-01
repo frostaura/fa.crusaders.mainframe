@@ -17,7 +17,7 @@ import { formatCredits } from "./utils";
  *
  * <p>
  * <b>Absent is a third arm everywhere, not a synonym for zero.</b> Three backend lanes are
- * writing these endpoints in parallel with this screen, so `would_refund_credits`,
+ * writing these endpoints in parallel with this screen, so `would_refund_minutes`,
  * `next_occurrence` and the materialisation count will arrive missing for a while. A refund
  * phrase that reads a missing quote as "nothing would go back" states the opposite of the
  * truth, immediately above a control that issues refunds.
@@ -249,16 +249,16 @@ export const NOTHING_CHANGED_YET = "Nothing has changed yet.";
 /**
  * What cancelling this one booking would pay back — with the arm for a quote we have not got.
  *
- * `would_refund_credits` comes from the server's own `QuoteCancellationAsync`, so when it is
+ * `would_refund_minutes` comes from the server's own `QuoteCancellationAsync`, so when it is
  * there it is the figure the cancellation will actually pay. When it is absent the honest
  * answer is that we do not know, and it is not zero: this sentence is read immediately above
  * the control that issues the refund.
  */
 export function conflictRefundPhrase(
-  conflict: Pick<ScheduleConflict, "would_refund_credits" | "member_name">,
+  conflict: Pick<ScheduleConflict, "would_refund_minutes" | "member_name">,
 ): string {
   const to = conflict.member_name ? ` to ${conflict.member_name}` : "";
-  const amount = conflict.would_refund_credits;
+  const amount = conflict.would_refund_minutes;
   if (amount === undefined || amount === null) return `What would go back${to} isn't known yet.`;
   if (amount === 0) return `Nothing would go back${to}.`;
   return `${formatCredits(amount)} would go back${to}.`;
@@ -378,7 +378,7 @@ export type EndWords = {
   /** Null when we cannot count what is held — never rendered as zero. */
   slots: number | null;
   /** A hold charges nobody, so this is 0 for every hold. Stated rather than left to inference. */
-  refundCredits: number;
+  refundMinutes: number;
   /** The dates still ahead (club-local), so they are counted by their own weekdays (R5 A5-4). */
   dates?: readonly string[];
 };
@@ -415,15 +415,15 @@ function remainingPhrase(remaining: number, days: readonly Weekday[], dates?: re
   return `${remaining} more ${remaining === 1 ? singularNoun(days) : pluralNoun(days)}`;
 }
 
-export function endConsequence({ remaining, days, slots, refundCredits, dates }: EndWords): string {
+export function endConsequence({ remaining, days, slots, refundMinutes, dates }: EndWords): string {
   const stops = remaining === null
     ? "Ending this stops every date still ahead"
     : `Ending this stops ${remainingPhrase(remaining, days, dates)}`;
   const release = slots === null
     ? `${stops}, and the slots it was holding can be booked again.`
     : `${stops} and releases ${slots} held slot${slots === 1 ? "" : "s"}, which members can then book.`;
-  const money = refundCredits > 0
-    ? `${formatCredits(refundCredits)} goes back to the members who paid.`
+  const money = refundMinutes > 0
+    ? `${formatCredits(refundMinutes)} goes back to the members who paid.`
     : "Nobody is refunded — nobody was charged for a hold.";
   const past = days.length === 1 && !mixedWeekdays(dates)
     ? `${weekdayPlural(days[0])} that have already happened stay exactly as they are.`

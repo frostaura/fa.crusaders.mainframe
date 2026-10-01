@@ -15,7 +15,7 @@ const PARTNER_ROW = bookingRow({
   booking_id: "bk-partner", role: "partner",
   organiser: { user_id: "org-1", name: "Alice Organiser", is_self: false },
   booked_by: { user_id: "org-1", name: "Alice Organiser", is_self: false },
-  charged_credits: 48, starts_at: "2099-10-01T16:00:00Z", ends_at: "2099-10-01T17:00:00Z",
+  charged_minutes: 48, starts_at: "2099-10-01T16:00:00Z", ends_at: "2099-10-01T17:00:00Z",
 });
 
 describe("member detail — the games a member plays as a partner", () => {

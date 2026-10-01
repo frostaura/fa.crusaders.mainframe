@@ -34,7 +34,7 @@ function chrome(doors: Record<string, unknown>[], route = "/admin/settings") {
   const server = doorsServer(doors);
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
     { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
@@ -93,7 +93,7 @@ function adminChromeRoutes() {
   const whoami = signIn({ isAdmin: true });
   return [
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
     {
       path: "/api/v1/me/profile",
       body: {
@@ -156,7 +156,7 @@ function chromeWithFailedDoors(route = "/admin/settings") {
   const whoami = signIn({ isAdmin: true });
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
     { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
@@ -348,7 +348,7 @@ describe("the club-wide shut banner", () => {
     const whoami = signIn({ isAdmin: false });
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
       { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
     ]);
     renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
@@ -490,7 +490,7 @@ describe("the shared doors store", () => {
     const whoami = signIn({ isAdmin: true });
     return [
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
       {
         path: "/api/v1/me/profile",
         body: {

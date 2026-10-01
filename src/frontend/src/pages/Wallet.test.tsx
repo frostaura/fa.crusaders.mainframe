@@ -23,7 +23,7 @@ import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../tes
  */
 describe("Wallet — one balance, and a way to refresh it", () => {
   const page = (balance: number, entries: unknown[], total = entries.length) => ({
-    balance_credits: balance, entries, total_entries: total, offset: 0, limit: 100,
+    balance_minutes: balance, entries, total_entries: total, offset: 0, limit: 100,
   });
 
   beforeEach(() => {
@@ -51,7 +51,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
   const ROW = ledgerRowFixture();
   const CREDITED = page(517.01, [
     ROW,
-    ledgerRowFixture({ id: "66", signedAmountCredits: 7, amountCredits: 7, type: "AdminAdjustment", comment: "Desk credit" }),
+    ledgerRowFixture({ id: "66", signedAmountMinutes: 7, amountMinutes: 7, type: "AdminAdjustment", comment: "Desk credit" }),
   ], 2);
 
   /** A stream the test pushes through by hand, so the live figure moves when the TEST says so. */
@@ -106,7 +106,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
 
     // The desk credits the member while they watch. The stream says so before anything else.
     server.credited = true;
-    await wire.frame({ balance_credits: 517.01, delta_credits: 7 });
+    await wire.frame({ balance_minutes: 517.01, delta_minutes: 7 });
 
     // The page follows the same signal: it re-reads, and the card, the chip and the ledger all
     // land on the new figure — with the row that explains the difference.
@@ -171,7 +171,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
 
   it("reads each share line's booking WITH the ledger, never one booking at a time (perf round)", async () => {
     const share = ledgerRowFixture({
-      id: "77", type: "ShareTransfer", signedAmountCredits: 25, amountCredits: 25, comment: "Share of a split booking",
+      id: "77", type: "ShareTransfer", signedAmountMinutes: 25, amountMinutes: 25, comment: "Share of a split booking",
       relatedBookingId: "b1", actorUserId: "55555555-5555-5555-5555-555555555555", actorName: "Sam Petersen",
     });
     const stub = stubFetch([
@@ -179,7 +179,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
       { path: "/api/v1/wallet", body: { ...page(510.01, [share], 1), share_bookings: { b1: {
         booking_id: "b1", court_name: "Court 3", starts_at: "2026-09-30T16:00:00Z",
         organiser: { user_id: "44444444-4444-4444-4444-444444444444", name: "Ada Lovelace", photo_url: null },
-        partners: [{ user_id: "55555555-5555-5555-5555-555555555555", name: "Sam Petersen", paid_credits: 25 }],
+        partners: [{ user_id: "55555555-5555-5555-5555-555555555555", name: "Sam Petersen", paid_minutes: 25 }],
       } } } },
     ]);
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
@@ -253,8 +253,8 @@ describe("Wallet — the desktop rail", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       // Plenty to play with: the level that used to draw a soft secondary.
-      { path: "/api/v1/wallet", body: { balance_credits: 900, entries: [ledgerRowFixture()], total_entries: 1, offset: 0, limit: 100 } },
-      { path: "/api/v1/reports/me/wallet", body: { top_ups_credits: 300, spent_credits: 150, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, net_movement_credits: 150, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 900, entries: [ledgerRowFixture()], total_entries: 1, offset: 0, limit: 100 } },
+      { path: "/api/v1/reports/me/wallet", body: { top_ups_minutes: 300, spent_minutes: 150, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0, net_movement_minutes: 150, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6 } },
     ]);
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
     const rail = await screen.findByRole("complementary", { name: "Your balance" });

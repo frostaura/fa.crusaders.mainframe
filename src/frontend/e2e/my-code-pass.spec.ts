@@ -21,7 +21,7 @@ const SHOTS = process.env.P7_SHOTS_DIR;
 function routes(serverTime: () => number = () => Date.now()): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/profile", body: { user_id: SESSION_MEMBER.user_id, email: "nomsa@club.test", full_name: "Nomsa Khumalo", photo_url: null, status: "active", is_admin: false, tenant_slug: "crusaders", membership_number: "M-1" } },
     {
       method: "POST", path: "/api/v1/me/code/enrol",

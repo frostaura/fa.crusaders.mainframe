@@ -22,7 +22,7 @@ export type SelectedSlot = {
   startsAt: string;
   sliceCount: number;
   /** THIS viewer's price for the whole item (slice price × sliceCount), in credits. */
-  priceCredits: number;
+  priceMinutes: number;
 };
 
 /**
@@ -52,7 +52,7 @@ export type GridBooking = {
   /** Whether the lights have been on. Null when the grid was not told (another member's). */
   checkedIn: boolean | null;
   /** What the booking cost; null when the grid was not told. */
-  amountChargedCredits: number | null;
+  amountChargedMinutes: number | null;
   /** The club's IANA zone, for any further clock the sheet writes. */
   timezone: string;
 };

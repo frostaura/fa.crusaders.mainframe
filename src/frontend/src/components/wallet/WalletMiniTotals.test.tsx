@@ -9,8 +9,8 @@ import { WalletMiniTotals } from "./WalletMiniTotals";
  * top-ups, spent, net — and keeps the three states apart: read, failed (never zeros), offline.
  */
 const REPORT = {
-  top_ups_credits: 300, spent_credits: 150, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0,
-  net_movement_credits: 150, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6,
+  top_ups_minutes: 300, spent_minutes: 150, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0,
+  net_movement_minutes: 150, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6,
 };
 
 describe("WalletMiniTotals", () => {

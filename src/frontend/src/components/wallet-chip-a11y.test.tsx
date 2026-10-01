@@ -145,7 +145,7 @@ describe("the credits chip in the top bar", () => {
     const whoami = signIn({ isAdmin: false });
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: balance, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: balance, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     return renderPage(<CreditsChip />);

@@ -23,8 +23,8 @@ const TZ = "Africa/Johannesburg";
 const ME = "44444444-4444-4444-4444-444444444444";
 const NALEDI = "bbbbbbbb-0000-4000-8000-00000000000b";
 
-const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 3, priceCredits: 50 };
-const C2: SelectedSlot = { courtId: "c2", courtName: "Court 2", startsAt: "2030-09-09T17:00:00.000Z", sliceCount: 1, priceCredits: 20 };
+const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 3, priceMinutes: 50 };
+const C2: SelectedSlot = { courtId: "c2", courtName: "Court 2", startsAt: "2030-09-09T17:00:00.000Z", sliceCount: 1, priceMinutes: 20 };
 /**
  * The sheet counts in GRID slots, the unit the action bar ticked (C1 is a 45-minute run = 3 slots):
  * a bar reading "3 slots" over a sheet titled "Book 2 slots" read as a slot lost (P3/P4 integration).
@@ -117,7 +117,7 @@ describe("BookSheet — a member, one slot", () => {
 
   it("books once on a double tap, then shows the tick and the row, and hands back the balance", async () => {
     const stub = stubFetch([
-      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_credits: 450 } },
+      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_minutes: 450 } },
     ]);
     const { onBooked } = open();
     await toConfirm();
@@ -145,7 +145,7 @@ describe("BookSheet — a member, one slot", () => {
     expect(book).not.toBeDisabled();
     expect(book).toHaveAttribute("aria-disabled", "true");
     await act(async () => {
-      release({ ok: true, status: 200, headers: { get: () => null }, text: () => Promise.resolve('{"booking_id":"b","balance_after_credits":1}') });
+      release({ ok: true, status: 200, headers: { get: () => null }, text: () => Promise.resolve('{"booking_id":"b","balance_after_minutes":1}') });
     });
   });
 
@@ -199,11 +199,11 @@ describe("BookSheet — a member, one slot", () => {
 
 describe("BookSheet — a member, several slots (D8)", () => {
   const bulkAnswer = (overrides: Record<string, unknown> = {}) => ({
-    requested: 2, booked: 1, refused: 1, total_charged_credits: 50, charged_now_credits: 50,
-    balance_before_credits: 500, balance_after_credits: 450, halted_at: null, halted_reason: null,
+    requested: 2, booked: 1, refused: 1, total_charged_minutes: 50, charged_now_minutes: 50,
+    balance_before_minutes: 500, balance_after_minutes: 450, halted_at: null, halted_reason: null,
     results: [
-      { index: 0, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, ends_at: null, status: "booked", reason: null, booking_id: "b1", amount_credits: 50, replayed: false },
-      { index: 1, court_id: "c2", court_name: "Court 2", starts_at: C2.startsAt, ends_at: null, status: "refused", reason: "slot_taken", booking_id: null, amount_credits: null, replayed: false },
+      { index: 0, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, ends_at: null, status: "booked", reason: null, booking_id: "b1", amount_minutes: 50, replayed: false },
+      { index: 1, court_id: "c2", court_name: "Court 2", starts_at: C2.startsAt, ends_at: null, status: "refused", reason: "slot_taken", booking_id: null, amount_minutes: null, replayed: false },
     ],
     ...overrides,
   });
@@ -253,7 +253,7 @@ describe("BookSheet — a member, several slots (D8)", () => {
 describe("BookSheet — an admin (R19 god mode)", () => {
   const quote = (overrides: Record<string, unknown> = {}) => ({
     user_id: NALEDI, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, ends_at: null,
-    slices: 3, price_credits: 60, balance_credits: 44, balance_after_credits: -16, overdraws: true, ...overrides,
+    slices: 3, price_minutes: 60, balance_minutes: 44, balance_after_minutes: -16, overdraws: true, ...overrides,
   });
   const members = [{ id: NALEDI, name: "Naledi Khumalo", balance: 44 }, { id: ME, name: "Desk Admin", balance: 0 }];
 
@@ -291,7 +291,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   it("quotes first, shows where it leaves the member, and sends the override once — no 402 dance", async () => {
     const stub = stubFetch([
       { path: "/api/v1/admin/bookings/quote", body: quote() },
-      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "bk-9", balance_after_credits: -16 } },
+      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "bk-9", balance_after_minutes: -16 } },
     ]);
     const { onBooked } = open({ isAdmin: true, members, bookAsUserId: NALEDI });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
@@ -316,7 +316,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
 
   it("P11: the god-mode notice names what the payer already owes back to partners", async () => {
     // The server's own figures: spendable = 44 − 16 owed back = 28, so 60 takes her to −32 (F1.4).
-    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ held_credits: 0, owed_back_credits: 16, spendable_credits: 28 }) }]);
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ held_minutes: 0, owed_back_minutes: 16, spendable_minutes: 28 }) }]);
     open({ isAdmin: true, members, bookAsUserId: NALEDI });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     const notice = await waitFor(() => {
@@ -331,7 +331,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   });
 
   it("P11: a quote that does not overdraw still names owed back, quietly; an older quote says nothing", async () => {
-    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_credits: 200, balance_after_credits: 140, overdraws: false, owed_back_credits: 16 }) }]);
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_minutes: 200, balance_after_minutes: 140, overdraws: false, owed_back_minutes: 16 }) }]);
     open({ isAdmin: true, members });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     expect(await screen.findByText(owedBackQuoteLine(16, null))).toBeTruthy();
@@ -339,7 +339,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   });
 
   it("P11: a quote with nothing owed back shows no owed-back line", async () => {
-    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_credits: 200, balance_after_credits: 140, overdraws: false }) }]);
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_minutes: 200, balance_after_minutes: 140, overdraws: false }) }]);
     open({ isAdmin: true, members });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     await screen.findByRole("button", { name: BOOK_SHEET.primary(S1, 60, null) });
@@ -349,8 +349,8 @@ describe("BookSheet — an admin (R19 god mode)", () => {
 
   it("books the admin's own court on their own wallet without the flag when it does not overdraw", async () => {
     const stub = stubFetch([
-      { path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_credits: 200, balance_after_credits: 140, overdraws: false }) },
-      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "bk-9", balance_after_credits: 140 } },
+      { path: "/api/v1/admin/bookings/quote", body: quote({ user_id: ME, balance_minutes: 200, balance_after_minutes: 140, overdraws: false }) },
+      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "bk-9", balance_after_minutes: 140 } },
     ]);
     open({ isAdmin: true, members });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
@@ -368,15 +368,15 @@ describe("BookSheet — an admin (R19 god mode)", () => {
       {
         method: "POST", path: "/api/v1/admin/bookings/bulk/quote",
         body: {
-          user_id: NALEDI, total_credits: 60, balance_credits: 100, balance_after_credits: 40, overdraws: false,
+          user_id: NALEDI, total_minutes: 60, balance_minutes: 100, balance_after_minutes: 40, overdraws: false,
           items: [
-            { index: 0, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, slices: 3, price_credits: 60, bookable: true, reason: null },
-            { index: 1, court_id: "c2", court_name: "Court 2", starts_at: C2.startsAt, slices: 1, price_credits: 0, bookable: false, reason: "slot_taken" },
+            { index: 0, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, slices: 3, price_minutes: 60, bookable: true, reason: null },
+            { index: 1, court_id: "c2", court_name: "Court 2", starts_at: C2.startsAt, slices: 1, price_minutes: 0, bookable: false, reason: "slot_taken" },
           ],
         },
       },
       // One slot left to send, so it goes by the single route with the same god-mode rule.
-      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "b1", balance_after_credits: 40 } },
+      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "b1", balance_after_minutes: 40 } },
     ]);
     open({ isAdmin: true, members, bookAsUserId: NALEDI, slots: [C1, C2] });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
@@ -398,20 +398,20 @@ describe("BookSheet — an admin (R19 god mode)", () => {
 
   it("books a batch for a member by the bulk route, and books the rest anyway under the same key", async () => {
     const bulkQuote = {
-      user_id: NALEDI, total_credits: 80, balance_credits: 100, balance_after_credits: 20, overdraws: false,
+      user_id: NALEDI, total_minutes: 80, balance_minutes: 100, balance_after_minutes: 20, overdraws: false,
       items: [
-        { index: 0, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, slices: 3, price_credits: 60, bookable: true, reason: null },
-        { index: 1, court_id: "c2", court_name: "Court 2", starts_at: C2.startsAt, slices: 1, price_credits: 20, bookable: true, reason: null },
+        { index: 0, court_id: "c1", court_name: "Court 1", starts_at: C1.startsAt, slices: 3, price_minutes: 60, bookable: true, reason: null },
+        { index: 1, court_id: "c2", court_name: "Court 2", starts_at: C2.startsAt, slices: 1, price_minutes: 20, bookable: true, reason: null },
       ],
     };
     const halted = {
-      halted_at: 1, halted_reason: "insufficient_balance", payer: { name: "Naledi Khumalo", balance_after_credits: 5 },
+      halted_at: 1, halted_reason: "insufficient_balance", payer: { name: "Naledi Khumalo", balance_after_minutes: 5 },
       results: [
-        { index: 0, status: "booked", booking_id: "b1", amount_credits: 60 },
+        { index: 0, status: "booked", booking_id: "b1", amount_minutes: 60 },
         { index: 1, status: "failed", error: "insufficient_balance" },
       ],
     };
-    const finished = { ...halted, halted_at: null, halted_reason: null, results: [halted.results[0], { index: 1, status: "booked", booking_id: "b2", amount_credits: 20 }] };
+    const finished = { ...halted, halted_at: null, halted_reason: null, results: [halted.results[0], { index: 1, status: "booked", booking_id: "b2", amount_minutes: 20 }] };
     let served = 0;
     const stub = stubFetch([
       { method: "POST", path: "/api/v1/admin/bookings/bulk/quote", body: bulkQuote },

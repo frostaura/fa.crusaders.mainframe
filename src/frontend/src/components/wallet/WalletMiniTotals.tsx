@@ -43,9 +43,9 @@ export function WalletMiniTotals({ offline = false }: { offline?: boolean }) {
 
 function Figures({ data }: { data: WalletReport }) {
   const rows = [
-    { label: COPY.topUps, value: data.top_ups_credits, tone: data.top_ups_credits > 0 ? "text-success-strong" : "text-text-primary" },
-    { label: COPY.spent, value: -data.spent_credits, tone: "text-text-primary" },
-    { label: COPY.net, value: data.net_movement_credits, tone: "text-text-primary" },
+    { label: COPY.topUps, value: data.top_ups_minutes, tone: data.top_ups_minutes > 0 ? "text-success-strong" : "text-text-primary" },
+    { label: COPY.spent, value: -data.spent_minutes, tone: "text-text-primary" },
+    { label: COPY.net, value: data.net_movement_minutes, tone: "text-text-primary" },
   ];
   return (
     <dl className="flex flex-col gap-1.5 text-sm">

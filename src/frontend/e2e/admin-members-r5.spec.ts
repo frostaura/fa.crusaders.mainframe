@@ -24,7 +24,7 @@ function partnerRow() {
   return {
     booking_id: "aaaaaaaa-0000-4000-8000-0000000000a1", court_id: "c1", court_name: "Court 4",
     starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 45 * 60_000).toISOString(),
-    status: "booked", charged_credits: 50, checked_in_at: null, cancelled_at: null,
+    status: "booked", charged_minutes: 50, checked_in_at: null, cancelled_at: null,
     booked_by: { user_id: "x", name: LONG_NAME, is_self: false },
     role: "partner", organiser: { user_id: "x", name: LONG_NAME, is_self: false },
   };
@@ -37,7 +37,7 @@ function detail() {
     membership_number: "CR-2026-0184", status: "Active", account_status: "Active", email_verified: true,
     created_at: "2026-03-01T08:00:00Z", last_login_at: "2026-09-22T17:30:00Z", photo_url: null,
     is_admin: false, admin_source: null, groups: [],
-    balance_credits: 120, passkey_count: 1, fingerprints: { count: 0, enrolments: [] },
+    balance_minutes: 120, passkey_count: 1, fingerprints: { count: 0, enrolments: [] },
     next_bookings: [partnerRow()], counts_30d: { bookings: 6, no_shows: 1, sessions_played: 5 },
   };
 }
@@ -48,7 +48,7 @@ function member(i: number, status: string, groups: { id: string; name: string }[
     membership_id: `00000000-0000-4000-8000-0000000001${String(i).padStart(2, "0")}`,
     full_name: i === 0 ? "Bartholomew Fitzwilliam" : `Member ${i}`, email: `member.${i}@member-r5.review.test`,
     membership_number: `MEM-10${String(i).padStart(2, "0")}`, status, email_verified: true,
-    balance_credits: 1234.5, created_at: "2026-09-05T08:00:00Z", photo_url: null,
+    balance_minutes: 1234.5, created_at: "2026-09-05T08:00:00Z", photo_url: null,
     is_admin: false, admin_source: null, groups,
   };
 }
@@ -212,7 +212,7 @@ test.describe("R5 P5 — a deep link to one member", () => {
 test.describe("R5 V-6 (lane A's ask) — the member's Wallet tab", () => {
   test("frames the ledger without making a scroll box of its own, so the heads can stick to the page", async ({ page }) => {
     const row = {
-      id: "l1", at: "2026-09-30T08:00:00Z", from: "Club", to: "Naledi Khumalo", amountCredits: 50, signedAmountCredits: 50,
+      id: "l1", at: "2026-09-30T08:00:00Z", from: "Club", to: "Naledi Khumalo", amountMinutes: 50, signedAmountMinutes: 50,
       type: "AdminTopUp", comment: "Desk", subjectUserId: MEMBER_ID, subjectName: "Naledi Khumalo",
       actorUserId: "a", actorName: "Admin", relatedBookingId: null,
     };

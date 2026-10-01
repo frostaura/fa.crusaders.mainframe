@@ -45,7 +45,7 @@ describe("signing back in after a lapse", () => {
       { method: "PUT", path: "/api/v1/admin/settings", respond: () => { saves += 1; return { error: "invalid_token" }; }, status: 401 },
       { method: "POST", path: "/api/v1/auth/refresh", status: 401, body: { error: "session_ended" } },
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t2", user_id: whoami.user_id, is_admin: true } },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     ]);
     renderPage(
@@ -94,7 +94,7 @@ describe("signing back in after a lapse, on a device another member used before"
       { method: "PUT", path: "/api/v1/admin/settings", status: 401, body: { error: "invalid_token" } },
       { method: "POST", path: "/api/v1/auth/refresh", status: 401, body: { error: "session_ended" } },
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t2", user_id: admin, is_admin: true } },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     ]);
     renderPage(

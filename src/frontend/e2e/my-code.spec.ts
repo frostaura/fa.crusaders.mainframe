@@ -96,7 +96,7 @@ const EMPTY_HISTORY = {
 
 const COMMON = [
   { path: "/api/v1/whoami", body: SESSION_MEMBER },
-  { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+  { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
   ...memberCodeRoutes(),
   // E-H2 (2) — the self-check reads the club's own record. Stubbed here rather than per
   // test because `serveApi` is strict and an unstubbed call fails the test it appears in,
@@ -293,7 +293,7 @@ test("a club with no door is told nothing whatever about one", async ({ page }) 
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     ...memberCodeRoutes(),
     { path: "/api/v1/me/door", body: door({ doors: false }) },
   ]);
@@ -933,7 +933,7 @@ test("both reads failing still leaves a door section, a self-check and a way to 
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
   ]);
   // D1: a phone with no key, and no club to enrol with.

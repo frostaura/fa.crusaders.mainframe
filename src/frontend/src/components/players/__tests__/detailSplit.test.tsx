@@ -32,10 +32,10 @@ const puts = (calls: StubCall[]) => calls.filter((c) => c.method === "PUT" && c.
 
 /** The server's own preview, from the body sent: partners as asked, the organiser the rest. */
 function previewOf({ body }: { body: unknown }) {
-  const req = body as { priceCredits: number; players: { seat: number; amount?: number }[] };
-  const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_credits: p.amount ?? 25, weight: 1 }));
-  const taken = partners.reduce((n, p) => n + p.share_credits, 0);
-  return { price_credits: req.priceCredits, shares: [{ seat: 1, team: "A", share_credits: req.priceCredits - taken, weight: 1 }, ...partners] };
+  const req = body as { priceMinutes: number; players: { seat: number; amount?: number }[] };
+  const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_minutes: p.amount ?? 25, weight: 1 }));
+  const taken = partners.reduce((n, p) => n + p.share_minutes, 0);
+  return { price_minutes: req.priceMinutes, shares: [{ seat: 1, team: "A", share_minutes: req.priceMinutes - taken, weight: 1 }, ...partners] };
 }
 
 describe("change the split (R1 F2.1)", () => {
@@ -43,7 +43,7 @@ describe("change the split (R1 F2.1)", () => {
     const stub = serve({ extra: [
       { method: "POST", path: PREVIEW, respond: previewOf },
       { method: "PUT", path: SPLIT, body: { booking_id: "b", split_mode: "amount", shares: [
-        { participant_id: PID.sam, seat: 2, share_credits: 30, weight: 1, needs_consent: true },
+        { participant_id: PID.sam, seat: 2, share_minutes: 30, weight: 1, needs_consent: true },
       ] } },
     ] });
     renderDetail();
@@ -100,13 +100,13 @@ describe("change the split (R1 F2.1)", () => {
 describe("inviting into an amount or ratio split asks for their share (R1 F2.1)", () => {
   const amountSplit = () => detail({
     split_mode: "amount",
-    players: [seat({ share_credits: 60 }), { ...SAM_SEAT, share_credits: 40 }],
+    players: [seat({ share_minutes: 60 }), { ...SAM_SEAT, share_minutes: 40 }],
   });
 
   it("asks what they should pay, then sends it with the invite", async () => {
     const stub = serve({ detail: amountSplit(), extra: [{
       method: "POST", path: `${DETAIL_PATH}/players`,
-      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 3, user_id: "u-jo", guest_name: null, status: "invited", share_credits: 30, invite_token: null, invite_path: null }] },
+      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 3, user_id: "u-jo", guest_name: null, status: "invited", share_minutes: 30, invite_token: null, invite_path: null }] },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
@@ -125,8 +125,8 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
 
   it("R4 M4-6: after a removal the prompt names what the organiser covers now, not the seat's stale figure", async () => {
     // Bongani (asked 30) was removed; the organiser's own seat still reads its old 30.
-    const removed = seat({ participant_id: "p-bongani", seat: 3, team: "B", kind: "member", user_id: "u-b", name: "Bongani Dube", status: "removed", share_credits: 30 });
-    serve({ detail: detail({ split_mode: "amount", players: [seat({ share_credits: 30 }), { ...SAM_SEAT, share_credits: 40 }, removed] }) });
+    const removed = seat({ participant_id: "p-bongani", seat: 3, team: "B", kind: "member", user_id: "u-b", name: "Bongani Dube", status: "removed", share_minutes: 30 });
+    serve({ detail: detail({ split_mode: "amount", players: [seat({ share_minutes: 30 }), { ...SAM_SEAT, share_minutes: 40 }, removed] }) });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
     fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
@@ -151,7 +151,7 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
   it("reads the amount with the club's one money parser: a decimal comma is fine, '1e3' is refused in words (R1, from F3)", async () => {
     const stub = serve({ detail: amountSplit(), extra: [{
       method: "POST", path: `${DETAIL_PATH}/players`,
-      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 3, user_id: "u-jo", guest_name: null, status: "invited", share_credits: 12.5, invite_token: null, invite_path: null }] },
+      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 3, user_id: "u-jo", guest_name: null, status: "invited", share_minutes: 12.5, invite_token: null, invite_path: null }] },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
@@ -170,7 +170,7 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
   it("a guest plays free, so nothing is asked", async () => {
     const stub = serve({ detail: amountSplit(), extra: [{
       method: "POST", path: `${DETAIL_PATH}/players`,
-      body: { booking_id: "b", participants: [{ participant_id: "p-g", seat: 3, user_id: null, guest_name: "Themba", status: "accepted", share_credits: 0, invite_token: null, invite_path: null }] },
+      body: { booking_id: "b", participants: [{ participant_id: "p-g", seat: 3, user_id: null, guest_name: "Themba", status: "accepted", share_minutes: 0, invite_token: null, invite_path: null }] },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
@@ -183,7 +183,7 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
   it("an equal split asks nothing — the server splits it", async () => {
     const stub = serve({ detail: detail({ players: [seat(), SAM_SEAT, ALEX_SEAT] }), extra: [{
       method: "POST", path: `${DETAIL_PATH}/players`,
-      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 4, user_id: "u-jo", guest_name: null, status: "invited", share_credits: 25, invite_token: null, invite_path: null }] },
+      body: { booking_id: "b", participants: [{ participant_id: "p-jo", seat: 4, user_id: "u-jo", guest_name: null, status: "invited", share_minutes: 25, invite_token: null, invite_path: null }] },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
@@ -225,7 +225,7 @@ describe("after the booking stands (R2 F2-3)", () => {
   });
 
   it("the money box says a part-paid partner is asked for more — never 'hasn't paid yet'", async () => {
-    const bob = { ...SAM_SEAT, share_credits: 37, target_credits: 37, paid_credits: 25, unpaid_credits: 12, consented_credits: 37 };
+    const bob = { ...SAM_SEAT, share_minutes: 37, target_minutes: 37, paid_minutes: 25, unpaid_minutes: 12, consented_minutes: 37 };
     serve({ detail: detail({ players: [seat(), bob] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
@@ -235,7 +235,7 @@ describe("after the booking stands (R2 F2-3)", () => {
   });
 
   it("a share lowered below what was paid says what goes back", async () => {
-    const eve = { ...SAM_SEAT, share_credits: 20, target_credits: 20, paid_credits: 25, unpaid_credits: 0, consented_credits: 20 };
+    const eve = { ...SAM_SEAT, share_minutes: 20, target_minutes: 20, paid_minutes: 25, unpaid_minutes: 0, consented_minutes: 20 };
     serve({ detail: detail({ players: [seat(), eve] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });

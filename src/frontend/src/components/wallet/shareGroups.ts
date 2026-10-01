@@ -46,10 +46,10 @@ export function groupShareRows(rows: readonly LedgerRow[]): LedgerItem[] {
     const existing = groups.get(row.relatedBookingId);
     if (existing) {
       existing.rows.push(row);
-      existing.net = roundCredits(existing.net + row.signedAmountCredits);
+      existing.net = roundCredits(existing.net + row.signedAmountMinutes);
       continue;
     }
-    const group = { kind: "shares" as const, bookingId: row.relatedBookingId, rows: [row], net: roundCredits(row.signedAmountCredits) };
+    const group = { kind: "shares" as const, bookingId: row.relatedBookingId, rows: [row], net: roundCredits(row.signedAmountMinutes) };
     groups.set(row.relatedBookingId, group);
     items.push(group);
   }
@@ -67,7 +67,7 @@ export type ShareSide = "organiser" | "partner";
 export function shareSide(group: { rows: readonly LedgerRow[]; net: number }): ShareSide {
   if (group.net !== 0) return group.net > 0 ? "organiser" : "partner";
   const first = group.rows[group.rows.length - 1] ?? group.rows[0];
-  return (first?.signedAmountCredits ?? 0) >= 0 ? "organiser" : "partner";
+  return (first?.signedAmountMinutes ?? 0) >= 0 ? "organiser" : "partner";
 }
 
 /** The distinct booking ids a page's share rows name, in first-seen order. */

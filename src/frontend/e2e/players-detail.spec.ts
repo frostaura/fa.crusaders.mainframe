@@ -144,7 +144,7 @@ function adminDetail(): Detail {
     organiser: PEOPLE.sam,
     players: [
       seat({ user_id: SAM, name: PEOPLE.sam.name }),
-      seat({ participant_id: PID.alex, seat: 2, kind: "member", user_id: ALEX, name: PEOPLE.alex.name, status: "accepted", consented_credits: 25, target_credits: 25, unpaid_credits: 25 }),
+      seat({ participant_id: PID.alex, seat: 2, kind: "member", user_id: ALEX, name: PEOPLE.alex.name, status: "accepted", consented_minutes: 25, target_minutes: 25, unpaid_minutes: 25 }),
     ],
     permissions: { ...(base.permissions as object), can_invite: false, can_change_split: false, can_cancel: false },
   };
@@ -157,10 +157,10 @@ test.describe("R1 F2.1 — changing the split", () => {
       {
         method: "POST", path: "/api/v1/players/split-preview",
         respond: ({ body }) => {
-          const req = body as { priceCredits: number; players: { seat: number; amount?: number }[] };
-          const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_credits: p.amount ?? 25, weight: 1 }));
-          const taken = partners.reduce((n, p) => n + p.share_credits, 0);
-          return { price_credits: req.priceCredits, shares: [{ seat: 1, team: "A", share_credits: req.priceCredits - taken, weight: 1 }, ...partners] };
+          const req = body as { priceMinutes: number; players: { seat: number; amount?: number }[] };
+          const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_minutes: p.amount ?? 25, weight: 1 }));
+          const taken = partners.reduce((n, p) => n + p.share_minutes, 0);
+          return { price_minutes: req.priceMinutes, shares: [{ seat: 1, team: "A", share_minutes: req.priceMinutes - taken, weight: 1 }, ...partners] };
         },
       },
       {
@@ -189,7 +189,7 @@ test.describe("god mode", () => {
     await openAs(page, { admin: true, detail: adminDetail(), extra: [
       {
         method: "POST", path: `/api/v1/admin/bookings/${BOOKING}/players/${PID.alex}/collect`,
-        respond: ({ body }) => { sent = body; return { participant_id: PID.alex, collected_credits: 25, balance_after_credits: -5 }; },
+        respond: ({ body }) => { sent = body; return { participant_id: PID.alex, collected_minutes: 25, balance_after_minutes: -5 }; },
       },
     ] });
     await page.goto(`/bookings/${BOOKING}`);

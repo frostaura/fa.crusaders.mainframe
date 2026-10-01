@@ -19,7 +19,7 @@ const NALEDI = "55555555-5555-5555-5555-555555555555";
 function memberRoutes(rules: Record<string, unknown>) {
   return [
     { path: `/api/v1/admin/members/${NALEDI}/booking-rules`, body: { slice_price_credits: 40, groups: [{ name: "Juniors" }], ...rules } },
-    { path: `/api/v1/admin/members/${NALEDI}`, body: { full_name: "Naledi Khumalo", balance_credits: 215 } },
+    { path: `/api/v1/admin/members/${NALEDI}`, body: { full_name: "Naledi Khumalo", balance_minutes: 215 } },
   ];
 }
 
@@ -71,7 +71,7 @@ describe("R2 F1-1 — a finished game is reachable, and its result recordable, f
     return {
       booking_id: "bk-past", court_name: "Court 1", starts_at: "2030-09-08T08:00:00Z", ends_at: "2030-09-08T08:30:00Z",
       role: "organiser", status: "Completed", players: [{ name: "Sam Petersen", photo_url: null, status: "accepted" }],
-      my_share_credits: 50, needs_action: false, result_status: "none", can_record: true, ...overrides,
+      my_share_minutes: 50, needs_action: false, result_status: "none", can_record: true, ...overrides,
     };
   }
   const recentRoute = (items: unknown[]) => [{ path: "/api/v1/me/bookings/recent", body: { timezone: "Africa/Johannesburg", items } }];

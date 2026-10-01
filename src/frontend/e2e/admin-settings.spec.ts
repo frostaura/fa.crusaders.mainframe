@@ -104,7 +104,7 @@ test("keeps the save bar clear of the tab bar, with nothing pushed sideways", as
 });
 
 test("asks before the app's own navigation throws unsaved changes away", async ({ page }) => {
-  await openSettings(page, [{ path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } }]);
+  await openSettings(page, [{ path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } }]);
   await page.getByRole("button", { name: "Door gates" }).click();
   await unlock(page).fill("20");
 

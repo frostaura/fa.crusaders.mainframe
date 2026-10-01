@@ -17,7 +17,7 @@ export function gridBookingOf(detail: BookingDetail): GridBooking {
     memberFirstName: null,
     memberPhotoUrl: null,
     checkedIn: detail.attendance.checked_in_at !== null,
-    amountChargedCredits: detail.money.price_credits,
+    amountChargedMinutes: detail.money.price_minutes,
     timezone: clubZone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
   };
 }
@@ -40,7 +40,7 @@ export function detailAsDay(detail: BookingDetail): ScheduleDay {
       courtId: detail.court_id, courtNumber: 0, startsAtUtc: detail.starts_at, endsAtUtc: detail.ends_at,
       status: detail.status, ownerUserId: detail.organiser.user_id, ownerFirstName: null, ownerPhotoUrl: null,
       isMine: true, bookingId: detail.booking_id, blockLabel: null,
-      checkedIn: detail.attendance.checked_in_at !== null, amountChargedCredits: detail.money.price_credits,
+      checkedIn: detail.attendance.checked_in_at !== null, amountChargedMinutes: detail.money.price_minutes,
     }] : [],
   };
 }

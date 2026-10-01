@@ -32,7 +32,7 @@ describe("LedgerTable — what survives a 375px screen", () => {
     {
       id: "r1", at: "2026-09-01T10:00:00Z",
       from: "Naledi Khumalo", to: "Club treasury",
-      amountCredits: 24, signedAmountCredits: -24,
+      amountMinutes: 24, signedAmountMinutes: -24,
       type: "BookingCharge", comment: "Court 1 · Tue 01 Sep 12:00–12:45",
       subjectUserId: "u1", subjectName: "Naledi Khumalo",
       actorUserId: "u1", actorName: "Naledi Khumalo",
@@ -41,7 +41,7 @@ describe("LedgerTable — what survives a 375px screen", () => {
     {
       id: "r2", at: "2026-09-02T08:00:00Z",
       from: "Club treasury", to: "Naledi Khumalo",
-      amountCredits: 2000, signedAmountCredits: 2000,
+      amountMinutes: 2000, signedAmountMinutes: 2000,
       type: "AdminAdjustment", comment: "Desk credit",
       subjectUserId: "u1", subjectName: "Naledi Khumalo",
       actorUserId: "a1", actorName: "Front desk",

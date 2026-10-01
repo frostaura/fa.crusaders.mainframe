@@ -29,7 +29,7 @@ describe("F1.6 — booking for a member says so before the sheet does", () => {
     },
     {
       path: `/api/v1/admin/members/${NALEDI}`,
-      body: { full_name: "Naledi Khumalo", balance_credits: 215, held_credits: 90, owed_back_credits: 0 },
+      body: { full_name: "Naledi Khumalo", balance_minutes: 215, held_minutes: 90, owed_back_minutes: 0 },
     },
   ];
 
@@ -130,7 +130,7 @@ describe("F1.12 — upcoming games above the grid, and a partner's game on it", 
   const game = (overrides: Record<string, unknown>) => ({
     booking_id: "bk-org", court_name: "Court 1", starts_at: sast(18), ends_at: sast(18, 45), role: "organiser",
     status: "booked", players: [{ name: "Sam Petersen", photo_url: null, status: "accepted" }],
-    my_share_credits: 75, needs_action: false, ...overrides,
+    my_share_minutes: 75, needs_action: false, ...overrides,
   });
 
   it("lists every upcoming game, soonest first, each opening its booking", async () => {

@@ -167,7 +167,7 @@ export function playersPayload(draft: PlayersDraft): PlayersPayload | null {
 /** The body of `POST /players/split-preview` for one price. */
 export function previewBody(price: number, draft: PlayersDraft): SplitPreviewRequest {
   const payload = playersPayload(draft);
-  const body: SplitPreviewRequest = { priceCredits: price, splitMode: payload?.splitMode ?? "equal", players: payload?.players ?? [] };
+  const body: SplitPreviewRequest = { priceMinutes: price, splitMode: payload?.splitMode ?? "equal", players: payload?.players ?? [] };
   if (payload?.organiserWeight !== undefined) body.organiserWeight = payload.organiserWeight;
   return body;
 }
@@ -189,10 +189,10 @@ export function withMode(draft: PlayersDraft, mode: SplitMode, price: number | n
 }
 
 /** The seats as the Confirm sentence names them, with each seat's share from `shares`. */
-export function sentenceSeats(draft: PlayersDraft, shares: readonly { seat: number; share_credits: number }[]): SentenceSeat[] {
+export function sentenceSeats(draft: PlayersDraft, shares: readonly { seat: number; share_minutes: number }[]): SentenceSeat[] {
   return draft.seats.map((s) => ({
     kind: s.player.kind === "member" ? "member" : s.player.kind,
     name: seatName(s.player),
-    share: shares.find((x) => x.seat === s.seat)?.share_credits ?? 0,
+    share: shares.find((x) => x.seat === s.seat)?.share_minutes ?? 0,
   }));
 }

@@ -18,7 +18,7 @@ const SETTINGS = {
 const BASE = [
   { path: "/api/v1/whoami", body: SESSION_ADMIN },
   { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
-  { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+  { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
 ];
 
 async function openSettings(page: Page) {

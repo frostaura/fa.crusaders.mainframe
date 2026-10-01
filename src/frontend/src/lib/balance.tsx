@@ -166,7 +166,7 @@ type BalanceState = {
    * Take a balance the server has just stated, without asking it again.
    *
    * <p>
-   * The booking response carries <code>balance_after_credits</code>, so the wallet GET that
+   * The booking response carries <code>balance_after_minutes</code>, so the wallet GET that
    * used to follow every booking asked a question already answered and put a second round trip
    * between a member's tap and the screen changing. This is not an optimistic guess — it is
    * the server's own figure from the response that committed the charge; the wallet stream and

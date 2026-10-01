@@ -54,7 +54,7 @@ export type BookFlowInput = {
   onBooked?: (outcome: BookedOutcome) => void;
   onStale?: () => void;
   /** What of a member's balance is held for partners (D11 §3a), for the line under the money. */
-  held?: { held: number; owedBack?: number; until: string | null; parts?: { credits: number; until: string }[] } | null;
+  held?: { held: number; owedBack?: number; until: string | null; parts?: { minutes: number; until: string }[] } | null;
   /**
    * Re-reads the day behind the sheet and returns it (null when that read fails). Given, a lost
    * answer or a "taken" refusal is checked against the schedule before anything is said (F1.1).
@@ -162,7 +162,7 @@ function useSheetMembers(isAdmin: boolean, given: ComboboxMember[] | undefined, 
     endpoints.adminMembers("Active").then(
       (rows) => {
         if (!live) return;
-        setRead(rows.map((m) => ({ id: m.user_id, name: m.full_name, photoUrl: m.photo_url, balance: m.balance_credits })));
+        setRead(rows.map((m) => ({ id: m.user_id, name: m.full_name, photoUrl: m.photo_url, balance: m.balance_minutes })));
       },
       () => { if (live) setRead([]); },
     );
@@ -273,7 +273,7 @@ export function useBookFlow(input: BookFlowInput) {
     action.reset();
   });
   const players = usePlayersStep({
-    enabled: !isAdmin, prices: slots.map((s) => s.priceCredits), step: stepId, onEdit: () => onEdit(),
+    enabled: !isAdmin, prices: slots.map((s) => s.priceMinutes), step: stepId, onEdit: () => onEdit(),
   });
   const steps = useMemo(() => stepsFor({ isAdmin, paying: players.paying }), [isAdmin, players.paying]);
   const step: StepId = steps.includes(stepId) ? stepId : steps[steps.length - 1];
@@ -364,7 +364,7 @@ export function useBookFlow(input: BookFlowInput) {
   /** In grid slots, the unit the action bar counted in — see `slotCount`. */
   const count = slotCount(slots);
   const refusedSlots = ready ? slotCount(slots.filter((_, i) => ready.refused.has(i))) : 0;
-  const total = slots.reduce((n, s) => n + s.priceCredits, 0);
+  const total = slots.reduce((n, s) => n + s.priceMinutes, 0);
   const short = !isAdmin && balanceCredits !== null && balanceCredits < total ? total - balanceCredits : null;
   const memberHeld = isAdmin ? null : input.held ?? null;
   const memberReserved = memberHeld ? memberHeld.held + (memberHeld.owedBack ?? 0) : 0;
@@ -374,7 +374,7 @@ export function useBookFlow(input: BookFlowInput) {
     const refusedCode = ready?.refused.has(i) ? ready.refused.get(i) ?? null : undefined;
     return {
       key: slotKey(s), courtName: s.courtName, day: f.day, time: f.time, duration: f.duration,
-      price: isAdmin ? ready?.prices.get(i) ?? null : s.priceCredits,
+      price: isAdmin ? ready?.prices.get(i) ?? null : s.priceMinutes,
       priceLoading: isAdmin && !hold && quote.state.status === "loading",
       refusal: refusedCode === undefined ? null : refusalReason(refusedCode),
       note: hold ? BOOK_SHEET.holdNote(who.kind === "hold" ? who.label : "") : undefined,

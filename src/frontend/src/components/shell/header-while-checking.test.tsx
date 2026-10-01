@@ -45,7 +45,7 @@ afterEach(async () => {
 
 describe("the header while the session check is out", () => {
   it("keeps the bell, the kept wallet figure and the account menu with Sign out", async () => {
-    primeQuery(ID, memberReads.wallet.key, { balance_credits: 120, spendable_credits: 120, held_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 });
+    primeQuery(ID, memberReads.wallet.key, { balance_minutes: 120, spendable_minutes: 120, held_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 });
     primeQuery(ID, memberReads.profile.key, { full_name: "Olga Petrova", email: "olga@example.test", status: "active", photo_url: null });
     whoamiStalled();
     render(<App />);

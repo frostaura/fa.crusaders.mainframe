@@ -93,8 +93,8 @@ async function openBookingSheet(page: Page) {
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
     { path: "/api/v1/schedule", body: day() },
     { path: "/api/v1/me/profile", body: PROFILE },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
-    { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-9", balance_after_credits: 450 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-9", balance_after_minutes: 450 } },
   ]);
   await page.goto("/bookings");
   await page.getByRole("button", { name: /^Book Court 1 .* for 50\.00 cr/ }).first().click();
@@ -112,7 +112,7 @@ async function holdBooking(page: Page) {
   // Registered after serveApi, so it wins for this one route.
   await page.route("**/api/v1/bookings/", async (route) => {
     await gate;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ booking_id: "bk-9", balance_after_credits: 450 }) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ booking_id: "bk-9", balance_after_minutes: 450 }) });
   });
   return () => release();
 }
@@ -173,7 +173,7 @@ test.describe("a destructive confirm", () => {
     await serveApi(page, [
       { path: "/api/v1/whoami", body: SESSION_MEMBER },
       { path: "/api/v1/me/profile", body: PROFILE },
-      { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
       {
         path: "/api/v1/schedule",
         body: {
@@ -183,18 +183,18 @@ test.describe("a destructive confirm", () => {
             startsAtUtc: `${d}T07:00:00.000Z`, endsAtUtc: `${d}T07:15:00.000Z`,
             status: "booked", ownerUserId: SESSION_MEMBER.user_id, ownerFirstName: "Test",
             ownerPhotoUrl: null, isMine: true, bookingId: "bk-1", blockLabel: null,
-            checkedIn: false, amountChargedCredits: 50,
+            checkedIn: false, amountChargedMinutes: 50,
           }],
         },
       },
       {
         path: "/api/v1/bookings/bk-1/cancellation-quote",
         body: {
-          bookingId: "bk-1", amountChargedCredits: 50, refundCredits: 35, penaltyCredits: 15, penaltyPct: 30,
+          bookingId: "bk-1", amountChargedMinutes: 50, refundMinutes: 35, penaltyMinutes: 15, penaltyPct: 30,
           penaltyWindowMinutes: 15, insidePenaltyWindow: true, checkedIn: false, alreadyStarted: false,
         },
       },
-      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_credits: 50, penalty_credits: 15 } },
+      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_minutes: 50, penalty_minutes: 15 } },
     ]);
     await page.goto("/bookings");
     await page.getByRole("button", { name: /^Cancel your booking on Court 1/ }).first().click();
@@ -255,7 +255,7 @@ test.describe("the money pages a member reaches alone", () => {
     await serveApi(page, [
       { path: "/api/v1/whoami", body: SESSION_MEMBER },
       { path: "/api/v1/me/profile", body: PROFILE },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
       // The endpoint the page actually reads. This stubbed `/payments/topup-options`, which
       // nothing calls: the old page drew its form anyway on a FAILED options read, and R12's
       // top-up shows that failure (with a retry) instead of a form with no rules behind it.

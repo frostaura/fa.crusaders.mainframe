@@ -16,7 +16,7 @@ const DAY = {
   slots: [{
     courtId: "b", courtNumber: 2, startsAtUtc: at(17), endsAtUtc: at(17, 30), status: "booked",
     ownerUserId: "u", ownerFirstName: "Thandi", ownerPhotoUrl: "p.jpg", isMine: false,
-    bookingId: "bk", blockLabel: null, checkedIn: null, amountChargedCredits: null,
+    bookingId: "bk", blockLabel: null, checkedIn: null, amountChargedMinutes: null,
   }],
 } as ScheduleDay;
 
@@ -40,8 +40,8 @@ describe("toSelectedSlots — what a BookSheet is handed", () => {
   it("merges adjacent slices on one court into one booking, priced at this viewer's rate", () => {
     const keys = [selectionKey("a", at(16, 15)), selectionKey("a", at(16)), selectionKey("b", at(16)), selectionKey("a", at(16, 30))];
     expect(toSelectedSlots(keys, DAY)).toEqual([
-      { courtId: "a", courtName: "Court 1", startsAt: at(16), sliceCount: 3, priceCredits: 150 },
-      { courtId: "b", courtName: "Court 2", startsAt: at(16), sliceCount: 1, priceCredits: 40 },
+      { courtId: "a", courtName: "Court 1", startsAt: at(16), sliceCount: 3, priceMinutes: 150 },
+      { courtId: "b", courtName: "Court 2", startsAt: at(16), sliceCount: 1, priceMinutes: 40 },
     ]);
   });
 

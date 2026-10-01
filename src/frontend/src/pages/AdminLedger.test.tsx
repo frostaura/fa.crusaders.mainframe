@@ -25,8 +25,8 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
   const ROWS = [
-    ledgerRowFixture({ id: "r1", comment: "Booking charge", signedAmountCredits: -24, amountCredits: 24 }),
-    ledgerRowFixture({ id: "r2", comment: "Desk credit", type: "AdminAdjustment", signedAmountCredits: 40, amountCredits: 40 }),
+    ledgerRowFixture({ id: "r1", comment: "Booking charge", signedAmountMinutes: -24, amountMinutes: 24 }),
+    ledgerRowFixture({ id: "r2", comment: "Desk credit", type: "AdminAdjustment", signedAmountMinutes: 40, amountMinutes: 40 }),
   ];
 
   const routes = (over: Parameters<typeof stubFetch>[0] = []) => [
@@ -236,7 +236,7 @@ describe("Admin ledger — the totals are signed by their value, not by their la
     // nets out. It lands in neither the credit nor the debit bucket, so both totals are zero
     // while the table below is emphatically not empty. Special-casing "no rows" would leave
     // this one wrong.
-    stubFetch(routes([ledgerRowFixture({ id: "z1", comment: "Nets out", type: "AdminAdjustment", signedAmountCredits: 0, amountCredits: 0 })]));
+    stubFetch(routes([ledgerRowFixture({ id: "z1", comment: "Nets out", type: "AdminAdjustment", signedAmountMinutes: 0, amountMinutes: 0 })]));
     renderPage(<AdminLedgerPage />);
 
     await screen.findByText("Nets out");
@@ -262,8 +262,8 @@ describe("Admin ledger — the totals are signed by their value, not by their la
     // The guard against fixing the above by dropping the signs altogether. The sign is the
     // information on this table; it just has to come from the number.
     stubFetch(routes([
-      ledgerRowFixture({ id: "r1", comment: "Booking charge", signedAmountCredits: -24, amountCredits: 24 }),
-      ledgerRowFixture({ id: "r2", comment: "Desk credit", type: "AdminAdjustment", signedAmountCredits: 40, amountCredits: 40 }),
+      ledgerRowFixture({ id: "r1", comment: "Booking charge", signedAmountMinutes: -24, amountMinutes: 24 }),
+      ledgerRowFixture({ id: "r2", comment: "Desk credit", type: "AdminAdjustment", signedAmountMinutes: 40, amountMinutes: 40 }),
     ]));
     renderPage(<AdminLedgerPage />);
 
@@ -286,8 +286,8 @@ describe("Admin ledger — the totals are signed by their value, not by their la
    */
   it("signs a net that has gone the other way", async () => {
     stubFetch(routes([
-      ledgerRowFixture({ id: "r1", comment: "Big charge", signedAmountCredits: -1250.5, amountCredits: 1250.5 }),
-      ledgerRowFixture({ id: "r2", comment: "Small credit", type: "AdminAdjustment", signedAmountCredits: 0.5, amountCredits: 0.5 }),
+      ledgerRowFixture({ id: "r1", comment: "Big charge", signedAmountMinutes: -1250.5, amountMinutes: 1250.5 }),
+      ledgerRowFixture({ id: "r2", comment: "Small credit", type: "AdminAdjustment", signedAmountMinutes: 0.5, amountMinutes: 0.5 }),
     ]));
     renderPage(<AdminLedgerPage />);
 
@@ -321,10 +321,10 @@ describe("Admin ledger — done by, category, and a detail per row", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
   const DESK = ledgerRowFixture({
-    id: "d1", comment: "R200 cash, receipt 0412", type: "AdminAdjustment", signedAmountCredits: 40, amountCredits: 40,
+    id: "d1", comment: "R200 cash, receipt 0412", type: "AdminAdjustment", signedAmountMinutes: 40, amountMinutes: 40,
     actorUserId: "admin-1", actorName: "Review Admin", relatedBookingId: "b-77",
   });
-  const OWN = ledgerRowFixture({ id: "o1", comment: "Booking charge", signedAmountCredits: -24, amountCredits: 24 });
+  const OWN = ledgerRowFixture({ id: "o1", comment: "Booking charge", signedAmountMinutes: -24, amountMinutes: 24 });
 
   function open() {
     stubFetch([
@@ -366,7 +366,7 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
 
   const row = (n: number) => ledgerRowFixture({
-    id: `r${n}`, comment: `Charge ${n}`, signedAmountCredits: -10, amountCredits: 10,
+    id: `r${n}`, comment: `Charge ${n}`, signedAmountMinutes: -10, amountMinutes: 10,
   });
   const totalsShown = () => Array.from(document.querySelectorAll("[data-ledger-total]")).map((el) => el.textContent);
 
@@ -378,7 +378,7 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
         path: "/api/v1/admin/ledger",
         respond: (req) => (req.path.includes("cursor=c1")
           ? { items: [row(3)], next_cursor: null, totals: null }
-          : { items: [row(1), row(2)], next_cursor: "c1", totals: { count: 1664, credits: 500, debits: 16640, net: -16140 } }),
+          : { items: [row(1), row(2)], next_cursor: "c1", totals: { count: 1664, in_minutes: 500, out_minutes: 16640, net_minutes: -16140 } }),
       },
     ]);
     renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });

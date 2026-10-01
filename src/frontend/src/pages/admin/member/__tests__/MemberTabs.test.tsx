@@ -50,7 +50,7 @@ describe("member detail — bookings tab", () => {
   it("cancels through the grid's own sheet, as an admin, naming the member", async () => {
     serve(baseRoutes(detailFixture(), [
       { path: `${BASE}/bookings`, body: { when: "upcoming", items: [bookingRow()], next_cursor: null } },
-      { path: "/api/v1/bookings/b1/cancellation-quote", body: { bookingId: "b1", refundCredits: 24, penaltyCredits: 0, checkedIn: false, withinPenaltyWindow: false } },
+      { path: "/api/v1/bookings/b1/cancellation-quote", body: { bookingId: "b1", refundMinutes: 24, penaltyMinutes: 0, checkedIn: false, withinPenaltyWindow: false } },
     ]));
     renderMember(at("bookings"));
     fireEvent.click(await screen.findByRole("button", { name: /^Cancel Court 1, / }));

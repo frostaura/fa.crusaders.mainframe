@@ -15,7 +15,7 @@ function book(n: number) {
     return {
       id: `l${String(i).padStart(3, "0")}`, at: new Date(Date.UTC(2026, 0, 28 - (i % 27), 10, i % 60)).toISOString(),
       from: signed >= 0 ? "Club treasury" : "Nomvula Dlamini-Hendricks", to: signed >= 0 ? "Nomvula Dlamini-Hendricks" : "Club treasury",
-      amountCredits: Math.abs(signed), signedAmountCredits: signed, type: signed >= 0 ? "AdminTopUp" : "BookingCharge",
+      amountMinutes: Math.abs(signed), signedAmountMinutes: signed, type: signed >= 0 ? "AdminTopUp" : "BookingCharge",
       comment: signed >= 0 ? "Desk top-up · R125.00 at 1.6 cr per R1" : "Share of a split booking returned · Court 3 · Thu 15 Jan, 18:00–19:30",
       subjectUserId: MEMBER, subjectName: "Nomvula Dlamini-Hendricks", actorUserId: MEMBER,
       actorName: signed >= 0 ? "Desk Volunteer Bartholomew" : "Nomvula Dlamini-Hendricks", relatedBookingId: null,
@@ -26,7 +26,7 @@ function book(n: number) {
 const ADMIN_SHELL: ApiRoute[] = [
   { path: "/api/v1/whoami", body: SESSION_ADMIN },
   { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
-  { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+  { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
 ];
 
 async function openTransactions(page: Page, width: number, height = 900) {
@@ -46,7 +46,7 @@ function memberRoutes(entries: unknown[]): ApiRoute[] {
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
     { path: "/api/v1/me/profile", body: { user_id: MEMBER, email: "n@club.test", full_name: "Nomvula", photo_url: null, status: "active", is_admin: false, tenant_slug: "crusaders", membership_number: "M-1" } },
     { path: "/api/v1/me/preferences", body: {} },
-    { path: "/api/v1/wallet", body: { balance_credits: 300, held_credits: 0, spendable_credits: 300, entries, total_entries: entries.length, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 300, held_minutes: 0, spendable_minutes: 300, entries, total_entries: entries.length, offset: 0, limit: 50 } },
   ];
 }
 
@@ -56,7 +56,7 @@ async function openWallet(page: Page, width: number, height = 900) {
   await signIn(page);
   await serveApi(page, [
     ...memberRoutes(book(30)),
-    { path: "/api/v1/reports/me/wallet", body: { top_ups_credits: 300, spent_credits: 150, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, net_movement_credits: 150, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6 } },
+    { path: "/api/v1/reports/me/wallet", body: { top_ups_minutes: 300, spent_minutes: 150, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0, net_movement_minutes: 150, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6 } },
   ]);
   await page.goto("/wallet");
   await expect(page.getByRole("table", { name: "Wallet ledger" })).toBeVisible(ARRIVES);
@@ -184,7 +184,7 @@ test.describe("F5-1 / V5-1: the Amount is always visible, folded by the table's 
       { path: "/api/v1/admin/members", body: [] },
       { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
       { path: "/api/v1/admin/ledger/", body: book(12) },
-      { path: `/api/v1/admin/members/${MEMBER_ID}`, body: { user_id: MEMBER_ID, membership_id: "c", full_name: "Naledi Khumalo", email: "n@x.test", membership_number: "CR-1", status: "Active", account_status: "Active", email_verified: true, created_at: "2026-03-01T08:00:00Z", last_login_at: null, photo_url: null, is_admin: false, admin_source: null, groups: [], balance_credits: 300, passkey_count: 0, fingerprints: { count: 0, enrolments: [] }, next_bookings: [], counts_30d: { bookings: 0, no_shows: 0, sessions_played: 0 } } },
+      { path: `/api/v1/admin/members/${MEMBER_ID}`, body: { user_id: MEMBER_ID, membership_id: "c", full_name: "Naledi Khumalo", email: "n@x.test", membership_number: "CR-1", status: "Active", account_status: "Active", email_verified: true, created_at: "2026-03-01T08:00:00Z", last_login_at: null, photo_url: null, is_admin: false, admin_source: null, groups: [], balance_minutes: 300, passkey_count: 0, fingerprints: { count: 0, enrolments: [] }, next_bookings: [], counts_30d: { bookings: 0, no_shows: 0, sessions_played: 0 } } },
     ]);
     for (const width of [1440, 1920]) {
       await page.setViewportSize({ width, height: 900 });
@@ -321,8 +321,8 @@ async function openActivity(page: Page, width: number, height: number) {
   await signIn(page);
   await serveApi(page, [
     ...memberRoutes([]),
-    { path: "/api/v1/reports/me/wallet", body: { top_ups_credits: 125050.5, spent_credits: 98765.25, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, net_movement_credits: 26285.25, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6 } },
-    { path: "/api/v1/reports/me/daily", body: Array.from({ length: 30 }, (_, i) => ({ date: `2026-09-${String(i + 1).padStart(2, "0")}`, top_ups_credits: 0, spent_credits: 50, refunds_credits: 0, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 300 })) },
+    { path: "/api/v1/reports/me/wallet", body: { top_ups_minutes: 125050.5, spent_minutes: 98765.25, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0, net_movement_minutes: 26285.25, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6 } },
+    { path: "/api/v1/reports/me/daily", body: Array.from({ length: 30 }, (_, i) => ({ date: `2026-09-${String(i + 1).padStart(2, "0")}`, top_ups_minutes: 0, spent_minutes: 50, refunds_minutes: 0, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 300 })) },
   ]);
   await page.goto("/wallet/activity");
   await expect(page.locator("[data-stat-tiles]")).toBeVisible(ARRIVES);

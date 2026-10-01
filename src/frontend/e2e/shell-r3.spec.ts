@@ -33,7 +33,7 @@ async function openAdmin(page: Page, path: string, width: number, bigText = fals
     ...memberShellRoutes({
       unread: wide ? 42 : 3,
       admin: true,
-      ...(wide ? { wallet: { balance_credits: 12_500, held_credits: 0, spendable_credits: 12_500, held_until: null } } : {}),
+      ...(wide ? { wallet: { balance_minutes: 12_500, held_minutes: 0, spendable_minutes: 12_500, held_until: null } } : {}),
     }),
   ]);
   await page.goto(path);

@@ -81,7 +81,7 @@ test.beforeAll(async () => {
       // standing between two members and a shared cache entry is the worker's own rule. A
       // `no-store` here would make this spec pass against a worker that had no rule at all.
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ member: authorization, balance_credits: authorization === "Bearer alice" ? 412.5 : 0 }));
+      res.end(JSON.stringify({ member: authorization, balance_minutes: authorization === "Bearer alice" ? 412.5 : 0 }));
       return;
     }
 
@@ -176,7 +176,7 @@ test("two members on one browser profile never share a cached response", async (
   // response hands it to Bob — that is the leak, reproduced live in round two before the fix.
   const bob = await read("Bearer bob");
   expect(bob.member, "Bob was served a response belonging to another member").toBe("Bearer bob");
-  expect(bob.balance_credits).toBe(0);
+  expect(bob.balance_minutes).toBe(0);
 
   // And nothing under /api/ reached storage at all, so there is nothing left for a third member,
   // for a devtools reader, or for the next person to pick the tablet up.

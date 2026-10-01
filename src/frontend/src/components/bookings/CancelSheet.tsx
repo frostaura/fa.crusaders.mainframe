@@ -206,7 +206,7 @@ function lineFor(b: GridBooking, detail: string | undefined, loading: boolean): 
     key: b.bookingId,
     courtName: b.mine || !b.memberFirstName ? b.courtName : `${b.courtName} · ${b.memberFirstName}`,
     day: f.day, time: f.time, duration: f.duration,
-    price: b.amountChargedCredits,
+    price: b.amountChargedMinutes,
     detail,
     detailLoading: loading,
   };
@@ -229,20 +229,20 @@ function CancelBody({ flow, bookings }: { flow: CancelFlow; bookings: GridBookin
 
 function consequence(quote: CancellationQuote, waived: boolean, subject: string | null) {
   if (quote.checkedIn) return { tone: "danger" as const, text: CANCEL_SHEET.checkedIn(subject) };
-  if (quote.penaltyCredits > 0 && !waived) return { tone: "warning" as const, text: CANCEL_SHEET.late(quote.penaltyPct) };
+  if (quote.penaltyMinutes > 0 && !waived) return { tone: "warning" as const, text: CANCEL_SHEET.late(quote.penaltyPct) };
   return { tone: "success" as const, text: CANCEL_SHEET.free(subject) };
 }
 
 function singleMoney(quote: CancellationQuote | null, waived: boolean, subject: string | null): MoneyRow[] {
   const net = quote ? netOf(quote, waived) : null;
-  const rows: MoneyRow[] = [{ term: CANCEL_SHEET.paid, value: quote?.amountChargedCredits ?? null }];
-  if (quote && quote.penaltyCredits > 0 && !quote.checkedIn) {
+  const rows: MoneyRow[] = [{ term: CANCEL_SHEET.paid, value: quote?.amountChargedMinutes ?? null }];
+  if (quote && quote.penaltyMinutes > 0 && !quote.checkedIn) {
     rows.push(waived
       ? { term: CANCEL_SHEET.penaltyWaived, value: 0 }
-      : { term: CANCEL_SHEET.penalty(quote.penaltyPct), value: quote.penaltyCredits, debit: true });
+      : { term: CANCEL_SHEET.penalty(quote.penaltyPct), value: quote.penaltyMinutes, debit: true });
   }
   // F1.13 — each partner's share goes back to them; the organiser keeps the rest.
-  for (const p of net?.partners ?? []) rows.push({ term: SPLIT_CANCEL.partnerBack(p.name), value: p.credits });
+  for (const p of net?.partners ?? []) rows.push({ term: SPLIT_CANCEL.partnerBack(p.name), value: p.minutes });
   const split = Boolean(net?.partners.length);
   const term = split && !subject ? SPLIT_CANCEL.youKeep : CANCEL_SHEET.goesBack(subject);
   rows.push({ term, value: net?.back ?? null, total: true });
@@ -302,7 +302,7 @@ function ManyCancel({ flow, bookings, quotes }: { flow: CancelFlow; bookings: Gr
 }
 
 function penaltyPctOf(quotes: QuoteMap | null): number {
-  for (const q of quotes?.values() ?? []) if (q && q.penaltyCredits > 0) return q.penaltyPct;
+  for (const q of quotes?.values() ?? []) if (q && q.penaltyMinutes > 0) return q.penaltyPct;
   return 0;
 }
 

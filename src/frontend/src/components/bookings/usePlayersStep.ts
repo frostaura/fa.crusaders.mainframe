@@ -34,8 +34,8 @@ function confirmLines(draft: PlayersDraft, prices: readonly number[], preview: P
   }
   if (preview.status !== "ready") return null;
   return preview.previews.map((p) => ({
-    price: p.price_credits,
-    sentence: confirmPlayersSentence(p.price_credits, sentenceSeats(draft, p.shares), bulk),
+    price: p.price_minutes,
+    sentence: confirmPlayersSentence(p.price_minutes, sentenceSeats(draft, p.shares), bulk),
   }));
 }
 

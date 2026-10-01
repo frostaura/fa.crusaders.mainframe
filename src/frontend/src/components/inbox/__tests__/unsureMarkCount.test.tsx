@@ -26,7 +26,7 @@ describe("an unsure mark and the unread count", () => {
     let listDown = false;
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
       // The club never recorded the mark: it still counts both.
       { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 2 } },

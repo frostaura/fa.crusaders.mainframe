@@ -80,7 +80,7 @@ function ClubBody({ data }: { data: ClubReport }) {
   const { revenue, noShows, days } = data;
   const tiles: Tile[] = [
     { label: "Net revenue", value: formatMoney(revenue.net_zar), tone: "accent" },
-    { label: "Top-ups", value: formatCredits(revenue.gross_topups_credits), tone: "success" },
+    { label: "Top-ups", value: formatCredits(revenue.gross_topups_minutes), tone: "success" },
     // Courts played, summed from the day series — the same clock as the table's column below.
     { label: "Courts played", value: String(days.reduce((s, d) => s + d.bookings, 0)), tone: "neutral" },
     { label: "No-show rate", value: `${noShows.no_show_pct.toFixed(1)}%`, tone: noShows.no_show_pct > 5 ? "warning" : "neutral" },
@@ -124,16 +124,16 @@ function clubSlides({ days, utilisation, noShows }: ClubReport): CarouselSlide[]
 function sumDays(days: DailyAdminPoint[]) {
   const sum = (pick: (d: DailyAdminPoint) => number) => days.reduce((s, d) => s + pick(d), 0);
   return {
-    topUps: sum((d) => d.top_ups_credits),
-    charges: sum((d) => d.booking_charges_credits),
-    refunds: sum((d) => d.refunds_credits),
-    penalties: sum((d) => d.penalties_credits),
-    adjustments: sum((d) => d.adjustments_credits),
-    reversals: sum((d) => d.reversals_credits),
-    shares: sum((d) => d.share_transfers_credits ?? 0),
+    topUps: sum((d) => d.top_ups_minutes),
+    charges: sum((d) => d.booking_charges_minutes),
+    refunds: sum((d) => d.refunds_minutes),
+    penalties: sum((d) => d.penalties_minutes),
+    adjustments: sum((d) => d.adjustments_minutes),
+    reversals: sum((d) => d.reversals_minutes),
+    shares: sum((d) => d.share_transfers_minutes ?? 0),
     bookings: sum((d) => d.bookings),
     noShows: sum((d) => d.no_shows),
-    net: sum((d) => d.net_movement_credits),
+    net: sum((d) => d.net_movement_minutes),
   };
 }
 
@@ -143,7 +143,7 @@ function sumDays(days: DailyAdminPoint[]) {
  */
 /** D11 — whether the server sent the share bucket at all. An older API does not, and then no row. */
 function carriesShares(days: DailyAdminPoint[]): boolean {
-  return days.some((d) => typeof d.share_transfers_credits === "number");
+  return days.some((d) => typeof d.share_transfers_minutes === "number");
 }
 
 function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
@@ -185,8 +185,8 @@ const COURT_COLUMNS: DataColumn<UtilisationRow>[] = [
   // Minutes, not slices. A 60-minute walk-up is SliceCount 1 and was counted the same as a
   // 15-minute booking, so the column mixed units.
   { key: "booked_minutes", header: "Booked", align: "right", cell: (r) => <Cell>{formatMinutes(r.booked_minutes)}</Cell>, sortValue: (r) => r.booked_minutes },
-  { key: "quoted_credits", header: "Quoted", align: "right", cell: (r) => <Cell>{formatCredits(r.quoted_credits)}</Cell>, sortValue: (r) => r.quoted_credits },
-  { key: "revenue_credits", header: "Kept", align: "right", cell: (r) => <Cell>{formatCredits(r.revenue_credits)}</Cell>, sortValue: (r) => r.revenue_credits },
+  { key: "sold_minutes", header: "Quoted", align: "right", cell: (r) => <Cell>{formatCredits(r.sold_minutes)}</Cell>, sortValue: (r) => r.sold_minutes },
+  { key: "kept_minutes", header: "Kept", align: "right", cell: (r) => <Cell>{formatCredits(r.kept_minutes)}</Cell>, sortValue: (r) => r.kept_minutes },
 ];
 
 function Utilisation({ rows }: { rows: UtilisationRow[] }) {
@@ -197,7 +197,7 @@ function Utilisation({ rows }: { rows: UtilisationRow[] }) {
         rows={rows}
         rowKey={(r) => r.court_id}
         search={{ placeholder: "Filter by court name…", fields: (r) => r.court_name }}
-        defaultSort={{ key: "revenue_credits", dir: "desc" }}
+        defaultSort={{ key: "kept_minutes", dir: "desc" }}
         emptyTitle="No bookings in this window."
         columns={COURT_COLUMNS}
       />
@@ -214,13 +214,13 @@ function Utilisation({ rows }: { rows: UtilisationRow[] }) {
 
 const DAY_COLUMNS: DataColumn<DailyAdminPoint>[] = [
   { key: "date", header: "Date", cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
-  { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => <Cell>{formatCredits(r.top_ups_credits)}</Cell>, sortValue: (r) => r.top_ups_credits },
-  { key: "booking_charges_credits", header: "Charges", align: "right", cell: (r) => <Cell>{formatCredits(r.booking_charges_credits)}</Cell>, sortValue: (r) => r.booking_charges_credits },
-  { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
-  { key: "penalties_credits", header: "Penalties (net)", align: "right", cell: (r) => <NetCredits value={r.penalties_credits} />, sortValue: (r) => r.penalties_credits },
-  { key: "adjustments_credits", header: "Adjustments", align: "right", cell: (r) => <NetCredits value={r.adjustments_credits} />, sortValue: (r) => r.adjustments_credits },
+  { key: "top_ups_minutes", header: "Top-ups", align: "right", cell: (r) => <Cell>{formatCredits(r.top_ups_minutes)}</Cell>, sortValue: (r) => r.top_ups_minutes },
+  { key: "booking_charges_minutes", header: "Charges", align: "right", cell: (r) => <Cell>{formatCredits(r.booking_charges_minutes)}</Cell>, sortValue: (r) => r.booking_charges_minutes },
+  { key: "refunds_minutes", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_minutes} />, sortValue: (r) => r.refunds_minutes },
+  { key: "penalties_minutes", header: "Penalties (net)", align: "right", cell: (r) => <NetCredits value={r.penalties_minutes} />, sortValue: (r) => r.penalties_minutes },
+  { key: "adjustments_minutes", header: "Adjustments", align: "right", cell: (r) => <NetCredits value={r.adjustments_minutes} />, sortValue: (r) => r.adjustments_minutes },
   // Reversals were on no screen at all while the totals card claimed to sum every movement.
-  { key: "reversals_credits", header: "Reversals", align: "right", cell: (r) => <NetCredits value={r.reversals_credits} />, sortValue: (r) => r.reversals_credits },
+  { key: "reversals_minutes", header: "Reversals", align: "right", cell: (r) => <NetCredits value={r.reversals_minutes} />, sortValue: (r) => r.reversals_minutes },
   // "Courts played", not "Bookings": these two count the day the court is USED; every money
   // column to their left counts the day the money MOVED. Under a 14-day advance window those
   // are routinely different days ("Charges 2300.00 cr · Bookings 6").
@@ -230,16 +230,16 @@ const DAY_COLUMNS: DataColumn<DailyAdminPoint>[] = [
 
 /** The share column, after Reversals — only when the server sends the bucket. */
 const SHARES_COLUMN: DataColumn<DailyAdminPoint> = {
-  key: "share_transfers_credits",
+  key: "share_transfers_minutes",
   header: REPORT_SHARES_COPY.clubShares,
   align: "right",
-  cell: (r) => <NetCredits value={r.share_transfers_credits ?? 0} />,
-  sortValue: (r) => r.share_transfers_credits ?? 0,
+  cell: (r) => <NetCredits value={r.share_transfers_minutes ?? 0} />,
+  sortValue: (r) => r.share_transfers_minutes ?? 0,
 };
 
 function dayColumns(shares: boolean): DataColumn<DailyAdminPoint>[] {
   if (!shares) return DAY_COLUMNS;
-  const at = DAY_COLUMNS.findIndex((c) => c.key === "reversals_credits") + 1;
+  const at = DAY_COLUMNS.findIndex((c) => c.key === "reversals_minutes") + 1;
   return [...DAY_COLUMNS.slice(0, at), SHARES_COLUMN, ...DAY_COLUMNS.slice(at)];
 }
 

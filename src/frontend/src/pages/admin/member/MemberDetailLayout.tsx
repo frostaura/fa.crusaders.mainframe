@@ -53,7 +53,7 @@ export default function MemberDetailLayout() {
   // A balance the lost-reply lookup could not re-read is null: read the member again rather
   // than leave the header on the figure from before the movement (review round 2, F3-2).
   const onApplied = useCallback(
-    (balance: number | null) => (balance === null ? reload() : patch({ balance_credits: balance })),
+    (balance: number | null) => (balance === null ? reload() : patch({ balance_minutes: balance })),
     [patch, reload],
   );
   const topUp = useMemberTopUp(userId, detail ? displayName(detail) : "this member", onApplied);
@@ -75,7 +75,7 @@ export default function MemberDetailLayout() {
       {topUp.open ? (
         <TopUpSheet
           name={context.name}
-          balance={context.detail.balance_credits}
+          balance={context.detail.balance_minutes}
           busy={topUp.busy}
           bookingError={topUp.bookingError}
           onApply={topUp.apply}
@@ -311,8 +311,8 @@ function GroupChips({ groups }: { groups: MemberGroupChip[] }) {
  * were 48 hours past, or that some was owed back. Nothing when there is none of either.
  */
 function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) {
-  const held = detail.held_credits ?? 0;
-  const owed = detail.owed_back_credits ?? 0;
+  const held = detail.held_minutes ?? 0;
+  const owed = detail.owed_back_minutes ?? 0;
   return (
     <>
       {held > 0 ? <dd data-held-line="" className="basis-full text-xs text-text-secondary">{heldLine(held, detail.held_until ?? null, zoneNow())}</dd> : null}
@@ -329,7 +329,7 @@ function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) 
 const GROWS = "!h-auto min-h-touch min-w-0 flex-[1_1_auto] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
 
 function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: string; onTopUp: () => void }) {
-  const overdrawn = detail.balance_credits < 0;
+  const overdrawn = detail.balance_minutes < 0;
   const canBook = detail.status === "Active";
   return (
     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end sm:justify-between md:justify-end md:gap-6">
@@ -341,7 +341,7 @@ function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: s
           // May wrap before "cr" (R4 V4-9): nowrap ran the figure off a 320 phone at 200% text.
           className={cn(typography({ variant: "display" }), "min-w-0 break-words text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
         >
-          {formatCredits(detail.balance_credits)}
+          {formatCredits(detail.balance_minutes)}
         </dd>
         {overdrawn ? <dd className="basis-full text-xs text-danger-strong">{MEMBER_COPY.balanceOverdrawn}</dd> : null}
         <BalanceParts detail={detail} name={name} />

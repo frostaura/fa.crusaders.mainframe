@@ -209,7 +209,7 @@ function toGridBooking(row: MemberBookingRow, mine: boolean, name: string, photo
     memberFirstName: mine ? null : firstName(name),
     memberPhotoUrl: mine ? null : photo,
     checkedIn: row.checked_in_at !== null,
-    amountChargedCredits: row.charged_credits,
+    amountChargedMinutes: row.charged_minutes,
     timezone: zone,
   };
 }

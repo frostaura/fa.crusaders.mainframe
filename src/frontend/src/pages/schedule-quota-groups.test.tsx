@@ -51,7 +51,7 @@ function open(day: unknown, balanceCredits = 500, isAdmin = false) {
     { path: "/api/v1/whoami", body: signIn({ isAdmin }) },
     { path: "/api/v1/schedule", body: day },
     { path: "/api/v1/admin/members/", body: [] },
-    { path: "/api/v1/wallet", body: { balance_credits: balanceCredits, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: balanceCredits, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   ]);
   renderPage(<SchedulePage />);
 }
@@ -285,7 +285,7 @@ describe("item 14 — a club hold on the members' grid", () => {
       courtId: COURT, courtNumber: 1, startsAtUtc: sast(17), endsAtUtc: sast(18),
       status: "adminblock", ownerUserId: null, ownerFirstName: null, ownerPhotoUrl: null,
       isMine: false, bookingId: "b-plan", blockLabel: "League night",
-      checkedIn: null, amountChargedCredits: null,
+      checkedIn: null, amountChargedMinutes: null,
     }],
   });
 

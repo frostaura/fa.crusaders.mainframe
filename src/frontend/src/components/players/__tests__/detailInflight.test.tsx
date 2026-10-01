@@ -57,10 +57,10 @@ function renderWithBack() {
 const back = () => act(async () => { fireEvent.click(screen.getByText("system back")); });
 
 function previewOf({ body }: { body: unknown }) {
-  const req = body as { priceCredits: number; players: { seat: number; amount?: number }[] };
-  const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_credits: p.amount ?? 25, weight: 1 }));
-  const taken = partners.reduce((n, p) => n + p.share_credits, 0);
-  return { price_credits: req.priceCredits, shares: [{ seat: 1, team: "A", share_credits: req.priceCredits - taken, weight: 1 }, ...partners] };
+  const req = body as { priceMinutes: number; players: { seat: number; amount?: number }[] };
+  const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_minutes: p.amount ?? 25, weight: 1 }));
+  const taken = partners.reduce((n, p) => n + p.share_minutes, 0);
+  return { price_minutes: req.priceMinutes, shares: [{ seat: 1, team: "A", share_minutes: req.priceMinutes - taken, weight: 1 }, ...partners] };
 }
 
 describe("Remove player (I5-2)", () => {

@@ -23,7 +23,7 @@ export function bookingRow(overrides: Partial<MemberBookingRow> = {}): MemberBoo
     starts_at: "2099-09-23T16:00:00Z",
     ends_at: "2099-09-23T16:45:00Z",
     status: "booked",
-    charged_credits: 24,
+    charged_minutes: 24,
     checked_in_at: null,
     cancelled_at: null,
     booked_by: { user_id: MEMBER_ID, name: "Thandi Mokoena", is_self: true },
@@ -47,7 +47,7 @@ export function detailFixture(overrides: Partial<MemberDetail> = {}): MemberDeta
     is_admin: false,
     admin_source: null,
     groups: [{ id: "g1", name: "League" }],
-    balance_credits: 120,
+    balance_minutes: 120,
     passkey_count: 1,
     fingerprints: { count: 1, enrolments: [{ template_id: "t1", finger_label: "right-index", enrolled_at: "2026-04-02T10:00:00Z" }] },
     next_bookings: [bookingRow()],
@@ -90,7 +90,7 @@ export function doorsPage(items: MemberDoorRow[], overrides: Partial<MemberDoors
 export function baseRoutes(detail: MemberDetail | null = detailFixture(), extra: StubRoute[] = []): StubRoute[] {
   return [
     { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
-    { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
     { path: BASE, ...(detail ? { body: detail } : { status: 500, body: { error: "boom" } }) },
     ...extra,
   ];

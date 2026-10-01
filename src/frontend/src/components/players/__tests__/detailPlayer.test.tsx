@@ -20,7 +20,7 @@ const SEAT = `${DETAIL_PATH}/players/${PID.alex}`;
 /** Alex has said yes and paid; the game is far enough off to pull out. */
 function inView() {
   return playerView({
-    players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", paid_credits: 25, unpaid_credits: 0, consented_credits: 25 }, OPEN_SEAT],
+    players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", paid_minutes: 25, unpaid_minutes: 0, consented_minutes: 25 }, OPEN_SEAT],
     permissions: { ...playerView().permissions, can_accept: false, can_decline: false, can_withdraw: true },
   });
 }
@@ -95,7 +95,7 @@ describe("review", () => {
 
   it("asks again when the share went up since they said yes", async () => {
     serve({ detail: playerView({
-      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", share_credits: 30, consented_credits: 25, paid_credits: 25, unpaid_credits: 5, needs_consent: true }],
+      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", share_minutes: 30, consented_minutes: 25, paid_minutes: 25, unpaid_minutes: 5, needs_consent: true }],
     }) });
     renderDetail();
     expect(await screen.findByText(DETAIL_PLAYER.askedAgain("30.00 cr"))).toBeInTheDocument();

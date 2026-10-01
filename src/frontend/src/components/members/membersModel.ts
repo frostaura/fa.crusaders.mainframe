@@ -29,7 +29,7 @@ export type MemberRow = AdminMember & {
   last_login_at?: string | null;
 };
 
-export type SortKey = "full_name" | "status" | "created_at" | "last_login_at" | "balance_credits";
+export type SortKey = "full_name" | "status" | "created_at" | "last_login_at" | "balance_minutes";
 export type SortDir = "asc" | "desc";
 export type Sort = { key: SortKey; dir: SortDir };
 
@@ -38,12 +38,12 @@ export const DEFAULT_SORT: Sort = { key: "created_at", dir: "desc" };
 /** A new column starts in the direction its reader expects: newest, richest, most recent first. */
 export function nextSort(current: Sort, key: SortKey): Sort {
   if (current.key === key) return { key, dir: current.dir === "asc" ? "desc" : "asc" };
-  const descending = key === "created_at" || key === "last_login_at" || key === "balance_credits";
+  const descending = key === "created_at" || key === "last_login_at" || key === "balance_minutes";
   return { key, dir: descending ? "desc" : "asc" };
 }
 
 function sortValue(row: MemberRow, key: SortKey): string | number {
-  if (key === "balance_credits") return row.balance_credits;
+  if (key === "balance_minutes") return row.balance_minutes;
   if (key === "last_login_at") return row.last_login_at ? Date.parse(row.last_login_at) : 0;
   if (key === "created_at") return Date.parse(row.created_at) || 0;
   return String(row[key] ?? "");

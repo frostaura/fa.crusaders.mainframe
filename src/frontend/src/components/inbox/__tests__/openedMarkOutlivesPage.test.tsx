@@ -35,7 +35,7 @@ function club(post: () => Post) {
   const unread = () => items.filter((n) => n.read_at === null).length;
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", respond: () => ({ unread_count: unread() }) },
     { path: "/api/v1/me/notifications", respond: () => ({ items: items.map((n) => ({ ...n })), unread_count: unread(), next_cursor: null }) },

@@ -31,7 +31,7 @@ function partnerSeats(d: BookingDetail): DetailPlayer[] {
 export function draftOf(d: BookingDetail): PlayersDraft {
   const organiser = d.players.find((p) => p.kind === "organiser");
   const seats: DraftSeat[] = partnerSeats(d).map((p) => ({
-    seat: p.seat, player: pickedOf(p), weight: String(p.weight), amount: p.share_credits.toFixed(2),
+    seat: p.seat, player: pickedOf(p), weight: String(p.weight), amount: p.share_minutes.toFixed(2),
   }));
   return { seats, mode: d.split_mode, organiserWeight: String(organiser?.weight ?? 1) };
 }
@@ -77,22 +77,22 @@ export function splitEffects(d: BookingDetail, shares: readonly SplitPreviewShar
   const lines: string[] = [];
   for (const p of partnerSeats(d)) {
     if (p.kind === "guest") continue;
-    const next = shares.find((s) => s.seat === p.seat)?.share_credits;
+    const next = shares.find((s) => s.seat === p.seat)?.share_minutes;
     if (next === undefined) continue;
     const name = seatName(p, d.players);
     if (p.status !== "accepted") {
-      if (next !== p.share_credits) lines.push(CHANGE_SPLIT.askedFor(name, formatCredits(next)));
-    } else if (next > p.paid_credits) {
-      if (next !== p.share_credits || p.unpaid_credits > 0) {
-        lines.push(CHANGE_SPLIT.askedMore(name, formatCredits(next - p.paid_credits), next > p.consented_credits));
+      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.askedFor(name, formatCredits(next)));
+    } else if (next > p.paid_minutes) {
+      if (next !== p.share_minutes || p.unpaid_minutes > 0) {
+        lines.push(CHANGE_SPLIT.askedMore(name, formatCredits(next - p.paid_minutes), next > p.consented_minutes));
       }
-    } else if (next < p.paid_credits) {
-      lines.push(CHANGE_SPLIT.goesBack(name, formatCredits(p.paid_credits - next)));
+    } else if (next < p.paid_minutes) {
+      lines.push(CHANGE_SPLIT.goesBack(name, formatCredits(p.paid_minutes - next)));
     }
   }
   if (lines.length === 0) return [CHANGE_SPLIT.noChange];
   const organiser = shares.find((s) => s.seat === 1);
-  if (organiser) lines.push(CHANGE_SPLIT.youCover(formatCredits(organiser.share_credits)));
+  if (organiser) lines.push(CHANGE_SPLIT.youCover(formatCredits(organiser.share_minutes)));
   return lines;
 }
 
@@ -106,13 +106,13 @@ export function needsShareAsk(d: BookingDetail, pick: PickedPlayer): boolean {
 
 /** What the organiser covers now — the most an added seat can be asked for under an amount split. */
 export function organiserShare(d: BookingDetail): number {
-  const own = d.players.find((p) => p.kind === "organiser")?.share_credits ?? d.money.price_credits;
+  const own = d.players.find((p) => p.kind === "organiser")?.share_minutes ?? d.money.price_minutes;
   if (d.split_mode !== "amount") return own;
   // R4 M4-6 — an amount split's organiser covers what the live partner seats are NOT asked for.
   // Derived here, not read off the organiser's seat: that figure went stale after a removal
   // ("You cover 30.00 cr now" beside a Money panel saying 50) and capped the ask with it.
-  const asked = partnerSeats(d).reduce((sum, p) => sum + p.share_credits, 0);
-  return Math.max(0, Math.round((d.money.price_credits - asked) * 100) / 100);
+  const asked = partnerSeats(d).reduce((sum, p) => sum + p.share_minutes, 0);
+  return Math.max(0, Math.round((d.money.price_minutes - asked) * 100) / 100);
 }
 
 /**
@@ -123,7 +123,7 @@ export function organiserShare(d: BookingDetail): number {
 export function defaultAsk(d: BookingDetail): string {
   if (d.split_mode === "ratio") return "1";
   const payers = partnerSeats(d).filter((p) => p.kind !== "guest").length + 2;
-  const equal = Math.floor(d.money.price_credits / payers);
+  const equal = Math.floor(d.money.price_minutes / payers);
   return Math.max(0, Math.min(equal, Math.floor(organiserShare(d)))).toFixed(2);
 }
 

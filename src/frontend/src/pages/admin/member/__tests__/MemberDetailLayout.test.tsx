@@ -36,7 +36,7 @@ describe("member detail — header and tabs", () => {
   });
 
   it("paints an overdrawn balance in the danger ink and says what it means", async () => {
-    serve(baseRoutes(detailFixture({ balance_credits: -16 })));
+    serve(baseRoutes(detailFixture({ balance_minutes: -16 })));
     renderMember();
     const balance = await screen.findByTestId("member-balance");
     expect(balance).toHaveTextContent("−16.00 cr");
@@ -45,7 +45,7 @@ describe("member detail — header and tabs", () => {
   });
 
   it("D9 — says under the balance what is held for partners and what is owed back", async () => {
-    serve(baseRoutes(detailFixture({ balance_credits: 170, held_credits: 20, held_until: null, owed_back_credits: 5 })));
+    serve(baseRoutes(detailFixture({ balance_minutes: 170, held_minutes: 20, held_until: null, owed_back_minutes: 5 })));
     renderMember();
     expect(await screen.findByTestId("member-balance")).toHaveTextContent("170.00 cr");
     expect(screen.getByText(heldLine(20, null))).toBeInTheDocument();

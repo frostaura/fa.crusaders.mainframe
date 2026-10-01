@@ -36,7 +36,7 @@ function routes() {
 function signInWith(entry: string) {
   stubFetch([
     { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t", user_id: MEMBER, is_admin: false } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
   ]);
   renderPage(routes(), { initialEntries: [entry] });

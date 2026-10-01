@@ -43,7 +43,7 @@ function api({ admin = false, status = "active", prefs = PREFS, extra = [] }: Se
     ...extra,
     { path: "/api/v1/whoami", body: whoami },
     { path: "/api/v1/me/profile", body: profile },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/webauthn/credentials", body: [] },
     // P11 — the privacy step reads the social half of the preferences.
     { path: "/api/v1/me/preferences", body: { ...PREFS, findable: false, show_in_leaderboards: false } },
@@ -288,7 +288,7 @@ describe("the setup checklist", () => {
     const { stub } = api({
       extra: [
         { path: "/api/v1/me/webauthn/credentials", body: [{ id: "p", label: "iPhone", transports: null, created_at: "2026-09-01T10:00:00Z", last_used_at: null }] },
-        { path: "/api/v1/wallet", body: { balance_credits: 40, entries: [{ id: "1", type: "BookingCharge" }], total_entries: 1, offset: 0, limit: 50 } },
+        { path: "/api/v1/wallet", body: { balance_minutes: 40, entries: [{ id: "1", type: "BookingCharge" }], total_entries: 1, offset: 0, limit: 50 } },
       ],
     });
     const { userId } = { userId: "44444444-4444-4444-4444-444444444444" };

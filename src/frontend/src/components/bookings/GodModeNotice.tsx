@@ -21,7 +21,7 @@ import { owedBackQuoteLine } from "@/lib/playersCopy";
  * </p>
  *
  * <p>
- * P11: when the payer already owes partners (`owed_back_credits` on the quote), the notice says
+ * P11: when the payer already owes partners (`owed_back_minutes` on the quote), the notice says
  * so too — the next credit they get goes to those partners before it goes to this debt.
  * </p>
  */

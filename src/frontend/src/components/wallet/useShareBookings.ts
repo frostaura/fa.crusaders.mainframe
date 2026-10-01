@@ -30,7 +30,7 @@ export function summariseBooking(detail: BookingDetail): ShareBooking {
     organiserName: detail.organiser.name,
     partners: detail.players
       .filter((p) => p.kind === "member" && p.user_id && p.user_id !== detail.organiser.user_id)
-      .map((p) => ({ userId: p.user_id as string, name: p.name, paid: p.paid_credits })),
+      .map((p) => ({ userId: p.user_id as string, name: p.name, paid: p.paid_minutes })),
   };
 }
 
@@ -44,7 +44,7 @@ export function shareBookingFromWire(wire: ShareBookingSummary): ShareBooking {
     startsAt: wire.starts_at,
     organiserId: wire.organiser.user_id,
     organiserName: wire.organiser.name,
-    partners: wire.partners.map((p) => ({ userId: p.user_id, name: p.name, paid: p.paid_credits })),
+    partners: wire.partners.map((p) => ({ userId: p.user_id, name: p.name, paid: p.paid_minutes })),
   };
 }
 

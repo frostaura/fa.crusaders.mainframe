@@ -36,7 +36,7 @@ function renderChrome({ isAdmin = false }: { isAdmin?: boolean } = {}) {
   const whoami = signIn({ isAdmin });
   stubFetch([
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
     { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "naledi@sample.local", full_name: "Naledi Dube", photo_url: null, membership_number: "C-104" } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },

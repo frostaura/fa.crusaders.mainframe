@@ -960,11 +960,12 @@ export function peakChangeLine(before: boolean, after: boolean, withheldBy: stri
 
 /** The member's standing, in one line under their groups: rate and peak. */
 export function tariffLine(tariff: {
-  top_up_credits_per_zar: number;
+  // P13-F3: the tariff wire no longer carries a rate (contract §3.8) — reword for package_discount_bps.
+  top_up_credits_per_zar?: number;
   peak_priority: boolean;
   peak_withheld_by?: string[];
 }, rateGroupName: string | null): string {
-  const rate = `Tops up at ${rateFace(tariff.top_up_credits_per_zar)}${rateGroupName ? ` (${rateGroupName})` : " (club rate)"}`;
+  const rate = `Tops up at ${rateFace(tariff.top_up_credits_per_zar ?? 0)}${rateGroupName ? ` (${rateGroupName})` : " (club rate)"}`;
   if (tariff.peak_priority) return `${rate} · peak priority`;
   const by = tariff.peak_withheld_by && tariff.peak_withheld_by.length > 0
     ? ` (withheld by ${listOf(tariff.peak_withheld_by)})`

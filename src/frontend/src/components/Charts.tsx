@@ -195,8 +195,8 @@ function stackedExtremes(rows: readonly Record<string, unknown>[], stacks: reado
 }
 
 /** Which series share a stack, per chart — mirroring the `stackId`s on the bars below. */
-const CLUB_FLOW_STACKS = [["top_ups_credits"], ["booking_charges_credits", "penalties_credits"]];
-const MEMBER_FLOW_STACKS = [["top_ups_credits", "refunds_credits"], ["spent_credits"]];
+const CLUB_FLOW_STACKS = [["top_ups_minutes"], ["booking_charges_minutes", "penalties_minutes"]];
+const MEMBER_FLOW_STACKS = [["top_ups_minutes", "refunds_minutes"], ["spent_minutes"]];
 /** F4-15 — the axis in the club's format ("1 Sep"), not the reader's locale ("Sep 01"). */
 const fmtDate = (d: string) => clubCalendarDate(d, { weekday: false });
 
@@ -232,9 +232,9 @@ export function drawRevenueArea(data: DailyAdminPoint[], c: ChartPalette) {
       {fillGradient("revFill", c.accent, 0.35)}
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["top_ups_credits"]]))} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["top_ups_minutes"]]))} />
       <Tooltip {...tooltipProps(c)} {...creditTooltip} />
-      <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={c.accent} fill="url(#revFill)" strokeWidth={2} />
+      <Area type="monotone" dataKey="top_ups_minutes" name="Top-ups" stroke={c.accent} fill="url(#revFill)" strokeWidth={2} />
     </AreaChart>
   );
 }
@@ -252,9 +252,9 @@ export function drawDailyFlow(data: DailyAdminPoint[], c: ChartPalette) {
       <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
       <Tooltip {...tooltipProps(c)} {...creditTooltip} />
       <Legend {...legendProps(c)} />
-      <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
-      <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
-      <Bar dataKey="penalties_credits" name="Penalties (net)" stackId="b" fill={c.warning} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="top_ups_minutes" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="booking_charges_minutes" name="Bookings" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="penalties_minutes" name="Penalties (net)" stackId="b" fill={c.warning} radius={[3, 3, 0, 0]} />
     </BarChart>
   );
 }
@@ -273,16 +273,16 @@ export function drawBookingsLine(data: DailyAdminPoint[], c: ChartPalette) {
   );
 }
 
-type CourtRevenue = { court_name: string; revenue_credits: number; bookings: number };
+type CourtRevenue = { court_name: string; kept_minutes: number; bookings: number };
 
 export function drawCourtsRevenue(data: CourtRevenue[], c: ChartPalette) {
   return (
     <BarChart data={data} margin={MARGIN}>
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="court_name" {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["revenue_credits"]]))} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["kept_minutes"]]))} />
       <Tooltip {...tooltipProps(c)} formatter={creditTooltip.formatter} />
-      <Bar dataKey="revenue_credits" name="Revenue" fill={c.accent} radius={[6, 6, 0, 0]} />
+      <Bar dataKey="kept_minutes" name="Revenue" fill={c.accent} radius={[6, 6, 0, 0]} />
     </BarChart>
   );
 }
@@ -310,9 +310,9 @@ export function drawMyBalance(data: DailyMePoint[], c: ChartPalette) {
       {fillGradient("balFill", c.accent, 0.3)}
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["balance_credits"]]))} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["balance_minutes"]]))} />
       <Tooltip {...tooltipProps(c)} {...creditTooltip} />
-      <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={c.accent} fill="url(#balFill)" strokeWidth={2} />
+      <Area type="monotone" dataKey="balance_minutes" name="Balance" stroke={c.accent} fill="url(#balFill)" strokeWidth={2} />
     </AreaChart>
   );
 }
@@ -330,9 +330,9 @@ export function drawMyFlow(data: DailyMePoint[], c: ChartPalette) {
       <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
       <Tooltip {...tooltipProps(c)} {...creditTooltip} />
       <Legend {...legendProps(c)} />
-      <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
-      <Bar dataKey="refunds_credits" name="Refunds (net)" stackId="a" fill={c.successSoft} radius={[3, 3, 0, 0]} />
-      <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="top_ups_minutes" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="refunds_minutes" name="Refunds (net)" stackId="a" fill={c.successSoft} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="spent_minutes" name="Spent" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
     </BarChart>
   );
 }

@@ -43,14 +43,14 @@ function day() {
         startsAtUtc: `${d}T10:00:00.000Z`, endsAtUtc: `${d}T10:30:00.000Z`,
         status: "adminblock", ownerUserId: null, ownerFirstName: null, ownerPhotoUrl: null,
         isMine: false, bookingId: "hold-1", blockLabel: "League night",
-        checkedIn: null, amountChargedCredits: null,
+        checkedIn: null, amountChargedMinutes: null,
       },
       {
         courtId: COURT_B, courtNumber: 2,
         startsAtUtc: `${d}T07:00:00.000Z`, endsAtUtc: `${d}T07:30:00.000Z`,
         status: "booked", ownerUserId: MEMBER, ownerFirstName: "Thandi", ownerPhotoUrl: null,
         isMine: false, bookingId: "bk-1", blockLabel: null,
-        checkedIn: false, amountChargedCredits: 50,
+        checkedIn: false, amountChargedMinutes: 50,
       },
     ],
     rules: {
@@ -68,7 +68,7 @@ async function openGrid(page: import("@playwright/test").Page, isAdmin = true) {
     { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: isAdmin } },
     { path: "/api/v1/schedule", body: day() },
     { path: "/api/v1/admin/members/", body: [] },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   ]);
   await page.goto(`/bookings?date=${tomorrow()}`);
   await page.waitForSelector('[role="grid"]');
@@ -228,7 +228,7 @@ test("scrolled to the end of the page, the court names still show and the bar co
     await serveApi(page, [
       { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
       { path: "/api/v1/schedule", body: long },
-      { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     ]);
     await page.goto(`/bookings?date=${tomorrow()}`);
     await page.waitForSelector('[role="grid"]');

@@ -36,13 +36,13 @@ export type ActSpec = {
  * not cover it, so no money has moved. Null when the return went through (or the API predates it).
  */
 function waitingReturn(answer: unknown): { amount: string | null } | null {
-  const a = answer as { return_waiting?: unknown; return_credits?: unknown } | null;
+  const a = answer as { return_waiting?: unknown; return_minutes?: unknown } | null;
   if (a?.return_waiting !== true) return null;
-  return { amount: typeof a.return_credits === "number" ? formatCredits(a.return_credits) : null };
+  return { amount: typeof a.return_minutes === "number" ? formatCredits(a.return_minutes) : null };
 }
 
 function collectedOf(answer: unknown): number {
-  const value = (answer as { collected_credits?: unknown } | null)?.collected_credits;
+  const value = (answer as { collected_minutes?: unknown } | null)?.collected_minutes;
   return typeof value === "number" ? value : 0;
 }
 
@@ -78,7 +78,7 @@ export const ACTS: Record<AdminAct, ActSpec> = {
     label: DETAIL_ADMIN.collect, title: DETAIL_ADMIN.collectTitle, body: DETAIL_ADMIN.collectBody, confirm: DETAIL_ADMIN.collectConfirm,
     alwaysOverdraft: true, mayOverdraft: true, tone: "primary",
     call: (r) => playersEndpoints.adminCollect(r.bookingId, r.participantId, r.reason),
-    landed: (was, now) => (now && now.paid_credits > was.paid_credits ? { collected_credits: now.paid_credits - was.paid_credits } : null),
+    landed: (was, now) => (now && now.paid_minutes > was.paid_minutes ? { collected_minutes: now.paid_minutes - was.paid_minutes } : null),
     done: (name, answer) => DETAIL_ADMIN.collected(name, formatCredits(collectedOf(answer))),
   },
 };
@@ -90,8 +90,8 @@ function fullName(name: string | null | undefined, fallback: string): string {
 /** The return and its cover, off the server's `overdraft_not_authorised`, when it sent them. */
 function returnFigures(refusal: unknown, partner: string) {
   if (!(refusal instanceof ApiError)) return undefined;
-  const returned = refusal.detail("return_credits");
-  const covered = refusal.detail("covered_credits");
+  const returned = refusal.detail("return_minutes");
+  const covered = refusal.detail("covered_minutes");
   if (typeof returned !== "number" || typeof covered !== "number") return undefined;
   return {
     returned: formatCredits(returned), covered: formatCredits(covered), short: formatCredits(Math.max(0, returned - covered)), partner,

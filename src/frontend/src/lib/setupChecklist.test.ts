@@ -9,9 +9,9 @@ import { checklistProgress, deriveChecklist } from "./setupChecklist";
 
 function wallet(balance: number, types: LedgerEntryType[] = []): WalletResponse {
   return {
-    balance_credits: balance,
+    balance_minutes: balance,
     entries: types.map((type, i) => ({
-      id: String(i), at: "2026-09-01T10:00:00Z", from: "", to: "", amountCredits: 10, signedAmountCredits: 10,
+      id: String(i), at: "2026-09-01T10:00:00Z", from: "", to: "", amountMinutes: 10, signedAmountMinutes: 10,
       type, comment: "", subjectUserId: "u", subjectName: "U", actorUserId: "u", actorName: "U", relatedBookingId: null,
     })),
     total_entries: types.length,

@@ -29,7 +29,7 @@ export const DEADLINE = "2026-10-02T18:45:00Z";
 export function seat(overrides: Partial<DetailPlayer> = {}): DetailPlayer {
   return {
     participant_id: PID.me, seat: 1, team: "A", kind: "organiser", user_id: ME, name: "Nomsa Khumalo", photo_url: null,
-    status: "accepted", share_credits: 25, weight: 1, consented_credits: 0, paid_credits: 0, target_credits: 0, unpaid_credits: 0,
+    status: "accepted", share_minutes: 25, weight: 1, consented_minutes: 0, paid_minutes: 0, target_minutes: 0, unpaid_minutes: 0,
     needs_consent: false, settled_outside: false, lapsed: false, checked_in_at: null,
     invited_at: "2026-09-28T08:00:00Z", responded_at: "2026-09-28T08:00:00Z",
     ...overrides,
@@ -38,10 +38,10 @@ export function seat(overrides: Partial<DetailPlayer> = {}): DetailPlayer {
 
 export const SAM_SEAT = seat({
   participant_id: PID.sam, seat: 2, kind: "member", user_id: SAM, name: "Sam Petersen",
-  consented_credits: 25, paid_credits: 25, target_credits: 25,
+  consented_minutes: 25, paid_minutes: 25, target_minutes: 25,
 });
 export const ALEX_SEAT = seat({
-  participant_id: PID.alex, seat: 3, team: "B", kind: "member", user_id: ALEX, name: "Alex Naidoo", status: "invited", unpaid_credits: 25,
+  participant_id: PID.alex, seat: 3, team: "B", kind: "member", user_id: ALEX, name: "Alex Naidoo", status: "invited", unpaid_minutes: 25,
 });
 export const OPEN_SEAT = seat({ participant_id: PID.open, seat: 4, team: "B", kind: "open_link", user_id: null, name: null, status: "invited" });
 
@@ -53,8 +53,8 @@ export function detail(overrides: Partial<BookingDetail> = {}): BookingDetail {
     organiser: { user_id: ME, name: "Nomsa Khumalo", photo_url: null },
     players: [seat(), SAM_SEAT, ALEX_SEAT, OPEN_SEAT],
     money: {
-      price_credits: 100, organiser_owed_credits: 100, shares_received_credits: 25, organiser_net_credits: 75,
-      unpaid_credits: 25, share_deadline: DEADLINE, is_split: true,
+      price_minutes: 100, organiser_owed_minutes: 100, shares_received_minutes: 25, organiser_net_minutes: 75,
+      unpaid_minutes: 25, share_deadline: DEADLINE, is_split: true,
     },
     attendance: { checked_in_at: null, players_checked_in: 0 },
     permissions: {
@@ -83,7 +83,7 @@ export function adminView(overrides: Partial<BookingDetail> = {}): BookingDetail
   return detail({
     viewer: { role: "admin", participant_id: null },
     organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null },
-    players: [seat({ user_id: SAM, name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", status: "accepted", consented_credits: 25, target_credits: 25 })],
+    players: [seat({ user_id: SAM, name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", status: "accepted", consented_minutes: 25, target_minutes: 25 })],
     permissions: {
       can_invite: false, can_change_split: false, can_cancel: false, can_accept: false, can_decline: false,
       can_withdraw: false, withdraw_closes_at: "2026-09-30T14:00:00Z",
@@ -111,7 +111,7 @@ export function serve(options: { admin?: boolean; detail?: unknown; extra?: Stub
     // answer the result card's route itself).
     ...(options.extra ?? []),
     { path: "/api/v1/whoami", body: session },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, held_credits: 0, spendable_credits: 100, held_until: null, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, held_minutes: 0, spendable_minutes: 100, held_until: null, entries: [] } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
     detailRoute,

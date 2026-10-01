@@ -31,8 +31,8 @@ function invite(overrides: Record<string, unknown> = {}): Record<string, unknown
     participant_id: SEAT, booking_id: BOOKING, status: "invited", seat: 3, team: "B", open_link: false,
     court_name: "Court 1", starts_at: at(24), ends_at: at(24.75),
     organiser: { user_id: "55555555-5555-5555-5555-555555555555", name: "Sam Petersen", photo_url: null },
-    players: 4, share_credits: 25, to_pay_credits: 25, needs_consent: false,
-    balance_credits: 120, spendable_credits: 100, held_credits: 20, balance_after_credits: 95, short_by_credits: 0,
+    players: 4, share_minutes: 25, to_pay_minutes: 25, needs_consent: false,
+    balance_minutes: 120, spendable_minutes: 100, held_minutes: 20, balance_after_minutes: 95, short_by_minutes: 0,
     share_deadline: at(26.75), cap: null,
     ...overrides,
   };
@@ -45,8 +45,8 @@ function openInvites({ invites = [invite()], routes = [], invitesStatus }: Open 
     ...routes,
     { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
     { path: "/api/v1/wallet", sequence: [
-      { balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 },
-      { balance_credits: 95, held_credits: 20, spendable_credits: 75, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 },
+      { balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 },
+      { balance_minutes: 95, held_minutes: 20, spendable_minutes: 75, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 },
     ] },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/invites", status: invitesStatus, body: { items: invites, count: invites.length } },
@@ -67,8 +67,8 @@ const acceptCalls = (stub: FetchStub) => stub.calls.filter((c) => c.method === "
 
 describe("the list", () => {
   it("shows each invite: who asked, the court, the players, your share and its state", async () => {
-    openInvites({ invites: [invite(), invite({ participant_id: "p2", needs_consent: true, status: "accepted", share_credits: 30, to_pay_credits: 5 }),
-      invite({ participant_id: "p3", status: "accepted", to_pay_credits: 10 })] });
+    openInvites({ invites: [invite(), invite({ participant_id: "p2", needs_consent: true, status: "accepted", share_minutes: 30, to_pay_minutes: 5 }),
+      invite({ participant_id: "p3", status: "accepted", to_pay_minutes: 10 })] });
     const list = await screen.findByRole("list", { name: INVITES_COPY.listLabel });
     // Each card's open button (R5 §3.5: the card also carries its answers on a phone).
     const cards = Array.from(list.querySelectorAll<HTMLElement>("[data-invite]"));
@@ -145,7 +145,7 @@ describe("Back with the accept sheet open (R1, F1.19's rule)", () => {
   function openWithBack() {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
       { path: "/api/v1/me/invites", body: { items: [invite()], count: 1 } },
     ]);
@@ -196,7 +196,7 @@ describe("the accept sheet", () => {
         { path: "/api/v1/me/invites", respond: () => (accepted ? { items: [], count: 0 } : { items: [invite()], count: 1 }) },
         { method: "POST", path: ACCEPT, respond: () => {
           accepted = true;
-          return { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 95 };
+          return { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_minutes: 25, consented_minutes: 25, paid_minutes: 25, balance_minutes: 95 };
         } },
       ],
     });
@@ -207,7 +207,7 @@ describe("the accept sheet", () => {
     fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
     expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
     expect(acceptCalls(stub)).toHaveLength(1);
-    expect(acceptCalls(stub)[0].body).toEqual({ expectedShareCredits: 25 });
+    expect(acceptCalls(stub)[0].body).toEqual({ expectedShareMinutes: 25 });
     expect(sheet).toHaveTextContent("25.00 cr paid to Sam");
     expect(within(sheet).getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
     await waitFor(() => expect(walletReads()).toBeGreaterThan(before));
@@ -222,29 +222,29 @@ describe("the accept sheet", () => {
     const stub = openInvites({
       routes: [
         // The organiser raised the share after the list was read: the next read has the new figure.
-        { path: "/api/v1/me/invites", respond: () => ({ items: [raised ? invite({ share_credits: 30, to_pay_credits: 30 }) : invite()], count: 1 }) },
+        { path: "/api/v1/me/invites", respond: () => ({ items: [raised ? invite({ share_minutes: 30, to_pay_minutes: 30 }) : invite()], count: 1 }) },
         { method: "POST", path: ACCEPT, respond: ({ body }) => {
           raised = true;
-          return (body as { expectedShareCredits: number }).expectedShareCredits < 30
-            ? refuse(409, { error: "share_changed", share_credits: 30 })
-            : { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: 30, consented_credits: 30, paid_credits: 30, balance_credits: 90 };
+          return (body as { expectedShareMinutes: number }).expectedShareMinutes < 30
+            ? refuse(409, { error: "share_changed", share_minutes: 30 })
+            : { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_minutes: 30, consented_minutes: 30, paid_minutes: 30, balance_minutes: 90 };
         } },
       ],
     });
     const sheet = await openSheet();
     fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
-    const sentence = playersRefusal(new ApiError(409, { error: "share_changed", share_credits: 30 }));
+    const sentence = playersRefusal(new ApiError(409, { error: "share_changed", share_minutes: 30 }));
     expect(await within(sheet).findByText(sentence)).toBeInTheDocument();
     // The fresh figure reaches the label, and nothing was sent a second time.
     const again = await within(sheet).findByRole("button", { name: acceptLabel(30) });
     expect(acceptCalls(stub)).toHaveLength(1);
     fireEvent.click(again);
     expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
-    expect(acceptCalls(stub).map((c) => c.body)).toEqual([{ expectedShareCredits: 25 }, { expectedShareCredits: 30 }]);
+    expect(acceptCalls(stub).map((c) => c.body)).toEqual([{ expectedShareMinutes: 25 }, { expectedShareMinutes: 30 }]);
   });
 
   it("P11: owed back to partners comes off spendable, is named with its reason, and a negative spendable adds up", async () => {
-    openInvites({ invites: [invite({ balance_credits: 10, held_credits: 0, owed_back_credits: 16, spendable_credits: -6, to_pay_credits: 25 })] });
+    openInvites({ invites: [invite({ balance_minutes: 10, held_minutes: 0, owed_back_minutes: 16, spendable_minutes: -6, to_pay_minutes: 25 })] });
     const sheet = await openSheet();
     // −6 to spend and 25 to pay: 31 short, and the sheet's figures agree with each other.
     expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("−6.00 cr");
@@ -263,7 +263,7 @@ describe("the accept sheet", () => {
   });
 
   it("short of spendable credits: no Accept to press, the reason, and a Top up", async () => {
-    const stub = openInvites({ invites: [invite({ spendable_credits: 10, balance_credits: 30, to_pay_credits: 25 })] });
+    const stub = openInvites({ invites: [invite({ spendable_minutes: 10, balance_minutes: 30, to_pay_minutes: 25 })] });
     const sheet = await openSheet();
     const accept = within(sheet).getByRole("button", { name: acceptLabel(25) });
     expect(accept).toHaveAttribute("aria-disabled", "true");
@@ -288,7 +288,7 @@ describe("the accept sheet", () => {
   });
 
   it("R1 F2.14: a share of nothing names no deadline — nothing can lapse — on the card or the sheet", async () => {
-    openInvites({ invites: [invite({ share_credits: 0, to_pay_credits: 0 })] });
+    openInvites({ invites: [invite({ share_minutes: 0, to_pay_minutes: 0 })] });
     const card = await screen.findByRole("button", { name: /Sam invited you to play/ });
     expect(card).not.toHaveTextContent(/Pay by/);
     const sheet = await openSheet();
@@ -298,7 +298,7 @@ describe("the accept sheet", () => {
   });
 
   it("an accepted seat asked again reads what is still to pay", async () => {
-    openInvites({ invites: [invite({ status: "accepted", needs_consent: true, share_credits: 30, to_pay_credits: 5 })] });
+    openInvites({ invites: [invite({ status: "accepted", needs_consent: true, share_minutes: 30, to_pay_minutes: 5 })] });
     fireEvent.click(await screen.findByRole("button", { name: /Sam invited you to play/ }));
     const sheet = await screen.findByRole("dialog");
     // R4 M4-8 — they already said yes: the sheet says the share went up, not "Join this game?".
@@ -336,7 +336,7 @@ describe("the accept sheet", () => {
   });
 
   const REFUSALS: [number, Record<string, unknown>][] = [
-    [402, { error: "insufficient_balance", current_credits: 10, required_credits: 25 }],
+    [402, { error: "insufficient_balance", current_minutes: 10, required_minutes: 25 }],
     [409, { error: "partner_cap_exceeded", cap: "minutes", cap_minutes: 60, already_booked_minutes: 45, attempted_minutes: 45, club_day: "2030-09-10" }],
     [409, { error: "invite_closed" }],
     [409, { error: "already_in_booking" }],
@@ -369,7 +369,7 @@ describe("an accept whose reply was lost (R2 F2-1)", () => {
   function seatRecord(status: string) {
     return {
       participant_id: SEAT, booking_id: BOOKING, status, lapsed: false, settled_outside: false, booking_status: "booked",
-      court_name: "Court 1", starts_at: at(24), ends_at: at(24.75), organiser_name: "Sam Petersen", share_credits: 25,
+      court_name: "Court 1", starts_at: at(24), ends_at: at(24.75), organiser_name: "Sam Petersen", share_minutes: 25,
       timezone: "Africa/Johannesburg",
     };
   }
@@ -454,7 +454,7 @@ describe("a decline whose reply was lost (R3 I-3)", () => {
   function seatRecord(status: string) {
     return {
       participant_id: SEAT, booking_id: BOOKING, status, lapsed: false, settled_outside: false, booking_status: "booked",
-      court_name: "Court 1", starts_at: at(24), ends_at: at(24.75), organiser_name: "Sam Petersen", share_credits: 25,
+      court_name: "Court 1", starts_at: at(24), ends_at: at(24.75), organiser_name: "Sam Petersen", share_minutes: 25,
       timezone: "Africa/Johannesburg",
     };
   }
@@ -495,7 +495,7 @@ describe("answering reads the unread count again (R3 I-9)", () => {
   it("after an accept", async () => {
     const stub = openInvites({ routes: [
       { path: UNREAD, body: { unread_count: 0 } },
-      { method: "POST", path: ACCEPT, body: { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 95 } },
+      { method: "POST", path: ACCEPT, body: { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_minutes: 25, consented_minutes: 25, paid_minutes: 25, balance_minutes: 95 } },
     ] });
     const sheet = await openSheet();
     const reads = () => stub.calls.filter((c) => c.path === UNREAD).length;
@@ -529,7 +529,7 @@ describe("an answer on its way keeps the sheet open", () => {
   it("refuses Cancel, Escape and Back while Accept is in flight; says it is waiting; closes once answered", async () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
       { path: "/api/v1/me/invites", body: { items: [invite()], count: 1 } },
     ]);
@@ -540,7 +540,7 @@ describe("an answer on its way keeps the sheet open", () => {
     vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
       const path = typeof input === "string" ? input : input.toString();
       if ((init?.method ?? "GET").toUpperCase() === "POST" && path === ACCEPT) {
-        return landed.then(() => new Response(JSON.stringify({ participant_id: SEAT, status: "accepted", paid_credits: 25 }), { status: 200 }));
+        return landed.then(() => new Response(JSON.stringify({ participant_id: SEAT, status: "accepted", paid_minutes: 25 }), { status: 200 }));
       }
       return stubbed(input, init);
     });
@@ -585,7 +585,7 @@ describe("R5 §3.5 — the answers on the card at phone width", () => {
   });
 
   it("an accepted seat with a share still to pay offers Accept only — it can no longer be declined", async () => {
-    openInvites({ invites: [invite({ status: "accepted", to_pay_credits: 10 })] });
+    openInvites({ invites: [invite({ status: "accepted", to_pay_minutes: 10 })] });
     const card = await screen.findByRole("group", { name: SPLIT_PANE_COPY.cardActionsLabel("Sam") });
     expect(within(card).queryByRole("button", { name: SPLIT_PANE_COPY.cardDecline })).toBeNull();
     expect(within(card).getByRole("button", { name: SPLIT_PANE_COPY.cardAccept })).toBeInTheDocument();

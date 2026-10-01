@@ -6,9 +6,9 @@ import { lastSeen, statusFilterFrom } from "../../lib/membersCopy";
 const row = (o: Record<string, unknown>) => memberFixture(o) as MemberRow;
 
 const CLUB: MemberRow[] = [
-  row({ user_id: "a", full_name: "Zola Budd", status: "Active", balance_credits: 10, created_at: "2026-01-01T00:00:00Z" }),
-  row({ user_id: "b", full_name: "ada lovelace", status: "PendingApproval", balance_credits: -5, created_at: "2026-03-01T00:00:00Z" }),
-  row({ user_id: "c", full_name: "Brian Habana", status: "Suspended", balance_credits: 200, email: "wing@club.test", created_at: "2026-02-01T00:00:00Z" }),
+  row({ user_id: "a", full_name: "Zola Budd", status: "Active", balance_minutes: 10, created_at: "2026-01-01T00:00:00Z" }),
+  row({ user_id: "b", full_name: "ada lovelace", status: "PendingApproval", balance_minutes: -5, created_at: "2026-03-01T00:00:00Z" }),
+  row({ user_id: "c", full_name: "Brian Habana", status: "Suspended", balance_minutes: 200, email: "wing@club.test", created_at: "2026-02-01T00:00:00Z" }),
 ];
 
 describe("the members list's rules", () => {
@@ -33,21 +33,21 @@ describe("the members list's rules", () => {
   });
 
   it("sorts newest, richest and most recent first when a column is first chosen", () => {
-    expect(nextSort({ key: "full_name", dir: "asc" }, "balance_credits")).toEqual({ key: "balance_credits", dir: "desc" });
-    expect(nextSort({ key: "balance_credits", dir: "desc" }, "balance_credits")).toEqual({ key: "balance_credits", dir: "asc" });
-    expect(visibleRows(CLUB, "all", "", { key: "balance_credits", dir: "desc" }).map((r) => r.user_id)).toEqual(["c", "a", "b"]);
+    expect(nextSort({ key: "full_name", dir: "asc" }, "balance_minutes")).toEqual({ key: "balance_minutes", dir: "desc" });
+    expect(nextSort({ key: "balance_minutes", dir: "desc" }, "balance_minutes")).toEqual({ key: "balance_minutes", dir: "asc" });
+    expect(visibleRows(CLUB, "all", "", { key: "balance_minutes", dir: "desc" }).map((r) => r.user_id)).toEqual(["c", "a", "b"]);
     expect(visibleRows(CLUB, "all", "", { key: "created_at", dir: "desc" }).map((r) => r.user_id)).toEqual(["b", "c", "a"]);
   });
 
   it("does not mutate the list it was given", () => {
     const before = CLUB.map((r) => r.user_id);
-    visibleRows(CLUB, "all", "", { key: "balance_credits", dir: "asc" });
+    visibleRows(CLUB, "all", "", { key: "balance_minutes", dir: "asc" });
     expect(CLUB.map((r) => r.user_id)).toEqual(before);
   });
 
   it("patches one row in place", () => {
-    const next = patchRow(CLUB, "b", { balance_credits: 40 })!;
-    expect(next[1].balance_credits).toBe(40);
+    const next = patchRow(CLUB, "b", { balance_minutes: 40 })!;
+    expect(next[1].balance_minutes).toBe(40);
     expect(next[0]).toBe(CLUB[0]);
     expect(patchRow(null, "b", {})).toBeNull();
   });

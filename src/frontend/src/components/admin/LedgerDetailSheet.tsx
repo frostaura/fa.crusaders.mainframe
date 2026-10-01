@@ -41,7 +41,7 @@ export function LedgerDetailSheet({ row, onClose }: { row: LedgerRow | null; onC
 }
 
 function rowTitle(row: LedgerRow): string {
-  return `${ledgerCategory(row)} · ${formatSignedCredits(row.signedAmountCredits)}`;
+  return `${ledgerCategory(row)} · ${formatSignedCredits(row.signedAmountMinutes)}`;
 }
 
 /**
@@ -83,7 +83,7 @@ export function LedgerDetailPanel({ row, onClose }: { row: LedgerRow | null; onC
 function LedgerFacts({ row }: { row: LedgerRow }) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-      <Fact term={LEDGER_COPY.amount}>{formatSignedCredits(row.signedAmountCredits)}</Fact>
+      <Fact term={LEDGER_COPY.amount}>{formatSignedCredits(row.signedAmountMinutes)}</Fact>
       <Fact term={LEDGER_COPY.categoryHeader}>{ledgerCategory(row)}</Fact>
       <Fact term={LEDGER_COPY.actorHeader}>{ledgerDoneBy(row)}</Fact>
       <Fact term={LEDGER_COPY.fromTo}>{`${row.from} → ${row.to}`}</Fact>

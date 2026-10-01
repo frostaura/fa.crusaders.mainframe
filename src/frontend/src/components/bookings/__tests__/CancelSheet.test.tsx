@@ -20,17 +20,17 @@ const strict = { reactStrictMode: true };
 const MINE: GridBooking = {
   bookingId: "bk-1", courtId: "c1", courtName: "Court 1",
   startsAt: "2030-09-09T16:00:00.000Z", endsAt: "2030-09-09T16:45:00.000Z", whenLabel: "Mon 9 Sep, 18:00",
-  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedCredits: 50,
+  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedMinutes: 50,
   timezone: "Africa/Johannesburg",
 };
-const THANDI: GridBooking = { ...MINE, bookingId: "bk-2", courtName: "Court 2", mine: false, memberFirstName: "Thandi", amountChargedCredits: null, checkedIn: null };
-const SIPHO: GridBooking = { ...MINE, bookingId: "bk-3", courtName: "Court 3", mine: false, memberFirstName: "Sipho", amountChargedCredits: null, checkedIn: null };
+const THANDI: GridBooking = { ...MINE, bookingId: "bk-2", courtName: "Court 2", mine: false, memberFirstName: "Thandi", amountChargedMinutes: null, checkedIn: null };
+const SIPHO: GridBooking = { ...MINE, bookingId: "bk-3", courtName: "Court 3", mine: false, memberFirstName: "Sipho", amountChargedMinutes: null, checkedIn: null };
 
 const quote = (overrides: Record<string, unknown> = {}) => ({
-  bookingId: "bk-1", amountChargedCredits: 50, refundCredits: 50, penaltyCredits: 0, penaltyPct: 30,
+  bookingId: "bk-1", amountChargedMinutes: 50, refundMinutes: 50, penaltyMinutes: 0, penaltyPct: 30,
   penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false, ...overrides,
 });
-const late = quote({ refundCredits: 35, penaltyCredits: 15, insidePenaltyWindow: true });
+const late = quote({ refundMinutes: 35, penaltyMinutes: 15, insidePenaltyWindow: true });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -82,7 +82,7 @@ describe("CancelSheet — a member's own booking", () => {
   });
 
   it("says nothing comes back once the lights have been on", async () => {
-    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote({ refundCredits: 0, checkedIn: true }) }]);
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: quote({ refundMinutes: 0, checkedIn: true }) }]);
     open();
     expect(await screen.findByText(CANCEL_SHEET.checkedIn(null))).toBeTruthy();
     expect(moneyOf()).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}0.00 cr`);
@@ -91,7 +91,7 @@ describe("CancelSheet — a member's own booking", () => {
   it("cancels once, closes, and says what moved in a toast — no tick for a destructive action", async () => {
     const stub = stubFetch([
       { path: "/api/v1/bookings/bk-1/cancellation-quote", body: late },
-      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_credits: 50, penalty_credits: 15 } },
+      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_minutes: 50, penalty_minutes: 15 } },
     ]);
     const { onOpenChange, onCancelled } = open();
     await screen.findByText(CANCEL_SHEET.late(30));
@@ -132,7 +132,7 @@ describe("CancelSheet — an admin, for a member", () => {
   it("asks why for a plain cancel of a member's booking, and sends it", async () => {
     const stub = stubFetch([
       { path: "/api/v1/bookings/bk-2/cancellation-quote", body: late },
-      { method: "POST", path: "/api/v1/admin/bookings/bk-2/cancel", body: { refunded_credits: 35, penalty_credits: 15 } },
+      { method: "POST", path: "/api/v1/admin/bookings/bk-2/cancel", body: { refunded_minutes: 35, penalty_minutes: 15 } },
     ]);
     const { onCancelled } = open({ isAdmin: true, bookings: [THANDI] });
     expect(await screen.findByText(CANCEL_SHEET.late(30))).toBeTruthy();
@@ -151,7 +151,7 @@ describe("CancelSheet — an admin, for a member", () => {
   it("names the member, and waives the penalty only with a reason", async () => {
     const stub = stubFetch([
       { path: "/api/v1/bookings/bk-2/cancellation-quote", body: late },
-      { method: "POST", path: "/api/v1/admin/bookings/bk-2/cancel", body: { refunded_credits: 50, penalty_credits: 0 } },
+      { method: "POST", path: "/api/v1/admin/bookings/bk-2/cancel", body: { refunded_minutes: 50, penalty_minutes: 0 } },
     ]);
     const { onCancelled } = open({ isAdmin: true, bookings: [THANDI] });
     expect(await screen.findByText(CANCEL_SHEET.late(30))).toBeTruthy();
@@ -181,7 +181,7 @@ describe("CancelSheet — an admin, for a member", () => {
         method: "POST", path: "/api/v1/admin/bookings/bulk-cancel",
         body: {
           results: [
-            { booking_id: "bk-2", status: "cancelled", refund_credits: 50, penalty_credits: 15 },
+            { booking_id: "bk-2", status: "cancelled", refund_minutes: 50, penalty_minutes: 15 },
             { booking_id: "bk-3", status: "failed", error: "already_started" },
           ],
         },

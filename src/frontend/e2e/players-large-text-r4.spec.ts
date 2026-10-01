@@ -85,9 +85,9 @@ const LONG_NAMES = detailFixture({
   players: [
     seat({ name: "Nomsa Khumalo-Mthembu" }),
     seat({ participant_id: "p0000000-0000-0000-0000-000000000002", seat: 2, kind: "member", user_id: "u2", name: "Bongani Wilhelmina Oosthuizen",
-      status: "accepted", consented_credits: 25, paid_credits: 25, target_credits: 25 }),
+      status: "accepted", consented_minutes: 25, paid_minutes: 25, target_minutes: 25 }),
     seat({ participant_id: "p0000000-0000-0000-0000-000000000003", seat: 3, team: "B", kind: "member", user_id: "u3", name: "Alexandria Naidoo",
-      status: "invited", unpaid_credits: 25 }),
+      status: "invited", unpaid_minutes: 25 }),
   ],
 });
 

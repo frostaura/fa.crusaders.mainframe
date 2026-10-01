@@ -370,7 +370,7 @@ describe("creating one", () => {
             conflictFixture({
               occurrence_date: "2026-10-20", court_id: COURT_IDS.three, court_name: "Court 3",
               starts_at: "2026-10-20T17:00:00.000Z", booking_id: "b-2",
-              member_name: "Jason Fourie", would_refund_credits: 24,
+              member_name: "Jason Fourie", would_refund_minutes: 24,
             }),
           ],
         }),
@@ -404,7 +404,7 @@ describe("creating one", () => {
         body: previewFixture({
           conflicts: [
             conflictFixture(),
-            conflictFixture({ booking_id: "b-2", member_name: "Jason Fourie", would_refund_credits: undefined }),
+            conflictFixture({ booking_id: "b-2", member_name: "Jason Fourie", would_refund_minutes: undefined }),
           ],
         }),
       },
@@ -431,7 +431,7 @@ describe("creating one", () => {
         method: "POST",
         path: "/api/v1/admin/bookings/",
         respond: (req) => (req.path.endsWith("/cancel")
-          ? { refunded_credits: 36, penalty_credits: 0 }
+          ? { refunded_minutes: 36, penalty_minutes: 0 }
           : refuse(404, { error: "not_found" })),
       },
     ]);

@@ -22,7 +22,7 @@ test("a credit balance is never shown with a rand sign", async ({ page }) => {
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 240, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 240, entries: [] } },
     { path: "/api/v1/me/profile", body: { full_name: "Test Member", email: "m@test.local", photo_url: null, membership_number: "P-1" } },
   ]);
 
@@ -56,15 +56,15 @@ test("club revenue reports rand as rand and credits as credits", async ({ page }
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-    { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0, penalty_count: 0, count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [] } },
+    { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: 0, penalty_count: 0, count: 0 } },
     { path: "/api/v1/reports/me/daily", body: [] },
     {
       path: "/api/v1/admin/reports/revenue",
       body: {
         from: "2026-01-01T00:00:00Z", to: "2026-02-01T00:00:00Z",
         gross_topups_zar: 1000, reversals_zar: 0, net_zar: 1000,
-        gross_topups_credits: 1600, reversals_credits: 0, net_credits: 1600,
+        gross_topups_minutes: 1600, reversals_minutes: 0, net_minutes: 1600,
       },
     },
     { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
@@ -85,7 +85,7 @@ test("club revenue reports rand as rand and credits as credits", async ({ page }
  *
  * <p>
  * The API sent <code>signedAmountZar</code>; the page has always read
- * <code>signedAmountCredits</code>. So the field arrived undefined: every comparison
+ * <code>signedAmountMinutes</code>. So the field arrived undefined: every comparison
  * against it was false, every row rendered with a minus sign, and both totals summed to
  * zero. Renaming the field to the unit it actually holds fixed the lie and the blank
  * totals in one move.
@@ -95,7 +95,7 @@ test("the admin ledger totals credits and debits apart", async ({ page }) => {
   await signIn(page);
   const row = (id: string, signed: number, type: string) => ({
     id, at: "2026-01-15T10:00:00Z", from: "Club", to: "Member",
-    amountCredits: Math.abs(signed), signedAmountCredits: signed,
+    amountMinutes: Math.abs(signed), signedAmountMinutes: signed,
     type, comment: "", subjectUserId: "00000000-0000-0000-0000-000000000002",
     subjectName: "Test Member", actorUserId: "00000000-0000-0000-0000-000000000002",
     actorName: "Test Member", relatedBookingId: null,
@@ -104,7 +104,7 @@ test("the admin ledger totals credits and debits apart", async ({ page }) => {
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [] } },
     { path: "/api/v1/admin/ledger/", body: [row("1", 160, "TopUp"), row("2", -50, "BookingCharge")] },
   ]);
 
@@ -151,15 +151,15 @@ test("the club's currency symbol reaches money and never a credit figure", async
         currency_symbol: "CHF",
       },
     },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-    { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0, penalty_count: 0, count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [] } },
+    { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: 0, penalty_count: 0, count: 0 } },
     { path: "/api/v1/reports/me/daily", body: [] },
     {
       path: "/api/v1/admin/reports/revenue",
       body: {
         from: "2026-01-01T00:00:00Z", to: "2026-02-01T00:00:00Z",
         gross_topups_zar: 1000, reversals_zar: 0, net_zar: 1000,
-        gross_topups_credits: 1600, reversals_credits: 0, net_credits: 1600,
+        gross_topups_minutes: 1600, reversals_minutes: 0, net_minutes: 1600,
       },
     },
     { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
@@ -194,7 +194,7 @@ test("the wallet chip still speaks a word when the club has a symbol", async ({ 
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 240, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 240, entries: [] } },
     {
       path: "/api/v1/me/profile",
       body: {

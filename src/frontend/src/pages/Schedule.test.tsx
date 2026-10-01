@@ -58,7 +58,7 @@ const MY_SLOT = slotRow({
 const THEIRS = slotRow({
   courtId: COURT_B, courtNumber: 2, startsAtUtc: sast(16, 30), endsAtUtc: sast(16, 45),
   ownerUserId: "55555555-5555-5555-5555-555555555555", ownerFirstName: "Thandi", bookingId: "theirs-1",
-  checkedIn: null, amountChargedCredits: null,
+  checkedIn: null, amountChargedMinutes: null,
 });
 
 describe("the page shell — R3, R11", () => {
@@ -172,7 +172,7 @@ describe("a tap hands the right thing to the right sheet", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15 for 50\.00 cr/ }));
     await screen.findByRole("dialog", { name: "Book sheet" });
     expect(sheets.book?.slots).toEqual([
-      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceCredits: 50 },
+      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceMinutes: 50 },
     ]);
     expect(sheets.book?.isAdmin).toBe(false);
     expect(sheets.book?.balanceCredits).toBe(900);
@@ -226,7 +226,7 @@ describe("what the page does with a sheet's outcome — R12", () => {
     hangScheduleReads();
     await act(async () => {
       sheets.book!.onBooked!({
-        booked: [{ courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 2, priceCredits: 100 }],
+        booked: [{ courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 2, priceMinutes: 100 }],
         ownBalanceAfter: 800, forMemberId: null, hold: false,
       });
     });
@@ -246,7 +246,7 @@ describe("what the page does with a sheet's outcome — R12", () => {
     hangScheduleReads();
     await act(async () => {
       sheets.book!.onBooked!({
-        booked: [{ courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 1, priceCredits: 50 }],
+        booked: [{ courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 1, priceMinutes: 50 }],
         ownBalanceAfter: null, forMemberId: "55555555-5555-5555-5555-555555555555", hold: false,
       });
     });
@@ -289,7 +289,7 @@ describe("what the page does with a sheet's outcome — R12", () => {
 describe("a club hold, lifted from the grid", () => {
   const HELD = dayFixture({
     slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(17), endsAtUtc: sast(17, 30), status: "adminblock",
-      bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedCredits: null })],
+      bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedMinutes: null })],
   });
 
   it("goes at once and says so", async () => {

@@ -59,11 +59,11 @@ test("F5: an invitee's Review and Decline are docked in thumb reach on a phone, 
 test("V5-7 / M5-3: a no-show at 390 with 200 % text: every figure on one line, nothing off screen", async ({ page }) => {
   const d = detailFixture() as Record<string, unknown> & { players: Record<string, unknown>[] };
   const partner = (n: number) => ({ ...d.players[1], seat: n, participant_id: `p0000000-0000-0000-0000-00000000000${n}`,
-    share_credits: 16, consented_credits: 16, paid_credits: 4.8, target_credits: 4.8, returned_credits: 11.2, unpaid_credits: 0, status: "accepted" });
+    share_minutes: 16, consented_minutes: 16, paid_minutes: 4.8, target_minutes: 4.8, returned_minutes: 11.2, unpaid_minutes: 0, status: "accepted" });
   await open(page, {
     ...d, status: "no_show",
     players: [d.players[0], partner(2), { ...partner(3), team: "B" }],
-    money: { price_credits: 100, organiser_owed_credits: 30, shares_received_credits: 9.6, organiser_net_credits: 20.4, unpaid_credits: 0, share_deadline: d.starts_at, is_split: true },
+    money: { price_minutes: 100, organiser_owed_minutes: 30, shares_received_minutes: 9.6, organiser_net_minutes: 20.4, unpaid_minutes: 0, share_deadline: d.starts_at, is_split: true },
     permissions: { ...(d.permissions as object), can_invite: false, can_change_split: false, can_cancel: false },
   });
   await expect(page.getByText(DETAIL_NO_SHOW.moneyNote(true))).toBeVisible();

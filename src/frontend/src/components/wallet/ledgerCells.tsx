@@ -37,7 +37,7 @@ export const CELL: Record<Column, (r: LedgerRow, note?: string) => ReactNode> = 
   comment: (r, note) => (
     <TableCell className={CELL_CLASS.comment} title={note ?? r.comment}>
       {note ?? r.comment}
-      <StackedAmount signed={r.signedAmountCredits} ink={amountInk(r.signedAmountCredits)} under={r.signedAmountCredits >= 0 ? r.from : r.to} />
+      <StackedAmount signed={r.signedAmountMinutes} ink={amountInk(r.signedAmountMinutes)} under={r.signedAmountMinutes >= 0 ? r.from : r.to} />
       <PhoneTime at={r.at} />
     </TableCell>
   ),
@@ -47,10 +47,10 @@ export const CELL: Record<Column, (r: LedgerRow, note?: string) => ReactNode> = 
     return <TableCell className={CELL_CLASS.actor} title={who}>{who}</TableCell>;
   },
   amount: (r) => {
-    const credit = r.signedAmountCredits >= 0;
+    const credit = r.signedAmountMinutes >= 0;
     return (
-      <TableCell className={cn(CELL_CLASS.amount, amountInk(r.signedAmountCredits))}>
-        {formatSignedCredits(r.signedAmountCredits)}
+      <TableCell className={cn(CELL_CLASS.amount, amountInk(r.signedAmountMinutes))}>
+        {formatSignedCredits(r.signedAmountMinutes)}
         {/* Until the box draws From/To, the counterparty rides under the amount rather than being
             lost — picked by sign, because the member is the other end.
             R4 form factor: it WRAPS (the amount's cell is nowrap, and a long name such as

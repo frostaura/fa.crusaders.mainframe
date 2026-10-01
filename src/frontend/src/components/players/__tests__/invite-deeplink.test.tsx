@@ -25,8 +25,8 @@ function invite(overrides: Record<string, unknown> = {}): Record<string, unknown
     participant_id: SEAT, booking_id: BOOKING, status: "invited", seat: 3, team: "B", open_link: false,
     court_name: "Court 1", starts_at: at(24), ends_at: at(24.75),
     organiser: { user_id: "55555555-5555-5555-5555-555555555555", name: "Sam Petersen", photo_url: null },
-    players: 4, share_credits: 25, to_pay_credits: 25, needs_consent: false,
-    balance_credits: 100, spendable_credits: 100, held_credits: 0, balance_after_credits: 75, short_by_credits: 0,
+    players: 4, share_minutes: 25, to_pay_minutes: 25, needs_consent: false,
+    balance_minutes: 100, spendable_minutes: 100, held_minutes: 0, balance_after_minutes: 75, short_by_minutes: 0,
     share_deadline: at(26.75), cap: null,
     ...overrides,
   };
@@ -39,7 +39,7 @@ function openDeepLink(routes: StubRoute[], participantId = SEAT): FetchStub {
   const stub = stubFetch([
     ...routes,
     { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, held_credits: 0, spendable_credits: 100, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, held_minutes: 0, spendable_minutes: 100, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
   ]);
   renderPage(<Routes><Route path="/invites/:participantId" element={<InviteDeepLinkPage />} /></Routes>, {
@@ -51,7 +51,7 @@ function openDeepLink(routes: StubRoute[], participantId = SEAT): FetchStub {
 describe("the invite mail's deep link", () => {
   it("R4 M4-8: a partner who said yes and whose share went up reads \"Your share went up\", not an invitation", async () => {
     openDeepLink([
-      { path: "/api/v1/me/invites", body: { items: [invite({ status: "accepted", needs_consent: true, share_credits: 30, to_pay_credits: 5 })], count: 1 } },
+      { path: "/api/v1/me/invites", body: { items: [invite({ status: "accepted", needs_consent: true, share_minutes: 30, to_pay_minutes: 5 })], count: 1 } },
     ]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.askedAgainTitle })).toBeInTheDocument();
     expect(screen.getByText(askedAgainLine("Sam", 30))).toBeInTheDocument();
@@ -67,7 +67,7 @@ describe("the invite mail's deep link", () => {
         : { items: [invite({ participant_id: "other", booking_id: "b2" }), invite()], count: 2 }) },
       { method: "POST", path: `/api/v1/bookings/${BOOKING}/players/${SEAT}/accept`, respond: () => {
         accepted = true;
-        return { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 75 };
+        return { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_minutes: 25, consented_minutes: 25, paid_minutes: 25, balance_minutes: 75 };
       } },
     ]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.linkTitle })).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe("the invite mail's deep link", () => {
     expect(screen.getByRole("heading", { level: 1, name: INVITES_COPY.acceptedTitle })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1, name: INVITES_COPY.linkTitle })).toBeNull();
     const posted = stub.calls.filter((c) => c.method === "POST" && c.path.endsWith("/accept"));
-    expect(posted.map((c) => c.body)).toEqual([{ expectedShareCredits: 25 }]);
+    expect(posted.map((c) => c.body)).toEqual([{ expectedShareMinutes: 25 }]);
     // The re-read no longer lists the seat, and the confirmation stays.
     expect(screen.queryByText(INVITES_COPY.deepLinkGone)).toBeNull();
   });
@@ -99,7 +99,7 @@ describe("the invite mail's deep link", () => {
         user_id: "44444444-4444-4444-4444-444444444444", email: "olivia@club.review.test", is_admin: false, tenant_slug: "crusaders",
         full_name: "Olivia Newton", membership_number: "MEM-2002", photo_url: null, status: "active",
       } },
-      { path: "/api/v1/wallet", body: { balance_credits: 100, held_credits: 0, spendable_credits: 100, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 100, held_minutes: 0, spendable_minutes: 100, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 10 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
       { method: "POST", path: "/api/v1/auth/logout", status: 204, body: "" },
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "sam.token", user_id: "77777777-7777-7777-7777-777777777777", is_admin: false } },
@@ -136,7 +136,7 @@ describe("R1 F2.7 / F2.8 — the mail's link after the invite moved on (asked of
     body: {
       participant_id: SEAT, booking_id: BOOKING, status, lapsed: false, settled_outside: false, booking_status: bookingStatus,
       court_name: "Court 1", starts_at: "2026-10-01T08:00:00Z", ends_at: "2026-10-01T08:45:00Z",
-      organiser_name: "Sam Petersen", share_credits: 25, timezone: "Africa/Johannesburg", ...extra,
+      organiser_name: "Sam Petersen", share_minutes: 25, timezone: "Africa/Johannesburg", ...extra,
     },
   });
 

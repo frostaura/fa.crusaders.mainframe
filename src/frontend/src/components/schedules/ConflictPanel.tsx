@@ -49,8 +49,8 @@ function knownRefundTotal(conflicts: readonly ScheduleConflict[]): number | null
   for (const c of conflicts) {
     // Unknown is never zero. A button promising "refund 314.00 cr" over a list where one
     // quote never arrived is promising a figure nobody computed.
-    if (c.would_refund_credits === undefined || c.would_refund_credits === null) return null;
-    total += c.would_refund_credits;
+    if (c.would_refund_minutes === undefined || c.would_refund_minutes === null) return null;
+    total += c.would_refund_minutes;
   }
   return total;
 }
@@ -99,7 +99,7 @@ export function ConflictPanel({
           id: conflict.booking_id as string,
           label,
           ok: true,
-          detail: `${result.refunded_credits.toFixed(2)} cr went back in full.`,
+          detail: `${result.refunded_minutes.toFixed(2)} cr went back in full.`,
         });
       } catch (err) {
         rows.push({

@@ -27,7 +27,7 @@ import { ApiError } from "./api";
  * <p>
  * <b>And the resulting balance is stated BEFORE the press.</b> Money deserves more than four
  * seconds, and a figure computed here from a balance fetched separately is two numbers read at
- * two different instants, which is not a movement — hence `balance_before_credits` on the
+ * two different instants, which is not a movement — hence `balance_before_minutes` on the
  * server's response, and hence the check step reads three figures rather than one.
  * </p>
  */
@@ -203,7 +203,7 @@ export const LIVE_SAID = {
  */
 function keyReusedSentence(stored: unknown): string {
   const row = (typeof stored === "object" && stored !== null ? stored : {}) as Record<string, unknown>;
-  const amount = typeof row.amount_credits === "number" ? row.amount_credits : null;
+  const amount = typeof row.amount_minutes === "number" ? row.amount_minutes : null;
   const what = amount === null ? "An earlier press of this already went through"
     : `An earlier press already went through: ${amount < 0 ? "−" : "+"}${formatCredits(Math.abs(amount))}`;
   const why = typeof row.reason === "string" && row.reason.trim() ? ` (“${row.reason.trim()}”)` : "";
@@ -266,14 +266,14 @@ export function validateZar(text: string): string | null {
 
 /**
  * What a refused adjustment says, by the server's code — or null for the generic sentence.
- * `amount_out_of_range` carries the ceiling (`max_credits`, or `max` per the round-1 contract).
+ * `amount_out_of_range` carries the ceiling (`max_minutes`, or `max` per the round-1 contract).
  */
 export function adjustRefusal(err: unknown): string | null {
   if (!(err instanceof ApiError) || typeof err.payload !== "object" || err.payload === null) return null;
   const payload = err.payload as Record<string, unknown>;
   switch (payload.error) {
     case "amount_out_of_range": {
-      const max = typeof payload.max_credits === "number" ? payload.max_credits
+      const max = typeof payload.max_minutes === "number" ? payload.max_minutes
         : typeof payload.max === "number" ? payload.max : ADJUST_MAX_CREDITS;
       return `That is more than one movement can be — the most is ${formatCredits(max)}. Nothing was changed.`;
     }

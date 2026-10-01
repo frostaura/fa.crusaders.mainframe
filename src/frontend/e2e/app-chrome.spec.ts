@@ -42,7 +42,7 @@ function routes(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
     // B13's toast is the settings page's own "Settings saved." — a save needs somewhere to land.
     { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
@@ -62,7 +62,7 @@ function memberRoutes(): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
     { path: "/api/v1/me/profile", body: { full_name: "Lerato Mokoena", email: "lerato@sample.local", photo_url: null, membership_number: "M-0001" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     ...memberCodeRoutes(),
     {
       path: "/api/v1/me/door",

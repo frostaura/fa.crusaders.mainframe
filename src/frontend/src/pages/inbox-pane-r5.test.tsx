@@ -31,8 +31,8 @@ const INVITE = {
   participant_id: SEAT, booking_id: BOOKING, status: "invited", seat: 3, team: "B", open_link: false,
   court_name: "Court 1", starts_at: at(24), ends_at: at(24.75),
   organiser: { user_id: "55555555-5555-5555-5555-555555555555", name: "Sam Petersen", photo_url: null },
-  players: 4, share_credits: 25, to_pay_credits: 25, needs_consent: false,
-  balance_credits: 120, spendable_credits: 100, held_credits: 20, balance_after_credits: 95, short_by_credits: 0,
+  players: 4, share_minutes: 25, to_pay_minutes: 25, needs_consent: false,
+  balance_minutes: 120, spendable_minutes: 100, held_minutes: 20, balance_after_minutes: 95, short_by_minutes: 0,
   share_deadline: at(26.75), cap: null,
 };
 
@@ -48,7 +48,7 @@ function open() {
   let accepted = false;
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, held_credits: 20, spendable_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 1 } },
     { method: "POST", path: "/api/v1/me/notifications/n1/read", body: { id: "n1", read: true } },
@@ -56,7 +56,7 @@ function open() {
     { path: "/api/v1/me/invites", respond: () => (accepted ? { items: [], count: 0 } : { items: [INVITE], count: 1 }) },
     { method: "POST", path: `/api/v1/bookings/${BOOKING}/players/${SEAT}/accept`, respond: () => {
       accepted = true;
-      return { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 95 };
+      return { participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_minutes: 25, consented_minutes: 25, paid_minutes: 25, balance_minutes: 95 };
     } },
   ]);
   renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
@@ -104,14 +104,14 @@ describe("the inbox pane beside the list (R5)", () => {
     };
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], total_entries: 0, offset: 0, limit: 10 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
       { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 1 } },
       { method: "POST", path: "/api/v1/me/notifications/n9/read", body: { id: "n9", read: true } },
       { path: "/api/v1/me/notifications", body: { items: [removed], unread_count: 1, next_cursor: null } },
       { path: `/api/v1/me/invites/${SEAT_GONE}`, body: {
         participant_id: SEAT_GONE, booking_id: BOOKING, status: "removed", lapsed: false, settled_outside: false, booking_status: "booked",
-        court_name: "Court 4", starts_at: at(24), ends_at: at(24.75), organiser_name: "Olga", share_credits: 16, timezone: "Africa/Johannesburg",
+        court_name: "Court 4", starts_at: at(24), ends_at: at(24.75), organiser_name: "Olga", share_minutes: 16, timezone: "Africa/Johannesburg",
       } },
       { path: `/api/v1/bookings/${BOOKING}`, respond: () => refuse(404, { error: "not_found" }) },
     ]);

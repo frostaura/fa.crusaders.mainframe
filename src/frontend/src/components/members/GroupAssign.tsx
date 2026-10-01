@@ -385,7 +385,8 @@ function PreviewLines({ preview, groups }: { preview: MemberGroupPreview; groups
   const lines: string[] = [];
   if (before && after) {
     const afterGroup = groups.find((g) => g.id === after.rate_group_id)?.name ?? null;
-    lines.push(rateChangeLine(before.top_up_credits_per_zar, after.top_up_credits_per_zar, afterGroup));
+    // P13-F3: no rate on the tariff wire any more (contract §3.8) — say the package discount instead.
+    lines.push(rateChangeLine(before.top_up_credits_per_zar ?? 0, after.top_up_credits_per_zar ?? 0, afterGroup));
     lines.push(peakChangeLine(before.peak_priority, after.peak_priority, after.peak_withheld_by ?? []));
   }
   const sliceBefore = preview.current.slice_price_credits;

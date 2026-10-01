@@ -172,11 +172,11 @@ const NOTICES = {
   unread_count: 1, next_cursor: null,
 };
 const LEDGER_ROW = {
-  id: "l1", at: new Date().toISOString(), from: "PayFast", to: "Member", amountCredits: 200, signedAmountCredits: 200,
+  id: "l1", at: new Date().toISOString(), from: "PayFast", to: "Member", amountMinutes: 200, signedAmountMinutes: 200,
   type: "TopUp", comment: "Top-up", subjectUserId: SESSION_MEMBER.user_id, subjectName: "Dean", actorUserId: SESSION_MEMBER.user_id,
   actorName: "Dean", relatedBookingId: null,
 };
-const WALLET = { balance_credits: 412.5, entries: [LEDGER_ROW], total_entries: 1, offset: 0, limit: 100 };
+const WALLET = { balance_minutes: 412.5, entries: [LEDGER_ROW], total_entries: 1, offset: 0, limit: 100 };
 const PROFILE = {
   user_id: SESSION_MEMBER.user_id, email: "dean@example.test", is_admin: false, tenant_slug: "crusaders",
   full_name: "Dean Martin", membership_number: "C-0009", photo_url: null, status: "Active",

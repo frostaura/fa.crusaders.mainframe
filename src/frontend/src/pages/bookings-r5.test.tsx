@@ -22,7 +22,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); signOut(); forget
 
 const HELD = dayFixture({
   slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(17), endsAtUtc: sast(17, 30), status: "adminblock",
-    bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedCredits: null })],
+    bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedMinutes: null })],
 });
 const LIFT = "Lift the League night hold on Court 1 at 17:00";
 const HOLD_CELL = "Court 1 at 17:00 — held by the club for League night";
@@ -91,7 +91,7 @@ const NALEDI = "55555555-5555-5555-5555-555555555555";
 function memberRoutes(rules: Record<string, unknown> = {}) {
   return [
     { path: `/api/v1/admin/members/${NALEDI}/booking-rules`, body: { slice_price_credits: 30, groups: [{ name: "Juniors" }], day: "2030-09-09", allowed_windows: [{ start: "16:00", end: "18:00" }], ...rules } },
-    { path: `/api/v1/admin/members/${NALEDI}`, body: { full_name: "Naledi Khumalo", balance_credits: 215, held_credits: 15 } },
+    { path: `/api/v1/admin/members/${NALEDI}`, body: { full_name: "Naledi Khumalo", balance_minutes: 215, held_minutes: 15 } },
   ];
 }
 
@@ -178,7 +178,7 @@ describe("V5-5 — a closed run nothing is booked in is one folded row", () => {
   const NIGHT = () => dayFixture({
     dayStartMinute: 6 * 60, dayEndMinute: 8 * 60,
     slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(0), endsAtUtc: sast(0, 30), status: "adminblock",
-      bookingId: "hold-0", blockLabel: "Resurfacing", checkedIn: null, amountChargedCredits: null })],
+      bookingId: "hold-0", blockLabel: "Resurfacing", checkedIn: null, amountChargedMinutes: null })],
   });
 
   it("folds 00:30–06:00 into one row, keeps the booked rows and the open ones", () => {
@@ -195,7 +195,7 @@ describe("V5-5 — a closed run nothing is booked in is one folded row", () => {
   it("leaves a short closed run as rows", () => {
     const day = dayFixture({
       dayStartMinute: 6 * 60, dayEndMinute: 8 * 60,
-      slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(5, 15), endsAtUtc: sast(5, 30), status: "adminblock", bookingId: "h", amountChargedCredits: null })],
+      slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(5, 15), endsAtUtc: sast(5, 30), status: "adminblock", bookingId: "h", amountChargedMinutes: null })],
     }) as unknown as ScheduleDay;
     expect(buildTimeSlices(day).slice(0, 4).map((t) => t.label)).toEqual(["05:15", "05:30", "05:45", "06:00"]);
   });
@@ -227,7 +227,7 @@ describe("§3.1 — the rail's day summary says how many more slots today", () =
 });
 
 describe("M5-7 (D1's ask) — a late split cancel says what came back, net of the penalty", () => {
-  const thandi = [{ name: "Thandi Third", credits: 25 }];
+  const thandi = [{ name: "Thandi Third", minutes: 25 }];
 
   it("corrects a net that left the penalty out (gross 50, penalty 15, Thandi's 25 → 10 back)", () => {
     const said = cancellationOutcome(50, 15, null, { net: 25, partners: thandi });

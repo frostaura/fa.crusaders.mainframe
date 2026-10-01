@@ -24,11 +24,11 @@ export function MoneyPanel({ detail, actions }: { detail: BookingDetail; actions
   return (
     <Section title={DETAIL_MONEY.title} description={money.is_split ? DETAIL_MONEY.deadline(deadline) : DETAIL_MONEY.notSplit} actions={actions} data-money-panel="">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
-        <Row term={DETAIL_MONEY.price} value={money.price_credits} />
-        <Row term={DETAIL_MONEY.organiserPaid(who)} value={money.organiser_owed_credits} />
-        {money.is_split ? <Row term={DETAIL_MONEY.received} value={money.shares_received_credits} /> : null}
-        {money.is_split ? <Row term={DETAIL_MONEY.stillToCome} value={money.unpaid_credits} /> : null}
-        <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_credits} total />
+        <Row term={DETAIL_MONEY.price} value={money.price_minutes} />
+        <Row term={DETAIL_MONEY.organiserPaid(who)} value={money.organiser_owed_minutes} />
+        {money.is_split ? <Row term={DETAIL_MONEY.received} value={money.shares_received_minutes} /> : null}
+        {money.is_split ? <Row term={DETAIL_MONEY.stillToCome} value={money.unpaid_minutes} /> : null}
+        <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_minutes} total />
       </dl>
       {money.is_split ? <PerPlayer detail={detail} deadline={deadline} /> : null}
       {money.is_split && detail.viewer.role === "organiser" ? (
@@ -57,7 +57,7 @@ function Row({ term, value, total = false }: { term: string; value: number; tota
 
 /** One line per seat: what it was asked, what it paid, and what is still to come. */
 function lineFor(p: DetailPlayer): string {
-  const share = formatCredits(p.share_credits);
+  const share = formatCredits(p.share_minutes);
   const key = statusKey(p);
   // R2 F2-3 — a share changed after money moved: say the difference, not the booking-time words.
   // ("Asked again" already names the new share beside what they said yes to.)
@@ -69,27 +69,27 @@ function lineFor(p: DetailPlayer): string {
     case "settled_outside": return DETAIL_MONEY.settledRow;
     case "lapsed": return DETAIL_MONEY.lapsedRow;
     case "invited": case "open_link": return DETAIL_MONEY.invitedRow(share);
-    case "needs_consent": return DETAIL_MONEY.askedAgainRow(share, formatCredits(p.consented_credits));
+    case "needs_consent": return DETAIL_MONEY.askedAgainRow(share, formatCredits(p.consented_minutes));
     case "not_agreed": return DETAIL_MONEY.notAgreedRow(share);
-    default: return p.unpaid_credits > 0 ? DETAIL_MONEY.unpaidRow(share) : DETAIL_MONEY.paidRow(formatCredits(p.paid_credits), share);
+    default: return p.unpaid_minutes > 0 ? DETAIL_MONEY.unpaidRow(share) : DETAIL_MONEY.paidRow(formatCredits(p.paid_minutes), share);
   }
 }
 
 /** Part-paid and asked for more, or paid more than the share now asks — null otherwise. */
 function movedLine(p: DetailPlayer): string | null {
-  if (p.paid_credits <= 0) return null;
-  const paid = formatCredits(p.paid_credits);
-  if (p.share_credits < p.paid_credits) {
-    return DETAIL_MONEY.goingBackRow(paid, formatCredits(p.paid_credits - p.share_credits));
+  if (p.paid_minutes <= 0) return null;
+  const paid = formatCredits(p.paid_minutes);
+  if (p.share_minutes < p.paid_minutes) {
+    return DETAIL_MONEY.goingBackRow(paid, formatCredits(p.paid_minutes - p.share_minutes));
   }
-  if (p.unpaid_credits > 0) return DETAIL_MONEY.askedMoreRow(paid, formatCredits(p.unpaid_credits));
+  if (p.unpaid_minutes > 0) return DETAIL_MONEY.askedMoreRow(paid, formatCredits(p.unpaid_minutes));
   return null;
 }
 
 /** The sentence under the list for a seat still owing: nothing paid yet, or asked for more. */
 function unpaidSentence(p: DetailPlayer, name: string, deadline: string, toWhom: string): string {
-  if (p.paid_credits > 0) {
-    return DETAIL_MONEY.askedMoreSentence(name, formatCredits(p.paid_credits), formatCredits(p.unpaid_credits), deadline, toWhom);
+  if (p.paid_minutes > 0) {
+    return DETAIL_MONEY.askedMoreSentence(name, formatCredits(p.paid_minutes), formatCredits(p.unpaid_minutes), deadline, toWhom);
   }
   return DETAIL_MONEY.unpaidSentence(name, deadline, toWhom);
 }
@@ -98,7 +98,7 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
   const live = detail.players.filter(isLive);
   const toWhom = detail.viewer.role === "organiser" ? DETAIL_MONEY.toYou : organiserName(detail) ?? DETAIL_MONEY.toYou;
   // The viewer's own unpaid share is said in their own panel, in the second person.
-  const unpaid = live.filter((p) => p.kind === "member" && p.unpaid_credits > 0 && !p.settled_outside
+  const unpaid = live.filter((p) => p.kind === "member" && p.unpaid_minutes > 0 && !p.settled_outside
     && p.participant_id !== detail.viewer.participant_id);
   return (
     <div className="flex flex-col gap-3">
@@ -125,8 +125,8 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
 
 /** What one partner's row says on a cancelled game: paid and standing, came back (R2 F2-4), or nothing owed. */
 function cancelledSeatWords(p: BookingDetail["players"][number]): string {
-  if (p.paid_credits > 0) return DETAIL_CANCELLED.paidRow(formatCredits(p.paid_credits));
-  if ((p.returned_credits ?? 0) > 0) return DETAIL_CANCELLED.returnedRow(formatCredits(p.returned_credits ?? 0));
+  if (p.paid_minutes > 0) return DETAIL_CANCELLED.paidRow(formatCredits(p.paid_minutes));
+  if ((p.returned_minutes ?? 0) > 0) return DETAIL_CANCELLED.returnedRow(formatCredits(p.returned_minutes ?? 0));
   return DETAIL_CANCELLED.nothingToPay;
 }
 
@@ -149,13 +149,13 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
   return (
     <Section title={DETAIL_MONEY.title} description={DETAIL_CANCELLED.moneyNote} data-money-panel="">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
-        <Row term={DETAIL_MONEY.price} value={money.price_credits} />
+        <Row term={DETAIL_MONEY.price} value={money.price_minutes} />
         {/* A split's gross refund is not what the organiser kept (R2 F2-4): said in words below. */}
         {refunded > 0 && !money.is_split ? <Row term={DETAIL_CANCELLED.refunded(who)} value={refunded} /> : null}
         {penalty > 0 ? <Row term={DETAIL_CANCELLED.penalty} value={-penalty} /> : null}
-        {checkedIn && money.organiser_owed_credits > 0 ? <Row term={DETAIL_CANCELLED.kept(who)} value={money.organiser_owed_credits} /> : null}
-        {money.shares_received_credits > 0 ? <Row term={DETAIL_MONEY.received} value={money.shares_received_credits} /> : null}
-        <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_credits} total />
+        {checkedIn && money.organiser_owed_minutes > 0 ? <Row term={DETAIL_CANCELLED.kept(who)} value={money.organiser_owed_minutes} /> : null}
+        {money.shares_received_minutes > 0 ? <Row term={DETAIL_MONEY.received} value={money.shares_received_minutes} /> : null}
+        <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_minutes} total />
       </dl>
       {refunded > 0 && money.is_split ? (
         <p className="text-sm text-text-secondary" data-split-refund="">
@@ -189,14 +189,14 @@ function SeatLines({ detail, seats, words }: SeatLinesProps) {
 }
 
 /**
- * What one partner's row says on a no-show: everything they paid in (`paid_credits` is net of what
+ * What one partner's row says on a no-show: everything they paid in (`paid_minutes` is net of what
  * came back) and what came back when their share came down with the penalty.
  */
 function noShowSeatWords(p: DetailPlayer): string {
   if (p.kind === "guest") return DETAIL_MONEY.guestRow;
   if (p.settled_outside) return DETAIL_MONEY.settledRow;
-  const back = p.returned_credits ?? 0;
-  const paidIn = p.paid_credits + back;
+  const back = p.returned_minutes ?? 0;
+  const paidIn = p.paid_minutes + back;
   if (back > 0) return DETAIL_NO_SHOW.paidBackRow(formatCredits(paidIn), formatCredits(back));
   return paidIn > 0 ? DETAIL_NO_SHOW.paidRow(formatCredits(paidIn)) : DETAIL_NO_SHOW.nothingRow;
 }
@@ -219,12 +219,12 @@ function NoShowMoney({ detail }: { detail: BookingDetail }) {
       data-no-show=""
     >
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
-        <Row term={DETAIL_MONEY.price} value={money.price_credits} />
-        <Row term={DETAIL_MONEY.organiserPaid(who)} value={money.price_credits} />
+        <Row term={DETAIL_MONEY.price} value={money.price_minutes} />
+        <Row term={DETAIL_MONEY.organiserPaid(who)} value={money.price_minutes} />
         {refunded > 0 ? <Row term={DETAIL_NO_SHOW.refunded(who)} value={refunded} /> : null}
         {penalty > 0 ? <Row term={DETAIL_NO_SHOW.penalty} value={-penalty} /> : null}
-        {money.shares_received_credits > 0 ? <Row term={DETAIL_MONEY.received} value={money.shares_received_credits} /> : null}
-        <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_credits} total />
+        {money.shares_received_minutes > 0 ? <Row term={DETAIL_MONEY.received} value={money.shares_received_minutes} /> : null}
+        <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_minutes} total />
       </dl>
       {money.is_split ? (
         <div className="flex flex-col gap-3">

@@ -162,11 +162,11 @@ async function bookTogether(
     res, "book with a partner");
   const seat = booked.players?.participants.find((p) => p.user_id === partner.session.userId);
   if (!seat) throw new Error("the partner's seat was not created");
-  const detail = await ok<{ players: { participant_id: string; share_credits: number }[] }>(
+  const detail = await ok<{ players: { participant_id: string; share_minutes: number }[] }>(
     await request.get(`/api/v1/bookings/${booked.booking_id}`, { headers: bearer(partner.session) }), "partner reads the booking");
-  const share = detail.players.find((p) => p.participant_id === seat.participant_id)?.share_credits ?? 0;
+  const share = detail.players.find((p) => p.participant_id === seat.participant_id)?.share_minutes ?? 0;
   await ok(await request.post(`/api/v1/bookings/${booked.booking_id}/players/${seat.participant_id}/accept`, {
-    headers: bearer(partner.session), data: { expectedShareCredits: share },
+    headers: bearer(partner.session), data: { expectedShareMinutes: share },
   }), "partner accepts");
   const endsAt = new Date(Date.parse(startsAt) + SLICES * sliceMs).toISOString();
   return { bookingId: booked.booking_id, court, startsAt, endsAt };

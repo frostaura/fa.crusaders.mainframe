@@ -101,14 +101,14 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
         const now = outcome.balanceNow;
         if (typeof now === "number") {
           // The sheet reads the target, the table reads the row: both were from before it landed.
-          setMembers((rows) => patchRow(rows, target.user_id, { balance_credits: now }));
-          setTarget((t) => (t ? { ...t, balance_credits: now } : t));
+          setMembers((rows) => patchRow(rows, target.user_id, { balance_minutes: now }));
+          setTarget((t) => (t ? { ...t, balance_minutes: now } : t));
         }
         return { said: outcome.said };
       }
       // The row follows the server's answer at once — no refetch that would re-sort the table.
       const after = outcome.balanceAfterCredits;
-      if (after !== null) setMembers((rows) => patchRow(rows, target.user_id, { balance_credits: after }));
+      if (after !== null) setMembers((rows) => patchRow(rows, target.user_id, { balance_minutes: after }));
       sayIfGone("success", () => doneSentence(name, after));
       return { balanceAfterCredits: after, recovered: outcome.recovered };
     } finally {

@@ -105,7 +105,7 @@ test("a club that answers never shows the outage screen in the first place", asy
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 274.25, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 274.25, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/profile", body: { full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1" } },
   ]);
 

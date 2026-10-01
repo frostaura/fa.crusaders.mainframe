@@ -38,7 +38,7 @@ function renderMember(entry = "/wallet/activity") {
  * Settlement-model I11: a correction is posted as a new row of the same type with the
  * opposite sign, never as an edit, because a single netted row cannot answer "how much
  * penalty did I pay?" — the question a disputed settlement asks. The accepted
- * consequence is that <code>refunds_credits</code> and <code>penalties_credits</code>
+ * consequence is that <code>refunds_minutes</code> and <code>penalties_minutes</code>
  * are <b>net</b> per day, and a day goes negative whenever a reversal lands in a
  * different day's bucket from the sweep it reverses. The API is right and stays; the
  * screen has to be honest about it.
@@ -62,19 +62,19 @@ describe("Reports — net daily buckets", () => {
   // totals card printed 161.50 — the five buckets it did have — under a sentence claiming it
   // was "every ledger movement in the club summed". The true movement is 1.50.
   const ADMIN_DAYS = [
-    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 25.5, reversals_credits: 0, net_movement_credits: 167.1, bookings: 3, no_shows: 1 },
-    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, adjustments_credits: 0, reversals_credits: -160, net_movement_credits: -165.6, bookings: 0, no_shows: 0 },
+    { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2.4, adjustments_minutes: 25.5, reversals_minutes: 0, net_movement_minutes: 167.1, bookings: 3, no_shows: 1 },
+    { date: "2026-09-02", top_ups_minutes: 0, booking_charges_minutes: 0, refunds_minutes: -8, penalties_minutes: -2.4, adjustments_minutes: 0, reversals_minutes: -160, net_movement_minutes: -165.6, bookings: 0, no_shows: 0 },
   ];
   const ME_DAYS = [
-    { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
-    { date: "2026-09-02", top_ups_credits: 0, spent_credits: 0, refunds_credits: -8, bookings: 0, attended: 0, minutes_on_court: 0, balance_credits: 128 },
+    { date: "2026-09-01", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 136 },
+    { date: "2026-09-02", top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: -8, bookings: 0, attended: 0, minutes_on_court: 0, balance_minutes: 128 },
   ];
 
   const WALLET = {
     from: "", to: "",
-    top_ups_credits: 160, spent_credits: 24, refunds_credits: -8,
-    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
-    net_movement_credits: 128,
+    top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: -8,
+    penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0,
+    net_movement_minutes: 128,
     penalty_count: 1, attended_bookings: 1, minutes_on_court: 45, count: 4,
   };
 
@@ -82,7 +82,7 @@ describe("Reports — net daily buckets", () => {
     { path: "/api/v1/whoami", body: signIn({ isAdmin }) },
     { path: "/api/v1/reports/me/wallet", body: WALLET },
     { path: "/api/v1/reports/me/daily", body: ME_DAYS },
-    { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 100, reversals_zar: 0, net_zar: 100, gross_topups_credits: 160, reversals_credits: 0, net_credits: 160 } },
+    { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 100, reversals_zar: 0, net_zar: 100, gross_topups_minutes: 160, reversals_minutes: 0, net_minutes: 160 } },
     { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
     { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 3, no_show: 1, no_show_pct: 33.3 } },
     { path: "/api/v1/admin/reports/daily", body: ADMIN_DAYS },
@@ -273,14 +273,14 @@ describe("Reports — the member's summary reconciles to their balance", () => {
 
   const NALEDI = {
     from: "", to: "",
-    top_ups_credits: 0,
-    spent_credits: 950,
-    refunds_credits: 100,
-    penalties_credits: 15,
-    adjustments_credits: 2500,
-    reversals_credits: 0,
+    top_ups_minutes: 0,
+    spent_minutes: 950,
+    refunds_minutes: 100,
+    penalties_minutes: 15,
+    adjustments_minutes: 2500,
+    reversals_minutes: 0,
     // 0 − 950 + 100 − 15 + 2500. Her balance is 1,635.00 and this is what it moved by.
-    net_movement_credits: 1635,
+    net_movement_minutes: 1635,
     penalty_count: 1,
     attended_bookings: 14,
     minutes_on_court: 225,
@@ -288,7 +288,7 @@ describe("Reports — the member's summary reconciles to their balance", () => {
   };
 
   const ME_DAYS = [
-    { date: "2026-09-01", top_ups_credits: 0, spent_credits: 50, refunds_credits: 0, bookings: 2, attended: 1, minutes_on_court: 45, balance_credits: 1635 },
+    { date: "2026-09-01", top_ups_minutes: 0, spent_minutes: 50, refunds_minutes: 0, bookings: 2, attended: 1, minutes_on_court: 45, balance_minutes: 1635 },
   ];
 
   // A function, not a constant: `signIn` writes the token to storage, and `afterEach`
@@ -381,9 +381,9 @@ describe("Reports — utilisation says what it counts", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
   const WALLET = {
-    from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0,
-    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
-    net_movement_credits: 0, penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
+    from: "", to: "", top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: 0,
+    penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0,
+    net_movement_minutes: 0, penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
   };
 
   it("separates what was quoted from what the club kept, and counts minutes not slices", async () => {
@@ -391,14 +391,14 @@ describe("Reports — utilisation says what it counts", () => {
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
       { path: "/api/v1/reports/me/wallet", body: WALLET },
       { path: "/api/v1/reports/me/daily", body: [] },
-      { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 0, reversals_zar: 0, net_zar: 0, gross_topups_credits: 0, reversals_credits: 0, net_credits: 0 } },
+      { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 0, reversals_zar: 0, net_zar: 0, gross_topups_minutes: 0, reversals_minutes: 0, net_minutes: 0 } },
       {
         path: "/api/v1/admin/reports/utilisation",
         body: {
           from: "", to: "",
           // Court 1: one 50.00 booking, no-showed. Quoted 50.00; the club kept the 15.00
           // penalty, which is what its own ledger rows for that booking sum to.
-          by_court: [{ court_id: "c1", court_number: 1, court_name: "Court 1", slices: 1, booked_minutes: 60, bookings: 1, revenue_credits: 15, quoted_credits: 50 }],
+          by_court: [{ court_id: "c1", court_number: 1, court_name: "Court 1", slices: 1, booked_minutes: 60, bookings: 1, kept_minutes: 15, sold_minutes: 50 }],
         },
       },
       { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 1, no_show: 1, no_show_pct: 100 } },
@@ -444,9 +444,9 @@ describe("Reports — the totals card on a period with no movement", () => {
 
   const EMPTY_WALLET = {
     from: "", to: "",
-    top_ups_credits: 0, spent_credits: 0, refunds_credits: 0,
-    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
-    net_movement_credits: 0,
+    top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: 0,
+    penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0,
+    net_movement_minutes: 0,
     penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
   };
 
@@ -476,7 +476,7 @@ describe("Reports — the totals card on a period with no movement", () => {
   it("still shows the direction of a figure that has one", async () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/reports/me/wallet", body: { ...EMPTY_WALLET, top_ups_credits: 160, spent_credits: 24, net_movement_credits: 136 } },
+      { path: "/api/v1/reports/me/wallet", body: { ...EMPTY_WALLET, top_ups_minutes: 160, spent_minutes: 24, net_movement_minutes: 136 } },
       { path: "/api/v1/reports/me/daily", body: [] },
     ]);
     renderMember();
@@ -498,12 +498,12 @@ describe("Reports — one page per reader", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
   const EMPTY_WALLET = {
-    from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0,
-    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
-    net_movement_credits: 0, penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
+    from: "", to: "", top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: 0,
+    penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0,
+    net_movement_minutes: 0, penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
   };
   const CLUB = [
-    { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 0, reversals_zar: 0, net_zar: 0, gross_topups_credits: 0, reversals_credits: 0, net_credits: 0 } },
+    { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 0, reversals_zar: 0, net_zar: 0, gross_topups_minutes: 0, reversals_minutes: 0, net_minutes: 0 } },
     { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
     { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 0, no_show: 0, no_show_pct: 0 } },
     { path: "/api/v1/admin/reports/daily", body: [] },
@@ -587,9 +587,9 @@ describe("Reports — reading, failing, refreshing", () => {
   afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
   const WALLET = {
-    from: "", to: "", top_ups_credits: 160, spent_credits: 24, refunds_credits: 0,
-    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
-    net_movement_credits: 136, penalty_count: 0, attended_bookings: 1, minutes_on_court: 45, count: 2,
+    from: "", to: "", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 0,
+    penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0,
+    net_movement_minutes: 136, penalty_count: 0, attended_bookings: 1, minutes_on_court: 45, count: 2,
   };
 
   it("shows the report's shape while it reads, and no Loading… text", async () => {

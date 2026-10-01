@@ -123,9 +123,9 @@ export default function WalletActivityPage() {
 function ActivityBody({ data }: { data: WalletActivity }) {
   const { wallet, days } = data;
   const tiles: Tile[] = [
-    { label: "Top-ups", value: formatCredits(wallet.top_ups_credits), tone: "success" },
-    { label: "Spent", value: formatCredits(wallet.spent_credits), tone: "accent" },
-    { label: "Refunds (net)", value: formatCredits(wallet.refunds_credits), tone: "neutral" },
+    { label: "Top-ups", value: formatCredits(wallet.top_ups_minutes), tone: "success" },
+    { label: "Spent", value: formatCredits(wallet.spent_minutes), tone: "accent" },
+    { label: "Refunds (net)", value: formatCredits(wallet.refunds_minutes), tone: "neutral" },
     // Attendance, which nothing in the product showed anywhere — `reporting.md` has promised
     // "Time on court" since it was written.
     { label: "Time on court", value: formatMinutes(wallet.minutes_on_court), tone: "neutral" },
@@ -190,24 +190,24 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
       <TotalsCard
         footnote={(
           <>
-            Net movement over this period: <strong className="font-semibold tabular-nums text-text-primary">{formatSignedCredits(wallet.net_movement_credits)}</strong>.
-            That is top-ups − spend + refunds − penalties + adjustments{typeof wallet.share_transfers_credits === "number" ? " + shares" : ""}, and it is exactly what your balance moved by.
-            {typeof wallet.share_transfers_credits === "number" ? ` ${REPORT_SHARES_COPY.memberFootnote}` : null}
+            Net movement over this period: <strong className="font-semibold tabular-nums text-text-primary">{formatSignedCredits(wallet.net_movement_minutes)}</strong>.
+            That is top-ups − spend + refunds − penalties + adjustments{typeof wallet.share_transfers_minutes === "number" ? " + shares" : ""}, and it is exactly what your balance moved by.
+            {typeof wallet.share_transfers_minutes === "number" ? ` ${REPORT_SHARES_COPY.memberFootnote}` : null}
           </>
         )}
       >
-        <Stat label="Top-ups" value={formatSignedCredits(wallet.top_ups_credits)} />
-        <Stat label="Spent" value={formatSignedCredits(-wallet.spent_credits)} />
-        <Stat label="Refunds (net)" value={formatSignedCredits(wallet.refunds_credits)} />
-        <Stat label="Penalties" value={formatSignedCredits(-wallet.penalties_credits)} />
-        <Stat label="Adjustments" value={formatSignedCredits(wallet.adjustments_credits)} />
+        <Stat label="Top-ups" value={formatSignedCredits(wallet.top_ups_minutes)} />
+        <Stat label="Spent" value={formatSignedCredits(-wallet.spent_minutes)} />
+        <Stat label="Refunds (net)" value={formatSignedCredits(wallet.refunds_minutes)} />
+        <Stat label="Penalties" value={formatSignedCredits(-wallet.penalties_minutes)} />
+        <Stat label="Adjustments" value={formatSignedCredits(wallet.adjustments_minutes)} />
         {/* D11 — optional on the wire: an API that predates shares sends neither, and a row
             reading 0.00 for a figure the server never sent would be a claim it did not make. */}
-        {typeof wallet.share_transfers_credits === "number" ? (
-          <Stat label={REPORT_SHARES_COPY.memberShares} value={formatSignedCredits(wallet.share_transfers_credits)} />
+        {typeof wallet.share_transfers_minutes === "number" ? (
+          <Stat label={REPORT_SHARES_COPY.memberShares} value={formatSignedCredits(wallet.share_transfers_minutes)} />
         ) : null}
-        {typeof wallet.net_court_spend_credits === "number" ? (
-          <Stat label={REPORT_SHARES_COPY.memberNetCourt} value={formatCredits(wallet.net_court_spend_credits)} />
+        {typeof wallet.net_court_spend_minutes === "number" ? (
+          <Stat label={REPORT_SHARES_COPY.memberNetCourt} value={formatCredits(wallet.net_court_spend_minutes)} />
         ) : null}
         <Stat label="Penalty count" value={String(wallet.penalty_count)} />
         <Stat label="Bookings played" value={`${wallet.attended_bookings} · ${formatMinutes(wallet.minutes_on_court)}`} />
@@ -219,11 +219,11 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
 
 const DAY_COLUMNS: DataColumn<DailyMePoint>[] = [
   { key: "date", header: "Date", cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
-  { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => <Cell>{formatCredits(r.top_ups_credits)}</Cell>, sortValue: (r) => r.top_ups_credits },
-  { key: "spent_credits", header: "Spent", align: "right", cell: (r) => <Cell>{formatCredits(r.spent_credits)}</Cell>, sortValue: (r) => r.spent_credits },
-  { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
+  { key: "top_ups_minutes", header: "Top-ups", align: "right", cell: (r) => <Cell>{formatCredits(r.top_ups_minutes)}</Cell>, sortValue: (r) => r.top_ups_minutes },
+  { key: "spent_minutes", header: "Spent", align: "right", cell: (r) => <Cell>{formatCredits(r.spent_minutes)}</Cell>, sortValue: (r) => r.spent_minutes },
+  { key: "refunds_minutes", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_minutes} />, sortValue: (r) => r.refunds_minutes },
   { key: "bookings", header: "Bookings", align: "right", cell: (r) => <Cell>{r.bookings}</Cell>, sortValue: (r) => r.bookings },
-  { key: "balance_credits", header: "Balance", align: "right", cell: (r) => <Cell>{formatCredits(r.balance_credits)}</Cell>, sortValue: (r) => r.balance_credits },
+  { key: "balance_minutes", header: "Balance", align: "right", cell: (r) => <Cell>{formatCredits(r.balance_minutes)}</Cell>, sortValue: (r) => r.balance_minutes },
 ];
 
 function DailyBreakdown({ days }: { days: DailyMePoint[] }) {

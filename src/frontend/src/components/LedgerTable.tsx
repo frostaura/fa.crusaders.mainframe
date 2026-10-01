@@ -138,7 +138,7 @@ function sortValue(row: LedgerRow, key: Column): string | number {
     case "time": return new Date(row.at).getTime();
     case "from": return row.from;
     case "to": return row.to;
-    case "amount": return row.signedAmountCredits;
+    case "amount": return row.signedAmountMinutes;
     case "comment": return row.comment ?? "";
     case "category": return ledgerCategory(row);
     case "actor": return ledgerDoneBy(row);

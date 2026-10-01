@@ -12,9 +12,9 @@ function serve() {
     { path: "/api/v1/wallet", respond: (req) => {
       const limit = Number(new URL(req.path, "http://x").searchParams.get("limit") ?? 100);
       const shares = req.path.includes("include=share_bookings") ? { share_bookings: { b1: null } } : {};
-      return { balance_credits: 90, entries: rows(Math.min(limit, 120)), total_entries: 120, offset: 0, limit, ...shares };
+      return { balance_minutes: 90, entries: rows(Math.min(limit, 120)), total_entries: 120, offset: 0, limit, ...shares };
     } },
-    { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 40 } },
+    { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_minutes: 40 } },
   ]);
 }
 const walletCalls = (stub: ReturnType<typeof serve>) => stub.calls.filter((c) => c.path.startsWith("/api/v1/wallet"));
@@ -30,7 +30,7 @@ describe("the wallet read", () => {
     expect(chip.entries).toHaveLength(100);
     expect(checklist.entries).toHaveLength(50);
     expect(checklist.limit).toBe(50);
-    expect(checklist.balance_credits).toBe(90);
+    expect(checklist.balance_minutes).toBe(90);
   });
 
   it("asks the club again once that read has finished — a Refresh is always a read", async () => {

@@ -448,12 +448,12 @@ function TraceCard({ event, subjectName, timezone }: {
           </span>
         )}
       </div>
-      {typeof event.amount_credits === "number" && (
+      {typeof event.amount_minutes === "number" && (
         <p className="text-sm text-text-secondary">
-          {`${event.amount_credits < 0 ? MINUS : "+"}${Math.abs(event.amount_credits).toFixed(2)} credits`}
-          {typeof event.balance_after_credits === "number"
+          {`${event.amount_minutes < 0 ? MINUS : "+"}${Math.abs(event.amount_minutes).toFixed(2)} credits`}
+          {typeof event.balance_after_minutes === "number"
             // U+2212 like every other figure on the admin (F3-14: "-100.00" sat beside "−200.00").
-            ? ` · balance ${formatCredits(event.balance_after_credits, { long: true }).replace(/ credits$/, "")}`
+            ? ` · balance ${formatCredits(event.balance_after_minutes, { long: true }).replace(/ credits$/, "")}`
             : ""}
         </p>
       )}

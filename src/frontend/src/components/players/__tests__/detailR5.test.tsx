@@ -82,7 +82,7 @@ const SWEPT_END = "2026-09-30T16:05:00Z";
 function partner(pid: string, n: number, name: string) {
   return seat({
     participant_id: pid, seat: n, team: n <= 2 ? "A" : "B", kind: "member", user_id: `u-${n}`, name,
-    share_credits: 16, consented_credits: 16, paid_credits: 4.8, target_credits: 4.8, returned_credits: 11.2,
+    share_minutes: 16, consented_minutes: 16, paid_minutes: 4.8, target_minutes: 4.8, returned_minutes: 11.2,
   });
 }
 function noShow(overrides: Partial<BookingDetail> = {}): BookingDetail {
@@ -90,8 +90,8 @@ function noShow(overrides: Partial<BookingDetail> = {}): BookingDetail {
     status: "no_show", ends_at: SWEPT_END, sold_ends_at: SOLD_END,
     players: [seat({ name: "Olga Petrova" }), partner(PID.sam, 2, "Pieter Botha"), partner(PID.alex, 3, "Thandi Third")],
     money: {
-      price_credits: 50, organiser_owed_credits: 15, shares_received_credits: 9.6, organiser_net_credits: 5.4,
-      unpaid_credits: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: true,
+      price_minutes: 50, organiser_owed_minutes: 15, shares_received_minutes: 9.6, organiser_net_minutes: 5.4,
+      unpaid_minutes: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: true,
     },
     permissions: {
       can_invite: false, can_change_split: false, can_cancel: false, can_accept: false, can_decline: false,
@@ -143,7 +143,7 @@ describe("M5-3 — a no-show has its own money view", () => {
   it("a waived no-show (the box was dark) says it all came back, with no penalty row", async () => {
     serve({ detail: noShow({
       players: [seat({ name: "Olga Petrova" })],
-      money: { price_credits: 50, organiser_owed_credits: 0, shares_received_credits: 0, organiser_net_credits: 0, unpaid_credits: 0, share_deadline: STARTS, is_split: false },
+      money: { price_minutes: 50, organiser_owed_minutes: 0, shares_received_minutes: 0, organiser_net_minutes: 0, unpaid_minutes: 0, share_deadline: STARTS, is_split: false },
     }) });
     renderDetail();
     await screen.findByText(DETAIL_NO_SHOW.moneyNoteFree);
@@ -161,7 +161,7 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
   it("not split: refunded 50 and the 15 penalty, as the ledger's two rows; cost 15", async () => {
     serve({ detail: detail({
       status: "cancelled", players: [seat()], permissions: CANCELLED_PERMISSIONS,
-      money: { price_credits: 50, organiser_owed_credits: 15, shares_received_credits: 0, organiser_net_credits: 15, unpaid_credits: 0, share_deadline: STARTS, is_split: false },
+      money: { price_minutes: 50, organiser_owed_minutes: 15, shares_received_minutes: 0, organiser_net_minutes: 15, unpaid_minutes: 0, share_deadline: STARTS, is_split: false },
     }) });
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
@@ -174,8 +174,8 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
   it("split (Olga and Thandi): the penalty row and the words name it; Thandi's 25 back", async () => {
     serve({ detail: detail({
       status: "cancelled", permissions: CANCELLED_PERMISSIONS,
-      players: [seat({ name: "Olga Petrova" }), { ...SAM_SEAT, name: "Thandi Third", paid_credits: 0, returned_credits: 25 }],
-      money: { price_credits: 50, organiser_owed_credits: 15, shares_received_credits: 0, organiser_net_credits: 15, unpaid_credits: 0, share_deadline: STARTS, is_split: true },
+      players: [seat({ name: "Olga Petrova" }), { ...SAM_SEAT, name: "Thandi Third", paid_minutes: 0, returned_minutes: 25 }],
+      money: { price_minutes: 50, organiser_owed_minutes: 15, shares_received_minutes: 0, organiser_net_minutes: 15, unpaid_minutes: 0, share_deadline: STARTS, is_split: true },
     }) });
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
@@ -189,7 +189,7 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
     serve({ detail: detail({
       status: "cancelled", players: [seat()], permissions: CANCELLED_PERMISSIONS,
       attendance: { checked_in_at: "2026-09-30T16:01:00Z", players_checked_in: 1 },
-      money: { price_credits: 50, organiser_owed_credits: 50, shares_received_credits: 0, organiser_net_credits: 50, unpaid_credits: 0, share_deadline: STARTS, is_split: false },
+      money: { price_minutes: 50, organiser_owed_minutes: 50, shares_received_minutes: 0, organiser_net_minutes: 50, unpaid_minutes: 0, share_deadline: STARTS, is_split: false },
     }) });
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
@@ -202,7 +202,7 @@ describe("M5-8 — a member taken off the game is told so, not 'Booking not foun
   const REMOVED: MySeat = {
     participant_id: PID.alex, booking_id: BOOKING, status: "removed", lapsed: false, settled_outside: false,
     booking_status: "booked", court_name: "Court 4", starts_at: STARTS, ends_at: "2026-09-30T16:45:00Z",
-    organiser_name: "Olga", share_credits: 16, timezone: "Africa/Johannesburg",
+    organiser_name: "Olga", share_minutes: 16, timezone: "Africa/Johannesburg",
   };
 
   function renderAt(url: string) {

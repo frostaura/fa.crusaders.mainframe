@@ -102,13 +102,13 @@ export function useWalletLedger() {
       setUnreachable(false);
       setRows(data.entries);
       setShareBookings(shareBookingsFrom(data.share_bookings));
-      setCardBalance(data.balance_credits);
+      setCardBalance(data.balance_minutes);
       setReadHeld(heldFrom(data));
       setTotal(data.total_entries);
       setError(null);
       setReadAt(Date.now());
-      lastRead.current = data.balance_credits;
-      if ((confirmedAt.current ?? -Infinity) < issuedAt) apply(data.balance_credits);
+      lastRead.current = data.balance_minutes;
+      if ((confirmedAt.current ?? -Infinity) < issuedAt) apply(data.balance_minutes);
       return data.entries;
     } catch (err) {
       // The thrown value whole, so the failure sentence can say WHY and the retry can be
@@ -194,9 +194,9 @@ function useMoneyAnnouncement(
 
 /** The page the phone kept, as the figures the card and ledger draw — the live figure still wins. */
 function fromKept(page: WalletResponse, liveBalance: number | null, liveHeld: HeldFigures | null, countUp: number | null) {
-  const balance = liveBalance ?? page.balance_credits;
+  const balance = liveBalance ?? page.balance_minutes;
   return {
-    rows: page.entries, shareBookings: shareBookingsFrom(page.share_bookings), cardBalance: page.balance_credits,
+    rows: page.entries, shareBookings: shareBookingsFrom(page.share_bookings), cardBalance: page.balance_minutes,
     total: page.total_entries, balance, painted: countUp ?? balance, held: liveHeld ?? heldFrom(page),
   };
 }
@@ -218,7 +218,7 @@ function matchingRow(
 ): { type: LedgerEntryType; actorName: string | null } | null {
   if (!rows) return null;
   const wanted = direction === "up" ? amount : -amount;
-  const row = rows.find((r) => Math.abs(r.signedAmountCredits - wanted) < 0.005);
+  const row = rows.find((r) => Math.abs(r.signedAmountMinutes - wanted) < 0.005);
   if (!row) return null;
   // An admin crediting somebody is an actor who is not the subject. A top-up the member made
   // themselves has the member as both, and naming them back to themselves reads as a fault.

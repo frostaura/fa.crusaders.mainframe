@@ -53,8 +53,8 @@ describe("CreditsChip — loading, and a change of member", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
       { path: WALLET, body: null, sequence: [
-        { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 },
-        { balance_credits: 170, entries: [], total_entries: 0, offset: 0, limit: 100 },
+        { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 },
+        { balance_minutes: 170, entries: [], total_entries: 0, offset: 0, limit: 100 },
       ] },
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "olivia.token.value", user_id: OLIVIA, is_admin: false } },
     ]);

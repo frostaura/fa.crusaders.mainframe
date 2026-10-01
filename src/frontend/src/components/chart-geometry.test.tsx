@@ -33,10 +33,10 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
  */
 
 const ADMIN: DailyAdminPoint[] = [
-  { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 141.6, bookings: 3, no_shows: 1 },
+  { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2.4, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 141.6, bookings: 3, no_shows: 1 },
 ];
 const ME: DailyMePoint[] = [
-  { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
+  { date: "2026-09-01", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 136 },
 ];
 
 /** The palette the drawings are handed; geometry does not depend on which theme it is. */
@@ -54,7 +54,7 @@ const CHARTS: [string, ReactNode, "credits" | "counts"][] = [
   ["Top-ups over time", drawRevenueArea(ADMIN, P), "credits"],
   ["Daily money flow (club)", drawDailyFlow(ADMIN, P), "credits"],
   ["Bookings & no-shows", drawBookingsLine(ADMIN, P), "counts"],
-  ["Revenue by court", drawCourtsRevenue([{ court_name: "Court 1", revenue_credits: 80, bookings: 4 }], P), "credits"],
+  ["Revenue by court", drawCourtsRevenue([{ court_name: "Court 1", kept_minutes: 80, bookings: 4 }], P), "credits"],
   ["Wallet balance", drawMyBalance(ME, P), "credits"],
   ["Daily money flow (member)", drawMyFlow(ME, P), "credits"],
   ["My bookings", drawMyBookings(ME, P), "counts"],
@@ -122,7 +122,7 @@ describe("chart plot area", () => {
 describe("a credit axis is as wide as its own numbers", () => {
   /** A club day whose net penalties are a four-figure reversal. Real shape, extreme value. */
   const bigNegative: DailyAdminPoint[] = [
-    { date: "2026-09-01", top_ups_credits: 200, booking_charges_credits: 30, refunds_credits: 0, penalties_credits: -1350, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: -1180, bookings: 4, no_shows: 0 },
+    { date: "2026-09-01", top_ups_minutes: 200, booking_charges_minutes: 30, refunds_minutes: 0, penalties_minutes: -1350, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: -1180, bookings: 4, no_shows: 0 },
   ];
 
   const widthsOf = (chart: ReactNode) =>
@@ -160,7 +160,7 @@ describe("a credit axis is as wide as its own numbers", () => {
    */
   it("reaches the stacked sum, not the largest single bar", () => {
     const stacked: DailyAdminPoint[] = [
-      { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: -760, refunds_credits: 0, penalties_credits: -700, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: -1300, bookings: 2, no_shows: 0 },
+      { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: -760, refunds_minutes: 0, penalties_minutes: -700, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: -1300, bookings: 2, no_shows: 0 },
     ];
     const width = widthsOf(drawDailyFlow(stacked, P))[0];
     expect(width).toBe(creditAxisWidth([-1460]));

@@ -16,7 +16,7 @@ import { CreditsChip } from "../shell/CreditsChip";
 const UNTIL = "2026-10-02T18:45:00Z";
 
 function wallet(over: Record<string, unknown> = {}) {
-  return { balance_credits: 120, entries: [], total_entries: 0, offset: 0, limit: 100, ...over };
+  return { balance_minutes: 120, entries: [], total_entries: 0, offset: 0, limit: 100, ...over };
 }
 
 function stub(body: Record<string, unknown>) {
@@ -34,7 +34,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); });
 
 describe("the wallet card's held line", () => {
   it("says what is held, until when, what can be spent, and why", async () => {
-    stub(wallet({ held_credits: 20, spendable_credits: 100, held_until: UNTIL }));
+    stub(wallet({ held_minutes: 20, spendable_minutes: 100, held_until: UNTIL }));
     renderPage(<WalletPage />);
     const line = await screen.findByText(heldLine(20, UNTIL));
     expect(line.closest("[data-held-line]")).toHaveTextContent(spendableLine(100));
@@ -46,10 +46,10 @@ describe("the wallet card's held line", () => {
   // F4-18 (C4) — one release date for the whole amount was wrong when two games' shares were held.
   it("explains each held part with its own release when there are two deadlines", async () => {
     const parts = [
-      { credits: 35, until: "2026-10-04T08:30:00Z" },
-      { credits: 25, until: "2026-10-02T04:45:00Z" },
+      { minutes: 35, until: "2026-10-04T08:30:00Z" },
+      { minutes: 25, until: "2026-10-02T04:45:00Z" },
     ];
-    stub(wallet({ held_credits: 60, spendable_credits: 60, held_until: "2026-10-02T04:45:00Z", held_parts: parts }));
+    stub(wallet({ held_minutes: 60, spendable_minutes: 60, held_until: "2026-10-02T04:45:00Z", held_parts: parts }));
     renderPage(<WalletPage />);
     const line = await screen.findByText(heldLine(60, null));
     const block = line.closest("[data-held-line]")!;
@@ -58,7 +58,7 @@ describe("the wallet card's held line", () => {
   });
 
   it("says nothing when nothing is held", async () => {
-    stub(wallet({ held_credits: 0, spendable_credits: 120, held_until: null }));
+    stub(wallet({ held_minutes: 0, spendable_minutes: 120, held_until: null }));
     renderPage(<WalletPage />);
     await screen.findByText("No movements yet");
     expect(document.querySelector("[data-held-line]")).toBeNull();
@@ -66,7 +66,7 @@ describe("the wallet card's held line", () => {
   });
 
   it("P11: names what is owed back to partners, and never says a negative spendable", async () => {
-    stub(wallet({ balance_credits: 10, held_credits: 0, owed_back_credits: 16, spendable_credits: -6, held_until: null }));
+    stub(wallet({ balance_minutes: 10, held_minutes: 0, owed_back_minutes: 16, spendable_minutes: -6, held_until: null }));
     renderPage(<WalletPage />);
     const line = await screen.findByText(owedBackLine(16));
     const block = line.closest("[data-held-line]");
@@ -79,7 +79,7 @@ describe("the wallet card's held line", () => {
   });
 
   it("P11: held and owed back together, each with its own reason", async () => {
-    stub(wallet({ balance_credits: 120, held_credits: 20, owed_back_credits: 16, spendable_credits: 84, held_until: UNTIL }));
+    stub(wallet({ balance_minutes: 120, held_minutes: 20, owed_back_minutes: 16, spendable_minutes: 84, held_until: UNTIL }));
     renderPage(<WalletPage />);
     const line = await screen.findByText(heldLine(20, UNTIL));
     const block = line.closest("[data-held-line]");
@@ -108,7 +108,7 @@ describe("the chip's name mentions what is held", () => {
   });
 
   it("P11: wears what is owed back on the live chip, name and title", async () => {
-    stub(wallet({ held_credits: 0, owed_back_credits: 16, spendable_credits: 104, held_until: null }));
+    stub(wallet({ held_minutes: 0, owed_back_minutes: 16, spendable_minutes: 104, held_until: null }));
     renderPage(<CreditsChip />);
     const chip = await screen.findByRole("link", { name: /120\.00 credits, 16\.00 owed back to partners/ }, { timeout: 5_000 });
     await waitFor(() => expect(chip).toHaveAttribute("title", "104.00 cr to spend — 120.00 cr in your wallet, 16.00 cr owed back to partners. Tap to top up."));
@@ -122,7 +122,7 @@ describe("the chip's name mentions what is held", () => {
    * be spent, and its name and title say what the rest is.
    */
   it("shows what can be spent, and names the whole balance and what is held", async () => {
-    stub(wallet({ held_credits: 20, spendable_credits: 100, held_until: UNTIL }));
+    stub(wallet({ held_minutes: 20, spendable_minutes: 100, held_until: UNTIL }));
     renderPage(<CreditsChip />);
     const chip = await screen.findByRole("link", { name: /120\.00 credits, 20\.00 held for partners/ }, { timeout: 5_000 });
     await waitFor(() => expect(chip).toHaveTextContent("100.00 cr"));
@@ -132,7 +132,7 @@ describe("the chip's name mentions what is held", () => {
   });
 
   it("says a member with nothing to spend cannot book, whatever the whole balance is", async () => {
-    stub(wallet({ held_credits: 0, owed_back_credits: 130, spendable_credits: -10, held_until: null }));
+    stub(wallet({ held_minutes: 0, owed_back_minutes: 130, spendable_minutes: -10, held_until: null }));
     renderPage(<CreditsChip />);
     const chip = await screen.findByRole("link", { name: /nothing to spend/ }, { timeout: 5_000 });
     expect(chip).toHaveAccessibleName(/You can't book until you top up/);
@@ -140,7 +140,7 @@ describe("the chip's name mentions what is held", () => {
   });
 
   it("keeps the plain balance when nothing is set aside (the fixture, varied)", async () => {
-    stub(wallet({ held_credits: 0, owed_back_credits: 0, spendable_credits: 120, held_until: null }));
+    stub(wallet({ held_minutes: 0, owed_back_minutes: 0, spendable_minutes: 120, held_until: null }));
     renderPage(<CreditsChip />);
     const chip = await screen.findByRole("link", { name: walletLabel(120, false, "live") }, { timeout: 5_000 });
     await waitFor(() => expect(chip).toHaveTextContent("120.00 cr"));

@@ -40,7 +40,7 @@ const PROFILE = {
   full_name: "Club Desk", membership_number: "M-1", photo_url: null, status: "active",
 };
 
-const WALLET = { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 };
+const WALLET = { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 };
 
 type MemberRow = ReturnType<typeof memberFixture>;
 

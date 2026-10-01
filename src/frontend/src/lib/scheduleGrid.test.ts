@@ -51,7 +51,7 @@ function slot(startsAtUtc: string, endsAtUtc: string, overrides: Partial<Schedul
     bookingId: "99999999-9999-9999-9999-999999999999",
     blockLabel: null,
     checkedIn: false,
-    amountChargedCredits: 50,
+    amountChargedMinutes: 50,
     ...overrides,
   };
 }
@@ -79,7 +79,7 @@ describe("slotAt — a booking occupies every cell it covers", () => {
     // The box stamps StartsAt = now. 12:51:05 -> 13:21:05 is a real row from the finding:
     // relay B closed, 100.00 credits charged, and BOTH 13:00 and 13:15 read "Available"
     // for the member and for the admin, while the court was lit and in use.
-    const walkUp = slot(sast(12, 51, 5), sast(13, 21, 5), { isMine: false, checkedIn: null, amountChargedCredits: null });
+    const walkUp = slot(sast(12, 51, 5), sast(13, 21, 5), { isMine: false, checkedIn: null, amountChargedMinutes: null });
     const byCourt = groupSlotsByCourt(day({}, [walkUp]));
 
     expect(slotAt(byCourt, COURT, Date.parse(sast(12, 45)), 15)).toBe(walkUp);

@@ -73,25 +73,25 @@ export type BalanceDelta = {
 
 /** One frame off the wire. Every field but the balance is optional — an older API sends none. */
 export type BalanceFrame = {
-  balance_credits: number;
-  delta_credits?: number;
+  balance_minutes: number;
+  delta_minutes?: number;
   reason?: string;
   /**
    * D11 (§3a): shares an organiser received, HELD for their partners' possible returns until
    * `held_until` (the earliest share deadline among them). Part of the balance, not spendable.
-   * Every spend decision reads `spendable_credits`. Absent from an API that predates P11.
+   * Every spend decision reads `spendable_minutes`. Absent from an API that predates P11.
    */
-  held_credits?: number;
-  spendable_credits?: number;
+  held_minutes?: number;
+  spendable_minutes?: number;
   held_until?: string | null;
-  /** C4 — the held credit per share deadline, soonest first; sums to `held_credits`. */
-  held_parts?: { credits: number; until: string }[];
+  /** C4 — the held credit per share deadline, soonest first; sums to `held_minutes`. */
+  held_parts?: { minutes: number; until: string }[];
   /**
    * P11 — credits the organiser OWES BACK to partners whose return is waiting because the
    * organiser's balance could not cover it. No release date: incoming credit pays it first.
-   * `spendable_credits` is balance − held − owed back, so it can be negative. Absent before P11.
+   * `spendable_minutes` is balance − held − owed back, so it can be negative. Absent before P11.
    */
-  owed_back_credits?: number;
+  owed_back_minutes?: number;
 };
 
 /**
@@ -111,7 +111,7 @@ export type HeldFigures = {
 };
 
 type HeldWire = {
-  balance_credits: number; held_credits?: number; spendable_credits?: number; held_until?: string | null; owed_back_credits?: number;
+  balance_minutes: number; held_minutes?: number; spendable_minutes?: number; held_until?: string | null; owed_back_minutes?: number;
   held_parts?: unknown;
 };
 
@@ -121,9 +121,9 @@ function positive(value: number | undefined): number {
 
 /** The held figures a frame (or a wallet read) carries, or the no-hold default. */
 export function heldFrom(frame: HeldWire): HeldFigures {
-  const held = positive(frame.held_credits);
-  const owedBack = positive(frame.owed_back_credits);
-  const spendable = typeof frame.spendable_credits === "number" ? frame.spendable_credits : frame.balance_credits - held - owedBack;
+  const held = positive(frame.held_minutes);
+  const owedBack = positive(frame.owed_back_minutes);
+  const spendable = typeof frame.spendable_minutes === "number" ? frame.spendable_minutes : frame.balance_minutes - held - owedBack;
   const parts = held > 0 ? heldPartsOf(frame) : [];
   return { held, owedBack, spendable, until: held > 0 ? frame.held_until ?? null : null, ...(parts.length > 0 ? { parts } : {}) };
 }
@@ -235,7 +235,7 @@ export function sseTransport(): BalanceTransport {
         heardFrom();
         try {
           const msg = JSON.parse(raw) as BalanceFrame;
-          if (typeof msg.balance_credits === "number") {
+          if (typeof msg.balance_minutes === "number") {
             // A read already on its way may predate this movement: never join it (api `readWallet`).
             noteWalletMoved();
             onFrame(msg);
@@ -291,7 +291,7 @@ export type LiveBalance = {
    * re-read is indistinguishable from an admin crediting the member at the desk, so the chip
    * announces it — which is right for the refresh on focus and on visibility, and wrong on
    * the path where the page has ALREADY told the member what happened. Cancelling a booking
-   * is that path: its endpoint answers with `refunded_credits` and `penalty_credits` and no
+   * is that path: its endpoint answers with `refunded_minutes` and `penalty_minutes` and no
    * balance, so there is no figure to `apply`, and the un-flagged re-read raised "The club
    * added 50 credits" over the page's own "50.00 back".
    * </p>
@@ -375,7 +375,7 @@ export function useLiveBalance({
     previous.current = credits;
     setBalance(credits);
     setLastConfirmedAt(Date.now());
-    const amount = frame?.delta_credits ?? (before === null ? 0 : credits - before);
+    const amount = frame?.delta_minutes ?? (before === null ? 0 : credits - before);
     // A first read is not a movement: `null -> 400.00` is the first time the member has been
     // told, not money arriving. Neither is a re-read that confirms what we already had.
     if (before === null || Math.abs(amount) < 0.01) { expectSelf.current = false; return; }
@@ -402,7 +402,7 @@ export function useLiveBalance({
       const w = await endpoints.wallet(CHIP_WALLET_ROWS);
       if (asked !== generation.current) return;
       setHeldFigures(heldFrom(w));
-      record(w.balance_credits);
+      record(w.balance_minutes);
       setState((current) => (current === "degraded" ? "degraded" : "live"));
     } catch {
       // Silent: the chip keeps the figure it has. What it must NOT do is claim that figure is
@@ -528,7 +528,7 @@ export function useLiveBalance({
             backoffMs = policy.backoffInitialMs;
             setState("live");
             setHeldFigures(heldFrom(frame));
-            record(frame.balance_credits, frame);
+            record(frame.balance_minutes, frame);
           },
           onNotification: (count) => setUnreadCount(Math.max(0, count)),
           onSilence: () => {

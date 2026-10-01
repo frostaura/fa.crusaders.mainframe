@@ -5,8 +5,8 @@ import { formatCredits, formatMoney } from "./utils";
 
 /** The desk adjustment's refusals, by the server's codes and figures (review round 1 contract §5, §9). */
 describe("adjustRefusal", () => {
-  it("reads the ceiling from max_credits, or from the contract's max", () => {
-    expect(adjustRefusal(new ApiError(400, { error: "amount_out_of_range", max_credits: 5000 }))).toContain(formatCredits(5000));
+  it("reads the ceiling from max_minutes, or from the contract's max", () => {
+    expect(adjustRefusal(new ApiError(400, { error: "amount_out_of_range", max_minutes: 5000 }))).toContain(formatCredits(5000));
     expect(adjustRefusal(new ApiError(400, { error: "amount_out_of_range", max: 750 }))).toContain(formatCredits(750));
   });
 

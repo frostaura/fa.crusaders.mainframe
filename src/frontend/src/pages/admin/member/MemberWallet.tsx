@@ -34,7 +34,7 @@ import { useMemberDetail } from "./useMemberDetail";
 export function MemberWallet() {
   const { detail, name, userId, readAt, openTopUp } = useMemberDetail();
   const load = useCallback(() => endpoints.adminLedger({ userId, limit: LEDGER_LIMIT }), [userId]);
-  const [ledger, retry] = useRead(`${userId}:${detail.balance_credits}:${readAt ?? 0}`, load);
+  const [ledger, retry] = useRead(`${userId}:${detail.balance_minutes}:${readAt ?? 0}`, load);
   const rows = ledger.data ?? [];
   const [opened, setOpened] = useState<LedgerRow | null>(null);
 

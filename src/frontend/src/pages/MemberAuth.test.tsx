@@ -756,7 +756,7 @@ describe("RequireAuth", () => {
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t", user_id: "u1", is_admin: false } },
       { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1" } },
       { path: "/api/v1/me/profile", body: { user_id: "u1", email: "a@b.test", is_admin: false, tenant_slug: "crusaders", full_name: "Ada", membership_number: "M-1", photo_url: null, status: "active" } },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [] } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [] } },
     ]);
     signOut(); // arrive genuinely signed out, the way a bookmarked link does
 
@@ -772,7 +772,7 @@ describe("RequireAuth", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1" } },
       { path: "/api/v1/me/profile", body: { user_id: "u1", email: "a@b.test", is_admin: false, tenant_slug: "crusaders", full_name: "Ada", membership_number: "M-1", photo_url: null, status: "active" } },
-      { path: "/api/v1/wallet", body: { balance_credits: 300, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 300, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
 
@@ -811,7 +811,7 @@ describe("RequireAuth", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1", must_change_password: true } },
       { path: "/api/v1/me/profile", body: { user_id: "u1", email: "a@b.test", is_admin: false, tenant_slug: "crusaders", full_name: "Ada", membership_number: "M-1", photo_url: null, status: "active" } },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [] } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [] } },
     ]);
 
     render(<App />);
@@ -855,7 +855,7 @@ describe("the header across a forced password change", () => {
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1", must_change_password: true } },
       { path: "/api/v1/me/profile", body: ADA },
-      { path: "/api/v1/wallet", body: { balance_credits: 300, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 300, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
       { method: "POST", path: "/api/v1/me/password", body: { changed: true } },
     ]);

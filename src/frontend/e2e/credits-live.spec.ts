@@ -37,7 +37,7 @@ function club(startingBalance: number) {
         if (path === "/api/v1/whoami") return json({ ...SESSION_ADMIN, is_admin: false });
         if (path === "/api/v1/me/profile") return json(PROFILE);
         if (path === "/api/v1/wallet") {
-          return json({ balance_credits: balance, entries: [], total_entries: 0, offset: 0, limit: 100 });
+          return json({ balance_minutes: balance, entries: [], total_entries: 0, offset: 0, limit: 100 });
         }
         if (path === "/api/v1/wallet/stream-ticket") return json({ ticket: "t", expires_in_seconds: 60 });
         if (path === "/api/v1/wallet/stream") {
@@ -54,7 +54,7 @@ function club(startingBalance: number) {
             status: 200,
             contentType: "text/event-stream",
             headers: { "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" },
-            body: `event: balance\ndata: ${JSON.stringify({ balance_credits: balance })}\n\n`,
+            body: `event: balance\ndata: ${JSON.stringify({ balance_minutes: balance })}\n\n`,
           });
         }
         if (path === "/api/v1/schedule") {

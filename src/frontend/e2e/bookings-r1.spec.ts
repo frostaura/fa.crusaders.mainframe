@@ -38,7 +38,7 @@ async function open(page: Page, options: { isAdmin?: boolean; date?: string } = 
     { path: "/api/v1/schedule", body: wholeDay(date) },
     { path: "/api/v1/admin/members/", body: [] },
     { path: "/api/v1/me/bookings/upcoming", body: { timezone: "UTC", items: [] } },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
   ]);
   await page.goto(date ? `/bookings?date=${date}` : "/bookings");

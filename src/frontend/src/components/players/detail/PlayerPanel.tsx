@@ -75,7 +75,7 @@ function CancelledShare({ seat }: { seat: DetailPlayer }) {
   return (
     <Section title={DETAIL_PLAYER.title}>
       <p className="text-sm text-text-secondary" data-cancelled-share="">
-        {seat.paid_credits > 0 ? keepAmounts(DETAIL_CANCELLED.partnerPaid(formatCredits(seat.paid_credits))) : DETAIL_CANCELLED.partnerNothing}
+        {seat.paid_minutes > 0 ? keepAmounts(DETAIL_CANCELLED.partnerPaid(formatCredits(seat.paid_minutes))) : DETAIL_CANCELLED.partnerNothing}
       </p>
     </Section>
   );
@@ -86,10 +86,10 @@ function CancelledShare({ seat }: { seat: DetailPlayer }) {
  * back. Nothing is asked any more — no "Still to pay", no "all paid up", no Review.
  */
 function NoShowShare({ seat }: { seat: DetailPlayer }) {
-  const back = seat.returned_credits ?? 0;
-  const paidIn = seat.paid_credits + back;
+  const back = seat.returned_minutes ?? 0;
+  const paidIn = seat.paid_minutes + back;
   let words: string = DETAIL_NO_SHOW.partnerNothing;
-  if (back > 0) words = DETAIL_NO_SHOW.partnerBack(formatCredits(paidIn), formatCredits(back), formatCredits(seat.paid_credits));
+  if (back > 0) words = DETAIL_NO_SHOW.partnerBack(formatCredits(paidIn), formatCredits(back), formatCredits(seat.paid_minutes));
   else if (paidIn > 0) words = DETAIL_NO_SHOW.partnerPaid(formatCredits(paidIn));
   return (
     <Section title={DETAIL_PLAYER.title}>
@@ -102,12 +102,12 @@ function ShareFigures({ seat }: { seat: DetailPlayer }) {
   return (
     <div className="flex flex-col gap-3">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
-        <Figure term={DETAIL_PLAYER.share} value={seat.share_credits} />
-        <Figure term={DETAIL_PLAYER.paid} value={seat.paid_credits} />
-        <Figure term={DETAIL_PLAYER.toPay} value={seat.unpaid_credits} strong />
+        <Figure term={DETAIL_PLAYER.share} value={seat.share_minutes} />
+        <Figure term={DETAIL_PLAYER.paid} value={seat.paid_minutes} />
+        <Figure term={DETAIL_PLAYER.toPay} value={seat.unpaid_minutes} strong />
       </dl>
-      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(DETAIL_PLAYER.askedAgain(formatCredits(seat.share_credits)))}</Alert> : null}
-      {seat.status === "accepted" && seat.unpaid_credits <= 0 && !seat.needs_consent ? (
+      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(DETAIL_PLAYER.askedAgain(formatCredits(seat.share_minutes)))}</Alert> : null}
+      {seat.status === "accepted" && seat.unpaid_minutes <= 0 && !seat.needs_consent ? (
         <p className="text-sm text-success-strong">{DETAIL_PLAYER.paidAll}</p>
       ) : null}
     </div>

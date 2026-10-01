@@ -137,14 +137,14 @@ describe("invite, remind, link", () => {
 describe("change the split", () => {
   const PREVIEW = "/api/v1/players/split-preview";
   function previewOf({ body }: { body: unknown }) {
-    const req = body as { priceCredits: number; players: { seat: number; amount?: number }[] };
-    const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_credits: p.amount ?? 25, weight: 1 }));
-    const taken = partners.reduce((n, p) => n + p.share_credits, 0);
-    return { price_credits: req.priceCredits, shares: [{ seat: 1, team: "A", share_credits: req.priceCredits - taken, weight: 1 }, ...partners] };
+    const req = body as { priceMinutes: number; players: { seat: number; amount?: number }[] };
+    const partners = req.players.map((p) => ({ seat: p.seat, team: p.seat <= 2 ? "A" : "B", share_minutes: p.amount ?? 25, weight: 1 }));
+    const taken = partners.reduce((n, p) => n + p.share_minutes, 0);
+    return { price_minutes: req.priceMinutes, shares: [{ seat: 1, team: "A", share_minutes: req.priceMinutes - taken, weight: 1 }, ...partners] };
   }
 
   it("a split that landed behind a 504 says it is changed", async () => {
-    const changed = detail({ split_mode: "amount", players: [seat({ share_credits: 20 }), { ...SAM_SEAT, share_credits: 30, needs_consent: true }, ALEX_SEAT, OPEN_SEAT] });
+    const changed = detail({ split_mode: "amount", players: [seat({ share_minutes: 20 }), { ...SAM_SEAT, share_minutes: 30, needs_consent: true }, ALEX_SEAT, OPEN_SEAT] });
     const b = booking(detail());
     serve({ detail: b.route, extra: [
       { method: "POST", path: PREVIEW, respond: previewOf },
@@ -180,12 +180,12 @@ describe("change the split", () => {
 
 describe("a partner leaving", () => {
   const inView = () => playerView({
-    players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", paid_credits: 25, unpaid_credits: 0, consented_credits: 25 }, OPEN_SEAT],
+    players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", paid_minutes: 25, unpaid_minutes: 0, consented_minutes: 25 }, OPEN_SEAT],
     permissions: { ...playerView().permissions, can_accept: false, can_decline: false, can_withdraw: true },
   });
   const mySeat = (status: string) => ({
     participant_id: PID.alex, booking_id: "b", status, lapsed: false, settled_outside: false, booking_status: "booked",
-    court_name: "Court 1", starts_at: "2026-09-30T16:00:00Z", ends_at: "2026-09-30T16:45:00Z", organiser_name: "Sam", share_credits: 25, timezone: "Africa/Johannesburg",
+    court_name: "Court 1", starts_at: "2026-09-30T16:00:00Z", ends_at: "2026-09-30T16:45:00Z", organiser_name: "Sam", share_minutes: 25, timezone: "Africa/Johannesburg",
   });
 
   it("a pull-out that landed behind a 504 goes back to Bookings saying so", async () => {
@@ -265,7 +265,7 @@ describe("the admin's god mode", () => {
 describe("one cancelled banner (R3 I-5)", () => {
   it("after a cancel from the page, the page says it once — the notice steps aside for the banner", async () => {
     const quote = {
-      bookingId: BOOKING, amountChargedCredits: 100, refundCredits: 100, penaltyCredits: 0, penaltyPct: 50,
+      bookingId: BOOKING, amountChargedMinutes: 100, refundMinutes: 100, penaltyMinutes: 0, penaltyPct: 50,
       penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false,
     };
     const cancelled = detail({

@@ -15,7 +15,7 @@ const POINTER = { button: 0, ctrlKey: false, pointerType: "mouse" } as const;
 function row(i: number, groups: { id: string; name: string }[] = []): MemberRow {
   return {
     user_id: `u-${i}`, membership_id: `m-${i}`, full_name: `Member ${i}`, email: `m${i}@x.test`,
-    membership_number: `MEM-${i}`, status: "Active", email_verified: true, balance_credits: 10,
+    membership_number: `MEM-${i}`, status: "Active", email_verified: true, balance_minutes: 10,
     created_at: "2026-09-01T08:00:00Z", photo_url: null, is_admin: false, admin_source: null, groups,
   } as unknown as MemberRow;
 }

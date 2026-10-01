@@ -25,13 +25,13 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
  */
 
 const SERIES: DailyAdminPoint[] = [
-  { date: "2026-09-01", top_ups_credits: 100, booking_charges_credits: 40, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 60, bookings: 4, no_shows: 0 },
-  { date: "2026-09-02", top_ups_credits: 160, booking_charges_credits: 80, refunds_credits: 0, penalties_credits: 5, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 75, bookings: 8, no_shows: 1 },
+  { date: "2026-09-01", top_ups_minutes: 100, booking_charges_minutes: 40, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 60, bookings: 4, no_shows: 0 },
+  { date: "2026-09-02", top_ups_minutes: 160, booking_charges_minutes: 80, refunds_minutes: 0, penalties_minutes: 5, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 75, bookings: 8, no_shows: 1 },
 ];
 
 const MY_SERIES: DailyMePoint[] = [
-  { date: "2026-09-01", top_ups_credits: 100, spent_credits: 50, refunds_credits: 0, bookings: 2, attended: 2, minutes_on_court: 30, balance_credits: 250 },
-  { date: "2026-09-02", top_ups_credits: 0, spent_credits: 100, refunds_credits: 25, bookings: 3, attended: 1, minutes_on_court: 15, balance_credits: 175 },
+  { date: "2026-09-01", top_ups_minutes: 100, spent_minutes: 50, refunds_minutes: 0, bookings: 2, attended: 2, minutes_on_court: 30, balance_minutes: 250 },
+  { date: "2026-09-02", top_ups_minutes: 0, spent_minutes: 100, refunds_minutes: 25, bookings: 3, attended: 1, minutes_on_court: 15, balance_minutes: 175 },
 ];
 
 /**

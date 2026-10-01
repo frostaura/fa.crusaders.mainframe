@@ -22,7 +22,7 @@ const ASKED: MemberNotification = {
 function open(items: MemberNotification[]) {
   stubFetch([
     { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-    { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
     { path: "/api/v1/me/notifications", body: { items, unread_count: 0, next_cursor: null } },

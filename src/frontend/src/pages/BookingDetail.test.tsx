@@ -59,7 +59,7 @@ describe("booking detail — the organiser's view", () => {
 
   it("R1 F2.2: 'Shares not paid yet' is the server's unpaid figure — open link seats included (contract §4)", async () => {
     // Alex (member, 25) and the open seat (25) are both unpaid: the server says 50, and so does the page.
-    serve({ detail: detail({ money: { ...detail().money, unpaid_credits: 50 } }) });
+    serve({ detail: detail({ money: { ...detail().money, unpaid_minutes: 50 } }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
     expect(within(money).getByText(DETAIL_MONEY.stillToCome).nextSibling).toHaveTextContent("50.00 cr");
@@ -89,7 +89,7 @@ describe("booking detail — the organiser's view", () => {
   it("opens the grid's own cancel sheet with the server's quote", async () => {
     serve({ extra: [{
       path: `${DETAIL_PATH}/cancellation-quote`,
-      body: { bookingId: "x", amountChargedCredits: 100, refundCredits: 100, penaltyCredits: 0, penaltyPct: 30, penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false },
+      body: { bookingId: "x", amountChargedMinutes: 100, refundMinutes: 100, penaltyMinutes: 0, penaltyPct: 30, penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false },
     }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_CANCEL.open }));
@@ -130,7 +130,7 @@ describe("booking detail — a player's view", () => {
   });
 
   it("sees co-players' paid and unpaid figures, and whose cover an unpaid share lapses to", async () => {
-    const jo = seat({ ...SAM_SEAT, participant_id: "p-jo", seat: 4, team: "B", user_id: "u-jo", name: "Jo van Wyk", paid_credits: 0, unpaid_credits: 25 });
+    const jo = seat({ ...SAM_SEAT, participant_id: "p-jo", seat: 4, team: "B", user_id: "u-jo", name: "Jo van Wyk", paid_minutes: 0, unpaid_minutes: 25 });
     serve({ detail: playerView({ players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, ALEX_SEAT, jo] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
@@ -144,7 +144,7 @@ describe("booking detail — a player's view", () => {
 
   it("says when pulling out closes, beside the button", async () => {
     serve({ detail: playerView({
-      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", paid_credits: 25, unpaid_credits: 0 }, OPEN_SEAT],
+      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, { ...ALEX_SEAT, status: "accepted", paid_minutes: 25, unpaid_minutes: 0 }, OPEN_SEAT],
       permissions: { ...playerView().permissions, can_accept: false, can_decline: false, can_withdraw: true },
     }) });
     renderDetail();

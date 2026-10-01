@@ -74,7 +74,7 @@ function PreviewFacts({ preview }: { preview: InvitePreview }) {
       </p>
       <p className="break-words text-sm text-text-secondary">{`${preview.court_name ?? INVITES_COPY.court} · ${when}`}</p>
       <p className="text-sm font-semibold tabular-nums text-text-primary">
-        {`${INVITES_COPY.yourShare} ${formatCredits(preview.share_credits)}`}
+        {`${INVITES_COPY.yourShare} ${formatCredits(preview.share_minutes)}`}
       </p>
     </div>
   );

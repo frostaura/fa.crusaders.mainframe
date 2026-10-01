@@ -15,7 +15,7 @@ import type { SelectedSlot } from "../types";
  * the guard after Continue is visible, the grid is told what is being sent the moment Book is
  * pressed, and a refusal takes that back at once.
  */
-const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceCredits: 50 };
+const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceMinutes: 50 };
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -40,7 +40,7 @@ const bookButton = () => within(screen.getByRole("dialog")).getByRole("button", 
 
 describe("BookSheet — the guard after Continue", () => {
   it("ignores only a double tap's second half; Book is ready the moment it appears (R4 I4-2)", async () => {
-    const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 450 } }]);
+    const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_minutes: 450 } }]);
     open();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }), { detail: 1 });
     // A double tap's second half lands here (its click count is 2): nothing is sent.
@@ -55,7 +55,7 @@ describe("BookSheet — the guard after Continue", () => {
 
 describe("BookSheet — what the grid is told", () => {
   it("names the slots it is sending the moment Book is pressed, and reports the booking from its own answer", async () => {
-    stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 450 } }]);
+    stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_minutes: 450 } }]);
     const { onBooked, onSending } = open();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     fireEvent.click(bookButton());

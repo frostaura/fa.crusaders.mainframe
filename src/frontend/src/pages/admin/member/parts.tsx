@@ -75,7 +75,7 @@ export function BookingLine({ row, zone, action, people }: {
         {partner ? <Badge tone="info">{COPY.partnerBadge}</Badge> : null}
         <Badge tone={status.tone}>{status.word}</Badge>
         {/* The charge on a partner's row is the ORGANISER's, not what this member paid — no figure. */}
-        {partner ? null : <span className="whitespace-nowrap text-sm tabular-nums text-text-secondary">{formatCredits(row.charged_credits)}</span>}
+        {partner ? null : <span className="whitespace-nowrap text-sm tabular-nums text-text-secondary">{formatCredits(row.charged_minutes)}</span>}
         {action ? <div className="ml-auto sm:ml-0">{action}</div> : null}
       </div>
     </li>

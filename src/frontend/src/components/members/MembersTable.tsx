@@ -195,7 +195,7 @@ export function MembersTable(props: MembersTableProps) {
               <SortHead label={COLUMNS.status} k="status" sort={sort} onSort={onSort} className={TH.status} />
               {groupsOf ? <TableHead className={TH.groups}>{COLUMNS.groups}</TableHead> : null}
               <SortHead label={dateColumn === "lastSeen" ? COLUMNS.lastSeen : COLUMNS.joined} k={dateKey} sort={sort} onSort={onSort} className={TH.date} />
-              <SortHead label={COLUMNS.balance} k="balance_credits" sort={sort} onSort={onSort} className={TH.balance} align="right" />
+              <SortHead label={COLUMNS.balance} k="balance_minutes" sort={sort} onSort={onSort} className={TH.balance} align="right" />
               <TableHead className={TH.actions}>{COLUMNS.actions}</TableHead>
             </tr>
           </TableHeader>
@@ -270,10 +270,10 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
       <DateCell row={row} dateColumn={dateColumn} now={now} />
       <td data-label={COLUMNS.balance} className={COL.balance}>
         <span
-          title={formatCredits(row.balance_credits)}
-          className={cn("block truncate font-semibold tabular-nums", row.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}
+          title={formatCredits(row.balance_minutes)}
+          className={cn("block truncate font-semibold tabular-nums", row.balance_minutes < 0 ? "text-danger-strong" : "text-text-primary")}
         >
-          {formatCredits(row.balance_credits)}
+          {formatCredits(row.balance_minutes)}
         </span>
       </td>
       {/* An application's Approve and Reject take the card's third line (the queue's two words). */}

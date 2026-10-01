@@ -148,20 +148,20 @@ export async function adjustCredits(
   request: APIRequestContext,
   admin: Session,
   userId: string,
-  amountCredits: number,
+  amountMinutes: number,
   reason = "Local walk setup",
-): Promise<{ balance_after_credits: number }> {
-  const res = await postWithBackoff(request, `/api/v1/admin/credit/${userId}/adjust`, {
+): Promise<{ balance_after_minutes: number }> {
+  const res = await postWithBackoff(request, `/api/v1/admin/minutes/${userId}/adjust`, {
     headers: bearer(admin),
     data: {
-      amountCredits,
+      amountMinutes,
       reason,
       reasonCode: "goodwill",
-      idempotencyKey: `walk-${userId}-${amountCredits}-${Date.now()}`,
+      idempotencyKey: `walk-${userId}-${amountMinutes}-${Date.now()}`,
     },
   });
   await expectOk(res, `adjust credits for ${userId}`);
-  return (await res.json()) as { balance_after_credits: number };
+  return (await res.json()) as { balance_after_minutes: number };
 }
 
 /** whoami with an explicit token — the server's own view of a session. */

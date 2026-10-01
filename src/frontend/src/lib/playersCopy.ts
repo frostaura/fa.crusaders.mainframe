@@ -185,14 +185,14 @@ function capSentence(e: ApiError): string {
 function withFigures(e: ApiError, timezone?: string): string | null {
   switch (e.code) {
     case "share_changed": {
-      const share = creditsDetail(e, "share_credits");
+      const share = creditsDetail(e, "share_minutes");
       return share === null
         ? "Your share has changed since you opened this. Check the new figure and say yes again."
         : `Your share is now ${formatCredits(share)}. Check it and say yes again if you're happy.`;
     }
     case "insufficient_balance": {
-      const have = creditsDetail(e, "current_credits");
-      const need = creditsDetail(e, "required_credits");
+      const have = creditsDetail(e, "current_minutes");
+      const need = creditsDetail(e, "required_minutes");
       if (have === null || need === null) return "You don't have enough credits to spend for this. Top up and try again.";
       return `You need ${formatCredits(need)} and have ${formatCredits(have)} to spend. Top up ${formatCredits(Math.max(0, need - have))} and try again.`;
     }

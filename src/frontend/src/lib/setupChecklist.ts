@@ -51,7 +51,7 @@ export function deriveChecklist(input: ChecklistInput): ChecklistItem[] {
     { id: "passkey", state: fromRead(input.passkeys, (rows) => Array.isArray(rows) && rows.length > 0) },
     {
       id: "topup",
-      state: fromRead(input.wallet, (w) => w.balance_credits > 0 || entries(w).some((e) => e.type === "TopUp")),
+      state: fromRead(input.wallet, (w) => w.balance_minutes > 0 || entries(w).some((e) => e.type === "TopUp")),
     },
     { id: "booking", state: fromRead(input.wallet, (w) => entries(w).some((e) => BOOKED.includes(e.type))) },
     { id: "install", state: input.installed ? "done" : "todo" },

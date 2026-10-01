@@ -35,7 +35,7 @@ function mine(startsAtUtc: string): Map<string, ScheduleSlot[]> {
   return new Map([["c1", [{
     courtId: "c1", courtNumber: 1, startsAtUtc, endsAtUtc: startsAtUtc,
     status: "booked", ownerUserId: "me", ownerFirstName: "Me", ownerPhotoUrl: null,
-    isMine: true, bookingId: "b1", blockLabel: null, checkedIn: false, amountChargedCredits: 50,
+    isMine: true, bookingId: "b1", blockLabel: null, checkedIn: false, amountChargedMinutes: 50,
   }]]]);
 }
 

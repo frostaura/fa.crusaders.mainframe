@@ -84,7 +84,7 @@ async function api(page: Page) {
     const body = path.endsWith("/whoami") ? SESSION
       : path.endsWith("/me/code/enrol") ? { v: 1, ref: MEMBER_CODE.ref, generation: 1, secret: memberCodeSecretB64(), tz: MEMBER_CODE.tz, step_seconds: 30, server_time_ms: Date.now() }
         : path.endsWith("/me/code") ? { v: 1, ref: MEMBER_CODE.ref, generation: 1, tz: MEMBER_CODE.tz, server_time_ms: Date.now() }
-          : path.endsWith("/wallet") ? { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 }
+          : path.endsWith("/wallet") ? { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 }
             : null;
     if (body === null) return route.fulfill({ status: 501, contentType: "application/json", body: "{}" });
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });

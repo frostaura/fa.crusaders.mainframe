@@ -42,7 +42,7 @@ test("open checkouts are listed and one Cancel frees the limit", async ({ page }
         return json({ ...BASE, already_zar: waiting, paid_zar: 0, waiting_zar: waiting, remaining_zar: 1000 - waiting, open_checkouts: open });
       }
       if (path.startsWith("/api/v1/whoami")) return json(SESSION_MEMBER);
-      if (path.startsWith("/api/v1/wallet")) return json({ balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 });
+      if (path.startsWith("/api/v1/wallet")) return json({ balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 50 });
       if (path.startsWith("/api/v1/me/profile")) {
         return json({ full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1" });
       }
@@ -86,7 +86,7 @@ test("nothing scrolls sideways at 320px with 200% text", async ({ page }) => {
       return json({ ...BASE, already_zar: 200, paid_zar: 0, waiting_zar: 200, remaining_zar: 800, open_checkouts: [OPEN[1]] });
     }
     if (path.startsWith("/api/v1/whoami")) return json(SESSION_MEMBER);
-    if (path.startsWith("/api/v1/wallet")) return json({ balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 });
+    if (path.startsWith("/api/v1/wallet")) return json({ balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 50 });
     if (path.startsWith("/api/v1/me/profile")) {
       return json({ full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1" });
     }

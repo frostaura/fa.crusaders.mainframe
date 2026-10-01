@@ -418,7 +418,7 @@ function SelectionBar(props: {
   const slots = toSelectedSlots(selection.keys, day, priceOf);
   const bookings = toGridBookings(selection.keys, day);
   const free = freeCount(selection.keys);
-  const total = slots.reduce((sum, s) => sum + s.priceCredits, 0);
+  const total = slots.reduce((sum, s) => sum + s.priceMinutes, 0);
   const headline = selection.keys.length ? selectionHeadline(free, total, bookings.length) : BOOKINGS_COPY.chooseSlots;
   return (
     <ActionBar
@@ -599,7 +599,7 @@ function useClearOnDayChange(date: string, selection: Selection, explainer: { an
 /* ─────────────────────────────── painting outcomes ─────────────────────────────── */
 
 function oneSlot(court: ScheduleCourt, startsAtUtc: string, priceOf: PriceOf): SelectedSlot {
-  return { courtId: court.id, courtName: court.name, startsAt: startsAtUtc, sliceCount: 1, priceCredits: priceOf(court) };
+  return { courtId: court.id, courtName: court.name, startsAt: startsAtUtc, sliceCount: 1, priceMinutes: priceOf(court) };
 }
 
 /**
@@ -629,7 +629,7 @@ function withBooked(day: ScheduleDay | null, outcome: BookedOutcome): ScheduleDa
     ownerUserId: outcome.forMemberId, ownerFirstName: null, ownerPhotoUrl: null,
     isMine: !outcome.hold && !outcome.forMemberId,
     bookingId: pendingBookingId(s.courtId, s.startsAt), blockLabel: null, checkedIn: false,
-    amountChargedCredits: outcome.hold ? null : s.priceCredits,
+    amountChargedMinutes: outcome.hold ? null : s.priceMinutes,
   }));
   return { ...day, slots: [...day.slots, ...added] };
 }

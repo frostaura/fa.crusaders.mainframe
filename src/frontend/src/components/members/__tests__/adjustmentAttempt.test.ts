@@ -13,7 +13,7 @@ describe("the desk adjustment under the club's rate limit", () => {
   it("says to wait, with the club's own wait, and that nothing changed", async () => {
     signIn({ isAdmin: true });
     const stub = stubFetch([
-      { method: "POST", path: "/api/v1/admin/credit/u1/adjust", respond: () => refuse(429, { error: "rate_limited", retry_after_seconds: 12 }) },
+      { method: "POST", path: "/api/v1/admin/minutes/u1/adjust", respond: () => refuse(429, { error: "rate_limited", retry_after_seconds: 12 }) },
     ]);
     const outcome = await attemptAdjustment(
       { userId: "u1", name: "Ada", amount: 100, reasonCode: "goodwill", reason: "Court light fault" },

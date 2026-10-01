@@ -7,7 +7,7 @@ import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
  * The checkout, which no member could complete.
  *
  * <p>
- * Two defects stacked. The screen POSTed <code>{ amountCredits }</code> against an API
+ * Two defects stacked. The screen POSTed <code>{ amountMinutes }</code> against an API
  * reading <code>AmountZar</code>, so the amount bound to 0, the positivity guard fired,
  * and every attempt came back rejected — the member was told their amount was a bad
  * multiple of R100 while looking at R100. And behind that, the page then did
@@ -87,12 +87,12 @@ describe("Top-up — what the checkout actually sends", () => {
     await vi.waitFor(() => expect(stub.calls.some((c) => c.method === "POST")).toBe(true));
     const post = stub.calls.find((c) => c.method === "POST" && c.path.includes("/credit/topup"))!;
 
-    // The bug, exactly: `amountCredits` bound to nothing on the server, `AmountZar` came
+    // The bug, exactly: `amountMinutes` bound to nothing on the server, `AmountZar` came
     // through as 0, and the positivity guard rejected every top-up the product could make.
     // `quotedConversionRate` rides along so the server can refuse a stale offer rather than
     // register the member at a rate the screen never showed them — see TopUp.rate-lock.test.tsx.
     expect(post.body).toEqual({ amountZar: 200, quotedConversionRate: 1.6 });
-    expect(post.raw).not.toContain("amountCredits");
+    expect(post.raw).not.toContain("amountMinutes");
   });
 
   it("POSTs the signed form to PayFast instead of following the URL as a GET", async () => {

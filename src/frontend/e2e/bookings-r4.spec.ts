@@ -30,7 +30,7 @@ async function open(page: Page, routes: ApiRoute[] = [], bigText = false) {
     { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
     { path: "/api/v1/me/bookings/upcoming", body: { timezone: "UTC", items: [] } },
     { path: "/api/v1/me/bookings/recent", body: { timezone: "UTC", items: [] } },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
   ].filter((r, i, all) => all.findIndex((o) => o.path === r.path && (o.method ?? "GET") === (r.method ?? "GET")) === i));
   await page.goto(`/bookings?date=${DAY}`);
@@ -47,7 +47,7 @@ async function holdBookings(page: Page) {
     if (route.request().method() !== "POST") return route.fallback();
     posts += 1;
     await gate;
-    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ booking_id: "bbbbbbbb-0000-4000-8000-000000000001", balance_after_credits: 450 }) });
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ booking_id: "bbbbbbbb-0000-4000-8000-000000000001", balance_after_minutes: 450 }) });
   });
   return { release: () => release(), posts: () => posts };
 }
@@ -91,7 +91,7 @@ test.describe("I4-2 — a double tap's tail is ignored, a quick first tap books"
     await page.route("**/api/v1/bookings/", async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
       posts += 1;
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ booking_id: "bbbbbbbb-0000-4000-8000-000000000001", balance_after_credits: 450 }) });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ booking_id: "bbbbbbbb-0000-4000-8000-000000000001", balance_after_minutes: 450 }) });
     });
     await bookCell(page, "10:00").click();
     const sheet = page.getByRole("dialog");

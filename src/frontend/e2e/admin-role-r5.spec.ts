@@ -24,7 +24,7 @@ const ids = (i: number) => ({
 function member(i: number, name: string, admin: null | "granted" | "config", status = "Active") {
   return {
     ...ids(i), full_name: name, email: `member.${i}@role-r5.review.test`, membership_number: `MEM-20${i}`,
-    status, email_verified: true, balance_credits: 120, created_at: `2026-09-0${i}T08:00:00Z`, photo_url: null,
+    status, email_verified: true, balance_minutes: 120, created_at: `2026-09-0${i}T08:00:00Z`, photo_url: null,
     is_admin: admin !== null, admin_source: admin, groups: [],
   };
 }

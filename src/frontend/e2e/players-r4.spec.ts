@@ -34,7 +34,7 @@ for (const width of WIDTHS) {
   test.describe(`at ${width} px with 200 % text`, () => {
     test("a partner asked again reads \"Your share went up\", and a cap names its day in words (M4-8, X4-9)", async ({ page }) => {
       const asked = inviteFixture({
-        participant_id: SEAT, status: "accepted", needs_consent: true, share_credits: 30, to_pay_credits: 5,
+        participant_id: SEAT, status: "accepted", needs_consent: true, share_minutes: 30, to_pay_minutes: 5,
         cap: { cap: "slots", cap_slots: 4, booked_slots: 4, attempted_slots: 3, club_day: "2030-09-10" },
       });
       await phone(page, width, [
@@ -80,7 +80,7 @@ test("an admin's Remove whose reply was lost says so in its dialog and keeps the
   const row = { ...rest, court_name: "Court 1", starts_at: new Date().toISOString(), organiser: { user_id: null, name: "Nomsa Khumalo" } };
   await phone(page, 390, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
     { path: "/api/v1/admin/members", body: [] },

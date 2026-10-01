@@ -17,7 +17,7 @@ export type InviteTone = "info" | "warning" | "brand";
 /** Where the seat stands, as one line: waiting · asked again · accepted with something to pay. */
 export function inviteStatus(invite: Invite): { text: string; tone: InviteTone } {
   if (invite.needs_consent) return { text: INVITES_COPY.statusAskedAgain, tone: "warning" };
-  if (invite.status === "accepted") return { text: acceptedUnpaidLine(invite.to_pay_credits), tone: "info" };
+  if (invite.status === "accepted") return { text: acceptedUnpaidLine(invite.to_pay_minutes), tone: "info" };
   return { text: INVITES_COPY.statusWaiting, tone: "brand" };
 }
 
@@ -28,7 +28,7 @@ export function inviteStatus(invite: Invite): { text: string; tone: InviteTone }
 export function inviteHeading(invite: Invite, invitedTitle: string): { title: string; line: string } {
   const organiser = organiserName(invite);
   if (invite.status === "accepted" && invite.needs_consent) {
-    return { title: INVITES_COPY.askedAgainTitle, line: askedAgainLine(organiser, invite.share_credits) };
+    return { title: INVITES_COPY.askedAgainTitle, line: askedAgainLine(organiser, invite.share_minutes) };
   }
   return { title: invitedTitle, line: invitedLine(organiser, invite.open_link) };
 }

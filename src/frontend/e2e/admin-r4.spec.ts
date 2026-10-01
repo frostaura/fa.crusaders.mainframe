@@ -22,7 +22,7 @@ function detail() {
     membership_number: "CR-2026-0184", status: "Active", account_status: "Active", email_verified: true,
     created_at: "2026-03-01T08:00:00Z", last_login_at: "2026-09-22T17:30:00Z", photo_url: null,
     is_admin: true, admin_source: "granted", groups: [{ id: "g1", name: "League" }],
-    balance_credits: -1250.5, passkey_count: 1, fingerprints: { count: 0, enrolments: [] },
+    balance_minutes: -1250.5, passkey_count: 1, fingerprints: { count: 0, enrolments: [] },
     next_bookings: [], counts_30d: { bookings: 6, no_shows: 1, sessions_played: 5 },
   };
 }
@@ -164,7 +164,7 @@ test.describe("R4 V-14 — the members table at 1280", () => {
     const member = {
       user_id: "dddddddd-0000-4000-8000-00000000000d", membership_id: "eeeeeeee-0000-4000-8000-00000000000e",
       full_name: "Evie Okafor", email: "eve+muo@member-r4.review.test", membership_number: "MR4-MUOIEQJH-EVE",
-      status: "PendingApproval", email_verified: true, balance_credits: 0, created_at: "2026-09-30T08:00:00Z",
+      status: "PendingApproval", email_verified: true, balance_minutes: 0, created_at: "2026-09-30T08:00:00Z",
       photo_url: null, is_admin: false, admin_source: null, groups: [],
     };
     await open(page, "/admin/members", 1280, false, [{ path: "/api/v1/admin/members/", body: [member] }]);

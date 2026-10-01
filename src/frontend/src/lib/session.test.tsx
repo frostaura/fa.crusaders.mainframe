@@ -208,7 +208,7 @@ describe("the wallet stream", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     stubFetch([
       { method: "GET", path: "/api/v1/whoami", body: WHOAMI },
-      { method: "GET", path: "/api/v1/wallet", body: { balance_credits: 450, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "GET", path: "/api/v1/wallet", body: { balance_minutes: 450, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "ticket-one", expires_in_seconds: 60 } },
     ]);
 
@@ -226,7 +226,7 @@ describe("the wallet stream", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     stubFetch([
       { method: "GET", path: "/api/v1/whoami", body: WHOAMI },
-      { method: "GET", path: "/api/v1/wallet", body: { balance_credits: 450, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "GET", path: "/api/v1/wallet", body: { balance_minutes: 450, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       {
         method: "POST", path: "/api/v1/wallet/stream-ticket", body: null,
         sequence: [

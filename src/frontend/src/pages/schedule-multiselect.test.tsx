@@ -128,8 +128,8 @@ describe("the floating action bar", () => {
     await act(async () => { fireEvent.click(within(bar()).getByRole("button", { name: BOOKINGS_COPY.bookSelection })); });
     // Two adjacent slices on Court 1 are one booking of two; Court 2 is its own.
     expect(sheets.book?.slots).toEqual([
-      { courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 2, priceCredits: 100 },
-      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 30), sliceCount: 1, priceCredits: 50 },
+      { courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 2, priceMinutes: 100 },
+      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 30), sliceCount: 1, priceMinutes: 50 },
     ]);
     expect(sheets.book?.open).toBe(true);
   });

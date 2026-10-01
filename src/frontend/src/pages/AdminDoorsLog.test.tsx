@@ -72,7 +72,7 @@ describe("the club door log", () => {
     const whoami = signIn({ isAdmin: true });
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       ...server.routes,
     ]);
@@ -533,7 +533,7 @@ describe("the club door log", () => {
     const whoami = signIn({ isAdmin: true });
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       {
         path: "/api/v1/admin/doors/activity.csv",
@@ -635,7 +635,7 @@ describe("the club door log", () => {
     const whoami = signIn({ isAdmin: true });
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       { path: "/api/v1/admin/doors/activity", body: { items: [doorLogFixture()], next_cursor: null, retention_days: 90 } },
       { path: "/api/v1/admin/doors", status: 503, body: {} },
@@ -849,7 +849,7 @@ describe("the club door log", () => {
     const whoami = signIn({ isAdmin: true });
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       {
         path: "/api/v1/admin/doors/activity",
@@ -987,7 +987,7 @@ describe("the club door log, filtered to a door that is gone", () => {
     const whoami = signIn({ isAdmin: true });
     const routes = [
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       ...server.routes,
     ];
@@ -1061,7 +1061,7 @@ describe("the club door log's heading", () => {
     const whoami = signIn({ isAdmin: true });
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       ...server.routes,
     ]);
@@ -1104,7 +1104,7 @@ describe("the club door log's export, when it fails", () => {
     const whoami = signIn({ isAdmin: true });
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       // BEFORE the server's own CSV route: the stub sorts by prefix LENGTH and these two are
       // the same path, so declaration order decides and the first one wins.

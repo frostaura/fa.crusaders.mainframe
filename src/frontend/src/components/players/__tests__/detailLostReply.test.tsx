@@ -18,7 +18,7 @@ beforeEach(() => { signOut(); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 const QUOTE = {
-  bookingId: BOOKING, amountChargedCredits: 100, refundCredits: 100, penaltyCredits: 0, penaltyPct: 50,
+  bookingId: BOOKING, amountChargedMinutes: 100, refundMinutes: 100, penaltyMinutes: 0, penaltyPct: 50,
   penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false,
 };
 

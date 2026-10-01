@@ -93,8 +93,8 @@ export const OFFLINE_CELL = {
 } as const;
 
 /** "Book Court 1 at 18:00 for 50.00 cr" — which court, which time, what it costs. */
-export function bookCellLabel(where: string, priceCredits: number): string {
-  return `Book ${where} for ${formatCredits(priceCredits)}`;
+export function bookCellLabel(where: string, priceMinutes: number): string {
+  return `Book ${where} for ${formatCredits(priceMinutes)}`;
 }
 
 /** The viewer's own future booking: pressing it opens the cancel sheet. */
@@ -125,8 +125,8 @@ export function idleCellLabel(where: string): string {
 }
 
 /** "Court 1 · 50.00 cr / 15 min" — the header's price line. */
-export function slicePriceLine(priceCredits: number, sliceMinutes: number): string {
-  return `${formatCredits(priceCredits)} / ${sliceMinutes} min`;
+export function slicePriceLine(priceMinutes: number, sliceMinutes: number): string {
+  return `${formatCredits(priceMinutes)} / ${sliceMinutes} min`;
 }
 
 /* ─────────────────────────── the selection ─────────────────────────── */
@@ -591,8 +591,8 @@ export const SPLIT_CANCEL = {
  * part per share deadline, each with its own release (R2 F4-18 — one date for the whole amount
  * was right only for the first part). "held" leads, so it reads as the held line it replaces.
  */
-export function heldPartsLine(parts: readonly { credits: number; until: string }[], timezone?: string): string {
-  return `Held: ${parts.map((p) => `${formatCredits(p.credits)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
+export function heldPartsLine(parts: readonly { minutes: number; until: string }[], timezone?: string): string {
+  return `Held: ${parts.map((p) => `${formatCredits(p.minutes)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
 }
 
 /**

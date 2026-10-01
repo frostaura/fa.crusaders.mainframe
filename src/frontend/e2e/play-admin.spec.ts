@@ -29,7 +29,7 @@ async function open(page: Page, theme?: "light" | "dark") {
   if (theme) await page.addInitScript((t) => window.localStorage.setItem("crusaders:theme", t), theme);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
     { path: "/api/v1/admin/members", body: [] },

@@ -18,7 +18,7 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./
 const SHELL: ApiRoute[] = [
   { path: "/api/v1/whoami", body: SESSION_ADMIN },
   { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1" } },
-  { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+  { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
 ];
 
@@ -59,7 +59,7 @@ async function labelInside(page: Page, name: RegExp): Promise<boolean> {
 
 const LEDGER_ROW = (id: string, signed: number) => ({
   id, at: "2026-01-15T10:00:00Z", from: "Club treasury", to: "Nomvula Dlamini-Hendricks",
-  amountCredits: Math.abs(signed), signedAmountCredits: signed, type: "AdminTopUp", comment: "Desk top-up",
+  amountMinutes: Math.abs(signed), signedAmountMinutes: signed, type: "AdminTopUp", comment: "Desk top-up",
   subjectUserId: "m1", subjectName: "Nomvula Dlamini-Hendricks", actorUserId: "a1", actorName: "Desk Volunteer",
   relatedBookingId: null,
 });
@@ -101,7 +101,7 @@ const MEMBER_ID = "bbbbbbbb-0000-4000-8000-00000000000b";
 const MEMBER = `/api/v1/admin/members/${MEMBER_ID}`;
 const BOOKING = {
   booking_id: "b1", court_id: "c1", court_name: "Court 2", starts_at: "2099-10-01T09:00:00Z", ends_at: "2099-10-01T09:30:00Z",
-  status: "booked", charged_credits: 100, checked_in_at: null, cancelled_at: null,
+  status: "booked", charged_minutes: 100, checked_in_at: null, cancelled_at: null,
   booked_by: { user_id: MEMBER_ID, name: "Valerie Visser", is_self: true },
 };
 function memberRoutes(): ApiRoute[] {
@@ -114,7 +114,7 @@ function memberRoutes(): ApiRoute[] {
         user_id: MEMBER_ID, membership_id: "cccccccc-0000-4000-8000-00000000000c", full_name: "Valerie Visser",
         email: "valerie@example.com", membership_number: "VIS-1", status: "Active", account_status: "Active", email_verified: true,
         created_at: "2026-03-01T08:00:00Z", last_login_at: null, photo_url: null, is_admin: false, admin_source: null,
-        groups: [], balance_credits: 433, held_credits: 33, held_until: "2099-10-03T09:30:00Z", passkey_count: 0,
+        groups: [], balance_minutes: 433, held_minutes: 33, held_until: "2099-10-03T09:30:00Z", passkey_count: 0,
         fingerprints: { count: 0, enrolments: [] }, next_bookings: [BOOKING], counts_30d: { bookings: 0, no_shows: 0, sessions_played: 0 },
       },
     },

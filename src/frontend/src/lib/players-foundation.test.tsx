@@ -37,12 +37,12 @@ describe("playersRefusal — every code is a sentence, never the generic fallbac
   });
 
   it("share_changed names the new figure and asks again", () => {
-    expect(playersRefusal(refusal(409, { error: "share_changed", share_credits: 30 })))
+    expect(playersRefusal(refusal(409, { error: "share_changed", share_minutes: 30 })))
       .toBe("Your share is now 30.00 cr. Check it and say yes again if you're happy.");
   });
 
   it("insufficient_balance says what is needed, what can be spent, and the gap", () => {
-    expect(playersRefusal(refusal(402, { error: "insufficient_balance", current_credits: 10, required_credits: 25 })))
+    expect(playersRefusal(refusal(402, { error: "insufficient_balance", current_minutes: 10, required_minutes: 25 })))
       .toBe("You need 25.00 cr and have 10.00 cr to spend. Top up 15.00 cr and try again.");
   });
 
@@ -87,20 +87,20 @@ describe("names", () => {
 
 describe("held credits (§3a)", () => {
   it("a frame with nothing held is all spendable, whatever an older API left out", () => {
-    expect(heldFrom({ balance_credits: 80 })).toEqual({ held: 0, owedBack: 0, spendable: 80, until: null });
-    expect(heldFrom({ balance_credits: 80, held_credits: 0, spendable_credits: 80, held_until: null })).toEqual({ held: 0, owedBack: 0, spendable: 80, until: null });
+    expect(heldFrom({ balance_minutes: 80 })).toEqual({ held: 0, owedBack: 0, spendable: 80, until: null });
+    expect(heldFrom({ balance_minutes: 80, held_minutes: 0, spendable_minutes: 80, held_until: null })).toEqual({ held: 0, owedBack: 0, spendable: 80, until: null });
   });
 
   it("the server's spendable figure is taken as given", () => {
-    expect(heldFrom({ balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: "2026-10-02T18:45:00Z" }))
+    expect(heldFrom({ balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, held_until: "2026-10-02T18:45:00Z" }))
       .toEqual({ held: 20, owedBack: 0, spendable: 100, until: "2026-10-02T18:45:00Z" });
   });
 
   it("owed back (P11) is its own figure, with no release date, and spendable may go negative", () => {
-    expect(heldFrom({ balance_credits: 10, held_credits: 0, owed_back_credits: 16, spendable_credits: -6, held_until: null }))
+    expect(heldFrom({ balance_minutes: 10, held_minutes: 0, owed_back_minutes: 16, spendable_minutes: -6, held_until: null }))
       .toEqual({ held: 0, owedBack: 16, spendable: -6, until: null });
     // An API that sends owed back but no spendable figure: balance − held − owed back.
-    expect(heldFrom({ balance_credits: 50, held_credits: 20, owed_back_credits: 16, held_until: "2026-10-02T18:45:00Z" }))
+    expect(heldFrom({ balance_minutes: 50, held_minutes: 20, owed_back_minutes: 16, held_until: "2026-10-02T18:45:00Z" }))
       .toEqual({ held: 20, owedBack: 16, spendable: 14, until: "2026-10-02T18:45:00Z" });
   });
 
@@ -117,16 +117,16 @@ describe("held credits (§3a)", () => {
   });
 
   it("an invite's balance-after is built on SPENDABLE, never on the raw balance", () => {
-    const money = inviteMoney({ balance_credits: 120, spendable_credits: 30, held_credits: 90, to_pay_credits: 25 });
+    const money = inviteMoney({ balance_minutes: 120, spendable_minutes: 30, held_minutes: 90, to_pay_minutes: 25 });
     expect(money).toEqual({ spendable: 30, toPay: 25, after: 5, shortBy: 0, held: 90, owedBack: 0 });
-    const short = inviteMoney({ balance_credits: 120, spendable_credits: 10, held_credits: 110, to_pay_credits: 25 });
+    const short = inviteMoney({ balance_minutes: 120, spendable_minutes: 10, held_minutes: 110, to_pay_minutes: 25 });
     expect(short.shortBy).toBe(15);
     // An older API with no spendable figure: the balance less what is held.
-    expect(inviteMoney({ balance_credits: 120, held_credits: 100, to_pay_credits: 25 }).after).toBe(-5);
+    expect(inviteMoney({ balance_minutes: 120, held_minutes: 100, to_pay_minutes: 25 }).after).toBe(-5);
     // P11: what is owed back comes off too, and a negative spendable makes the shortfall bigger.
-    expect(inviteMoney({ balance_credits: 30, held_credits: 0, owed_back_credits: 16, to_pay_credits: 25 }))
+    expect(inviteMoney({ balance_minutes: 30, held_minutes: 0, owed_back_minutes: 16, to_pay_minutes: 25 }))
       .toEqual({ spendable: 14, toPay: 25, after: -11, shortBy: 11, held: 0, owedBack: 16 });
-    expect(inviteMoney({ balance_credits: 10, spendable_credits: -6, held_credits: 0, owed_back_credits: 16, to_pay_credits: 25 }).shortBy).toBe(31);
+    expect(inviteMoney({ balance_minutes: 10, spendable_minutes: -6, held_minutes: 0, owed_back_minutes: 16, to_pay_minutes: 25 }).shortBy).toBe(31);
   });
 });
 
@@ -156,7 +156,7 @@ describe("the wallet stream carries the bell's count and the held figures", () =
     };
     stubFetch([
       { path: "/api/v1/whoami", body: WHOAMI },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     ]);
     signIn({ isAdmin: false });
     render(
@@ -175,14 +175,14 @@ describe("the wallet stream carries the bell's count and the held figures", () =
     await act(async () => { live?.onNotification?.(3); });
     expect(screen.getByTestId("unread").textContent).toBe("3");
 
-    await act(async () => { live?.onFrame({ balance_credits: 145, held_credits: 45, spendable_credits: 100, held_until: "2026-10-02T18:45:00Z" }); });
+    await act(async () => { live?.onFrame({ balance_minutes: 145, held_minutes: 45, spendable_minutes: 100, held_until: "2026-10-02T18:45:00Z" }); });
     expect(screen.getByTestId("balance").textContent).toBe("145.00");
     expect(screen.getByTestId("held").textContent).toBe("45.00");
     expect(screen.getByTestId("spendable").textContent).toBe("100.00");
     expect(screen.getByTestId("owed").textContent).toBe("0.00");
 
     // P11: the named balance frame carries owed back, and spendable can go below zero.
-    await act(async () => { live?.onFrame({ balance_credits: 10, held_credits: 0, owed_back_credits: 16, spendable_credits: -6, held_until: null }); });
+    await act(async () => { live?.onFrame({ balance_minutes: 10, held_minutes: 0, owed_back_minutes: 16, spendable_minutes: -6, held_until: null }); });
     expect(screen.getByTestId("owed").textContent).toBe("16.00");
     expect(screen.getByTestId("spendable").textContent).toBe("-6.00");
   });

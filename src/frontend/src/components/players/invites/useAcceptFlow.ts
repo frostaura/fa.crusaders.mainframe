@@ -13,7 +13,7 @@ import type { Landed } from "@/lib/lostReply";
  * One invite's accept / decline, shared by the sheet (Invites page) and the link page.
  *
  * <p>
- * <b>Consent is to the figure shown.</b> Accept sends `expectedShareCredits = share_credits` —
+ * <b>Consent is to the figure shown.</b> Accept sends `expectedShareMinutes = share_minutes` —
  * the server compares it with the seat's current share (`PlayersService.Member.cs`,
  * `seat.ShareCredits > expected` → `409 share_changed`). A risen share is never retried for the
  * member: the invite is read again, the new figure is shown with the reason, and Accept waits
@@ -21,7 +21,7 @@ import type { Landed } from "@/lib/lostReply";
  * </p>
  */
 export type AcceptPort = {
-  accept: (expectedShareCredits: number) => Promise<AcceptAnswer>;
+  accept: (expectedShareMinutes: number) => Promise<AcceptAnswer>;
   /** Null when this seat cannot be declined (an open link seat — the server answers 404). */
   decline: (() => Promise<SeatAnswer>) | null;
   /** Read the invite again (after any answer). Never rejects. */
@@ -108,8 +108,8 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
   const accept = useCallback(() => {
     if (blocked) return;
     declineAction.reset();
-    void runAccept(invite.share_credits);
-  }, [blocked, runAccept, invite.share_credits, declineAction]);
+    void runAccept(invite.share_minutes);
+  }, [blocked, runAccept, invite.share_minutes, declineAction]);
   const decline = useCallback(() => {
     acceptAction.reset();
     setKeptInvite(false);
@@ -152,8 +152,8 @@ async function acceptOrProve(port: AcceptPort, invite: Invite, expected: number)
     if (seat.status !== "accepted" || seat.lapsed || seat.booking_status === "cancelled") throw new UnsureOutcome(error, true);
     const answer: AcceptAnswer = {
       participant_id: seat.participant_id, booking_id: seat.booking_id, status: seat.status,
-      share_credits: seat.share_credits, consented_credits: seat.share_credits, paid_credits: invite.to_pay_credits,
-      balance_credits: invite.balance_credits,
+      share_minutes: seat.share_minutes, consented_minutes: seat.share_minutes, paid_minutes: invite.to_pay_minutes,
+      balance_minutes: invite.balance_minutes,
     };
     return { answer, proven: true };
   }

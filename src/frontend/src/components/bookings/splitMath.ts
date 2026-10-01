@@ -107,9 +107,9 @@ export function splitShares(price: number, mode: SplitMode, organiserWeight: num
 }
 
 /** What the partners are asked for in all — the "you get Y back as they accept" figure. */
-export function partnersTotal(shares: readonly { seat: number; share_credits?: number; share?: number }[]): number {
+export function partnersTotal(shares: readonly { seat: number; share_minutes?: number; share?: number }[]): number {
   const cents = shares
     .filter((s) => s.seat !== 1)
-    .reduce((n, s) => n + toCents(s.share_credits ?? s.share ?? 0), 0);
+    .reduce((n, s) => n + toCents(s.share_minutes ?? s.share ?? 0), 0);
   return cents / 100;
 }

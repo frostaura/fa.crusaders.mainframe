@@ -18,12 +18,12 @@ import { summariseBooking } from "@/components/wallet/useShareBookings";
 export async function namedShareMovement(amount: number, me: string | null): Promise<string | null> {
   const wallet = await endpoints.wallet(5, 0);
   const row = wallet.entries.find((e) =>
-    e.type === "ShareTransfer" && e.relatedBookingId && Math.abs(e.signedAmountCredits - amount) < 0.005);
+    e.type === "ShareTransfer" && e.relatedBookingId && Math.abs(e.signedAmountMinutes - amount) < 0.005);
   if (!row?.relatedBookingId) return null;
   const booking = summariseBooking(await playersEndpoints.detail(row.relatedBookingId));
   const side = booking.organiserId === me ? "organiser" : "partner";
   const other = side === "organiser"
     ? booking.partners.find((p) => p.userId === row.actorUserId)?.name ?? null
     : booking.organiserName;
-  return shareRowSentence({ side, signed: row.signedAmountCredits, place: booking, other });
+  return shareRowSentence({ side, signed: row.signedAmountMinutes, place: booking, other });
 }

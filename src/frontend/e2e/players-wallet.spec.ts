@@ -14,7 +14,7 @@ const B2 = "b0000000-0000-0000-0000-000000000002";
 
 function ledgerRow(id: string, over: Record<string, unknown>) {
   return {
-    id, at: new Date().toISOString(), from: "Club treasury", to: PEOPLE.me.name, amountCredits: 25, signedAmountCredits: 25,
+    id, at: new Date().toISOString(), from: "Club treasury", to: PEOPLE.me.name, amountMinutes: 25, signedAmountMinutes: 25,
     type: "ShareTransfer", comment: "Share of a split booking", subjectUserId: ME, subjectName: PEOPLE.me.name,
     actorUserId: SAM, actorName: PEOPLE.sam.name, relatedBookingId: BOOKING, ...over,
   };
@@ -22,8 +22,8 @@ function ledgerRow(id: string, over: Record<string, unknown>) {
 
 const ENTRIES = [
   ledgerRow("s-sam", {}),
-  ledgerRow("topup", { type: "TopUp", comment: "Wallet top-up · R100.00", from: "PayFast", relatedBookingId: null, amountCredits: 100, signedAmountCredits: 100, actorUserId: ME, actorName: PEOPLE.me.name }),
-  ledgerRow("s-jo", { relatedBookingId: B2, signedAmountCredits: -25, from: PEOPLE.me.name, to: "Club treasury", actorUserId: ME, actorName: PEOPLE.me.name }),
+  ledgerRow("topup", { type: "TopUp", comment: "Wallet top-up · R100.00", from: "PayFast", relatedBookingId: null, amountMinutes: 100, signedAmountMinutes: 100, actorUserId: ME, actorName: PEOPLE.me.name }),
+  ledgerRow("s-jo", { relatedBookingId: B2, signedAmountMinutes: -25, from: PEOPLE.me.name, to: "Club treasury", actorUserId: ME, actorName: PEOPLE.me.name }),
 ];
 
 /** Jo's booking, on which the member is the partner who paid a share. */
@@ -34,7 +34,7 @@ const JO_BOOKING = detailFixture({
 });
 
 type Detail = ReturnType<typeof detailFixture>;
-type Seat = { kind: string; user_id: string | null; name: string | null; paid_credits: number };
+type Seat = { kind: string; user_id: string | null; name: string | null; paid_minutes: number };
 
 /** What `GET /wallet?include=share_bookings` says about a booking (perf round, 2026-09-30). */
 function summaryOf(d: Detail) {
@@ -42,7 +42,7 @@ function summaryOf(d: Detail) {
   return {
     booking_id: d.booking_id, court_name: d.court_name, starts_at: d.starts_at, organiser,
     partners: (d.players as Seat[]).filter((p) => p.kind === "member" && p.user_id && p.user_id !== organiser.user_id)
-      .map((p) => ({ user_id: p.user_id, name: p.name, paid_credits: p.paid_credits })),
+      .map((p) => ({ user_id: p.user_id, name: p.name, paid_minutes: p.paid_minutes })),
   };
 }
 
@@ -113,7 +113,7 @@ test.describe("P11: the wallet, with shares", () => {
   test("says nothing about holds when nothing is held", async ({ page }) => {
     await signIn(page);
     await serveApi(page, [
-      ...memberShellRoutes({ wallet: { held_credits: 0, spendable_credits: 120, held_until: null } }),
+      ...memberShellRoutes({ wallet: { held_minutes: 0, spendable_minutes: 120, held_until: null } }),
     ]);
     await page.goto("/wallet");
     await expect(page.getByText("No movements yet")).toBeVisible();
@@ -127,7 +127,7 @@ test.describe("P11: the club's ledger, filtered to shares", () => {
     await serveApi(page, [
       {
         path: "/api/v1/admin/ledger",
-        body: [ledgerRow("in", {}), ledgerRow("out", { subjectUserId: SAM, subjectName: PEOPLE.sam.name, signedAmountCredits: -25, from: PEOPLE.sam.name, to: "Club treasury" })],
+        body: [ledgerRow("in", {}), ledgerRow("out", { subjectUserId: SAM, subjectName: PEOPLE.sam.name, signedAmountMinutes: -25, from: PEOPLE.sam.name, to: "Club treasury" })],
       },
       ...memberShellRoutes({ admin: true }),
       { path: "/api/v1/admin/members", body: [] },

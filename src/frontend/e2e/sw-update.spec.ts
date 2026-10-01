@@ -46,7 +46,7 @@ const API: Record<string, unknown> = {
   "/api/v1/whoami": SESSION,
   "/api/v1/session": SESSION,
   "/api/v1/me/profile": { user_id: SESSION.user_id, email: `${MARKER}@club.review.test`, full_name: MARKER, status: "Active", is_admin: false, tenant_slug: "crusaders", photo_url: null },
-  "/api/v1/wallet": { balance_credits: 412.5, entries: [{ id: MARKER }], total_entries: 1, offset: 0, limit: 1, note: MARKER },
+  "/api/v1/wallet": { balance_minutes: 412.5, entries: [{ id: MARKER }], total_entries: 1, offset: 0, limit: 1, note: MARKER },
 };
 
 let server: Server;

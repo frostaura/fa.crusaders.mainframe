@@ -502,7 +502,7 @@ export function AdminScheduleDetailPage() {
             remaining: occurrences === null ? null : remaining.length,
             days,
             slots: remainingSlots,
-            refundCredits: 0,
+            refundMinutes: 0,
             // Counted by each date's own weekday (R5 A5-4), not the latest rule's.
             dates: remaining.map((o) => o.date),
           })}

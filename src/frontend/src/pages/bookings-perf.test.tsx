@@ -62,7 +62,7 @@ describe("the grid under an open sheet", () => {
 });
 
 describe("a booking on its way", () => {
-  const SLOT = { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceCredits: 50 };
+  const SLOT = { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceMinutes: 50 };
   const holdingCell = () => screen.queryByRole("button", { name: HOLDING_CELL.label("Court 2 at 16:15") });
 
   it("holds the cell while the club answers, then draws it confirming in one step", async () => {

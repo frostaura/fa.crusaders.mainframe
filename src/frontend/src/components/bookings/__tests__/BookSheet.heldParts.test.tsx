@@ -18,8 +18,8 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const TZ = "Africa/Johannesburg";
 const PARTS = [
-  { credits: 35, until: "2030-10-04T08:30:00Z" },
-  { credits: 25, until: "2030-10-02T04:45:00Z" },
+  { minutes: 35, until: "2030-10-04T08:30:00Z" },
+  { minutes: 25, until: "2030-10-02T04:45:00Z" },
 ];
 
 vi.mock("@/lib/balance", async (original) => ({
@@ -47,7 +47,7 @@ describe("held parts (C4)", () => {
     render(
       <BookSheet
         open onOpenChange={vi.fn()} timezone={TZ} sliceMinutes={15} isAdmin={false} actorUserId="me" balanceCredits={100}
-        slots={[{ courtId: "c1", courtName: "Court 1", startsAt: "2030-10-05T16:00:00.000Z", sliceCount: 1, priceCredits: 20 }]}
+        slots={[{ courtId: "c1", courtName: "Court 1", startsAt: "2030-10-05T16:00:00.000Z", sliceCount: 1, priceMinutes: 20 }]}
         onBooked={vi.fn()}
       />,
       { wrapper: Providers, reactStrictMode: true },

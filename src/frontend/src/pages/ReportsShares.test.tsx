@@ -12,12 +12,12 @@ import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 const WALLET = {
   from: "", to: "",
-  top_ups_credits: 200, spent_credits: 100, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
-  net_movement_credits: 150, penalty_count: 0, attended_bookings: 1, minutes_on_court: 45, count: 4,
+  top_ups_minutes: 200, spent_minutes: 100, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0,
+  net_movement_minutes: 150, penalty_count: 0, attended_bookings: 1, minutes_on_court: 45, count: 4,
 };
-const ME_DAYS = [{ date: "2026-09-01", top_ups_credits: 200, spent_credits: 100, refunds_credits: 0, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 150 }];
+const ME_DAYS = [{ date: "2026-09-01", top_ups_minutes: 200, spent_minutes: 100, refunds_minutes: 0, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 150 }];
 
-const DAY = { date: "2026-09-01", top_ups_credits: 200, booking_charges_credits: 100, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 100, bookings: 1, no_shows: 0 };
+const DAY = { date: "2026-09-01", top_ups_minutes: 200, booking_charges_minutes: 100, refunds_minutes: 0, penalties_minutes: 0, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 100, bookings: 1, no_shows: 0 };
 
 function memberRoutes(wallet: Record<string, unknown>) {
   return [
@@ -30,7 +30,7 @@ function memberRoutes(wallet: Record<string, unknown>) {
 function adminRoutes(days: unknown[]) {
   return [
     { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
-    { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 100, reversals_zar: 0, net_zar: 100, gross_topups_credits: 200, reversals_credits: 0, net_credits: 200 } },
+    { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 100, reversals_zar: 0, net_zar: 100, gross_topups_minutes: 200, reversals_minutes: 0, net_minutes: 200 } },
     { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
     { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 1, no_show: 0, no_show_pct: 0 } },
     { path: "/api/v1/admin/reports/daily", body: days },
@@ -41,7 +41,7 @@ afterEach(() => { vi.unstubAllGlobals(); signOut(); });
 
 describe("the member's activity: shares and what court time really cost", () => {
   it("shows both rows when the server sends them", async () => {
-    stubFetch(memberRoutes({ ...WALLET, share_transfers_credits: 50, net_court_spend_credits: 50 }));
+    stubFetch(memberRoutes({ ...WALLET, share_transfers_minutes: 50, net_court_spend_minutes: 50 }));
     renderPage(<WalletActivityPage />, { initialEntries: ["/wallet/activity"], reactStrictMode: true });
     const totals = within(await screen.findByRole("region", { name: "Totals" }));
     expect(totals.getByText(COPY.memberShares)).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("the member's activity: shares and what court time really cost", () => 
 
 describe("the club's report: shares net to zero, and it says so", () => {
   it("adds the share bucket to the totals and the daily table, with the caption", async () => {
-    stubFetch(adminRoutes([{ ...DAY, share_transfers_credits: 0 }]));
+    stubFetch(adminRoutes([{ ...DAY, share_transfers_minutes: 0 }]));
     renderPage(<AdminReportsPage />, { initialEntries: ["/admin/reports"] });
     const totals = await screen.findByRole("region", { name: "Club money — totals" });
     expect(within(totals.querySelector("dl")!).getByText(COPY.clubShares)).toBeInTheDocument();

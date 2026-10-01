@@ -30,15 +30,15 @@ export function isNoShow(d: Pick<BookingDetail, "status">): boolean {
  * R5 M5-3 / M5-7 — a cancelled or no-show game's settlement as the payer's ledger posted it: the
  * refund (the whole charge, unless the lights had been on) and the penalty kept from it. Taken from
  * the API's own figures when it sends them; until then from the ledger's shape — a refund of the
- * whole charge and a penalty row, so what the payer is left paying (`organiser_owed_credits`) IS
+ * whole charge and a penalty row, so what the payer is left paying (`organiser_owed_minutes`) IS
  * the penalty. After a check-in nothing was refunded and nothing is a penalty.
  */
 export function settlementOf(d: BookingDetail): { refunded: number; penalty: number } {
   const { money } = d;
-  if (d.attendance.checked_in_at) return { refunded: money.refunded_credits ?? 0, penalty: money.penalty_credits ?? 0 };
+  if (d.attendance.checked_in_at) return { refunded: money.refunded_minutes ?? 0, penalty: money.penalty_minutes ?? 0 };
   return {
-    refunded: money.refunded_credits ?? money.price_credits,
-    penalty: money.penalty_credits ?? money.organiser_owed_credits,
+    refunded: money.refunded_minutes ?? money.price_minutes,
+    penalty: money.penalty_minutes ?? money.organiser_owed_minutes,
   };
 }
 
@@ -66,8 +66,8 @@ function liveKey(p: DetailPlayer): string {
   if (p.kind === "open_link") return "open_link";
   if (p.status === "invited") return "invited";
   // Accepted for them by the club (no consent recorded): nothing agreed, so nothing "asked again".
-  if (p.needs_consent) return p.consented_credits <= 0 ? "not_agreed" : "needs_consent";
-  return p.share_credits > 0 && p.unpaid_credits <= 0 && p.paid_credits > 0 ? "paid" : "accepted";
+  if (p.needs_consent) return p.consented_minutes <= 0 ? "not_agreed" : "needs_consent";
+  return p.share_minutes > 0 && p.unpaid_minutes <= 0 && p.paid_minutes > 0 ? "paid" : "accepted";
 }
 
 export function statusWord(p: DetailPlayer, cancelled = false): string {
@@ -153,7 +153,7 @@ export function organiserName(d: BookingDetail): string | null {
 /** A reminder has something to say: an unanswered invite, an unpaid share, a share asked again. */
 export function canNudge(p: DetailPlayer): boolean {
   if (p.kind !== "member" || !isLive(p) || p.settled_outside) return false;
-  return p.status === "invited" || p.unpaid_credits > 0 || p.needs_consent;
+  return p.status === "invited" || p.unpaid_minutes > 0 || p.needs_consent;
 }
 
 /** An open seat, or a member still to answer, can be sent a (new) link. */
@@ -173,8 +173,8 @@ export type AdminAct = "remove" | "accept" | "settle" | "collect";
 /** What an admin collect would take: the unpaid share of a live seat, or what a lapsed one never paid. */
 export function collectable(p: DetailPlayer): number {
   if (p.kind !== "member" || p.settled_outside) return 0;
-  if (p.status === "accepted") return Math.max(p.unpaid_credits, p.target_credits - p.paid_credits, 0);
-  if (p.status === "lapsed" || p.lapsed) return Math.max(p.share_credits - p.paid_credits, 0);
+  if (p.status === "accepted") return Math.max(p.unpaid_minutes, p.target_minutes - p.paid_minutes, 0);
+  if (p.status === "lapsed" || p.lapsed) return Math.max(p.share_minutes - p.paid_minutes, 0);
   return 0;
 }
 

@@ -70,8 +70,8 @@ export function netOf(quote: CancellationQuote, waived: boolean): { back: number
   const split = splitCancelOf(quote);
   const partners = split?.partners ?? [];
   // A waiver returns the penalty, which is the organiser's alone: their net grows by it.
-  if (waived) return { back: split ? split.net + quote.penaltyCredits : quote.amountChargedCredits, penalty: 0, partners };
-  return { back: split ? split.net : quote.refundCredits, penalty: quote.penaltyCredits, partners };
+  if (waived) return { back: split ? split.net + quote.penaltyMinutes : quote.amountChargedMinutes, penalty: 0, partners };
+  return { back: split ? split.net : quote.refundMinutes, penalty: quote.penaltyMinutes, partners };
 }
 
 export type CancelTotals = { back: number; penalty: number; nothingBack: number; missing: number; anyPenalty: boolean };
@@ -85,7 +85,7 @@ export function totalsOf(bookings: readonly GridBooking[], quotes: QuoteMap | nu
     totals.back += back;
     totals.penalty += penalty;
     if (back <= 0) totals.nothingBack += 1;
-    if (q.penaltyCredits > 0 && !q.checkedIn) totals.anyPenalty = true;
+    if (q.penaltyMinutes > 0 && !q.checkedIn) totals.anyPenalty = true;
   }
   return totals;
 }
@@ -158,7 +158,7 @@ function nameOf(b: GridBooking): string {
 function okRow(b: GridBooking, refunded: number | null, penalty: number | null, split: SplitCancel | null = null): BulkResultRow {
   let detail: string;
   if (refunded === null || penalty === null) detail = CANCEL_SHEET.provenRow;
-  else if (split) detail = splitRowOutcome(split.net, split.partners.reduce((n, p) => n + p.credits, 0), penalty);
+  else if (split) detail = splitRowOutcome(split.net, split.partners.reduce((n, p) => n + p.minutes, 0), penalty);
   else detail = cancelRowOutcome(refunded, penalty);
   return { key: b.bookingId, courtName: nameOf(b), when: whenOf(b), ok: true, word: RESULT_WORD.cancelled, detail };
 }
@@ -193,8 +193,8 @@ function fromBulk(res: BulkCancelResponse, bookings: readonly GridBooking[], req
       continue;
     }
     cancelledIds.push(b.bookingId);
-    const refund = typeof raw.refund_credits === "number" ? raw.refund_credits : 0;
-    const penalty = typeof raw.penalty_credits === "number" ? raw.penalty_credits : 0;
+    const refund = typeof raw.refund_minutes === "number" ? raw.refund_minutes : 0;
+    const penalty = typeof raw.penalty_minutes === "number" ? raw.penalty_minutes : 0;
     rows.push(status === "already_cancelled"
       ? { ...okRow(b, 0, 0), detail: refusalReason("already_cancelled") }
       : okRow(b, refund, penalty, splitFor(b, raw, req)));
@@ -234,7 +234,7 @@ async function cancelInTurn(req: CancelRequest): Promise<CancelRun> {
   for (const b of req.bookings) {
     try {
       const r = await cancelOne(b, req);
-      rows.push(okRow(b, r.refunded_credits, r.penalty_credits, splitFor(b, r, req)));
+      rows.push(okRow(b, r.refunded_minutes, r.penalty_minutes, splitFor(b, r, req)));
       cancelledIds.push(b.bookingId);
     } catch (error) {
       if (outcomeUnknown(error)) unsure.push(b);
@@ -254,8 +254,8 @@ async function cancelSingle(b: GridBooking, req: CancelRequest): Promise<CancelR
   try {
     const r = await cancelOne(b, req);
     const split = splitFor(b, r, req);
-    return { rows: [okRow(b, r.refunded_credits, r.penalty_credits, split)], cancelledIds: [b.bookingId],
-      single: { refunded: r.refunded_credits, penalty: r.penalty_credits, split } };
+    return { rows: [okRow(b, r.refunded_minutes, r.penalty_minutes, split)], cancelledIds: [b.bookingId],
+      single: { refunded: r.refunded_minutes, penalty: r.penalty_minutes, split } };
   } catch (error) {
     if (!outcomeUnknown(error) || !req.reread) throw error;
     const day = await req.reread();

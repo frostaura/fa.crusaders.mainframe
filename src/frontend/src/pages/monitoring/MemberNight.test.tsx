@@ -284,7 +284,7 @@ describe("a night's money signs (review round 2, F3-14)", () => {
   beforeEach(() => { signIn({ isAdmin: true }); });
 
   it("writes a negative balance with the same minus as every other figure", async () => {
-    stubFetch(nightRoutes(traceView([traceEvent({ amount_credits: -50, balance_after_credits: -100 })])));
+    stubFetch(nightRoutes(traceView([traceEvent({ amount_minutes: -50, balance_after_minutes: -100 })])));
     renderNight();
     expect(await screen.findByText(/balance −100\.00/)).toBeInTheDocument();
     expect(screen.queryByText(/balance -100/)).toBeNull();
@@ -326,7 +326,7 @@ describe("the admin change record", () => {
     reason: "Court 1 lights faulty",
     changes: [
       { field: "booking_status", before: "Confirmed", after: "Cancelled" },
-      { field: "balance_credits", before: "270.00 cr", after: "370.00 cr" },
+      { field: "balance_minutes", before: "270.00 cr", after: "370.00 cr" },
     ],
   };
 
@@ -387,9 +387,9 @@ describe("the admin change record", () => {
     stubFetch(changeRoutes([{
       ...change, area: "booking", action: "players.share_collected", headline: "Collected a member's share of a booking — Sam Okafor",
       changes: [
-        { field: "collected_credits", label: "Collected credits", before: null, after: "100.00" },
-        { field: "balance_after_credits", label: "Balance after credits", before: null, after: "-100.00" },
-        { field: "balance_before_credits", label: "Balance before credits", before: null, after: "0.00" },
+        { field: "collected_minutes", label: "Collected credits", before: null, after: "100.00" },
+        { field: "balance_after_minutes", label: "Balance after credits", before: null, after: "-100.00" },
+        { field: "balance_before_minutes", label: "Balance before credits", before: null, after: "0.00" },
         { field: "seat", label: "Seat", before: "2", after: null },
         { field: "booking_id", label: "Booking id", before: "a5604dd3-1204-4b67-bc6b-cfca1804fa4f", after: null },
       ],

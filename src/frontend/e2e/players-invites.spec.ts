@@ -56,7 +56,7 @@ async function answerSurface(page: Page) {
 }
 
 const accepted = (share: number) => ({
-  participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: share, consented_credits: share, paid_credits: share, balance_credits: 120 - share,
+  participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_minutes: share, consented_minutes: share, paid_minutes: share, balance_minutes: 120 - share,
 });
 
 test("the Bookings badge leads to Invites, and an accept ends in a calm confirmation", async ({ page }) => {
@@ -76,7 +76,7 @@ test("the Bookings badge leads to Invites, and an accept ends in a calm confirma
 
   await expect(sheet.getByText("You're in", { exact: true })).toBeVisible();
   await expect(sheet.getByRole("link", { name: "See the booking" })).toHaveAttribute("href", `/bookings/${BOOKING}`);
-  expect(sent).toEqual([{ expectedShareCredits: 25 }]);
+  expect(sent).toEqual([{ expectedShareMinutes: 25 }]);
 });
 
 test("a share raised after the sheet opened is shown and asked again", async ({ page }) => {
@@ -84,13 +84,13 @@ test("a share raised after the sheet opened is shown and asked again", async ({ 
   const sent: unknown[] = [];
   await open(page, []);
   await page.route("**/api/v1/me/invites", (route) => json(route, 200, {
-    items: [raised ? samInvite({ share_credits: 30, to_pay_credits: 30 }) : samInvite()], count: 1,
+    items: [raised ? samInvite({ share_minutes: 30, to_pay_minutes: 30 }) : samInvite()], count: 1,
   }));
   await page.route(`**${ACCEPT}`, async (route) => {
-    const body = route.request().postDataJSON() as { expectedShareCredits: number };
+    const body = route.request().postDataJSON() as { expectedShareMinutes: number };
     sent.push(body);
     raised = true;
-    if (body.expectedShareCredits < 30) await json(route, 409, { error: "share_changed", share_credits: 30 });
+    if (body.expectedShareMinutes < 30) await json(route, 409, { error: "share_changed", share_minutes: 30 });
     else await json(route, 200, accepted(30));
   });
   await page.goto("/bookings/invites");
@@ -105,7 +105,7 @@ test("a share raised after the sheet opened is shown and asked again", async ({ 
 
   await again.click();
   await expect(sheet.getByText("You're in", { exact: true })).toBeVisible();
-  expect(sent).toEqual([{ expectedShareCredits: 25 }, { expectedShareCredits: 30 }]);
+  expect(sent).toEqual([{ expectedShareMinutes: 25 }, { expectedShareMinutes: 30 }]);
 });
 
 test("a shared link opens as a page and accepts through the link", async ({ page }) => {
@@ -121,7 +121,7 @@ test("a shared link opens as a page and accepts through the link", async ({ page
   await expect(page.getByRole("button", { name: "Decline" })).toHaveCount(0);
   await page.getByRole("button", { name: "Accept and pay 25.00 cr" }).click();
   await expect(page.getByText("You're in", { exact: true })).toBeVisible();
-  expect(sent).toEqual([{ expectedShareCredits: 25 }]);
+  expect(sent).toEqual([{ expectedShareMinutes: 25 }]);
 });
 
 test("a link that names nothing is answered in a sentence, with a way back", async ({ page }) => {

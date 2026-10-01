@@ -53,7 +53,7 @@ function day() {
 }
 
 type PreviewBody = {
-  priceCredits: number; splitMode: "equal" | "ratio" | "amount"; organiserWeight?: number;
+  priceMinutes: number; splitMode: "equal" | "ratio" | "amount"; organiserWeight?: number;
   players: { seat: number; guestName?: string; weight?: number; amount?: number }[];
 };
 
@@ -61,10 +61,10 @@ type PreviewBody = {
 function previewAnswer(body: unknown) {
   const b = body as PreviewBody;
   const seats = b.players.map((p) => ({ seat: p.seat, isGuest: p.guestName !== undefined, weight: p.weight, amount: p.amount }));
-  const r = splitShares(b.priceCredits, b.splitMode, b.organiserWeight ?? 1, seats);
+  const r = splitShares(b.priceMinutes, b.splitMode, b.organiserWeight ?? 1, seats);
   if (!r.ok) return { error: r.error };
-  const shares = r.shares.map((s) => ({ seat: s.seat, team: s.seat <= 2 ? "A" : "B", share_credits: s.share, weight: s.weight }));
-  return { price_credits: b.priceCredits, shares };
+  const shares = r.shares.map((s) => ({ seat: s.seat, team: s.seat <= 2 ? "A" : "B", share_minutes: s.share, weight: s.weight }));
+  return { price_minutes: b.priceMinutes, shares };
 }
 
 const OPEN_PATH = "/j/OPENOPENOPENOPENOPEN1";
@@ -127,12 +127,12 @@ async function seatSamAndALink(page: Page, capture?: (name: string) => Promise<v
 }
 
 const BOOKED_WITH_PLAYERS = {
-  booking_id: "bk-1", balance_after_credits: 20, players_error: null,
+  booking_id: "bk-1", balance_after_minutes: 20, players_error: null,
   players: {
     booking_id: "bk-1",
     participants: [
-      { participant_id: "p2", seat: 2, user_id: SAM, guest_name: null, status: "invited", share_credits: 33, invite_token: "t2", invite_path: "/j/SAMSAMSAMSAMSAMSAMSAM" },
-      { participant_id: "p4", seat: 4, user_id: null, guest_name: null, status: "invited", share_credits: 33, invite_token: "t4", invite_path: OPEN_PATH },
+      { participant_id: "p2", seat: 2, user_id: SAM, guest_name: null, status: "invited", share_minutes: 33, invite_token: "t2", invite_path: "/j/SAMSAMSAMSAMSAMSAMSAM" },
+      { participant_id: "p4", seat: 4, user_id: null, guest_name: null, status: "invited", share_minutes: 33, invite_token: "t4", invite_path: OPEN_PATH },
     ],
   },
 };
@@ -205,7 +205,7 @@ test.describe("booking with players", () => {
     let raw: unknown = null;
     await signIn(page);
     await serveApi(page, routes([
-      { method: "POST", path: "/api/v1/bookings/", respond: ({ body }) => { raw = body; return { booking_id: "bk-2", balance_after_credits: 20 }; } },
+      { method: "POST", path: "/api/v1/bookings/", respond: ({ body }) => { raw = body; return { booking_id: "bk-2", balance_after_minutes: 20 }; } },
     ]));
     await openSheet(page);
     await next(page);
@@ -220,7 +220,7 @@ test.describe("booking with players", () => {
     await signIn(page);
     await serveApi(page, routes([
       { method: "POST", path: "/api/v1/bookings/bulk", status: 404, respond: () => { bulkCalls += 1; return { error: "member_not_found", user_id: SAM }; } },
-    ], { balance_credits: 500, held_credits: 0, spendable_credits: 500, held_until: null }));
+    ], { balance_minutes: 500, held_minutes: 0, spendable_minutes: 500, held_until: null }));
     await page.goto("/bookings");
     await page.getByRole("button", { name: BOOKINGS_COPY.selectOn }).click();
     await page.getByRole("button", { name: /^Book Court 1 at 07:00/ }).click();

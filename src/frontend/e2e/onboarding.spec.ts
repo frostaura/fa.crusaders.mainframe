@@ -39,7 +39,7 @@ function home(doorBody: Record<string, unknown>) {
     { path: "/api/v1/session", body: SESSION_MEMBER },
     { path: "/api/v1/whoami", body: { ...SESSION_MEMBER, is_admin: false } },
     { path: "/api/v1/me/profile", body: { full_name: "Thandi Probe", photo_url: null, email: "thandi@review.test" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/door", body: doorBody },
   ];
 }
@@ -224,7 +224,7 @@ function p8Routes(opts: { admin?: boolean; prefs?: Partial<typeof PREFS>; record
         full_name: "Thandi Probe", membership_number: "M-9", photo_url: null, status: "active", preferences: prefs,
       },
     },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/webauthn/credentials", body: [] },
     // P11 / D13 — the wizard's last step and Profile's Privacy card read the social switches.
     { path: "/api/v1/me/preferences", body: { ...prefs, findable: false, show_in_leaderboards: false } },

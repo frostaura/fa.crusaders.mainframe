@@ -50,7 +50,7 @@ export function MemberPicker({ rows, total, shown, onMore }: MemberPickerProps) 
 }
 
 function PickerRow({ row }: { row: MemberRow }) {
-  const overdrawn = row.balance_credits < 0;
+  const overdrawn = row.balance_minutes < 0;
   return (
     <NavLink
       to={memberHref(row.user_id)}
@@ -77,7 +77,7 @@ function PickerRow({ row }: { row: MemberRow }) {
         </span>
       </span>
       <span className={cn("shrink-0 text-right text-sm font-semibold tabular-nums", overdrawn ? "text-danger-strong" : "text-text-primary")}>
-        {formatCredits(row.balance_credits)}
+        {formatCredits(row.balance_minutes)}
       </span>
     </NavLink>
   );

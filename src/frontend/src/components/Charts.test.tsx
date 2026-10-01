@@ -10,7 +10,7 @@ import { paletteNow } from "./ChartFrame";
  *
  * <p>
  * Settlement-model I11 posts a correction as a new row of the same type with the
- * opposite sign, never as an edit — so `refunds_credits` and `penalties_credits` are
+ * opposite sign, never as an edit — so `refunds_minutes` and `penalties_minutes` are
  * <b>net</b>, and a day is negative whenever a reversal lands in a different day's
  * bucket from the sweep it reverses. That is the netting working; the API is right and
  * stays. What has to hold is on this side: the axis must be able to go under zero, the
@@ -29,16 +29,16 @@ describe("Charts — net series and the sign of a day", () => {
   const ADMIN_DAYS: DailyAdminPoint[] = [
     // Tuesday: the sweep. Wednesday: the box's upload lands and the sweep is reversed,
     // so the penalty bucket for Wednesday is the reversal alone, and negative.
-    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 141.6, bookings: 3, no_shows: 1 },
-    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: -5.6, bookings: 0, no_shows: 0 },
+    { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2.4, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 141.6, bookings: 3, no_shows: 1 },
+    { date: "2026-09-02", top_ups_minutes: 0, booking_charges_minutes: 0, refunds_minutes: -8, penalties_minutes: -2.4, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: -5.6, bookings: 0, no_shows: 0 },
   ];
 
   // `attended` and `minutes_on_court` come off `CheckedInAt`, the attendance source of
   // truth: Tuesday she booked three quarter-hours and turned up; Wednesday she booked
   // nothing. A booked-but-not-attended day is what the second bar exists to show.
   const ME_DAYS: DailyMePoint[] = [
-    { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
-    { date: "2026-09-02", top_ups_credits: 0, spent_credits: 0, refunds_credits: -8, bookings: 0, attended: 0, minutes_on_court: 0, balance_credits: 128 },
+    { date: "2026-09-01", top_ups_minutes: 160, spent_minutes: 24, refunds_minutes: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_minutes: 136 },
+    { date: "2026-09-02", top_ups_minutes: 0, spent_minutes: 0, refunds_minutes: -8, bookings: 0, attended: 0, minutes_on_court: 0, balance_minutes: 128 },
   ];
 
   /** Every element in a chart's tree, depth first. */
@@ -91,8 +91,8 @@ describe("Charts — net series and the sign of a day", () => {
     // treat 2.40 on Tuesday and -2.40 on Wednesday as an error rather than as one
     // penalty that was charged and then given back.
     const bars = propsOf(tree, Bar);
-    expect(bars.find((b) => b.dataKey === "penalties_credits")?.name).toBe("Penalties (net)");
-    expect(bars.find((b) => b.dataKey === "top_ups_credits")?.name).toBe("Top-ups");
+    expect(bars.find((b) => b.dataKey === "penalties_minutes")?.name).toBe("Penalties (net)");
+    expect(bars.find((b) => b.dataKey === "top_ups_minutes")?.name).toBe("Top-ups");
   });
 
   it("gives the member's flow chart the same treatment for refunds", () => {
@@ -105,7 +105,7 @@ describe("Charts — net series and the sign of a day", () => {
     // A member whose no-show was reversed the next day sees the refund taken back on the
     // day the evidence landed. That is what happened to them, and the label says so.
     const bars = propsOf(tree, Bar);
-    expect(bars.find((b) => b.dataKey === "refunds_credits")?.name).toBe("Refunds (net)");
-    expect(bars.find((b) => b.dataKey === "spent_credits")?.name).toBe("Spent");
+    expect(bars.find((b) => b.dataKey === "refunds_minutes")?.name).toBe("Refunds (net)");
+    expect(bars.find((b) => b.dataKey === "spent_minutes")?.name).toBe("Spent");
   });
 });

@@ -45,7 +45,7 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
       {flow.blocked === "short" ? <ShortNotice shortBy={flow.money.shortBy} reasonId={reasonId} /> : null}
       <CapEffect flow={flow} reasonId={reasonId} />
       {/* A share of nothing has nothing to pay by and nothing to lapse (R1 F2.14). */}
-      {flow.invite.share_credits > 0 ? (
+      {flow.invite.share_minutes > 0 ? (
         <p className="text-sm text-text-secondary" data-deadline="">
           {deadlineLine(flow.invite.share_deadline, organiserName(flow.invite))}
         </p>
@@ -103,8 +103,8 @@ function MoneyFacts({ flow }: { flow: AcceptFlow }) {
   return (
     <div className="flex flex-col gap-2">
       <dl className="flex flex-col gap-2" data-money="">
-        <MoneyRow label={INVITES_COPY.yourShare} value={formatCredits(invite.share_credits)} strong />
-        {money.toPay !== invite.share_credits ? <MoneyRow label={INVITES_COPY.toPayNow} value={formatCredits(money.toPay)} /> : null}
+        <MoneyRow label={INVITES_COPY.yourShare} value={formatCredits(invite.share_minutes)} strong />
+        {money.toPay !== invite.share_minutes ? <MoneyRow label={INVITES_COPY.toPayNow} value={formatCredits(money.toPay)} /> : null}
         {/* Signed, not clamped: owing partners more than the balance is real, and "short by" adds up from it. */}
         <MoneyRow label={INVITES_COPY.spendable} value={signedCredits(money.spendable)} />
         {/* Short, there is no "after" — a negative figure would read as an overdraft the accept never allows. */}
@@ -207,7 +207,7 @@ function OutcomeView({ flow, headed }: { flow: AcceptFlow; headed: boolean }) {
     <div className="flex flex-col items-start gap-3" data-outcome="accepted">
       <Alert tone="success" className="w-full">
         {headed ? null : <span className="font-semibold">{INVITES_COPY.acceptedTitle}</span>}
-        {headed ? acceptedLine(answer?.paid_credits ?? 0, name) : ` — ${acceptedLine(answer?.paid_credits ?? 0, name)}`}
+        {headed ? acceptedLine(answer?.paid_minutes ?? 0, name) : ` — ${acceptedLine(answer?.paid_minutes ?? 0, name)}`}
       </Alert>
       {proven ? <p className="text-sm text-text-secondary" data-proven="">{INVITE_UNSURE.provenNote}</p> : null}
       <TextLink to={`/bookings/${answer?.booking_id ?? flow.invite.booking_id}`} variant="standalone">

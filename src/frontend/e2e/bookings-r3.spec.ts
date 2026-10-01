@@ -27,7 +27,7 @@ function mySlot() {
   return {
     courtId: COURTS[0].id, courtNumber: 1, startsAtUtc: `${DAY}T12:00:00.000Z`, endsAtUtc: `${DAY}T12:15:00.000Z`,
     status: "booked", ownerUserId: SESSION_ADMIN.user_id, ownerFirstName: "Dean", ownerPhotoUrl: null, isMine: true,
-    bookingId: "bbbbbbbb-0000-4000-8000-000000000001", blockLabel: null, checkedIn: false, amountChargedCredits: 50,
+    bookingId: "bbbbbbbb-0000-4000-8000-000000000001", blockLabel: null, checkedIn: false, amountChargedMinutes: 50,
   };
 }
 
@@ -40,7 +40,7 @@ function openSeatGame() {
       { name: "Vincent Venter", photo_url: null, status: "invited" },
       { name: null, photo_url: null, status: "invited" },
     ],
-    my_share_credits: 67, needs_action: false,
+    my_share_minutes: 67, needs_action: false,
   };
 }
 
@@ -51,7 +51,7 @@ async function open(page: Page, options: { routes?: ApiRoute[]; upcoming?: unkno
     { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
     { path: "/api/v1/me/bookings/upcoming", body: { timezone: "UTC", items: options.upcoming ?? [] } },
     { path: "/api/v1/me/bookings/recent", body: { timezone: "UTC", items: [] } },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
   ].filter((r, i, all) => all.findIndex((o) => o.path === r.path && (o.method ?? "GET") === (r.method ?? "GET")) === i));
   await page.goto(`/bookings?date=${DAY}`);
@@ -117,7 +117,7 @@ test.describe("X-6 — a sheet closing over a re-drawn cell gives focus back to 
     let booked = false;
     return [
       { path: "/api/v1/schedule", respond: () => wholeDay(booked ? [mySlot()] : []) },
-      { method: "POST", path: "/api/v1/bookings/", respond: () => { booked = true; return { booking_id: mySlot().bookingId, balance_after_credits: 450 }; } },
+      { method: "POST", path: "/api/v1/bookings/", respond: () => { booked = true; return { booking_id: mySlot().bookingId, balance_after_minutes: 450 }; } },
     ];
   }
 
@@ -144,10 +144,10 @@ test.describe("X-6 — a sheet closing over a re-drawn cell gives focus back to 
       routes: [
         { path: "/api/v1/schedule", respond: () => wholeDay(cancelled ? [] : [mySlot()]) },
         { path: `/api/v1/bookings/${mySlot().bookingId}/cancellation-quote`, body: {
-          bookingId: mySlot().bookingId, amountChargedCredits: 50, refundCredits: 50, penaltyCredits: 0, penaltyPct: 30,
+          bookingId: mySlot().bookingId, amountChargedMinutes: 50, refundMinutes: 50, penaltyMinutes: 0, penaltyPct: 30,
           penaltyWindowMinutes: 15, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false,
         } },
-        { method: "POST", path: `/api/v1/bookings/${mySlot().bookingId}/cancel`, respond: () => { cancelled = true; return { refunded_credits: 50, penalty_credits: 0 }; } },
+        { method: "POST", path: `/api/v1/bookings/${mySlot().bookingId}/cancel`, respond: () => { cancelled = true; return { refunded_minutes: 50, penalty_minutes: 0 }; } },
       ],
     });
     await page.getByRole("button", { name: /Cancel your booking on Court 1 at 12:00/ }).click();

@@ -71,8 +71,8 @@ async function readClosedGame(bookingId: string): Promise<ClosedGame> {
     const mine = d.players.find((p) => p.participant_id !== null && p.participant_id === d.viewer.participant_id);
     if (d.status !== "cancelled" || d.viewer.role !== "player" || !mine) return { kind: "other" };
     // What they had paid came back with the cancellation — the share they said yes to, when
-    // nothing is still counted as paid (a check-in keeps it: then it is `paid_credits`).
-    const back = mine.status === "accepted" && mine.paid_credits <= 0 ? mine.consented_credits : 0;
+    // nothing is still counted as paid (a check-in keeps it: then it is `paid_minutes`).
+    const back = mine.status === "accepted" && mine.paid_minutes <= 0 ? mine.consented_minutes : 0;
     return { kind: "cancelled", bookingId, back };
   } catch {
     return { kind: "other" };

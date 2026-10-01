@@ -68,7 +68,7 @@ export function addOrProve(detail: BookingDetail, pick: PickedPlayer | { kind: "
       booking_id: detail.booking_id,
       participants: [{
         participant_id: seat.participant_id, seat: seat.seat, user_id: seat.user_id,
-        guest_name: seat.kind === "guest" ? seat.name : null, status: seat.status, share_credits: seat.share_credits,
+        guest_name: seat.kind === "guest" ? seat.name : null, status: seat.status, share_minutes: seat.share_minutes,
         invite_token: null, invite_path: null,
       }],
     };
@@ -79,7 +79,7 @@ export function addOrProve(detail: BookingDetail, pick: PickedPlayer | { kind: "
 export function splitOrProve(
   bookingId: string,
   body: SplitChange,
-  expected: readonly { seat: number; share_credits: number }[],
+  expected: readonly { seat: number; share_minutes: number }[],
   write: () => Promise<SplitChangeAnswer>,
 ): Promise<Landed<SplitChangeAnswer>> {
   return writeOrReadBack(write, async () => {
@@ -87,12 +87,12 @@ export function splitOrProve(
     if (now.split_mode !== body.mode) return null;
     const live = now.players.filter((p) => p.participant_id && p.status !== "removed");
     // The partners' seats: the organiser's own figure is what is left over, however it is shown.
-    const matches = expected.filter((e) => e.seat !== 1).every((e) => live.find((p) => p.seat === e.seat)?.share_credits === e.share_credits);
+    const matches = expected.filter((e) => e.seat !== 1).every((e) => live.find((p) => p.seat === e.seat)?.share_minutes === e.share_minutes);
     if (!matches) return null;
     return {
       booking_id: bookingId, split_mode: now.split_mode,
       shares: live.map((p) => ({
-        participant_id: p.participant_id ?? "", seat: p.seat, share_credits: p.share_credits, weight: p.weight, needs_consent: p.needs_consent,
+        participant_id: p.participant_id ?? "", seat: p.seat, share_minutes: p.share_minutes, weight: p.weight, needs_consent: p.needs_consent,
       })),
     };
   });

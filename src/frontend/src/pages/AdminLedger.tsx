@@ -262,7 +262,7 @@ function LedgerTotals({ totals, loading, searching }: { totals: Totals | null; l
   // the empty case: a genuine zero-valued adjustment row is wrong in exactly the same
   // way, with a table full of rows underneath it.
   //
-  // Debits are summed as a MAGNITUDE (amountCredits of the rows whose signed amount
+  // Debits are summed as a MAGNITUDE (amountMinutes of the rows whose signed amount
   // is negative), so the negation is what tells the formatter which direction this tile
   // is counting. The sign on screen is then the sign of a number, which is the property
   // that cannot drift.
@@ -278,9 +278,10 @@ function tilesOf(totals: Totals | null): Array<{ label: string; value: string | 
   if (!totals) return ["Movements", "Credits", "Debits", "Net"].map((label) => ({ label, value: null }));
   return [
     { label: "Movements", value: String(totals.count) },
-    { label: "Credits", value: formatSignedCredits(totals.credits), tone: toneOf(totals.credits) },
-    { label: "Debits", value: formatSignedCredits(-totals.debits), tone: toneOf(-totals.debits) },
-    { label: "Net", value: formatSignedCredits(totals.net), tone: toneOf(totals.net) },
+    // P13-F3: the words "Credits"/"Debits" and the formatter are F3's; the keys are §3.2's.
+    { label: "Credits", value: formatSignedCredits(totals.in_minutes), tone: toneOf(totals.in_minutes) },
+    { label: "Debits", value: formatSignedCredits(-totals.out_minutes), tone: toneOf(-totals.out_minutes) },
+    { label: "Net", value: formatSignedCredits(totals.net_minutes), tone: toneOf(totals.net_minutes) },
   ];
 }
 

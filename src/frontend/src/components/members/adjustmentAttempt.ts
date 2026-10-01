@@ -96,7 +96,7 @@ async function lookFor(input: AdjustmentInput, pressedAt: number): Promise<Found
     });
     const reason = input.reason.trim();
     const hit = rows.some((row) => ADJUSTMENT_TYPES.has(row.type)
-      && row.signedAmountCredits === input.amount
+      && row.signedAmountMinutes === input.amount
       && row.comment.trim() === reason);
     return hit ? "landed" : "absent";
   } catch {
@@ -108,7 +108,7 @@ async function lookFor(input: AdjustmentInput, pressedAt: number): Promise<Found
 async function balanceNow(userId: string): Promise<number | null> {
   try {
     const detail = await memberDetailEndpoints.detail(userId);
-    return typeof detail?.balance_credits === "number" ? detail.balance_credits : null;
+    return typeof detail?.balance_minutes === "number" ? detail.balance_minutes : null;
   } catch {
     return null;
   }
@@ -133,7 +133,7 @@ export async function attemptAdjustment(
   const pressedAt = Date.now();
   try {
     const r = await adminEndpoints.adjustCredit(input.userId, {
-      amountCredits: input.amount,
+      amountMinutes: input.amount,
       reasonCode: input.reasonCode,
       reason: input.reason,
       ...(input.bookingId ? { relatedBookingId: input.bookingId } : {}),
@@ -141,7 +141,7 @@ export async function attemptAdjustment(
       idempotencyKey: keyRef.current!.key,
     });
     keyRef.current = null;
-    return { kind: "applied", balanceAfterCredits: r.balance_after_credits, recovered: false };
+    return { kind: "applied", balanceAfterCredits: r.balance_after_minutes, recovered: false };
   } catch (err) {
     const booking = relatedBookingRefusal(err);
     if (booking) return { kind: "booking", message: booking };

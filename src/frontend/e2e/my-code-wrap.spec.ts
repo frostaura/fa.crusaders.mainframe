@@ -15,7 +15,7 @@ for (const width of [390, 768]) {
     await serveApi(page, [
       { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
       { path: "/api/v1/me/profile", body: { full_name: "Lerato Mokoena", email: "lerato@sample.local", photo_url: null, membership_number: "M-0001" } },
-      { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
       ...memberCodeRoutes(),
       {
         path: "/api/v1/me/door",

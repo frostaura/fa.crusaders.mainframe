@@ -35,7 +35,7 @@ const PROFILE = {
 };
 const COMMON = [
   { path: "/api/v1/whoami", body: SESSION_ADMIN },
-  { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+  { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
   { path: "/api/v1/me/profile", body: PROFILE },
 ];
 

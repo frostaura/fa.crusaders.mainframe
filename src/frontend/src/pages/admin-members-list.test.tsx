@@ -29,7 +29,7 @@ const GRACE = memberFixture({
 });
 const ALAN = memberFixture({
   membership_id: "m3", user_id: "u3", full_name: "Alan Turing", email: "alan@example.com",
-  membership_number: "CR-0003", status: "Suspended", balance_credits: -30,
+  membership_number: "CR-0003", status: "Suspended", balance_minutes: -30,
 });
 
 function render(opts: { members?: unknown[]; extra?: StubRoute[]; at?: string } = {}) {

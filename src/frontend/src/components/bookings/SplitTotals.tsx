@@ -27,7 +27,7 @@ function nameOfSeat(draft: PlayersDraft, seat: number): string {
 }
 
 function heading(preview: SplitPreview, count: number, bulk: boolean): string | null {
-  if (count > 1) return BOOK_SPLIT.perPrice(formatCredits(preview.price_credits));
+  if (count > 1) return BOOK_SPLIT.perPrice(formatCredits(preview.price_minutes));
   return bulk ? BOOK_SPLIT.eachBooking : null;
 }
 
@@ -36,22 +36,22 @@ type TotalsBlockProps = { preview: SplitPreview; draft: PlayersDraft; title: str
 function TotalsBlock({ preview, draft, title, hidePayNow }: TotalsBlockProps) {
   const back = partnersTotal(preview.shares);
   return (
-    <div className="grid gap-2" data-totals={preview.price_credits}>
+    <div className="grid gap-2" data-totals={preview.price_minutes}>
       {title ? <p className="text-xs font-semibold uppercase tracking-overline text-text-muted">{title}</p> : null}
       <dl className="grid gap-1.5">
         {preview.shares.map((s) => (
           <div key={s.seat} className="flex items-baseline justify-between gap-4">
             <dt className="truncate text-text-secondary">{nameOfSeat(draft, s.seat)}</dt>
-            <dd className="font-medium tabular-nums text-text-primary">{formatCredits(s.share_credits)}</dd>
+            <dd className="font-medium tabular-nums text-text-primary">{formatCredits(s.share_minutes)}</dd>
           </div>
         ))}
       </dl>
       {hidePayNow ? null : (
         <p className="border-t border-border pt-2 font-semibold text-text-primary">
-          {BOOK_SPLIT.youPayNow(formatCredits(preview.price_credits), formatCredits(back))}
+          {BOOK_SPLIT.youPayNow(formatCredits(preview.price_minutes), formatCredits(back))}
         </p>
       )}
-      <p className="text-xs text-text-secondary">{BOOK_SPLIT.addsUp(formatCredits(preview.price_credits))}</p>
+      <p className="text-xs text-text-secondary">{BOOK_SPLIT.addsUp(formatCredits(preview.price_minutes))}</p>
     </div>
   );
 }
@@ -94,7 +94,7 @@ export function SplitTotals({ players, hidePayNow = false }: { players: SplitEdi
       {state.status === "ready"
         ? state.previews.map((p) => (
           <TotalsBlock
-            key={p.price_credits} preview={p} draft={players.draft} hidePayNow={hidePayNow}
+            key={p.price_minutes} preview={p} draft={players.draft} hidePayNow={hidePayNow}
             title={heading(p, state.previews.length, players.bulk)}
           />
         ))

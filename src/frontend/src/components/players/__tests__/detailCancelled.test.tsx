@@ -26,10 +26,10 @@ const CANCELLED_PERMISSIONS = {
 function cancelled(overrides = {}) {
   return detail({
     status: "cancelled",
-    players: [seat(), { ...SAM_SEAT, paid_credits: 0, target_credits: 0 }, ALEX_SEAT, OPEN_SEAT],
+    players: [seat(), { ...SAM_SEAT, paid_minutes: 0, target_minutes: 0 }, ALEX_SEAT, OPEN_SEAT],
     money: {
-      price_credits: 100, organiser_owed_credits: 0, shares_received_credits: 0, organiser_net_credits: 0,
-      unpaid_credits: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: true,
+      price_minutes: 100, organiser_owed_minutes: 0, shares_received_minutes: 0, organiser_net_minutes: 0,
+      unpaid_minutes: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: true,
     },
     permissions: CANCELLED_PERMISSIONS,
     ...overrides,
@@ -50,7 +50,7 @@ describe("a cancelled booking (R1 F2.10)", () => {
   });
 
   it("R2 F2-9: offers no 'Free seat' placeholders — nothing is left to fill", async () => {
-    serve({ detail: cancelled({ players: [seat(), { ...SAM_SEAT, paid_credits: 0, target_credits: 0 }] }) });
+    serve({ detail: cancelled({ players: [seat(), { ...SAM_SEAT, paid_minutes: 0, target_minutes: 0 }] }) });
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
     expect(document.querySelectorAll("[data-free]")).toHaveLength(0);
@@ -70,7 +70,7 @@ describe("a cancelled booking (R1 F2.10)", () => {
   });
 
   it("R2 F2-4: each partner's row says what came back to them — '25.00 cr back', not 'nothing owed'", async () => {
-    serve({ detail: cancelled({ players: [seat(), { ...SAM_SEAT, paid_credits: 0, target_credits: 0, returned_credits: 25 }, ALEX_SEAT] }) });
+    serve({ detail: cancelled({ players: [seat(), { ...SAM_SEAT, paid_minutes: 0, target_minutes: 0, returned_minutes: 25 }, ALEX_SEAT] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
     const sam = within(money).getByText("Sam").closest("li")!;
@@ -102,11 +102,11 @@ describe("a cancelled booking (R1 F2.10)", () => {
 
   it("cancelled after check-in: the partners' shares stand and are said as paid", async () => {
     serve({ detail: cancelled({
-      players: [seat(), { ...SAM_SEAT, paid_credits: 25 }, OPEN_SEAT],
+      players: [seat(), { ...SAM_SEAT, paid_minutes: 25 }, OPEN_SEAT],
       attendance: { checked_in_at: "2026-09-30T16:02:00Z", players_checked_in: 1 },
       money: {
-        price_credits: 100, organiser_owed_credits: 100, shares_received_credits: 25, organiser_net_credits: 75,
-        unpaid_credits: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: true,
+        price_minutes: 100, organiser_owed_minutes: 100, shares_received_minutes: 25, organiser_net_minutes: 75,
+        unpaid_minutes: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: true,
       },
     }) });
     renderDetail();
@@ -122,8 +122,8 @@ describe("a cancelled booking nobody split (R2 F2-4)", () => {
     serve({ detail: cancelled({
       players: [seat()],
       money: {
-        price_credits: 100, organiser_owed_credits: 0, shares_received_credits: 0, organiser_net_credits: 0,
-        unpaid_credits: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: false,
+        price_minutes: 100, organiser_owed_minutes: 0, shares_received_minutes: 0, organiser_net_minutes: 0,
+        unpaid_minutes: 0, share_deadline: "2026-10-02T18:45:00Z", is_split: false,
       },
     }) });
     renderDetail();

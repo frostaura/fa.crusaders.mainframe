@@ -88,7 +88,7 @@ function Probe() {
   );
 }
 
-async function mount(transport: BalanceTransport, wallet = { balance_credits: 100 }, policy: LiveBalancePolicy = FAST) {
+async function mount(transport: BalanceTransport, wallet = { balance_minutes: 100 }, policy: LiveBalancePolicy = FAST) {
   const stub: FetchStub = stubFetch([
     { path: "/api/v1/whoami", body: WHOAMI },
     { path: "/api/v1/wallet", body: { ...wallet, entries: [], total_entries: 0, offset: 0, limit: 100 } },
@@ -181,7 +181,7 @@ describe("a movement knows who caused it", () => {
     const wire = fakeTransport();
     await mount(wire.transport);
     await wire.accept();
-    await wire.push({ balance_credits: 300 });
+    await wire.push({ balance_minutes: 300 });
     expect(screen.getByTestId("delta").textContent).toBe("club:200.00");
   });
 
@@ -199,7 +199,7 @@ describe("a movement knows who caused it", () => {
     await wire.accept();
     // The difference and the stated delta deliberately disagree: a client that inferred the
     // movement from the balance would report 200 for what the server calls a 50 refund.
-    await wire.push({ balance_credits: 300, delta_credits: 50, reason: "cancellation_refund" });
+    await wire.push({ balance_minutes: 300, delta_minutes: 50, reason: "cancellation_refund" });
     expect(screen.getByTestId("delta").textContent).toBe("club:50.00");
   });
 
@@ -207,7 +207,7 @@ describe("a movement knows who caused it", () => {
     const wire = fakeTransport();
     await mount(wire.transport);
     await wire.accept();
-    await wire.push({ balance_credits: 100 });
+    await wire.push({ balance_minutes: 100 });
     expect(screen.getByTestId("delta").textContent).toBe("none");
   });
 });
@@ -227,7 +227,7 @@ describe("two tabs", () => {
 
     const stub: FetchStub = stubFetch([
       { path: "/api/v1/whoami", body: WHOAMI },
-      { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 100, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     ]);
     expect(stub).toBeTruthy();
     signIn({ isAdmin: false });
@@ -248,8 +248,8 @@ describe("two tabs", () => {
     await a.accept();
     await b.accept();
 
-    await a.push({ balance_credits: 350 });
-    await b.push({ balance_credits: 350 });
+    await a.push({ balance_minutes: 350 });
+    await b.push({ balance_minutes: 350 });
 
     const figures = [...view.container.querySelectorAll('[data-testid="balance"]')]
       .map((n) => n.textContent);
@@ -330,7 +330,7 @@ describe("the zero-balance entice is finite by construction", () => {
  * <b>`source` is the only thing standing between a cancel and two toasts for one event.</b>
  * `apply()` marks the next movement as this tab's own, which is why booking raises exactly one
  * — the page says "Booked", and the chip stays quiet. Cancelling had no `apply` to call: the
- * cancel endpoint answers with `refunded_credits` and `penalty_credits` and no balance, so the
+ * cancel endpoint answers with `refunded_minutes` and `penalty_minutes` and no balance, so the
  * page re-read the wallet instead — and a plain re-read is indistinguishable from an admin
  * crediting the member, so the chip announced "The club added 50 credits" over the page's own
  * "50.00 back". One action, two sentences, and a member wondering which one happened.
@@ -347,12 +347,12 @@ describe("a re-read can say whose doing it was", () => {
   /** Re-points the wallet route at a new figure, as a refund landing on the server would. */
   const walletNowHolds = (credits: number) => stubFetch([
     { path: "/api/v1/whoami", body: WHOAMI },
-    { path: "/api/v1/wallet", body: { balance_credits: credits, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: credits, entries: [], total_entries: 0, offset: 0, limit: 100 } },
   ]);
 
   it("marks a movement the page caused as this tab's own", async () => {
     const t = fakeTransport();
-    await mount(t.transport, { balance_credits: 100 });
+    await mount(t.transport, { balance_minutes: 100 });
     await t.accept();
 
     // The refund has landed on the server; the page asks for the figure rather than guessing.
@@ -370,7 +370,7 @@ describe("a re-read can say whose doing it was", () => {
    */
   it("still calls an unattributed movement the club's", async () => {
     const t = fakeTransport();
-    await mount(t.transport, { balance_credits: 100 });
+    await mount(t.transport, { balance_minutes: 100 });
     await t.accept();
 
     walletNowHolds(300);
@@ -381,7 +381,7 @@ describe("a re-read can say whose doing it was", () => {
 
   it("does not leave the flag armed for the next movement", async () => {
     const t = fakeTransport();
-    await mount(t.transport, { balance_credits: 100 });
+    await mount(t.transport, { balance_minutes: 100 });
     await t.accept();
 
     walletNowHolds(150);
@@ -389,7 +389,7 @@ describe("a re-read can say whose doing it was", () => {
     expect(screen.getByTestId("delta")).toHaveTextContent("self:50.00");
 
     // The club credits them a moment later. A flag that stayed armed would swallow it.
-    await t.push({ balance_credits: 250 });
+    await t.push({ balance_minutes: 250 });
     expect(screen.getByTestId("delta")).toHaveTextContent("club:100.00");
   });
 });

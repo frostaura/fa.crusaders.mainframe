@@ -35,7 +35,8 @@ describe("the credit-conversion rate fields", () => {
    * holds the same step rule there.
    */
   const RATES: [RegExp, number][] = [
-    [/Credits per R1 — members/, SETTINGS_FIXTURE.credits_per_zar_regular],
+    // P13-F3: the rate left the settings GET (contract §3.9) and SETTINGS_FIXTURE; this test goes with the field.
+    [/Credits per R1 — members/, 1.6],
   ];
 
   it("accept the rates the club actually uses", async () => {

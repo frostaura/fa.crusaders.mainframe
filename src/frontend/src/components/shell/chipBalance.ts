@@ -32,8 +32,8 @@ type Kept = { balance: number; held: HeldFigures; at: number | null } | null;
 function useKeptFigures(waiting: boolean): Kept {
   const kept = useCachedRead<WalletResponse>(waiting ? memberReads.wallet.key : null, memberReads.wallet.load, { whileChecking: false });
   const wallet = kept.data;
-  if (!waiting || !wallet || typeof wallet.balance_credits !== "number") return null;
-  return { balance: wallet.balance_credits, held: heldFrom(wallet), at: kept.readAt };
+  if (!waiting || !wallet || typeof wallet.balance_minutes !== "number") return null;
+  return { balance: wallet.balance_minutes, held: heldFrom(wallet), at: kept.readAt };
 }
 
 /**

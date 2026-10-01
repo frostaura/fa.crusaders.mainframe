@@ -35,7 +35,7 @@ function reason(dialog: HTMLElement, text: string) {
 describe("collect", () => {
   it("always asks for the overdraft go-ahead, and a reason, before it sends", async () => {
     const stub = serve({ admin: true, detail: adminView(), extra: [{
-      method: "POST", path: `${ADMIN_SEAT}/collect`, body: { participant_id: PID.alex, collected_credits: 25, balance_after_credits: -5 },
+      method: "POST", path: `${ADMIN_SEAT}/collect`, body: { participant_id: PID.alex, collected_minutes: 25, balance_after_minutes: -5 },
     }] });
     const dialog = await openAct(DETAIL_ADMIN.collect);
     expect(dialog).toHaveTextContent(DETAIL_ADMIN.changeLog);
@@ -94,7 +94,7 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
   it("names the organiser in full, the return, what is covered and the shortfall", async () => {
     serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `${ADMIN_SEAT}/settle-outside`, status: 400,
-      body: { error: "overdraft_not_authorised", return_credits: 40, covered_credits: 10 },
+      body: { error: "overdraft_not_authorised", return_minutes: 40, covered_minutes: 10 },
     }] });
     const dialog = await openAct(DETAIL_ADMIN.settle);
     reason(dialog, "Paid cash");
@@ -107,7 +107,7 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
 
   it("accepted by the club (no consent) reads as a share not agreed — never 'Asked again … said yes to 0.00'", async () => {
     serve({ admin: true, detail: adminView({
-      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", status: "accepted", consented_credits: 0, needs_consent: true, unpaid_credits: 0 })],
+      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", status: "accepted", consented_minutes: 0, needs_consent: true, unpaid_minutes: 0 })],
     }) });
     renderDetail();
     expect(await screen.findByText(DETAIL_MONEY.notAgreedRow("25.00 cr"))).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
 
   it("two players who share a first name are told apart by their full names", async () => {
     serve({ admin: true, detail: adminView({
-      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", name: "Sam Naidoo", status: "accepted", consented_credits: 25, target_credits: 25 })],
+      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", name: "Sam Naidoo", status: "accepted", consented_minutes: 25, target_minutes: 25 })],
     }) });
     renderDetail();
     expect(await screen.findByRole("listitem", { name: /^Sam Petersen, / })).toBeInTheDocument();
@@ -137,7 +137,7 @@ describe("remove and settle — a return that waits on the organiser (P11)", () 
   ])("%s: return_waiting says the money has not moved yet", async (route, label, confirm, done) => {
     serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `${ADMIN_SEAT}/${route}`,
-      body: { participant_id: PID.alex, status: "removed", return_waiting: true, return_credits: 16 },
+      body: { participant_id: PID.alex, status: "removed", return_waiting: true, return_minutes: 16 },
     }] });
     const dialog = await openAct(label);
     reason(dialog, "Injured");
@@ -148,7 +148,7 @@ describe("remove and settle — a return that waits on the organiser (P11)", () 
   it("a waiting return with no figure still says nothing has moved", async () => {
     serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `${ADMIN_SEAT}/remove`,
-      body: { participant_id: PID.alex, status: "removed", return_waiting: true, return_credits: null },
+      body: { participant_id: PID.alex, status: "removed", return_waiting: true, return_minutes: null },
     }] });
     const dialog = await openAct(DETAIL_ADMIN.remove);
     reason(dialog, "Injured");
@@ -161,7 +161,7 @@ describe("remove and settle — a return that waits on the organiser (P11)", () 
   it("return_waiting false reads exactly as before", async () => {
     serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `${ADMIN_SEAT}/remove`,
-      body: { participant_id: PID.alex, status: "removed", return_waiting: false, return_credits: 16 },
+      body: { participant_id: PID.alex, status: "removed", return_waiting: false, return_minutes: 16 },
     }] });
     const dialog = await openAct(DETAIL_ADMIN.remove);
     reason(dialog, "Injured");
@@ -197,7 +197,7 @@ describe("add a player as the club", () => {
   it("adds an open link seat with a reason, then offers its link", async () => {
     const stub = serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `/api/v1/admin/bookings/${BOOKING}/players`,
-      body: { booking_id: BOOKING, participants: [{ participant_id: "p-new", seat: 3, user_id: null, guest_name: null, status: "invited", share_credits: 25, invite_token: "t", invite_path: "/j/t" }] },
+      body: { booking_id: BOOKING, participants: [{ participant_id: "p-new", seat: 3, user_id: null, guest_name: null, status: "invited", share_minutes: 25, invite_token: "t", invite_path: "/j/t" }] },
     }, { path: "/api/v1/admin/members", body: [] }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ADMIN.add }));
@@ -215,7 +215,7 @@ describe("add a player as the club", () => {
   it("adds a named guest", async () => {
     const stub = serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `/api/v1/admin/bookings/${BOOKING}/players`,
-      body: { booking_id: BOOKING, participants: [{ participant_id: "p-g", seat: 3, user_id: null, guest_name: "Themba", status: "accepted", share_credits: 0, invite_token: null, invite_path: null }] },
+      body: { booking_id: BOOKING, participants: [{ participant_id: "p-g", seat: 3, user_id: null, guest_name: "Themba", status: "accepted", share_minutes: 0, invite_token: null, invite_path: null }] },
     }, { path: "/api/v1/admin/members", body: [] }] });
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ADMIN.add }));

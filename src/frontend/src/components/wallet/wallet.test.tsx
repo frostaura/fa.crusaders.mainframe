@@ -22,7 +22,7 @@ const ROW = (over: Record<string, unknown> = {}) => ({
   id: "r1",
   at: "2026-09-21T18:31:00Z",
   from: "Club", to: "Thandi Probe",
-  amountCredits: 200, signedAmountCredits: 200,
+  amountMinutes: 200, signedAmountMinutes: 200,
   type: "AdminAdjustment",
   comment: "Desk credit",
   subjectUserId: "u-member", subjectName: "Thandi Probe",
@@ -33,7 +33,7 @@ const ROW = (over: Record<string, unknown> = {}) => ({
 
 function serveWallet(balance: number, entries: Record<string, unknown>[] = []) {
   return stubFetch([
-    { path: "/api/v1/wallet", body: { balance_credits: balance, entries, total_entries: entries.length, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: balance, entries, total_entries: entries.length, offset: 0, limit: 100 } },
   ]);
 }
 
@@ -115,12 +115,12 @@ describe("what a member sees when the club tops them up while they watch", () =>
       gets which answer a race. This is the club changing its mind about a member's balance,
       which is what actually happens.
     */
-    const club = { balance_credits: 0, entries: [] as unknown[], total_entries: 0, offset: 0, limit: 100 };
+    const club = { balance_minutes: 0, entries: [] as unknown[], total_entries: 0, offset: 0, limit: 100 };
     stubFetch([{ path: "/api/v1/wallet", respond: () => ({ ...club }) }]);
     renderPage(<WalletPage />);
     await screen.findByText(BALANCE_SENTENCE.zero);
 
-    club.balance_credits = 200;
+    club.balance_minutes = 200;
     club.entries = [ROW()];
     club.total_entries = 1;
     /*

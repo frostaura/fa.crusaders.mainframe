@@ -24,10 +24,10 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
  */
 
 const ME: DailyMePoint[] = [
-  { date: "2026-09-01", top_ups_credits: 100, spent_credits: 50, refunds_credits: 10, bookings: 2, attended: 2, minutes_on_court: 30, balance_credits: 250 },
+  { date: "2026-09-01", top_ups_minutes: 100, spent_minutes: 50, refunds_minutes: 10, bookings: 2, attended: 2, minutes_on_court: 30, balance_minutes: 250 },
 ];
 const ADMIN: DailyAdminPoint[] = [
-  { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 141.6, bookings: 3, no_shows: 1 },
+  { date: "2026-09-01", top_ups_minutes: 160, booking_charges_minutes: 24, refunds_minutes: 8, penalties_minutes: 2.4, adjustments_minutes: 0, reversals_minutes: 0, net_movement_minutes: 141.6, bookings: 3, no_shows: 1 },
 ];
 
 afterEach(() => {

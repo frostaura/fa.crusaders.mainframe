@@ -103,12 +103,12 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
  * A server without the figures (or a game that has cost nothing yet) keeps the share line.
  */
 function MoneyLine({ game }: { game: UpcomingGame }) {
-  const owing = game.my_owing_credits ?? 0;
-  const paid = game.my_paid_credits ?? 0;
+  const owing = game.my_owing_minutes ?? 0;
+  const paid = game.my_paid_minutes ?? 0;
   let text: string | null = null;
   if (owing > 0) text = UPCOMING.owe(owing);
   else if (paid > 0) text = UPCOMING.paid(paid);
-  else if (game.my_share_credits !== null) text = UPCOMING.share(game.my_share_credits);
+  else if (game.my_share_minutes !== null) text = UPCOMING.share(game.my_share_minutes);
   return text ? <span className="text-xs tabular-nums text-text-secondary">{text}</span> : null;
 }
 

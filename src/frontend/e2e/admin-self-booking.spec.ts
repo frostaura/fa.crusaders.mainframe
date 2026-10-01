@@ -49,18 +49,18 @@ const day = () => ({
 function quote(userId: string, balance: number) {
   return {
     user_id: userId, court_id: COURT, court_name: "Court 1", starts_at: `${tomorrow()}T07:00:00Z`, ends_at: null,
-    slices: 1, price_credits: 50, balance_credits: balance, balance_after_credits: balance - 50, overdraws: balance < 50,
+    slices: 1, price_minutes: 50, balance_minutes: balance, balance_after_minutes: balance - 50, overdraws: balance < 50,
   };
 }
 
 function routes(extra: ApiRoute[]): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/admin/members", body: [
-      { user_id: ADMIN_ID, full_name: "Crusaders Admin", photo_url: null, balance_credits: 10 },
-      { user_id: MEMBER_ID, full_name: "Naledi Khumalo", photo_url: null, balance_credits: 34 },
+      { user_id: ADMIN_ID, full_name: "Crusaders Admin", photo_url: null, balance_minutes: 10 },
+      { user_id: MEMBER_ID, full_name: "Naledi Khumalo", photo_url: null, balance_minutes: 34 },
     ] },
     { path: "/api/v1/schedule", body: day() },
     ...extra,
@@ -91,7 +91,7 @@ test("an admin books their own court below zero — told first, sent once, with 
     { path: "/api/v1/admin/bookings/quote", body: quote(ADMIN_ID, 10) },
     {
       method: "POST", path: "/api/v1/admin/bookings",
-      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-1", balance_after_credits: -40 }; },
+      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-1", balance_after_minutes: -40 }; },
     },
   ]));
 
@@ -115,7 +115,7 @@ test("an admin books a member below zero — the member is named and the notice 
     { path: "/api/v1/admin/bookings/quote", body: quote(MEMBER_ID, 34) },
     {
       method: "POST", path: "/api/v1/admin/bookings",
-      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-2", balance_after_credits: -16 }; },
+      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-2", balance_after_minutes: -16 }; },
     },
   ]));
 
@@ -141,7 +141,7 @@ test("no notice and no flag when the quote says the payer can cover it", async (
     { path: "/api/v1/admin/bookings/quote", body: quote(ADMIN_ID, 500) },
     {
       method: "POST", path: "/api/v1/admin/bookings",
-      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-3", balance_after_credits: 450 }; },
+      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-3", balance_after_minutes: 450 }; },
     },
   ]));
 

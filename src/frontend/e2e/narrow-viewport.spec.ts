@@ -26,8 +26,8 @@ const row = (id: string, signed: number, comment: string) => ({
   at: AT,
   from: signed >= 0 ? "PayFast top-up" : "Nomsa Khumalo",
   to: signed >= 0 ? "Nomsa Khumalo" : "Court 3 · 18:00",
-  amountCredits: Math.abs(signed),
-  signedAmountCredits: signed,
+  amountMinutes: Math.abs(signed),
+  signedAmountMinutes: signed,
   type: signed >= 0 ? "TopUp" : "BookingCharge",
   comment,
   subjectUserId: "00000000-0000-0000-0000-000000000002",
@@ -52,7 +52,7 @@ test("every wallet ledger column a member needs is on screen at 375px", async ({
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     {
       path: "/api/v1/wallet",
-      body: { balance_credits: 274.25, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
+      body: { balance_minutes: 274.25, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
     },
     {
       path: "/api/v1/me/profile",
@@ -106,7 +106,7 @@ test("the page itself never scrolls sideways at 375px", async ({ page }) => {
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     {
       path: "/api/v1/wallet",
-      body: { balance_credits: 274.25, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
+      body: { balance_minutes: 274.25, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
     },
     {
       path: "/api/v1/me/profile",
@@ -189,7 +189,7 @@ async function serveAdminChrome(page: Page) {
     },
     {
       path: "/api/v1/wallet",
-      body: { balance_credits: 1600, entries: [], total_entries: 0, offset: 0, limit: 50 },
+      body: { balance_minutes: 1600, entries: [], total_entries: 0, offset: 0, limit: 50 },
     },
     {
       path: "/api/v1/me/profile",

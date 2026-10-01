@@ -264,7 +264,7 @@ test.describe("Waiting, and then getting in", () => {
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t", user_id: "u-1", is_admin: false } },
       { path: "/api/v1/whoami", body: { user_id: "u-1", is_admin: false, must_change_password: false } },
       { path: "/api/v1/me/profile", body: { full_name: "Thandi Probe", photo_url: null, email: "thandi.probe@review.test" } },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0 } },
       { path: "/api/v1/schedule", body: { days: [] } },
     ]);
     await page.goto("/login");
@@ -285,7 +285,7 @@ test.describe("Waiting, and then getting in", () => {
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t", user_id: "u-1", is_admin: false } },
       { path: "/api/v1/whoami", body: { user_id: "u-1", is_admin: false, must_change_password: false } },
       { path: "/api/v1/me/profile", body: { full_name: "Thandi Probe", photo_url: null, email: "thandi.probe@review.test" } },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0 } },
       { path: "/api/v1/schedule", body: { days: [] } },
     ]);
     await page.goto("/login");

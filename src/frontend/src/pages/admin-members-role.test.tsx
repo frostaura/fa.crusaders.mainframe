@@ -31,7 +31,7 @@ const OLD = memberFixture({ membership_id: "m-old", user_id: "u-old", full_name:
 function render(extra: StubRoute[] = [], members: unknown[] = [SELF, BEA, CAM, OPS, SAL, OLD]) {
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
-    { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0 } },
     { path: LIST, body: members },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
     ...extra,

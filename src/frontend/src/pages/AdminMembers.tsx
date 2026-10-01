@@ -216,7 +216,7 @@ function MemberOverlays(props: OverlayProps) {
           name={credit.target.full_name}
           // NOT zero where the row has no figure: a balance the console could not read is a
           // balance it must not do arithmetic on.
-          balance={typeof credit.target.balance_credits === "number" ? credit.target.balance_credits : null}
+          balance={typeof credit.target.balance_minutes === "number" ? credit.target.balance_minutes : null}
           busy={credit.busy}
           bookingError={credit.bookingError}
           onApply={credit.apply}

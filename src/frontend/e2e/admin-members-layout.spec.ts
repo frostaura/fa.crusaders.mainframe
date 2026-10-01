@@ -71,7 +71,7 @@ function membersOf(club: Club) {
     admin_source: i === 6 ? "config" : null,
     created_at: "2026-09-05T08:00:00Z",
     rejection_reason: null,
-    balance_credits: m.bal,
+    balance_minutes: m.bal,
   }));
 }
 

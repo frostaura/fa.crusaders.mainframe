@@ -29,8 +29,8 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const TZ = "Africa/Johannesburg";
 const ME = "44444444-4444-4444-4444-444444444444";
-const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 3, priceCredits: 100 };
-const C2: SelectedSlot = { courtId: "c2", courtName: "Court 2", startsAt: "2030-09-09T17:00:00.000Z", sliceCount: 3, priceCredits: 100 };
+const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 3, priceMinutes: 100 };
+const C2: SelectedSlot = { courtId: "c2", courtName: "Court 2", startsAt: "2030-09-09T17:00:00.000Z", sliceCount: 3, priceMinutes: 100 };
 const SAM = { user_id: "sam", name: "Sam Petersen", photo_url: null };
 
 afterEach(() => {
@@ -73,14 +73,14 @@ const PREVIEW: StubRoute = {
   method: "POST",
   path: "/api/v1/players/split-preview",
   respond: ({ body }) => {
-    const b = body as { priceCredits: number; splitMode: "equal" | "ratio" | "amount"; organiserWeight?: number; players: { seat: number; guestName?: string; weight?: number; amount?: number }[] };
-    const r = splitShares(b.priceCredits, b.splitMode, b.organiserWeight ?? 1, b.players.map((p) => ({
+    const b = body as { priceMinutes: number; splitMode: "equal" | "ratio" | "amount"; organiserWeight?: number; players: { seat: number; guestName?: string; weight?: number; amount?: number }[] };
+    const r = splitShares(b.priceMinutes, b.splitMode, b.organiserWeight ?? 1, b.players.map((p) => ({
       seat: p.seat, isGuest: p.guestName !== undefined, weight: p.weight, amount: p.amount,
     })));
     if (!r.ok) return refuse(400, { error: r.error });
     return {
-      price_credits: b.priceCredits,
-      shares: r.shares.map((s) => ({ seat: s.seat, team: s.seat <= 2 ? "A" : "B", share_credits: s.share, weight: s.weight })),
+      price_minutes: b.priceMinutes,
+      shares: r.shares.map((s) => ({ seat: s.seat, team: s.seat <= 2 ? "A" : "B", share_minutes: s.share, weight: s.weight })),
     };
   },
 };
@@ -126,7 +126,7 @@ describe("BookSheet — Players", () => {
   });
 
   it("opens on Just me, and Just me books exactly as before — no players on the wire", async () => {
-    const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_credits: 400 } }]);
+    const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_minutes: 400 } }]);
     open();
     expect(screen.getByRole("radio", { name: BOOK_PLAYERS.justMe })).toHaveAttribute("aria-checked", "true");
     await next();
@@ -203,7 +203,7 @@ describe("BookSheet — Players", () => {
 
   it("a guest alone is nothing to split: no Split step, and the guest plays free", async () => {
     stubFetch([FAVOURITES]);
-    open({ slots: [{ ...C1, priceCredits: 50 }] });
+    open({ slots: [{ ...C1, priceMinutes: 50 }] });
     fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
     await tab(PICKER.guest);
@@ -227,7 +227,7 @@ describe("BookSheet — Split", () => {
     expect(totals).toHaveTextContent("Sam33.00 cr");
     expect(totals).toHaveTextContent(`${BOOK_PLAYERS.linkName}33.00 cr`);
     const [sent] = posts(stub.calls, "/api/v1/players/split-preview");
-    expect(sent.body).toEqual({ priceCredits: 100, splitMode: "equal", players: [{ userId: "sam", seat: 2 }, { link: true, seat: 4 }] });
+    expect(sent.body).toEqual({ priceMinutes: 100, splitMode: "equal", players: [{ userId: "sam", seat: 2 }, { link: true, seat: 4 }] });
   });
 
   it("re-previews a ratio, and ignores a slower answer to the question before", async () => {
@@ -311,12 +311,12 @@ describe("BookSheet — Confirm and the booking", () => {
       {
         method: "POST", path: "/api/v1/bookings/",
         body: {
-          booking_id: "bk-1", balance_after_credits: 400,
+          booking_id: "bk-1", balance_after_minutes: 400,
           players: {
             booking_id: "bk-1",
             participants: [
-              { participant_id: "p2", seat: 2, user_id: "sam", guest_name: null, status: "invited", share_credits: 33, invite_token: "t2", invite_path: "/j/SAMSAMSAMSAMSAMSAMSAM" },
-              { participant_id: "p4", seat: 4, user_id: null, guest_name: null, status: "invited", share_credits: 33, invite_token: "t4", invite_path: "/j/OPENOPENOPENOPENOPEN1" },
+              { participant_id: "p2", seat: 2, user_id: "sam", guest_name: null, status: "invited", share_minutes: 33, invite_token: "t2", invite_path: "/j/SAMSAMSAMSAMSAMSAMSAM" },
+              { participant_id: "p4", seat: 4, user_id: null, guest_name: null, status: "invited", share_minutes: 33, invite_token: "t4", invite_path: "/j/OPENOPENOPENOPENOPEN1" },
             ],
           },
           players_error: null,
@@ -356,8 +356,8 @@ describe("BookSheet — Confirm and the booking", () => {
       {
         method: "POST", path: "/api/v1/bookings/",
         body: {
-          booking_id: "bk-1", balance_after_credits: 400, players_error: null,
-          players: { booking_id: "bk-1", participants: [{ participant_id: "p2", seat: 2, user_id: null, guest_name: null, status: "invited", share_credits: 50, invite_token: "t", invite_path: "/j/OPENOPENOPENOPENOPEN1" }] },
+          booking_id: "bk-1", balance_after_minutes: 400, players_error: null,
+          players: { booking_id: "bk-1", participants: [{ participant_id: "p2", seat: 2, user_id: null, guest_name: null, status: "invited", share_minutes: 50, invite_token: "t", invite_path: "/j/OPENOPENOPENOPENOPEN1" }] },
         },
       },
     ]);
@@ -382,7 +382,7 @@ describe("BookSheet — Confirm and the booking", () => {
   it("says plainly when the court stood but the players were not added", async () => {
     stubFetch([
       FAVOURITES, PREVIEW,
-      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_credits: 400, players: null, players_error: "member_not_found" } },
+      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_minutes: 400, players: null, players_error: "member_not_found" } },
     ]);
     open();
     fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
@@ -421,7 +421,7 @@ describe("BookSheet — Confirm and the booking", () => {
       { path: "/api/v1/whoami", body: { tenant_slug: "crusaders", tenant_id: "t", user_id: ME, is_authenticated: true, is_admin: false } },
       {
         path: "/api/v1/wallet",
-        body: { balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: "2030-09-10T18:00:00Z", entries: [], total_entries: 0, offset: 0, limit: 100 },
+        body: { balance_minutes: 120, held_minutes: 20, spendable_minutes: 100, held_until: "2030-09-10T18:00:00Z", entries: [], total_entries: 0, offset: 0, limit: 100 },
       },
     ]);
     signIn({ isAdmin: false });
@@ -441,7 +441,7 @@ describe("BookSheet — Confirm and the booking", () => {
       { path: "/api/v1/whoami", body: { tenant_slug: "crusaders", tenant_id: "t", user_id: ME, is_authenticated: true, is_admin: false } },
       {
         path: "/api/v1/wallet",
-        body: { balance_credits: 10, held_credits: 0, owed_back_credits: 16, spendable_credits: -6, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 100 },
+        body: { balance_minutes: 10, held_minutes: 0, owed_back_minutes: 16, spendable_minutes: -6, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 100 },
       },
     ]);
     signIn({ isAdmin: false });

@@ -49,7 +49,7 @@ function chrome({ isAdmin, route = "/bookings", doors = [doorFixture()] }: {
   const server = doorsServer(doors);
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
     { path: "/api/v1/me/profile", body: PROFILE },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
@@ -133,7 +133,7 @@ describe("the skip link", () => {
     const whoami = signIn({ isAdmin: false });
     stubFetch([
       { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], count: 0 } },
       { path: "/api/v1/me/profile", body: PROFILE },
     ]);
     renderPage(

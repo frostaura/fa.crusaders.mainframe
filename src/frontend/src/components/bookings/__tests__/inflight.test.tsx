@@ -22,11 +22,11 @@ import type { GridBooking, SelectedSlot } from "../types";
  * for the club's answer and says so; an answer arriving after the sheet was torn down is a toast.
  * </p>
  */
-const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceCredits: 50 };
+const C1: SelectedSlot = { courtId: "c1", courtName: "Court 1", startsAt: "2030-09-09T16:00:00.000Z", sliceCount: 1, priceMinutes: 50 };
 const MINE: GridBooking = {
   bookingId: "bk-1", courtId: "c1", courtName: "Court 1",
   startsAt: "2030-09-09T16:00:00.000Z", endsAt: "2030-09-09T16:45:00.000Z", whenLabel: "Mon 9 Sep, 18:00",
-  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedCredits: 50,
+  mine: true, memberFirstName: null, memberPhotoUrl: null, checkedIn: false, amountChargedMinutes: 50,
   timezone: "Africa/Johannesburg",
 };
 
@@ -67,7 +67,7 @@ function openBook(onOpenChange = vi.fn()) {
 
 describe("BookSheet — nothing leaves the sheet while a booking is on its way (I4-1)", () => {
   it("refuses Back, the ×, Escape and the scrim until the club answers, then shows what happened", async () => {
-    stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 450 } }]);
+    stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_minutes: 450 } }]);
     const slow = holdPosts();
     const { onOpenChange, onBooked } = openBook();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
@@ -91,7 +91,7 @@ describe("BookSheet — nothing leaves the sheet while a booking is on its way (
   });
 
   it("says a booking that lands after the sheet was torn down, in a toast", async () => {
-    stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 450 } }]);
+    stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_minutes: 450 } }]);
     const slow = holdPosts();
     function Host() {
       const [shown, setShown] = useState(true);
@@ -117,7 +117,7 @@ describe("BookSheet — nothing leaves the sheet while a booking is on its way (
 
 describe("BookSheet — a quick first tap on Book books (I4-2)", () => {
   it("accepts a single tap straight after Continue, and ignores only a double tap's second half", async () => {
-    const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_credits: 450 } }]);
+    const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b1", balance_after_minutes: 450 } }]);
     openBook();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }), { detail: 1 });
     // The double tap on Continue: its second click (detail 2) lands on Book — ignored.
@@ -135,8 +135,8 @@ describe("BookSheet — a quick first tap on Book books (I4-2)", () => {
 describe("CancelSheet — Keep, the × and Escape wait for the club (I4-1)", () => {
   it("refuses every way out while the cancel is on its way", async () => {
     stubFetch([
-      { path: "/api/v1/bookings/bk-1/cancellation-quote", body: { bookingId: "bk-1", amountChargedCredits: 50, refundCredits: 50, penaltyCredits: 0, penaltyPct: 30, penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false } },
-      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_credits: 50, penalty_credits: 0 } },
+      { path: "/api/v1/bookings/bk-1/cancellation-quote", body: { bookingId: "bk-1", amountChargedMinutes: 50, refundMinutes: 50, penaltyMinutes: 0, penaltyPct: 30, penaltyWindowMinutes: 120, insidePenaltyWindow: false, checkedIn: false, alreadyStarted: false } },
+      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_minutes: 50, penalty_minutes: 0 } },
     ]);
     const slow = holdPosts();
     const onOpenChange = vi.fn();

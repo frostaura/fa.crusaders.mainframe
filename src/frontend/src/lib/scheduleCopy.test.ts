@@ -23,7 +23,7 @@ import {
  *
  * <p>
  * <b>The absent arm is tested as hard as the present one.</b> Three backend lanes are writing
- * these endpoints right now, so `would_refund_credits`, `next_occurrence` and
+ * these endpoints right now, so `would_refund_minutes`, `next_occurrence` and
  * `materialised_through` will all arrive missing for a while. A sentence that reads a missing
  * refund as zero tells an admin nobody gets their money back, which is the exact opposite of
  * the truth and is read immediately before a destructive press.
@@ -214,17 +214,17 @@ describe("the clash check", () => {
   });
 
   it("never reads an unknown refund as nothing", () => {
-    expect(conflictRefundPhrase({ would_refund_credits: 36, member_name: "Priya Naidoo" }))
+    expect(conflictRefundPhrase({ would_refund_minutes: 36, member_name: "Priya Naidoo" }))
       .toBe("36.00 cr would go back to Priya Naidoo.");
-    expect(conflictRefundPhrase({ would_refund_credits: 36 }))
+    expect(conflictRefundPhrase({ would_refund_minutes: 36 }))
       .toBe("36.00 cr would go back.");
-    expect(conflictRefundPhrase({ would_refund_credits: 0, member_name: "Priya Naidoo" }))
+    expect(conflictRefundPhrase({ would_refund_minutes: 0, member_name: "Priya Naidoo" }))
       .toBe("Nothing would go back to Priya Naidoo.");
     // The arm that matters: the backend has not shipped the quote yet. "Nothing would go
     // back" is the opposite of the truth and it is read immediately before a refund.
     expect(conflictRefundPhrase({ member_name: "Priya Naidoo" }))
       .toBe("What would go back to Priya Naidoo isn't known yet.");
-    expect(conflictRefundPhrase({ would_refund_credits: null }))
+    expect(conflictRefundPhrase({ would_refund_minutes: null }))
       .toBe("What would go back isn't known yet.");
   });
 
@@ -321,7 +321,7 @@ describe("skipping and ending", () => {
   });
 
   it("arms the end of a series with its count, its refunds and what survives", () => {
-    expect(endConsequence({ remaining: 9, days: ["tue"], slots: 324, refundCredits: 0 })).toBe(
+    expect(endConsequence({ remaining: 9, days: ["tue"], slots: 324, refundMinutes: 0 })).toBe(
       "Ending this stops 9 more Tuesdays and releases 324 held slots, which members can then book. "
       + "Nobody is refunded — nobody was charged for a hold. "
       + "Tuesdays that have already happened stay exactly as they are.",
@@ -329,7 +329,7 @@ describe("skipping and ending", () => {
   });
 
   it("does not promise a release it cannot size", () => {
-    const line = endConsequence({ remaining: 9, days: ["tue"], slots: null, refundCredits: 0 });
+    const line = endConsequence({ remaining: 9, days: ["tue"], slots: null, refundMinutes: 0 });
     expect(line).toContain("stops 9 more Tuesdays");
     expect(line).not.toContain("null");
     expect(line).not.toContain("0 held slots");
@@ -338,7 +338,7 @@ describe("skipping and ending", () => {
   it("does not count the dates ahead when the dates could not be read", () => {
     // "stops 0 more Tuesdays" out of a failed read is the page telling an admin that ending
     // the series costs nothing, in the armed consequence of the control that ends it.
-    const line = endConsequence({ remaining: null, days: ["tue"], slots: null, refundCredits: 0 });
+    const line = endConsequence({ remaining: null, days: ["tue"], slots: null, refundMinutes: 0 });
     expect(line).toBe(
       "Ending this stops every date still ahead, and the slots it was holding can be booked again. "
       + "Nobody is refunded — nobody was charged for a hold. "

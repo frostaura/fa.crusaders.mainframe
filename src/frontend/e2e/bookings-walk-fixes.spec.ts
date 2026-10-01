@@ -27,7 +27,7 @@ function day() {
   const slot = (court: string, n: number, from: string, to: string, extra: Record<string, unknown>) => ({
     courtId: court, courtNumber: n, startsAtUtc: `${d}T${from}:00.000Z`, endsAtUtc: `${d}T${to}:00.000Z`,
     status: "booked", ownerUserId: null, ownerFirstName: null, ownerPhotoUrl: null, isMine: false,
-    blockLabel: null, checkedIn: false, amountChargedCredits: 50, ...extra,
+    blockLabel: null, checkedIn: false, amountChargedMinutes: 50, ...extra,
   });
   return {
     date: d, timezone: "UTC", sliceMinutes: 15,
@@ -51,7 +51,7 @@ async function openGrid(page: Page, isAdmin: boolean) {
     { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: isAdmin } },
     { path: "/api/v1/schedule", body: day() },
     { path: "/api/v1/admin/members/", body: [] },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
   ]);
   await page.goto(`/bookings?date=${tomorrow()}`);
   await page.waitForSelector('[role="grid"]');

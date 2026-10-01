@@ -18,7 +18,7 @@ const ALEX = "66666666-6666-6666-6666-666666666666";
 function row(id: string, over: Partial<LedgerRow> = {}): LedgerRow {
   return {
     id, at: "2026-09-30T10:00:00Z", from: "Club treasury", to: "Nomsa Khumalo",
-    amountCredits: 25, signedAmountCredits: 25, type: "ShareTransfer", comment: "Share of a split booking",
+    amountMinutes: 25, signedAmountMinutes: 25, type: "ShareTransfer", comment: "Share of a split booking",
     subjectUserId: ME, subjectName: "Nomsa Khumalo", actorUserId: SAM, actorName: "Sam Petersen",
     relatedBookingId: "b1", ...over,
   };
@@ -29,14 +29,14 @@ function summary(over: Partial<ShareBookingSummary> = {}): ShareBookingSummary {
   return {
     booking_id: "b1", court_name: "Court 1", starts_at: "2026-09-30T16:00:00Z",
     organiser: { user_id: ME, name: "Nomsa Khumalo", photo_url: null },
-    partners: [{ user_id: SAM, name: "Sam Petersen", paid_credits: 25 }, { user_id: ALEX, name: "Alex Naidoo", paid_credits: 25 }],
+    partners: [{ user_id: SAM, name: "Sam Petersen", paid_minutes: 25 }, { user_id: ALEX, name: "Alex Naidoo", paid_minutes: 25 }],
     ...over,
   };
 }
-const SAM_ORGANISES = { organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null }, partners: [{ user_id: ME, name: "Nomsa Khumalo", paid_credits: 25 }] };
+const SAM_ORGANISES = { organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null }, partners: [{ user_id: ME, name: "Nomsa Khumalo", paid_minutes: 25 }] };
 const known = (s: ShareBookingSummary | null) => shareBookingsFrom({ b1: s });
 
-const TOPUP = row("t1", { type: "TopUp", relatedBookingId: null, comment: "Wallet top-up", at: "2026-09-29T10:00:00Z", signedAmountCredits: 200, amountCredits: 200 });
+const TOPUP = row("t1", { type: "TopUp", relatedBookingId: null, comment: "Wallet top-up", at: "2026-09-29T10:00:00Z", signedAmountMinutes: 200, amountMinutes: 200 });
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -73,7 +73,7 @@ describe("the wallet ledger's share lines", () => {
 
   it("says the partner's side as their share, with what moved to whom", async () => {
     stubFetch([]);
-    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME })]} label="Wallet ledger" groupShares shareBookings={known(summary(SAM_ORGANISES))} />);
+    renderPage(<LedgerTable rows={[row("s1", { signedAmountMinutes: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME })]} label="Wallet ledger" groupShares shareBookings={known(summary(SAM_ORGANISES))} />);
 
     const toggle = await screen.findByRole("button", { name: /^Your share · Court 1 · Wed 30 Sep, / });
     // D10 — the amount is said once, in its column; the To column names the organiser.
@@ -90,13 +90,13 @@ describe("the wallet ledger's share lines", () => {
 
   it("still makes sense when the booking cannot be read (a partner who pulled out reads it as a stranger)", async () => {
     stubFetch([]);
-    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25 })]} label="Wallet ledger" groupShares shareBookings={known(null)} />);
+    renderPage(<LedgerTable rows={[row("s1", { signedAmountMinutes: -25 })]} label="Wallet ledger" groupShares shareBookings={known(null)} />);
     expect(await screen.findByRole("button", { name: /^Your share of a split booking, / })).toBeInTheDocument();
   });
 
   it("says the same when the club summarised nothing for that booking (an older API)", async () => {
     stubFetch([]);
-    renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25 })]} label="Wallet ledger" groupShares shareBookings={shareBookingsFrom(undefined)} />);
+    renderPage(<LedgerTable rows={[row("s1", { signedAmountMinutes: -25 })]} label="Wallet ledger" groupShares shareBookings={shareBookingsFrom(undefined)} />);
     expect(await screen.findByRole("button", { name: /^Your share of a split booking, / })).toBeInTheDocument();
   });
 
@@ -112,8 +112,8 @@ describe("R1 F2.14 — a refunded share", () => {
   it("nets to zero in neutral ink, never the green of money in, and the whole line opens it", async () => {
     stubFetch([]);
     renderPage(<LedgerTable rows={[
-      row("s2", { signedAmountCredits: 25, at: "2026-09-30T11:00:00Z", actorUserId: SAM }),
-      row("s1", { signedAmountCredits: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME }),
+      row("s2", { signedAmountMinutes: 25, at: "2026-09-30T11:00:00Z", actorUserId: SAM }),
+      row("s1", { signedAmountMinutes: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME }),
     ]} label="Wallet ledger" groupShares shareBookings={known(summary(SAM_ORGANISES))} />);
     const toggle = await screen.findByRole("button", { name: /paid and returned/ });
     const line = toggle.closest("tr") as HTMLElement;

@@ -48,7 +48,7 @@ function routes(isAdmin: boolean) {
         photo_url: null, status: "active",
       },
     },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 120, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     {
       path: "/api/v1/schedule",

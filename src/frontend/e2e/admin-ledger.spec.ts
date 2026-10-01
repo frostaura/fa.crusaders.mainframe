@@ -14,7 +14,7 @@ const MEMBER = "00000000-0000-0000-0000-000000000002";
 const row = (id: string, signed: number, over: Record<string, unknown> = {}) => ({
   id, at: "2026-01-15T10:00:00Z",
   from: signed >= 0 ? "Club treasury" : "Nomvula Dlamini-Hendricks", to: signed >= 0 ? "Nomvula Dlamini-Hendricks" : "Club treasury",
-  amountCredits: Math.abs(signed), signedAmountCredits: signed, type: "BookingCharge",
+  amountMinutes: Math.abs(signed), signedAmountMinutes: signed, type: "BookingCharge",
   comment: "Court 3 · Thu 15 Jan, 18:00–19:30 — booked for the league fixture against the visiting side",
   subjectUserId: MEMBER, subjectName: "Nomvula Dlamini-Hendricks", actorUserId: MEMBER,
   actorName: "Nomvula Dlamini-Hendricks", relatedBookingId: "b0000000-0000-0000-0000-000000000001",
@@ -26,7 +26,7 @@ async function open(page: import("@playwright/test").Page) {
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [] } },
     { path: "/api/v1/admin/ledger/", body: [row("1", -48), row("2", 200, { type: "AdminTopUp", actor_name: "Desk Volunteer", actorUserId: "00000000-0000-0000-0000-00000000000a" })] },
   ]);
   await page.goto("/admin/ledger?from=2026-01-01&to=2026-01-31");

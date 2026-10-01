@@ -123,7 +123,7 @@ export function newIdempotencyKey(prefix: string): string {
  */
 export type SheetQuote = {
   total: number;
-  /** The payer's RAW balance — `balance_credits`, as everywhere. */
+  /** The payer's RAW balance — `balance_minutes`, as everywhere. */
   balance: number;
   /**
    * What the payer may SPEND (D11 §3a): the raw balance less what is held for partners and owed
@@ -142,23 +142,23 @@ export type SheetQuote = {
   refused: Map<number, string | null>;
 };
 
-function owedBackOf(q: { owed_back_credits?: number }): number {
-  return typeof q.owed_back_credits === "number" && q.owed_back_credits > 0 ? q.owed_back_credits : 0;
+function owedBackOf(q: { owed_back_minutes?: number }): number {
+  return typeof q.owed_back_minutes === "number" && q.owed_back_minutes > 0 ? q.owed_back_minutes : 0;
 }
 
-type HeldWire = { balance_credits: number; held_credits?: number; owed_back_credits?: number; spendable_credits?: number };
+type HeldWire = { balance_minutes: number; held_minutes?: number; owed_back_minutes?: number; spendable_minutes?: number };
 
-/** The payer's spend figures off a quote; an older API without `spendable_credits` derives it. */
+/** The payer's spend figures off a quote; an older API without `spendable_minutes` derives it. */
 function spendOf(q: HeldWire, total: number) {
-  const held = typeof q.held_credits === "number" && q.held_credits > 0 ? q.held_credits : 0;
-  const spendable = typeof q.spendable_credits === "number" ? q.spendable_credits : q.balance_credits - held - owedBackOf(q);
+  const held = typeof q.held_minutes === "number" && q.held_minutes > 0 ? q.held_minutes : 0;
+  const spendable = typeof q.spendable_minutes === "number" ? q.spendable_minutes : q.balance_minutes - held - owedBackOf(q);
   return { spendable, held, after: spendable - total };
 }
 
 function fromSingle(q: AdminBookingQuote): SheetQuote {
   return {
-    total: q.price_credits, balance: q.balance_credits, ...spendOf(q, q.price_credits),
-    overdraws: q.overdraws, owedBack: owedBackOf(q), prices: new Map([[0, q.price_credits]]), refused: new Map(),
+    total: q.price_minutes, balance: q.balance_minutes, ...spendOf(q, q.price_minutes),
+    overdraws: q.overdraws, owedBack: owedBackOf(q), prices: new Map([[0, q.price_minutes]]), refused: new Map(),
   };
 }
 
@@ -167,10 +167,10 @@ function fromBulk(q: AdminBulkQuote): SheetQuote {
   const prices = new Map<number, number>();
   for (const item of q.items ?? []) {
     if (!item.bookable) refused.set(item.index, item.reason);
-    else if (typeof item.price_credits === "number") prices.set(item.index, item.price_credits);
+    else if (typeof item.price_minutes === "number") prices.set(item.index, item.price_minutes);
   }
   return {
-    total: q.total_credits, balance: q.balance_credits, ...spendOf(q, q.total_credits),
+    total: q.total_minutes, balance: q.balance_minutes, ...spendOf(q, q.total_minutes),
     overdraws: q.overdraws, owedBack: owedBackOf(q), prices, refused,
   };
 }
@@ -275,7 +275,7 @@ export function fromMemberBulk(res: MemberBulkBookResponse, sent: readonly Selec
     const word = ok ? (r.replayed ? RESULT_WORD.replayed : RESULT_WORD.booked) : RESULT_WORD.refused;
     rows.push(row(slot, face, ok, word, ok ? null : refusalReason(r.reason)));
   }
-  return { rows, booked, balanceAfter: res.balance_after_credits ?? null, halted: res.halted_reason ?? null, hold: false };
+  return { rows, booked, balanceAfter: res.balance_after_minutes ?? null, halted: res.halted_reason ?? null, hold: false };
 }
 
 const ADMIN_OK: Record<string, string> = {
@@ -295,7 +295,7 @@ export function fromAdminBulk(res: BulkBookResponse, sent: readonly SelectedSlot
     const code = typeof raw.error === "string" ? raw.error : null;
     rows.push(row(slot, face, Boolean(word), word ?? RESULT_WORD.refused, word ? null : refusalReason(code)));
   });
-  const after = res.payer?.balance_after_credits;
+  const after = res.payer?.balance_after_minutes;
   return {
     rows, booked, balanceAfter: typeof after === "number" ? after : null,
     halted: typeof res.halted_reason === "string" ? res.halted_reason : null, hold,
@@ -327,7 +327,7 @@ async function bookWithPlayers(req: BookRequest, players: PlayersPayload): Promi
   if (slots.length === 1) {
     const [s] = slots;
     const r = await playersEndpoints.bookWithPlayers({ courtId: s.courtId, startsAt: s.startsAt, sliceCount: s.sliceCount, ...players });
-    return { ...singleRun(s, face, r.balance_after_credits, false), players: fromSingleWithPlayers(r, s) };
+    return { ...singleRun(s, face, r.balance_after_minutes, false), players: fromSingleWithPlayers(r, s) };
   }
   const res = await playersEndpoints.bulkWithPlayers({ idempotencyKey: req.idempotencyKey, items: itemsOf(slots), ...players });
   return { ...fromMemberBulk(res, slots, face), players: fromBulkWithPlayers(res, slots) };
@@ -339,7 +339,7 @@ async function bookAsMember(req: BookRequest): Promise<BookRun> {
   if (slots.length === 1) {
     const [s] = slots;
     const r = await endpoints.book(s.courtId, s.startsAt, s.sliceCount);
-    return singleRun(s, face, r.balance_after_credits, false);
+    return singleRun(s, face, r.balance_after_minutes, false);
   }
   const res = await endpoints.memberBulkBook({ idempotencyKey: req.idempotencyKey, items: itemsOf(slots) });
   return fromMemberBulk(res, slots, face);
@@ -367,7 +367,7 @@ async function bookAsAdmin(req: BookRequest): Promise<BookRun> {
   if (slots.length === 1 && payer) {
     const [s] = slots;
     const r = await endpoints.adminBook(s.courtId, payer, s.startsAt, s.sliceCount, req.allowNegativeBalance);
-    return singleRun(s, face, r.balance_after_credits, false);
+    return singleRun(s, face, r.balance_after_minutes, false);
   }
   const res = await endpoints.adminBulkBook({
     idempotencyKey: req.idempotencyKey,

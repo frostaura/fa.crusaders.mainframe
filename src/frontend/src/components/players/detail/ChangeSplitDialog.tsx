@@ -45,12 +45,12 @@ type SplitEditor = StepEditor & { problem: string | null };
 
 function useSplitEditor(detail: BookingDetail): SplitEditor {
   const [draft, setDraft] = useState<PlayersDraft>(() => draftOf(detail));
-  const prices = useMemo(() => [detail.money.price_credits], [detail.money.price_credits]);
+  const prices = useMemo(() => [detail.money.price_minutes], [detail.money.price_minutes]);
   const preview = useSplitPreview(prices, draft, hasPaying(draft));
   return {
     draft, bulk: false, preview,
     problem: preview.state.status === "invalid" ? preview.state.error : null,
-    setMode: (mode: SplitMode) => setDraft(withMode(draft, mode, detail.money.price_credits)),
+    setMode: (mode: SplitMode) => setDraft(withMode(draft, mode, detail.money.price_minutes)),
     setWeight: (seat: number, weight: string) => setDraft(updateSeat(draft, seat, { weight })),
     setAmount: (seat: number, amount: string) => setDraft(updateSeat(draft, seat, { amount })),
     setOrganiserWeight: (organiserWeight: string) => setDraft({ ...draft, organiserWeight }),

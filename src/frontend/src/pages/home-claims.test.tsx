@@ -122,7 +122,7 @@ describe("the public landing page", () => {
       const session = signIn({ isAdmin: false });
       stubFetch([
         { path: "/api/v1/whoami", body: session },
-        { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+        { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [] } },
       ]);
       renderRoot();
 

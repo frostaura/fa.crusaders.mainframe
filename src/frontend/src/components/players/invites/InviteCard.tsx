@@ -99,11 +99,11 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
         </span>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
           <span className="text-sm font-semibold tabular-nums text-text-primary">
-            {`${INVITES_COPY.yourShare} ${formatCredits(invite.share_credits)}`}
+            {`${INVITES_COPY.yourShare} ${formatCredits(invite.share_minutes)}`}
           </span>
           <Badge tone={status.tone}>{status.text}</Badge>
         </span>
-        {invite.share_credits > 0 ? <span className="text-xs text-text-muted">{payByLine(invite.share_deadline)}</span> : null}
+        {invite.share_minutes > 0 ? <span className="text-xs text-text-muted">{payByLine(invite.share_deadline)}</span> : null}
       </span>
     </>
   );

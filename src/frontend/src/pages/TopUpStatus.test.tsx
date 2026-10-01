@@ -53,7 +53,7 @@ describe("Top-up status — failure copy", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: `/api/v1/credit/topup/${ID}`, body: status },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     ]);
     renderPage(
       <BalanceProvider>
@@ -141,7 +141,7 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: `/api/v1/credit/topup/${ID}`, body: null, sequence },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
@@ -244,7 +244,7 @@ describe("Top-up status — when the club cannot be reached", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: `/api/v1/credit/topup/${ID}`, body: null, sequence, status },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
@@ -346,7 +346,7 @@ describe("Top-up status — a top-up that does not exist", () => {
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: `/api/v1/credit/topup/${ID}`, status, body },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
@@ -417,7 +417,7 @@ describe("Top-up status — the first read", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status: "Completed", amount_zar: 200, conversion_rate: 1.6, failure_code: null } },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     const realFetch = globalThis.fetch;
@@ -468,7 +468,7 @@ describe("Top-up status — back from PayFast after cancelling", () => {
       // older one, or a reply the page could not use), so the page reads it back.
       { method: "POST", path: `/api/v1/credit/topup/${ID}/cancel`, status: 503, body: { error: "unavailable" } },
       { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status, amount_zar: 200, conversion_rate: 1, failure_code: null } },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
@@ -520,7 +520,7 @@ describe("Top-up status — the way back", () => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status, amount_zar: 200, conversion_rate: 1, failure_code: null } },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
