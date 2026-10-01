@@ -74,25 +74,8 @@ export default function InvitesPage() {
           splitAt={SPLIT_AT}
           back={{ label: SPLIT_PANE_COPY.backToInvites, onBack: picked.unpick }}
           pickedKey={picked.shown?.participant_id ?? null}
-          announce={picked.shown ? SPLIT_PANE_COPY.showing(inviteHeading(picked.shown, INVITES_COPY.sheetTitle).title) : undefined}
-          list={(
-            <ul aria-label={INVITES_COPY.listLabel} className="flex flex-col gap-3">
-              {pending ? (
-                <li key={`pending-${pending.token}`}>
-                  <InviteCard invite={pending.invite} to={pending.path} note={INVITES_COPY.pendingFrom} />
-                </li>
-              ) : null}
-              {items.map((invite) => (
-                <li key={invite.participant_id}>
-                  <InviteCard
-                    invite={invite} onOpen={wide ? picked.pick : sheet.openFor}
-                    current={wide && picked.invite?.participant_id === invite.participant_id}
-                    actions={wide ? undefined : <CardAnswers invite={invite} onAnswer={sheet.openFor} />}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
+          announce={announceOf(picked.shown)}
+          list={<InviteList items={items} pending={pending} wide={wide} picked={picked} openSheet={sheet.openFor} />}
           detail={picked.shown ? <InviteDetail key={picked.shown.participant_id} invite={picked.shown} onReread={reread} /> : null}
           placeholder={<StateBlock empty emptyIcon={Envelope} emptyTitle={INVITES_COPY.pickTitle} emptyHint={INVITES_COPY.pickHint} />}
         />
@@ -145,12 +128,56 @@ function CardAnswers({ invite, onAnswer }: { invite: Invite; onAnswer: (invite: 
 function usePicked(items: Invite[] | null, wide: boolean) {
   const { value: seat, pick: pickSeat, unpick } = usePickParam("seat");
   const [held, setHeld] = useState<Invite | null>(null);
-  const fromList = items?.find((i) => i.participant_id === seat) ?? (seat === null && wide && items?.length === 1 ? items[0] : null);
-  const invite = fromList ?? (held && held.participant_id === seat ? held : null);
+  const fromList = pickedFrom(items, seat, wide);
+  const invite = fromList ?? (held?.participant_id === seat ? held : null);
   if (fromList && fromList !== held) setHeld(fromList);
   const pick = useCallback((next: Invite) => pickSeat(next.participant_id), [pickSeat]);
   const shown = wide || seat !== null ? invite : null;
   return { invite, shown, pick, unpick };
+}
+
+type Picked = ReturnType<typeof usePicked>;
+
+/** The named seat, or — beside the list, with nothing named and exactly one waiting — that one. */
+function pickedFrom(items: Invite[] | null, seat: string | null, wide: boolean): Invite | null {
+  if (!items) return null;
+  if (seat !== null) return items.find((i) => i.participant_id === seat) ?? null;
+  return wide && items.length === 1 ? items[0] : null;
+}
+
+function announceOf(shown: Invite | null): string | undefined {
+  return shown ? SPLIT_PANE_COPY.showing(inviteHeading(shown, INVITES_COPY.sheetTitle).title) : undefined;
+}
+
+type ListProps = {
+  items: Invite[];
+  pending: ReturnType<typeof usePendingLinkInvite>;
+  wide: boolean;
+  picked: Picked;
+  openSheet: (invite: Invite, startWith?: "decline") => void;
+};
+
+/** The cards: beside a pane a card opens there; stacked it opens the sheet and carries its answers. */
+function InviteList(props: ListProps) {
+  const { items, pending, wide, picked, openSheet } = props;
+  return (
+    <ul aria-label={INVITES_COPY.listLabel} className="flex flex-col gap-3">
+      {pending ? (
+        <li key={`pending-${pending.token}`}>
+          <InviteCard invite={pending.invite} to={pending.path} note={INVITES_COPY.pendingFrom} />
+        </li>
+      ) : null}
+      {items.map((invite) => (
+        <li key={invite.participant_id}>
+          <InviteCard
+            invite={invite} onOpen={wide ? picked.pick : openSheet}
+            current={wide && picked.invite?.participant_id === invite.participant_id}
+            actions={wide ? undefined : <CardAnswers invite={invite} onAnswer={openSheet} />}
+          />
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function useSheet(items: Invite[] | null) {
