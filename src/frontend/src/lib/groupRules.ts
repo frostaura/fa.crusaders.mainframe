@@ -14,10 +14,9 @@ import type { MemberGroup, Weekday } from "./adminApi";
  * <p>
  * <b>"Most restrictive" means the member gets the least favourable of the rules that apply to
  * them</b>, which is XACML's deny-overrides read in three shapes: for a permission the least
- * favourable is the NARROWEST window, so windows intersect; for a price it is the HIGHEST, so
- * prices take a maximum; for a cap it is the SMALLEST, so caps take a minimum. Taking the
- * narrowest window and the lowest price would be two different meanings of one word in one
- * sentence.
+ * favourable is the NARROWEST window, so windows intersect; for a cap it is the SMALLEST, so
+ * caps take a minimum; for a package discount it is the LOWEST a group sets (P13 §3.8). There is
+ * no price here: a booking costs its playing minutes, the same for every member (P13 §1.1).
  * </p>
  *
  * <p>
@@ -203,7 +202,7 @@ function hasAnyWindow(group: MemberGroup): boolean {
  *
  * <p>
  * <b>A group with no window rows ANYWHERE is unrestricted</b> — the club's own hours. Without
- * that clause, a group created to hold a PRICE would silently forbid its members from booking
+ * that clause, a group created to hold a DISCOUNT would silently forbid its members from booking
  * at all, which is the single worst failure this feature can have because it looks like the
  * club being shut.
  * </p>
@@ -266,87 +265,6 @@ export function emptyIntersection(
   if (normalise(clubHours).length === 0) return null;
   if (allowedWindows(groups, day, clubHours).length > 0) return null;
   return groups.filter(isActive).map((g) => g.name);
-}
-
-// ---------------------------------------------------------------------------------------
-// Price
-// ---------------------------------------------------------------------------------------
-
-/** The API's own bound on a multiplier: 0× to 100×, in basis points. */
-export const MIN_MULTIPLIER_BPS = 0;
-export const MAX_MULTIPLIER_BPS = 1_000_000;
-
-/**
- * Two places, away from zero — the rounding the walk-up pro-rata and the penalty already use.
- *
- * `toPrecision` before rounding rather than a bare `Math.round(x * 100)`: `8.01 * 1.25` is
- * `10.0125000000000018` in binary floating point, and the digits past the twelfth are noise
- * that can carry a half-way value over the line in either direction.
- */
-export function round2AwayFromZero(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  const scaled = Number((Math.abs(value) * 100).toPrecision(12));
-  return (value < 0 ? -1 : 1) * Math.round(scaled) / 100;
-}
-
-/**
- * What one slice costs under one group, or null when the server has not said enough to know.
- *
- * <p>
- * Null, never a fallback to the court's price: a flat-priced group whose price has not arrived
- * would otherwise quote a member the standard rate with nothing on the screen saying it was a
- * guess. Three backend lanes are building these fields in parallel with this screen, so absent
- * is a state that will actually happen.
- * </p>
- */
-export function priceForGroup(group: MemberGroup, courtPrice: number): number | null {
-  const mode = group.pricing?.mode ?? "inherit_court";
-  if (mode === "inherit_court") return courtPrice;
-  if (mode === "multiplier") {
-    const bps = group.pricing?.multiplier_bps;
-    if (typeof bps !== "number" || !Number.isFinite(bps)) return null;
-    const clamped = Math.max(MIN_MULTIPLIER_BPS, Math.min(MAX_MULTIPLIER_BPS, bps));
-    return Math.max(0, round2AwayFromZero(courtPrice * clamped / 10_000));
-  }
-  const flat = group.pricing?.flat_slice_price_credits;
-  if (typeof flat !== "number" || !Number.isFinite(flat)) return null;
-  return Math.max(0, flat);
-}
-
-/**
- * What one slice costs a member — the MAXIMUM over their groups, and the court's price for a
- * member in none.
- *
- * <p>
- * The maximum, and this is the decision most likely to be argued with. Three reasons, in the
- * order D2 gives them: it is the consistent reading of "most restrictive"; it is safe under
- * admin error, because adding somebody to an extra group can then never make them cheaper by
- * accident; and it matches the seeded shape, where League is the cheaper class, so a member
- * wrongly in both gets the club's standard rate rather than the discount.
- * </p>
- *
- * <p>
- * `unknown` is the other half. A group whose price could not be worked out does not silently
- * drop out of the maximum — the screen says the figure is incomplete, because a price quoted
- * from two of three groups is a number an admin would otherwise believe.
- * </p>
- */
-export function memberSlicePrice(
-  groups: MemberGroup[], courtPrice: number,
-): { credits: number; unknown: boolean } {
-  const active = groups.filter(isActive);
-  if (active.length === 0) return { credits: courtPrice, unknown: false };
-  let highest = 0;
-  let unknown = false;
-  for (const group of active) {
-    const price = priceForGroup(group, courtPrice);
-    if (price === null) { unknown = true; continue; }
-    highest = Math.max(highest, price);
-  }
-  // Every group unreadable: the court's own price is the only figure left that is true of the
-  // club, and `unknown` says the groups did not narrow it.
-  if (unknown && highest === 0) return { credits: courtPrice, unknown: true };
-  return { credits: highest, unknown };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -422,7 +340,6 @@ export function ceilingSlots(slotCap: number, minuteCap: number, sliceMinutes: n
 
 export type DayOptions = {
   settings: ClubHoursSettings & { slice_minutes?: number | null };
-  courtPrice: number;
   /** `member_max_slots_per_day` — the club-wide value the settings page owns. 0 = no limit. */
   slotCap: number;
   /** `member_per_day_max_minutes` — the older cap, which ruling 3 keeps. 0 = no limit. */
@@ -436,9 +353,6 @@ export type ResolvedDay = {
   allowed: Interval[];
   /** The names of the groups that between them leave nothing bookable, or null. */
   emptyBecause: string[] | null;
-  slicePrice: number;
-  /** True when at least one group's price could not be worked out from what the server sent. */
-  priceUnknown: boolean;
   maxSlotsPerDay: number;
   maxMinutesPerDay: number;
   advanceBookingDays: number;
@@ -461,7 +375,6 @@ export function resolveDay(groups: MemberGroup[], day: Weekday, options: DayOpti
   const slice = options.settings.slice_minutes ?? 15;
   const clubHours = clubHoursFor(options.settings, day);
   const allowed = allowedWindows(groups, day, clubHours);
-  const price = memberSlicePrice(groups, options.courtPrice);
   const slots = capFor(groups, "max_slots_per_day", options.slotCap);
   const minutes = capFor(groups, "max_minutes_per_day", options.minuteCap);
   return {
@@ -469,8 +382,6 @@ export function resolveDay(groups: MemberGroup[], day: Weekday, options: DayOpti
     clubHours,
     allowed,
     emptyBecause: emptyIntersection(groups, day, clubHours),
-    slicePrice: price.credits,
-    priceUnknown: price.unknown,
     maxSlotsPerDay: slots,
     maxMinutesPerDay: minutes,
     advanceBookingDays: capFor(groups, "advance_booking_days", options.advanceDays),
@@ -484,106 +395,76 @@ export function resolveDay(groups: MemberGroup[], day: Weekday, options: DayOpti
 export const WEEK_IN_READING_ORDER: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 // ---------------------------------------------------------------------------------------
-// The tariff — top-up rate and peak priority (D2: groups replace the member class)
+// The tariff — package discount and peak priority (D2: groups replace the member class; P13 §3.8)
 // ---------------------------------------------------------------------------------------
 
-/** The API's bounds on a group's top-up rate: more than 0, at most 1000, at most 4 decimals. */
-export const MIN_CREDITS_PER_ZAR_EXCLUSIVE = 0;
-export const MAX_CREDITS_PER_ZAR = 1000;
-export const CREDITS_PER_ZAR_DECIMALS = 4;
+/** The API's bounds on a group's package discount, in basis points: 0 to 10 000 (100 %). */
+export const MIN_PACKAGE_DISCOUNT_BPS = 0;
+export const MAX_PACKAGE_DISCOUNT_BPS = 10_000;
 
-/** Why a typed rate would be refused, as a machine-readable reason, or null when it is fine. */
-export type RateProblem = "empty" | "not_a_number" | "not_positive" | "too_high" | "too_precise";
-
-/**
- * The server's own `group_credits_per_zar_invalid` test, run as it is typed.
- *
- * <p>
- * The shape is checked before the value, for the reason `TopUp.tsx` gives: `Number` reads
- * "1e3" as 1000 and "0x10" as 16, and a rate field that accepts programmer notation quotes a
- * member eighty times what the admin meant with nothing on screen to say so.
- * </p>
- */
-export function rateProblem(text: string): RateProblem | null {
-  const trimmed = text.trim();
-  if (trimmed === "") return "empty";
-  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return "not_a_number";
-  const value = Number(trimmed);
-  if (!Number.isFinite(value)) return "not_a_number";
-  if (value <= MIN_CREDITS_PER_ZAR_EXCLUSIVE) return "not_positive";
-  if (value > MAX_CREDITS_PER_ZAR) return "too_high";
-  const decimals = trimmed.includes(".") ? trimmed.split(".")[1].length : 0;
-  if (decimals > CREDITS_PER_ZAR_DECIMALS) return "too_precise";
-  return null;
-}
-
-/** One group as the tariff reads it. `undefined` (an API that predates D2) counts as no say. */
+/** One group as the tariff reads it. `undefined` / `null` (no say) never counts as a discount. */
 export type TariffInput = Pick<MemberGroup, "id" | "name"> & {
   status?: MemberGroup["status"];
   sort_order?: number;
-  credits_per_zar?: number | null;
+  package_discount_bps?: number | null;
   peak_priority?: boolean | null;
 };
 
 export type ResolvedTariff = {
-  rate: number;
-  /** The group the rate comes from, or null when it is the club's default. */
-  rateGroup: TariffInput | null;
+  /** The package discount in basis points; null when no active group sets one. */
+  discountBps: number | null;
+  /** The group the discount comes from, or null when there is none. */
+  discountGroup: TariffInput | null;
   peak: boolean;
   /** The groups explicitly withholding peak priority, by name. */
   withheldBy: string[];
 };
 
+/** A discount a group really SETS: a whole number of basis points in range. Anything else is no say. */
+function setsDiscount(bps: number | null | undefined): bps is number {
+  return typeof bps === "number" && Number.isInteger(bps) && bps >= MIN_PACKAGE_DISCOUNT_BPS && bps <= MAX_PACKAGE_DISCOUNT_BPS;
+}
+
 /**
  * What a member's groups add up to — the SAME rule as the server's `MemberTariffs.Resolve`.
  *
  * <p>
- * <b>Rate: the lowest rate any active group SETS; the club's default when none sets one.</b>
- * A group that inherits has no opinion about money and is skipped, rather than read as the
- * default — a "Juniors" group made only to hold a booking window must not drag a league member
- * back to the regular rate. And the default is not folded into the minimum: a group that sets a
- * rate replaces the default for its members, which is what "this group tops up at 2.4" means.
+ * <b>Discount: the LOWEST any active group sets; none when no group sets one</b> (P13 §3.8,
+ * "most restrictive"). A group with no say is skipped rather than read as 0 %: a "Juniors" group
+ * made only to hold a booking window must not take a league member's discount away. An archived
+ * group says nothing. The discount is rand off a package; it never changes minutes (§1.2).
  * </p>
  *
  * <p>
  * <b>Peak: granted when at least one active group grants it and none withholds it.</b> A group
  * with no say cannot take a league member's priority away; an explicit "withholds" wins over any
- * number of grants, and is named, so a refusal can say which group stopped them. Nobody granting
- * at all is "no", as it was for a member nobody had classified.
+ * number of grants, and is named, so a refusal can say which group stopped them.
  * </p>
  *
  * <p>
- * Ties on the rate go to the club's own order (sort order, then name, then id) — the server's
- * tie-break, so the group this names is the group the top-up row will name.
+ * Ties on the discount go to the club's own order (sort order, then name, then id) — the
+ * server's tie-break, so the group this names is the group the purchase row will name.
  * </p>
  */
-export function resolveTariff(groups: TariffInput[], clubDefaultRate: number): ResolvedTariff {
+export function resolveTariff(groups: TariffInput[]): ResolvedTariff {
   const ordered = groups
     .filter((g) => (g.status ?? "active") === "active")
     .slice()
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
       || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
       || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  let rateGroup: TariffInput | null = null;
+  let discountGroup: TariffInput | null = null;
   for (const group of ordered) {
-    const rate = group.credits_per_zar;
-    if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) continue;
-    if (rateGroup === null || rate < (rateGroup.credits_per_zar as number)) rateGroup = group;
+    const bps = group.package_discount_bps;
+    if (!setsDiscount(bps)) continue;
+    if (discountGroup === null || bps < (discountGroup.package_discount_bps as number)) discountGroup = group;
   }
   const withheldBy = ordered.filter((g) => g.peak_priority === false).map((g) => g.name);
   const peak = ordered.some((g) => g.peak_priority === true) && withheldBy.length === 0;
   return {
-    rate: rateGroup ? (rateGroup.credits_per_zar as number) : clubDefaultRate,
-    rateGroup,
+    discountBps: discountGroup ? (discountGroup.package_discount_bps as number) : null,
+    discountGroup,
     peak,
     withheldBy: peak ? [] : withheldBy,
   };
-}
-
-/**
- * Credits a top-up of `amount` buys at `rate`, rounded the way the ledger column stores it —
- * two places, away from zero (`TopUpEndpoints.Convert`).
- */
-export function creditsFor(amount: number, rate: number): number {
-  return round2AwayFromZero(amount * rate);
 }

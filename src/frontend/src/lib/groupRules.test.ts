@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  CREDITS_PER_ZAR_DECIMALS, MAX_CREDITS_PER_ZAR, MIN_CREDITS_PER_ZAR_EXCLUSIVE, creditsFor, rateProblem,
-  resolveTariff, type TariffInput,
+  MAX_PACKAGE_DISCOUNT_BPS, MIN_PACKAGE_DISCOUNT_BPS, resolveTariff, type TariffInput,
 } from "./groupRules";
 import {
   UNLIMITED, allowedWindows, allowFor, capFor, capOverrideIsInert, ceilingSlots, clubHoursFor,
-  countSlots, emptyIntersection, fitsInOneWindow, formatClock, intersect, memberSlicePrice,
-  normalise, parseClock, priceForGroup, resolveDay, round2AwayFromZero, totalMinutes,
+  countSlots, emptyIntersection, fitsInOneWindow, formatClock, intersect,
+  normalise, parseClock, resolveDay, totalMinutes,
 } from "./groupRules";
 import { groupFixture, restrictedGroupFixture, weekdayWindows, windowFixture } from "../test/groupFixtures";
 import { SETTINGS_FIXTURE } from "../test/harness";
@@ -206,66 +205,6 @@ describe("the empty intersection — reachable, and named rather than rendered a
   });
 });
 
-describe("price — most restrictive is the HIGHEST, and that is the decision most likely to be argued with", () => {
-  it("inherits the court's own price", () => {
-    expect(priceForGroup(groupFixture(), 8)).toBe(8);
-  });
-
-  it("applies a multiplier in basis points, rounded away from zero to two places", () => {
-    // `AwayFromZero` matches the walk-up pro-rata and the penalty, so the club does not round
-    // in its own favour in one place and against itself in another.
-    expect(priceForGroup(groupFixture({ pricing: { mode: "multiplier", multiplier_bps: 7_500 } }), 8)).toBe(6);
-    expect(priceForGroup(groupFixture({ pricing: { mode: "multiplier", multiplier_bps: 12_500 } }), 8.01)).toBe(10.01);
-    expect(round2AwayFromZero(8.005)).toBe(8.01);
-    expect(round2AwayFromZero(-8.005)).toBe(-8.01);
-  });
-
-  it("takes a flat per-slice price as it stands", () => {
-    expect(priceForGroup(groupFixture({ pricing: { mode: "flat_per_slice", flat_slice_price_credits: 12 } }), 8)).toBe(12);
-  });
-
-  it("answers null — not the court's price — for a flat group whose price the server has not sent", () => {
-    // Unknown is never a number. A `?? courtPrice` here would quote a member the standard rate
-    // for a group the club has priced, and nothing on the screen would say it was a guess.
-    expect(priceForGroup(groupFixture({ pricing: { mode: "flat_per_slice", flat_slice_price_credits: null } }), 8))
-      .toBeNull();
-  });
-
-  it("gives a member in no group the court's own price", () => {
-    expect(memberSlicePrice([], 8)).toEqual({ credits: 8, unknown: false });
-  });
-
-  it("gives a member in two groups the HIGHER price, never the lower", () => {
-    const cheap = groupFixture({ id: "a", pricing: { mode: "multiplier", multiplier_bps: 5_000 } });
-    const dear = groupFixture({ id: "b", pricing: { mode: "flat_per_slice", flat_slice_price_credits: 12 } });
-    // The mutant this kills is `Math.min`. It would make a mis-click cost the club revenue
-    // nobody notices, instead of costing a member a price they can see before confirming.
-    expect(memberSlicePrice([cheap, dear], 8)).toEqual({ credits: 12, unknown: false });
-  });
-
-  it("says so when one of the groups has a price it could not work out", () => {
-    // The highest KNOWN figure, with the flag that stops the screen printing it as final. The
-    // copy turns the pair into "at least 4 credits", which is the only true sentence available
-    // when one of the three rules has not arrived yet.
-    const known = groupFixture({ id: "a", pricing: { mode: "multiplier", multiplier_bps: 5_000 } });
-    const unknown = groupFixture({ id: "b", pricing: { mode: "flat_per_slice", flat_slice_price_credits: null } });
-    expect(memberSlicePrice([known, unknown], 8)).toEqual({ credits: 4, unknown: true });
-  });
-
-  it("falls back to the court's own price when NO group's price could be read", () => {
-    const unknown = groupFixture({ id: "b", pricing: { mode: "flat_per_slice", flat_slice_price_credits: null } });
-    // Not zero. A maximum over nothing is 0, and quoting a member a free court because three
-    // fields had not shipped is the one arithmetic mistake here that costs the club money.
-    expect(memberSlicePrice([unknown], 8)).toEqual({ credits: 8, unknown: true });
-  });
-
-  it("clamps a multiplier outside the API's own bound rather than quoting it", () => {
-    expect(priceForGroup(groupFixture({ pricing: { mode: "multiplier", multiplier_bps: -5_000 } }), 8)).toBe(0);
-    // 1_000_000 bps is the API's ceiling: 100×, so 800 credits and not 800 000.
-    expect(priceForGroup(groupFixture({ pricing: { mode: "multiplier", multiplier_bps: 9_999_999 } }), 8)).toBe(800);
-  });
-});
-
 describe("caps — most restrictive is the MINIMUM, and 0 means unlimited", () => {
   it("gives a member in no group the club's own limit", () => {
     expect(capFor([], "max_slots_per_day", 4)).toBe(4);
@@ -332,28 +271,26 @@ describe("one day, resolved — what the page actually renders from", () => {
   const club = SETTINGS_FIXTURE;
 
   it("answers the club's own everything for a member in no group", () => {
-    const day = resolveDay([], "tue", { settings: club, courtPrice: 8, slotCap: 4, minuteCap: 60, advanceDays: 14 });
+    const day = resolveDay([], "tue", { settings: club, slotCap: 4, minuteCap: 60, advanceDays: 14 });
     expect(day.allowed).toEqual([{ start: 360, end: 1320 }]);
-    expect(day.slicePrice).toBe(8);
     expect(day.ceilingSlots).toBe(4);
     expect(day.emptyBecause).toBeNull();
   });
 
-  it("intersects, maximises and minimises all at once for a member in two groups", () => {
+  it("intersects and minimises at once for a member in two groups — and prices nothing (P13)", () => {
     const offpeak = restrictedGroupFixture({
       id: "a", name: "Off-peak", caps: { max_slots_per_day: 2 },
       windows: weekdayWindows(["tue"], "06:00", "16:00"),
     });
     const coaching = groupFixture({
       id: "b", name: "Coaching squad",
-      pricing: { mode: "flat_per_slice", flat_slice_price_credits: 12 },
       windows: [windowFixture("tue", "10:00", "20:00")],
     });
     const day = resolveDay([offpeak, coaching], "tue", {
-      settings: club, courtPrice: 8, slotCap: 4, minuteCap: 60, advanceDays: 14,
+      settings: club, slotCap: 4, minuteCap: 60, advanceDays: 14,
     });
     expect(day.allowed).toEqual([{ start: 600, end: 960 }]);
-    expect(day.slicePrice).toBe(12);
+    expect(day).not.toHaveProperty("slicePrice");
     expect(day.maxSlotsPerDay).toBe(2);
     expect(day.ceilingSlots).toBe(2);
   });
@@ -362,7 +299,7 @@ describe("one day, resolved — what the page actually renders from", () => {
     const early = groupFixture({ id: "a", name: "League members", windows: [windowFixture("tue", "06:00", "09:00")] });
     const late = groupFixture({ id: "b", name: "Non-league members", windows: [windowFixture("tue", "17:00", "21:00")] });
     const day = resolveDay([early, late], "tue", {
-      settings: club, courtPrice: 8, slotCap: 4, minuteCap: 60, advanceDays: 14,
+      settings: club, slotCap: 4, minuteCap: 60, advanceDays: 14,
     });
     expect(day.allowed).toEqual([]);
     expect(day.emptyBecause).toEqual(["League members", "Non-league members"]);
@@ -378,7 +315,7 @@ describe("one day, resolved — what the page actually renders from", () => {
     const chicago = { ...club, timezone: "America/Chicago" };
     const london = { ...club, timezone: "Europe/London" };
     const group = restrictedGroupFixture({ windows: weekdayWindows(["tue"], "06:00", "16:00") });
-    const options = { courtPrice: 8, slotCap: 4, minuteCap: 60, advanceDays: 14 };
+    const options = { slotCap: 4, minuteCap: 60, advanceDays: 14 };
     const here = resolveDay([group], "tue", { settings: club, ...options });
     expect(resolveDay([group], "tue", { settings: chicago, ...options }).allowed).toEqual(here.allowed);
     expect(resolveDay([group], "tue", { settings: london, ...options }).allowed).toEqual(here.allowed);
@@ -386,79 +323,65 @@ describe("one day, resolved — what the page actually renders from", () => {
 });
 
 // ---------------------------------------------------------------------------------------
-// D2 — the tariff (top-up rate and peak priority), the server's MemberTariffs.Resolve rule
+// D2 / P13 §3.8 — the tariff (package discount and peak priority), MemberTariffs.Resolve's rule
 // ---------------------------------------------------------------------------------------
 
-describe("resolveTariff — the rule the top-up and the booking path both read", () => {
-  const g = (id: string, rate: number | null | undefined, peak: boolean | null | undefined, extra: Partial<TariffInput> = {}): TariffInput =>
-    ({ id, name: id, credits_per_zar: rate, peak_priority: peak, ...extra });
+describe("resolveTariff — the rule the package shelf and the booking path both read", () => {
+  const g = (id: string, bps: number | null | undefined, peak: boolean | null | undefined, extra: Partial<TariffInput> = {}): TariffInput =>
+    ({ id, name: id, package_discount_bps: bps, peak_priority: peak, ...extra });
 
-  it("gives a member in no group the club's rate and no peak priority", () => {
-    expect(resolveTariff([], 1.6)).toEqual({ rate: 1.6, rateGroup: null, peak: false, withheldBy: [] });
+  it("gives a member in no group no discount and no peak priority", () => {
+    expect(resolveTariff([])).toEqual({ discountBps: null, discountGroup: null, peak: false, withheldBy: [] });
   });
 
-  it("takes the LOWEST rate a group sets, and never folds the club's default into it", () => {
-    const t = resolveTariff([g("League", 2.4, null), g("Seniors", 2.0, null)], 1.6);
-    expect(t.rate).toBe(2.0);
-    expect(t.rateGroup?.id).toBe("Seniors");
-    // 2.0 is above the club's 1.6 and still wins: a group that sets a rate REPLACES the default.
-    expect(resolveTariff([g("League", 2.4, null)], 1.6).rate).toBe(2.4);
+  it("takes the LOWEST discount a group sets — most restrictive wins", () => {
+    // The mutant this kills is "highest wins": an extra group must never make packages cheaper.
+    const t = resolveTariff([g("League", 1_500, null), g("Seniors", 1_000, null)]);
+    expect(t.discountBps).toBe(1_000);
+    expect(t.discountGroup?.id).toBe("Seniors");
+    expect(resolveTariff([g("League", 1_500, null)]).discountBps).toBe(1_500);
   });
 
-  it("skips a group that inherits, rather than reading it as the default", () => {
-    // A window-only "Juniors" group must not drag a league member back to the regular rate.
-    const t = resolveTariff([g("League", 2.4, true), g("Juniors", null, null)], 1.6);
-    expect(t.rate).toBe(2.4);
-    expect(t.rateGroup?.id).toBe("League");
+  it("counts an explicit 0 % as a discount that is set — it beats a higher one", () => {
+    const t = resolveTariff([g("League", 1_500, null), g("Probation", 0, null)]);
+    expect(t.discountBps).toBe(0);
+    expect(t.discountGroup?.id).toBe("Probation");
+  });
+
+  it("skips a group with no say, rather than reading it as 0 %", () => {
+    // A window-only "Juniors" group must not take a league member's discount away.
+    const t = resolveTariff([g("League", 1_000, true), g("Juniors", null, null)]);
+    expect(t.discountBps).toBe(1_000);
+    expect(t.discountGroup?.id).toBe("League");
+  });
+
+  it("ignores a value outside the API's bound, or not whole, as no say", () => {
+    expect(resolveTariff([g("A", -5, null), g("B", 10_001, null), g("C", 12.5, null)]).discountBps).toBeNull();
+    expect([MIN_PACKAGE_DISCOUNT_BPS, MAX_PACKAGE_DISCOUNT_BPS]).toEqual([0, 10_000]);
   });
 
   it("ignores archived groups entirely", () => {
-    const t = resolveTariff([g("League", 2.4, true, { status: "archived" })], 1.6);
-    expect(t).toEqual({ rate: 1.6, rateGroup: null, peak: false, withheldBy: [] });
+    const t = resolveTariff([g("League", 1_000, true, { status: "archived" })]);
+    expect(t).toEqual({ discountBps: null, discountGroup: null, peak: false, withheldBy: [] });
   });
 
-  it("breaks a rate tie by the club's own order, so the group named is the one the top-up row names", () => {
-    const t = resolveTariff([g("B", 2, null, { sort_order: 2 }), g("A", 2, null, { sort_order: 1 })], 1.6);
-    expect(t.rateGroup?.id).toBe("A");
+  it("breaks a discount tie by the club's own order, so the group named is the one the purchase row names", () => {
+    const t = resolveTariff([g("B", 1_000, null, { sort_order: 2 }), g("A", 1_000, null, { sort_order: 1 })]);
+    expect(t.discountGroup?.id).toBe("A");
   });
 
   it("grants peak when one group grants and none withholds — a group with no say takes nothing away", () => {
-    expect(resolveTariff([g("League", null, true), g("Juniors", null, null)], 1.6).peak).toBe(true);
-    expect(resolveTariff([g("Juniors", null, null)], 1.6).peak, "nobody granting is no").toBe(false);
+    expect(resolveTariff([g("League", null, true), g("Juniors", null, null)]).peak).toBe(true);
+    expect(resolveTariff([g("Juniors", null, null)]).peak, "nobody granting is no").toBe(false);
   });
 
   it("lets a withhold win over any number of grants, and names who withheld", () => {
-    const t = resolveTariff([g("League", null, true), g("Seniors", null, true), g("Probation", null, false)], 1.6);
+    const t = resolveTariff([g("League", null, true), g("Seniors", null, true), g("Probation", null, false)]);
     expect(t.peak).toBe(false);
     expect(t.withheldBy).toEqual(["Probation"]);
   });
 
   it("treats a field an older API never sent as no say, not as a withhold", () => {
-    expect(resolveTariff([g("League", undefined, true), g("Old", undefined, undefined)], 1.6).peak).toBe(true);
-  });
-});
-
-describe("rateProblem — the server's group_credits_per_zar_invalid, as it is typed", () => {
-  it.each([
-    ["", "empty"], ["  ", "empty"], ["abc", "not_a_number"], ["1e3", "not_a_number"], ["0x10", "not_a_number"],
-    ["0", "not_positive"], ["-1", "not_positive"], ["1000.0001", "too_high"], ["2.12345", "too_precise"],
-  ])("refuses %j as %s", (text, problem) => {
-    expect(rateProblem(text)).toBe(problem);
-  });
-
-  it.each(["2.4", "1000", "0.0001", " 1.6667 "])("accepts %j", (text) => {
-    expect(rateProblem(text)).toBeNull();
-  });
-
-  it("names its bounds as the API does", () => {
-    expect([MIN_CREDITS_PER_ZAR_EXCLUSIVE, MAX_CREDITS_PER_ZAR, CREDITS_PER_ZAR_DECIMALS]).toEqual([0, 1000, 4]);
-  });
-});
-
-describe("creditsFor — a block at a rate, rounded as the ledger column is", () => {
-  it("rounds to two places, away from zero", () => {
-    expect(creditsFor(100, 2.4)).toBe(240);
-    expect(creditsFor(50, 1.6667)).toBe(83.34);
-    expect(creditsFor(100, 1.00005)).toBe(100.01);
+    expect(resolveTariff([g("League", undefined, true), g("Old", undefined, undefined)]).peak).toBe(true);
   });
 });
