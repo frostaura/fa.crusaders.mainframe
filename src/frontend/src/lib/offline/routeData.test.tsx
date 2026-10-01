@@ -84,3 +84,33 @@ describe("a direct load", () => {
     expect(calls()).toEqual(["/api/v1/schedule", "/api/v1/me/bookings/upcoming", "/api/v1/me/bookings/recent"]);
   });
 });
+
+describe("the page joins the read its link started", () => {
+  it("a Bookings press's day read is the grid's first read — one request, not two", async () => {
+    const { renderHook, waitFor } = await import("@testing-library/react");
+    const { AuthProvider } = await import("@/lib/auth");
+    const { useScheduleDay } = await import("@/lib/scheduleDay");
+    tokenStore.set("member.jwt.value");
+    localStorage.setItem("crusaders.mainframe.last-identity", ID);
+    setDataOwner(ID);
+    const day = { date: "2030-09-09", timezone: "UTC", sliceMinutes: 15, dayStartMinute: 480, dayEndMinute: 600, advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15, courts: [], slots: [] };
+    const fetchSpy = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      const body = path.startsWith("/api/v1/whoami") ? { is_authenticated: true, user_id: ID, is_admin: false, tenant_slug: "crusaders" }
+        : path.startsWith("/api/v1/schedule") ? day : { items: [] };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    vi.spyOn(routeChunks, "schedule").mockImplementation(never);
+
+    routeIntent("/bookings?date=2030-09-09");
+    await vi.waitFor(() => expect(peekQuery(ID, "schedule:2030-09-09")).toBeDefined());
+    const { result } = renderHook(() => useScheduleDay(false, "2030-09-09"), {
+      wrapper: ({ children }) => <AuthProvider>{children}</AuthProvider>,
+    });
+    await waitFor(() => expect(result.current.day?.date).toBe("2030-09-09"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetchSpy.mock.calls.filter(([i]) => String(i).startsWith("/api/v1/schedule"))).toHaveLength(1);
+    localStorage.clear();
+  });
+});

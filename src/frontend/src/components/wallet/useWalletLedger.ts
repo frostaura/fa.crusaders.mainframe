@@ -4,7 +4,7 @@ import { useBalance } from "@/lib/balance";
 import { heldFrom, type HeldFigures } from "@/lib/liveBalance";
 import { memberReads, WALLET_PAGE_SIZE } from "@/lib/offline/memberReads";
 import { fetchQuery, peekQuery, subscribeQuery } from "@/lib/offline/queryCache";
-import { isConnectionFailure, useDataOwner } from "@/lib/offline/useCachedRead";
+import { isConnectionFailure, JOIN_MS, useDataOwner } from "@/lib/offline/useCachedRead";
 import { creditArrivedSentence, creditLeftSentence } from "@/lib/walletCopy";
 import { useToast } from "../Toast";
 import { shareBookingsFrom, type ShareBookings } from "./useShareBookings";
@@ -87,14 +87,16 @@ export function useWalletLedger() {
   const peekKept = useCallback(() => peekQuery(who, memberReads.wallet.key), [who]);
   const kept = useSyncExternalStore(subscribeKept, peekKept, peekKept);
   const [stale, setStale] = useState(false);
+  const firstRead = useRef(true);
   const [unreachable, setUnreachable] = useState(false);
 
-  const load = useCallback(async (limit: number) => {
+  /** `join`: the page's first read may take the one a press on the Wallet tab started a moment ago (P4-5). */
+  const load = useCallback(async (limit: number, join = false) => {
     setBusy(true);
     const issuedAt = Date.now();
     try {
       const data = limit === WALLET_PAGE_SIZE
-        ? await fetchQuery(who, memberReads.wallet.key, memberReads.wallet.load)
+        ? await fetchQuery(who, memberReads.wallet.key, memberReads.wallet.load, { reuseWithinMs: join ? JOIN_MS : 0 })
         : await endpoints.walletWithShareBookings(limit, 0);
       setStale(false);
       setUnreachable(false);
@@ -126,7 +128,9 @@ export function useWalletLedger() {
     // be a second identical round trip after every Refresh that moved the balance.
     if (live.balance !== null && lastRead.current !== null && Math.abs(live.balance - lastRead.current) < 0.005) return;
     // Fetch on mount, and re-read when the live balance moves.
-    void load(WALLET_PAGE_SIZE);
+    // Only the mount's read joins a link press's; a re-read after a balance move asks the club.
+    void load(WALLET_PAGE_SIZE, firstRead.current);
+    firstRead.current = false;
   }, [load, live.balance]);
 
   /*

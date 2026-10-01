@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { ScheduleDay } from "./api";
 import { memberReads } from "./offline/memberReads";
 import { fetchQuery, peekQuery, primeQuery, subscribeQuery, whenHydrated } from "./offline/queryCache";
-import { useDataOwner } from "./offline/useCachedRead";
+import { JOIN_MS, useDataOwner } from "./offline/useCachedRead";
 import { clubDayOf, gridNow, shiftClubDay } from "./gridClock";
 import { buildTimeSlices, groupSlotsByCourt } from "./scheduleGrid";
 import { readViewerRules, type ViewerRules } from "./gridRules";
@@ -137,13 +137,14 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
   // day looked at. A day the member picked, or linked to, is that day or nothing.
   const autoDay = useRef(validClubDay(initialDate) ? null : date);
 
-  const load = useCallback(async (which: string) => {
+  /** `join`: a read of this day that landed a moment ago (a Bookings link press, P4-5) answers it. */
+  const load = useCallback(async (which: string, join = false) => {
     const read = ++latestRead.current;
     setLoading(true);
     setError(null);
     try {
       const day = memberReads.schedule(which);
-      const fresh = await fetchQuery(whoRef.current, day.key, day.load);
+      const fresh = await fetchQuery(whoRef.current, day.key, day.load, { reuseWithinMs: join ? JOIN_MS : 0 });
       if (read !== latestRead.current || wanted.current !== which) return;
       loadedDate.current = fresh.date;
       setDay(fresh);
@@ -178,7 +179,7 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
     wanted.current = date;
     // The day on screen is this one already (the server's own club day adopted, or a return to
     // a day whose read is still the last one to land): nothing to read. Anything else reads.
-    if (loadedDate.current !== date) void load(date);
+    if (loadedDate.current !== date) void load(date, true);
   }, [date, load]);
 
   // Reconcile in the BACKGROUND after a write.
