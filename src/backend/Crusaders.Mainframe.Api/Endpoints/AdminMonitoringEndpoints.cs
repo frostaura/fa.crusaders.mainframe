@@ -354,13 +354,14 @@ public static class AdminMonitoringEndpoints
         HttpContext ctx, Guid id, ResolveRequest? body, [AsParameters] MonitoringResolveServices services,
         CancellationToken ct)
     {
-        var (db, tenant, bus) = services;
+        var (db, tenant, bus, _) = services;
         var row = await db.DeviceErrors.FirstOrDefaultAsync(e => e.Id == id, ct);
         if (row is null) return Results.NotFound(new { error = ErrorNotFound });
         if (row.ResolvedAt is not null) return Results.Conflict(new { error = AlreadyResolved });
 
         var actor = ctx.User.Id() ?? Guid.Empty;
-        Close(db, tenant.TenantId, row, actor, body?.Note, DateTimeOffset.UtcNow);
+        var labels = await BoardLabelsAsync(db, [row], ct);
+        await CloseAsync(services, row, new BulkItem(id, actor, body?.Note, DateTimeOffset.UtcNow) { Board = labels.GetValueOrDefault(row.Id) }, ct);
         await db.SaveChangesAsync(ct);
 
         // Published AFTER the save, never after the mutation: a monitoring page that strikes a
@@ -394,19 +395,21 @@ public static class AdminMonitoringEndpoints
         var duplicate = ids.GroupBy(i => i).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null) return Results.BadRequest(new { error = DuplicateId, id = duplicate.Key });
 
-        var (db, tenant, bus) = services;
+        var (db, tenant, bus, _) = services;
         var actor = ctx.User.Id() ?? Guid.Empty;
         var now = DateTimeOffset.UtcNow;
 
         // One read for the whole batch — tenant-filtered, so a foreign id simply is not here and
         // answers error_not_found without this method ever comparing a tenant.
         var found = await db.DeviceErrors.Where(e => ids.Contains(e.Id)).ToDictionaryAsync(e => e.Id, e => e, ct);
+        var labels = await BoardLabelsAsync(db, found.Values, ct);
 
         var results = new List<object>();
         var resolved = new List<DeviceError>();
         foreach (var id in ids)
         {
-            results.Add(await ResolveOneAsync(db, tenant, found, resolved, new BulkItem(id, actor, body?.Note, now), ct));
+            results.Add(await ResolveOneAsync(
+                services, found, resolved, new BulkItem(id, actor, body?.Note, now) { Board = labels.GetValueOrDefault(id) }, ct));
         }
 
         // Published after every save, and one frame per row: a page counting open faults has to
@@ -430,9 +433,10 @@ public static class AdminMonitoringEndpoints
     /// the batch's. Block body for the lizard reason in <c>memory/gotchas.md</c>.
     /// </summary>
     private static async Task<object> ResolveOneAsync(
-        MainframeDbContext db, ITenantContext tenant, IReadOnlyDictionary<Guid, DeviceError> found,
+        MonitoringResolveServices services, IReadOnlyDictionary<Guid, DeviceError> found,
         List<DeviceError> resolved, BulkItem item, CancellationToken ct)
     {
+        var db = services.Db;
         if (!found.TryGetValue(item.Id, out var row))
         {
             return new { id = item.Id, status = FailedStatus, error = ErrorNotFound };
@@ -445,13 +449,21 @@ public static class AdminMonitoringEndpoints
 
         try
         {
-            Close(db, tenant.TenantId, row, item.Actor, item.Note, item.At);
+            await CloseAsync(services, row, item, ct);
             await db.SaveChangesAsync(ct);
             resolved.Add(row);
             return new { id = item.Id, status = ResolvedStatus, error = (string?)null };
         }
         catch (DbUpdateException)
         {
+            // Its audit and change rows describe nothing that happened, and the next item saves
+            // in this same context — detached so that save cannot carry them in.
+            foreach (var entry in db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+            db.Entry(row).State = EntityState.Detached;
+
             // This row's problem, reported as this row's result. Anything else would make one
             // unlucky id cost an admin the other ninety-nine.
             return new { id = item.Id, status = FailedStatus, error = "resolve_failed" };
@@ -467,16 +479,33 @@ public static class AdminMonitoringEndpoints
     /// rather than the longer thing they typed and a row that disagrees with it.
     /// </para>
     /// </summary>
-    private static void Close(
-        MainframeDbContext db, Guid tenantId, DeviceError row, Guid actor, string? note, DateTimeOffset at)
+    private static async Task CloseAsync(
+        MonitoringResolveServices services, DeviceError row, BulkItem item, CancellationToken ct)
     {
-        row.ResolvedAt = at;
+        var actor = item.Actor;
+        row.ResolvedAt = item.At;
         row.ResolvedByUserId = actor == Guid.Empty ? null : actor;
-        row.ResolutionNote = Trim(note);
+        row.ResolutionNote = Trim(item.Note);
 
-        db.AuditLogs.Add(new AuditLog
+        // On the club's change record too, in the resolve's own save (review round 4 wave B):
+        // the admin's note is the reason, the board is the subject.
+        await services.Changes.StageAsync(new AdminChange(
+            Action: AdminChangeActions.MonitoringErrorResolved,
+            ActorUserId: actor,
+            SubjectKind: row.DeviceId is null ? null : AdminChangeSubjects.Device,
+            SubjectId: row.DeviceId,
+            SubjectLabel: item.Board ?? row.ClaimedDeviceCode,
+            Reason: row.ResolutionNote,
+            After: new Dictionary<string, object?>
+            {
+                ["code"] = row.Code,
+                ["severity"] = DeviceErrorService.SeverityWire(row.Severity),
+                ["count"] = row.Count,
+            }), ct);
+
+        services.Db.AuditLogs.Add(new AuditLog
         {
-            TenantId = tenantId,
+            TenantId = services.Tenant.TenantId,
             ActorUserId = actor,
             SubjectUserId = null,
             Action = ResolvedAction,
@@ -490,6 +519,19 @@ public static class AdminMonitoringEndpoints
                 note = row.ResolutionNote,
             }),
         });
+    }
+
+    /// <summary>Each fault's board, labelled as the change record names a board — one read for the lot.</summary>
+    private static async Task<Dictionary<Guid, string>> BoardLabelsAsync(
+        MainframeDbContext db, IEnumerable<DeviceError> rows, CancellationToken ct)
+    {
+        var list = rows.ToList();
+        var ids = list.Where(r => r.DeviceId is not null).Select(r => r.DeviceId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return [];
+        var boards = await db.Devices.AsNoTracking().Where(d => ids.Contains(d.Id)).ToDictionaryAsync(d => d.Id, ct);
+        return list
+            .Where(r => r.DeviceId is { } id && boards.ContainsKey(id))
+            .ToDictionary(r => r.Id, r => DeviceChanges.Label(boards[r.DeviceId!.Value]));
     }
 
     private static string? Trim(string? note)
@@ -605,7 +647,11 @@ public sealed record ResolveBulkRequest(List<Guid>? Ids, string? Note)
 /// the complexity gate bounds a parameter list at six, on a count that says nothing about how
 /// hard the method is to reason about.
 /// </summary>
-public sealed record BulkItem(Guid Id, Guid Actor, string? Note, DateTimeOffset At);
+public sealed record BulkItem(Guid Id, Guid Actor, string? Note, DateTimeOffset At)
+{
+    /// <summary>The fault's board as the change record labels it, or null when it names none.</summary>
+    public string? Board { get; init; }
+}
 
 /// <summary>What the export handler needs, bundled. See <c>ControlBoardStreamServices</c>.</summary>
 public sealed record MonitoringExportServices(
@@ -613,7 +659,7 @@ public sealed record MonitoringExportServices(
 
 /// <summary>What the two resolve handlers need, bundled. See <c>ControlBoardStreamServices</c>.</summary>
 public sealed record MonitoringResolveServices(
-    MainframeDbContext Db, ITenantContext Tenant, IRealtimeBus Bus);
+    MainframeDbContext Db, ITenantContext Tenant, IRealtimeBus Bus, AdminChangeRecorder Changes);
 
 /// <summary>
 /// What the stream handler needs, bundled.

@@ -55,9 +55,8 @@ public static class AdminDoorFleetEndpoint
     /// </para>
     /// </summary>
     public static Task<IResult> ShutAllAsync(
-        MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settingsAccessor,
-        HttpContext ctx, CancellationToken ct)
-        => ApplyAsync(db, tenant, settingsAccessor, ctx, shut: true, ct);
+        [AsParameters] DoorFleetDeps deps, HttpContext ctx, CancellationToken ct)
+        => ApplyAsync(deps, ctx, shut: true, ct);
 
     /// <summary>
     /// <c>POST /api/v1/admin/doors/reopen-all</c> — every door THIS feature shut, and no other.
@@ -71,19 +70,22 @@ public static class AdminDoorFleetEndpoint
     /// </para>
     /// </summary>
     public static Task<IResult> ReopenAllAsync(
-        MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settingsAccessor,
-        HttpContext ctx, CancellationToken ct)
-        => ApplyAsync(db, tenant, settingsAccessor, ctx, shut: false, ct);
+        [AsParameters] DoorFleetDeps deps, HttpContext ctx, CancellationToken ct)
+        => ApplyAsync(deps, ctx, shut: false, ct);
+
+    /// <summary>What a fleet switch resolves from the container — the gate's six-argument cap.</summary>
+    public sealed record DoorFleetDeps(
+        MainframeDbContext Db, ITenantContext Tenant, TenantSettingsAccessor Settings, AdminChangeRecorder Changes);
 
     /// <summary>
     /// The one unit of work both directions run: select the doors this call is about, flip them,
     /// close or leave their outages, write ONE audit row, save once.
     /// </summary>
     private static async Task<IResult> ApplyAsync(
-        MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settingsAccessor,
-        HttpContext ctx, bool shut, CancellationToken ct)
+        DoorFleetDeps deps, HttpContext ctx, bool shut, CancellationToken ct)
     {
-        var settings = await settingsAccessor.GetAsync(ct);
+        var (db, tenant) = (deps.Db, deps.Tenant);
+        var settings = await deps.Settings.GetAsync(ct);
         // Storable, not raw: these instants are written to timestamptz AND answered to the
         // caller in the same request, so a sub-microsecond reading would report a time the
         // column cannot keep. See StorableTime.
@@ -162,6 +164,17 @@ public static class AdminDoorFleetEndpoint
 
         // ONE save. The console's "nothing was shut, every door is exactly as it was" depends
         // on this line and on nothing else.
+        // On the club's change record too, in the same save (review round 4 wave B): which doors
+        // this switch moved, by the names the club reads them by.
+        await deps.Changes.StageAsync(new AdminChange(
+            Action: shut ? AdminChangeActions.DoorsShutAll : AdminChangeActions.DoorsReopenedAll,
+            ActorUserId: actor,
+            After: new Dictionary<string, object?>
+            {
+                ["doors"] = changing.Count,
+                ["door_names"] = changing.Select(d => DeviceView.Named(d.Name) ?? d.GateKey ?? d.DeviceCode).ToList(),
+            }), ct);
+
         await db.SaveChangesAsync(ct);
 
         return Results.Ok(new

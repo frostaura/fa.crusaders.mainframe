@@ -365,12 +365,14 @@ describe("devices, courts and doors (lib/api.ts)", () => {
     reads(only(at(FILE, "Grouped", "events.Add(")), F.doorEventEntry());
   });
 
+  // R4 wave B: the courts moved out of AdminConfigEndpoints into their own file, with their change record.
   it("courts", () => {
-    const FILE = "Endpoints/AdminConfigEndpoints.cs";
-    reads(only(at(FILE, { route: 'courts.MapGet("/"' }, "Select(c => ")), F.adminCourt());
-    reads(last(ok(FILE, { route: 'courts.MapPost("/"' })), F.courtCreateAnswer());
-    reads(last(ok(FILE, { route: 'courts.MapPatch("/{id:guid}"' })), F.courtUpdateAnswer());
-    reads(last(ok(FILE, { route: 'courts.MapDelete("/{id:guid}"' })), F.courtDeleteAnswer());
+    const FILE = "Endpoints/AdminCourtEndpoints.cs";
+    expect(serverBody(FILE, "MapAdminCourtEndpoints")).toContain('courts.MapDelete("/{id:guid}", DeactivateAsync)');
+    reads(only(at(FILE, "ListAsync", "Select(c => ")), F.adminCourt());
+    reads(last(ok(FILE, "CreateAsync")), F.courtCreateAnswer());
+    reads(last(ok(FILE, "UpdateAsync")), F.courtUpdateAnswer());
+    reads(last(ok(FILE, "DeactivateAsync")), F.courtDeleteAnswer());
   });
 
   it("the doors overview, its rows and its signals", () => {

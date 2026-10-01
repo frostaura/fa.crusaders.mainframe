@@ -18,9 +18,9 @@ import { resolve } from "node:path";
  * </p>
  *
  * <p>
- * Actions with no writer into `admin_change_log` (they write `audit_log` only) carry
- * `writer: null` and an empty diff: the page still shows their headline, and the test still
- * requires them to be listed, so the day one gains a writer is the day it needs a real fixture.
+ * Every action has a writer since review round 4 wave B (courts, devices, the club key, the
+ * doors, blocks and fault resolves wrote `audit_log` only until then). A new action without a
+ * fixture here fails the catalogue test.
  * </p>
  */
 
@@ -191,14 +191,20 @@ const BOOKING_FACTS = {
   amount_credits: dec("80.00"),
 } satisfies Stored;
 
+const BLOCK = {
+  label: "Coaching", ends_at: "2026-10-03T11:00:00+00:00", starts_at: "2026-10-03T10:00:00+00:00",
+} satisfies Stored;
+
+const COURT = {
+  name: "Court 2", court_number: 2, court_type: "Squash", slice_price_credits: dec("9"), is_active: true,
+} satisfies Stored;
+
 const SEAT = { booking_id: ID.booking, participant_id: ID.participant, seat: 2 } satisfies Stored;
 
 const RANGE = { from: "2026-09-28T22:00:00+00:00", to: "2026-09-29T22:00:00+00:00" } satisfies Stored;
 
 type Draft = Omit<ChangeRecordFixture, "changes">;
 const row = (d: Draft): ChangeRecordFixture => ({ ...d, changes: serverDiff(d.before, d.after) });
-const unwritten = (action: string, area: string, headline: string, writer: string): ChangeRecordFixture =>
-  row({ action, area, headline, writer: null, before: null, after: null, variant: `no writer — ${writer}` });
 
 export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
   // ---- schedule ---- AdminScheduleEndpoints.Snapshot / WithEffectiveFrom
@@ -247,8 +253,14 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "booking.cancelled_by_admin", area: "booking", headline: "Cancelled a booking — Thandi Mokoena",
     writer: "AdminCancelRecord.StageAsync", before: { ...BOOKING_FACTS, status: "booked" }, after: { status: "cancelled" },
   }),
-  unwritten("booking.blocked", "booking", "Blocked a court", "AdminBlockService.CreateAsync writes audit_log only"),
-  unwritten("booking.block_lifted", "booking", "Lifted a court block", "AdminBlockService.RemoveAsync writes audit_log only"),
+  row({
+    action: "booking.blocked", area: "booking", headline: "Blocked a court — Court 2",
+    writer: "AdminBlockService.CreateAsync (R4 wave B)", before: null, after: BLOCK,
+  }),
+  row({
+    action: "booking.block_lifted", area: "booking", headline: "Lifted a court block — Court 2",
+    writer: "AdminBlockService.RemoveAsync (R4 wave B)", before: BLOCK, after: null,
+  }),
   row({
     action: "booking.booked_on_behalf", area: "booking", headline: "Booked a court for a member — Thandi Mokoena",
     writer: "BookingService (RecordOnBehalf)", before: null, after: { ...BOOKING_FACTS, part_of_batch: false },
@@ -416,9 +428,24 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
       credits_per_zar_regular: dec("1.2"), member_trace_enabled: true, peak_hours: "17:00-20:00",
     },
   }),
-  unwritten("court.created", "setting", "Added a court", "no admin_change_log writer found"),
-  unwritten("court.updated", "setting", "Changed a court", "no admin_change_log writer found"),
-  unwritten("court.deactivated", "setting", "Deactivated a court", "no admin_change_log writer found"),
+  // AdminCourtEndpoints (R4 wave B): only what changed, each side.
+  row({
+    action: "court.created", area: "setting", headline: "Added a court — Court 2",
+    writer: "AdminCourtEndpoints.CreateAsync", before: null, after: COURT,
+  }),
+  row({
+    action: "court.updated", area: "setting", headline: "Changed a court — Glass court",
+    writer: "AdminCourtEndpoints.UpdateAsync", before: { name: "Court 2" }, after: { name: "Glass court" },
+  }),
+  row({
+    variant: "price", action: "court.updated", area: "setting", headline: "Changed a court — Court 2",
+    writer: "AdminCourtEndpoints.UpdateAsync",
+    before: { slice_price_credits: dec("8.00") }, after: { slice_price_credits: dec("9.50") },
+  }),
+  row({
+    action: "court.deactivated", area: "setting", headline: "Deactivated a court — Court 2",
+    writer: "AdminCourtEndpoints.DeactivateAsync / UpdateAsync", before: { is_active: true }, after: { is_active: false },
+  }),
   row({
     action: "changes.exported", area: "setting", headline: "Downloaded the club's change record",
     writer: "AdminChangeEndpoints.CsvAsync", before: null,
@@ -443,20 +470,51 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     before: { destination: "https://hooks.example.org:8443", event_filter: "*", description: null }, after: null,
   }),
 
-  // ---- device ---- (DeviceRegistryService / AdminDoorFleetEndpoint / AdminMonitoringEndpoints write audit_log only)
-  unwritten("device.updated", "device", "Changed a device", "DeviceRegistryService writes audit_log only"),
-  unwritten("device.deleted", "device", "Removed a device", "DeviceRegistryService writes audit_log only"),
-  unwritten("device.api_key_regenerated", "device", "Regenerated the club's device key", "DeviceRegistryService writes audit_log only"),
-  unwritten("doors.shut_all", "device", "Shut every door at once", "AdminDoorFleetEndpoint writes audit_log only"),
-  unwritten("doors.reopened_all", "device", "Reopened the doors", "AdminDoorFleetEndpoint writes audit_log only"),
-  unwritten("monitoring.error_resolved", "device", "Marked a device fault as resolved", "AdminMonitoringEndpoints writes audit_log only"),
+  // ---- device ---- (R4 wave B) DeviceChanges.Snapshot / Removed, AdminDoorFleetEndpoint, AdminMonitoringEndpoints.CloseAsync
+  row({
+    action: "device.updated", area: "device", headline: "Changed a device — Court 1 box (box-0a1b2c)",
+    writer: "DeviceRegistryService.UpdateAsync", before: { name: "Court box", in_service: true },
+    after: { name: "Court 1 box", in_service: false },
+  }),
+  row({
+    variant: "card and wiring", action: "device.updated", area: "device", headline: "Changed a device — Front door (gate-0a1b2c)",
+    writer: "DeviceRegistryService.UpdateAsync",
+    before: { gate_key: null, acknowledged: false, location_note: null, power_loss_behaviour: "not_established" },
+    after: { gate_key: "front", acknowledged: true, location_note: "Reception, left of the desk", power_loss_behaviour: "released" },
+  }),
+  row({
+    variant: "court box", action: "device.updated", area: "device", headline: "Changed a device — Court box (box-0a1b2c)",
+    writer: "DeviceRegistryService.UpdateAsync",
+    before: { court_numbers: "1, 2", own_button_map: false }, after: { court_numbers: "1, 2, 3", own_button_map: true },
+  }),
+  row({
+    action: "device.deleted", area: "device", headline: "Removed a device — Court box (box-0a1b2c)",
+    writer: "DeviceRegistryService.DeleteAsync",
+    before: { name: "Court box", kind: "court_box", device_code: "box-0a1b2c", court_numbers: "1, 2" }, after: null,
+  }),
+  row({
+    action: "device.api_key_regenerated", area: "device", headline: "Regenerated the club's device key",
+    writer: "DeviceRegistryService.IssueApiKeyAsync (never the key)", before: null, after: null,
+  }),
+  row({
+    action: "doors.shut_all", area: "device", headline: "Shut every door at once",
+    writer: "AdminDoorFleetEndpoint.ApplyAsync", before: null, after: { doors: 2, door_names: ["Front door", "Side door"] },
+  }),
+  row({
+    action: "doors.reopened_all", area: "device", headline: "Reopened the doors",
+    writer: "AdminDoorFleetEndpoint.ApplyAsync", before: null, after: { doors: 1, door_names: ["Front door"] },
+  }),
+  row({
+    action: "monitoring.error_resolved", area: "device", headline: "Marked a device fault as resolved — Court box (box-0a1b2c)",
+    writer: "AdminMonitoringEndpoints.CloseAsync", before: null, after: { code: "relay_stuck", count: 3, severity: "error" },
+  }),
 
   // ---- play ---- ResultService.RecordChangeAsync
   row({
     action: "play.result_voided", area: "play", headline: "Removed a match result — Court 2, Tue 29 Sep 18:00",
     writer: "ResultService.RecordChangeAsync", before: { status: "confirmed" },
     after: {
-      result_id: ID.result, booking_id: ID.booking, from_status: "confirmed", reason: "Entered on the wrong booking",
+      status: "voided", result_id: ID.result, booking_id: ID.booking, reason: "Entered on the wrong booking",
       games: [{ a: 11, b: 9 }, { a: 11, b: 7 }, { a: 9, b: 11 }, { a: 11, b: 5 }], format: "best_of_5",
       subject_user_id: ID.user, lineup_user_ids: [ID.user, ID.user2, ID.user3, ID.user4],
     },
@@ -465,7 +523,7 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     action: "play.result_upheld", area: "play", headline: "Kept a disputed match result — Court 2, Tue 29 Sep 18:00",
     writer: "ResultService.RecordChangeAsync", before: { status: "disputed" },
     after: {
-      result_id: ID.result, booking_id: ID.booking, from_status: "disputed", reason: "Both captains confirmed the score",
+      status: "confirmed", result_id: ID.result, booking_id: ID.booking, reason: "Both captains confirmed the score",
       games: [{ a: 11, b: 9 }, { a: 8, b: 11 }, { a: 11, b: 6 }], format: "best_of_3",
       subject_user_id: ID.user, lineup_user_ids: [ID.user, ID.user2],
     },

@@ -262,78 +262,8 @@ public static class AdminConfigEndpoints
             });
         });
 
-        var courts = app.MapGroup("/api/v1/admin/courts").RequireAuthorization(p => p.RequireRole("admin"));
-
-        courts.MapGet("/", async (MainframeDbContext db, CancellationToken ct) =>
-        {
-            var list = await db.Courts.OrderBy(c => c.CourtNumber).ToListAsync(ct);
-            return Results.Ok(list.Select(c => new
-            {
-                id = c.Id,
-                court_number = c.CourtNumber,
-                name = c.Name,
-                court_type = c.CourtType.ToString(),
-                slice_price_credits = c.SlicePriceCredits,
-                is_active = c.IsActive,
-            }));
-        });
-
-        courts.MapPost("/", async (
-            CreateCourtRequest req, MainframeDbContext db, ITenantContext tenant,
-            TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
-        {
-            if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new { error = "name_required" });
-            if (req.SlicePriceCredits < 0) return Results.BadRequest(new { error = "price_negative" });
-
-            // The tenant's slice_price_credits is the default for a new court, and until now
-            // it was the default for nothing at all: every charge in the system reads
-            // court.SlicePriceCredits, and the setting was only ever read back to render the
-            // settings screen and written straight out again. The seed ships the setting at
-            // 8.00 and the courts at 50.00, so an admin looking at that number was looking at
-            // a price 6.25x away from what members actually pay, and editing it changed
-            // nobody's bill. Giving it one real job is what makes it honest.
-            var settings = await settingsAccessor.GetAsync(ct);
-            var priceCredits = req.SlicePriceCredits ?? settings.DefaultSlicePriceCredits;
-
-            var maxNo = await db.Courts.IgnoreQueryFilters().Where(c => c.TenantId == tenant.TenantId).MaxAsync(c => (int?)c.CourtNumber, ct) ?? 0;
-            var court = new Court
-            {
-                TenantId = tenant.TenantId,
-                CourtNumber = maxNo + 1,
-                Name = req.Name.Trim(),
-                CourtType = Enum.TryParse<CourtType>(req.CourtType, true, out var t) ? t : CourtType.Squash,
-                SlicePriceCredits = priceCredits,
-                IsActive = true,
-            };
-            db.Courts.Add(court);
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { id = court.Id, court_number = court.CourtNumber });
-        });
-
-        courts.MapPatch("/{id:guid}", async (Guid id, UpdateCourtRequest req, MainframeDbContext db, CancellationToken ct) =>
-        {
-            var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == id, ct);
-            if (court is null) return Results.NotFound();
-            if (req.Name is not null) court.Name = req.Name.Trim();
-            if (req.SlicePriceCredits is not null)
-            {
-                if (req.SlicePriceCredits < 0) return Results.BadRequest(new { error = "price_negative" });
-                court.SlicePriceCredits = req.SlicePriceCredits.Value;
-            }
-            if (req.IsActive is not null) court.IsActive = req.IsActive.Value;
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { saved = true });
-        });
-
-        courts.MapDelete("/{id:guid}", async (Guid id, MainframeDbContext db, CancellationToken ct) =>
-        {
-            var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == id, ct);
-            if (court is null) return Results.NotFound();
-            // Soft delete: deactivate so historical bookings stay coherent.
-            court.IsActive = false;
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { deactivated = true });
-        });
+        // The courts moved to AdminCourtEndpoints (review round 4 wave B), with their change record.
+        app.MapAdminCourtEndpoints();
 
         return app;
     }

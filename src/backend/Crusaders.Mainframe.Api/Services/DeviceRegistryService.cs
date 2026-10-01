@@ -31,12 +31,15 @@ public sealed class DeviceRegistryService
     private readonly MainframeDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly TenantSettingsAccessor _settings;
+    private readonly AdminChangeRecorder _changes;
 
-    public DeviceRegistryService(MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settings)
+    public DeviceRegistryService(
+        MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settings, AdminChangeRecorder changes)
     {
         _db = db;
         _tenant = tenant;
         _settings = settings;
+        _changes = changes;
     }
 
     /// <summary>
@@ -314,6 +317,7 @@ public sealed class DeviceRegistryService
         Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
     {
         var changes = new List<string>();
+        var before = DeviceChanges.Snapshot(device);
         ApplyName(device, cmd, changes);
 
         // The switch-off instant and the outage it closes: see SwitchAsync.
@@ -352,6 +356,8 @@ public sealed class DeviceRegistryService
         if (changes.Count == 0) return (device, changes);
 
         Audit(actorUserId, "device.updated", new { device_id = device.Id, changes });
+        var (was, now) = AdminChangeFields.Changed(before, DeviceChanges.Snapshot(device));
+        await StageChangeAsync(AdminChangeActions.DeviceUpdated, actorUserId, device, was, now, ct);
         await _db.SaveChangesAsync(ct);
 
         return (device, changes);
@@ -735,6 +741,7 @@ public sealed class DeviceRegistryService
     {
         _db.Devices.Remove(device);
         Audit(actorUserId, "device.deleted", new { device_id = device.Id, device_code = device.DeviceCode });
+        await StageChangeAsync(AdminChangeActions.DeviceDeleted, actorUserId, device, DeviceChanges.Removed(device), null, ct);
         await _db.SaveChangesAsync(ct);
     }
 
@@ -773,6 +780,14 @@ public sealed class DeviceRegistryService
         // The key itself is never in the audit details. An audit trail an admin can read is
         // not a place to put a live credential.
         Audit(actorUserId, "device.api_key_regenerated", new { first_issue = firstIssue });
+
+        // On the change record too (review round 4 wave B) — a rotation takes every board offline
+        // until it is reflashed. Never the key, either one. A first issue on the page's first read
+        // replaced nothing, so it is not a regeneration and is not recorded as one.
+        if (!firstIssue)
+        {
+            await _changes.StageAsync(new AdminChange(AdminChangeActions.DeviceApiKeyRegenerated, actorUserId), ct);
+        }
         await _db.SaveChangesAsync(ct);
 
         return tenant;
@@ -786,6 +801,24 @@ public sealed class DeviceRegistryService
     private async Task<Tenant> CurrentTenantAsync(CancellationToken ct)
         => await _db.Tenants.FirstOrDefaultAsync(t => t.Id == _tenant.TenantId, ct)
            ?? throw new InvalidOperationException("The resolved tenant no longer exists.");
+
+    /// <summary>
+    /// A board's edit or removal on the club's change record, in the action's own save (review
+    /// round 4 wave B — these wrote <c>audit_log</c> only). Labelled with the name AND the code:
+    /// every box is called "Court box" until somebody names it.
+    /// </summary>
+    private async Task StageChangeAsync(
+        string action, Guid actorUserId, Device device, object? before, object? after, CancellationToken ct)
+    {
+        await _changes.StageAsync(new AdminChange(
+            Action: action,
+            ActorUserId: actorUserId,
+            SubjectKind: AdminChangeSubjects.Device,
+            SubjectId: device.Id,
+            SubjectLabel: DeviceChanges.Label(device),
+            Before: before,
+            After: after), ct);
+    }
 
     // Block body, not an expression body: lizard's C# parser mis-scopes an
     // expression-bodied member containing braces into a *global* pseudo-function the

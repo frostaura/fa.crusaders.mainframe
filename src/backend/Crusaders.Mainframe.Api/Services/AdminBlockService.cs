@@ -33,10 +33,12 @@ public sealed class AdminBlockService
     private readonly ITenantContext _tenant;
     private readonly TenantSettingsAccessor _settings;
     private readonly ILogger<AdminBlockService> _logger;
+    private readonly AdminChangeRecorder _changes;
 
     public AdminBlockService(
-        MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settings, ILogger<AdminBlockService> logger)
-    { _db = db; _tenant = tenant; _settings = settings; _logger = logger; }
+        MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settings, ILogger<AdminBlockService> logger,
+        AdminChangeRecorder changes)
+    { _db = db; _tenant = tenant; _settings = settings; _logger = logger; _changes = changes; }
 
     public async Task<BookingResult> CreateAsync(
         Guid courtId, DateTimeOffset startsAt, int sliceCount, string? label, Guid actorId, CancellationToken ct)
@@ -93,6 +95,16 @@ public sealed class AdminBlockService
             }),
         });
 
+        // On the club's change record, in the block's own save (review round 4 wave B): a lost
+        // race detaches it with the block, so a refused block records nothing.
+        await _changes.StageAsync(new AdminChange(
+            Action: AdminChangeActions.BookingBlocked,
+            ActorUserId: actorId,
+            SubjectKind: AdminChangeSubjects.Court,
+            SubjectId: court.Id,
+            SubjectLabel: court.Name,
+            After: BlockFacts(block)), ct);
+
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -102,10 +114,7 @@ public sealed class AdminBlockService
             // Lost the race to a booking that committed after our check. The database is
             // the only place a court-time collision is decidable; this is its answer.
             _logger.LogInformation("Admin block lost the slot race on court {CourtId} at {StartsAt}", courtId, startsAt);
-            foreach (var entry in _db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
-            {
-                entry.State = EntityState.Detached;
-            }
+            DetachAdded();
             return new BookingResult.SlotTaken();
         }
 
@@ -132,6 +141,15 @@ public sealed class AdminBlockService
             }),
         });
 
+        var court = await _db.Courts.AsNoTracking().FirstOrDefaultAsync(c => c.Id == block.CourtId, ct);
+        await _changes.StageAsync(new AdminChange(
+            Action: AdminChangeActions.BookingBlockLifted,
+            ActorUserId: actorId,
+            SubjectKind: AdminChangeSubjects.Court,
+            SubjectId: block.CourtId,
+            SubjectLabel: court?.Name,
+            Before: BlockFacts(block)), ct);
+
         // Cancelled rather than deleted. The exclusion constraint ignores Cancelled rows,
         // so the court frees immediately, and the block stays on the record — an admin who
         // blocked four courts on a Saturday and lifted them an hour later leaves a trail.
@@ -157,10 +175,35 @@ public sealed class AdminBlockService
             // result row. Both are true — by the time this returns the block IS lifted, just
             // not by this request.
             _logger.LogInformation("Lift of block {BlockId} lost a concurrent write", blockId);
+
+            // Neither this request's audit row nor its change row describes anything that
+            // happened, and a bulk lift goes on to save again in this same context — detached,
+            // so the next item's save cannot carry them in.
+            DetachAdded();
+            _db.Entry(block).State = EntityState.Detached;
             return false;
         }
 
         return true;
+    }
+
+    private void DetachAdded()
+    {
+        foreach (var entry in _db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
+    /// <summary>What a block's change row names: when, and the label it showed on the grid.</summary>
+    private static Dictionary<string, object?> BlockFacts(Booking block)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["starts_at"] = block.StartsAt,
+            ["ends_at"] = block.EndsAt,
+            ["label"] = block.BlockLabel,
+        };
     }
 
     private static string Normalise(string? label)
