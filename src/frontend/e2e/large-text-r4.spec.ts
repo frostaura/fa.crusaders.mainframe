@@ -244,7 +244,12 @@ async function chooseByKeyboard(page: Page, name: string) {
   await page.getByRole("button", { name: "Account menu" }).focus();
   await page.keyboard.press("Enter");
   const item = page.getByRole("menu").getByRole("menuitem", { name });
-  for (let i = 0; i < 12 && !(await item.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press("ArrowDown");
+  // One step per frame, so a loaded runner's keys can't outrun Radix moving the highlight; the menu
+  // grew this round (the folded wallet at 200 % text), so allow every item, not twelve.
+  for (let i = 0; i < 24 && !(await item.evaluate((el) => el === document.activeElement)); i++) {
+    await page.keyboard.press("ArrowDown");
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+  }
   await expect(item).toBeFocused();
   await page.keyboard.press("Enter");
 }
