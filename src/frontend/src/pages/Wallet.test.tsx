@@ -232,3 +232,36 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     expect(document.querySelector("[data-state-block=loading]")).toBeNull();
   });
 });
+
+/**
+ * R5 M5-9 (SPEC 3.4): on a desktop the rail's Top up is the page's PRIMARY action beside the
+ * figure (it was a soft secondary next to a primary docked twin on phones), and the last 30 days
+ * stand under the balance.
+ */
+describe("Wallet — the desktop rail", () => {
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", class { close() {} } as unknown as typeof EventSource);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query.includes("reduce") || query.includes("min-width: 1024px"), media: query, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+  });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); });
+
+  it("draws Top up as the primary action beside the balance, with the last 30 days under it", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      // Plenty to play with: the level that used to draw a soft secondary.
+      { path: "/api/v1/wallet", body: { balance_credits: 900, entries: [ledgerRowFixture()], total_entries: 1, offset: 0, limit: 100 } },
+      { path: "/api/v1/reports/me/wallet", body: { top_ups_credits: 300, spent_credits: 150, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, net_movement_credits: 150, penalty_count: 0, attended_bookings: 3, bookings: 3, minutes_on_court: 135, count: 6 } },
+    ]);
+    renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
+    const rail = await screen.findByRole("complementary", { name: "Your balance" });
+    const topUp = await within(rail).findByRole("link", { name: /Top up/ });
+    expect(topUp.className.split(" ")).toContain("bg-primary");
+    expect(await within(rail).findByText("+300.00 cr")).toBeInTheDocument();
+    // One Top up on the page: the docked bar is the phone's.
+    expect(screen.getAllByRole("link", { name: /Top up/ })).toHaveLength(1);
+  });
+});

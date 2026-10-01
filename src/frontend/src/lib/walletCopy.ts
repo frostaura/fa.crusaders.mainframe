@@ -151,6 +151,19 @@ export const WALLET_LAYOUT = {
   actionsLabel: "Wallet actions",
 } as const;
 
+/** The rail's last-30-days figures under the balance (R5 M5-9, SPEC 3.4). */
+export const WALLET_MINI_COPY = {
+  title: "Last 30 days",
+  topUps: "Top-ups",
+  spent: "Spent",
+  net: "Net",
+  readAction: "read the last 30 days",
+  failed: "Couldn't read the last 30 days.",
+  offline: "The last 30 days need a connection.",
+  retry: "Try again",
+  more: "See activity",
+} as const;
+
 /* ─────────────────────────────── held credits (D11 §3a) ─────────────────────────────── */
 
 /** Under the held line on the wallet card: the figure every spend decision reads. */

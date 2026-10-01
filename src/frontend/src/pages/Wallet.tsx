@@ -22,6 +22,7 @@ import { BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL, WALLET
 import { ContextBar } from "../components/ui/context-bar";
 import { useMediaQuery } from "../components/ui/use-media-query";
 import { WithAside } from "../components/ui/with-aside";
+import { WalletMiniTotals } from "../components/wallet/WalletMiniTotals";
 
 /**
  * The figure, its sentence and the way to fix it — one component because they are one claim.
@@ -36,8 +37,10 @@ import { WithAside } from "../components/ui/with-aside";
  *
  * <p>
  * The top-up control is navigation, so it is a link — drawn as the page's primary action
- * (`<Button asChild><Link/></Button>`, design-system.md: Buttons vs links). Primary when there is
- * nothing to play with: at zero it is the only thing on the page that does anything for them.
+ * (`<Button asChild><Link/></Button>`, design-system.md: Buttons vs links). It is drawn here only
+ * in the desktop rail, and there it is PRIMARY beside the figure whatever the balance (R5 M5-9,
+ * SPEC 3.4): a soft secondary next to the number read as an afterthought, while the phone's docked
+ * Top up was primary — one verb, one weight, wherever it is drawn.
  * </p>
  */
 function BalanceCard({ balance, painted, held, topUp = true }: { balance: number | null; painted: number | null; held: HeldFigures | null; topUp?: boolean }) {
@@ -63,7 +66,7 @@ function BalanceCard({ balance, painted, held, topUp = true }: { balance: number
           </p>
           <HeldLine held={held} />
         </div>
-        {topUp ? <TopUpLink level={level} /> : null}
+        {topUp ? <TopUpLink level={level} primary /> : null}
       </div>
     </Card>
   );
@@ -132,7 +135,9 @@ function LedgerSection(props: LedgerProps) {
           emptyHint="Top up, or wait for the club to credit you — every movement lands here."
         />
       ) : (
-        <Card className="gap-0 overflow-hidden py-0 sm:gap-0 sm:py-0">
+        // `overflow-clip`, not `-hidden`: a hidden overflow is a scroll container, and the ledger's
+        // column heads would stick to the card (which never scrolls) instead of the page (R5 V5-6).
+        <Card className="gap-0 overflow-clip py-0 sm:gap-0 sm:py-0">
           <LedgerTable rows={rows} label="Wallet ledger" groupShares shareBookings={shareBookings} />
           {/* Said once under the list rather than on every row: every face on a member surface
               is the CLUB's day, which is right and otherwise invisible. */}
@@ -178,8 +183,12 @@ export default function WalletPage() {
         {loaded ? (
           // R4 form factor (SPEC 3.4): from a 64rem page the balance is a sticky rail beside the
           // ledger, first in reading order — the figure and Top up together, not 800px apart.
+          // The rail carries the last 30 days under the figure (R5 M5-9) where it is a rail.
           <WithAside placement="before" at="64rem" asideLabel={WALLET_LAYOUT.railLabel} aside={
-            <BalanceCard balance={balance} painted={painted} held={held} topUp={wide} />
+            <>
+              <BalanceCard balance={balance} painted={painted} held={held} topUp={wide} />
+              {wide ? <WalletMiniTotals offline={offline} /> : null}
+            </>
           }>
             <LedgerSection rows={rows} shareBookings={shareBookings} total={total} busy={busy} error={stale ? null : error} onOlder={() => void load(shown + PAGE_SIZE)} />
           </WithAside>
