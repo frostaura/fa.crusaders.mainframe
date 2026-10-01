@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { ApiError, endpoints, type TopUpStatus } from "../lib/api";
+import { ApiError, endpoints, type PurchaseStatus } from "../lib/api";
 import { useBalance } from "../lib/balance";
 import { formatMoney } from "../lib/utils";
+import { minutesCompact } from "../lib/minutes";
+import { discountPercent } from "../lib/topUpShelf";
+import { BUY_MINUTES_PATH } from "../lib/balance";
+import { Minutes } from "../components/Minutes";
 import { typography } from "../lib/typography";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Freshness } from "../components/ui/refresh-button";
@@ -17,7 +21,6 @@ import { Alert } from "../components/Alert";
 import { useAuth } from "../lib/auth";
 import { pendingInvitePath } from "../lib/playersPending";
 import { returnLabel, safeReturnTo, topUpReturnFor } from "../lib/topUpReturn";
-import type { TopUpSnapshot } from "../lib/topUpOpen";
 import { CancelPending } from "./TopUpOpenCheckouts";
 
 /**
@@ -32,36 +35,35 @@ import { CancelPending } from "./TopUpOpenCheckouts";
  */
 const FAILURE_COPY: Record<string, string> = {
   amount_mismatch:
-    "PayFast reported a different amount from the one this top-up was for, so nothing was credited. If money did leave your account, send the club your PayFast reference and they'll sort it out.",
+    "PayFast reported a different amount from the one this purchase was for, so no minutes were added. If money did leave your account, send the club your PayFast reference and they'll sort it out.",
   declined:
     "Your bank declined the payment, so nothing was charged. Try again, or use a different card.",
   gateway_error:
     "PayFast couldn't complete the payment and nothing was charged. Try again in a few minutes.",
   provider_register_failed:
-    "The club's payment settings wouldn't accept this top-up. Nothing was charged — please tell an admin.",
+    "The club's payment settings wouldn't accept this purchase. Nothing was charged — please tell an admin.",
 };
 
 /**
- * What a Cancelled top-up says, by who closed it (R4 M4-1). The member's own cancel keeps the
+ * What a Cancelled purchase says, by who closed it (R4 M4-1). The member's own cancel keeps the
  * sentence it always had; one the club closed because nothing came back from PayFast for an hour
  * (`expired`) is not something the member did, and used to be told "You cancelled".
  */
 const CANCELLED_COPY: Record<string, string> = {
-  expired: "This payment was never finished, so nothing was charged and no credits were added.",
+  expired: "This payment was never finished, so nothing was charged and no minutes were added.",
 };
 
 /**
- * R4 M4-1 — the cancel return tells the club, so the attempt stops counting against the member's
- * top-up limit. Whatever happens to that call, the row is then read back and the read is what
- * the page believes: a lost reply is the lost-reply rule (the cancel is idempotent, and a row the
- * club already closed is answered as it stands), and a 404 may be a server that predates the
- * cancel route rather than a missing top-up — the read's own 404 is the page's "no such top-up".
+ * R4 M4-1 — the cancel return tells the club, so the purchase is closed rather than left Pending
+ * for an hour. Whatever happens to that call, the row is then read back and the read is what the
+ * page believes: a lost reply is the lost-reply rule (the cancel is idempotent, and a row the club
+ * already closed is answered as it stands); the read's own 404 is the page's "no such purchase".
  */
-async function cancelAtReturn(topupId: string): Promise<TopUpStatus> {
+async function cancelAtReturn(purchaseId: string): Promise<PurchaseStatus> {
   try {
-    return await endpoints.topupCancel(topupId);
+    return await endpoints.minutesPurchaseCancel(purchaseId);
   } catch {
-    return endpoints.topupStatus(topupId);
+    return endpoints.minutesPurchaseStatus(purchaseId);
   }
 }
 
@@ -73,7 +75,7 @@ async function cancelAtReturn(topupId: string): Promise<TopUpStatus> {
  * seconds — and said nothing. PayFast retries an ITN for hours and an EFT clears when it
  * clears, so the common case is that the money arrives AFTER the polling has quietly
  * given up: the member is left reading "Waiting for confirmation from PayFast…" for ever
- * beside credits that are already in their ledger, with no control on the screen and no
+ * beside minutes that are already in their ledger, with no control on the screen and no
  * way out but a manual browser reload.
  * </p>
  *
@@ -97,37 +99,44 @@ function pollDelayMs(attempt: number): number | null {
  *
  * <p>
  * PayFast sends no ITN for a cancel; its cancel URL is the only word the page gets
- * (`TopUpEndpoints.cs` sets `?cancelled=1`), and the page now passes it on (`cancelAtReturn`).
+ * (the server's `cancel_url` carries `?cancelled=1`), and the page passes it on (`cancelAtReturn`).
  * When even that could not be said — the cancel's reply was lost and the read still shows
  * Pending — the snapshot is the member's own cancel all the same: shown as Cancelled, and not
  * polled for six minutes under "Waiting for confirmation". Anything final the club reports
  * still wins over the flag.
  * </p>
  */
-function shownStatus(snap: TopUpStatus, cancelledReturn: boolean): TopUpStatus {
+function shownStatus(snap: PurchaseStatus, cancelledReturn: boolean): PurchaseStatus {
   return cancelledReturn && snap.status === "Pending" ? { ...snap, status: "Cancelled" } : snap;
 }
 
-export default function TopUpStatusPage() {
-  const { topupId } = useParams<{ topupId: string }>();
+/**
+ * `/wallet/buy/:purchaseId` — where PayFast sends the member back (P13 §3.1), and where a purchase
+ * is watched until it is done. Three states a member reads: <b>waiting</b> (Pending, polled), <b>done</b>
+ * (Completed: the minutes are in the wallet) and <b>not done</b> (Failed, or Cancelled — by the
+ * member at PayFast or by the club after an hour). The old `/wallet/topup/:id` redirects here, and
+ * `:topupId` is still read so the page works under either route table while the deploy settles.
+ */
+export default function BuyMinutesStatusPage() {
+  const params = useParams<{ purchaseId?: string; topupId?: string }>();
+  const purchaseId = params.purchaseId ?? params.topupId;
   const [search] = useSearchParams();
   const cancelledReturn = search.get("cancelled") === "1";
-  const wayBack = useWayBack(topupId, search.get("returnTo"));
-  const [s, setS] = useState<TopUpSnapshot | null>(null);
+  const wayBack = useWayBack(purchaseId, search.get("returnTo"));
+  const [s, setS] = useState<PurchaseStatus | null>(null);
   /* Whether the LAST attempt to read the status failed. Not the sentence — the two places
      that report it say different things, because "we could not reach the club" means something
      different before a status is known than it does beside one that is already on screen. */
   const [loadFailed, setLoadFailed] = useState(false);
   /**
-   * The club answered, definitively, that there is no such top-up for this member.
+   * The club answered, definitively, that there is no such purchase for this member.
    *
    * <p>
    * Held apart from {@link loadFailed} because a 404 is not an outage and the two owe the
-   * member opposite things. The catch below used to be bare, so `GET /credit/topup/{id}`
-   * answering 404 rendered "We couldn't reach the club to check on this payment … we'll
-   * email you either way" beside a Check-again button that can never resolve — a promise of
-   * a mail against a `PendingTopup` row that does not exist, and an invitation to keep
-   * pressing. A definite answer deserves a definite screen.
+   * member opposite things. The catch below used to be bare, so a 404 rendered "We couldn't
+   * reach the club to check on this payment … we'll email you either way" beside a Check-again
+   * button that can never resolve — a promise of a mail against a row that does not exist, and
+   * an invitation to keep pressing. A definite answer deserves a definite screen.
    * </p>
    */
   const [missing, setMissing] = useState(false);
@@ -148,7 +157,7 @@ export default function TopUpStatusPage() {
   useEffect(() => { refreshBalanceRef.current = refreshBalance; }, [refreshBalance]);
 
   useEffect(() => {
-    if (!topupId) return;
+    if (!purchaseId) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
@@ -160,7 +169,7 @@ export default function TopUpStatusPage() {
 
     const tick = async () => {
       try {
-        const read = tellCancel ? cancelAtReturn(topupId) : endpoints.topupStatus(topupId);
+        const read = tellCancel ? cancelAtReturn(purchaseId) : endpoints.minutesPurchaseStatus(purchaseId);
         tellCancel = false;
         const snap = shownStatus(await read, cancelledReturn);
         if (cancelled) return;
@@ -170,7 +179,7 @@ export default function TopUpStatusPage() {
         setLoadFailed(false);
         if (snap.status === "Completed" && !refreshedOnce.current) {
           refreshedOnce.current = true;
-          // The member's own top-up, and this page says so (D4) — not a toast about the club.
+          // The member's own purchase, and this page says so (D4) — not a toast about the club.
           void refreshBalanceRef.current({ expectSelf: true });
         }
         // Anything but Pending is final; there is nothing left to ask about.
@@ -193,11 +202,11 @@ export default function TopUpStatusPage() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [topupId, round, cancelledReturn]);
+  }, [purchaseId, round, cancelledReturn]);
 
   // M5-2 — the member cancelled from this page: the club's answer is the snapshot now, and a
   // payment that went through after all refreshes the wallet as the poll would have.
-  const settled = (next: TopUpSnapshot) => {
+  const settled = (next: PurchaseStatus) => {
     setS(next);
     setReadAt(Date.now());
     if (next.status === "Completed" && !refreshedOnce.current) {
@@ -213,26 +222,26 @@ export default function TopUpStatusPage() {
     setRound((r) => r + 1);
   };
 
-  const header = <PageHeader back={{ to: "/wallet", label: "Wallet" }} title="Top-up" freshness={<Freshness at={readAt} />} />;
+  const header = <PageHeader back={{ to: "/wallet", label: "Wallet" }} title={STATUS_TITLE} freshness={<Freshness at={readAt} />} />;
 
-  if (missing) return <StatusShell header={header}><NoSuchTopUp /></StatusShell>;
+  if (missing) return <StatusShell header={header}><NoSuchPurchase /></StatusShell>;
 
   /*
     A failed status request is not a dead end, and it used to be one: a bare sentence in a bare
     card, no controls, so the only way out was a manual browser reload. A failure BEFORE anything
     is known keeps the two controls the Pending branch has; a failure AFTER a status has been
     read keeps that status, and says beside it that the screen may be stale. Nothing here
-    touches the payment, and a member watching a R500 top-up needs to be told so.
+    touches the payment, and a member watching a R500 purchase needs to be told so.
   */
   if (loadFailed && !s) {
     return (
       <StatusShell header={header}>
         <Card className="px-4 sm:px-6">
           {/*
-            "we'll email you either way" is TRUE: `NotifyNotCompletedAsync` in TopUpEndpoints.cs
-            mails a member whose payment ends Failed, Cancelled or amount-mismatched, alongside
-            the confirmation `CompleteAsync` sends. `topup-status-email-promise.test.ts` holds
-            this sentence to the backend in both directions.
+            "we'll email you either way" is TRUE: the server mails a member whose payment ends
+            Failed, Cancelled or amount-mismatched (`PurchaseNotCompleted`), alongside the
+            confirmation a completion sends (`PurchaseConfirmation`, P13 §6).
+            `topup-status-email-promise.test.ts` holds this sentence to the backend.
           */}
           <Alert tone="danger">{UNREACHABLE_FIRST}</Alert>
           <StatusActions checking={checking} onCheck={checkAgain} />
@@ -259,13 +268,13 @@ export default function TopUpStatusPage() {
 }
 
 /**
- * Where this top-up was started from: `?returnTo=`, else the path kept when the member left for
+ * Where this purchase was started from: `?returnTo=`, else the path kept when the member left for
  * PayFast, else an invite this device is still waiting to answer (R1, lane F2's journey).
  */
-function useWayBack(topupId: string | undefined, fromQuery: string | null): string | null {
+function useWayBack(purchaseId: string | undefined, fromQuery: string | null): string | null {
   const auth = useAuth();
   const userId = auth.status === "authenticated" ? auth.userId : null;
-  return safeReturnTo(fromQuery) ?? topUpReturnFor(topupId) ?? pendingInvitePath(userId);
+  return safeReturnTo(fromQuery) ?? topUpReturnFor(purchaseId) ?? pendingInvitePath(userId);
 }
 
 function WayBack({ path }: { path: string | null }) {
@@ -281,7 +290,7 @@ function StatusShell({ header, children }: { header: ReactNode; children: ReactN
   return <PageShell width="narrow">{header}{children}</PageShell>;
 }
 
-/** The card's shape while the first status is read: the amount, the badge, a line, two controls. */
+/** The card's shape while the first status is read: the minutes, the badge, a line, two controls. */
 function StatusSkeleton() {
   return (
     <Card className="px-4 sm:px-6" aria-busy="true">
@@ -302,21 +311,34 @@ function StatusSkeleton() {
  * their payment had failed. Each status carries an icon as well as a colour.
  */
 const STATUS_LOOK = {
-  Completed: { tone: "success", icon: CheckCircle },
-  Failed: { tone: "danger", icon: WarningCircle },
-  Cancelled: { tone: "neutral", icon: Prohibit },
-  Pending: { tone: "info", icon: Clock },
+  Completed: { tone: "success", icon: CheckCircle, word: "Done" },
+  Failed: { tone: "danger", icon: WarningCircle, word: "Not completed" },
+  Cancelled: { tone: "neutral", icon: Prohibit, word: "Cancelled" },
+  Pending: { tone: "info", icon: Clock, word: "Waiting" },
 } as const;
 
-function StatusHead({ status }: { status: TopUpStatus }) {
+/** The minutes being bought, big — the thing the member is waiting for — then the package and its rand. */
+function StatusHead({ status }: { status: PurchaseStatus }) {
   const look = STATUS_LOOK[status.status];
   const Icon = look.icon;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className={typography({ variant: "display" })}>{formatMoney(status.amount_zar)}</p>
-      <Badge tone={look.tone} icon={<Icon size={14} weight="bold" aria-hidden="true" />}>{status.status}</Badge>
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className={typography({ variant: "display" })}><Minutes value={status.minutes} /></p>
+        <Badge tone={look.tone} icon={<Icon size={14} weight="bold" aria-hidden="true" />}>{look.word}</Badge>
+      </div>
+      <p className="text-sm text-text-secondary" data-status-package="">{packageLine(status)}</p>
     </div>
   );
+}
+
+const STATUS_TITLE = "Buying minutes";
+
+/** "5 hours for R495.00 (10% off R550.00)". */
+function packageLine(status: PurchaseStatus): string {
+  const off = status.discount_bps > 0 && status.list_price_zar > status.amount_zar
+    ? ` (${discountPercent(status.discount_bps)} off ${formatMoney(status.list_price_zar)})` : "";
+  return `${status.package_name} for ${formatMoney(status.amount_zar)}${off}`;
 }
 
 function StatusActions({ checking, onCheck }: { checking: boolean; onCheck: () => void }) {
@@ -328,25 +350,38 @@ function StatusActions({ checking, onCheck }: { checking: boolean; onCheck: () =
   );
 }
 
-const UNREACHABLE_FIRST = "We couldn't reach the club to check on this payment. Nothing here cancels or changes it — if it has already cleared, your credits are in your wallet, and we'll email you either way.";
-const UNREACHABLE_LATER = "We couldn't reach the club just now, so this may be out of date. Nothing here cancels or changes your payment — press Check again in a moment.";
-const NOT_FOUND = "We can't find this top-up on your account. The link may be wrong, or it may belong to a different account — nothing has been charged for it. Your wallet shows every top-up that did go through.";
-const GAVE_UP = "We've stopped checking on this page. PayFast can take a while — an instant EFT usually lands within minutes and a normal EFT can take until the next working day. Your credits appear the moment it clears, and we'll email you.";
-const CANCELLED = "You cancelled this payment, so nothing was charged and no credits were added.";
-const FAILED_FALLBACK = "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening.";
+export const STATUS_COPY = {
+  unreachableFirst: "We couldn't reach the club to check on this payment. Nothing here cancels or changes it — if it has already cleared, your minutes are in your wallet, and we'll email you either way.",
+  unreachableLater: "We couldn't reach the club just now, so this may be out of date. Nothing here cancels or changes your payment — press Check again in a moment.",
+  notFound: "We can't find this purchase on your account. The link may be wrong, or it may belong to a different account — nothing has been charged for it. Your wallet shows every purchase that did go through.",
+  gaveUp: "We've stopped checking on this page. PayFast can take a while — an instant EFT usually lands within minutes and a normal EFT can take until the next working day. Your minutes appear the moment it clears, and we'll email you.",
+  waiting: "Waiting for confirmation from PayFast…",
+  done: (minutes: number) => `${minutesCompact(minutes)} added to your wallet.`,
+  cancelled: "You cancelled this payment, so nothing was charged and no minutes were added.",
+  failedFallback: "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening.",
+  tryAgain: "Try again",
+  buy: "Buy minutes",
+} as const;
+
+const UNREACHABLE_FIRST = STATUS_COPY.unreachableFirst;
+const UNREACHABLE_LATER = STATUS_COPY.unreachableLater;
+const NOT_FOUND = STATUS_COPY.notFound;
+const GAVE_UP = STATUS_COPY.gaveUp;
+const CANCELLED = STATUS_COPY.cancelled;
+const FAILED_FALLBACK = STATUS_COPY.failedFallback;
 
 type BodyProps = {
-  status: TopUpSnapshot; gaveUp: boolean; checking: boolean; onCheck: () => void; wayBack: string | null;
-  onSettled: (next: TopUpSnapshot) => void;
+  status: PurchaseStatus; gaveUp: boolean; checking: boolean; onCheck: () => void; wayBack: string | null;
+  onSettled: (next: PurchaseStatus) => void;
 };
 
 /**
- * "Try again" keeps the way back (F4-12): a member sent to top up from an invite who cancelled at
- * PayFast and tried again used to lose the invite — the new top-up had no `returnTo`, so its own
- * status page, and its Cancel, only knew the wallet.
+ * "Try again" keeps the way back (F4-12): a member sent to buy minutes from an invite who cancelled
+ * at PayFast and tried again used to lose the invite — the new purchase had no `returnTo`, so its
+ * own status page, and its Cancel, only knew the wallet.
  */
 function retryPath(wayBack: string | null): string {
-  return wayBack ? `/wallet/topup?returnTo=${encodeURIComponent(wayBack)}` : "/wallet/topup";
+  return wayBack ? `${BUY_MINUTES_PATH}?returnTo=${encodeURIComponent(wayBack)}` : BUY_MINUTES_PATH;
 }
 
 /**
@@ -366,7 +401,7 @@ function StatusBody(props: BodyProps) {
         ) : (
           <p className="flex items-center gap-2 text-sm text-text-secondary">
             <Spinner className="text-accent-strong" />
-            <span>Waiting for confirmation from PayFast…</span>
+            <span>{STATUS_COPY.waiting}</span>
           </p>
         )}
         <StatusActions checking={checking} onCheck={onCheck} />
@@ -377,7 +412,7 @@ function StatusBody(props: BodyProps) {
   if (status.status === "Completed") {
     return (
       <div className="flex flex-col items-start gap-1">
-        <p className="text-sm text-text-primary">Your wallet has been credited.</p>
+        <p className="text-sm text-text-primary">{STATUS_COPY.done(status.minutes)}</p>
         <TextLink to="/wallet" variant="standalone">View wallet</TextLink>
       </div>
     );
@@ -389,39 +424,38 @@ function StatusBody(props: BodyProps) {
     <>
       <p className={failed ? "text-sm font-medium text-danger-strong" : "text-sm text-text-secondary"}>{sentence}</p>
       <div>
-        <Button asChild variant="outline"><Link to={retryPath(wayBack)}>Try again</Link></Button>
+        <Button asChild variant="outline"><Link to={retryPath(wayBack)}>{STATUS_COPY.tryAgain}</Link></Button>
       </div>
     </>
   );
 }
 
 /**
- * K-F6 — the club answered, and the answer was "there is no such top-up".
+ * K-F6 — the club answered, and the answer was "there is no such purchase".
  *
  * <p>
  * Three things followed from treating that 404 as an outage, and all three were wrong. It
  * blamed the club's connection for an answer the club had given. It promised a mail that
- * <code>NotifyNotCompletedAsync</code> can only send against a real <code>PendingTopup</code>
- * row, so on this branch nothing would ever arrive — the one channel the screen falls back to
- * does not exist. And it offered <b>Check again</b>, which re-asks a question already
+ * the server can only send against a real purchase row, so on this branch nothing would ever
+ * arrive — the one channel the screen falls back to does not exist. And it offered <b>Check again</b>, which re-asks a question already
  * answered and can never resolve, to a member who is watching for money.
  * </p>
  *
  * <p>
- * What a member can actually do is look at their wallet — the credits are either in it or
- * they are not — or start a top-up that does exist. Both are offered; neither is a retry.
- * Out here as its own component because `TopUpStatusPage` is against the 200-line gate, and
+ * What a member can actually do is look at their wallet — the minutes are either in it or
+ * they are not — or start a purchase that does exist. Both are offered; neither is a retry.
+ * Out here as its own component because the page is against the 200-line gate, and
  * lizard measures a .tsx function by what it last scoped: moving code to another function is
  * what shrinks it, extracting it into the same one is not.
  * </p>
  */
-function NoSuchTopUp() {
+function NoSuchPurchase() {
   return (
     <Card className="px-4 sm:px-6">
       <Alert tone="danger">{NOT_FOUND}</Alert>
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="outline"><Link to="/wallet">View wallet</Link></Button>
-        <Button asChild variant="ghost"><Link to="/wallet/topup">Top up</Link></Button>
+        <Button asChild variant="ghost"><Link to={BUY_MINUTES_PATH}>{STATUS_COPY.buy}</Link></Button>
       </div>
     </Card>
   );

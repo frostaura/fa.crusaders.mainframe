@@ -54,7 +54,9 @@ const pageSource = read("src", "frontend", "src", "pages", "TopUpStatus.tsx");
 export function sendsATopUpFailureEmail(templatesSource: string, endpointsSource: string): boolean {
   return [...templatesSource.matchAll(/public static EmailMessage\s+(\w+)/g)]
     .map((m) => m[1])
-    .filter((n) => /^TopUp/.test(n) && !/Confirmation$/.test(n))
+    // P13 §6 renamed the pair: `PurchaseConfirmation` / `PurchaseNotCompleted` (the old `TopUp*`
+    // names are still read, so a tree mid-rename is judged too).
+    .filter((n) => /^(TopUp|Purchase)/.test(n) && !/Confirmation$/.test(n))
     .some((n) => endpointsSource.includes(`EmailTemplates.${n}(`));
 }
 
@@ -73,7 +75,7 @@ describe("the top-up status screen's email promises", () => {
     // A path that stops resolving would turn every assertion below into a silent pass, which
     // is the failure mode this whole file exists to prevent.
     expect(topUpEndpoints).toContain("CompleteAsync");
-    expect(emailTemplates).toContain("public static EmailMessage TopUpConfirmation");
+    expect(emailTemplates).toMatch(/public static EmailMessage (TopUp|Purchase)Confirmation/);
   });
 
   it("does not promise an email on a top-up that failed, cancelled or mismatched", () => {
@@ -102,7 +104,7 @@ describe("the top-up status screen's email promises", () => {
     expect(memberCopy(pageSource)).toMatch(/we'll email you/i);
     // Dispatched from the completion path, not from a branch that might not run.
     const complete = topUpEndpoints.slice(topUpEndpoints.indexOf("CompleteAsync"));
-    expect(complete).toContain("EmailTemplates.TopUpConfirmation(");
+    expect(complete).toMatch(/EmailTemplates\.(TopUp|Purchase)Confirmation\(/);
     expect(complete).toContain("EmailDispatch.InBackground(");
   });
 });
@@ -118,6 +120,12 @@ describe("the top-up status screen's email promises", () => {
  * </p>
  */
 describe("the rule itself", () => {
+  it("counts P13's purchase failure template when it is dispatched", () => {
+    const templates = "public static EmailMessage PurchaseConfirmation(\npublic static EmailMessage PurchaseNotCompleted(";
+    expect(sendsATopUpFailureEmail(templates, "EmailTemplates.PurchaseConfirmation(")).toBe(false);
+    expect(sendsATopUpFailureEmail(templates, "EmailTemplates.PurchaseNotCompleted(")).toBe(true);
+  });
+
   const CONFIRMATION_ONLY = "public static EmailMessage TopUpConfirmation(string to) => new(";
   const WITH_FAILURE =
     CONFIRMATION_ONLY + "\npublic static EmailMessage TopUpFailed(string to, string why) => new(";

@@ -6,11 +6,15 @@ import { BalanceProvider } from "../lib/balance";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 /*
-  R10 (links navigate, buttons act): "View wallet", "Try again" (→ /wallet/topup) and "Top up"
+  R10 (links navigate, buttons act): "View wallet", "Try again" (→ /wallet/buy) and "Buy minutes"
   were buttons wrapped in links and are now links drawn as buttons, so they are queried as
   `link`. "Check again" stays a button — it acts — and keeps `toBeEnabled()` while it works,
   because R12's pending state is aria-busy, never `disabled`.
 */
+
+
+/** P13 §3.4 — what a purchase status carries beyond id/status/amount. */
+const EXTRA = { package_id: "00000000-0000-0000-0000-0000000000a5", package_name: "5 hours", minutes: 300, list_price_zar: 500, discount_bps: 0, created_at: "2026-10-01T08:00:00Z", expires_at: "2026-10-01T09:00:00Z" };
 
 /**
  * What a member is told when a payment does not complete.
@@ -33,7 +37,7 @@ describe("Top-up status — failure copy", () => {
   const ID = "aaaa1111-0000-0000-0000-000000000001";
 
   const snapshot = (over: Record<string, unknown>) => ({
-    id: ID, status: "Pending", amount_zar: 500, conversion_rate: 1.6, failure_code: null, ...over,
+    id: ID, status: "Pending", amount_zar: 500, ...EXTRA, failure_code: null, ...over,
   });
 
   beforeEach(() => {
@@ -52,14 +56,14 @@ describe("Top-up status — failure copy", () => {
   const show = (status: unknown) => {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: `/api/v1/credit/topup/${ID}`, body: status },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: status },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
     ]);
     renderPage(
       <BalanceProvider>
-        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+        <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
       </BalanceProvider>,
-      { initialEntries: [`/wallet/topup/${ID}`] },
+      { initialEntries: [`/wallet/buy/${ID}`] },
     );
   };
 
@@ -86,7 +90,7 @@ describe("Top-up status — failure copy", () => {
     // payment that worked exactly as they asked.
     expect(await screen.findByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText(/You cancelled this payment, so nothing was charged/)).toBeInTheDocument();
-    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not completed")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -101,7 +105,7 @@ describe("Top-up status — failure copy", () => {
     show(snapshot({ status: "Pending" }));
 
     expect(await screen.findByText(/Waiting for confirmation from PayFast/)).toBeInTheDocument();
-    expect(screen.getByText("R500.00")).toBeInTheDocument();
+    expect(screen.getByText(/for R500\.00/)).toBeInTheDocument();
   });
 });
 
@@ -113,7 +117,7 @@ describe("Top-up status — failure copy", () => {
  * 62 seconds — and said nothing. PayFast retries an ITN for hours and an EFT clears when
  * it clears, so the common case is that the money arrives AFTER the page has quietly given
  * up: a member whose R500 had landed sat reading "Waiting for confirmation from PayFast…"
- * with the credits already in their ledger, no control on the screen, and no way out but a
+ * with the minutes already in their ledger, no control on the screen, and no way out but a
  * manual browser reload — which showed "Completed" immediately.
  * </p>
  *
@@ -124,7 +128,7 @@ describe("Top-up status — failure copy", () => {
  */
 describe("Top-up status — waiting for a payment that has not landed yet", () => {
   const ID = "aaaa1111-0000-0000-0000-000000000002";
-  const PENDING = { id: ID, status: "Pending", amount_zar: 500, conversion_rate: 1.6, failure_code: null };
+  const PENDING = { id: ID, status: "Pending", amount_zar: 500, ...EXTRA, failure_code: null };
   const COMPLETED = { ...PENDING, status: "Completed" };
 
   beforeEach(() => {
@@ -140,15 +144,15 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
   function show(sequence: unknown[]) {
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: `/api/v1/credit/topup/${ID}`, body: null, sequence },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: null, sequence },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
       <BalanceProvider>
-        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+        <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
       </BalanceProvider>,
-      { initialEntries: [`/wallet/topup/${ID}`] },
+      { initialEntries: [`/wallet/buy/${ID}`] },
     );
     return stub;
   }
@@ -166,8 +170,8 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     show([...Array(31).fill(PENDING), COMPLETED]);
     await walkTheClock(40);
 
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText(/Your wallet has been credited/)).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText(/5 h added to your wallet\./)).toBeInTheDocument();
     expect(screen.queryByText(/Waiting for confirmation from PayFast/)).not.toBeInTheDocument();
   });
 
@@ -188,7 +192,7 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     expect(screen.queryByText(/Waiting for confirmation from PayFast/)).not.toBeInTheDocument();
     expect(screen.getByText(/We've stopped checking on this page/)).toBeInTheDocument();
     // …and says what happens next, rather than leaving the member to guess.
-    expect(screen.getByText(/Your credits appear the moment it clears/)).toBeInTheDocument();
+    expect(screen.getByText(/Your minutes appear the moment it clears/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
   });
 
@@ -200,8 +204,8 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
 
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText(/Your wallet has been credited/)).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText(/5 h added to your wallet\./)).toBeInTheDocument();
   });
 });
 
@@ -227,7 +231,7 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
  */
 describe("Top-up status — when the club cannot be reached", () => {
   const ID = "aaaa1111-0000-0000-0000-000000000003";
-  const PENDING = { id: ID, status: "Pending", amount_zar: 500, conversion_rate: 1.6, failure_code: null };
+  const PENDING = { id: ID, status: "Pending", amount_zar: 500, ...EXTRA, failure_code: null };
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -243,15 +247,15 @@ describe("Top-up status — when the club cannot be reached", () => {
   function show(sequence: unknown[], status: number[]) {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: `/api/v1/credit/topup/${ID}`, body: null, sequence, status },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: null, sequence, status },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
       <BalanceProvider>
-        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+        <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
       </BalanceProvider>,
-      { initialEntries: [`/wallet/topup/${ID}`] },
+      { initialEntries: [`/wallet/buy/${ID}`] },
     );
   }
 
@@ -270,7 +274,7 @@ describe("Top-up status — when the club cannot be reached", () => {
     expect(screen.queryByText("Couldn't load top-up status.")).not.toBeInTheDocument();
 
     // The promise the copy makes, kept: the API emails on every terminal outcome, not only
-    // on the one that credits. TopUpEndpoints.NotifyNotCompletedAsync is the other half,
+    // on the one that completes. The server's not-completed mail is the other half,
     // pinned by TopUpFlowTests.A_declined_payment_emails_the_member_that_nothing_was_charged
     // and its two siblings. If that dispatch is ever removed, this sentence has to go with
     // it — a named promise on screen that no code path keeps is this programme's archetype.
@@ -282,14 +286,14 @@ describe("Top-up status — when the club cannot be reached", () => {
     // has stopped answering.
     show([PENDING, PENDING], [200, 500]);
     await tick();
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     await tick();
 
     // The status, the amount and both controls survive the failure…
-    expect(screen.getByText("Pending")).toBeInTheDocument();
-    expect(screen.getByText("R500.00")).toBeInTheDocument();
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+    expect(screen.getByText(/for R500\.00/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "View wallet" })).toBeInTheDocument();
     // …and the page says the figures may be stale rather than pretending they are fresh.
@@ -305,8 +309,8 @@ describe("Top-up status — when the club cannot be reached", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     await tick();
 
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText(/Your wallet has been credited/)).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText(/5 h added to your wallet\./)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
@@ -315,7 +319,7 @@ describe("Top-up status — when the club cannot be reached", () => {
  * K-F6 — a 404 is not an outage.
  *
  * <p>
- * <code>GET /credit/topup/{id}</code> answers <code>Results.NotFound()</code> for an id that
+ * <code>GET /minutes/purchase/{id}</code> answers <code>Results.NotFound()</code> for an id that
  * is not this member's, and the page's bare <code>catch</code> put all of it on the
  * unreachable-club branch: "We couldn't reach the club to check on this payment … we'll email
  * you either way", with a Check-again button. Every clause of that is wrong here. The club
@@ -345,15 +349,15 @@ describe("Top-up status — a top-up that does not exist", () => {
   function show(status: number, body: unknown = "") {
     const stub = stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: `/api/v1/credit/topup/${ID}`, status, body },
+      { path: `/api/v1/minutes/purchase/${ID}`, status, body },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
       <BalanceProvider>
-        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+        <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
       </BalanceProvider>,
-      { initialEntries: [`/wallet/topup/${ID}`] },
+      { initialEntries: [`/wallet/buy/${ID}`] },
     );
     return stub;
   }
@@ -362,7 +366,7 @@ describe("Top-up status — a top-up that does not exist", () => {
     show(404);
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/We can't find this top-up on your account/);
+    expect(alert).toHaveTextContent(/We can't find this purchase on your account/);
     expect(alert).toHaveTextContent(/nothing has been charged for it/);
 
     // The three clauses that were wrong, each one named.
@@ -375,9 +379,9 @@ describe("Top-up status — a top-up that does not exist", () => {
     show(404);
     await screen.findByRole("alert");
 
-    // Not a dead end and not a retry: the wallet is where the credits either are or aren't.
+    // Not a dead end and not a retry: the wallet is where the minutes either are or aren't.
     expect(screen.getByRole("link", { name: "View wallet" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Top up" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Buy minutes" })).toBeInTheDocument();
   });
 
   it("stops asking, because the answer will not change", async () => {
@@ -385,7 +389,7 @@ describe("Top-up status — a top-up that does not exist", () => {
     await screen.findByRole("alert");
 
     await new Promise((r) => setTimeout(r, 60));
-    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/credit/topup/${ID}`))).toHaveLength(1);
+    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/minutes/purchase/${ID}`))).toHaveLength(1);
   });
 
   /**
@@ -400,7 +404,7 @@ describe("Top-up status — a top-up that does not exist", () => {
     expect(alert).toHaveTextContent(/couldn't reach the club/i);
     expect(alert).toHaveTextContent(/we'll email you either way/);
     expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
-    expect(screen.queryByText(/We can't find this top-up/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/We can't find this purchase/)).not.toBeInTheDocument();
   });
 });
 
@@ -416,26 +420,26 @@ describe("Top-up status — the first read", () => {
     let answer: (() => void) | null = null;
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status: "Completed", amount_zar: 200, conversion_rate: 1.6, failure_code: null } },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: { id: ID, status: "Completed", amount_zar: 200, ...EXTRA, failure_code: null } },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     const realFetch = globalThis.fetch;
-    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (String(input).includes("/credit/topup/")
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (String(input).includes("/minutes/purchase/")
       ? new Promise<void>((resolve) => { answer = resolve; }).then(() => realFetch(input, init))
       : realFetch(input, init)));
     renderPage(
       <BalanceProvider>
-        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+        <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
       </BalanceProvider>,
-      { initialEntries: [`/wallet/topup/${ID}`], reactStrictMode: true },
+      { initialEntries: [`/wallet/buy/${ID}`], reactStrictMode: true },
     );
 
     expect(await screen.findByRole("status")).toHaveTextContent("Checking this payment…");
     expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
     await waitFor(() => expect(answer).not.toBeNull());
     answer!();
-    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(await screen.findByText("Done")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View wallet" })).toHaveAttribute("href", "/wallet");
   });
 });
@@ -466,16 +470,16 @@ describe("Top-up status — back from PayFast after cancelling", () => {
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       // R4 M4-1: the cancel return is told to the club; this server has not closed the row (an
       // older one, or a reply the page could not use), so the page reads it back.
-      { method: "POST", path: `/api/v1/credit/topup/${ID}/cancel`, status: 503, body: { error: "unavailable" } },
-      { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status, amount_zar: 200, conversion_rate: 1, failure_code: null } },
+      { method: "POST", path: `/api/v1/minutes/purchase/${ID}/cancel`, status: 503, body: { error: "unavailable" } },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: { id: ID, status, amount_zar: 200, ...EXTRA, failure_code: null } },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
       <BalanceProvider>
-        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+        <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
       </BalanceProvider>,
-      { initialEntries: [`/wallet/topup/${ID}${search}`] },
+      { initialEntries: [`/wallet/buy/${ID}${search}`] },
     );
     return stub;
   }
@@ -485,15 +489,15 @@ describe("Top-up status — back from PayFast after cancelling", () => {
     expect(await screen.findByText(/You cancelled this payment, so nothing was charged/)).toBeInTheDocument();
     expect(screen.queryByText(/Waiting for confirmation from PayFast/)).not.toBeInTheDocument();
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/topup");
+    expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/buy");
     await new Promise((r) => setTimeout(r, 2_300));
     // One cancel (whose reply failed) and one read back — then nothing more.
-    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/credit/topup/${ID}`)).map((c) => c.method)).toEqual(["POST", "GET"]);
+    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/minutes/purchase/${ID}`)).map((c) => c.method)).toEqual(["POST", "GET"]);
   }, 10_000);
 
   it("still believes the club when the payment went through after all", async () => {
     show("Completed");
-    expect(await screen.findByText("Your wallet has been credited.")).toBeInTheDocument();
+    expect(await screen.findByText("5 h added to your wallet.")).toBeInTheDocument();
     expect(screen.queryByText(/You cancelled this payment/)).not.toBeInTheDocument();
   });
 
@@ -519,15 +523,15 @@ describe("Top-up status — the way back", () => {
   function show(status: string, search = "") {
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status, amount_zar: 200, conversion_rate: 1, failure_code: null } },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: { id: ID, status, amount_zar: 200, ...EXTRA, failure_code: null } },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
       { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
     ]);
     renderPage(
       <BalanceProvider>
-        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+        <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
       </BalanceProvider>,
-      { initialEntries: [`/wallet/topup/${ID}${search}`] },
+      { initialEntries: [`/wallet/buy/${ID}${search}`] },
     );
   }
 
@@ -543,20 +547,54 @@ describe("Top-up status — the way back", () => {
   });
 
   // F4-12 — trying again must not drop the way back to the invite.
-  it("keeps the way back on Try again after a cancel, and plain /wallet/topup when there is none", async () => {
+  it("keeps the way back on Try again after a cancel, and plain /wallet/buy when there is none", async () => {
     sessionStorage.setItem(`crusaders.topup-return:${ID}`, "/invites/p-1");
     show("Cancelled");
-    expect(await screen.findByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/topup?returnTo=%2Finvites%2Fp-1");
+    expect(await screen.findByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/buy?returnTo=%2Finvites%2Fp-1");
   });
 
   it("offers a bare Try again when the top-up had no way back", async () => {
     show("Failed");
-    expect(await screen.findByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/topup");
+    expect(await screen.findByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/buy");
   });
 
   it("ignores a returnTo that leaves the app, and says nothing while the payment is pending", async () => {
     show("Completed", "?returnTo=https%3A%2F%2Fevil.example");
-    await screen.findByText("Your wallet has been credited.");
+    await screen.findByText("5 h added to your wallet.");
     expect(screen.queryByRole("link", { name: /Back to/ })).toBeNull();
+  });
+});
+
+/** P13 — the status page says what was bought: minutes big, the package and its rand, never credits. */
+describe("Purchase status — what was bought", () => {
+  const ID = "cccc0000-0000-0000-0000-000000000003";
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); });
+
+  function show(path: string, entry: string, body: unknown) {
+    vi.stubGlobal("EventSource", class { close() {} addEventListener() {} removeEventListener() {} } as unknown as typeof EventSource);
+    stubFetch([
+      { path: "/api/v1/minutes/purchase/", body },
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+    renderPage(
+      <BalanceProvider><Routes><Route path={path} element={<TopUpStatusPage />} /></Routes></BalanceProvider>,
+      { initialEntries: [entry] },
+    );
+  }
+
+  it("shows the minutes, the package and the discounted rand, and says done in minutes", async () => {
+    show("/wallet/buy/:purchaseId", `/wallet/buy/${ID}`, { id: ID, status: "Completed", amount_zar: 495, failure_code: null, ...EXTRA, list_price_zar: 550, discount_bps: 1000 });
+    expect(await screen.findByText("Done")).toBeInTheDocument();
+    expect(screen.getByText("5 hours for R495.00 (10% off R550.00)")).toBeInTheDocument();
+    expect(screen.getByText("5 h added to your wallet.")).toBeInTheDocument();
+    expect(screen.getByText("5 hours", { selector: ".sr-only" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/credit|\bcr\b/i);
+  });
+
+  it("still reads the id under the old /wallet/topup/:topupId route while the deploy settles", async () => {
+    show("/wallet/topup/:topupId", `/wallet/topup/${ID}`, { id: ID, status: "Pending", amount_zar: 550, failure_code: null, ...EXTRA });
+    expect(await screen.findByText("Waiting")).toBeInTheDocument();
   });
 });

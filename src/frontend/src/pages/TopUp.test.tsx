@@ -1,441 +1,237 @@
-import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
-import TopUpPage from "./TopUp";
-import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import BuyMinutesPage from "./TopUp";
+import { refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
+import {
+  PACKAGE_IDS, discountedShelf, minutesShelf, openCheckout, purchaseStart, shelfPackage,
+} from "../test/minutesFixtures";
+import { BUY_COPY, BUY_SAID } from "../lib/topUpShelf";
+import { topUpReturnFor } from "../lib/topUpReturn";
+import { formatMoney } from "../lib/utils";
 
 /**
- * The checkout, which no member could complete.
+ * `/wallet/buy` — the package shelf and its checkout (P13 §3.4, §4).
  *
  * <p>
- * Two defects stacked. The screen POSTed <code>{ amountMinutes }</code> against an API
- * reading <code>AmountZar</code>, so the amount bound to 0, the positivity guard fired,
- * and every attempt came back rejected — the member was told their amount was a bad
- * multiple of R100 while looking at R100. And behind that, the page then did
- * <code>window.location.href = redirect_url</code>: a GET to PayFast's process endpoint
- * with no merchant id, no amount and no signature. PayFast has no server-side checkout
- * registration; the signed form <i>is</i> the checkout, the provider had been building
- * and signing one all along, and nothing on the wire ever carried it.
- * </p>
- *
- * <p>
- * These assertions therefore look at what goes OUT — the request body and the form the
- * page builds — rather than at what the screen says. A screen can say "Redirecting…"
- * perfectly while sending PayFast nothing it can act on.
+ * What goes OUT is on trial as much as what the screen says: the purchase body names a package
+ * and the price the member was shown, and the browser leaves with the SIGNED form the API built
+ * (PayFast has no server-side checkout; a GET to its process URL carries nothing it can act on).
  * </p>
  */
-describe("Top-up — what the checkout actually sends", () => {
-  const OPTIONS = {
-    block_zar: 100,
-    min_zar: 100,
-    max_zar: 1000,
-    presets_zar: [100, 200, 500, 1000],
-    conversion_rate: 1.6,
-    rate_group: null,
-  };
+const PURCHASE = "/api/v1/minutes/purchase";
+const SHELF = "/api/v1/minutes/packages";
 
-  /** The signed field list PayFast's own process endpoint requires, in signature order. */
-  const START = {
-    topup_id: "aaaa1111-0000-0000-0000-000000000001",
-    checkout_id: "CRS-001",
-    redirect_url: "https://sandbox.payfast.co.za/eng/process",
-    form_fields: [
-      { name: "merchant_id", value: "10000100" },
-      { name: "merchant_key", value: "46f0cd694581a" },
-      { name: "return_url", value: "https://club.example/wallet/topup/aaaa1111/return" },
-      { name: "cancel_url", value: "https://club.example/wallet/topup/aaaa1111/cancel" },
-      { name: "notify_url", value: "https://club.example/api/v1/credit/topup/itn" },
-      { name: "m_payment_id", value: "aaaa1111-0000-0000-0000-000000000001" },
-      { name: "amount", value: "200.00" },
-      { name: "item_name", value: "Court credits" },
-      { name: "signature", value: "8f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f" },
-    ],
-    quoted_credits: 320,
-    conversion_rate: 1.6,
-  };
+/** Every form the page actually submitted — the last one is the checkout. */
+const submitted: HTMLFormElement[] = [];
 
-  // Overrides go FIRST. The stub breaks a length tie by declaration order, and an
-  // override of the same path is the same length as the route it replaces.
-  const routes = (overrides: Parameters<typeof stubFetch>[0] = []) => [
-    ...overrides,
-    { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-    { path: "/api/v1/credit/topup/options", body: OPTIONS },
-    { method: "POST", path: "/api/v1/credit/topup", body: START },
-  ];
+beforeEach(() => {
+  submitted.length = 0;
+  // jsdom does not implement `HTMLFormElement.prototype.submit`; the receiver is the form on trial.
+  vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
+    submitted.push(this);
+  });
+  vi.stubGlobal("EventSource", class {
+    close() {}
+    addEventListener() {}
+    removeEventListener() {}
+  } as unknown as typeof EventSource);
+});
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); sessionStorage.clear(); });
 
-  /** Every form the page actually submitted — the last one is the checkout. */
-  const submitted: HTMLFormElement[] = [];
+function show(routes: StubRoute[], entry = "/wallet/buy") {
+  const stub = stubFetch([...routes, { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) }]);
+  renderPage(<BuyMinutesPage />, { initialEntries: [entry] });
+  return stub;
+}
 
-  beforeEach(() => {
-    submitted.length = 0;
-    // jsdom does not implement `HTMLFormElement.prototype.submit` and records nothing, so
-    // the submit is intercepted and the receiver kept. The form is what is on trial:
-    // `submit()` takes no arguments, so it is only reachable through the receiver.
-    vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
-      submitted.push(this);
+const card = (name: string) => screen.findByRole("radio", { name });
+const continueButton = () => screen.getByRole("button", { name: new RegExp(BUY_COPY.cta) });
+
+describe("Buy minutes — the shelf", () => {
+  it("shows each package as minutes in human form, its rand price and the saving against the smallest", async () => {
+    show([{ path: SHELF, body: minutesShelf() }]);
+    const five = await card("5 hours");
+    expect(within(five).getByText("5 h")).toBeInTheDocument();
+    expect(within(five).getByText(formatMoney(550))).toBeInTheDocument();
+    expect(within(five).getByText(BUY_COPY.save(8))).toBeInTheDocument();
+    // §4.3's worked example: 10 h saves R200 (16%) against 1 h at a time.
+    const ten = await card("10 hours");
+    expect(within(ten).getByText(BUY_COPY.save(16))).toBeInTheDocument();
+    expect(within(ten).getByText(`${formatMoney(200)} less than 1 h at a time`)).toBeInTheDocument();
+    // The baseline itself never claims a saving.
+    expect(within(await card("1 hour")).queryByText(/Save/)).toBeNull();
+    // Screen readers hear the long form, never "h".
+    expect(five).toHaveAccessibleDescription(/^5 hours for R550\.00, saves R50\.00 \(8%\) against buying 1 hour at a time\.$/);
+  });
+
+  it("offers no free amount, no limit and no rate — a package is the only thing to buy", async () => {
+    show([{ path: SHELF, body: minutesShelf() }]);
+    await card("5 hours");
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/limit|multiples of|per member|rate|credit|\bcr\b|top up/i);
+  });
+
+  it("names the member's group discount once, and shows each club price against its list price", async () => {
+    show([{ path: SHELF, body: discountedShelf() }]);
+    const five = await card("5 hours");
+    expect(screen.getByText(BUY_COPY.discountNote("10%", "League"))).toBeInTheDocument();
+    expect(within(five).getByText(formatMoney(495))).toBeInTheDocument();
+    expect(within(five).getByText(BUY_COPY.wasPrice(550))).toBeInTheDocument();
+    expect(five).toHaveAccessibleDescription(/10% off R550\.00/);
+  });
+
+  it("shows a group's own packages under the group's name AND the club's packages (Dean's answer 2)", async () => {
+    const league = { id: "00000000-0000-0000-0000-0000000000c1", name: "League" };
+    const shelf = minutesShelf({
+      packages: [
+        shelfPackage({ id: "g-1", name: "League night", minutes: 90, list_price_zar: 150, price_zar: 150, saving_zar: null, saving_pct: null, source: "group", group: league }),
+        ...minutesShelf().packages,
+      ],
     });
+    show([{ path: SHELF, body: shelf }]);
+    const groupSection = await screen.findByRole("region", { name: BUY_COPY.groupSection("League") });
+    expect(within(groupSection).getByRole("radio", { name: "League night" })).toBeInTheDocument();
+    expect(within(groupSection).getByText("1 h 30 min")).toBeInTheDocument();
+    const clubSection = screen.getByRole("region", { name: BUY_COPY.clubSection });
+    expect(within(clubSection).getAllByRole("radio")).toHaveLength(3);
+    // One choice across both shelves.
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(1);
   });
 
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); });
-
-  it("sends the amount in RAND, under the name the API reads", async () => {
-    const stub = stubFetch(routes());
-    renderPage(<TopUpPage />);
-
-    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
-
-    await vi.waitFor(() => expect(stub.calls.some((c) => c.method === "POST")).toBe(true));
-    const post = stub.calls.find((c) => c.method === "POST" && c.path.includes("/credit/topup"))!;
-
-    // The bug, exactly: `amountMinutes` bound to nothing on the server, `AmountZar` came
-    // through as 0, and the positivity guard rejected every top-up the product could make.
-    // `quotedConversionRate` rides along so the server can refuse a stale offer rather than
-    // register the member at a rate the screen never showed them — see TopUp.rate-lock.test.tsx.
-    expect(post.body).toEqual({ amountZar: 200, quotedConversionRate: 1.6 });
-    expect(post.raw).not.toContain("amountMinutes");
+  it("says plainly when the club has no packages — an answer, not a failure", async () => {
+    show([{ path: SHELF, body: minutesShelf({ packages: [] }) }]);
+    expect(await screen.findByText(BUY_COPY.emptyTitle)).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).toBeNull();
   });
 
-  it("POSTs the signed form to PayFast instead of following the URL as a GET", async () => {
-    stubFetch(routes());
-    renderPage(<TopUpPage />);
-
-    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
-
-    await vi.waitFor(() => expect(submitted.length).toBe(1));
-    const form = submitted[0];
-
-    // A real cross-origin form post, because the member must LAND on PayFast's card page
-    // and fetch cannot navigate there.
-    expect(form.method.toLowerCase()).toBe("post");
-    expect(form.action).toBe(START.redirect_url);
-
-    // Every signed field, by name and value and IN ORDER — PayFast's signature covers the
-    // field sequence, so a reordered form is a rejected payment even with the right values.
-    const sent = [...form.querySelectorAll("input")].map((i) => [i.name, i.value]);
-    expect(sent).toEqual(START.form_fields.map((f) => [f.name, f.value]));
-
-    // The one that made the whole path dead: without a signature PayFast cannot start a
-    // payment at all, and a bare GET to the process URL carries none.
-    expect(sent.map(([n]) => n)).toContain("signature");
-    expect(sent.map(([n]) => n)).toContain("merchant_id");
-    // cancel_url too — a member who backs out at PayFast had nowhere to land before.
-    expect(sent.map(([n]) => n)).toContain("cancel_url");
-  });
-
-  it("takes the block, the cap and the rate from the club's settings, not from literals", async () => {
-    // A club on R50 blocks to R5,000, at the league rate. Every one of these numbers was
-    // hardcoded on the screen, so this club was quoted 1.6 when it settled at 2.4, offered
-    // amounts it had stopped accepting and refused amounts it did accept — disagreeing with
-    // its own server in both directions at once.
-    stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      {
-        path: "/api/v1/credit/topup/options",
-        body: { block_zar: 50, min_zar: 50, max_zar: 5000, presets_zar: [50, 500, 2500, 5000], conversion_rate: 2.4, rate_group: { id: "g-league", name: "League", system_key: "league" } },
-      },
-      { method: "POST", path: "/api/v1/credit/topup", body: START },
-    ]);
-    renderPage(<TopUpPage />);
-
-    expect(await screen.findByText(/Min R50\.00 · Max R5000\.00 · Multiples of R50\.00 only/)).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "R2500" })).toBeInTheDocument();
-    expect(screen.queryByText(/R1000\.00 only/)).not.toBeInTheDocument();
-
-    // The rate the member is quoted is the club's, and the preview is that rate applied.
-    expect(screen.getByText(/Every R1\.00 you pay adds 2\.40 cr to your wallet\./)).toBeInTheDocument();
-    // D2: the rate's source is the member's GROUP, in the club's own words.
-    expect(screen.getByTestId("your-rate")).toHaveTextContent("Your rate: League — 2.4 cr per R1");
-    fireEvent.click(screen.getByRole("radio", { name: "R500" }));
-    expect(screen.getByText("1200.00 credits")).toBeInTheDocument();
-
-    // R2,500 is fine here and would have been refused by the old hardcoded R1,000 cap.
-    fireEvent.click(screen.getByRole("radio", { name: "R2500" }));
-    expect(screen.getByRole("button", { name: "Continue to PayFast" })).not.toBeDisabled();
-  });
-
-  /**
-   * Continue is the one action; Cancel is navigation.
-   *
-   * <p>
-   * This pinned `data-intent="affirm"` / `"decline"` and the thumbs glyph on both — the
-   * ActionGlyph layer the design system retires (R8, design-system.md "No glyph on buttons at
-   * rest"; D5 for the watermark that replaces it). What that test protected is kept: Continue
-   * is the page's single action and carries a real pending state while the payment is
-   * registered (R12), and "Cancel" leaves for the wallet — which makes it a LINK (R10: links
-   * navigate, buttons act), drawn as a quiet button because it is the form's exit.
-   * </p>
-   */
-  it("makes Continue the action, with a real pending state, and Cancel a way back to the wallet", async () => {
-    let answer: (() => void) | null = null;
-    stubFetch(routes());
-    // Hold the registration open, so the pending state can be looked at.
-    const realFetch = globalThis.fetch;
-    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (init?.method === "POST"
-      ? new Promise<void>((resolve) => { answer = resolve; }).then(() => realFetch(input, init))
-      : realFetch(input, init)));
-    renderPage(<TopUpPage />, { reactStrictMode: true });
-
-    const cancel = await screen.findByRole("link", { name: "Cancel" });
-    expect(cancel).toHaveAttribute("href", "/wallet");
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("radio", { name: "R200" }));
-    const go = screen.getByRole("button", { name: "Continue to PayFast" });
-    fireEvent.click(go);
-    // Pending, not disabled: focus stays on it and a second tap cannot start a second payment.
-    await waitFor(() => expect(go).toHaveAttribute("aria-busy", "true"));
-    expect(go).not.toBeDisabled();
-    expect(screen.queryByText(/Redirecting…/)).not.toBeInTheDocument();
-    await waitFor(() => expect(answer).not.toBeNull());
-    answer!();
-    await waitFor(() => expect(submitted).toHaveLength(1));
-  });
-
-  // F4-12 — the top-up page's Cancel goes back where the member came from.
-  it("sends Cancel back to ?returnTo= when the member came from an invite", async () => {
-    stubFetch(routes());
-    renderPage(<TopUpPage />, { initialEntries: ["/wallet/topup?returnTo=%2Fj%2Fabc"] });
-    expect(await screen.findByRole("link", { name: "Cancel" })).toHaveAttribute("href", "/j/abc");
-  });
-
-  // F4-11 — the amounts are a radio group: arrowing to one chooses it, as with any radio.
-  it("chooses a preset with the arrow keys, filling the field", async () => {
-    stubFetch(routes());
-    renderPage(<TopUpPage />);
-    const r100 = await screen.findByRole("radio", { name: "R100" });
-    fireEvent.click(r100);
-    r100.focus();
-    fireEvent.keyDown(r100, { key: "ArrowRight" });
-    const r200 = screen.getByRole("radio", { name: "R200" });
-    await waitFor(() => expect(r200).toHaveAttribute("aria-checked", "true"));
-    expect(screen.getByRole("textbox", { name: /Or enter an amount/ })).toHaveValue("200");
-  });
-
-  it("says why an amount is not accepted, rather than greying the button in silence", async () => {
-    stubFetch(routes());
-    renderPage(<TopUpPage />);
-
-    const input = await screen.findByPlaceholderText(/Custom amount/);
-
-    // The old predicate both produced the message and disabled the button, so every
-    // branch of it was unreachable and the member had to infer the rule from a hint line.
-    fireEvent.change(input, { target: { value: "150" } });
-    expect(screen.getByText("Top-ups go in multiples of R100.00.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue to PayFast" })).toBeDisabled();
-
-    fireEvent.change(input, { target: { value: "5000" } });
-    expect(screen.getByText("The most you can top up at once is R1000.00.")).toBeInTheDocument();
-
-    fireEvent.change(input, { target: { value: "50" } });
-    expect(screen.getByText("The smallest top-up is R100.00.")).toBeInTheDocument();
-
-    // `parseFloat` took "200abc" as 200 and "1e3" as 1000 and enabled the button on both,
-    // so the member submitted an amount that is not the one they typed.
-    fireEvent.change(input, { target: { value: "200abc" } });
-    expect(screen.getByText("That isn't a number — enter an amount in rand.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue to PayFast" })).toBeDisabled();
-  });
-
-  /**
-   * `Number` fixed "200abc" and left the rest of the family behind: "1e3" enabled the
-   * button and quoted 1600 credits, which is R1000 the member did not ask for. The
-   * comment beside the code asserted the opposite, which is how it survived a round.
-   */
-  it("refuses programmer notation in a rand field", async () => {
-    stubFetch(routes());
-    renderPage(<TopUpPage />);
-
-    const input = await screen.findByPlaceholderText(/Custom amount/);
-    const submit = screen.getByRole("button", { name: "Continue to PayFast" });
-
-    for (const typed of ["1e3", "1E3", "0x64", "0b1100100", "1_000", "1,000", "Infinity", "+200", "2e2"]) {
-      fireEvent.change(input, { target: { value: typed } });
-      expect(screen.getByText("That isn't a number — enter an amount in rand.")).toBeInTheDocument();
-      expect(submit).toBeDisabled();
-      expect(screen.queryByText(/You receive/)).not.toHaveTextContent(/1600|320/);
-    }
-
-    // Nothing a member actually types is caught by the same net.
-    fireEvent.change(input, { target: { value: "200" } });
-    expect(submit).not.toBeDisabled();
-    fireEvent.change(input, { target: { value: " 200 " } });
-    expect(submit).not.toBeDisabled();
-    // And a negative still gets the sentence about zero, not the one about digits.
-    fireEvent.change(input, { target: { value: "-100" } });
-    expect(screen.getByText("Enter an amount greater than zero.")).toBeInTheDocument();
-  });
-
-  it("turns a rejection from the API into a sentence, never a code", async () => {
-    stubFetch(routes([
-      { method: "POST", path: "/api/v1/credit/topup", status: 503, body: { error: "payments_not_configured" } },
-    ]));
-    renderPage(<TopUpPage />);
-
-    fireEvent.click(await screen.findByRole("radio", { name: "R100" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
-
-    expect(await screen.findByText("Payments aren't set up for this club yet — please ask an admin.")).toBeInTheDocument();
-    expect(screen.queryByText(/payments_not_configured/)).not.toBeInTheDocument();
+  it("never calls a failed read 'no packages', and offers the retry", async () => {
+    let fail = true;
+    show([{ path: SHELF, respond: () => (fail ? refuse(503, { error: "down" }) : minutesShelf()) }]);
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    expect(screen.queryByText(BUY_COPY.emptyTitle)).toBeNull();
+    fail = false;
+    fireEvent.click(retry);
+    expect(await card("5 hours")).toBeInTheDocument();
   });
 });
 
-/**
- * L-F1 / N-F1 / K-F3 — the best-corroborated defect of round 3, driven twice each by three
- * independent finders.
- *
- * <p>
- * The screen fetched the club's rate once on mount and then told the member, in so many
- * words, that "this rate is locked in when you continue, so it can't change while you're
- * paying". It is not the rate that was locked — it is whatever the server resolves when the
- * POST lands. So an admin editing <code>credits_per_zar_*</code>, or that member's class
- * changing, left a member pressing Continue on 480.00 credits and being registered at 320,
- * with nothing between the offer and the ledger row to say so.
- * </p>
- *
- * <p>
- * Two lanes closed this in the same round, by different seams. One read the rate off the
- * POST's own answer and declined to go on — a check the server does not enforce, run after
- * the pending row had already been written at the new rate. The other sends the quoted rate
- * WITH the amount so the server refuses with <code>409 topup_rate_changed</code> before
- * writing anything. The second shipped, so these assertions drive the refusal rather than a
- * 200 at a surprising rate. What they are really about is unchanged: what the page does with
- * that answer, and the sentence beside the figure. Copy is a promise, and this programme has
- * now found five screens promising what no code path keeps.
- * </p>
- */
-describe("Top-up — the quoted rate against the registered one", () => {
-  const LEAGUE = {
-    block_zar: 100, min_zar: 100, max_zar: 1000, presets_zar: [100, 200, 500, 1000],
-    conversion_rate: 2.4, rate_group: { id: "g-league", name: "League", system_key: "league" },
-  };
-
-  /** What the server answers once the club has demoted the member behind their back. */
-  const RATE_MOVED = {
-    error: "topup_rate_changed",
-    conversion_rate: 1.6,
-    quoted_credits: 320,
-    rate_group: null,
-  };
-
-  /** …and what it answers on the second press, at the figure the member has now seen. */
-  const REGISTERED = {
-    topup_id: "aaaa1111-0000-0000-0000-000000000001",
-    checkout_id: "CRS-002",
-    redirect_url: "https://sandbox.payfast.co.za/eng/process",
-    form_fields: [{ name: "signature", value: "deadbeef" }],
-    quoted_credits: 320,
-    conversion_rate: 1.6,
-  };
-
-  const submitted: HTMLFormElement[] = [];
-  beforeEach(() => {
-    submitted.length = 0;
-    vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
-      submitted.push(this);
-    });
+describe("Buy minutes — the checkout", () => {
+  it("sends the package and the price the member was shown, then POSTs the signed form to PayFast", async () => {
+    const stub = show([{ path: SHELF, body: minutesShelf() }, { method: "POST", path: PURCHASE, body: purchaseStart() }]);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    const post = stub.calls.find((c) => c.method === "POST" && c.path === PURCHASE)!;
+    expect(post.body).toEqual({ packageId: PACKAGE_IDS.five, quotedPriceZar: 550 });
+    const form = submitted[0];
+    expect(form.method.toLowerCase()).toBe("post");
+    expect(form.action).toBe(purchaseStart().redirect_url);
+    expect([...form.querySelectorAll("input")].map((i) => [i.name, i.value])).toEqual(purchaseStart().form_fields.map((f) => [f.name, f.value]));
   });
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); });
 
-  it("does not hand the member to PayFast at a rate they were never shown", async () => {
-    stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/credit/topup/options", body: LEAGUE },
-      { method: "POST", path: "/api/v1/credit/topup", status: 409, body: RATE_MOVED },
+  it("sends the DISCOUNTED price the shelf showed, never the list price", async () => {
+    const stub = show([{ path: SHELF, body: discountedShelf() }, { method: "POST", path: PURCHASE, body: purchaseStart({ amount_zar: 495 }) }]);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(stub.calls.find((c) => c.method === "POST" && c.path === PURCHASE)!.body).toEqual({ packageId: PACKAGE_IDS.five, quotedPriceZar: 495 });
+  });
+
+  it("cannot continue before a package is chosen", async () => {
+    const stub = show([{ path: SHELF, body: minutesShelf() }]);
+    await card("5 hours");
+    const button = screen.getByRole("button", { name: BUY_COPY.pickOne });
+    fireEvent.click(button);
+    expect(stub.calls.some((c) => c.method === "POST" && c.path === PURCHASE)).toBe(false);
+  });
+
+  it("keeps the way back (an invite) through the PayFast round-trip", async () => {
+    show([{ path: SHELF, body: minutesShelf() }, { method: "POST", path: PURCHASE, body: purchaseStart() }], "/wallet/buy?returnTo=%2Fj%2Fabc");
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(topUpReturnFor(purchaseStart().purchase_id)).toBe("/j/abc");
+  });
+
+  it("stops on a moved price, shows the new one, and the next press pays exactly that", async () => {
+    const now = shelfPackage({ price_zar: 600, list_price_zar: 600 });
+    let calls = 0;
+    const stub = show([
+      { path: SHELF, body: minutesShelf() },
+      { method: "POST", path: PURCHASE, respond: () => (++calls === 1 ? refuse(409, { error: "package_price_changed", package: now }) : purchaseStart({ amount_zar: 600 })) },
     ]);
-    renderPage(<TopUpPage />);
-
-    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
-    // The offer the member is looking at when they press the button.
-    expect(screen.getByText("480.00 credits")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
-
-    // The whole finding: the browser went to PayFast to pay R200 for a top-up the server
-    // had already written at 1.6, and the first place 320 appeared was a ledger row.
-    await screen.findByRole("alert");
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.priceChanged(now))).toBeInTheDocument();
     expect(submitted).toHaveLength(0);
-
-    // …and the member is told, in the club's own figures, what changed.
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent(/The club changed its rate while this page was open/);
-    expect(alert).toHaveTextContent("320.00 credits");
-    expect(alert).toHaveTextContent("Every R1.00 you pay adds 1.60 cr to your wallet");
-    // The preview moves with it, so nothing on screen still says 480.
-    expect(screen.queryByText("480.00 credits")).not.toBeInTheDocument();
-    expect(screen.getByText("320.00 credits")).toBeInTheDocument();
-    // …and the rate's source moves with it too, rather than being dropped. A headed run against
-    // the client-side version of this fix showed the new rate beside the old label — the new
-    // number beside the old reason for it, a second small untruth arriving with the fix for the
-    // first. That lane dropped the label. It does not have to be dropped: the refusal carries
-    // `rate_group` (D2; it was `member_class`), so the line names the RIGHT source, asserted here.
-    expect(screen.getAllByText(/Every R1\.00 you pay adds 1\.60 cr to your wallet\./).length).toBeGreaterThan(1);
-    expect(screen.getByTestId("your-rate")).toHaveTextContent("Your rate: the club's standard rate — 1.6 cr per R1");
-    expect(screen.queryByText(/Your rate: League/)).not.toBeInTheDocument();
+    expect(within(await card("5 hours")).getByText(formatMoney(600))).toBeInTheDocument();
+    fireEvent.click(continueButton());
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    const posts = stub.calls.filter((c) => c.method === "POST" && c.path === PURCHASE);
+    expect(posts.map((p) => (p.body as { quotedPriceZar: number }).quotedPriceZar)).toEqual([550, 600]);
   });
 
-  it("goes through on the second press, now that the member has seen the real figure", async () => {
-    stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/credit/topup/options", body: LEAGUE },
-      // Refused, then accepted: the member's second press agrees to the club's new rate, and
-      // the quote it now sends matches, so the server has nothing left to refuse.
-      { method: "POST", path: "/api/v1/credit/topup", status: [409, 200], sequence: [RATE_MOVED, REGISTERED], body: RATE_MOVED },
+  it("re-reads the shelf when a package has gone, and says nothing was sent", async () => {
+    let gone = false;
+    const stub = show([
+      { path: SHELF, respond: () => (gone ? minutesShelf({ packages: minutesShelf().packages.filter((p) => p.id !== PACKAGE_IDS.five) }) : minutesShelf()) },
+      { method: "POST", path: PURCHASE, respond: () => { gone = true; return refuse(409, { error: "package_unavailable" }); } },
     ]);
-    renderPage(<TopUpPage />);
-
-    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
-    await screen.findByRole("alert");
-
-    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
-
-    // A hold that cannot be got past is a dead end, which is the other half of this
-    // programme's error-copy rule.
-    await vi.waitFor(() => expect(submitted).toHaveLength(1));
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.unavailable)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("radio", { name: "5 hours" })).toBeNull());
+    expect(stub.calls.filter((c) => c.path === SHELF).length).toBeGreaterThanOrEqual(2);
   });
 
-  /**
-   * The fixture, varied. The check above passes trivially if the page simply never posts the
-   * form, so the ordinary case — the club's rate is exactly what the screen said — has to be
-   * driven through the same code path. It also pins the wire field the refusal depends on: a
-   * POST that stops sending the quote is a POST the server can no longer refuse, and every
-   * assertion above would still pass while the defect walked back in.
-   */
-  it("sends the payment straight on when the rate has not moved, and sends the quote with it", async () => {
-    const stub = stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/credit/topup/options", body: LEAGUE },
-      {
-        method: "POST", path: "/api/v1/credit/topup",
-        body: { ...REGISTERED, quoted_credits: 480, conversion_rate: 2.4 },
-      },
-    ]);
-    renderPage(<TopUpPage />);
+  it("says a coded gateway refusal (502 provider_register_failed) as the club's answer, not a lost reply", async () => {
+    const stub = show([{ path: SHELF, body: minutesShelf() }, { method: "POST", path: PURCHASE, status: 502, body: { error: "provider_register_failed", reason: "x" } }]);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.providerFailed)).toBeInTheDocument();
+    expect(stub.calls.filter((c) => c.path === SHELF)).toHaveLength(1);
+  });
+});
 
-    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
-
-    await vi.waitFor(() => expect(submitted).toHaveLength(1));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    const posted = stub.calls.filter((c) => c.method === "POST" && c.path.startsWith("/api/v1/credit/topup"));
-    expect(posted.map((c) => c.body)).toEqual([{ amountZar: 200, quotedConversionRate: 2.4 }]);
+/** A purchase that LANDS on the server and loses its reply: the shelf is read back, never re-sent. */
+describe("Buy minutes — a lost reply", () => {
+  const lostAfterRegistering = (registered: { yes: boolean }): StubRoute => ({
+    method: "POST", path: PURCHASE, respond: () => { registered.yes = true; return refuse(502, {}); },
   });
 
-  it("does not tell the member the rate cannot change, because it can", async () => {
-    stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/credit/topup/options", body: LEAGUE },
-      { method: "POST", path: "/api/v1/credit/topup", status: 409, body: RATE_MOVED },
+  it("finds the checkout the lost reply registered, says so, and offers its Cancel", async () => {
+    const registered = { yes: false };
+    const stub = show([
+      { path: SHELF, respond: () => (registered.yes ? minutesShelf({ open_checkouts: [openCheckout()] }) : minutesShelf()) },
+      lostAfterRegistering(registered),
     ]);
-    renderPage(<TopUpPage />);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.lostStarted)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Cancel the 5 hours \(5 h\) for R550\.00 purchase/ })).toBeInTheDocument();
+    expect(submitted).toHaveLength(0);
+    expect(stub.calls.filter((c) => c.method === "POST" && c.path === PURCHASE)).toHaveLength(1);
+  });
 
-    // The retired sentence, word for word off the three finders' screenshots.
-    expect(await screen.findByText(/Every R1\.00 you pay adds 2\.40 cr to your wallet/)).toBeInTheDocument();
-    expect(screen.queryByText(/locked in when you continue/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/can't change while you're paying\./)).not.toBeInTheDocument();
-    // What is true, and what the code above now keeps.
-    expect(screen.getByText(/fixed the moment the club registers this payment/)).toBeInTheDocument();
-    expect(screen.getByText(/we'll show you the new figure before sending you there/)).toBeInTheDocument();
+  it("says nothing was started when the club's record shows no new checkout", async () => {
+    const before = openCheckout({ id: "old-one" });
+    show([
+      { path: SHELF, body: minutesShelf({ open_checkouts: [before] }) },
+      { method: "POST", path: PURCHASE, status: 504, body: {} },
+    ]);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.lostNothing)).toBeInTheDocument();
+  });
+
+  it("says it cannot tell when the record cannot be read either", async () => {
+    let reads = 0;
+    show([
+      { path: SHELF, respond: () => (++reads === 1 ? minutesShelf() : refuse(503, {})) },
+      { method: "POST", path: PURCHASE, status: 502, body: {} },
+    ]);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.lostUnknown)).toBeInTheDocument();
   });
 });

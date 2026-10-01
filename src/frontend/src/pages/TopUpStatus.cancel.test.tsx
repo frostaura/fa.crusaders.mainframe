@@ -5,15 +5,19 @@ import TopUpStatusPage from "./TopUpStatus";
 import { BalanceProvider } from "../lib/balance";
 import { renderPage, signIn, signOut, stubFetch, unreachable, type StubRoute } from "../test/harness";
 
+
+/** P13 §3.4 — what a purchase status carries beyond id/status/amount. */
+const EXTRA = { package_id: "00000000-0000-0000-0000-0000000000a5", package_name: "5 hours", minutes: 300, list_price_zar: 500, discount_bps: 0, created_at: "2026-10-01T08:00:00Z", expires_at: "2026-10-01T09:00:00Z" };
+
 /**
  * R4 M4-1 (the page's half) — a cancelled or abandoned PayFast checkout used up the member's
  * top-up limit for ever: PayFast sends no ITN for a cancel, so the row stayed Pending, and the
  * cancel return only changed the screen. The page now tells the club
- * (`POST /credit/topup/{id}/cancel`), reads the row back when that reply is lost, and words a
+ * (`POST /minutes/purchase/{id}/cancel`), reads the row back when that reply is lost, and words a
  * checkout the club closed itself (`expired`) as what it is — not "You cancelled".
  */
 const ID = "eeee1111-0000-0000-0000-000000000042";
-const row = (over: Record<string, unknown>) => ({ id: ID, status: "Pending", amount_zar: 200, conversion_rate: 1, failure_code: null, ...over });
+const row = (over: Record<string, unknown>) => ({ id: ID, status: "Pending", amount_zar: 200, ...EXTRA, failure_code: null, ...over });
 
 beforeEach(() => {
   vi.stubGlobal("EventSource", class {
@@ -33,21 +37,21 @@ function show(routes: StubRoute[], search = "?cancelled=1") {
   ]);
   renderPage(
     <BalanceProvider>
-      <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+      <Routes><Route path="/wallet/buy/:purchaseId" element={<TopUpStatusPage />} /></Routes>
     </BalanceProvider>,
-    { initialEntries: [`/wallet/topup/${ID}${search}`] },
+    { initialEntries: [`/wallet/buy/${ID}${search}`] },
   );
   return stub;
 }
 
 const topupCalls = (stub: ReturnType<typeof stubFetch>) =>
-  stub.calls.filter((c) => c.path.startsWith(`/api/v1/credit/topup/${ID}`)).map((c) => `${c.method} ${c.path.replace(`/api/v1/credit/topup/${ID}`, "")}`);
+  stub.calls.filter((c) => c.path.startsWith(`/api/v1/minutes/purchase/${ID}`)).map((c) => `${c.method} ${c.path.replace(`/api/v1/minutes/purchase/${ID}`, "")}`);
 
 describe("Top-up status — the cancel return is told to the club (M4-1)", () => {
   it("closes the checkout on the club's side and shows the club's answer", async () => {
     const stub = show([
-      { method: "POST", path: `/api/v1/credit/topup/${ID}/cancel`, body: row({ status: "Cancelled", failure_code: "cancelled_at_return" }) },
-      { path: `/api/v1/credit/topup/${ID}`, body: row({}) },
+      { method: "POST", path: `/api/v1/minutes/purchase/${ID}/cancel`, body: row({ status: "Cancelled", failure_code: "cancelled_at_return" }) },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: row({}) },
     ]);
     expect(await screen.findByText(/You cancelled this payment, so nothing was charged/)).toBeInTheDocument();
     expect(topupCalls(stub)).toEqual(["POST /cancel"]);
@@ -55,27 +59,27 @@ describe("Top-up status — the cancel return is told to the club (M4-1)", () =>
 
   it("reads the row back when the cancel's reply is lost, and believes what it finds", async () => {
     const stub = show([
-      unreachable(`/api/v1/credit/topup/${ID}/cancel`, "POST"),
+      unreachable(`/api/v1/minutes/purchase/${ID}/cancel`, "POST"),
       // The ITN had landed first: the money moved, and the page says so.
-      { path: `/api/v1/credit/topup/${ID}`, body: row({ status: "Completed" }) },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: row({ status: "Completed" }) },
     ]);
-    expect(await screen.findByText("Your wallet has been credited.")).toBeInTheDocument();
+    expect(await screen.findByText("5 h added to your wallet.")).toBeInTheDocument();
     expect(topupCalls(stub)).toEqual(["POST /cancel", "GET "]);
   });
 
   it("answers a completion that landed before the cancel as a completion", async () => {
     show([
-      { method: "POST", path: `/api/v1/credit/topup/${ID}/cancel`, body: row({ status: "Completed" }) },
-      { path: `/api/v1/credit/topup/${ID}`, body: row({ status: "Completed" }) },
+      { method: "POST", path: `/api/v1/minutes/purchase/${ID}/cancel`, body: row({ status: "Completed" }) },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: row({ status: "Completed" }) },
     ]);
-    expect(await screen.findByText("Your wallet has been credited.")).toBeInTheDocument();
+    expect(await screen.findByText("5 h added to your wallet.")).toBeInTheDocument();
     expect(screen.queryByText(/You cancelled/)).toBeNull();
   });
 
   it("reads a 404 on the cancel back — a server without the route is not a missing top-up", async () => {
     show([
-      { method: "POST", path: `/api/v1/credit/topup/${ID}/cancel`, status: 404, body: null },
-      { path: `/api/v1/credit/topup/${ID}`, body: row({}) },
+      { method: "POST", path: `/api/v1/minutes/purchase/${ID}/cancel`, status: 404, body: null },
+      { path: `/api/v1/minutes/purchase/${ID}`, body: row({}) },
     ]);
     // The row is there and still Pending: on the cancel return that is the member's own cancel.
     expect(await screen.findByText(/You cancelled this payment, so nothing was charged/)).toBeInTheDocument();
@@ -83,23 +87,23 @@ describe("Top-up status — the cancel return is told to the club (M4-1)", () =>
 
   it("says no such top-up when the read back is a 404 too", async () => {
     show([
-      { method: "POST", path: `/api/v1/credit/topup/${ID}/cancel`, status: 404, body: null },
-      { path: `/api/v1/credit/topup/${ID}`, status: 404, body: null },
+      { method: "POST", path: `/api/v1/minutes/purchase/${ID}/cancel`, status: 404, body: null },
+      { path: `/api/v1/minutes/purchase/${ID}`, status: 404, body: null },
     ]);
-    expect(await screen.findByText(/We can't find this top-up on your account/)).toBeInTheDocument();
+    expect(await screen.findByText(/We can't find this purchase on your account/)).toBeInTheDocument();
   });
 
   it("does not tell the club anything without the cancel flag", async () => {
-    const stub = show([{ path: `/api/v1/credit/topup/${ID}`, body: row({ status: "Completed" }) }], "");
-    await screen.findByText("Your wallet has been credited.");
+    const stub = show([{ path: `/api/v1/minutes/purchase/${ID}`, body: row({ status: "Completed" }) }], "");
+    await screen.findByText("5 h added to your wallet.");
     expect(topupCalls(stub)).toEqual(["GET "]);
   });
 });
 
 describe("Top-up status — a checkout the club closed because nothing came back (M4-1)", () => {
   it("says it was never finished, not that the member cancelled it", async () => {
-    show([{ path: `/api/v1/credit/topup/${ID}`, body: row({ status: "Cancelled", failure_code: "expired" }) }], "");
-    expect(await screen.findByText("This payment was never finished, so nothing was charged and no credits were added.")).toBeInTheDocument();
+    show([{ path: `/api/v1/minutes/purchase/${ID}`, body: row({ status: "Cancelled", failure_code: "expired" }) }], "");
+    expect(await screen.findByText("This payment was never finished, so nothing was charged and no minutes were added.")).toBeInTheDocument();
     expect(screen.queryByText(/You cancelled/)).toBeNull();
     expect(screen.getByRole("link", { name: "Try again" })).toBeInTheDocument();
   });
