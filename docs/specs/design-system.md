@@ -115,8 +115,22 @@ squash court's tin). Never as a state colour.
 - **z-index:** base 0 · raised 10 (time column) · sticky 20 (court headers) · sticky-corner 25 ·
   chrome 30 · actionbar 35 · overlay 40 · modal 50 · popover 60 (Radix portals above modals) · toast 70 ·
   tooltip 80 · skip 90. No `z-[…]`.
-- **Widths:** `narrow` 36rem (My Code, auth, forms) · `content` 64rem · `wide` 80rem (admin, grid).
-  Breakpoints are Tailwind defaults.
+- **Widths** (`max-w-*`): `narrow` 36rem — single-task linear pages only (auth forms, change
+  password, top up, not found) · `content` 64rem · `wide` 80rem · `page` 120rem (PageShell
+  `full`: admin and data screens; never unbounded) · slots inside a page: `list` 24rem (a split
+  view's list), `aside` 20rem / `asideWide` 24rem (a side rail, the wide one from 3xl), `form`
+  40rem. Tailwind's `max-w-full` stays 100 %.
+- **Tiles** (`layout.tile`, AutoGrid minimums, rem so 200 % text halves the columns): `stat` 9rem ·
+  `card` 18rem · `panel` 26rem · `wide` 34rem.
+- **Breakpoints:** Tailwind's, plus `3xl` 1800px. **Layout is decided by the box, not the
+  viewport** wherever a primitive can: `@tailwindcss/container-queries` (pinned) — every
+  PageShell is `@container/page`, and SplitView, WithAside and the Auth card name their own. The
+  viewport lies beside the admin rail and at 200 % text. The plugin emits nothing for
+  `@[56rem]/name:` in front of an arbitrary PROPERTY (`[grid-area:x]`); write those as
+  `[@container_name_(min-width:56rem)]:[…]`.
+- **Sticky offsets:** `<main>` is the scroller and sits UNDER the app bar, so sticky things use
+  `top-0` / `top-6` (`layout.stickyTop` is 0), and full-height panes subtract
+  `--app-chrome-height`.
 
 ## Theme
 
@@ -202,14 +216,36 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   (24/32/40/56/96, initials fallback) · **progress** · **separator** · **spinner**.
 - **Ours, in `ui/`:** `interactable` + `watermark`, `feedback-marks`, `page-shell` (PageShell,
   PageHeader, Section), `refresh-button` (+ `Freshness`), `state-block`, `week-strip`, `action-bar`,
-  `text-link`, `countdown-ring`, `pass-card`.
+  `text-link`, `countdown-ring`, `pass-card`, and the layout system (R4 form factor):
+  `split-view`, `with-aside`, `auto-grid` (AutoGrid, Columns), `context-bar`, with their shared
+  parts in `layout.ts` (the AutoGrid template, the bottom dock, the list keys).
 - **Product composites outside `ui/`** (built on it): `ConfirmButton` (two-press, armed state),
   `Toast` (live-region handling), `Alert`, `DataTable`, `SegmentedTabs` (legacy tabs, still in use),
   `ScrollArea`, `Carousel`, `Charts`/`ChartFrame`, and the app shell in `components/shell/`.
 
 ## Patterns
 
-- **Page shell.** `PageShell width="narrow|content|wide"` owns gutters, top padding and section gap.
+- **Page shell.** `PageShell width="narrow|content|wide|full"` (+ `fullFrom3xl`) owns gutters
+  (`px-4 sm:px-6 lg:px-8 3xl:px-12`), top padding and section gap, and is the page's container.
+  The app bar follows the frame: `max-w-page` from 3xl on a full page (`data-page-frame`, read by
+  `:has()`), full-bleed with the crest over the rail on `/admin` from xl.
+- **Use the width** (R4 form factor). A screen with more than one thing on it never sits in a
+  phone column on a desktop:
+  - **SplitView** — master–detail. The caller owns the pick (a child route or a `?param`); split
+    when its box is `splitAt` wide (list pane sticky, own scroll, `[data-split-item]` rows walked
+    by Up/Down/Home/End, the picked one `aria-current`); stacked, the list or the detail. Both
+    panes stay mounted — CSS decides, so nothing flickers. Invites, Inbox, Members.
+  - **WithAside** — a sticky `<aside aria-label>` rail beside the main column from its box's `at`
+    width; `after`, `before`, `first` (DOM-first, drawn second — the Bookings games) or `sheet`.
+  - **AutoGrid / Columns** — tiles by token with a column CAP and no breakpoint (`max`), or
+    masonry-like columns for unequal cards.
+  - **ContextBar** — `top`: a sticky strip of filters and totals; `bottom`: ONE primary verb docked
+    above the tab bar in thumb reach (Top up, Invite a player, Answer an invite). A docked bar
+    publishes `--context-bar-height`; `<main>`'s padding, the toasts and the booking grid's
+    height budget make room for it. ActionBar shares the dock.
+  - **One control, one place.** Where a verb moves between a docked bar (phone) and the page
+    (desktop), `useMediaQuery` picks ONE rendering — a CSS-hidden twin is still a second button
+    to a test, a screen reader's element list and a `getByRole`.
   `PageHeader`: optional back link and eyebrow, the page's only `h1`, description, actions on the
   right, freshness slot. `Section`: `section[aria-labelledby]` with h2, description, actions. No page
   sets its own root spacing or width.
@@ -226,7 +262,8 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
 - **Booking grid.** `48px repeat(N, minmax(104px,1fr))` mobile / `64px repeat(N, minmax(120px,1fr))`
   ≥ md; `gap` 4px rows / 6px columns; cells `h-12 rounded-md`; inset selection rings; sticky court
   header and time column; tin now-line; scrolls to now on first load; courts side by side on mobile
-  with column scroll-snap and a court-chip row above 3 courts.
+  with column scroll-snap and a court-chip row above 3 courts (in a ScrollArea whose fade says
+  it scrolls); from 3xl a court column stops at 18rem and the frame hugs the grid.
 - **Multiselect.** Enter via the toolbar ("Select slots"), long-press (450ms), a desktop checkbox
   hover, or a drag; Shift-click/arrow for ranges. A floating **ActionBar** (above the tab bar on
   mobile): × exit · "3 selected" · secondary actions · primary right; Esc clears then exits.
@@ -234,7 +271,8 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   prev/next clamped to the booking window) plus a calendar button that opens `DatePicker`.
 - **Pass card (My Code).** Navy brand band (crest, club, "MEMBER", avatar), perforation notches, QR
   panel always white with a ≥ 4-module quiet zone, code in JetBrains Mono, `CountdownRing` for the
-  rotating window, offline badge. Centred in a `narrow` shell; tap for full screen.
+  rotating window, offline badge. First on a phone; from a 60rem page a sticky 24rem column beside what's next,
+  the doors, the wallet and setup (three columns from 72rem); tap for full screen.
 - **Stat tiles.** Five figures fill their rows: two columns on a phone with an odd last tile spanning
   both, a six-column track (3 + 2) from `sm`. Badge tiles are one row height (`auto-rows-fr`) with
   names clamped at two lines.
