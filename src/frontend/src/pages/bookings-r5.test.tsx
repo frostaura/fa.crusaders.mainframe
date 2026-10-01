@@ -6,8 +6,10 @@ import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, slotRow 
 import { liftWithReason } from "../test/liftHold";
 import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET, OFFLINE_CELL, bookCellLabel } from "../lib/bookingsCopy";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
+import type { ScheduleDay } from "../lib/api";
 import { HOLD_LIFTED } from "../lib/scheduleEnd";
 import { notYetOpenSentence } from "../lib/gridCopy";
+import { buildTimeSlices } from "../lib/scheduleGrid";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -167,5 +169,41 @@ describe("V5-8 — offline, the grid's free cells are muted, not green Book cell
     fireEvent.click(cell);
     expect(await screen.findByText(OFFLINE_COPY.bookNeedsConnection)).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Book sheet" })).toBeNull();
+  });
+});
+
+describe("V5-5 — a closed run nothing is booked in is one folded row", () => {
+  // Club hours 06:00–08:00; a hold at 00:00–00:30 reaches the grid back to midnight.
+  const NIGHT = () => dayFixture({
+    dayStartMinute: 6 * 60, dayEndMinute: 8 * 60,
+    slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(0), endsAtUtc: sast(0, 30), status: "adminblock",
+      bookingId: "hold-0", blockLabel: "Resurfacing", checkedIn: null, amountChargedCredits: null })],
+  });
+
+  it("folds 00:30–06:00 into one row, keeps the booked rows and the open ones", () => {
+    const slices = buildTimeSlices(NIGHT() as unknown as ScheduleDay);
+    expect(slices.map((t) => t.label)).toEqual([
+      "00:00", "00:15", "00:30–06:00",
+      "06:00", "06:15", "06:30", "06:45", "07:00", "07:15", "07:30", "07:45",
+    ]);
+    const fold = slices[2];
+    expect(fold.outOfHours).toBe(true);
+    expect(fold.folded).toBe(22);
+  });
+
+  it("leaves a short closed run as rows", () => {
+    const day = dayFixture({
+      dayStartMinute: 6 * 60, dayEndMinute: 8 * 60,
+      slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(5, 15), endsAtUtc: sast(5, 30), status: "adminblock", bookingId: "h", amountChargedCredits: null })],
+    }) as unknown as ScheduleDay;
+    expect(buildTimeSlices(day).slice(0, 4).map((t) => t.label)).toEqual(["05:15", "05:30", "05:45", "06:00"]);
+  });
+
+  it("draws the fold as one Closed row on the desk's grid", async () => {
+    openBookings({ isAdmin: true, day: NIGHT() });
+    const grid = await screen.findByRole("grid");
+    expect(within(grid).getByRole("rowheader", { name: "00:30–06:00" })).toBeInTheDocument();
+    expect(within(grid).getByRole("button", { name: /^Court 1 at 00:30–06:00 — the club is closed/ })).toHaveTextContent("Closed");
+    expect(within(grid).queryByRole("rowheader", { name: "03:00" })).toBeNull();
   });
 });

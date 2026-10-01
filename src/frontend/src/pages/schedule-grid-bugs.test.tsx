@@ -157,8 +157,9 @@ describe("the grid's cells", () => {
     // Two of D3-B04's five silent types. A cell holding a control is named by its POSITION and
     // the control carries the sentence; a cell holding nothing carries the whole story itself.
     // One name per node either way — a cell answering to two labels is the sentence read twice.
-    expect(within(grid).getByRole("gridcell", { name: "Court 1 at 07:00" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Court 1 at 07:00 — the club is closed/ })).toBeTruthy();
+    // R5 V5-5: the hour closed between 07:00 and the hold is ONE folded row, named by its span.
+    expect(within(grid).getByRole("gridcell", { name: "Court 1 at 07:00–08:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Court 1 at 07:00–08:00 — the club is closed/ })).toBeTruthy();
     expect(screen.getByRole("gridcell", { name: /Court 1 at 08:00 — held by the club for League night/ })).toBeTruthy();
   });
 
@@ -182,7 +183,7 @@ describe("the grid's cells", () => {
     stubDay(futureDay());
     renderPage(<SchedulePage />);
 
-    const closed = await screen.findByRole("button", { name: /Court 1 at 07:00 — the club is closed/ });
+    const closed = await screen.findByRole("button", { name: /Court 1 at 07:00–08:00 — the club is closed/ });
     await act(async () => { closed.click(); });
     expect(await screen.findByRole("status")).toHaveTextContent(/The club is open/i);
   });

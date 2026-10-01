@@ -10,7 +10,15 @@ export type TimeSlice = {
   minuteOfDay: number;
   /** The club is shut for this row. Rendered, greyed, never bookable. */
   outOfHours: boolean;
+  /**
+   * R5 V5-5 — a run of closed rows nothing is booked in, folded into this one row; how many
+   * slices it stands for (absent = one). Its label is the span, "00:30–06:00".
+   */
+  folded?: number;
 };
+
+/** A closed run shorter than this stays as rows: a fold over two or three costs more than it saves. */
+export const FOLD_MIN_ROWS = 4;
 
 /** Returns the IANA-timezone offset (minutes) for a given UTC instant. */
 export function tzOffsetMinutes(timezone: string, atUtcMs: number): number {
@@ -69,20 +77,63 @@ export function gridWindow(day: ScheduleDay): { startMinute: number; endMinute: 
   };
 }
 
-/** The rows of the grid, in the tenant's wall clock, with the closed ones marked. */
+/** HH:mm for minutes past local midnight (24:00 reads as 00:00). */
+function clockLabel(mins: number): string {
+  return `${String(Math.floor(mins / 60) % 24).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The rows of the grid, in the tenant's wall clock, with the closed ones marked.
+ *
+ * <p>
+ * R5 V5-5 — a day that reaches out of hours for one booking (a 00:00 walk-up) drew every closed
+ * row between it and opening: six hours of empty "Closed" rows. A run of {@link FOLD_MIN_ROWS} or
+ * more closed rows that no booking touches is one row, labelled with its span.
+ * </p>
+ */
 export function buildTimeSlices(day: ScheduleDay): TimeSlice[] {
+  return foldClosedRuns(rawTimeSlices(day), day);
+}
+
+function rawTimeSlices(day: ScheduleDay): TimeSlice[] {
   const slice = day.sliceMinutes > 0 ? day.sliceMinutes : 15;
   const { startMinute, endMinute } = gridWindow(day);
   const slices: TimeSlice[] = [];
   for (let mins = startMinute; mins < endMinute; mins += slice) {
     slices.push({
       utc: utcAt(day.date, day.timezone, mins),
-      label: `${String(Math.floor(mins / 60) % 24).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`,
+      label: clockLabel(mins),
       minuteOfDay: mins,
       outOfHours: mins < day.dayStartMinute || mins + slice > day.dayEndMinute,
     });
   }
   return slices;
+}
+
+function foldClosedRuns(slices: TimeSlice[], day: ScheduleDay): TimeSlice[] {
+  const slice = day.sliceMinutes > 0 ? day.sliceMinutes : 15;
+  const sliceMs = slice * 60_000;
+  const spans = day.slots.map((s) => [Date.parse(s.startsAtUtc), Date.parse(s.endsAtUtc)] as const);
+  const empty = (t: TimeSlice) => {
+    const from = Date.parse(t.utc);
+    return !spans.some(([a, b]) => a < from + sliceMs && b > from);
+  };
+  const out: TimeSlice[] = [];
+  let i = 0;
+  while (i < slices.length) {
+    let j = i;
+    while (j < slices.length && slices[j].outOfHours && empty(slices[j])) j += 1;
+    if (j - i >= FOLD_MIN_ROWS) {
+      const first = slices[i];
+      const endMinute = slices[j - 1].minuteOfDay + slice;
+      out.push({ ...first, label: `${first.label}–${clockLabel(endMinute)}`, folded: j - i });
+      i = j;
+    } else {
+      out.push(slices[i]);
+      i += 1;
+    }
+  }
+  return out;
 }
 
 /**
