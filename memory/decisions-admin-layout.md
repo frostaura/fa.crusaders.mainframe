@@ -1,14 +1,13 @@
 ---
 name: crusaders-mainframe-decisions-admin-layout
-description: "R4-R5 form factor: the admin console uses the full frame; Members beside the record; Transactions keeps totals in view; rails for alerts and settings; R5 phone density for Overview, Faults, Boards, schedules."
+description: "R4-R5 form factor: full frame; Members beside the record; admin role in row, header and Access tab (one dialog); Transactions totals in view; rails; R5 phone density for Overview, Faults, Boards, schedules."
 type: decision
 last_verified: 2026-10-01
 ---
 
 # Live decisions — how the admin console uses the screen (review round 4, form factor, lane L2)
 
-Spec: the round's `SPEC.md` §3/§4. Primitives: `components/ui` (`SplitView`, `WithAside`,
-`AutoGrid`, `ContextBar`), all decided by their own BOX in rem, never the viewport.
+Spec: round 4 `SPEC.md` §3/§4. `components/ui` primitives decide by their own BOX in rem, never the viewport.
 
 - **The frame is `max-w-page` (120rem) and every admin page is a `full` PageShell.** At 1920 the
   80rem frame left ~225px dead on each side beside a full-bleed app bar (73 % used → 94 %).
@@ -23,13 +22,15 @@ Spec: the round's `SPEC.md` §3/§4. Primitives: `components/ui` (`SplitView`, `
   **R5 §4.3: a phone card is a 3-column grid, ~72px** (R4's wrap was ~126): who over two lines ·
   balance over status · the 44px ⋯, which holds Top up below a 48rem box (`useBoxAtLeast(48)`);
   an application keeps Approve/Reject on a third line — they are the queue.
-- **R5 P5: a member's record open reads no groups and no enrolments** (`useGroupMemberships` /
-  `useFingerprints` `enabled`): only the table draws them, and a deep link read every group's
-  member list for nothing. The attention counts: see `lib/adminAttention` (arrival = the 30 s
-  fresh window; the members loader hands its pending count, adopted, not re-asked).
-- **An application's decision is on the record's header** (Approve/Reject; Approve for a turned-
-  down one), not in the ⋯ — the queue is cleared with ↓, Enter, Approve. Same confirm, same
-  lost-reply read-back (`MemberActions` `MemberDecision`).
+- **R5 P5: an open record reads no groups, no enrolments** (`enabled`): only the table draws them;
+  a deep link read every group's list for nothing. Attention counts: `lib/adminAttention` (arrival =
+  the 30 s fresh window; the members loader's pending count is adopted, not re-asked).
+- **An application's decision is on the record's header** (Approve/Reject; Approve for a turned-down
+  one), not in the ⋯ — the queue is cleared with ↓, Enter, Approve (`MemberDecision`, same confirm).
+- **R5 G: the admin role is in THREE places, ONE act** (`AdminRoleDialog`, rule `adminRoleOffer`):
+  row ⋯, record header ⋯, Access tab switch — *why:* Dean never found the switch. Locked items (config
+  admin; grant to non-active) stay, disabled, reason shown, muted by ink not opacity; none without
+  `is_admin`. Redraw from the server's answer only. "Admins" chip filters by ROLE. `e2e/admin-role-r5`.
 - **V-14:** the address gets its own column only where the table's box is 76rem (2xl beside the
   rail); below it, under the name. Optional cells are `hidden` at 48rem AND at base — CELL makes
   every cell a table-cell from 48rem, and a cell drawn under a hidden header shifted the balance.
@@ -46,9 +47,8 @@ Spec: the round's `SPEC.md` §3/§4. Primitives: `components/ui` (`SplitView`, `
 - **A failed refresh keeps what is on screen** (integrator ask, D's `StaleNotice`): Members (a
   re-read publishes only a WHOLE club), Transactions (same filters only — new filters that fail
   drop the rows, R12), Courts, Webhooks, Settings (and its draft), Schedules (same list only).
-- **Not built (no data or another lane's file):** the Overview's court-occupancy strip and the
-  board's live-event rail; split views for Groups/Schedules/Boards (cards instead); Settings'
-  third help column.
+- **Not built (no data or another lane's file):** Overview's court-occupancy strip, the board's
+  live-event rail; split views for Groups/Schedules/Boards (cards); Settings' third help column.
 - **R5 (lane E2) — phones and large text.** Overview: 5 alerts, then "See all N" opens the rest IN
   PLACE (there is no alerts page), focus on the first revealed; the Console folds under a 48rem box
   (*why:* it repeats the section switcher; 5,790 → ~2,000px at 390). Faults: text takes the row,
