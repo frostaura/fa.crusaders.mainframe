@@ -226,7 +226,7 @@ export function MonitoringFaultsPage() {
   const boardCount = boards.filter((b) => b.key !== "__no_board__").length;
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title="Faults"
         description={`What the club's boards have reported going wrong, grouped by board. Re-reads every ${REFRESH_MS / 1000} seconds while this tab is in front.`}

@@ -118,7 +118,7 @@ export function AdminChangeRecordPage() {
   });
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title="Change record"
         // The retention sentence (the server's) sits under the list now: beside the banner it

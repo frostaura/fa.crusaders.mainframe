@@ -270,7 +270,7 @@ function AdminDoorsPageBody() {
   const stale = doorStaleChecksNotice(failures, secondsSinceRead);
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       {/* A16: the freshness and the staleness notice below it count from the same
           `checkedAt` against the same tick, so the two ages on one screen cannot disagree. */}
       <PageHeader

@@ -261,7 +261,7 @@ function AdminDoorsDetailPageBody() {
   if (read.loading) {
     // A skeleton the shape of the page (R12): header, the controls column, the feed.
     return (
-      <PageShell width="wide" aria-busy="true">
+      <PageShell width="full" aria-busy="true">
         <p className="sr-only">Reading this door…</p>
         <div className="flex flex-col gap-3">
           <Skeleton className="h-5 w-20" />
@@ -277,7 +277,7 @@ function AdminDoorsDetailPageBody() {
   }
   if (read.failed) {
     return (
-      <PageShell width="wide">
+      <PageShell width="full">
         <PageHeader back={BACK_TO_DOORS} title="Door" />
         <div className="flex flex-col items-start gap-3">
           <Alert tone="danger" className="w-full">{DOORS_READ_FAILED}</Alert>
@@ -288,7 +288,7 @@ function AdminDoorsDetailPageBody() {
   }
   if (!row) {
     return (
-      <PageShell width="wide">
+      <PageShell width="full">
         <PageHeader back={BACK_TO_DOORS} title="Door not found" />
         <StateBlock
           empty
@@ -302,7 +302,7 @@ function AdminDoorsDetailPageBody() {
   }
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       {/* A11 / R3-21: ONE fallback. This printed the raw `name`, which for a board nobody has
           named is the registration placeholder "Door gate" — so the heading, the identity line
           below it ("no door name yet") and the tile that linked here ("Unnamed scanner

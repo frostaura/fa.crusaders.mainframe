@@ -405,7 +405,7 @@ export function AdminScheduleDetailPage() {
 
   if (!row) {
     return (
-      <PageShell width="wide">
+      <PageShell width="full">
         {scheduleRead.loading ? null : <PageHeader back={BACK} title="Repeating booking" />}
         <StateBlock
           loading={scheduleRead.loading}
@@ -420,7 +420,7 @@ export function AdminScheduleDetailPage() {
   }
 
   return (
-    <PageShell width="wide" ref={shellRef}>
+    <PageShell width="full" ref={shellRef}>
       <ScheduleHeadline
         row={row}
         days={days}

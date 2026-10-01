@@ -133,7 +133,7 @@ export function AdminSchedulesPage() {
 
   if (creating) {
     return (
-      <PageShell width="wide">
+      <PageShell width="full">
         {header}
         <ScheduleEditor
           onCancel={() => { setCreating(false); }}
@@ -144,7 +144,7 @@ export function AdminSchedulesPage() {
   }
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       {header}
 
       {created && (

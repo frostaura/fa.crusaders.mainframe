@@ -53,7 +53,7 @@ export default function AdminReportsPage() {
   const { data } = report;
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title="Reports"
         description="The club's money, courts and attendance, for any period."

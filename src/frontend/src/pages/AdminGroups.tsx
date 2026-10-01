@@ -331,7 +331,7 @@ export function AdminGroupsPage() {
   const weekPreviewGroup = rows.find((g) => g.id === weekPreviewId) ?? null;
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title="Groups"
         description={"What each kind of member pays for a slot and a top-up, when they may book, how much, and "

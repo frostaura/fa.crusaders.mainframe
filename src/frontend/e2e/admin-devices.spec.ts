@@ -904,7 +904,7 @@ test.describe("Devices at 320 px with a 32 px root font", () => {
       // h1 → the header's title row → the page header → the shell.
       return heading.closest("[data-page-header]")?.parentElement?.getAttribute("data-page-shell") ?? null;
     });
-    expect(owner).toBe("wide");
+    expect(owner).toBe("full");
   });
 
   test("keeps the out-of-service question on screen once it is armed", async ({ page }) => {

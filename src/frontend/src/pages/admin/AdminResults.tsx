@@ -73,7 +73,7 @@ export default function AdminResultsPage() {
     void refreshAttentionCounts();
   };
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title={ADMIN_RESULTS.title}
         description={ADMIN_RESULTS.description}

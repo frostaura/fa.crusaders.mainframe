@@ -345,7 +345,7 @@ export default function AdminWebhooksPage() {
   const retry = () => { load().catch(() => {}); };
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title="Webhooks"
         description={"Outbound HTTP cues — lights, downstream integrations, audit pipes. URL templates "

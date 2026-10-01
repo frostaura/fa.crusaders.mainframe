@@ -1117,7 +1117,7 @@ export function AdminDevicesPage() {
 
   return (
     // R11: the shell owns width, gutters and rhythm; no page sets its own root spacing.
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title="Boards"
         description={`The club's court boxes and door gates — which are calling in, and what their buttons do. This page re-reads the boards every ${REFRESH_MS / 1000} seconds while this tab is in front.`}

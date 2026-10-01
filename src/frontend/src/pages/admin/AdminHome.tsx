@@ -384,7 +384,7 @@ export default function AdminHome() {
   // R23: what every admin was emailed about. Refreshed with the rest of the page, never polled.
   const alerts = useRecentAlerts();
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       {/* No eyebrow: the rail (desktop) and the section bar (phone) already say "Admin". */}
       <PageHeader
         title="Overview"

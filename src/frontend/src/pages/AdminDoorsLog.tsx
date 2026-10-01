@@ -554,7 +554,7 @@ function AdminDoorsLogPageBody() {
   const anyOffline = scans.some((entry) => entry.offline);
 
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       {/* E6 / R3-19: the heading is what a screenshot of this page is read as, and it said
           "All scans, all doors" over one door's refusals on one Tuesday. */}
       <PageHeader

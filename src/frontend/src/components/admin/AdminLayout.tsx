@@ -36,9 +36,14 @@ import { AdminTour } from "../onboarding/AdminTour";
  * shell's Admin tab badge anyway (see `lib/adminAttention.ts`).
  * </p>
  */
-/** The PageShell `wide` frame, for a child that does not frame itself (see above). */
+/**
+ * The PageShell `full` frame (120rem, `max-w-page`), for a child that does not frame itself (see
+ * above). R4 form factor (SPEC 2.1): it was `max-w-wide` (80rem), which left 225px dead on each
+ * side of every admin screen at 1920 beside the rail while the app bar ran full-bleed over it; the
+ * console's pages are `width="full"` and meet the bar's edge.
+ */
 const FRAME = [
-  "mx-auto flex w-full max-w-wide min-h-0 flex-1 flex-col px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8",
+  "mx-auto flex w-full max-w-page min-h-0 flex-1 flex-col px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8 3xl:px-12",
   "has-[>[data-page-shell]]:max-w-none has-[>[data-page-shell]]:p-0",
   "has-[>[data-full-bleed]]:max-w-none has-[>[data-full-bleed]]:p-0",
 ].join(" ");

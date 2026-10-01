@@ -120,7 +120,7 @@ export function ControlBoardPage() {
   return (
     // `--board-scale` is declared on the shell and consumed ONLY by CourtTile. Wall view is
     // therefore one declaration rather than a second set of class strings that drift from the first.
-    <PageShell width="wide" style={wall ? ({ "--board-scale": "1.6" } as CSSProperties) : undefined}>
+    <PageShell width="full" style={wall ? ({ "--board-scale": "1.6" } as CSSProperties) : undefined}>
       <PageHeader
         title="Control board"
         // The freshness line is a fact about the SCREEN and changes on a timer: it is the
