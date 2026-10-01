@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { resetUnread } from "@/components/inbox/useUnreadCount";
 import type { MemberNotification } from "@/lib/playersApi";
-import { INBOX_COPY, INVITES_COPY, acceptLabel } from "@/lib/playersCopy";
-import { renderPage, signIn, signOut, stubFetch } from "@/test/harness";
+import { DETAIL_GONE, INBOX_COPY, INVITES_COPY, acceptLabel } from "@/lib/playersCopy";
+import { refuse, renderPage, signIn, signOut, stubFetch } from "@/test/harness";
 import InboxPage from "./Inbox";
 
 /**
@@ -94,5 +94,31 @@ describe("the inbox pane beside the list (R5)", () => {
     // Only the picked row names a border: forced colours frame every link whose class does.
     const others = within(list).queryAllByRole("link").filter((l) => l !== row);
     for (const other of others) expect(other.className).not.toContain("border");
+  });
+  it("M5-8: a 'taken off' notice opens its game in the pane with the seat its path names — never 'Booking not found'", async () => {
+    splitBox();
+    const SEAT_GONE = "p0000000-0000-0000-0000-000000000009";
+    const removed: MemberNotification = {
+      id: "n9", kind: "players.game_changed", headline: "You were taken off Court 4", link: `/bookings/${BOOKING}?seat=${SEAT_GONE}`,
+      booking_id: BOOKING, created_at: NOW, read_at: null,
+    };
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
+      { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 1 } },
+      { method: "POST", path: "/api/v1/me/notifications/n9/read", body: { id: "n9", read: true } },
+      { path: "/api/v1/me/notifications", body: { items: [removed], unread_count: 1, next_cursor: null } },
+      { path: `/api/v1/me/invites/${SEAT_GONE}`, body: {
+        participant_id: SEAT_GONE, booking_id: BOOKING, status: "removed", lapsed: false, settled_outside: false, booking_status: "booked",
+        court_name: "Court 4", starts_at: at(24), ends_at: at(24.75), organiser_name: "Olga", share_credits: 16, timezone: "Africa/Johannesburg",
+      } },
+      { path: `/api/v1/bookings/${BOOKING}`, respond: () => refuse(404, { error: "not_found" }) },
+    ]);
+    renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
+    const list = await screen.findByRole("list", { name: INBOX_COPY.listLabel }, { timeout: 3000 });
+    fireEvent.click(within(list).getByRole("link", { name: removed.headline }));
+    expect(await screen.findByText(DETAIL_GONE.removedTitle, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.path === `/api/v1/me/invites/${SEAT_GONE}`)).toBe(true);
   });
 });

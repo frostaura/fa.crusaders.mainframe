@@ -92,6 +92,12 @@ function usePickedNotice(items: MemberNotification[]) {
 
 const INVITE_PATH = /^\/invites\/([^/?#]+)/;
 
+/** The `?seat=` an app path names, or null. */
+function seatOf(path: string | null): string | null {
+  const query = path?.split("#")[0].split("?")[1];
+  return query ? new URLSearchParams(query).get("seat") : null;
+}
+
 /**
  * A notice's target, in place (SPEC 3.6): an invite answered here; a share, a payment or a change
  * to a game as that booking's own panel; anything else as the notice with the way to it.
@@ -100,7 +106,9 @@ function NoticeTarget({ notice }: { notice: MemberNotification }) {
   const path = appPath(notice.link);
   const seat = path?.match(INVITE_PATH)?.[1] ?? null;
   if (seat) return <InviteTarget seat={seat} notice={notice} />;
-  if (notice.booking_id) return <BookingDetailPanel bookingId={notice.booking_id} />;
+  // R5 M5-8 — a "you were taken off" notice names the member's seat in its path (`?seat=`): the
+  // pane then says what became of it instead of "Booking not found", as the full page does.
+  if (notice.booking_id) return <BookingDetailPanel bookingId={notice.booking_id} seatId={seatOf(path)} />;
   return <NoticeCard notice={notice} />;
 }
 
