@@ -11,6 +11,9 @@ import { ChartBar, DownloadSimple } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { Skeleton } from "../components/ui/skeleton";
 import { WalletNav } from "../components/wallet/WalletNav";
+import { AutoGrid } from "../components/ui/auto-grid";
+import { Card } from "../components/ui/card";
+import { useMediaQuery } from "../components/ui/use-media-query";
 import { REPORT_SHARES_COPY } from "../lib/playersCopy";
 import {
   Cell, ChartsCard, NetCredits, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
@@ -82,7 +85,9 @@ export default function WalletActivityPage() {
   const { data } = report;
 
   return (
-    <PageShell>
+    // R4 form factor (SPEC 3.4): `wide`; the range sticks while the figures scroll, and from lg
+    // the charts stand side by side instead of one at a time in a carousel.
+    <PageShell width="wide">
       <PageHeader
         title="Wallet activity"
         description="What came in, what went out and when you played, for any period."
@@ -90,11 +95,13 @@ export default function WalletActivityPage() {
         freshness={<Freshness at={report.readAt} />}
       />
       <WalletNav />
-      <RangeToolbar range={range} onChange={setRange}>
-        <Button variant="outline" onClick={() => void csv.run()} pending={csv.pending} icon={<DownloadSimple aria-hidden="true" />}>
-          Download CSV
-        </Button>
-      </RangeToolbar>
+      <div data-range-bar="" className="lg:sticky lg:top-0 lg:z-sticky lg:-my-2 lg:bg-bg-app lg:py-2">
+        <RangeToolbar range={range} onChange={setRange}>
+          <Button variant="outline" onClick={() => void csv.run()} pending={csv.pending} icon={<DownloadSimple aria-hidden="true" />}>
+            Download CSV
+          </Button>
+        </RangeToolbar>
+      </div>
       {/* A refresh that failed keeps the figures it had, and says so above them. */}
       {report.error && data ? <Alert tone="warning">{REFRESH_FAILED}</Alert> : null}
       <StateBlock
@@ -128,15 +135,7 @@ function ActivityBody({ data }: { data: Activity }) {
       <StatTiles tiles={tiles} label="This period at a glance" />
       <WalletTotals wallet={wallet} />
       <Section title="Charts">
-        {days.length > 0 ? (
-          <ChartsCard
-            slides={[
-              { key: "balance", title: "Wallet balance", node: <LazyChart><MyBalanceLineChart data={days} /></LazyChart> },
-              { key: "flow", title: "Daily money flow", node: <LazyChart><MyFlowBarChart data={days} /></LazyChart> },
-              { key: "bk", title: "My bookings", node: <LazyChart><MyBookingsBarChart data={days} /></LazyChart> },
-            ]}
-          />
-        ) : (
+        {days.length > 0 ? <Charts days={days} /> : (
           <StateBlock empty emptyIcon={ChartBar} emptyTitle="Nothing to chart in this period." emptyHint="Pick a longer range, or come back after your next top-up or booking." />
         )}
       </Section>
@@ -157,6 +156,34 @@ function ActivityBody({ data }: { data: Activity }) {
  * the one card whose job is to reconcile, a signed zero reads as a movement that did not happen.
  * </p>
  */
+/**
+ * The three charts: a carousel on a phone, where one at a time is all the width holds, and side
+ * by side from lg (an AutoGrid of three 18rem-and-up cards: one row on a wide page) — a desktop paging through three charts in a
+ * 1200px box was a carousel for its own sake. One rendering, chosen in JS, so a chart is never
+ * drawn twice.
+ */
+function Charts({ days }: { days: DailyMePoint[] }) {
+  const wide = useMediaQuery(LG_UP);
+  const slides = [
+    { key: "balance", title: "Wallet balance", node: <LazyChart><MyBalanceLineChart data={days} /></LazyChart> },
+    { key: "flow", title: "Daily money flow", node: <LazyChart><MyFlowBarChart data={days} /></LazyChart> },
+    { key: "bk", title: "My bookings", node: <LazyChart><MyBookingsBarChart data={days} /></LazyChart> },
+  ];
+  if (!wide) return <ChartsCard slides={slides} />;
+  return (
+    <AutoGrid min="card" max={3} gap="lg" data-charts-grid="">
+      {slides.map((slide) => (
+        <Card key={slide.key} className="min-w-0 px-4 sm:px-6">
+          <h3 className="text-base font-semibold text-text-primary">{slide.title}</h3>
+          {slide.node}
+        </Card>
+      ))}
+    </AutoGrid>
+  );
+}
+
+const LG_UP = "(min-width: 1024px)";
+
 function WalletTotals({ wallet }: { wallet: WalletReport }) {
   return (
     <Section title="Totals" description="Every way credit moved in or out of your wallet in this period.">

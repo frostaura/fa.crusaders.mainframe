@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { MEMBER_CODE, SESSION_ANON, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { BOOKING, detailFixture, memberShellRoutes } from "./playersKit";
 import { DETAIL_ACTIONS, DETAIL_COPY } from "../src/lib/playersCopy";
+import { WALLET_LAYOUT } from "../src/lib/walletCopy";
 import { HEIGHT, WIDTHS, bigText, box, fontsReady, sideways, textOffScreen, widthUsed, type Width } from "./layoutKit";
 
 /**
@@ -293,5 +294,71 @@ test.describe("Booking detail (SPEC 3.3)", () => {
     await bigText(page);
     await healthy(page);
     await expect(page.getByRole("region", { name: DETAIL_COPY.actionsLabel }).getByRole("button", { name: DETAIL_ACTIONS.invite })).toBeVisible();
+  });
+});
+
+test.describe("Wallet and Wallet activity (SPEC 3.4)", () => {
+  const LEDGER = Array.from({ length: 6 }, (_, i) => ({
+    id: `e000000${i}`, at: new Date(Date.now() - i * 86_400_000).toISOString(), from: i % 2 ? "Nomsa" : "Club treasury",
+    to: i % 2 ? "Club treasury" : "Nomsa", amountCredits: i % 2 ? 50 : 100, signedAmountCredits: i % 2 ? -50 : 100,
+    type: i % 2 ? "BookingCharge" : "TopUp", comment: i % 2 ? "Booking Court 1" : "", subjectUserId: SESSION_MEMBER.user_id,
+    subjectName: "Nomsa", actorUserId: SESSION_MEMBER.user_id, actorName: "Nomsa", relatedBookingId: null,
+  }));
+  const walletRoutes = (): ApiRoute[] => [
+    ...memberShellRoutes({ wallet: { balance_credits: 300, held_credits: 0, spendable_credits: 300, entries: LEDGER, total_entries: LEDGER.length, limit: 50 } }),
+  ];
+  const day = (n: number) => ({ date: inDays(-n), top_ups_credits: 0, spent_credits: 50, refunds_credits: 0, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 300 });
+  const activityRoutes = (): ApiRoute[] => [
+    ...walletRoutes(),
+    { path: "/api/v1/reports/me/wallet", body: {
+      from: inDays(-30), to: inDays(0), top_ups_credits: 300, spent_credits: 150, refunds_credits: 0, penalties_credits: 0,
+      adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 150, penalty_count: 0, attended_bookings: 3,
+      bookings: 3, minutes_on_court: 135, movements: 6,
+    } },
+    { path: "/api/v1/reports/me/daily", body: [day(3), day(2), day(1)] },
+  ];
+
+  for (const width of WIDTHS) {
+    test(`${width}px: the balance rail beside the ledger from a 64rem page; Top up in thumb reach below lg`, async ({ page }, info) => {
+      test.skip(info.project.name !== "desktop", "one project sweeps the widths");
+      await open(page, "/wallet", walletRoutes(), width);
+      const rail = page.getByRole("complementary", { name: WALLET_LAYOUT.railLabel });
+      await expect(rail).toBeVisible();
+      await healthy(page);
+      const r = (await rail.boundingBox())!;
+      const ledger = (await box(page, "[data-aside-main]"))!;
+      if (width >= 1280) {
+        expect(ledger.x, "the ledger beside the balance").toBeGreaterThanOrEqual(r.x + r.width);
+        await expect(rail.getByRole("link", { name: "Top up" })).toBeVisible();
+      } else {
+        expect(ledger.y).toBeGreaterThanOrEqual(r.y + r.height);
+      }
+      const docked = page.getByRole("region", { name: WALLET_LAYOUT.actionsLabel });
+      if (width < 1024) {
+        const b = (await docked.getByRole("link", { name: "Top up" }).boundingBox())!;
+        expect(b.y + b.height).toBeGreaterThan(HEIGHT[width] * 0.75);
+        await expect(rail.getByRole("link", { name: "Top up" })).toHaveCount(0);
+      } else {
+        await expect(docked).toHaveCount(0);
+      }
+    });
+  }
+
+  test("activity at 1280: three charts in one row, the range sticky", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "a desktop width");
+    await open(page, "/wallet/activity", activityRoutes(), 1280);
+    const charts = page.locator("[data-charts-grid] > *");
+    await expect(charts).toHaveCount(3);
+    const ys = await charts.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().y)));
+    expect(new Set(ys).size).toBe(1);
+    expect(await page.locator("[data-range-bar]").evaluate((el) => getComputedStyle(el).position)).toBe("sticky");
+    await healthy(page);
+  });
+
+  test("390 at 200 % text: the wallet and its activity, nothing off screen", async ({ page }) => {
+    await open(page, "/wallet", walletRoutes(), 390);
+    await expect(page.getByRole("complementary", { name: WALLET_LAYOUT.railLabel })).toBeVisible();
+    await bigText(page);
+    await healthy(page);
   });
 });

@@ -145,6 +145,12 @@ export function movementSentence(amount: number, reason: string | undefined): st
 /** Said once under the ledger, not on every row — the same rule the door history follows. */
 export const LEDGER_CLOCK_NOTE = "Times are the club's own.";
 
+/** R4 form factor (SPEC 3.4) — the balance rail beside the ledger, and the phone's docked top-up. */
+export const WALLET_LAYOUT = {
+  railLabel: "Your balance",
+  actionsLabel: "Wallet actions",
+} as const;
+
 /* ─────────────────────────────── held credits (D11 §3a) ─────────────────────────────── */
 
 /** Under the held line on the wallet card: the figure every spend decision reads. */

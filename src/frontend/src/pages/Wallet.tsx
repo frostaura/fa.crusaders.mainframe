@@ -18,7 +18,10 @@ import type { HeldFigures } from "../lib/liveBalance";
 import { WALLET_PAGE_SIZE as PAGE_SIZE } from "../lib/offline/memberReads";
 import { WalletNav } from "../components/wallet/WalletNav";
 import { HeldLine } from "../components/wallet/HeldLine";
-import { BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL } from "../lib/walletCopy";
+import { BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL, WALLET_LAYOUT, type BalanceLevel } from "../lib/walletCopy";
+import { ContextBar } from "../components/ui/context-bar";
+import { useMediaQuery } from "../components/ui/use-media-query";
+import { WithAside } from "../components/ui/with-aside";
 
 /**
  * The figure, its sentence and the way to fix it — one component because they are one claim.
@@ -37,7 +40,7 @@ import { BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL } from 
  * nothing to play with: at zero it is the only thing on the page that does anything for them.
  * </p>
  */
-function BalanceCard({ balance, painted, held }: { balance: number | null; painted: number | null; held: HeldFigures | null }) {
+function BalanceCard({ balance, painted, held, topUp = true }: { balance: number | null; painted: number | null; held: HeldFigures | null; topUp?: boolean }) {
   const level = walletTone(balance);
   const tone = BALANCE_TONE[level];
   const edge = level === "zero" ? "border-danger-strong" : "border-warning-strong";
@@ -60,11 +63,22 @@ function BalanceCard({ balance, painted, held }: { balance: number | null; paint
           </p>
           <HeldLine held={held} />
         </div>
-        <Button asChild variant={level === "zero" ? "primary" : "secondary"} className="shrink-0">
-          <Link to="/wallet/topup">{TOP_UP_LABEL[level]}</Link>
-        </Button>
+        {topUp ? <TopUpLink level={level} /> : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * The top-up control. Navigation, so a link drawn as the page's primary action
+ * (`<Button asChild><Link/></Button>`). Primary when there is nothing to play with; on a phone it is
+ * docked in thumb reach (R4 form factor, SPEC 3.4) and primary there whatever the balance.
+ */
+function TopUpLink({ level, primary = false, block = false }: { level: BalanceLevel; primary?: boolean; block?: boolean }) {
+  return (
+    <Button asChild block={block} variant={primary || level === "zero" ? "primary" : "secondary"} className="shrink-0">
+      <Link to="/wallet/topup">{TOP_UP_LABEL[level]}</Link>
+    </Button>
   );
 }
 
@@ -139,9 +153,11 @@ export default function WalletPage() {
   const loaded = rows !== null && cardBalance !== null;
   const shown = rows?.length ?? 0;
   const refresh = () => { void load(Math.max(shown, PAGE_SIZE)); };
+  // One Top up, in one place: beside the figure from lg, docked in thumb reach below it.
+  const wide = useMediaQuery(LG_UP);
 
   return (
-    <PageShell>
+    <PageShell width="wide">
       <PageHeader
         title="Wallet"
         description="Your credit, and every movement of it."
@@ -160,12 +176,23 @@ export default function WalletPage() {
         className="gap-8"
       >
         {loaded ? (
-          <>
-            <BalanceCard balance={balance} painted={painted} held={held} />
+          // R4 form factor (SPEC 3.4): from a 64rem page the balance is a sticky rail beside the
+          // ledger, first in reading order — the figure and Top up together, not 800px apart.
+          <WithAside placement="before" at="64rem" asideLabel={WALLET_LAYOUT.railLabel} aside={
+            <BalanceCard balance={balance} painted={painted} held={held} topUp={wide} />
+          }>
             <LedgerSection rows={rows} shareBookings={shareBookings} total={total} busy={busy} error={stale ? null : error} onOlder={() => void load(shown + PAGE_SIZE)} />
-          </>
+          </WithAside>
         ) : null}
       </StateBlock>
+      {loaded && !wide ? (
+        // One verb, the bar's whole width: the figure it is about is the card just above.
+        <ContextBar position="bottom" until="lg" label={WALLET_LAYOUT.actionsLabel}>
+          <TopUpLink level={walletTone(balance)} primary block />
+        </ContextBar>
+      ) : null}
     </PageShell>
   );
 }
+
+const LG_UP = "(min-width: 1024px)";
