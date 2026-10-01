@@ -45,6 +45,21 @@ describe("focusAfterAction — filling a vacuum, and waiting for one", () => {
     expect(document.activeElement).toBe(target);
   });
 
+  it("treats the page's <main> as a vacuum: a closing dialog's rescue never beats a named target", () => {
+    // ui/dialog parks focus on <main> when the opener has gone; on a slow runner that landed
+    // first, read as "held", and the result card's heading never got it (ResultCard F2-12).
+    const main = document.createElement("main");
+    main.id = "main-content";
+    main.tabIndex = -1;
+    document.body.append(main);
+    main.focus();
+    const target = button("successor");
+    focusAfterAction(() => target);
+
+    vi.advanceTimersByTime(1);
+    expect(document.activeElement).toBe(target);
+  });
+
   it("leaves focus alone when somebody else is holding it on purpose", () => {
     const held = button("the-field-they-tabbed-to");
     const target = button("successor");

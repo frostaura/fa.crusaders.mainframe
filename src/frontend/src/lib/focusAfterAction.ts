@@ -59,10 +59,18 @@ const BACKOFF_MS = [0, 32, 64, 128, 256, 512, 1024, 2048];
  */
 let currentRun = 0;
 
-/** Whether focus is nowhere in particular: the body, nothing, or a node that has been removed. */
+/**
+ * Whether focus is nowhere in particular: the body, nothing, a node that has been removed — or
+ * the page's `<main>`, which is where a closing dialog parks focus when its opener has gone
+ * (`ui/dialog` `rescueFromBody`). That rescue is the floor, not a choice: a caller that named a
+ * target must still win over it. It raced this module on a slow runner: when the Record button
+ * was already gone at the sheet's close, `<main>` took focus first, read as "held", and the
+ * result card's heading never got it (ResultCard F2-12, red on CI only).
+ */
 function adrift(active: Element | null): boolean {
   if (active === null) return true;
   if (active === document.body) return true;
+  if (active.tagName === "MAIN") return true;
   return !active.isConnected;
 }
 
