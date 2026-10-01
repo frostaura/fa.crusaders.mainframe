@@ -42,7 +42,7 @@ public static class CourtActivationResponse
             ["user_id"] = userId,
             ["booking_id"] = a.Booking.Id,
             ["paid_by_user_id"] = a.PayerUserId,
-            ["amount_credits"] = a.AmountCredits,
+            ["amount_minutes"] = a.AmountMinutes,
             ["already_active"] = a.AlreadyActive,
             ["ends_at"] = a.Booking.EndsAt,
         },
@@ -57,8 +57,8 @@ public static class CourtActivationResponse
             ["activated"] = false,
             ["user_id"] = userId,
             ["reason"] = "insufficient_balance",
-            ["current_credits"] = ib.Current,
-            ["required_credits"] = ib.Required,
+            ["current_minutes"] = ib.Current,
+            ["required_minutes"] = ib.Required,
         },
 
         ActivationResult.NoBooking => new()

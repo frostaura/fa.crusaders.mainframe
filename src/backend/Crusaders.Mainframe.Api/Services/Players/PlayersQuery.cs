@@ -121,17 +121,17 @@ public sealed partial class PlayersQuery
             players = table.Players,
             money = new
             {
-                price_credits = booking.AmountChargedCredits,
-                organiser_owed_credits = owed,
-                shares_received_credits = table.Received,
-                organiser_net_credits = owed - table.Received,
-                unpaid_credits = table.Unpaid,
+                price_minutes = booking.AmountChargedMinutes,
+                organiser_owed_minutes = owed,
+                shares_received_minutes = table.Received,
+                organiser_net_minutes = owed - table.Received,
+                unpaid_minutes = table.Unpaid,
                 share_deadline = PlayerSettings.ShareDeadline(booking, settings),
-                is_split = seats.Any(s => s.IsPartner && s.IsLive && s.ShareCredits > 0) || table.Received != 0m,
+                is_split = seats.Any(s => s.IsPartner && s.IsLive && s.ShareMinutes > 0) || table.Received != 0,
                 // R5 (M5-3/M5-7, lane D1's ask): what the club gave back and kept, from the payer's
                 // own rows — the client derived both and was wrong beside an admin compensation.
-                refunded_credits = refunded,
-                penalty_credits = penalty,
+                refunded_minutes = refunded,
+                penalty_minutes = penalty,
             },
             attendance = new
             {
@@ -156,10 +156,10 @@ public sealed partial class PlayersQuery
     }
 
     private sealed record DetailContext(
-        Booking Booking, List<BookingParticipant> Seats, Dictionary<Guid, PublicMember> People, decimal Owed, string Role, Guid? MySeatId,
+        Booking Booking, List<BookingParticipant> Seats, Dictionary<Guid, PublicMember> People, int Owed, string Role, Guid? MySeatId,
         TenantSettingsView Settings);
 
-    private sealed record DetailTable(List<object> Players, decimal Received, decimal Unpaid);
+    private sealed record DetailTable(List<object> Players, int Received, int Unpaid);
 
     /// <summary>
     /// The player table and its two money sums. Dead seats are shown to the organiser and admins
@@ -168,17 +168,17 @@ public sealed partial class PlayersQuery
     private async Task<DetailTable> TableAsync(DetailContext d, CancellationToken ct)
     {
         var players = new List<object>();
-        decimal received = 0m, unpaid = 0m;
+        int received = 0, unpaid = 0;
         foreach (var s in d.Seats)
         {
             var paid = await _shares.PaidAsync(s, ct);
             var open = await OpenAsync(d, s, ct);
-            received += s.IsPartner ? paid : 0m;
+            received += s.IsPartner ? paid : 0;
             unpaid += open;
             if (!IsShown(s, d.Role, d.MySeatId)) continue;
             var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
             var money = new SeatMoney(paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open,
-                s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct, CancelledSince(d.Booking)) : 0m);
+                s.IsPartner ? await ShareLedger.ReturnedOfAsync(_db, s, ct, CancelledSince(d.Booking)) : 0);
             players.Add(SeatView(s, d.People, money));
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
@@ -189,7 +189,7 @@ public sealed partial class PlayersQuery
     /// The payer's refund rows for this booking, and the penalties kept (late cancel or no-show,
     /// as a positive figure), in one read. Zero for a booking nothing was settled on.
     /// </summary>
-    private async Task<(decimal Refunded, decimal Penalty)> SettledAsync(Booking booking, CancellationToken ct)
+    private async Task<(int Refunded, int Penalty)> SettledAsync(Booking booking, CancellationToken ct)
     {
         var payer = ShareLedger.PayerOf(booking);
         var rows = await _db.LedgerEntries.AsNoTracking()
@@ -197,7 +197,7 @@ public sealed partial class PlayersQuery
                         && (l.Type == LedgerEntryType.CancellationRefund || l.Type == LedgerEntryType.LateCancellationPenalty
                             || l.Type == LedgerEntryType.NoShowPenalty))
             .GroupBy(l => l.Type == LedgerEntryType.CancellationRefund)
-            .Select(g => new { Refund = g.Key, Sum = g.Sum(l => l.AmountCredits) })
+            .Select(g => new { Refund = g.Key, Sum = g.Sum(l => l.AmountMinutes) })
             .ToListAsync(ct);
         var refunded = rows.Where(r => r.Refund).Sum(r => r.Sum);
         var penalty = -rows.Where(r => !r.Refund).Sum(r => r.Sum);
@@ -205,7 +205,7 @@ public sealed partial class PlayersQuery
     }
 
     /// <summary>
-    /// On a cancelled game, <c>returned_credits</c> is what the CANCELLATION sent back (M4-4), not
+    /// On a cancelled game, <c>returned_minutes</c> is what the CANCELLATION sent back (M4-4), not
     /// every return the seat ever had; elsewhere it stays the running total.
     /// </summary>
     private static DateTimeOffset? CancelledSince(Booking b) =>
@@ -224,13 +224,13 @@ public sealed partial class PlayersQuery
     /// (review round 1, B4: "Shares not paid yet" read 80 on a booking where 120 was owed, because
     /// the share rule gives an unclaimed seat no target at all).
     /// </summary>
-    private async Task<decimal> OpenAsync(DetailContext d, BookingParticipant s, CancellationToken ct)
+    private async Task<int> OpenAsync(DetailContext d, BookingParticipant s, CancellationToken ct)
     {
-        if (!s.IsPartner || !s.IsLive) return 0m;
+        if (!s.IsPartner || !s.IsLive) return 0;
         if (s.UserId is not null) return await _shares.UnpaidAsync(d.Booking, s, ct);
         var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
         var live = d.Booking.Status is BookingStatus.Booked or BookingStatus.Completed;
-        return closed || !live ? 0m : s.ShareCredits;
+        return closed || !live ? 0 : s.ShareMinutes;
     }
 
     /// <summary>One seat's money: paid (net of returns), its target, what is still open, and what came back.</summary>
@@ -250,16 +250,16 @@ public sealed partial class PlayersQuery
             name = member?.Name ?? s.GuestName,
             photo_url = member?.PhotoUrl,
             status = PlayerViews.StatusName(s.Status),
-            share_credits = s.ShareCredits,
+            share_minutes = s.ShareMinutes,
             weight = s.ShareWeight,
-            consented_credits = s.ConsentedCredits,
-            paid_credits = paid,
-            target_credits = target,
-            unpaid_credits = unpaid,
-            // F2-4: share credits that came BACK to this seat — paid_credits nets them out, so a
+            consented_minutes = s.ConsentedMinutes,
+            paid_minutes = paid,
+            target_minutes = target,
+            unpaid_minutes = unpaid,
+            // F2-4: share credits that came BACK to this seat — paid_minutes nets them out, so a
             // cancelled game read "paid 0" with no word of the refund.
-            returned_credits = money.Returned,
-            needs_consent = s.IsPartner && s.Status == ParticipantStatus.Accepted && s.ShareCredits > s.ConsentedCredits,
+            returned_minutes = money.Returned,
+            needs_consent = s.IsPartner && s.Status == ParticipantStatus.Accepted && s.ShareMinutes > s.ConsentedMinutes,
             settled_outside = s.SettledOutsideAt is not null,
             lapsed = s.LapsedAt is not null || s.Status == ParticipantStatus.Lapsed,
             checked_in_at = s.CheckedInAt,
@@ -282,13 +282,13 @@ public sealed partial class PlayersQuery
             name = member?.Name,
             photo_url = member?.PhotoUrl,
             status = "accepted",
-            share_credits = b.AmountChargedCredits,
+            share_minutes = b.AmountChargedMinutes,
             weight = 1,
-            consented_credits = 0m,
-            paid_credits = 0m,
-            target_credits = 0m,
-            unpaid_credits = 0m,
-            returned_credits = 0m,
+            consented_minutes = 0,
+            paid_minutes = 0,
+            target_minutes = 0,
+            unpaid_minutes = 0,
+            returned_minutes = 0,
             needs_consent = false,
             settled_outside = false,
             lapsed = false,
@@ -347,7 +347,7 @@ public sealed partial class PlayersQuery
         foreach (var x in rows.Where(x => now < PlayerSettings.ShareDeadline(x.Booking, settings)).OrderBy(x => x.Booking.StartsAt))
         {
             var unpaid = await _shares.UnpaidAsync(x.Booking, x.Seat, ct);
-            if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0m) continue;
+            if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0) continue;
             items.Add(await InviteViewAsync(x.Booking, x.Seat, me, settings, ct, wallet));
         }
         return items;
@@ -390,15 +390,15 @@ public sealed partial class PlayersQuery
             ends_at = BookingService.OriginalEndsAt(booking),
             organiser = Member(booking.UserId, people),
             players = Math.Max(players, 1),
-            share_credits = seat.ShareCredits,
-            to_pay_credits = unpaid,
-            needs_consent = seat.Status == ParticipantStatus.Accepted && seat.ShareCredits > seat.ConsentedCredits,
-            balance_credits = balance,
-            spendable_credits = spendable,
-            held_credits = held.Held,
-            owed_back_credits = held.OwedBack,
-            balance_after_credits = balance - unpaid,
-            short_by_credits = Math.Max(0m, unpaid - spendable),
+            share_minutes = seat.ShareMinutes,
+            to_pay_minutes = unpaid,
+            needs_consent = seat.Status == ParticipantStatus.Accepted && seat.ShareMinutes > seat.ConsentedMinutes,
+            balance_minutes = balance,
+            spendable_minutes = spendable,
+            held_minutes = held.Held,
+            owed_back_minutes = held.OwedBack,
+            balance_after_minutes = balance - unpaid,
+            short_by_minutes = Math.Max(0, unpaid - spendable),
             share_deadline = PlayerSettings.ShareDeadline(booking, settings),
             cap = cap is null ? null : PlayersService.CapFigures(cap),
 
@@ -409,7 +409,7 @@ public sealed partial class PlayersQuery
     }
 
     /// <summary>A member's raw balance and what of it is held — read once, shown together.</summary>
-    public sealed record Wallet(decimal Balance, HeldCredits Held);
+    public sealed record Wallet(int Balance, HeldMinutes Held);
 
     private async Task<Wallet> WalletAsync(Guid userId, CancellationToken ct) =>
         new(await _ledger.GetBalanceAsync(userId, ct), await _ledger.GetHeldAsync(userId, ct));
@@ -424,8 +424,8 @@ public sealed partial class PlayersQuery
             Seat = seat.Seat,
             UserId = viewer,
             Status = seat.Status,
-            ShareCredits = seat.ShareCredits,
-            ConsentedCredits = seat.ConsentedCredits,
+            ShareMinutes = seat.ShareMinutes,
+            ConsentedMinutes = seat.ConsentedMinutes,
         };
     }
 

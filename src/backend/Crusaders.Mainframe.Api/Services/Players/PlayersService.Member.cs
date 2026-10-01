@@ -15,7 +15,7 @@ public sealed partial class PlayersService
     }
 
     /// <summary>Accepts through a shared link — claiming an open seat, or answering one addressed to the caller.</summary>
-    public async Task<PlayerOutcome> AcceptByTokenAsync(string? token, Guid me, decimal? expectedShare, CancellationToken ct)
+    public async Task<PlayerOutcome> AcceptByTokenAsync(string? token, Guid me, int? expectedShare, CancellationToken ct)
     {
         var seat = await SeatForTokenAsync(token, ct);
         if (seat is null || (seat.UserId is { } owner && owner != me)) return PlayerOutcome.InviteNotFound;
@@ -47,7 +47,7 @@ public sealed partial class PlayersService
     /// already-accepted seat whose share went UP is how a partner consents to the new figure.
     /// </para>
     /// </summary>
-    public async Task<PlayerOutcome> AcceptAsync(Guid seatId, Guid me, decimal? expectedShare, CancellationToken ct, bool viaToken = false)
+    public async Task<PlayerOutcome> AcceptAsync(Guid seatId, Guid me, int? expectedShare, CancellationToken ct, bool viaToken = false)
     {
         PlayerOutcome outcome;
         try
@@ -76,7 +76,7 @@ public sealed partial class PlayersService
     private sealed record AcceptBody(Guid BookingId, Guid OrganiserId, object Answer);
 
     /// <summary>One accept: whose, of which seat, at which figure, and by which route.</summary>
-    private sealed record AcceptAsk(Guid SeatId, Guid Me, decimal? Expected, bool ViaToken);
+    private sealed record AcceptAsk(Guid SeatId, Guid Me, int? Expected, bool ViaToken);
 
     /// <summary>
     /// After a lost race: the winner's accept is this caller's answer too — but only when it was
@@ -84,13 +84,13 @@ public sealed partial class PlayersService
     /// caller agreed to. A share raised between the two taps is a 409 with the current figure,
     /// never a stale 200 that reads as "you agreed to this".
     /// </summary>
-    internal async Task<PlayerOutcome> AlreadyAnsweredAsync(Guid seatId, Guid me, CancellationToken ct, decimal? expected = null)
+    internal async Task<PlayerOutcome> AlreadyAnsweredAsync(Guid seatId, Guid me, CancellationToken ct, int? expected = null)
     {
         var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
         if (seat?.UserId != me || seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
-        if (seat.ConsentedCredits < seat.ShareCredits || (expected is { } e && seat.ShareCredits > e))
+        if (seat.ConsentedMinutes < seat.ShareMinutes || (expected is { } e && seat.ShareMinutes > e))
         {
-            return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_credits = seat.ShareCredits });
+            return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_minutes = seat.ShareMinutes });
         }
         return PlayerOutcome.Ok(await AnswerAsync(seat, ct));
     }
@@ -110,15 +110,15 @@ public sealed partial class PlayersService
         seat = game.Seats.First(s => s.Id == seatId);
 
         if (await AcceptRefusalAsync(game, seat, me, now, ct) is { } refused) return refused;
-        if (seat.ShareCredits > expected)
+        if (seat.ShareMinutes > expected)
         {
-            return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_credits = seat.ShareCredits });
+            return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_minutes = seat.ShareMinutes });
         }
 
         var fresh = seat.Status == ParticipantStatus.Invited;
         seat.UserId = me;
         seat.Status = ParticipantStatus.Accepted;
-        seat.ConsentedCredits = Math.Max(seat.ConsentedCredits, seat.ShareCredits);
+        seat.ConsentedMinutes = Math.Max(seat.ConsentedMinutes, seat.ShareMinutes);
         seat.RespondedAt ??= now.Storable();
         seat.UpdatedAt = now.Storable();
 
@@ -133,7 +133,7 @@ public sealed partial class PlayersService
             if (balance < delta)
             {
                 _db.ChangeTracker.Clear();
-                return PlayerOutcome.Refuse(402, PlayerErrors.InsufficientBalance, new { current_credits = balance, required_credits = delta });
+                return PlayerOutcome.Refuse(402, PlayerErrors.InsufficientBalance, new { current_minutes = balance, required_minutes = delta });
             }
             postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct);
         }
@@ -206,8 +206,8 @@ public sealed partial class PlayersService
         }
 
         // A seat already accepted and fully paid at its current share: nothing to do.
-        if (seat.Status == ParticipantStatus.Accepted && seat.ConsentedCredits >= seat.ShareCredits
-            && await _p.Shares.UnpaidAsync(game.Booking, seat, ct) <= 0m)
+        if (seat.Status == ParticipantStatus.Accepted && seat.ConsentedMinutes >= seat.ShareMinutes
+            && await _p.Shares.UnpaidAsync(game.Booking, seat, ct) <= 0)
         {
             return PlayerOutcome.Ok(await AnswerAsync(seat, ct));
         }
@@ -229,25 +229,25 @@ public sealed partial class PlayersService
     }
 
     /// <summary>
-    /// The accept's answer. <c>balance_credits</c> is the RAW balance, as on every route; what the
+    /// The accept's answer. <c>balance_minutes</c> is the RAW balance, as on every route; what the
     /// partner may spend and what they hold for partners of their own sit beside it (review (a)).
     /// </summary>
     private async Task<object> AnswerAsync(BookingParticipant seat, CancellationToken ct)
     {
-        var balance = seat.UserId is { } u ? await _p.Ledger.GetBalanceAsync(u, ct) : 0m;
-        var held = seat.UserId is { } h ? await _p.Ledger.GetHeldAsync(h, ct) : HeldCredits.None;
+        var balance = seat.UserId is { } u ? await _p.Ledger.GetBalanceAsync(u, ct) : 0;
+        var held = seat.UserId is { } h ? await _p.Ledger.GetHeldAsync(h, ct) : HeldMinutes.None;
         return new
         {
             participant_id = seat.Id,
             booking_id = seat.BookingId,
             status = PlayerViews.StatusName(seat.Status),
-            share_credits = seat.ShareCredits,
-            consented_credits = seat.ConsentedCredits,
-            paid_credits = await _p.Shares.PaidAsync(seat, ct),
-            balance_credits = balance,
-            spendable_credits = balance - held.Reserved,
-            held_credits = held.Held,
-            owed_back_credits = held.OwedBack,
+            share_minutes = seat.ShareMinutes,
+            consented_minutes = seat.ConsentedMinutes,
+            paid_minutes = await _p.Shares.PaidAsync(seat, ct),
+            balance_minutes = balance,
+            spendable_minutes = balance - held.Reserved,
+            held_minutes = held.Held,
+            owed_back_minutes = held.OwedBack,
         };
     }
 

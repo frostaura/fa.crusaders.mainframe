@@ -12,12 +12,12 @@ namespace Crusaders.Mainframe.Api.Services;
 /// (review round 3). Neither is spendable: <see cref="Reserved"/> is what every spend check takes
 /// off the balance. The balance itself is untouched — both are derived, neither is a ledger row.
 /// </summary>
-public sealed record HeldCredits(decimal Held, DateTimeOffset? ReleasesAt, decimal OwedBack = 0m)
+public sealed record HeldMinutes(int Held, DateTimeOffset? ReleasesAt, int OwedBack = 0)
 {
-    public static readonly HeldCredits None = new(0m, null);
+    public static readonly HeldMinutes None = new(0, null);
 
     /// <summary>Held plus owed back: the part of the balance that is not the member's to spend.</summary>
-    public decimal Reserved => Held + OwedBack;
+    public int Reserved => Held + OwedBack;
 
     /// <summary>
     /// <see cref="Held"/> broken down by release instant — one part per share deadline, soonest
@@ -26,15 +26,15 @@ public sealed record HeldCredits(decimal Held, DateTimeOffset? ReleasesAt, decim
     /// </summary>
     public IReadOnlyList<HeldPart> Parts { get; init; } = [];
 
-    /// <summary>The parts as the wire carries them: <c>[{credits, until}]</c>.</summary>
+    /// <summary>The parts as the wire carries them: <c>[{minutes, until}]</c>.</summary>
     public IEnumerable<object> WireParts()
     {
-        return Parts.Select(p => new { credits = p.Credits, until = p.Until });
+        return Parts.Select(p => new { minutes = p.Minutes, until = p.Until });
     }
 }
 
-/// <summary>Credits held until one share deadline.</summary>
-public sealed record HeldPart(decimal Credits, DateTimeOffset Until);
+/// <summary>Minutes held until one share deadline.</summary>
+public sealed record HeldPart(int Minutes, DateTimeOffset Until);
 
 /// <summary>
 /// Credits an organiser received as shares that are not theirs to spend yet (D11, decision of
@@ -66,7 +66,7 @@ public sealed record HeldPart(decimal Credits, DateTimeOffset Until);
 /// </summary>
 public static class ShareHolds
 {
-    public static async Task<HeldCredits> ForAsync(
+    public static async Task<HeldMinutes> ForAsync(
         MainframeDbContext db, Guid userId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
         var snapshot = await SnapshotAsync(db, userId, settings, now, ct);
@@ -75,7 +75,7 @@ public static class ShareHolds
             .OrderBy(g => g.Key)
             .Select(g => new HeldPart(g.Sum(kv => kv.Value), g.Key))
             .ToList();
-        return new HeldCredits(snapshot.Held.Values.Sum(), snapshot.ReleasesAt, snapshot.OwedBack(snapshot.Waiting)) { Parts = parts };
+        return new HeldMinutes(snapshot.Held.Values.Sum(), snapshot.ReleasesAt, snapshot.OwedBack(snapshot.Waiting)) { Parts = parts };
     }
 
     /// <summary>
@@ -103,7 +103,7 @@ public static class ShareHolds
     /// organiser below zero without the desk's named overdraft.
     /// </para>
     /// </summary>
-    public static async Task<decimal> CoverageAsync(
+    public static async Task<int> CoverageAsync(
         MainframeDbContext db, CoverageAsk ask, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
         var snapshot = await SnapshotAsync(db, ask.UserId, settings, now, ct);
@@ -128,7 +128,7 @@ public static class ShareHolds
         MainframeDbContext db, Guid userId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
         var nets = await NetsAsync(db, userId, DeadlineAhead(now, UnstampedFrom(now, settings)), ct);
-        var (held, releases, deadlines) = (new Dictionary<Guid, decimal>(), (DateTimeOffset?)null, new Dictionary<Guid, DateTimeOffset>());
+        var (held, releases, deadlines) = (new Dictionary<Guid, int>(), (DateTimeOffset?)null, new Dictionary<Guid, DateTimeOffset>());
         var afterCheckIn = new HashSet<Guid>();
         if (nets.Count > 0)
         {
@@ -164,7 +164,7 @@ public static class ShareHolds
             .Distinct()
             .ToListAsync(ct);
         if (bookings.Count == 0) return [];
-        return (await PendingSeatReturnsAsync(db, bookings, settings, now, ct)).Where(p => p.Since is not null && p.Pending > 0m).ToList();
+        return (await PendingSeatReturnsAsync(db, bookings, settings, now, ct)).Where(p => p.Since is not null && p.Pending > 0).ToList();
     }
 
     /// <summary>
@@ -180,23 +180,23 @@ public static class ShareHolds
         now.AddHours(-PlayerSettings.ShareLapseHours(settings)).AddDays(-1);
 
     /// <summary>The member's net share rows per booking in <paramref name="window"/>, positive ones only (what they received).</summary>
-    private static async Task<Dictionary<Guid, decimal>> NetsAsync(
+    private static async Task<Dictionary<Guid, int>> NetsAsync(
         MainframeDbContext db, Guid userId, Expression<Func<Booking, bool>> window, CancellationToken ct)
     {
         var rows = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.UserId == userId && l.Type == LedgerEntryType.ShareTransfer && l.RelatedBookingId != null)
-            .Join(db.Bookings.AsNoTracking().Where(window), l => l.RelatedBookingId, b => (Guid?)b.Id, (l, b) => new { b.Id, l.AmountCredits })
+            .Join(db.Bookings.AsNoTracking().Where(window), l => l.RelatedBookingId, b => (Guid?)b.Id, (l, b) => new { b.Id, l.AmountMinutes })
             .GroupBy(x => x.Id)
-            .Select(g => new { BookingId = g.Key, Net = g.Sum(x => x.AmountCredits) })
+            .Select(g => new { BookingId = g.Key, Net = g.Sum(x => x.AmountMinutes) })
             .ToListAsync(ct);
-        return rows.Where(r => r.Net > 0m).ToDictionary(r => r.BookingId, r => r.Net);
+        return rows.Where(r => r.Net > 0).ToDictionary(r => r.BookingId, r => r.Net);
     }
 
-    private static (Dictionary<Guid, decimal> PerBooking, DateTimeOffset? ReleasesAt, Dictionary<Guid, DateTimeOffset> Deadlines) Sum(
-        Dictionary<Guid, decimal> nets, Dictionary<Guid, Booking> bookings, Dictionary<Guid, decimal> pending, Guid userId,
+    private static (Dictionary<Guid, int> PerBooking, DateTimeOffset? ReleasesAt, Dictionary<Guid, DateTimeOffset> Deadlines) Sum(
+        Dictionary<Guid, int> nets, Dictionary<Guid, Booking> bookings, Dictionary<Guid, int> pending, Guid userId,
         TenantSettingsView settings, DateTimeOffset now)
     {
-        var held = new Dictionary<Guid, decimal>();
+        var held = new Dictionary<Guid, int>();
         var deadlines = new Dictionary<Guid, DateTimeOffset>();
         DateTimeOffset? releases = null;
         foreach (var n in nets.Select(kv => new { BookingId = kv.Key, Net = kv.Value }))
@@ -207,7 +207,7 @@ public static class ShareHolds
             if (now >= deadline) continue;
 
             var amount = booking.Status == BookingStatus.Cancelled ? pending.GetValueOrDefault(booking.Id) : n.Net;
-            if (amount <= 0m) continue;
+            if (amount <= 0) continue;
             held[n.BookingId] = Math.Min(amount, n.Net);
             deadlines[n.BookingId] = deadline;
             releases = releases is { } r && r <= deadline ? r : deadline;
@@ -232,25 +232,25 @@ public static class ShareHolds
         var owedBy = (await db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId != null && ids.Contains(l.RelatedBookingId.Value) && l.Type != LedgerEntryType.ShareTransfer)
             .GroupBy(l => new { Booking = l.RelatedBookingId!.Value, l.UserId })
-            .Select(g => new { g.Key.Booking, g.Key.UserId, Sum = g.Sum(l => l.AmountCredits) })
+            .Select(g => new { g.Key.Booking, g.Key.UserId, Sum = g.Sum(l => l.AmountMinutes) })
             .ToListAsync(ct)).ToDictionary(x => (x.Booking, x.UserId), x => x.Sum);
         var shareRows = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId != null && ids.Contains(l.RelatedBookingId.Value)
                         && l.Type == LedgerEntryType.ShareTransfer && l.ExternalReference != null)
-            .Select(l => new { l.UserId, Reference = l.ExternalReference!, l.AmountCredits })
+            .Select(l => new { l.UserId, Reference = l.ExternalReference!, l.AmountMinutes })
             .ToListAsync(ct);
 
         var result = new List<SeatPending>();
         foreach (var booking in bookings)
         {
-            var owed = Math.Max(0m, -owedBy.GetValueOrDefault((booking.Id, ShareLedger.PayerOf(booking))));
+            var owed = Math.Max(0, -owedBy.GetValueOrDefault((booking.Id, ShareLedger.PayerOf(booking))));
             foreach (var seat in seats.Where(p => p.BookingId == booking.Id))
             {
                 var prefix = ShareLedger.Prefix(seat.Id);
                 var paid = -shareRows.Where(r => r.UserId == seat.UserId && r.Reference.StartsWith(prefix, StringComparison.Ordinal))
-                    .Sum(r => r.AmountCredits);
+                    .Sum(r => r.AmountMinutes);
                 var target = ShareLedger.TargetFor(booking, seat, owed, paid, ShareLedger.IsClosed(booking, seat, settings, now));
-                result.Add(new SeatPending(seat.Id, booking.Id, seat.ReturnPendingSince, Math.Max(0m, paid - target)));
+                result.Add(new SeatPending(seat.Id, booking.Id, seat.ReturnPendingSince, Math.Max(0, paid - target)));
             }
         }
         return result;
@@ -258,13 +258,13 @@ public static class ShareHolds
 }
 
 /// <summary>A return one partner seat is due: how much, on which booking, and since when it has waited (null: not waiting).</summary>
-public sealed record SeatPending(Guid SeatId, Guid BookingId, DateTimeOffset? Since, decimal Pending);
+public sealed record SeatPending(Guid SeatId, Guid BookingId, DateTimeOffset? Since, int Pending);
 
 /// <summary>Whose coverage, for a return from which booking to which seat, against which balance.</summary>
-public sealed record CoverageAsk(Guid UserId, Guid BookingId, Guid SeatId, decimal Balance);
+public sealed record CoverageAsk(Guid UserId, Guid BookingId, Guid SeatId, int Balance);
 
 /// <summary>What a member has set aside: per-booking holds, the earliest release, and the returns waiting on them.</summary>
-public sealed record HoldSnapshot(Dictionary<Guid, decimal> Held, DateTimeOffset? ReleasesAt, List<SeatPending> Waiting)
+public sealed record HoldSnapshot(Dictionary<Guid, int> Held, DateTimeOffset? ReleasesAt, List<SeatPending> Waiting)
 {
     /// <summary>
     /// Bookings whose hold is NOT an earmark: games cancelled after check-in (S4). Every share on
@@ -277,7 +277,7 @@ public sealed record HoldSnapshot(Dictionary<Guid, decimal> Held, DateTimeOffset
     /// <summary>Each held booking's share deadline — when its part of <see cref="Held"/> frees (C4).</summary>
     public IReadOnlyDictionary<Guid, DateTimeOffset> Deadlines { get; init; } = new Dictionary<Guid, DateTimeOffset>();
 
-    private decimal EarmarkOf(Guid bookingId) => NotEarmarked.Contains(bookingId) ? 0m : Held.GetValueOrDefault(bookingId);
+    private int EarmarkOf(Guid bookingId) => NotEarmarked.Contains(bookingId) ? 0 : Held.GetValueOrDefault(bookingId);
 
     /// <summary>
     /// Coverage for a return from <paramref name="bookingId"/>, behind the <paramref name="earlier"/>
@@ -293,26 +293,26 @@ public sealed record HoldSnapshot(Dictionary<Guid, decimal> Held, DateTimeOffset
     /// </list>
     /// Never more than the balance, never below zero.
     /// </summary>
-    public decimal CoverageFor(Guid bookingId, IReadOnlyCollection<SeatPending> earlier, decimal balance)
+    public int CoverageFor(Guid bookingId, IReadOnlyCollection<SeatPending> earlier, int balance)
     {
         var need = earlier.GroupBy(w => w.BookingId).ToDictionary(g => g.Key, g => g.Sum(w => w.Pending));
         var drawn = need.Sum(kv => Math.Min(kv.Value, EarmarkOf(kv.Key)));
-        var excess = need.Sum(kv => Math.Max(0m, kv.Value - EarmarkOf(kv.Key)));
+        var excess = need.Sum(kv => Math.Max(0, kv.Value - EarmarkOf(kv.Key)));
         // Only EARMARKS stand between the balance and the free money. An S4 game's hold is its own
         // pending returns — the very returns this arithmetic pays from free balance — so counting
         // it here as well charged each such return twice: it posted only once the balance reached
         // twice the return (review round 6). Spend checks still set the S4 hold aside (ForAsync).
         var held = Held.Where(kv => !NotEarmarked.Contains(kv.Key)).Sum(kv => kv.Value);
 
-        var mine = Math.Max(0m, EarmarkOf(bookingId) - need.GetValueOrDefault(bookingId));
-        var backed = Math.Max(0m, Math.Min(balance, held) - drawn);
-        return Math.Min(mine, backed) + Math.Max(0m, balance - held - excess);
+        var mine = Math.Max(0, EarmarkOf(bookingId) - need.GetValueOrDefault(bookingId));
+        var backed = Math.Max(0, Math.Min(balance, held) - drawn);
+        return Math.Min(mine, backed) + Math.Max(0, balance - held - excess);
     }
 
     /// <summary>
     /// What <paramref name="waiting"/> sets aside beyond what their own bookings already hold — a
     /// booking's hold is not counted twice when it also has a waiting return.
     /// </summary>
-    public decimal OwedBack(IEnumerable<SeatPending> waiting) =>
-        waiting.GroupBy(w => w.BookingId).Sum(g => Math.Max(0m, g.Sum(w => w.Pending) - Held.GetValueOrDefault(g.Key)));
+    public int OwedBack(IEnumerable<SeatPending> waiting) =>
+        waiting.GroupBy(w => w.BookingId).Sum(g => Math.Max(0, g.Sum(w => w.Pending) - Held.GetValueOrDefault(g.Key)));
 }

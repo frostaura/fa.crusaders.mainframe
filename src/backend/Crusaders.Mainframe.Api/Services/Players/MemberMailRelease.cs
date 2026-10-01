@@ -143,7 +143,7 @@ public static class MemberMailRelease
         if (!InviteOpen(booking, seat, c)) return ReleaseVerdict.Drop(InviteClosed);
 
         var game = await GameText.ForAsync(c.Db, booking, c.Settings, ct);
-        return Send(p with { CourtName = game.CourtName, StartsAtLocal = game.StartsLocal, ShareCredits = seat.ShareCredits, SeatId = seat.Id });
+        return Send(p with { CourtName = game.CourtName, StartsAtLocal = game.StartsLocal, ShareMinutes = seat.ShareMinutes, SeatId = seat.Id });
     }
 
     private static async Task<ReleaseVerdict> ClubSeatAsync(ReleaseContext c, CancellationToken ct)
@@ -159,7 +159,7 @@ public static class MemberMailRelease
         {
             CourtName = game.CourtName,
             StartsAtLocal = game.StartsLocal,
-            ShareCredits = seat.ShareCredits,
+            ShareMinutes = seat.ShareMinutes,
             Accepted = accepted,
             Path = accepted ? $"/bookings/{booking.Id}" : PlayerNotices.InvitePath(seat.Id),
             SeatId = seat.Id,
@@ -175,7 +175,7 @@ public static class MemberMailRelease
         if (!GameOn(booking)) return ReleaseVerdict.Drop(GameOff);
         if (seat.LapsedAt is not null || c.Now >= PlayerSettings.ShareDeadline(booking, c.Settings)) return ReleaseVerdict.Drop(InviteClosed);
         if (seat.Status == ParticipantStatus.Accepted
-            && await c.Services.GetRequiredService<ShareLedger>().UnpaidAsync(booking, seat, ct) <= 0m)
+            && await c.Services.GetRequiredService<ShareLedger>().UnpaidAsync(booking, seat, ct) <= 0)
         {
             return ReleaseVerdict.Drop(SharePaid);
         }
@@ -185,7 +185,7 @@ public static class MemberMailRelease
         {
             CourtName = game.CourtName,
             StartsAtLocal = game.StartsLocal,
-            ShareCredits = seat.ShareCredits,
+            ShareMinutes = seat.ShareMinutes,
             DeadlineLocal = GameText.Local(PlayerSettings.ShareDeadline(booking, c.Settings), c.Settings),
             SeatId = seat.Id,
         });
@@ -215,8 +215,8 @@ public static class MemberMailRelease
         {
             CourtName = game.CourtName,
             StartsAtLocal = game.StartsLocal,
-            NewShareCredits = seat.ShareCredits,
-            NeedsConsent = seat.Status == ParticipantStatus.Accepted && seat.ShareCredits > seat.ConsentedCredits,
+            NewShareMinutes = seat.ShareMinutes,
+            NeedsConsent = seat.Status == ParticipantStatus.Accepted && seat.ShareMinutes > seat.ConsentedMinutes,
             SeatId = seat.Id,
         });
     }

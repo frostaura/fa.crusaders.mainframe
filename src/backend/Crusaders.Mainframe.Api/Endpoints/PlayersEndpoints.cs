@@ -176,7 +176,7 @@ public static class PlayersEndpoints
     private static IResult SplitPreview(SplitPreviewRequest req)
     {
         var specs = req.Players ?? [];
-        if (req.PriceCredits is not { } price || price < 0 || specs.Count > BookingParticipant.MaxSeats - 1)
+        if (req.PriceMinutes is not { } price || price < 0 || specs.Count > BookingParticipant.MaxSeats - 1)
         {
             return Results.BadRequest(new { error = "split_preview_invalid" });
         }
@@ -189,8 +189,8 @@ public static class PlayersEndpoints
         if (split.Error is { } error) return Results.BadRequest(new { error });
         return Results.Ok(new
         {
-            price_credits = price,
-            shares = split.Shares!.Select(s => new { seat = s.Seat, team = PlayerViews.TeamOf(s.Seat), share_credits = s.ShareCredits, weight = s.Weight }),
+            price_minutes = price,
+            shares = split.Shares!.Select(s => new { seat = s.Seat, team = PlayerViews.TeamOf(s.Seat), share_minutes = s.ShareMinutes, weight = s.Weight }),
         });
     }
 
@@ -217,13 +217,13 @@ public static class PlayersEndpoints
 
     /// <summary>
     /// The seat must be on the booking in the path — an id from another booking is a 404, not an
-    /// accept. The body names the share the partner was shown (<c>expectedShareCredits</c>).
+    /// accept. The body names the share the partner was shown (<c>expectedShareMinutes</c>).
     /// </summary>
     private static async Task<IResult> AcceptAsync(
         Guid bookingId, Guid participantId, AcceptRequest? req, HttpContext ctx, [AsParameters] SeatDeps deps, CancellationToken ct)
     {
         if (!await SeatOnAsync(deps.Db, bookingId, participantId, ct)) return Results.NotFound(new { error = "invite_not_found" });
-        return ToResult(await deps.Players.AcceptAsync(participantId, Me(ctx), req?.ExpectedShareCredits, ct));
+        return ToResult(await deps.Players.AcceptAsync(participantId, Me(ctx), req?.ExpectedShareMinutes, ct));
     }
 
     /// <summary>The accept route's services, bound as one parameter for the complexity gate.</summary>
@@ -244,7 +244,7 @@ public static class PlayersEndpoints
     }
 
     private static Task<IResult> AcceptLinkAsync(string token, AcceptRequest? req, HttpContext ctx, PlayersService players, CancellationToken ct) =>
-        Run(players.AcceptByTokenAsync(token, Me(ctx), req?.ExpectedShareCredits, ct));
+        Run(players.AcceptByTokenAsync(token, Me(ctx), req?.ExpectedShareMinutes, ct));
 
     private static async Task<IResult> DeclineLinkAsync(string token, HttpContext ctx, PlayersService players, CancellationToken ct)
     {
@@ -321,7 +321,7 @@ public static class PlayersEndpoints
 
 /// <summary>A split to preview: the price, the mode, and the players as the BookSheet holds them.</summary>
 public sealed record SplitPreviewRequest(
-    decimal? PriceCredits = null, string? SplitMode = null, int? OrganiserWeight = null, IReadOnlyList<PlayerSpec>? Players = null);
+    int? PriceMinutes = null, string? SplitMode = null, int? OrganiserWeight = null, IReadOnlyList<PlayerSpec>? Players = null);
 
 /// <summary>An admin adding a player: a member (invited, or placed with <c>accepted</c>), a guest, or an open link seat.</summary>
 public sealed record AdminAddPlayerRequest(Guid? UserId = null, string? GuestName = null, bool Accepted = false, string? Reason = null);
@@ -330,7 +330,7 @@ public sealed record AdminAddPlayerRequest(Guid? UserId = null, string? GuestNam
 /// A partner's accept: the share they were shown on the accept sheet. Required — a share that has
 /// risen past it since is refused with <c>409 share_changed</c> and the current figure.
 /// </summary>
-public sealed record AcceptRequest(decimal? ExpectedShareCredits = null);
+public sealed record AcceptRequest(int? ExpectedShareMinutes = null);
 
 /// <summary>
 /// An admin acting on one seat. The reason is required. The overdraft flag is required on a

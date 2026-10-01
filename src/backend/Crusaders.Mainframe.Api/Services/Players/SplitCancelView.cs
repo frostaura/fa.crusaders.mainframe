@@ -8,7 +8,7 @@ namespace Crusaders.Mainframe.Api.Services;
 public sealed record PartnerRefund(
     [property: System.Text.Json.Serialization.JsonPropertyName("user_id")] Guid UserId,
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string Name,
-    [property: System.Text.Json.Serialization.JsonPropertyName("credits")] decimal Credits);
+    [property: System.Text.Json.Serialization.JsonPropertyName("minutes")] int Minutes);
 
 /// <summary>
 /// What a cancellation does to a SPLIT booking's money (review round 1, B3). The organiser's
@@ -39,10 +39,10 @@ public sealed class SplitCancelView
     }
 
     /// <summary>What each accepted member partner has paid towards this booking, now.</summary>
-    public async Task<Dictionary<Guid, decimal>> PaidByPartnerAsync(Guid bookingId, CancellationToken ct)
+    public async Task<Dictionary<Guid, int>> PaidByPartnerAsync(Guid bookingId, CancellationToken ct)
     {
         var seats = await PartnerSeatsAsync(bookingId, ct);
-        var paid = new Dictionary<Guid, decimal>();
+        var paid = new Dictionary<Guid, int>();
         foreach (var s in seats) paid[s.Id] = await _shares.PaidAsync(s, ct);
         return paid;
     }
@@ -51,7 +51,7 @@ public sealed class SplitCancelView
     /// The refunds a cancellation that returns <paramref name="netRefund"/> to the organiser would
     /// send on to the partners, per the share rule.
     /// </summary>
-    public async Task<List<PartnerRefund>> QuoteAsync(Booking booking, decimal netRefund, CancellationToken ct)
+    public async Task<List<PartnerRefund>> QuoteAsync(Booking booking, int netRefund, CancellationToken ct)
     {
         var seats = await PartnerSeatsAsync(booking.Id, ct);
         if (seats.Count == 0) return [];
@@ -63,12 +63,12 @@ public sealed class SplitCancelView
             TenantId = booking.TenantId,
             Status = BookingStatus.Cancelled,
             CheckedInAt = booking.CheckedInAt,
-            AmountChargedCredits = booking.AmountChargedCredits,
+            AmountChargedMinutes = booking.AmountChargedMinutes,
             CancellationReason = booking.CancellationReason,
         };
         var settings = await _settings.GetAsync(ct);
-        var paidBefore = new Dictionary<Guid, decimal>();
-        var targetAfter = new Dictionary<Guid, decimal>();
+        var paidBefore = new Dictionary<Guid, int>();
+        var targetAfter = new Dictionary<Guid, int>();
         foreach (var s in seats)
         {
             var paid = await _shares.PaidAsync(s, ct);
@@ -80,7 +80,7 @@ public sealed class SplitCancelView
     }
 
     /// <summary>After the cancellation has settled: each partner's refund against what they had paid before it.</summary>
-    public async Task<List<PartnerRefund>> AfterAsync(Guid bookingId, Dictionary<Guid, decimal> paidBefore, CancellationToken ct)
+    public async Task<List<PartnerRefund>> AfterAsync(Guid bookingId, Dictionary<Guid, int> paidBefore, CancellationToken ct)
     {
         var booking = await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
         if (booking is null || paidBefore.Count == 0) return [];
@@ -88,7 +88,7 @@ public sealed class SplitCancelView
         var seats = await PartnerSeatsAsync(bookingId, ct);
         var owed = await _shares.OwedAsync(booking, ct);
         var settings = await _settings.GetAsync(ct);
-        var targets = new Dictionary<Guid, decimal>();
+        var targets = new Dictionary<Guid, int>();
         foreach (var s in seats)
         {
             var before = paidBefore.GetValueOrDefault(s.Id);
@@ -103,13 +103,13 @@ public sealed class SplitCancelView
             .OrderBy(p => p.Seat)
             .ToListAsync(ct);
 
-    private async Task<List<PartnerRefund>> NameAsync(List<BookingParticipant> seats, Func<BookingParticipant, decimal> refund, CancellationToken ct)
+    private async Task<List<PartnerRefund>> NameAsync(List<BookingParticipant> seats, Func<BookingParticipant, int> refund, CancellationToken ct)
     {
-        var due = seats.Select(s => (Seat: s, Credits: Math.Max(0m, refund(s)))).Where(x => x.Credits > 0m).ToList();
+        var due = seats.Select(s => (Seat: s, Minutes: Math.Max(0, refund(s)))).Where(x => x.Minutes > 0).ToList();
         if (due.Count == 0) return [];
         var ids = due.Select(x => x.Seat.UserId!.Value).ToList();
         var names = await _db.Memberships.AsNoTracking().Where(m => ids.Contains(m.UserId))
             .ToDictionaryAsync(m => m.UserId, m => m.FullName, ct);
-        return [.. due.Select(x => new PartnerRefund(x.Seat.UserId!.Value, names.GetValueOrDefault(x.Seat.UserId!.Value) ?? "", x.Credits))];
+        return [.. due.Select(x => new PartnerRefund(x.Seat.UserId!.Value, names.GetValueOrDefault(x.Seat.UserId!.Value) ?? "", x.Minutes))];
     }
 }

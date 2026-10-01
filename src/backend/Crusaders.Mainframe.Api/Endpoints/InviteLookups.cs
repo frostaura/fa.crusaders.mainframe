@@ -50,7 +50,7 @@ public static class InviteLookups
             court_name = court,
             starts_at = booking.StartsAt,
             ends_at = BookingService.OriginalEndsAt(booking),
-            share_credits = seat.ShareCredits,
+            share_minutes = seat.ShareMinutes,
             timezone = DoorClock.ZoneOf(settings).Name,
         });
     }
@@ -83,7 +83,7 @@ public static class InviteLookups
             starts_at = booking.StartsAt,
             ends_at = BookingService.OriginalEndsAt(booking),
             organiser_name = organiser,
-            share_credits = seat.ShareCredits,
+            share_minutes = seat.ShareMinutes,
             timezone = DoorClock.ZoneOf(settings).Name,
         });
     }

@@ -8,33 +8,33 @@ namespace Crusaders.Mainframe.Api.Services;
 
 /// <param name="SeatId">The seat the invite is for — what the release reads the invite's fate from (C8). Null on older rows.</param>
 public sealed record InvitePayload(
-    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string Path, Guid? SeatId = null);
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, int ShareMinutes, string Path, Guid? SeatId = null);
 
 /// <param name="HeldUntilLocal">On a share an organiser receives: when it stops being held (B12). Null on older rows.</param>
 /// <param name="ByClub">The club collected it (B8). False on older rows.</param>
-/// <param name="BalanceAfterCredits">The partner's balance after a club collect (B8).</param>
+/// <param name="BalanceAfterMinutes">The partner's balance after a club collect (B8).</param>
 /// <param name="ClubRemoved">The club took the partner off the game; this is that removal's return (review round 2, B-8).</param>
 /// <param name="ClubReason">The reason the admin recorded for a club collect or removal (B-8). Null on older rows.</param>
 public sealed record SharePayload(
-    Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits,
-    string? HeldUntilLocal = null, bool ByClub = false, decimal? BalanceAfterCredits = null,
+    Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes,
+    string? HeldUntilLocal = null, bool ByClub = false, int? BalanceAfterMinutes = null,
     bool ClubRemoved = false, string? ClubReason = null);
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
 public sealed record ClubSeatPayload(
-    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, bool Accepted, string Path,
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, int ShareMinutes, bool Accepted, string Path,
     Guid? SeatId = null);
 
 public sealed record ReminderPayload(
-    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string DeadlineLocal,
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, int ShareMinutes, string DeadlineLocal,
     bool FromOrganiser, string Path, Guid? SeatId = null);
 
 public sealed record LapsedPayload(
-    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal UnpaidCredits, bool ToOrganiser, Guid? SeatId = null);
+    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, int UnpaidMinutes, bool ToOrganiser, Guid? SeatId = null);
 
 /// <summary>A return of a paid share that waits for the organiser's credits to cover it (review round 2).</summary>
 public sealed record ReturnWaitingPayload(
-    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, bool ToOrganiser, Guid? SeatId = null);
+    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes, bool ToOrganiser, Guid? SeatId = null);
 
 public sealed record GameCancelledPayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal);
 
@@ -43,7 +43,7 @@ public sealed record ResultToConfirmPayload(
     Guid BookingId, string SubmitterName, string CourtName, string WhenLocal, string ScoreLine, string ConfirmDueLocal);
 
 public sealed record GameChangedPayload(
-    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent,
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, int? NewShareMinutes, bool NeedsConsent,
     Guid? SeatId = null, bool ByClub = false);
 
 /// <summary>Everything one member mail needs.</summary>
@@ -153,15 +153,15 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<InvitePayload>();
         return EmailTemplates.PlayerInvite(c.Club, c.To, new PlayerInviteNotice(
-            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareCredits, c.BaseUrl + p.Path));
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareMinutes, c.BaseUrl + p.Path));
     }
 
     private static EmailMessage ComposeShare(MemberMailContext c)
     {
         var p = c.Payload<SharePayload>();
         return EmailTemplates.ShareMoved(c.Club, c.To, new ShareMovement(
-            p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, c.BookingUrl(p.BookingId),
-            p.HeldUntilLocal, p.ByClub, p.BalanceAfterCredits)
+            p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountMinutes, c.BookingUrl(p.BookingId),
+            p.HeldUntilLocal, p.ByClub, p.BalanceAfterMinutes)
         {
             ClubRemoved = p.ClubRemoved,
             ClubReason = p.ClubReason,
@@ -172,21 +172,21 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<ClubSeatPayload>();
         return EmailTemplates.ClubSeat(c.Club, c.To, new ClubSeatNotice(
-            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareCredits, p.Accepted, c.BaseUrl + p.Path));
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareMinutes, p.Accepted, c.BaseUrl + p.Path));
     }
 
     private static EmailMessage ComposeReminder(MemberMailContext c)
     {
         var p = c.Payload<ReminderPayload>();
         return EmailTemplates.ShareReminder(c.Club, c.To, new ShareReminderNotice(
-            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareCredits, p.DeadlineLocal, p.FromOrganiser, c.BaseUrl + p.Path));
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareMinutes, p.DeadlineLocal, p.FromOrganiser, c.BaseUrl + p.Path));
     }
 
     private static EmailMessage ComposeLapsed(MemberMailContext c)
     {
         var p = c.Payload<LapsedPayload>();
         return EmailTemplates.ShareLapsed(c.Club, c.To, new ShareLapsedNotice(
-            p.OtherName, p.CourtName, p.StartsAtLocal, p.UnpaidCredits, p.ToOrganiser, c.BookingUrl(p.BookingId)));
+            p.OtherName, p.CourtName, p.StartsAtLocal, p.UnpaidMinutes, p.ToOrganiser, c.BookingUrl(p.BookingId)));
     }
 
     private static EmailMessage ComposeCancelled(MemberMailContext c)
@@ -199,7 +199,7 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<ReturnWaitingPayload>();
         return EmailTemplates.ShareReturnWaiting(c.Club, c.To, new ShareReturnWaitingNotice(
-            p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, p.ToOrganiser, c.BookingUrl(p.BookingId)));
+            p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountMinutes, p.ToOrganiser, c.BookingUrl(p.BookingId)));
     }
 
     private static EmailMessage ComposeResultToConfirm(MemberMailContext c)
@@ -213,7 +213,7 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<GameChangedPayload>();
         return EmailTemplates.PlayersChanged(c.Club, c.To, new PlayersChange(
-            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.Removed, p.NewShareCredits, p.NeedsConsent, c.BookingUrl(p.BookingId))
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.Removed, p.NewShareMinutes, p.NeedsConsent, c.BookingUrl(p.BookingId))
         {
             ByClub = p.ByClub,
         });

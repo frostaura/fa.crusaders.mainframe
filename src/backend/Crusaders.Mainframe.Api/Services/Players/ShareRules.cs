@@ -12,14 +12,14 @@ public sealed record ShareFacts(
     ParticipantStatus Status,
     bool IsPartner,
     bool SettledOutside,
-    decimal ShareCredits,
-    decimal ConsentedCredits,
+    int ShareMinutes,
+    int ConsentedMinutes,
     BookingStatus BookingStatus,
     bool BookingCheckedIn,
     bool Displaced,
-    decimal Price,
-    decimal Owed,
-    decimal Paid = 0m,
+    int Price,
+    int Owed,
+    int Paid = 0,
     bool Closed = false);
 
 /// <summary>
@@ -31,7 +31,7 @@ public sealed record ShareFacts(
 /// <c>Owed(b)</c> is the settlement model's own figure for the organiser (the payer), so every
 /// path the settlement model already decides — a no-show's penalty, a reversal back to the full
 /// price, a displacement to nothing, a cancelled court lit after all — moves the partners' shares
-/// with it and needs no rule of its own here. The fraction is <c>ShareCredits / P</c>, frozen at
+/// with it and needs no rule of its own here. The fraction is <c>ShareMinutes / P</c>, frozen at
 /// the price the court was sold at.
 /// </para>
 ///
@@ -54,20 +54,21 @@ public sealed record ShareFacts(
 /// </summary>
 public static class ShareRules
 {
-    public static decimal TargetFor(ShareFacts f)
+    public static int TargetFor(ShareFacts f)
     {
-        if (!f.IsPartner || f.Status != ParticipantStatus.Accepted || f.SettledOutside) return 0m;
-        if (f.Displaced || f.BookingStatus == BookingStatus.AdminBlock) return 0m;
-        if (f.BookingStatus == BookingStatus.Cancelled && !f.BookingCheckedIn) return 0m;
-        if (f.Price <= 0m || f.ShareCredits <= 0m) return 0m;
+        if (!f.IsPartner || f.Status != ParticipantStatus.Accepted || f.SettledOutside) return 0;
+        if (f.Displaced || f.BookingStatus == BookingStatus.AdminBlock) return 0;
+        if (f.BookingStatus == BookingStatus.Cancelled && !f.BookingCheckedIn) return 0;
+        if (f.Price <= 0 || f.ShareMinutes <= 0) return 0;
 
-        var owed = Math.Clamp(f.Owed, 0m, f.Price);
-        var fraction = Math.Round(owed * f.ShareCredits / f.Price, 2, MidpointRounding.ToZero);
-        var target = Math.Max(0m, Math.Min(fraction, f.ConsentedCredits));
+        var owed = Math.Clamp(f.Owed, 0, f.Price);
+        // P13-B3: floor(owed × share ÷ price) in whole minutes; the organiser keeps the remainder.
+        var fraction = (int)((long)owed * f.ShareMinutes / f.Price);
+        var target = Math.Max(0, Math.Min(fraction, f.ConsentedMinutes));
 
         // No debts (D11): once the seat has closed the organiser's cover stands. What the partner
         // paid can still come back to them — a return follows the organiser's Owed down — but a
         // top-up after the deadline never turns an unpaid share into a collection.
-        return f.Closed ? Math.Min(target, Math.Max(0m, f.Paid)) : target;
+        return f.Closed ? Math.Min(target, Math.Max(0, f.Paid)) : target;
     }
 }

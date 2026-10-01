@@ -60,7 +60,7 @@ public sealed partial class PlayersQuery
 
     private static List<object> Partners(
         Booking booking, List<BookingParticipant> seats, (string Role, Guid? MySeatId) viewer,
-        Dictionary<Guid, PublicMember> people, Dictionary<Guid, decimal> paid)
+        Dictionary<Guid, PublicMember> people, Dictionary<Guid, int> paid)
     {
         var partners = new List<object>();
         foreach (var s in seats)
@@ -70,7 +70,7 @@ public sealed partial class PlayersQuery
             {
                 user_id = s.UserId,
                 name = s.UserId is { } id && people.TryGetValue(id, out var m) ? m.Name : null,
-                paid_credits = paid.GetValueOrDefault(s.Id),
+                paid_minutes = paid.GetValueOrDefault(s.Id),
             });
         }
         return partners;

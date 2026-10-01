@@ -99,7 +99,7 @@ public static class DevicePayForEndpoint
         if (!req.Confirm)
         {
             await RecordQuoteAsync(device, req, decision.Booking!, services, now, ct);
-            return Results.Ok(new PayForQuoteResponse(true, "ok", req.Court, WireCredits(decision.Amount), decision.Label));
+            return Results.Ok(new PayForQuoteResponse(true, "ok", req.Court, decision.Amount, decision.Label));
         }
 
         // The confirm pays for the booking the glass ASKED about, or nothing. A label alone did
@@ -164,7 +164,7 @@ public static class DevicePayForEndpoint
 
     /// <summary>Everything decided before any money: who pays, which booking, how much.</summary>
     private sealed record Judgement(
-        string? Refusal, string? Label = null, decimal Amount = 0m, Guid PayerUserId = default,
+        string? Refusal, string? Label = null, int Amount = 0, Guid PayerUserId = default,
         Booking? Booking = null, Court? Court = null, MemberCodeMatch? Match = null);
 
     private static async Task<Judgement> JudgeAsync(
@@ -221,9 +221,9 @@ public static class DevicePayForEndpoint
         // `not_chargeable` (SEE THE DESK), which is where such a row is settled. A booking
         // costing nothing has nothing to pay.
         if (booking.ChargedAt is null) return new Judgement(NotChargeable);
-        if (booking.AmountChargedCredits <= 0m) return new Judgement(AlreadyPaid);
+        if (booking.AmountChargedMinutes <= 0) return new Judgement(AlreadyPaid);
 
-        var amount = booking.AmountChargedCredits;
+        var amount = booking.AmountChargedMinutes;
         var label = Label(amount);
         if (label.Length > MaxLabelLength) return new Judgement(AmountUnshowable);
 
@@ -251,7 +251,7 @@ public static class DevicePayForEndpoint
             PayerUserId = j.PayerUserId,
             RefundedUserId = refunded,
             CourtNumber = req.Court,
-            AmountCredits = j.Amount,
+            AmountMinutes = j.Amount,
             AmountLabel = j.Label!,
             CreatedAt = now,
         };
@@ -284,7 +284,7 @@ public static class DevicePayForEndpoint
         var granted = GrantFor(booking, settings, now);
         row.Paid = true;
         row.GrantedSeconds = granted;
-        row.BalanceAfterCredits = await services.Ledger.GetBalanceAsync(j.PayerUserId, ct) - j.Amount;
+        row.BalanceAfterMinutes = await services.Ledger.GetBalanceAsync(j.PayerUserId, ct) - j.Amount;
         db.AuditLogs.Add(new AuditLog
         {
             TenantId = device.TenantId,
@@ -297,7 +297,7 @@ public static class DevicePayForEndpoint
                 device_id = device.Id,
                 device_code = device.DeviceCode,
                 court_number = req.Court,
-                amount_credits = j.Amount,
+                amount_minutes = j.Amount,
                 refunded_user_id = refunded,
                 granted_seconds = granted,
             }),
@@ -340,7 +340,7 @@ public static class DevicePayForEndpoint
         // paid; this only sharpens the figure, and losing it to a crash loses nothing but that.
         try
         {
-            row.BalanceAfterCredits = await services.Ledger.GetBalanceAsync(j.PayerUserId, ct);
+            row.BalanceAfterMinutes = await services.Ledger.GetBalanceAsync(j.PayerUserId, ct);
             await db.SaveChangesAsync(ct);
         }
         catch (Exception ex) when (ex is DbUpdateException or OperationCanceledException)
@@ -351,7 +351,7 @@ public static class DevicePayForEndpoint
         await NotifyAsync(services, j, refunded, ct);
 
         return Results.Ok(new PayForConfirmResponse(
-            true, "ok", req.Court, WireCredits(j.Amount), j.Label, WireCredits(row.BalanceAfterCredits), false, granted));
+            true, "ok", req.Court, j.Amount, j.Label, row.BalanceAfterMinutes, false, granted));
     }
 
     /// <summary>
@@ -473,8 +473,8 @@ public static class DevicePayForEndpoint
         }
 
         return Results.Ok(new PayForConfirmResponse(
-            true, "ok", row.CourtNumber, WireCredits(row.AmountCredits), row.AmountLabel,
-            WireCredits(row.BalanceAfterCredits), true, granted));
+            true, "ok", row.CourtNumber, row.AmountMinutes, row.AmountLabel,
+            row.BalanceAfterMinutes, true, granted));
     }
 
     /// <summary>
@@ -550,21 +550,11 @@ public static class DevicePayForEndpoint
     }
 
     /// <summary>
-    /// The server's label for an amount (§9.2): invariant culture, at most two decimals, no
-    /// trailing zeros — <c>50</c>, <c>32.5</c>. The box shows it verbatim.
+    /// The server's label for an amount (§9.2, P13 §3.16): the whole number of minutes in
+    /// invariant digits — <c>45</c>, <c>9999</c>. The box shows it verbatim.
     /// </summary>
-    public static string Label(decimal credits) =>
-        Math.Round(credits, 2, MidpointRounding.AwayFromZero).ToString("0.##", CultureInfo.InvariantCulture);
-
-    /// <summary>
-    /// Credits as the wire carries them — at least one decimal (<c>50.0</c>, <c>32.5</c>,
-    /// <c>12.25</c>), which is how the corpus pins them and how System.Text.Json writes a decimal
-    /// whose scale is one.
-    /// </summary>
-    public static decimal WireCredits(decimal credits) =>
-        decimal.Parse(
-            Math.Round(credits, 2, MidpointRounding.AwayFromZero).ToString("0.0#", CultureInfo.InvariantCulture),
-            CultureInfo.InvariantCulture);
+    // P13-B3: refuse a price above 9999 minutes (amount_unshowable) before any money moves.
+    public static string Label(int minutes) => MoneyFormat.MinutesLabel(minutes);
 }
 
 /// <summary>The services the pay-for decision needs, bundled — see <see cref="WalkUpServices"/>.</summary>
@@ -603,7 +593,7 @@ public sealed record PayForQuoteResponse(
     [property: JsonPropertyName("payable")] bool Payable,
     [property: JsonPropertyName("reason")] string Reason,
     [property: JsonPropertyName("court_number")] int CourtNumber,
-    [property: JsonPropertyName("amount_credits")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? AmountCredits = null,
+    [property: JsonPropertyName("amount_minutes")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? AmountMinutes = null,
     [property: JsonPropertyName("amount_label")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AmountLabel = null);
 
 /// <summary>The confirm's answer. Declaration order is the corpus's byte order.</summary>
@@ -611,8 +601,8 @@ public sealed record PayForConfirmResponse(
     [property: JsonPropertyName("paid")] bool Paid,
     [property: JsonPropertyName("reason")] string Reason,
     [property: JsonPropertyName("court_number")] int CourtNumber,
-    [property: JsonPropertyName("amount_credits")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? AmountCredits = null,
+    [property: JsonPropertyName("amount_minutes")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? AmountMinutes = null,
     [property: JsonPropertyName("amount_label")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AmountLabel = null,
-    [property: JsonPropertyName("balance_after_credits")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? BalanceAfterCredits = null,
+    [property: JsonPropertyName("balance_after_minutes")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? BalanceAfterMinutes = null,
     [property: JsonPropertyName("replayed")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Replayed = null,
     [property: JsonPropertyName("granted_seconds")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? GrantedSeconds = null);

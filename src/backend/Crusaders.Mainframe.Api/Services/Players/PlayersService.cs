@@ -85,7 +85,7 @@ public sealed partial class PlayersService
     /// rather than booked and left with a <c>players_error</c>.
     /// </summary>
     public async Task<PlayerOutcome?> ValidateAsync(
-        Guid organiserId, PlayersRequest req, decimal? price, CancellationToken ct, IReadOnlyCollection<int>? takenSeats = null)
+        Guid organiserId, PlayersRequest req, int? price, CancellationToken ct, IReadOnlyCollection<int>? takenSeats = null)
     {
         var specs = req.Players ?? [];
         if (specs.Count == 0) return null;
@@ -207,7 +207,7 @@ public sealed partial class PlayersService
 
         var taken = game!.Live.Select(s => s.Seat).Append(1).ToList();
         var mode = SplitModes.Normalise(req.SplitMode) ?? game.Organiser?.SplitMode ?? SplitModes.Equal;
-        if (await ValidateAsync(organiserId, req with { SplitMode = mode }, game.Booking.AmountChargedCredits, ct, taken) is { } bad)
+        if (await ValidateAsync(organiserId, req with { SplitMode = mode }, game.Booking.AmountChargedMinutes, ct, taken) is { } bad)
         {
             return bad;
         }
@@ -311,7 +311,7 @@ public sealed partial class PlayersService
                 user_id = a.Seat.UserId,
                 guest_name = a.Seat.GuestName,
                 status = PlayerViews.StatusName(a.Seat.Status),
-                share_credits = a.Seat.ShareCredits,
+                share_minutes = a.Seat.ShareMinutes,
                 invite_token = a.Token,
                 invite_path = a.Token is null ? null : InviteTokens.PathFor(a.Token),
             }).ToList(),
@@ -346,7 +346,7 @@ public sealed partial class PlayersService
             Seat = 1,
             UserId = game.Booking.UserId,
             Status = ParticipantStatus.Accepted,
-            ShareCredits = game.Booking.AmountChargedCredits,
+            ShareMinutes = game.Booking.AmountChargedMinutes,
             ShareWeight = 1,
             SplitMode = SplitModes.Equal,
             InvitedByUserId = game.Booking.UserId,
@@ -396,18 +396,18 @@ public sealed partial class PlayersService
         var live = game.Live.OrderBy(s => s.Seat).ToList();
         var inputs = live.Select(s => figures.TryGetValue(s.Id, out var f)
             ? new SplitSeat(s.Seat, s.GuestName is not null, f.Weight, f.Amount)
-            : new SplitSeat(s.Seat, s.GuestName is not null, Math.Max(s.ShareWeight, mode == SplitModes.Ratio ? 0 : 1), s.ShareCredits))
+            : new SplitSeat(s.Seat, s.GuestName is not null, Math.Max(s.ShareWeight, mode == SplitModes.Ratio ? 0 : 1), s.ShareMinutes))
             .ToList();
 
-        var split = SplitCalculator.Split(game.Booking.AmountChargedCredits, mode, inputs);
+        var split = SplitCalculator.Split(game.Booking.AmountChargedMinutes, mode, inputs);
         if (split.Error is { } error) return error;
 
         foreach (var share in split.Shares!)
         {
             var seat = live.First(s => s.Seat == share.Seat);
-            seat.ShareCredits = share.ShareCredits;
+            seat.ShareMinutes = share.ShareMinutes;
             seat.ShareWeight = share.Weight;
-            if (seat.ConsentedCredits > seat.ShareCredits) seat.ConsentedCredits = seat.ShareCredits;
+            if (seat.ConsentedMinutes > seat.ShareMinutes) seat.ConsentedMinutes = seat.ShareMinutes;
         }
         game.Organiser!.SplitMode = mode;
         return null;
@@ -429,15 +429,15 @@ public sealed partial class PlayersService
     /// </summary>
     internal async Task AbsorbFreedShareAsync(Booking booking, CancellationToken ct)
     {
-        var price = booking.AmountChargedCredits;
+        var price = booking.AmountChargedMinutes;
         var bookingId = booking.Id;
         await _db.BookingParticipants
             .Where(o => o.BookingId == bookingId && o.Seat == 1
                         && (o.Status == ParticipantStatus.Invited || o.Status == ParticipantStatus.Accepted))
-            .ExecuteUpdateAsync(u => u.SetProperty(o => o.ShareCredits, o => Math.Max(0m, price - (_db.BookingParticipants
+            .ExecuteUpdateAsync(u => u.SetProperty(o => o.ShareMinutes, o => Math.Max(0, price - (_db.BookingParticipants
                 .Where(p => p.BookingId == bookingId && p.Seat > 1
                             && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted))
-                .Sum(p => (decimal?)p.ShareCredits) ?? 0m))), ct);
+                .Sum(p => (int?)p.ShareMinutes) ?? 0))), ct);
     }
 
     /// <summary>Takes a player off the booking. Anything they paid comes back at the reconcile.</summary>
@@ -489,7 +489,7 @@ public sealed partial class PlayersService
 
         var seat = game!.Seats.FirstOrDefault(s => s.Id == seatId && s.Seat > 1 && s.IsLive && s.UserId is not null);
         if (seat is null) return PlayerOutcome.PlayerNotFound;
-        if (seat.Status == ParticipantStatus.Accepted && await _p.Shares.UnpaidAsync(game.Booking, seat, ct) <= 0m)
+        if (seat.Status == ParticipantStatus.Accepted && await _p.Shares.UnpaidAsync(game.Booking, seat, ct) <= 0)
         {
             return PlayerOutcome.Refuse(409, PlayerErrors.NothingToNudge);
         }
@@ -555,10 +555,10 @@ public sealed partial class PlayersService
             figures[s.ParticipantId] = (s.Weight ?? 1, s.Amount ?? 0m);
         }
 
-        var before = game.Live.ToDictionary(s => s.Id, s => s.ShareCredits);
+        var before = game.Live.ToDictionary(s => s.Id, s => s.ShareMinutes);
         if (Resplit(game, mode, figures) is { } error) return PlayerOutcome.Refuse(400, error);
 
-        var changed = game.Live.Where(s => s.Seat > 1 && s.UserId is not null && before[s.Id] != s.ShareCredits).ToList();
+        var changed = game.Live.Where(s => s.Seat > 1 && s.UserId is not null && before[s.Id] != s.ShareMinutes).ToList();
         foreach (var seat in changed)
         {
             seat.UpdatedAt = now.Storable();
@@ -577,9 +577,9 @@ public sealed partial class PlayersService
             {
                 participant_id = s.Id,
                 seat = s.Seat,
-                share_credits = s.ShareCredits,
+                share_minutes = s.ShareMinutes,
                 weight = s.ShareWeight,
-                needs_consent = s.Seat > 1 && s.Status == ParticipantStatus.Accepted && s.ShareCredits > s.ConsentedCredits,
+                needs_consent = s.Seat > 1 && s.Status == ParticipantStatus.Accepted && s.ShareMinutes > s.ConsentedMinutes,
             }).ToList(),
         });
     }

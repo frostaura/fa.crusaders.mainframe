@@ -83,7 +83,7 @@ public static class PlayerNotices
         var organiser = await NameAsync(db, booking.UserId, "A member", ct);
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.Invited, $"{InvitedKeyPrefix}{seat.Id:N}",
-            new InvitePayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, InvitePath(seat.Id), seat.Id),
+            new InvitePayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareMinutes, InvitePath(seat.Id), seat.Id),
             $"{organiser} invited you — {game.CourtName}, {game.StartsLocal}", InvitePath(seat.Id), booking.Id);
     }
 
@@ -96,7 +96,7 @@ public static class PlayerNotices
         var deadline = GameText.Local(PlayerSettings.ShareDeadline(booking, settings), settings);
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.Reminder, dedupeKey,
-            new ReminderPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, deadline,
+            new ReminderPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareMinutes, deadline,
                 fromOrganiser, InvitePath(seat.Id), seat.Id),
             fromOrganiser ? $"{organiser} is waiting for your answer" : $"Your invite is still open — {game.CourtName}",
             InvitePath(seat.Id), booking.Id);
@@ -110,11 +110,11 @@ public static class PlayerNotices
         var game = await GameText.ForAsync(db, booking, settings, ct);
         var organiser = await NameAsync(db, booking.UserId, "The organiser", ct);
         var removed = seat.Status == ParticipantStatus.Removed;
-        var needsConsent = !removed && seat.Status == ParticipantStatus.Accepted && seat.ShareCredits > seat.ConsentedCredits;
+        var needsConsent = !removed && seat.Status == ParticipantStatus.Accepted && seat.ShareMinutes > seat.ConsentedMinutes;
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.GameChanged, dedupeKey,
             new GameChangedPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, removed,
-                removed ? null : seat.ShareCredits, needsConsent, seat.Id),
+                removed ? null : seat.ShareMinutes, needsConsent, seat.Id),
             removed ? $"You were taken off {game.CourtName}, {game.StartsLocal}" : $"Your share changed — {game.CourtName}",
             // R5 (M5-8): a removed member reads 404 from the booking; naming the seat lets the page
             // read their invite and say they were taken off. A share change keeps the plain path.
@@ -136,7 +136,7 @@ public static class PlayerNotices
         var path = accepted ? $"/bookings/{booking.Id}" : InvitePath(seat.Id);
         return new MemberNotice(
             seat.UserId!.Value, MemberEventCatalogue.ClubSeat, $"{keyPrefix}:{seat.Id:N}",
-            new ClubSeatPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, accepted, path, seat.Id),
+            new ClubSeatPayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareMinutes, accepted, path, seat.Id),
             accepted
                 ? $"The club put you in {organiser}'s game — {game.CourtName}, {game.StartsLocal}"
                 : $"The club added you to {organiser}'s game — {game.CourtName}, {game.StartsLocal}",

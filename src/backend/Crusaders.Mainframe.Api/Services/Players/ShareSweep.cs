@@ -191,7 +191,7 @@ public sealed class ShareSweep
                         || (x.Booking.Status == BookingStatus.Cancelled && x.Booking.CheckedInAt == null))
             .Where(x => _db.LedgerEntries.Where(l => l.RelatedBookingId == x.Booking.Id && l.UserId == x.Seat.UserId
                                                      && l.Type == LedgerEntryType.ShareTransfer)
-                            .Sum(l => l.AmountCredits) < 0m)
+                            .Sum(l => l.AmountMinutes) < 0)
             .Select(x => x.Booking.Id)
             .Distinct()
             .ToListAsync(ct);
@@ -309,9 +309,9 @@ public sealed class ShareSweep
         foreach (var x in candidates.Where(x => PlayerSettings.ShareDeadline(x.Booking, settings) <= now))
         {
             var unpaid = await _shares.UnpaidAsync(x.Booking, x.Seat, ct, evenIfClosed: true);
-            if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0m) continue;
+            if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0) continue;
 
-            var shareForNotice = x.Seat.Status == ParticipantStatus.Invited ? x.Seat.ShareCredits : unpaid;
+            var shareForNotice = x.Seat.Status == ParticipantStatus.Invited ? x.Seat.ShareMinutes : unpaid;
             if (x.Seat.Status == ParticipantStatus.Invited) x.Seat.Status = ParticipantStatus.Lapsed;
             x.Seat.LapsedAt = now.Storable();
             x.Seat.UpdatedAt = now.Storable();
@@ -333,7 +333,7 @@ public sealed class ShareSweep
     }
 
     private async Task StageLapseNoticesAsync(
-        Booking booking, BookingParticipant seat, decimal unpaid, TenantSettingsView settings, CancellationToken ct)
+        Booking booking, BookingParticipant seat, int unpaid, TenantSettingsView settings, CancellationToken ct)
     {
         var game = await GameText.ForAsync(_db, booking, settings, ct);
         var names = await PersonNames.ForAsync(_db, [booking.UserId, seat.UserId], ct);
@@ -377,7 +377,7 @@ public sealed class ShareSweep
         foreach (var x in due.Where(x => PlayerSettings.ShareDeadline(x.Booking, settings) > now))
         {
             var unpaid = await _shares.UnpaidAsync(x.Booking, x.Seat, ct);
-            if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0m) continue;
+            if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0) continue;
 
             x.Seat.ReminderCount++;
             x.Seat.LastReminderAt = now.Storable();

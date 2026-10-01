@@ -59,7 +59,7 @@ public static class BookingPlayerQueries
     /// <summary>Any live (invited or accepted) partner seat — with a share, when <paramref name="requireShare"/>.</summary>
     public static Task<bool> HasLivePartnerSeatAsync(MainframeDbContext db, Guid bookingId, CancellationToken ct, bool requireShare = false) =>
         db.BookingParticipants.AsNoTracking().AnyAsync(
-            p => p.BookingId == bookingId && p.Seat > 1 && (!requireShare || p.ShareCredits > 0)
+            p => p.BookingId == bookingId && p.Seat > 1 && (!requireShare || p.ShareMinutes > 0)
                  && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted), ct);
 }
 

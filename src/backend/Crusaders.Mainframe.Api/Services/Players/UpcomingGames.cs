@@ -14,10 +14,10 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <para>
 /// A game in progress is still "upcoming" (its end is ahead) — the member at the door is looking
 /// for exactly that one. Players are shown as the grid shows anybody: name and photo only, live
-/// seats only, each with its seat <c>status</c>. <c>my_share_credits</c> is the caller's own share
+/// seats only, each with its seat <c>status</c>. <c>my_share_minutes</c> is the caller's own share
 /// — a partner's seat share, or what the organiser carries after the ACCEPTED partners' shares (an
-/// invitation nobody has answered reduces nothing: review round 3, M-3). <c>my_paid_credits</c> is
-/// what the game has cost the caller so far, off their own wallet, net; <c>my_owing_credits</c> is
+/// invitation nobody has answered reduces nothing: review round 3, M-3). <c>my_paid_minutes</c> is
+/// what the game has cost the caller so far, off their own wallet, net; <c>my_owing_minutes</c> is
 /// what a partner still owes on an open seat. <c>needs_action</c> is a partner asked for more than
 /// they agreed to, or still owing while the seat is open.
 /// </para>
@@ -104,10 +104,10 @@ public sealed class UpcomingGames
         // The caller's own ledger rows on these games, in one read: what each has cost them.
         var mine = (await _db.LedgerEntries.AsNoTracking()
                 .Where(l => l.UserId == me && l.RelatedBookingId != null && ids.Contains(l.RelatedBookingId.Value))
-                .Select(l => new { BookingId = l.RelatedBookingId!.Value, l.AmountCredits })
+                .Select(l => new { BookingId = l.RelatedBookingId!.Value, l.AmountMinutes })
                 .ToListAsync(ct))
             .GroupBy(l => l.BookingId)
-            .ToDictionary(g => g.Key, g => g.Sum(l => l.AmountCredits));
+            .ToDictionary(g => g.Key, g => g.Sum(l => l.AmountMinutes));
 
         var context = new ItemContext { Courts = courts, People = people, MyNet = mine };
         var items = new List<GameItem>(bookings.Count);
@@ -124,7 +124,7 @@ public sealed class UpcomingGames
     {
         public required Dictionary<Guid, string> Courts { get; init; }
         public required Dictionary<Guid, PublicMember> People { get; init; }
-        public required Dictionary<Guid, decimal> MyNet { get; init; }
+        public required Dictionary<Guid, int> MyNet { get; init; }
     }
 
     private async Task<GameItem> ItemAsync(
@@ -140,31 +140,31 @@ public sealed class UpcomingGames
         // Paid: the caller's own wallet on this game, net — the charge less refunds and shares
         // received for the organiser, the share transfers for a partner. A share settled outside
         // the app moved no credits, so it is counted as paid from both ends (M-3).
-        var paid = Math.Max(0m, -context.MyNet.GetValueOrDefault(b.Id));
-        decimal myShare;
-        var owing = 0m;
+        var paid = Math.Max(0, -context.MyNet.GetValueOrDefault(b.Id));
+        int myShare;
+        var owing = 0;
         var needsAction = false;
         if (organiser)
         {
             var partners = live.Where(s => s.IsPartner).ToList();
-            var acceptedShare = partners.Where(s => s.Status == ParticipantStatus.Accepted).Sum(s => s.ShareCredits);
-            myShare = Math.Max(0m, b.AmountChargedCredits - acceptedShare);
-            paid = Math.Max(0m, paid - partners.Where(s => s.SettledOutsideAt is not null).Sum(s => s.ShareCredits));
+            var acceptedShare = partners.Where(s => s.Status == ParticipantStatus.Accepted).Sum(s => s.ShareMinutes);
+            myShare = Math.Max(0, b.AmountChargedMinutes - acceptedShare);
+            paid = Math.Max(0, paid - partners.Where(s => s.SettledOutsideAt is not null).Sum(s => s.ShareMinutes));
         }
         else
         {
-            myShare = mySeat?.ShareCredits ?? 0m;
-            owing = mySeat is null ? 0m : await _shares.UnpaidAsync(b, mySeat, ct);
-            if (mySeat?.SettledOutsideAt is not null) paid = Math.Max(paid, mySeat.ShareCredits);
-            needsAction = mySeat is not null && (mySeat.ShareCredits > mySeat.ConsentedCredits || owing > 0m);
+            myShare = mySeat?.ShareMinutes ?? 0;
+            owing = mySeat is null ? 0 : await _shares.UnpaidAsync(b, mySeat, ct);
+            if (mySeat?.SettledOutsideAt is not null) paid = Math.Max(paid, mySeat.ShareMinutes);
+            needsAction = mySeat is not null && (mySeat.ShareMinutes > mySeat.ConsentedMinutes || owing > 0);
         }
 
         return new GameItem(
             b.Id, context.Courts.GetValueOrDefault(b.CourtId), b.StartsAt, b.EndsAt, organiser ? "organiser" : "partner",
             PlayerViews.BookingStatusName(b.Status), players, myShare, needsAction)
         {
-            MyPaidCredits = paid,
-            MyOwingCredits = owing,
+            MyPaidMinutes = paid,
+            MyOwingMinutes = owing,
         };
     }
 
@@ -187,16 +187,16 @@ public sealed record GameItem(
     [property: JsonPropertyName("role")] string Role,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("players")] IReadOnlyList<object> Players,
-    [property: JsonPropertyName("my_share_credits")] decimal MyShareCredits,
+    [property: JsonPropertyName("my_share_minutes")] int MyShareMinutes,
     [property: JsonPropertyName("needs_action")] bool NeedsAction)
 {
     /// <summary>What the game has cost the caller so far, off their own wallet, net (review round 3, M-3).</summary>
-    [JsonPropertyName("my_paid_credits")]
-    public decimal MyPaidCredits { get; init; }
+    [JsonPropertyName("my_paid_minutes")]
+    public int MyPaidMinutes { get; init; }
 
     /// <summary>What a partner still owes on an open seat; 0 for the organiser (review round 3, M-3).</summary>
-    [JsonPropertyName("my_owing_credits")]
-    public decimal MyOwingCredits { get; init; }
+    [JsonPropertyName("my_owing_minutes")]
+    public int MyOwingMinutes { get; init; }
 
     /// <summary><c>none</c> · <c>pending</c> · <c>confirmed</c> · <c>disputed</c> — the booking's live result. Recent only.</summary>
     [JsonPropertyName("result_status")]

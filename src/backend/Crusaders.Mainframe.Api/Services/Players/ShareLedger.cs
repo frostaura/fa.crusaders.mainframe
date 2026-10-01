@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>One share pair this reconcile posted: positive <see cref="Delta"/> collected from the partner, negative returned to them.</summary>
-public sealed record ShareMove(Guid ParticipantId, Guid PartnerUserId, Guid OrganiserUserId, decimal Delta, int Seq);
+public sealed record ShareMove(Guid ParticipantId, Guid PartnerUserId, Guid OrganiserUserId, int Delta, int Seq);
 
 /// <summary>Who is reconciling, and whether one seat may be collected below zero (an admin's explicit collect).</summary>
 /// <param name="ClubRemoval">The club took this seat off the game (an admin's remove): its return's receipts say so, with the reason (review round 2, B-8).</param>
@@ -29,7 +29,7 @@ public sealed record ClubRemoval(Guid SeatId, string? Reason);
 /// The club's hand in a share movement (B8, review round 2 B-8): a collect (with the partner's
 /// balance after it) or a removal, and the reason the admin recorded — both receipts say it.
 /// </summary>
-public sealed record ClubReceipt(bool Collected, decimal? BalanceAfter, string? Reason);
+public sealed record ClubReceipt(bool Collected, int? BalanceAfter, string? Reason);
 
 /// <summary>
 /// Moves each partner's share of a split booking to or from the organiser until what they have
@@ -98,30 +98,30 @@ public sealed class ShareLedger
     /// payer's wallet, negated — share transfers excepted, because they are between the players and
     /// not between a player and the club.
     /// </summary>
-    public Task<decimal> OwedAsync(Booking booking, CancellationToken ct) => OwedOfAsync(_db, booking, ct);
+    public Task<int> OwedAsync(Booking booking, CancellationToken ct) => OwedOfAsync(_db, booking, ct);
 
     /// <summary>What this seat's partner has paid the organiser, net — read off their own share rows.</summary>
-    public Task<decimal> PaidAsync(BookingParticipant seat, CancellationToken ct) => PaidOfAsync(_db, seat, ct);
+    public Task<int> PaidAsync(BookingParticipant seat, CancellationToken ct) => PaidOfAsync(_db, seat, ct);
 
     /// <summary><see cref="OwedAsync"/> on a given context — for a reader that cannot take this service (the hold).</summary>
-    public static async Task<decimal> OwedOfAsync(MainframeDbContext db, Booking booking, CancellationToken ct)
+    public static async Task<int> OwedOfAsync(MainframeDbContext db, Booking booking, CancellationToken ct)
     {
         var payer = PayerOf(booking);
         var sum = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId == booking.Id && l.UserId == payer && l.Type != LedgerEntryType.ShareTransfer)
-            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
-        return Math.Max(0m, -sum);
+            .SumAsync(l => (int?)l.AmountMinutes, ct) ?? 0;
+        return Math.Max(0, -sum);
     }
 
     /// <summary><see cref="PaidAsync"/> on a given context.</summary>
-    public static async Task<decimal> PaidOfAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
+    public static async Task<int> PaidOfAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
     {
-        if (seat.UserId is not { } partner) return 0m;
+        if (seat.UserId is not { } partner) return 0;
         var prefix = Prefix(seat.Id);
         var sum = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.UserId == partner && l.Type == LedgerEntryType.ShareTransfer
                         && l.ExternalReference != null && l.ExternalReference.StartsWith(prefix))
-            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
+            .SumAsync(l => (int?)l.AmountMinutes, ct) ?? 0;
         return -sum;
     }
 
@@ -131,10 +131,10 @@ public sealed class ShareLedger
     /// Same rows, same sign: each seat's own <c>share:{seat}:*</c> rows on its partner's wallet,
     /// grouped by the seat id the reference carries. A seat with no partner, or nothing paid, is 0.
     /// </summary>
-    public static async Task<Dictionary<Guid, decimal>> PaidOfManyAsync(
+    public static async Task<Dictionary<Guid, int>> PaidOfManyAsync(
         MainframeDbContext db, IReadOnlyCollection<BookingParticipant> seats, CancellationToken ct)
     {
-        var result = seats.Select(s => s.Id).Distinct().ToDictionary(id => id, _ => 0m);
+        var result = seats.Select(s => s.Id).Distinct().ToDictionary(id => id, _ => 0);
         var bySeat = seats.Where(s => s.UserId is not null).DistinctBy(s => s.Id).ToDictionary(s => s.Id.ToString("N"), s => s);
         if (bySeat.Count == 0) return result;
 
@@ -146,7 +146,7 @@ public sealed class ShareLedger
                         && l.ExternalReference != null && l.ExternalReference.StartsWith(SharePrefix)
                         && keys.Contains(l.ExternalReference.Substring(start, 32)))
             .GroupBy(l => new { Seat = l.ExternalReference!.Substring(start, 32), l.UserId })
-            .Select(g => new { g.Key.Seat, g.Key.UserId, Sum = g.Sum(l => l.AmountCredits) })
+            .Select(g => new { g.Key.Seat, g.Key.UserId, Sum = g.Sum(l => l.AmountMinutes) })
             .ToListAsync(ct);
 
         foreach (var row in sums)
@@ -167,16 +167,16 @@ public sealed class ShareLedger
     /// 25 and then refunded read "31.00 back" for a cancellation that returned 25.
     /// </para>
     /// </summary>
-    public static async Task<decimal> ReturnedOfAsync(
+    public static async Task<int> ReturnedOfAsync(
         MainframeDbContext db, BookingParticipant seat, CancellationToken ct, DateTimeOffset? since = null)
     {
-        if (seat.UserId is not { } partner) return 0m;
+        if (seat.UserId is not { } partner) return 0;
         var prefix = Prefix(seat.Id);
         var rows = db.LedgerEntries.AsNoTracking()
-            .Where(l => l.UserId == partner && l.Type == LedgerEntryType.ShareTransfer && l.AmountCredits > 0
+            .Where(l => l.UserId == partner && l.Type == LedgerEntryType.ShareTransfer && l.AmountMinutes > 0
                         && l.ExternalReference != null && l.ExternalReference.StartsWith(prefix));
         if (since is { } from) rows = rows.Where(l => l.CreatedAt >= from);
-        return await rows.SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
+        return await rows.SumAsync(l => (int?)l.AmountMinutes, ct) ?? 0;
     }
 
     /// <summary>
@@ -192,7 +192,7 @@ public sealed class ShareLedger
     /// Nothing, once the seat has closed — unless <paramref name="evenIfClosed"/>: what the seat
     /// fell short by, for the lapse that records it and the admin collect that may still take it.
     /// </summary>
-    public async Task<decimal> UnpaidAsync(Booking booking, BookingParticipant seat, CancellationToken ct, bool evenIfClosed = false)
+    public async Task<int> UnpaidAsync(Booking booking, BookingParticipant seat, CancellationToken ct, bool evenIfClosed = false)
     {
         var asked = new BookingParticipant
         {
@@ -203,26 +203,26 @@ public sealed class ShareLedger
             UserId = seat.UserId,
             GuestName = seat.GuestName,
             Status = ParticipantStatus.Accepted,
-            ShareCredits = seat.ShareCredits,
-            ConsentedCredits = Math.Max(seat.ConsentedCredits, seat.ShareCredits),
+            ShareMinutes = seat.ShareMinutes,
+            ConsentedMinutes = Math.Max(seat.ConsentedMinutes, seat.ShareMinutes),
             SettledOutsideAt = seat.SettledOutsideAt,
         };
         var paid = await PaidAsync(seat, ct);
         var closed = !evenIfClosed && IsClosed(booking, seat, await _settings.GetAsync(ct), DateTimeOffset.UtcNow);
         var target = TargetFor(booking, asked, await OwedAsync(booking, ct), paid, closed);
-        return Math.Max(0m, target - paid);
+        return Math.Max(0, target - paid);
     }
 
     /// <summary>
     /// The target for one seat against one booking, given the organiser's current <c>Owed</c>,
     /// what the partner has paid, and whether the seat has closed (see <see cref="ShareFacts"/>).
     /// </summary>
-    public static decimal TargetFor(Booking booking, BookingParticipant seat, decimal owed, decimal paid = 0m, bool closed = false)
+    public static int TargetFor(Booking booking, BookingParticipant seat, int owed, int paid = 0, bool closed = false)
     {
         return ShareRules.TargetFor(new ShareFacts(
             seat.Status, seat.IsPartner && seat.UserId is not null, seat.SettledOutsideAt is not null,
-            seat.ShareCredits, seat.ConsentedCredits, booking.Status, booking.CheckedInAt is not null,
-            booking.CancellationReason == BookingService.ResoldTailRefunded, booking.AmountChargedCredits, owed,
+            seat.ShareMinutes, seat.ConsentedMinutes, booking.Status, booking.CheckedInAt is not null,
+            booking.CancellationReason == BookingService.ResoldTailRefunded, booking.AmountChargedMinutes, owed,
             paid, closed));
     }
 
@@ -273,8 +273,8 @@ public sealed class ShareLedger
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var estimate = await DeltaAsync(bookingId, seatId, options, ct);
-            if (estimate is { Delta: >= 0m, Seat.ReturnPendingSince: not null }) await ClearStaleWaitAsync(bookingId, seatId, PayerOf(estimate.Booking), options, ct);
-            if (estimate is not { } first || first.Delta == 0m) return null;
+            if (estimate is { Delta: >= 0, Seat.ReturnPendingSince: not null }) await ClearStaleWaitAsync(bookingId, seatId, PayerOf(estimate.Booking), options, ct);
+            if (estimate is not { } first || first.Delta == 0) return null;
 
             var debited = first.Delta > 0 ? first.Seat.UserId!.Value : PayerOf(first.Booking);
             try
@@ -290,9 +290,9 @@ public sealed class ShareLedger
         return null;
     }
 
-    private sealed record SeatDelta(Booking Booking, BookingParticipant Seat, decimal Target, decimal Paid)
+    private sealed record SeatDelta(Booking Booking, BookingParticipant Seat, int Target, int Paid)
     {
-        public decimal Delta => Target - Paid;
+        public int Delta => Target - Paid;
     }
 
     private async Task<SeatDelta?> DeltaAsync(Guid bookingId, Guid seatId, ReconcileOptions options, CancellationToken ct)
@@ -314,7 +314,7 @@ public sealed class ShareLedger
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, debited, _outbox, ct);
 
         // Decided again under the lock: the unlocked read chose WHOM to lock, this one decides.
-        if (await DeltaAsync(bookingId, seatId, options, ct) is not { } now || now.Delta == 0m) return null;
+        if (await DeltaAsync(bookingId, seatId, options, ct) is not { } now || now.Delta == 0) return null;
         var collecting = now.Delta > 0;
         var partner = now.Seat.UserId!.Value;
         if ((collecting ? partner : PayerOf(now.Booking)) != debited) return null;
@@ -357,7 +357,7 @@ public sealed class ShareLedger
     /// the partner and the organiser once (<see cref="MemberEventCatalogue.ReturnWaiting"/>). A
     /// sweep or reconcile that finds it still waiting finds the stamp and says nothing again.
     /// </summary>
-    private async Task MarkWaitingAsync(Booking booking, BookingParticipant seat, decimal amount, CancellationToken ct)
+    private async Task MarkWaitingAsync(Booking booking, BookingParticipant seat, int amount, CancellationToken ct)
     {
         var at = DateTimeOffset.UtcNow.Storable();
         var stamped = await _db.BookingParticipants
@@ -386,12 +386,12 @@ public sealed class ShareLedger
         await _ledger.PublishSetAsideAsync(organiser, ct);
     }
 
-    private static string Cr(decimal amount) => MoneyFormat.Credits(amount);
+    private static string Cr(int amount) => MoneyFormat.Minutes(amount);
 
     /// <summary>A return caused by the club's removal of THIS seat is told as the club's (review round 2, B-8); anything else is not.</summary>
     private static ClubReceipt? RemovalReceipt(ReconcileOptions options, ShareMove move)
     {
-        if (options.ClubRemoval is not { } removal || removal.SeatId != move.ParticipantId || move.Delta >= 0m) return null;
+        if (options.ClubRemoval is not { } removal || removal.SeatId != move.ParticipantId || move.Delta >= 0) return null;
         return new ClubReceipt(false, null, removal.Reason);
     }
 
@@ -406,7 +406,7 @@ public sealed class ShareLedger
     private async Task ClearStaleWaitAsync(Guid bookingId, Guid seatId, Guid organiser, ReconcileOptions options, CancellationToken ct)
     {
         await using var organiserLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, organiser, _outbox, ct);
-        if (await DeltaAsync(bookingId, seatId, options, ct) is { Delta: >= 0m, Seat.ReturnPendingSince: not null } now
+        if (await DeltaAsync(bookingId, seatId, options, ct) is { Delta: >= 0, Seat.ReturnPendingSince: not null } now
             && PayerOf(now.Booking) == organiser)
         {
             await ClearWaitingAsync(seatId, organiser, ct);
@@ -429,7 +429,7 @@ public sealed class ShareLedger
     /// which must commit the seat's new state and its first payment as one decision).
     /// </summary>
     public async Task<IReadOnlyList<LedgerPosting>> StageCollectionAsync(
-        Booking booking, BookingParticipant seat, decimal delta, Guid actorUserId, CancellationToken ct)
+        Booking booking, BookingParticipant seat, int delta, Guid actorUserId, CancellationToken ct)
     {
         var partner = seat.UserId ?? throw new InvalidOperationException("a seat with no member pays nothing");
         var move = new ShareMove(seat.Id, partner, PayerOf(booking), delta, await NextSeqAsync(seat.Id, partner, ct));
@@ -438,7 +438,7 @@ public sealed class ShareLedger
     }
 
     /// <summary>What an admin's collect actually moved, and the partner's balance either side of it.</summary>
-    public sealed record Collected(ShareMove Move, decimal BalanceBefore, decimal BalanceAfter);
+    public sealed record Collected(ShareMove Move, int BalanceBefore, int BalanceAfter);
 
     /// <summary>
     /// An admin's explicit collect (R19 posture, applied to shares): the seat's consent raised to
@@ -450,7 +450,7 @@ public sealed class ShareLedger
     /// written either).
     /// </summary>
     public async Task<Collected?> CollectAsync(
-        Guid bookingId, Guid seatId, Guid actorUserId, Func<BookingParticipant, decimal, decimal, Task> record, CancellationToken ct,
+        Guid bookingId, Guid seatId, Guid actorUserId, Func<BookingParticipant, int, int, Task> record, CancellationToken ct,
         string? reason = null)
     {
         var partner = await _db.BookingParticipants.AsNoTracking().Where(p => p.Id == seatId).Select(p => p.UserId).FirstOrDefaultAsync(ct);
@@ -461,11 +461,11 @@ public sealed class ShareLedger
         var seat = await _db.BookingParticipants.FirstOrDefaultAsync(p => p.Id == seatId && p.BookingId == bookingId, ct);
         if (booking?.UserId is null || seat is null || seat.UserId != partnerId) return null;
 
-        seat.ConsentedCredits = seat.ShareCredits;
+        seat.ConsentedMinutes = seat.ShareMinutes;
         seat.UpdatedAt = DateTimeOffset.UtcNow.Storable();
         var paid = await PaidAsync(seat, ct);
         var delta = TargetFor(booking, seat, await OwedAsync(booking, ct), paid, closed: false) - paid;
-        if (delta <= 0m)
+        if (delta <= 0)
         {
             _db.ChangeTracker.Clear();
             return null;
@@ -554,7 +554,7 @@ public sealed class ShareLedger
         var reason = club?.Reason?.Trim() is { Length: > 0 } r ? r : null;
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
-                ByClub: byClub, BalanceAfterCredits: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason),
+                ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason),
             move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
@@ -577,9 +577,9 @@ public sealed class ShareLedger
         }, settings);
     }
 
-    private static string ShareHeadline(ShareDirection d, string other, decimal amount, bool byClub = false)
+    private static string ShareHeadline(ShareDirection d, string other, int amount, bool byClub = false)
     {
-        var cr = MoneyFormat.Credits(amount);
+        var cr = MoneyFormat.Minutes(amount);
         if (byClub && d == ShareDirection.Paid) return $"The club collected {cr} for your share";
         if (byClub && d == ShareDirection.Received) return $"The club collected {other}'s share: {cr}";
         switch (d)

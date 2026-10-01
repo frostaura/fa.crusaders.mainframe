@@ -13,7 +13,7 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <para>
 /// <b>Nothing here debits a partner by implication.</b> An admin's accept records that the member
 /// is playing; it does not record the member's consent, so the reconcile collects nothing from
-/// them (<see cref="BookingParticipant.ConsentedCredits"/> stays where the member left it). Money
+/// them (<see cref="BookingParticipant.ConsentedMinutes"/> stays where the member left it). Money
 /// moves from a partner only through the member's own accept or through <see cref="CollectAsync"/>,
 /// which must be sent with <c>allowNegativeBalance</c> and a reason — the R19 posture, applied to
 /// shares.
@@ -56,10 +56,10 @@ public sealed class PlayersAdminService
     {
         if (act.AllowNegativeBalance) return null;
         var paid = await _shares.PaidAsync(seat, ct);
-        if (paid <= 0m) return null;
+        if (paid <= 0) return null;
         var coverage = await _ledger.GetCoverageAsync(ShareLedger.PayerOf(game.Booking), game.Booking.Id, seat.Id, ct);
         return coverage < paid
-            ? PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised, new { return_credits = paid, covered_credits = Math.Max(0m, coverage) })
+            ? PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised, new { return_minutes = paid, covered_minutes = Math.Max(0, coverage) })
             : null;
     }
 
@@ -113,7 +113,7 @@ public sealed class PlayersAdminService
     /// The hand-back's answer tells the desk whether the money actually went (review round 3): the
     /// coverage check above is not under the organiser's lock, so a spend in between can leave the
     /// return waiting even though the action succeeded. <c>return_waiting</c> says so, with
-    /// <c>return_credits</c> — what is due back and waiting — when it does.
+    /// <c>return_minutes</c> — what is due back and waiting — when it does.
     /// </summary>
     private async Task<PlayerOutcome> WithReturnStateAsync(PlayerOutcome outcome, Guid seatId, CancellationToken ct)
     {
@@ -125,7 +125,7 @@ public sealed class PlayersAdminService
             participant_id = seat.Id,
             status = PlayerViews.StatusName(seat.Status),
             return_waiting = waiting,
-            return_credits = waiting ? await _shares.PaidAsync(seat, ct) : (decimal?)null,
+            return_minutes = waiting ? await _shares.PaidAsync(seat, ct) : (int?)null,
         });
     }
 
@@ -140,7 +140,7 @@ public sealed class PlayersAdminService
         seat.Status = ParticipantStatus.Accepted;
         seat.RespondedAt = StorableTime.UtcNow;
         seat.UpdatedAt = StorableTime.UtcNow;
-        await RecordAsync(AdminChangeActions.BookingPlayerAcceptedOnBehalf, act, seat, new { status = "accepted", consented_credits = seat.ConsentedCredits }, ct);
+        await RecordAsync(AdminChangeActions.BookingPlayerAcceptedOnBehalf, act, seat, new { status = "accepted", consented_minutes = seat.ConsentedMinutes }, ct);
         // B8: the member is told the club said yes for them, in the same save.
         MemberNotices.Stage(_db, _tenant.TenantId,
             await PlayerNotices.ClubSeatAsync(_db, game!.Booking, seat, game.Settings, "club-accepted", ct), game.Settings);
@@ -166,7 +166,7 @@ public sealed class PlayersAdminService
         seat.RespondedAt ??= StorableTime.UtcNow;
         seat.UpdatedAt = StorableTime.UtcNow;
         await RecordAsync(AdminChangeActions.BookingShareSettledOutside, act, seat,
-            new { share_credits = seat.ShareCredits, paid_in_app_credits = paid, overdraft_authorised = act.AllowNegativeBalance }, ct);
+            new { share_minutes = seat.ShareMinutes, paid_in_app_minutes = paid, overdraft_authorised = act.AllowNegativeBalance }, ct);
         return await WithReturnStateAsync(await SaveAndSettleAsync(game!, seat, ct, OptionsFor(act, seat)), seat.Id, ct);
     }
 
@@ -197,7 +197,7 @@ public sealed class PlayersAdminService
         {
             collected = await _shares.CollectAsync(game!.Booking.Id, seat.Id, act.ActorId, (tracked, delta, before) =>
                 RecordAsync(AdminChangeActions.BookingShareCollected, act, tracked,
-                    new { collected_credits = delta, balance_before_credits = before, balance_after_credits = before - delta }, ct), ct,
+                    new { collected_minutes = delta, balance_before_minutes = before, balance_after_minutes = before - delta }, ct), ct,
                 act.Reason);
         }
         catch (DbUpdateException)
@@ -210,8 +210,8 @@ public sealed class PlayersAdminService
         return PlayerOutcome.Ok(new
         {
             participant_id = seat.Id,
-            collected_credits = collected.Move.Delta,
-            balance_after_credits = collected.BalanceAfter,
+            collected_minutes = collected.Move.Delta,
+            balance_after_minutes = collected.BalanceAfter,
         });
     }
 
