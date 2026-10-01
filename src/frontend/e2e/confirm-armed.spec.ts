@@ -427,7 +427,10 @@ test("keeps the frame round its words in pixels, whatever the root font size", a
  * </p>
  */
 test("brings the armed block into view when the trigger was at the bottom edge", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  // One column of account cards, so the last confirm is far enough down the page to be put on
+  // the bottom edge: from 1440 the Account tab is two columns (R4 form factor) and the last
+  // confirm sits near the top of one, where nothing can scroll it to the edge.
+  await page.setViewportSize({ width: 800, height: 700 });
   await open(page, "/profile?tab=account", 0);
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
 

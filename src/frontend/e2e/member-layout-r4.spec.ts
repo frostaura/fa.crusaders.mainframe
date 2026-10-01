@@ -314,7 +314,7 @@ test.describe("Wallet and Wallet activity (SPEC 3.4)", () => {
     { path: "/api/v1/reports/me/wallet", body: {
       from: inDays(-30), to: inDays(0), top_ups_credits: 300, spent_credits: 150, refunds_credits: 0, penalties_credits: 0,
       adjustments_credits: 0, reversals_credits: 0, net_movement_credits: 150, penalty_count: 0, attended_bookings: 3,
-      bookings: 3, minutes_on_court: 135, movements: 6,
+      bookings: 3, minutes_on_court: 135, count: 6,
     } },
     { path: "/api/v1/reports/me/daily", body: [day(3), day(2), day(1)] },
   ];
@@ -359,6 +359,13 @@ test.describe("Wallet and Wallet activity (SPEC 3.4)", () => {
   test("390 at 200 % text: the wallet and its activity, nothing off screen", async ({ page }) => {
     await open(page, "/wallet", walletRoutes(), 390);
     await expect(page.getByRole("complementary", { name: WALLET_LAYOUT.railLabel })).toBeVisible();
+    await bigText(page);
+    await healthy(page);
+  });
+
+  test("390 at 200 % text: the activity's totals fall to one column rather than off the screen", async ({ page }) => {
+    await open(page, "/wallet/activity", activityRoutes(), 390);
+    await expect(page.getByText("Net movement over this period", { exact: false })).toBeVisible();
     await bigText(page);
     await healthy(page);
   });

@@ -69,6 +69,9 @@ async function hovered(locator: import("@playwright/test").Locator) {
 }
 
 test("a control marked .no-lift really does not lift, and one that is not marked does", async ({ page }) => {
+  // Below lg, where the activity's charts are a carousel with its dots (R4 form factor: from lg
+  // they stand side by side and there is no dot to measure).
+  await page.setViewportSize({ width: 900, height: 900 });
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },

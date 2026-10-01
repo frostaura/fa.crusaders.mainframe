@@ -23,7 +23,7 @@ import { GAP, autoGridTemplate, type GridGap, type Tile } from "./layout";
  * The tiles are rem, so at 200 % text a grid of four drops to two rather than squeezing words.
  * </p>
  */
-type GridElement = "div" | "ul" | "ol";
+type GridElement = "div" | "ul" | "ol" | "dl";
 
 export type AutoGridProps = Omit<ComponentProps<"div">, "children" | "ref"> & {
   /** The tile's minimum width — `stat` 9rem, `card` 18rem, `panel` 26rem, `wide` 34rem. */

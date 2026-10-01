@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cn, formatCredits } from "@/lib/utils";
 import { typography } from "@/lib/typography";
 import { Toggle } from "@/components/ui/toggle";
+import { AutoGrid } from "@/components/ui/auto-grid";
 import { Card } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -104,22 +105,22 @@ export function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** How many across from `lg` — chosen by the caller so its count fills whole rows (VIS F3-15). */
-const TOTAL_COLUMNS = {
-  3: "grid-cols-2 sm:grid-cols-3",
-  4: "grid-cols-2 sm:grid-cols-4",
-  5: "grid-cols-2 lg:grid-cols-5",
-} as const;
+/**
+ * How many across at most — chosen by the caller so its count fills whole rows (VIS F3-15). An
+ * AutoGrid of 9rem tiles (R4 form factor): two across on a phone as before, ONE at 200 % text,
+ * where "MOVEMENTS" in a half column ran 10px off a 390 screen.
+ */
+type TotalColumns = 3 | 4 | 5;
 
 /** A card of {@link Stat}s and the sentence that says how they add up. */
 export function TotalsCard({ children, footnote, columns = 4 }: {
   children: ReactNode; footnote: ReactNode;
   /** Ten totals in four columns left two orphans on the admin page; five across fill two rows. */
-  columns?: keyof typeof TOTAL_COLUMNS;
+  columns?: TotalColumns;
 }) {
   return (
     <Card className="px-4 sm:px-6">
-      <dl className={cn("grid gap-3", TOTAL_COLUMNS[columns])}>{children}</dl>
+      <AutoGrid as="dl" min="stat" max={columns} gap="md">{children}</AutoGrid>
       <p className="text-sm text-text-secondary">{footnote}</p>
     </Card>
   );
