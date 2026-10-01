@@ -443,7 +443,6 @@ class Door:
         s = self.read_settings()
         body = {
             "sliceMinutes": s["slice_minutes"],
-            "slicePriceCredits": s["slice_price_credits"],
             "advanceBookingDays": s["advance_booking_days"],
             "dayStartMinute": s["day_start_minute"],
             "dayEndMinute": s["day_end_minute"],
@@ -633,9 +632,9 @@ def d3_member_books(d: Door) -> dict:
     if len(d.spare) < 4:
         raise StepFailed(f"need four spare seeded members, have {len(d.spare)}")
     for m in d.spare[:4]:
-        expect_status(d.w.http.post(f"/api/v1/admin/credit/{m['user_id']}/adjust",
-                                    {"amountCredits": 800, "reason": "door walkthrough"},
-                                    token=d.w.admin_token), 200, "credit")
+        expect_status(d.w.http.post(f"/api/v1/admin/minutes/{m['user_id']}/adjust",
+                                    {"amountMinutes": 800, "reasonCode": "goodwill", "reason": "door walkthrough"},
+                                    token=d.w.admin_token), 200, "minutes")
 
     # Far enough out that its own code is NOT yet in its door window (so the first
     # scan below is a real `too_early`), and inside `roster_window + early_entry` so

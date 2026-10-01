@@ -34,7 +34,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -285,22 +285,24 @@ def tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
 
 def dec(value: Any) -> Decimal:
     """
-    Credits, as a decimal — never a float.
+    Rand, as a decimal — never a float.
 
-    Every money assertion in this file is an equality, and float equality on credits
-    holds only while every balance happens to be a whole number. It was, until walk-ups
-    began to truncate at closing time and a member bought fifty minutes for 26.67: from
-    that moment `451.33 + 160 == 611.33` was False, and a top-up that had credited
-    exactly the right 160 reported as a failure. The repo's own invariant is that money
-    is decimal; a harness that checks it in binary floating point is checking something
-    else.
+    Every money assertion in this file is an equality. Rand carries cents, and float
+    equality on cents is not equality (`451.33 + 160 == 611.33` is False in binary
+    floating point), so a rand figure is compared as a Decimal.
     """
     return Decimal(str(value))
 
 
-def credits(value: Any) -> Decimal:
-    """A credit amount rounded to the ledger's own scale, the way the server rounds it."""
-    return dec(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+def mins(value: Any) -> int:
+    """
+    Minutes, the ledger's unit (docs/specs/minutes-and-packages.md §1.1): a JSON integer,
+    never `50.0`. A fractional or non-integral value is a wire defect, so it is refused
+    here rather than rounded into agreement — an assertion that compares it fails loudly.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise StepFailed(f"a minutes figure on the wire is not a JSON integer: {value!r}")
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -1147,7 +1149,7 @@ class World:
     admin_user_id: str = ""
     tenant_tz: str = "Africa/Johannesburg"
     courts: dict[int, str] = field(default_factory=dict)  # court number -> id
-    court_price: Decimal = Decimal("8")
+    slice_minutes: int = 15
     m_user_id: str = ""
     m_membership_id: str = ""
     m_token: str = ""
@@ -1224,7 +1226,6 @@ def seed_and_tune(w: World) -> None:
     body = {
         "timezone": zone,
         "sliceMinutes": 15,
-        "slicePriceCredits": settings["slice_price_credits"],
         "advanceBookingDays": settings["advance_booking_days"],
         # The club is open for the whole local day, for the run.
         #
@@ -1280,10 +1281,9 @@ def seed_and_tune(w: World) -> None:
     courts = expect_status(w.http.get("/api/v1/admin/courts", token=w.admin_token), 200, "courts GET").json
     for c in courts:
         w.courts[c["court_number"]] = c["id"]
-        # 8 credits a slice, the number the whole test corpus is written against; the
-        # seeder ships 50. Patched through the API rather than assumed.
-        expect_status(w.http.patch(f"/api/v1/admin/courts/{c['id']}", {"slicePriceCredits": 8}, token=w.admin_token), 200, "court PATCH")
-    REPORT.check("setup", "four courts present (numbers 1-4) and priced at 8 credits/slice", all(n in w.courts for n in (1, 2, 3, 4)))
+    # A court has no price: a booking costs its length in minutes (P13 §1.1), so the
+    # 15-minute slices set above are the whole of the arithmetic below.
+    REPORT.check("setup", "four courts present (numbers 1-4)", all(n in w.courts for n in (1, 2, 3, 4)))
 
     members = expect_status(w.http.get("/api/v1/admin/members", token=w.admin_token), 200, "members GET").json
     by_number = {m["membership_number"]: m for m in members}
@@ -1318,12 +1318,13 @@ def seed_and_tune(w: World) -> None:
     REPORT.check("setup", "and once it is changed the member holds an ordinary session",
                  not login.get("must_change_password") and w.http.get("/api/v1/wallet", token=w.m_token).status == 200)
 
-    # Credits through the admin API, on top of the seeded opening balance.
-    adj = expect_status(w.http.post(f"/api/v1/admin/credit/{w.m_user_id}/adjust", {"amountCredits": 500, "reason": "e2e-device seed"}, token=w.admin_token), 200, "adjust M")
-    expect_status(w.http.post(f"/api/v1/admin/credit/{w.n_user_id}/adjust", {"amountCredits": 500, "reason": "e2e-device seed"}, token=w.admin_token), 200, "adjust N")
+    # Minutes through the desk's goodwill adjustment, on top of the seeded opening balance.
+    seed = {"amountMinutes": 500, "reasonCode": "goodwill", "reason": "e2e-device seed"}
+    adj = expect_status(w.http.post(f"/api/v1/admin/minutes/{w.m_user_id}/adjust", seed, token=w.admin_token), 200, "adjust M")
+    expect_status(w.http.post(f"/api/v1/admin/minutes/{w.n_user_id}/adjust", seed, token=w.admin_token), 200, "adjust N")
     wallet = expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")
-    REPORT.check("setup", "credits seeded via admin adjustment and visible on M's wallet",
-                 dec(wallet["balance_credits"]) == dec(adj["balance_after_credits"]) and dec(wallet["balance_credits"]) >= 500)
+    REPORT.check("setup", "minutes seeded via admin adjustment and visible on M's wallet, as whole minutes",
+                 mins(wallet["balance_minutes"]) == mins(adj["balance_after_minutes"]) and wallet["balance_minutes"] >= 500)
 
 
 
@@ -1405,7 +1406,8 @@ def admin_book(w: World, court_number: int, user_id: str, starts_at: datetime, s
     }, token=w.admin_token)
     expect_status(r, 200, f"admin booking {what}")
     return {"id": r["booking_id"], "court": court_number, "starts_at": starts_at,
-            "ends_at": starts_at + timedelta(minutes=15 * slices), "user_id": user_id, "amount": w.court_price * slices}
+            "ends_at": starts_at + timedelta(minutes=w.slice_minutes * slices), "user_id": user_id,
+            "amount": w.slice_minutes * slices}
 
 
 def create_bookings(w: World) -> None:
@@ -1532,7 +1534,7 @@ def heartbeat_roster(w: World) -> None:
     def set_roster_window(minutes: int) -> None:
         cur = expect_status(w.http.get("/api/v1/admin/settings", token=w.admin_token), 200, "settings GET")
         body = {
-            "sliceMinutes": cur["slice_minutes"], "slicePriceCredits": cur["slice_price_credits"],
+            "sliceMinutes": cur["slice_minutes"],
             "advanceBookingDays": cur["advance_booking_days"], "dayStartMinute": cur["day_start_minute"],
             "dayEndMinute": cur["day_end_minute"], "penaltyPct": cur["penalty_pct"],
             "graceWindowMinutes": cur["grace_window_minutes"], "penaltyWindowMinutes": cur["penalty_window_minutes"],
@@ -1604,8 +1606,8 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
     REPORT.check("C3", "B3 (now checked in, still live) is still pushed in the roster — re-lightable offline", 2 in roster_entries(hb))
     ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=200", token=w.admin_token), 200, "ledger M").json
     b3_rows = [r for r in ledger if r.get("relatedBookingId") == w.b3["id"]]
-    REPORT.check("C3", "M's ledger holds exactly one movement for B3: the -24 charge posted at booking, nothing at activation",
-                 len(b3_rows) == 1 and dec(b3_rows[0]["signedAmountCredits"]) == -24 and b3_rows[0]["type"] == "BookingCharge", f"rows={[(r['type'], r['signedAmountCredits']) for r in b3_rows]}")
+    REPORT.check("C3", f"M's ledger holds exactly one movement for B3: the -{w.b3['amount']} minute charge posted at booking, nothing at activation",
+                 len(b3_rows) == 1 and mins(b3_rows[0]["signedAmountMinutes"]) == -w.b3["amount"] and b3_rows[0]["type"] == "BookingCharge", f"rows={[(r['type'], r['signedAmountMinutes']) for r in b3_rows]}")
     if sim is not None:
         sim.send("OFF", "C")
         evt = sim.expect_frame(lambda f: f.verb == "EVT" and f.args[:2] == ["OFF", "C"], 5, "!EVT,OFF,C")
@@ -1646,7 +1648,7 @@ def offline_attendance(w: World) -> None:
                  wr.get("accepted_through") == 2 and wr.get("recorded") == 1)
 
 
-def walk_up_expectation(w: World, requested: int) -> tuple[int, Decimal]:
+def walk_up_expectation(w: World, requested: int) -> tuple[int, int]:
     """How many minutes the club can sell right now, and what the server will charge."""
     tz = ZoneInfo(w.tenant_tz) if ZoneInfo else timezone.utc
     local = now_utc().astimezone(tz)
@@ -1655,25 +1657,24 @@ def walk_up_expectation(w: World, requested: int) -> tuple[int, Decimal]:
     closes = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=int(day["dayEndMinute"]))
     to_close = int((closes - local).total_seconds() // 60)
     minutes = min(requested, max(to_close, 0))
-    # The server's own arithmetic: pro rata on the slice price, rounded away from zero to
-    # the ledger's two places.
-    cost = credits(w.court_price * minutes / int(day["sliceMinutes"]))
-    return minutes, cost
+    # A walk-up costs exactly the whole minutes it grants (P13 §1.2) — no slice price, no
+    # pro rata, no rounding to argue about.
+    return minutes, minutes
 
 
 def walk_up(w: World) -> None:
     step("C5/H3  Walk-up on an unbooked court, replay-safe by nonce")
     assert w.box is not None
-    wallet_before = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
+    wallet_before = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
 
     # What the club will actually sell right now, rather than a hard-coded hour.
     #
     # A walk-up truncates at closing time — an hour bought at 19:50 on a Saturday ends at
-    # 20:00 — so a fixed "60 minutes for 32 credits" is a test that passes all afternoon
+    # 20:00 — so a fixed "60 minutes for 60 minutes" is a test that passes all afternoon
     # and fails after 19:00, which is the same wall-clock trap `BookableSlot` and the
     # peak-window fixtures already exist to close, arriving from a third direction. It
     # cost a whole red run at 19:09 SAST. The expectation is derived from the club's own
-    # hours for today and the pro-rata price the server computes from them.
+    # hours for today.
     minutes, cost = walk_up_expectation(w, requested=60)
     # A club with nothing left to sell refuses the purchase outright, and the wire says
     # `walk_up_refused` — which reads as a broken walk-up and is a closed club. seed_and_tune
@@ -1688,18 +1689,18 @@ def walk_up(w: World) -> None:
     nonce = secrets.token_hex(8)
     req = {"minutes": 60, "method": "qr", "token": w.ident_code, "court": 2, "nonce": nonce}
     first = expect_status(w.box.call("POST", "/api/v1/device/walkup", req), 200, "walkup")
-    REPORT.check("C5", f"walk-up on court 2 (named in the request, on the box) is granted {minutes} minutes (<= 90) for {cost} credits",
-                 first.get("granted_minutes") == minutes and credits(first.get("amount_credits", 0)) == cost and first.get("replayed") is False, f"resp={first.json}")
-    REPORT.check("C5", f"balance_after_credits == wallet before - {cost}", credits(first.get("balance_after_credits", -1)) == wallet_before - cost)
+    REPORT.check("C5", f"walk-up on court 2 (named in the request, on the box) is granted {minutes} minutes (<= 90) for {cost} minutes",
+                 first.get("granted_minutes") == minutes and first.get("amount_minutes") == cost and first.get("replayed") is False, f"resp={first.json}")
+    REPORT.check("C5", f"balance_after_minutes == wallet before - {cost}", first.get("balance_after_minutes") == wallet_before - cost)
     replay = expect_status(w.box.call("POST", "/api/v1/device/walkup", req), 200, "walkup replay")
     REPORT.check("H3", f"resending the identical nonce answers replayed:true with the SAME booking_id and the remainder of the grant ({minutes}, seconds later)",
                  replay.get("replayed") is True and replay.get("booking_id") == first.get("booking_id") and minutes - 1 <= replay.get("granted_minutes", 0) <= minutes, f"resp={replay.json}")
-    wallet_after = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
+    wallet_after = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
     REPORT.check("H3", f"the replay charged nothing: wallet moved by exactly -{cost} across both calls", wallet_after == wallet_before - cost, f"{wallet_before} -> {wallet_after}")
     ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=200", token=w.admin_token), 200, "ledger M").json
     wu_rows = [r for r in ledger if r.get("relatedBookingId") == first.get("booking_id")]
-    REPORT.check("H3", f"one LightsPurchase row of -{cost} for the walk-up booking, not two", len(wu_rows) == 1 and wu_rows[0]["type"] == "LightsPurchase" and credits(wu_rows[0]["signedAmountCredits"]) == -cost,
-                 f"rows={[(r['type'], r['signedAmountCredits']) for r in wu_rows]}")
+    REPORT.check("H3", f"one LightsPurchase row of -{cost} for the walk-up booking, not two", len(wu_rows) == 1 and wu_rows[0]["type"] == "LightsPurchase" and mins(wu_rows[0]["signedAmountMinutes"]) == -cost,
+                 f"rows={[(r['type'], r['signedAmountMinutes']) for r in wu_rows]}")
     slot = find_slot(w, first.get("booking_id", ""), now_utc())
     REPORT.check("C5", "the walk-up is a real booking on court 2 in M's name, visible on the schedule",
                  bool(slot) and slot["courtNumber"] == 2 and slot["ownerUserId"] == w.m_user_id and slot["status"] == "booked")
@@ -1709,9 +1710,9 @@ def walk_up(w: World) -> None:
     REPORT.check("H3", "a walk-up without a nonce -> 400 nonce_required", no_nonce.status == 400 and no_nonce.get("error") == "nonce_required")
     booking_code = w.tokens.get(2)
     if booking_code:
-        wallet_now = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
+        wallet_now = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
         as_wallet = w.box.call("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": booking_code, "court": 2, "nonce": secrets.token_hex(8)})
-        wallet_after_attempt = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
+        wallet_after_attempt = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
         REPORT.check("R19", "B3's BOOKING code presented as a walk-up buyer -> 400 not_recognised and the wallet is untouched (a roster code is not a wallet)",
                      as_wallet.status == 400 and as_wallet.get("error") == "not_recognised" and wallet_after_attempt == wallet_now, f"resp={as_wallet.text[:120]}")
     too_long = w.box.call("POST", "/api/v1/device/walkup", {"minutes": 240, "method": "qr", "token": w.ident_code, "court": 2, "nonce": secrets.token_hex(8)})
@@ -1740,39 +1741,53 @@ def early_scan(w: World) -> None:
 
 
 def money_leg(w: World, mb: Mountebank) -> None:
-    step("Money  PayFast top-up through the mountebank imposter, ITN verified and replay refused")
-    wallet_before = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
-    topup = expect_status(w.http.post("/api/v1/credit/topup", {"amountZar": 100}, token=w.m_token), 200, "topup register")
-    m_payment_id = topup["checkout_id"]
-    REPORT.check("money", "POST /credit/topup registers a pending R100 top-up and points the browser at PayFast's process URL",
-                 bool(m_payment_id) and "/eng/process" in topup.get("redirect_url", ""), f"resp={topup.json}")
+    step("Money  A PayFast package purchase through the mountebank imposter, ITN verified and replay refused")
+    wallet_before = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
+    # The member's own shelf (P13 §3.4, §4.2). The seeded club packages are 1 hour / 5 hours /
+    # 10 hours; whatever discount M's groups set applies to the RAND, never the minutes.
+    shelf = expect_status(w.http.get("/api/v1/minutes/packages", token=w.m_token), 200, "shelf").json
+    hour = next((p for p in shelf.get("packages", []) if p.get("source") == "club" and p.get("minutes") == 60), None)
+    if hour is None:
+        raise StepFailed(f"no one-hour club package on M's shelf: {shelf}")
+    price = dec(hour["price_zar"])
+    amount = f"{price:.2f}"
+    REPORT.check("money", "M's shelf offers the one-hour club package as 60 whole minutes, priced in rand",
+                 mins(hour["minutes"]) == 60 and price > 0, f"package={hour}")
+    buy = expect_status(w.http.post("/api/v1/minutes/purchase", {"packageId": hour["id"], "quotedPriceZar": float(price)},
+                                    token=w.m_token), 200, "purchase register")
+    m_payment_id = buy["checkout_id"]
+    REPORT.check("money", "POST /minutes/purchase registers a pending purchase locked at the shelf price and points the browser at PayFast",
+                 bool(m_payment_id) and "/eng/process" in buy.get("redirect_url", "") and dec(buy.get("amount_zar", -1)) == price
+                 and mins(buy["package"]["minutes"]) == 60, f"resp={buy.json}")
     # The browser leg, against the imposter instead of PayFast.
-    form = form_encode([("merchant_id", SEEDED_PAYFAST_MERCHANT_ID), ("m_payment_id", m_payment_id), ("amount", "100.00"), ("item_name", "Credits")])
+    form = form_encode([("merchant_id", SEEDED_PAYFAST_MERCHANT_ID), ("m_payment_id", m_payment_id), ("amount", amount), ("item_name", "Minutes")])
     checkout = w.http.call("POST", f"{mb.base}/eng/process", raw=form, content_type="application/x-www-form-urlencoded", absolute=True)
     REPORT.check("money", "the imposter answers the checkout POST with a 302 back to the return URL",
-                 checkout.status == 302 and "/wallet/topup/" in checkout.headers.get("Location", ""), f"Location={checkout.headers.get('Location')}")
+                 checkout.status == 302 and "/wallet/" in checkout.headers.get("Location", ""), f"Location={checkout.headers.get('Location')}")
     # The server-to-server leg: an ITN as PayFast would sign it, in posted order.
     pf_payment_id = str(1_000_000 + secrets.randbelow(9_000_000))
     fields = [("m_payment_id", m_payment_id), ("pf_payment_id", pf_payment_id), ("payment_status", "COMPLETE"),
-              ("item_name", "Credits"), ("amount_gross", "100.00"), ("amount_fee", "-2.30"), ("amount_net", "97.70"),
+              ("item_name", "Minutes"), ("amount_gross", amount), ("amount_fee", "-2.30"), ("amount_net", f"{price - Decimal('2.30'):.2f}"),
               ("merchant_id", SEEDED_PAYFAST_MERCHANT_ID)]
     signed = fields + [("signature", payfast_signature(fields, SEEDED_PAYFAST_PASSPHRASE))]
     itn = w.http.call("POST", f"/api/v1/credit/topup/callback?tenant={SEEDED_TENANT}", raw=form_encode(signed), content_type="application/x-www-form-urlencoded")
-    REPORT.check("money", "a correctly signed COMPLETE ITN is accepted and converts R100 -> 160 credits (Regular rate 1.6)",
-                 itn.status == 200 and itn.get("ok") is True and dec(itn.get("credits", 0)) == 160, f"resp={itn.text[:160]}")
-    wallet_mid = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
-    REPORT.check("money", "M's wallet rose by exactly 160", wallet_mid == wallet_before + 160, f"{wallet_before} -> {wallet_mid}")
-    status = expect_status(w.http.get(f"/api/v1/credit/topup/{topup['topup_id']}", token=w.m_token), 200, "topup status")
-    REPORT.check("money", "the pending top-up is now Completed", status.get("status") == "Completed")
+    REPORT.check("money", "a correctly signed COMPLETE ITN is accepted and adds the package's locked 60 minutes",
+                 itn.status == 200 and itn.get("ok") is True and itn.get("minutes") == 60 and itn.get("package_id") == hour["id"], f"resp={itn.text[:160]}")
+    wallet_mid = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
+    REPORT.check("money", "M's wallet rose by exactly 60 minutes", wallet_mid == wallet_before + 60, f"{wallet_before} -> {wallet_mid}")
+    status = expect_status(w.http.get(f"/api/v1/minutes/purchase/{buy['purchase_id']}", token=w.m_token), 200, "purchase status")
+    REPORT.check("money", "the pending purchase is now Completed", status.get("status") == "Completed")
     replay = w.http.call("POST", f"/api/v1/credit/topup/callback?tenant={SEEDED_TENANT}", raw=form_encode(signed), content_type="application/x-www-form-urlencoded")
-    wallet_after = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
-    REPORT.check("money", "replaying the same ITN is acknowledged as idempotent and credits nothing a second time",
+    wallet_after = mins(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_minutes"])
+    REPORT.check("money", "replaying the same ITN is acknowledged as idempotent and adds nothing a second time",
                  replay.status == 200 and replay.get("idempotent") is True and wallet_after == wallet_mid, f"resp={replay.text[:120]}")
     tampered = [(k, ("999.00" if k == "amount_gross" else v)) for k, v in signed]
     bad = w.http.call("POST", f"/api/v1/credit/topup/callback?tenant={SEEDED_TENANT}", raw=form_encode(tampered), content_type="application/x-www-form-urlencoded")
     REPORT.check("money", "an ITN altered after signing is refused (401)", bad.status == 401)
     ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&type=TopUp&limit=50", token=w.admin_token), 200, "ledger topups").json
-    REPORT.check("money", "exactly one TopUp ledger row of +160 exists for this payment", sum(1 for r in ledger if dec(r["signedAmountCredits"]) == 160) == 1)
+    REPORT.check("money", "exactly one TopUp ledger row of +60 minutes exists for this payment",
+                 sum(1 for r in ledger if mins(r["signedAmountMinutes"]) == 60) == 1,
+                 f"rows={[(r.get('signedAmountMinutes'), r.get('comment')) for r in ledger]}")
 
 
 def no_show_sweep(w: World) -> None:
@@ -1795,18 +1810,21 @@ def no_show_sweep(w: World) -> None:
         ends = parse_dt(slot7["endsAtUtc"])
         REPORT.check("H5", "B7's EndsAt is truncated to the sweep time (<= now, < the booked end)", ends <= swept_at and ends < w.b7["ends_at"], f"ends_at={ends.isoformat()}")
     ledger_n = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.n_user_id}&limit=200", token=w.admin_token), 200, "ledger N").json
-    rows7 = {r["type"]: dec(r["signedAmountCredits"]) for r in ledger_n if r.get("relatedBookingId") == w.b7["id"]}
-    REPORT.check("H5", "N's ledger for B7: BookingCharge -24, CancellationRefund +24, NoShowPenalty -7.20 (30%) as separate rows",
-                 rows7.get("BookingCharge") == dec(-24) and rows7.get("CancellationRefund") == dec(24)
-                 and rows7.get("NoShowPenalty") == dec("-7.2"), f"rows={rows7}")
+    rows7 = {r["type"]: mins(r["signedAmountMinutes"]) for r in ledger_n if r.get("relatedBookingId") == w.b7["id"]}
+    charged7 = w.b7["amount"]
+    # ⌊30% of the charge⌋: the member keeps the part-minute (P13 §1.2) — 45 → 13, never 13.5 or 14.
+    penalty7 = charged7 * 30 // 100
+    REPORT.check("H5", f"N's ledger for B7: BookingCharge -{charged7}, CancellationRefund +{charged7}, NoShowPenalty -{penalty7} (⌊30%⌋) as separate rows",
+                 rows7.get("BookingCharge") == -charged7 and rows7.get("CancellationRefund") == charged7
+                 and rows7.get("NoShowPenalty") == -penalty7, f"rows={rows7}")
     n_after = next(m for m in expect_status(w.http.get("/api/v1/admin/members", token=w.admin_token), 200, "members").json if m["user_id"] == w.n_user_id)
     # Money is ledger-only: the balance the admin screen shows must be the sum of N's rows,
     # including the two the sweep just posted. (A plain before/after delta would also
     # pick up any seeded booking of N's the same sweep happened to settle.)
-    ledger_sum = credits(sum(dec(r["signedAmountCredits"]) for r in ledger_n))
+    ledger_sum = sum(mins(r["signedAmountMinutes"]) for r in ledger_n)
     REPORT.check("H5", "N's balance equals the sum of N's ledger rows after the sweep (no stored balance drift)",
-                 credits(n_after["balance_credits"]) == ledger_sum and dec(n_after["balance_credits"]) >= dec(n_before["balance_credits"]) + dec("16.8"),
-                 f"{n_before['balance_credits']} -> {n_after['balance_credits']} (ledger sum {ledger_sum})")
+                 mins(n_after["balance_minutes"]) == ledger_sum and n_after["balance_minutes"] >= n_before["balance_minutes"] + charged7 - penalty7,
+                 f"{n_before['balance_minutes']} -> {n_after['balance_minutes']} (ledger sum {ledger_sum})")
     rebook = w.http.post("/api/v1/admin/bookings", {
         "courtId": w.courts[4], "userId": w.n_user_id, "startsAt": iso(now_utc() + timedelta(seconds=45)), "sliceCount": 1,
     }, token=w.admin_token)
@@ -1818,9 +1836,9 @@ def no_show_sweep(w: World) -> None:
     REPORT.check("C3", "B3 (attended via /activate) is still booked after the sweep", bool(slot3) and slot3["status"] == "booked")
     ledger_m = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=300", token=w.admin_token), 200, "ledger M").json
     for label, b in (("C6", w.b1), ("C3", w.b3)):
-        rows = [(r["type"], dec(r["signedAmountCredits"])) for r in ledger_m if r.get("relatedBookingId") == b["id"]]
+        rows = [(r["type"], mins(r["signedAmountMinutes"])) for r in ledger_m if r.get("relatedBookingId") == b["id"]]
         REPORT.check(label, f"no refund and no penalty were posted for the attended booking on court {b['court']}",
-                     rows == [("BookingCharge", -24.0)], f"rows={rows}")
+                     rows == [("BookingCharge", -b["amount"])], f"rows={rows}")
 
 
 def mega_half(sim: Simulator) -> None:
