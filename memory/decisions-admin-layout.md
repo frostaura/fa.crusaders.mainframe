@@ -26,11 +26,10 @@ Spec: the round's `SPEC.md` §3/§4. Primitives: `components/ui` (`SplitView`, `
 - **V-14:** the address gets its own column only where the table's box is 76rem (2xl beside the
   rail); below it, under the name. Optional cells are `hidden` at 48rem AND at base — CELL makes
   every cell a table-cell from 48rem, and a cell drawn under a hidden header shifted the balance.
-- **Transactions:** filters and the four totals are one sticky `ContextBar` (from lg); on a phone
+- **Transactions:** filters and the four totals are one sticky `ContextBar` (by room, R5); on a phone
   the filters fold behind one "Filters · range · type" button. From a 72rem box an opened row
   fills a side panel (`WithAside` sheet; `useBoxAtLeast` decides modal sheet vs panel, in rem) and
-  ↑/↓ walk the rows in the table's order. LedgerTable's wide-only column is folded from `sm` to a
-  64rem TABLE box — never `hidden` on a phone (it hid the movement cell: SPEC §4.1).
+  ↑/↓ walk the rows in the table's order. LedgerTable's folds and pins: `decisions-ledger-layout`.
 - **Rails, from a 64rem box:** Overview's recent alerts, Settings' section index (scroll-spy,
   unsaved dot), Webhooks' variable catalogue (folded below it). Grids by the box: control-board
   tiles 1/2/4 for four courts, never 3 + 1; groups, schedules, boards, doors, courts as AutoGrid.

@@ -42,8 +42,8 @@ Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admi
   A no-show's title ends at `sold_ends_at` (the sweep truncates `ends_at`). Figures never wrap
   mid-value: `dd` nowrap, `keepAmounts` NBSP inside sentences. A 404 with `?seat=` reads the
   member's own seat and says "You were taken off this game".
-- **Not built:** Bookings rail selection dock; Record result docked on booking detail; Wallet's
-  30-day mini totals; preselecting the first unread from the bell; How it works' sticky index.
+- **Not built:** Bookings rail selection dock; Record result docked on booking detail;
+  preselecting the first unread from the bell; How it works' sticky index. Wallet: `decisions-ledger-layout`.
 
 ## Traps found
 - **The container-queries plugin emits NOTHING for `@[56rem]/name:` before an arbitrary property**

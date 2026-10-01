@@ -54,3 +54,6 @@ last_verified: 2026-10-01
   tie on specificity and utilities come later, so `<div hidden className="flex">` shows. Toggle a class.
 - **A hidden `CardAction` still leaves the header's second grid column** (R4, L2): the description
   auto-placed into it and squeezed the title to a letter a line. Put a conditional control in its own row.
+- **`overflow: auto`/`hidden` on ANY ancestor captures `position: sticky`** (R5 V5-6): be a scroller
+  only while wider (`ScrollArea onlyWhenWider`), clip with `overflow-clip`; a sticky `top` inside a
+  box that never scrolls vertically pushes the element DOWN over the rows (`[[data-scrolls]_&]:!top-0`).
