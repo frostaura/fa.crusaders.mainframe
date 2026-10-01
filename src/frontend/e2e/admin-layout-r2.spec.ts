@@ -27,7 +27,10 @@ async function openSettings(page: Page) {
   await page.addInitScript(() => window.localStorage.setItem("crusaders:settings-intro-dismissed", "1"));
   await serveApi(page, [...BASE, { path: "/api/v1/admin/settings/", body: SETTINGS }]);
   await page.goto("/admin/settings");
-  await expect(page.getByRole("button", { name: "Door gates" })).toBeVisible();
+  // The admin frame and the Settings chunk (~420 modules) compile cold on a fresh dev server:
+  // measured 1 s warm, 9-14 s for the first arrival under a loaded runner, where the default 5 s
+  // left all three walks on "Opening the page…". The 20 s the other admin specs give it.
+  await expect(page.getByRole("button", { name: "Door gates" })).toBeVisible({ timeout: 20_000 });
 }
 
 test("the settings search placeholder fits a 390px phone", async ({ page }) => {
