@@ -1,4 +1,6 @@
-import { useId, useMemo } from "react";
+import { useId, useLayoutEffect, useMemo } from "react";
+import { SendingNote } from "@/components/bookings/SheetParts";
+import { useSendingGuard } from "@/components/bookings/useSendingGuard";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogBody, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -28,20 +30,37 @@ export type AcceptSheetProps = {
   onReread: () => Promise<unknown>;
   /** Bumped by the page each time the sheet opens, so a reopened sheet starts clean. */
   session?: number;
+  /** An answer is on its way to the club (the page's Back refuses to close meanwhile). */
+  onBusyChange?: (busy: boolean) => void;
 };
 
+/**
+ * R4 (I4-1's rule, the integration leftover) — the sheet stays open while an answer is on its way.
+ * Accept moves money; a Cancel, ×, Escape, scrim or Back pressed on a slow reply used to close the
+ * sheet in silence while the share was taken a moment later. Every way out asks the guard first,
+ * and while the answer is in flight the sheet says it is waiting, again on each refused close.
+ */
 export function AcceptSheet(props: AcceptSheetProps) {
-  const { invite, open, onOpenChange, onReread, session = 0 } = props;
+  const { invite, open, onOpenChange, onReread, session = 0, onBusyChange } = props;
+  const guard = useSendingGuard(onOpenChange, onBusyChange);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={guard.onOpenChange}>
       <DialogContent data-sheet="accept-invite">
-        {invite ? <SheetInner key={`${invite.participant_id}:${session}`} invite={invite} onReread={onReread} /> : null}
+        {invite ? (
+          <SheetInner
+            key={`${invite.participant_id}:${session}`} invite={invite} onReread={onReread}
+            onBusy={guard.setSending} refused={guard.refused}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function SheetInner({ invite, onReread }: { invite: Invite; onReread: () => Promise<unknown> }) {
+type InnerProps = { invite: Invite; onReread: () => Promise<unknown>; onBusy: (busy: boolean) => void; refused: number };
+
+function SheetInner(props: InnerProps) {
+  const { invite, onReread, onBusy, refused } = props;
   const reasonId = useId();
   const { booking_id: bookingId, participant_id: participantId, open_link: openLink } = invite;
   const port = useMemo(
@@ -49,6 +68,10 @@ function SheetInner({ invite, onReread }: { invite: Invite; onReread: () => Prom
     [bookingId, participantId, openLink, onReread],
   );
   const flow = useAcceptFlow(invite, port);
+  const sending = flow.acceptAction.pending || flow.declineAction.pending;
+  useLayoutEffect(() => { onBusy(sending); }, [sending, onBusy]);
+  // Torn down mid-answer (a sign-out): nothing is waiting on this sheet any more.
+  useLayoutEffect(() => () => onBusy(false), [onBusy]);
   const dismiss = (
     <DialogClose asChild>
       <Button variant="outline">{flow.outcome ? INVITES_COPY.done : INVITES_COPY.cancel}</Button>
@@ -65,6 +88,7 @@ function SheetInner({ invite, onReread }: { invite: Invite; onReread: () => Prom
         <AcceptBody flow={flow} reasonId={reasonId} />
       </DialogBody>
       <DialogFooter>
+        <SendingNote text={sending ? INVITES_COPY.sending : null} refused={refused} />
         <AcceptActions flow={flow} reasonId={reasonId} dismiss={dismiss} />
       </DialogFooter>
     </>

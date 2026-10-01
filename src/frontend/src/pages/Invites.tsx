@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Envelope } from "@/components/ui/icons";
 import { PageHeader, PageShell } from "@/components/ui/page-shell";
@@ -64,7 +64,7 @@ export default function InvitesPage() {
           ))}
         </ul>
       </StateBlock>
-      <AcceptSheet invite={sheet.invite} open={sheet.open} onOpenChange={sheet.setOpen} onReread={reread} session={sheet.session} />
+      <AcceptSheet invite={sheet.invite} open={sheet.open} onOpenChange={sheet.setOpen} onReread={reread} session={sheet.session} onBusyChange={sheet.onBusyChange} />
     </PageShell>
   );
 }
@@ -83,9 +83,12 @@ function useSheet(items: Invite[] | null) {
     setSession((n) => n + 1);
     setOpen(true);
   }, []);
-  // R1 (F1.19's rule) — the phone's Back closes the sheet and stays on Invites.
-  const close = useCallback(() => setOpen(false), []);
+  // R1 (F1.19's rule) — the phone's Back closes the sheet and stays on Invites; R4 — not while an
+  // answer is on its way (the sheet's guard says so; the history entry goes back on).
+  const busy = useRef(false);
+  const close = useCallback(() => (busy.current ? false : setOpen(false)), []);
+  const onBusyChange = useCallback((next: boolean) => { busy.current = next; }, []);
   useSheetHistory(open, close, "accept");
   const latest = opened ? items?.find((i) => i.participant_id === opened.participant_id) ?? opened : null;
-  return { invite: latest, open, setOpen, openFor, session };
+  return { invite: latest, open, setOpen, openFor, session, onBusyChange };
 }

@@ -786,6 +786,8 @@ export const INVITES_COPY = {
   seeBooking: "See the booking",
   declinedTitle: "You said no",
   readingAgain: "Checking the latest figure…",
+  /** R4 (I4-1's rule) — the accept sheet's waiting line, said again on every refused close. */
+  sending: "Answering… waiting for the club's answer before this closes.",
   acceptAction: "accept the invite",
   declineAction: "decline the invite",
   deepLinkGone: "This invite is no longer waiting for you",

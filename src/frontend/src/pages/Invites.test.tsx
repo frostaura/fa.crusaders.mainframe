@@ -516,3 +516,47 @@ describe("answering reads the unread count again (R3 I-9)", () => {
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 });
+
+/**
+ * R4 (I4-1's rule, the integration leftover) — an answer on its way keeps the accept sheet open.
+ * Accept moves money: a Cancel, Escape or Back pressed on a slow reply used to close the sheet in
+ * silence and the share was taken a moment later. Now each is refused, said as waiting, and the
+ * sheet closes as ever once the club has answered.
+ */
+describe("an answer on its way keeps the sheet open", () => {
+  it("refuses Cancel, Escape and Back while Accept is in flight; says it is waiting; closes once answered", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, held_credits: 20, spendable_credits: 100, held_until: at(26.75), entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
+      { path: "/api/v1/me/invites", body: { items: [invite()], count: 1 } },
+    ]);
+    // The accept's reply is held until the test lets it go.
+    const stubbed = globalThis.fetch;
+    let land: () => void = () => undefined;
+    const landed = new Promise<void>((resolve) => { land = resolve; });
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = typeof input === "string" ? input : input.toString();
+      if ((init?.method ?? "GET").toUpperCase() === "POST" && path === ACCEPT) {
+        return landed.then(() => new Response(JSON.stringify({ participant_id: SEAT, status: "accepted", paid_credits: 25 }), { status: 200 }));
+      }
+      return stubbed(input, init);
+    });
+    renderPage(<><InvitesPage /><BackProbe /></>, { initialEntries: ["/bookings", "/bookings/invites"], reactStrictMode: true });
+    const sheet = await openSheet();
+    fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
+    expect(await within(sheet).findByText(INVITES_COPY.sending)).toBeInTheDocument();
+
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.cancel }));
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Phone back", hidden: true }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("dialog", { name: INVITES_COPY.sheetTitle })).toBeInTheDocument();
+    expect(screen.getByTestId("where")).toHaveTextContent("/bookings/invites");
+
+    land();
+    await waitFor(() => expect(within(sheet).queryByText(INVITES_COPY.sending)).toBeNull());
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.done }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
