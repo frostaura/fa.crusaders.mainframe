@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo } from "react";
+import { useId, useLayoutEffect, useMemo, useRef } from "react";
 import { SendingNote } from "@/components/bookings/SheetParts";
 import { useSendingGuard } from "@/components/bookings/useSendingGuard";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,11 @@ export type AcceptSheetProps = {
   session?: number;
   /** An answer is on its way to the club (the page's Back refuses to close meanwhile). */
   onBusyChange?: (busy: boolean) => void;
+  /**
+   * R5 §3.5 — opened from a card's own Decline: the sheet opens on the decline question ("Decline
+   * for good? / Keep the invite", focus on the safe answer). Nothing is sent until it is answered.
+   */
+  startWith?: "decline";
 };
 
 /**
@@ -41,7 +46,7 @@ export type AcceptSheetProps = {
  * and while the answer is in flight the sheet says it is waiting, again on each refused close.
  */
 export function AcceptSheet(props: AcceptSheetProps) {
-  const { invite, open, onOpenChange, onReread, session = 0, onBusyChange } = props;
+  const { invite, open, onOpenChange, onReread, session = 0, onBusyChange, startWith } = props;
   const guard = useSendingGuard(onOpenChange, onBusyChange);
   return (
     <Dialog open={open} onOpenChange={guard.onOpenChange}>
@@ -49,7 +54,7 @@ export function AcceptSheet(props: AcceptSheetProps) {
         {invite ? (
           <SheetInner
             key={`${invite.participant_id}:${session}`} invite={invite} onReread={onReread}
-            onBusy={guard.setSending} refused={guard.refused}
+            onBusy={guard.setSending} refused={guard.refused} startWith={startWith}
           />
         ) : null}
       </DialogContent>
@@ -57,10 +62,12 @@ export function AcceptSheet(props: AcceptSheetProps) {
   );
 }
 
-type InnerProps = { invite: Invite; onReread: () => Promise<unknown>; onBusy: (busy: boolean) => void; refused: number };
+type InnerProps = {
+  invite: Invite; onReread: () => Promise<unknown>; onBusy: (busy: boolean) => void; refused: number; startWith?: "decline";
+};
 
 function SheetInner(props: InnerProps) {
-  const { invite, onReread, onBusy, refused } = props;
+  const { invite, onReread, onBusy, refused, startWith } = props;
   const reasonId = useId();
   const { booking_id: bookingId, participant_id: participantId, open_link: openLink } = invite;
   const port = useMemo(
@@ -72,6 +79,14 @@ function SheetInner(props: InnerProps) {
   useLayoutEffect(() => { onBusy(sending); }, [sending, onBusy]);
   // Torn down mid-answer (a sign-out): nothing is waiting on this sheet any more.
   useLayoutEffect(() => () => onBusy(false), [onBusy]);
+  // R5 §3.5 — a card's Decline opens straight onto the question; asked once per opening (the
+  // sheet's inner part is keyed by the opening, so a reopen asks again).
+  const asked = useRef(false);
+  useLayoutEffect(() => {
+    if (asked.current || startWith !== "decline" || !flow.canDecline) return;
+    asked.current = true;
+    flow.decline();
+  }, [startWith, flow]);
   const dismiss = (
     <DialogClose asChild>
       <Button variant="outline">{flow.outcome ? INVITES_COPY.done : INVITES_COPY.cancel}</Button>

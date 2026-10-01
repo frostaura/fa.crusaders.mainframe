@@ -28,12 +28,19 @@ type CardProps = {
   note?: string;
   /** R4 form factor: the invite open in the split view's pane beside the list. */
   current?: boolean;
+  /**
+   * R5 §3.5 — the card's own answers (Decline · Accept) at its foot, on a phone. Given, the card is
+   * no longer one button: the frame is a box, its body the button that opens the invite (stretched
+   * over the card), and the answers sit in the frame BESIDE it — never a button inside a button.
+   */
+  actions?: ReactNode;
 };
 
 const CARD_CLASS = "flex w-full min-h-touch items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left shadow-xs no-underline";
 
-export function InviteCard({ invite, onOpen, to, note, current }: CardProps) {
+export function InviteCard({ invite, onOpen, to, note, current, actions }: CardProps) {
   const body = <CardBody invite={invite} note={note} />;
+  if (actions) return <CardWithActions invite={invite} onOpen={onOpen} to={to} current={current} body={body} actions={actions} />;
   return (
     <Interactable asChild surface="card" watermark>
       {to ? (
@@ -46,6 +53,31 @@ export function InviteCard({ invite, onOpen, to, note, current }: CardProps) {
           {body}
         </button>
       )}
+    </Interactable>
+  );
+}
+
+/** The body opens the invite over the whole card (`after:` inset); the answers sit above that layer. */
+const OPEN_CLASS = "flex w-full min-h-touch items-start gap-3 text-left no-underline after:absolute after:inset-0 after:rounded-xl after:content-['']";
+
+type WithActionsProps = Pick<CardProps, "invite" | "onOpen" | "to" | "current"> & { body: ReactNode; actions: ReactNode };
+
+function CardWithActions({ invite, onOpen, to, current, body, actions }: WithActionsProps) {
+  return (
+    <Interactable asChild surface="card" watermark>
+      <div className={cn(CARD_CLASS, "relative flex-col items-stretch gap-0", current && "border-accent-strong ring-1 ring-accent-strong")}>
+        {to ? (
+          <Link to={to} data-invite={invite.participant_id} data-invite-pending="" data-split-item="" className={OPEN_CLASS}>{body}</Link>
+        ) : (
+          <button
+            type="button" onClick={() => onOpen?.(invite)} data-invite={invite.participant_id} data-split-item=""
+            aria-current={current ? "true" : undefined} className={OPEN_CLASS}
+          >
+            {body}
+          </button>
+        )}
+        <div data-invite-actions="" className="relative z-10 flex flex-wrap justify-end gap-2 pt-3">{actions}</div>
+      </div>
     </Interactable>
   );
 }
