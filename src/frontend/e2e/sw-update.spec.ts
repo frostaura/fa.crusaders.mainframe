@@ -122,8 +122,22 @@ test.afterAll(async () => {
   if (work) rmSync(work, { recursive: true, force: true });
 });
 
-/** Every cache, its URLs, and whether any stored body carries the member's marker. */
-async function cacheReport(page: Page) {
+/**
+ * Every cache, its URLs, and whether any stored body carries the member's marker. A new worker
+ * taking control may reload the page mid-read; that read is simply taken again once it has loaded.
+ */
+async function cacheReport(page: Page): Promise<{ name: string; urls: string[]; marked: string[] }[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await readCaches(page);
+    } catch (error) {
+      if (attempt >= 4 || !/context was destroyed|navigat/i.test(String(error))) throw error;
+      await page.waitForLoadState("load");
+    }
+  }
+}
+
+function readCaches(page: Page) {
   return page.evaluate(async (marker) => {
     const out: { name: string; urls: string[]; marked: string[] }[] = [];
     for (const name of await caches.keys()) {
