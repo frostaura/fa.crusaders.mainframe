@@ -1,18 +1,17 @@
 ---
 name: crusaders-mainframe-decisions-change-record
-description: "Rounds 1-3 lane B: membership decisions on the change record in their own save (a rejection can be approved); reasons required and mailed; webhooks recorded without secrets; overdraft figures are spendable, with U+2212."
+description: "Rounds 1-4: membership decisions on the change record in their own save (a rejection can be approved); reasons required and mailed; webhooks recorded without secrets; every vocabulary action now has a writer."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — the club's record of what its desk did (review round 1, lane B)
 
 Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, `R1MoneyHttpTests`.
 
-- **Approve, reject, suspend, reactivate and the admin temporary password write
-  `admin_change_log` rows in the decision's own save** (B5; `MemberApprovalService`'s notifier
-  bundle carries the recorder — the constructor is at the 6-parameter gate). *Why:* the actions
-  were in the vocabulary from the start and nothing wrote them.
+- **Approve, reject, suspend, reactivate and the admin temporary password are recorded in the
+  decision's own save** (B5; the recorder rides `MemberApprovalService`'s notifier bundle — the
+  constructor is at the 6-parameter gate). *Why:* in the vocabulary from the start, never written.
 - **The desk's code reset requires a `reason`** (400 `reason_required`), records
   `member.code_reset` and emails the member (`MemberCodeReset`) (B6). *Why:* it signs them out
   everywhere and drops their passkeys; "who did this and why" had no answer.
@@ -40,21 +39,22 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
 - **The console words the diff the server renders** (review round 2, F3-7, `presentChanges` in
   `lib/changeRecordCopy.ts`): ids hidden, credits and rand formatted, states and reason codes in
   words, `balance_before/after_credits` joined into one Balance row, one-sided values listed as
-  facts rather than as a "Before" with a dash. *Why:* the writers store keys and tokens, and the
-  record read `pending_approval`, `top_up_cash` and UUIDs; a new writer's key falls back to words.
-  R3: instants in club day+clock, ISO dates as the club's short date, lengths and repeats in words
-  (A-7); `spendable_credits` pairs as "Can spend"; a webhook row's facts are facts, not settings.
+  facts rather than a "Before" with a dash. *Why:* writers store keys and tokens (`pending_approval`,
+  `top_up_cash`, UUIDs); a new writer's key falls back to words. R3 (A-7): instants in club day+clock,
+  ISO dates short, lengths and repeats in words; `spendable_credits` pairs as "Can spend".
 - **Review round 3 (lane B), `R3*HttpTests`:** a REJECTED applicant can be approved (A-2) —
   the same approval (audit, change row from `rejected`, welcome mail, webhook), rejection reason
   cleared; nothing else is approvable. *Why:* the console offered it and got a bare 404.
   **Both admin-grant mails carry the reason** (A-3) — required since B10, dropped on the way out.
 - **Club webhooks are on the record** (A-5): `webhook.created`/`.deleted`, area `setting`, subject
-  kind `webhook`, destination as scheme+host+port only. *Why:* URL credentials, path tokens and
-  the signing secret must never reach a record every admin can read and export. No edit, enable,
-  disable or rotate route exists to record.
-- **An overdraft is reported on SPENDABLE** (A-8), the figure it is decided on and the desk's
-  confirm step shows: the notice payload carries `HeldCredits` (null on older rows), the mail
-  leads "Can spend after", naming the hold and balance when they differ, and the overdraft row
-  carries `spendable_credits` beside `balance_credits`. Every negative credit figure in server
-  prose uses U+2212 (`MoneyFormat.Credits`; rand untouched — a machine may read it).
-- **Desk cancellations** (R4): reason required, `booking.cancelled_by_admin` in the cancel's own save — [`decisions-admin-writes.md`](decisions-admin-writes.md).
+  kind `webhook`, destination as scheme+host+port only — URL credentials, path tokens and the
+  signing secret never reach a record anyone can export; the console shows them as facts, not settings.
+- **An overdraft is reported on SPENDABLE** (A-8), the figure it is decided on: the notice payload
+  carries `HeldCredits` (null on older rows), the mail leads "Can spend after" (hold and balance
+  named when they differ), the row carries `spendable_credits` beside `balance_credits`. Negative
+  credits in server prose use U+2212 (`MoneyFormat.Credits`; rand untouched — machines read it).
+- **Every action in the vocabulary has a writer** (R4 wave B, `R4ChangeRecordWritersHttpTests`): courts
+  (`AdminCourtEndpoints`), devices + the club key (never the key), door fleet switches, blocks/lifts,
+  fault resolves (note = reason), each in its action's own save, changed fields only; a no-op or
+  refused action records nothing, and a failed save detaches its staged rows. Play-result rows carry
+  `status` on both sides. Desk cancels: [`decisions-admin-writes.md`](decisions-admin-writes.md).

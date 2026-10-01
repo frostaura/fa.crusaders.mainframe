@@ -16,10 +16,11 @@ last_verified: 2026-10-01
   who were added; each suite stubbed the other side with its own guess (R2's "End undefined" again).
   **Page tests stub with the pinned fixtures**, never a shape written in the test.
 - **Keys the UI reads that no handler sends are `it.fails`, each naming the screen**: booking-rules
-  `club_hours` (the preview now takes the club's hours from settings), trace `approximate` /
-  `device_code` / `outage_id` (the ≈ never shows; bursts key on `detail.door_name` instead),
-  control-board `door`, group members `added_by_name`, `shut_by_shut_all_at`. Turning one green
-  means the server started sending it — delete the `.fails`.
+  `club_hours` (the preview now takes the club's hours from settings) and `shut_by_shut_all_at`.
+  Turning one green means the server started sending it — delete the `.fails`. Wave B sent the
+  rest (`R4AdminReplyKeysHttpTests`): trace `device_code` / `approximate` (= the door log's
+  `time_uncertain`) / `outage_id`; group members `added_by_name`, `photo_url` (a link), `cursor: null`;
+  a tile's `door` is always null — nothing maps a door to a court.
 - **The older `serverResponseKeys` splits on commas before dropping comments**: a handler whose
   comments carry commas reads extra keys. Use `serverShapes` there (ledger `ListAsync`).
 - **Transactions shows the SERVER's totals** for the whole range (first page's `totals`), rows a
@@ -34,7 +35,6 @@ last_verified: 2026-10-01
 - **The change record says every action in words** (`lib/changeRecordCatalogue.test.ts` iterates
   `AdminChangeActions.cs`, fixtures = what each writer stores, rendered as `AdminChangeDiff` does
   after jsonb). No JSON, ISO date, id, enum token, snake code, "bps", empty row or repeated figure.
-  A new action without a fixture fails. 12 actions have no change-record writer at all (courts,
-  devices, doors, holds, fault resolve) — a backend gap, recorded there.
+  A new action without a fixture fails. Every action has a writer since wave B.
 - **Attention counts re-read on arrival, an application change, the minute poll and a tab return;
   a move between sections only when older than 30 s.** *Why:* every click re-read three counts.

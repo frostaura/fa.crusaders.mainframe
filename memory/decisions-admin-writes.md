@@ -1,14 +1,15 @@
 ---
 name: crusaders-mainframe-decisions-admin-writes
-description: "Review round 4 lane B2: settings saves are partial and versioned (409 on stale), a schedule's dates read at their held hours, a future end keeps running, desk cancels need a reason and are recorded."
+description: "Review round 4 (B2, wave B): settings saves are partial and versioned (409 on stale), a schedule keeps the rules it replaced, a future end keeps running, desk cancels need a reason and are recorded."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — admin writes that two people or two dates can race (review round 4, lane B2)
 
-Tests: `AdminSettingsHttpTests+Concurrency`, `R4ScheduleDatesHttpTests`, `R4AdminCancelRecordHttpTests`,
-`R4ControlBoardBoxesHttpTests`, `R4TracePagingHttpTests`, `R4LedgerTotalsHttpTests`.
+Tests: `AdminSettingsHttpTests+Concurrency`, `R4ScheduleDatesHttpTests`, `R4ScheduleRuleFromHttpTests`,
+`ScheduleRuleHistoryTests`, `R4AdminCancelRecordHttpTests`, `R4ControlBoardBoxesHttpTests`,
+`R4TracePagingHttpTests`, `R4LedgerTotalsHttpTests`.
 
 - **Settings saves name only their keys and the version they read** (A4-1). Every PUT key is
   optional (the eight booking keys were required, so the console sent all 64 and a stale tab put a
@@ -28,10 +29,14 @@ Tests: `AdminSettingsHttpTests+Concurrency`, `R4ScheduleDatesHttpTests`, `R4Admi
   **The materialiser keys "already held" by (court, DATE)**, not start instant: by instant it tried
   the new hours over each earlier date, collided with the series' own row, stalled the horizon and
   mailed the admins a clash with itself.
-- **Known gap, not fixed:** a DAY-of-week change from a future date still materialises the new rule's
-  days between today and that date (the rule has no "governs from" field; `StartDate` is unchanged).
-  Closing it needs a column (a rule-effective date) and so a migration — deferred while another lane
-  may be migrating.
+- **A schedule keeps the rules its changes replaced** (wave B, migration `AddScheduleEarlierRules`):
+  `booking_schedules.EarlierRulesJson` (jsonb) lists each replaced rule with the first date it no
+  longer governs, and `ScheduleOccurrences.Expand` reads every date at the rule in force ON it. *Why:*
+  holding hours by held rows covered only dates already materialised — a DAY change from a future
+  date booked the new days before it, and a date past the horizon came out at the new hours. A list,
+  not one rule: two changes can wait at once; a change earlier than a waiting one cuts it back to
+  its own date (`ScheduleRuleHistory.Supersede`). `rule_*`/`on_rule` now mean the GOVERNING rule.
+  The edit's conflict check starts at the effective date.
 - **A series ended from a future date keeps running until then** (A4-10): `Status` stays Active and
   materialising; the wire's status is "ended" once ended outright or past `end_date`, and the list
   filters on that.
