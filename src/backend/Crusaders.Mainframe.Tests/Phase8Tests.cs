@@ -37,24 +37,24 @@ public class Phase8Tests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        // Fund the player with 100 credits; slice price is 8.
+        // Fund the player with 100 minutes; one 15-minute slice costs 15.
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id, ZarPaid: 62.50m), default);
 
         var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
         var ok = Assert.IsType<BookingResult.Ok>(result);
 
-        // 100 in, 8 out. The balance the caller is handed is post-charge, because that is
+        // 100 in, 15 out. The balance the caller is handed is post-charge, because that is
         // the number the confirmation email quotes.
         var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Equal(92, balance);
-        Assert.Equal(92, ok.BalanceAfterMinutes);
+        Assert.Equal(85, balance);
+        Assert.Equal(85, ok.BalanceAfterMinutes);
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var entries = await db.LedgerEntries.Where(l => l.UserId == host.PlayerUser.Id).ToListAsync();
         Assert.Equal(2, entries.Count);
         var charge = Assert.Single(entries, e => e.Type == LedgerEntryType.BookingCharge);
-        Assert.Equal(-8, charge.AmountMinutes);
+        Assert.Equal(-15, charge.AmountMinutes);
         Assert.Equal(ok.Booking.Id, charge.RelatedBookingId);
         Assert.NotNull(ok.Booking.ChargedAt);
     }
@@ -92,7 +92,7 @@ public class Phase8Tests
             EndsAt = startsAt.AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedMinutes = 8,
+            AmountChargedMinutes = 15,
             Status = BookingStatus.Booked,
             ChargedAt = null,
         };
@@ -103,10 +103,10 @@ public class Phase8Tests
         var charge = await booking.ChargeOnActivationAsync(reserved.Id, payerOverrideUserId: null, actorUserId: host.PlayerUser.Id, default);
         var ok = Assert.IsType<ChargeResult.Ok>(charge);
         Assert.Equal(host.PlayerUser.Id, ok.ChargedUserId);
-        Assert.Equal(8, ok.AmountMinutes);
+        Assert.Equal(15, ok.AmountMinutes);
 
         var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Equal(92, balance);
+        Assert.Equal(85, balance);
 
         var fresh = await db.Bookings.AsNoTracking().FirstAsync(b => b.Id == reserved.Id);
         Assert.NotNull(fresh.ChargedAt);
@@ -130,10 +130,10 @@ public class Phase8Tests
         {
             var result = await booking.ChargeOnActivationAsync(created.Booking.Id, null, host.PlayerUser.Id, default);
             var already = Assert.IsType<ChargeResult.AlreadyCharged>(result);
-            Assert.Equal(8, already.AmountMinutes);
+            Assert.Equal(15, already.AmountMinutes);
         }
 
-        Assert.Equal(92, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(85, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -154,7 +154,7 @@ public class Phase8Tests
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
-        Assert.Equal(8, cancelled.RefundedMinutes);
+        Assert.Equal(15, cancelled.RefundedMinutes);
         Assert.Equal(0, cancelled.PenaltyMinutes);
 
         Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
@@ -193,16 +193,16 @@ public class Phase8Tests
 
         // Use admin actor so the "can't self-cancel after start" guard doesn't trip on edge timing.
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
-        Assert.Equal(8, cancelled.RefundedMinutes);     // the booking charge, in full
-        Assert.Equal(2.4m, cancelled.PenaltyMinutes);    // 30% of 8 credits = 2.4
+        Assert.Equal(15, cancelled.RefundedMinutes);     // the booking charge, in full
+        Assert.Equal(4, cancelled.PenaltyMinutes);      // floor(30% of 15) = 4, rounded down for the member
 
-        // Balance: 100 - 8 + 8 - 2.4 = 97.6
-        Assert.Equal(97.6m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        // Balance: 100 - 15 + 15 - 4 = 96
+        Assert.Equal(96, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var entries = await db.LedgerEntries.Where(l => l.UserId == host.PlayerUser.Id).ToListAsync();
-        Assert.Equal(-2.4m, Assert.Single(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty).AmountMinutes);
-        Assert.Equal(8, Assert.Single(entries, e => e.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
+        Assert.Equal(-4, Assert.Single(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty).AmountMinutes);
+        Assert.Equal(15, Assert.Single(entries, e => e.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
     }
 
     // ---- 8.4 Per-day cap + peak-hours ----
@@ -344,7 +344,7 @@ public class Phase8Tests
         Assert.Equal(host.LeaguePlayerUser.Id, ok.ChargedUserId);
 
         Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));    // booker untouched
-        Assert.Equal(92, await ledger.GetBalanceAsync(host.LeaguePlayerUser.Id, default)); // payer debited
+        Assert.Equal(85, await ledger.GetBalanceAsync(host.LeaguePlayerUser.Id, default)); // payer debited
     }
 
     [Fact]
