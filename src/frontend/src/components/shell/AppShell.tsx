@@ -45,6 +45,8 @@ import { SkipLink } from "./SkipLink";
  * </p>
  */
 
+const ADMIN_PATH = /^\/admin(\/|$)/;
+
 const HEADERLESS = /^\/(login|register|verify-email|welcome|forgot-password|reset-password|change-password)(\/|$)/;
 
 /** Stands the legacy frame down for a child that frames itself. */
@@ -61,7 +63,36 @@ const SELF_FRAMED = [
  * included) sat under the tab bar at the end of the scroll (measured at the P3/P4 integration).
  * It still grows, so a short page fills the height.
  */
-const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8";
+const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8 3xl:px-12";
+
+/**
+ * The app bar's inner box follows the PAGE's frame (R4 form factor, SPEC 2.1), so the crest and
+ * the content share one edge instead of reading as two grids.
+ *
+ * <ul>
+ *   <li>Member pages: `wide` (80rem), widening to the `full` frame (120rem) from 3xl when the page
+ *   is a `full` PageShell — read by `:has()` from the shell root, so no page has to tell the shell
+ *   anything and the first paint is right.</li>
+ *   <li>`/admin` from xl, where the rail stands: full-bleed. The crest sits in a box as wide as the
+ *   rail (16rem), over it, and the nav starts at the content's edge (16rem + the frame's 2rem
+ *   gutter) — at 1920 the bar was centred at 80rem with its crest at x≈320 while the rail sat flush
+ *   at x=0.</li>
+ * </ul>
+ */
+const HEADER_FRAME = [
+  "mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
+  "3xl:px-12 3xl:group-has-[[data-page-shell=full]]/shell:max-w-page",
+].join(" ");
+const HEADER_OVER_RAIL = "xl:max-w-none xl:gap-x-8 xl:pl-0";
+/** The rail is `w-64` and its items start 24px in (px-3 + px-3). */
+const CREST_OVER_RAIL = "xl:w-64 xl:pl-6";
+
+/** The frame the bar follows: the admin console's (over the rail) or a member page's. */
+function chromeFrame(admin: boolean) {
+  return admin
+    ? { name: "admin", header: cn(HEADER_FRAME, HEADER_OVER_RAIL), crest: cn("flex shrink-0", CREST_OVER_RAIL) }
+    : { name: "member", header: HEADER_FRAME, crest: "flex shrink-0" };
+}
 
 export default function AppShell() {
   const auth = useAuth();
@@ -111,9 +142,10 @@ export default function AppShell() {
     );
   }
 
-  const wide = location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+  const wide = ADMIN_PATH.test(location.pathname);
+  const frame = chromeFrame(wide);
   return (
-    <div className="flex h-full flex-col">
+    <div data-frame={frame.name} className="group/shell flex h-full flex-col">
       <SkipLink />
       <header
         ref={headerRef}
@@ -131,8 +163,10 @@ export default function AppShell() {
           chip and avatar drop to the next line together, right-aligned — two lines, not three.
           On one line the bell's auto margin takes the free space and the actions follow it.
         */}
-        <div className="mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8">
-          <CrestLink to={signedIn ? LANDING_PATH : "/"} />
+        <div className={frame.header}>
+          <div data-app-crest="" className={frame.crest}>
+            <CrestLink to={signedIn ? LANDING_PATH : "/"} />
+          </div>
           {signedIn ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
           {signedIn ? <NotificationBell className="ml-auto md:-mr-4" /> : null}
           <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !signedIn && "ml-auto")}>
@@ -157,8 +191,8 @@ export default function AppShell() {
         tabIndex={-1}
         className="relative flex min-h-0 flex-1 flex-col overflow-auto"
         style={{
-          paddingBottom: "var(--app-bottom-bar-height, 0px)",
-          scrollPaddingBottom: "calc(var(--app-bottom-bar-height, 0px) + 0.5rem)",
+          paddingBottom: "calc(var(--app-bottom-bar-height, 0px) + var(--context-bar-height, 0px))",
+          scrollPaddingBottom: "calc(var(--app-bottom-bar-height, 0px) + var(--context-bar-height, 0px) + 0.5rem)",
         }}
       >
         {/*
@@ -169,7 +203,7 @@ export default function AppShell() {
           card that goes in a cupboard does not carry "the doors are shut" until March (B14).
         */}
         {isAdmin ? (
-          <div className="mx-auto w-full max-w-wide px-4 pt-4 empty:hidden print:hidden sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-wide px-4 pt-4 empty:hidden print:hidden sm:px-6 lg:px-8 3xl:px-12">
             <ShutDoorsBanner chrome={doors} />
           </div>
         ) : null}
