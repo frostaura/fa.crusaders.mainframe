@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Plus, Racquet } from "../../components/ui/icons";
+import { AutoGrid } from "../../components/ui/auto-grid";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { RefreshButton } from "../../components/ui/refresh-button";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -54,7 +55,7 @@ export default function AdminCourtsPage() {
   const add = () => setEditing("new");
 
   return (
-    <PageShell>
+    <PageShell width="full">
       <PageHeader
         title={COURTS_COPY.title}
         description={COURTS_COPY.description}
@@ -101,9 +102,9 @@ function usualPrice(courts: AdminCourt[] | null): number | null {
 
 function CourtListSkeleton() {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 sm:p-6">
-      {[0, 1, 2].map((row) => (
-        <div key={row} className="flex items-center gap-3">
+    <AutoGrid min="card" max={4} gap="lg" aria-hidden="true">
+      {[0, 1, 2, 3].map((row) => (
+        <div key={row} className="flex items-center gap-3 rounded-xl border border-border bg-bg-surface p-4">
           <Skeleton className="size-11 shrink-0" />
           <div className="flex flex-1 flex-col gap-2">
             <Skeleton className="h-4 w-32" />
@@ -112,21 +113,26 @@ function CourtListSkeleton() {
           <Skeleton className="h-9 w-16" />
         </div>
       ))}
-    </div>
+    </AutoGrid>
   );
 }
 
+/**
+ * The courts as cards (R4 form factor, SPEC §3.16): a 4-row list floated in 58 % of a 1920
+ * screen. Each court is a card — its number, name, rate, whether it is in use, Edit — packed as
+ * many across as the box holds (AutoGrid card, at most 4), one across on a phone.
+ */
 function CourtList({ courts, onEdit }: { courts: AdminCourt[]; onEdit: (court: AdminCourt) => void }) {
   const inUse = courts.filter((court) => court.is_active).length;
   return (
-    <section aria-labelledby="courts-list-title" className="rounded-xl border border-border bg-bg-surface shadow-xs">
-      <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
+    <section aria-labelledby="courts-list-title" className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between gap-3">
         <h2 id="courts-list-title" className="text-sm font-semibold text-text-primary">{COURTS_COPY.listLabel}</h2>
         <p className="text-sm tabular-nums text-text-secondary">{COURTS_COPY.count(inUse, courts.length)}</p>
       </div>
-      <ul className="flex flex-col divide-y divide-border">
+      <AutoGrid as="ul" min="card" max={4} gap="lg">
         {courts.map((court) => <CourtRow key={court.id} court={court} onEdit={() => onEdit(court)} />)}
-      </ul>
+      </AutoGrid>
     </section>
   );
 }
@@ -135,19 +141,19 @@ function CourtRow({ court, onEdit }: { court: AdminCourt; onEdit: () => void }) 
   return (
     // Wraps (R3 X-4): at 200% text the badge and Edit went past a phone's edge; now they drop
     // under the name instead.
-    <li className="flex flex-wrap items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
+    <li className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
       <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-bg-muted font-display text-lg font-bold tabular-nums text-text-primary">
         <span aria-hidden="true">{court.court_number}</span>
         <span className="sr-only">{COURTS_COPY.number(court.court_number)}</span>
       </span>
       <div className="min-w-0 flex-1 basis-20">
-        <p className="truncate text-sm font-semibold text-text-primary">{court.name}</p>
+        <p className="truncate text-sm font-semibold text-text-primary" title={court.name}>{court.name}</p>
         <p className="text-sm tabular-nums text-text-secondary">
           {COURTS_COPY.price(court.slice_price_credits)}
-          <span className="hidden sm:inline"> · {court.court_type}</span>
+          <span> · {court.court_type}</span>
         </p>
       </div>
-      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-3">
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
         <Badge tone={court.is_active ? "success" : "neutral"} className="whitespace-nowrap">{court.is_active ? COURTS_COPY.inUse : COURTS_COPY.notInUse}</Badge>
         <Button variant="outline" size="sm" aria-label={COURTS_COPY.editLabel(court.name)} onClick={onEdit}>
           {COURTS_COPY.edit}

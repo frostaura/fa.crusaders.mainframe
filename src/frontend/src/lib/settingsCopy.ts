@@ -32,6 +32,8 @@ export const SETTINGS_COPY = {
   matchCount: (n: number) => (n === 1 ? "1 setting matches" : `${n} settings match`),
 
   unsaved: "Unsaved changes",
+  /** R4 form factor: the sections, listed beside them where the page has the room. */
+  indexLabel: "Settings sections",
   advancedShow: (n: number) => (n === 1 ? "Show 1 advanced setting" : `Show ${n} advanced settings`),
   advancedHide: "Hide advanced settings",
   notServed: "The club’s system is not serving these settings yet, so there is nothing to change here.",

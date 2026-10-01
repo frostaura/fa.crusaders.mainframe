@@ -3,6 +3,7 @@ import { Accordion } from "../components/ui/accordion";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { WithAside } from "../components/ui/with-aside";
 import { Skeleton } from "../components/ui/skeleton";
 import { StateBlock } from "../components/ui/state-block";
 import { TextLink } from "../components/ui/text-link";
@@ -23,6 +24,7 @@ import { LeaveGuard } from "../components/settings/LeaveGuard";
 import { OperatingHours } from "../components/settings/OperatingHours";
 import { SaveBar } from "../components/settings/SaveBar";
 import { SettingsConflictBanner } from "../components/settings/SettingsConflictBanner";
+import { SettingsIndex } from "../components/settings/SettingsIndex";
 import { SettingsIntro } from "../components/settings/SettingsIntro";
 import { SettingsSection } from "../components/settings/SettingsSection";
 import { SettingsToolbar } from "../components/settings/SettingsToolbar";
@@ -64,7 +66,7 @@ export default function AdminSettingsPage() {
 
   if (doc.error) {
     return (
-      <PageShell>
+      <PageShell width="full">
         <PageHeader title={SETTINGS_COPY.title} description={SETTINGS_COPY.description} />
         <StateBlock
           error={doc.error}
@@ -81,7 +83,7 @@ export default function AdminSettingsPage() {
 
 function SettingsSkeleton() {
   return (
-    <PageShell>
+    <PageShell width="full">
       <PageHeader title={SETTINGS_COPY.title} description={SETTINGS_COPY.description} />
       <StateBlock
         loading
@@ -197,11 +199,34 @@ function SettingsEditor({ doc }: { doc: Doc }) {
     sections.setSearchOpen(null);
   };
   const barShown = changed.length > 0 || blockers.length > 0 || doc.savedNote !== null;
+  // From the index: a section the search hides is reached by clearing the search first.
+  const goToSection = (id: SettingsSectionId) => {
+    if (search && !search.sections.includes(id)) onQueryChange("");
+    sections.openSection(id);
+    requestAnimationFrame(() => document.getElementById(`settings-${id}`)?.scrollIntoView?.({ block: "start" }));
+  };
 
   return (
     <SettingsFormProvider value={form}>
-      <PageShell className={barShown ? (blockers.length > 0 ? "pb-80" : "pb-40") : undefined}>
+      <PageShell width="full" className={barShown ? (blockers.length > 0 ? "pb-80" : "pb-40") : undefined}>
         <PageHeader title={SETTINGS_COPY.title} description={SETTINGS_COPY.description} />
+        {/* R4 form factor (SPEC §3.12): from a 64rem box the sections are indexed BESIDE them —
+            sticky, with each one's summary and an unsaved dot — so a 1920 screen is not a 1024px
+            column in the middle; narrower, the accordion alone, as before. */}
+        <WithAside
+          placement="sheet"
+          at="64rem"
+          asideWidth="18rem"
+          asideLabel={SETTINGS_COPY.indexLabel}
+          aside={(
+            <SettingsIndex
+              sections={SETTINGS_SECTIONS}
+              summaryOf={(id) => sectionSummary(id, draft, currency)}
+              dirty={dirty}
+              onGo={(id) => goToSection(id)}
+            />
+          )}
+        >
         <SaveNotices doc={doc} changes={changed.length} currency={currency} onGoTo={focusSetting} />
         <SettingsIntro />
         <SettingsToolbar
@@ -244,6 +269,7 @@ function SettingsEditor({ doc }: { doc: Doc }) {
             );
           })}
         </Accordion>
+        </WithAside>
       </PageShell>
       <SaveBar
         changes={changed.length}
