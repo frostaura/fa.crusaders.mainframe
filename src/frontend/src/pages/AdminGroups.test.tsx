@@ -612,6 +612,26 @@ describe("the top-up rate and peak hours (D2: groups replaced the class)", () =>
     fireEvent.click(await screen.findByRole("menuitem", { name: ARCHIVE_COPY.restore }));
     await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.body).toEqual({ status: "active" }));
   });
+
+  /**
+   * R5 X5-6: an archived card was `opacity-80`, which faded its TEXT too — the Archived badge fell to
+   * 3.24:1 and the chips to 4.25:1. It is muted by its surface (dashed edge, muted fill), never its ink.
+   */
+  it("mutes an archived card by its surface, never by fading its text", async () => {
+    const ARCHIVED = restrictedGroupFixture({ status: "archived" });
+    open([LEAGUE, ARCHIVED]);
+    await screen.findByRole("heading", { name: `${ARCHIVED_HEADING} (1)` });
+    const card = document.querySelector<HTMLElement>(`[data-group-card="${ARCHIVED.id}"]`)!;
+    expect(card.className).not.toMatch(/opacity/);
+    expect(card.className).toContain("border-dashed");
+  });
+
+  /** R5 F5-5: two groups at 1920 sat in two of three tracks with the third empty. */
+  it("lets the groups share the row instead of leaving an empty track", async () => {
+    open([LEAGUE]);
+    const grid = (await screen.findByRole("heading", { name: "League" })).closest("[data-auto-grid]") as HTMLElement;
+    expect(grid.style.gridTemplateColumns).toContain("auto-fit");
+  });
 });
 
 describe("moving somebody between groups from the group's own members tab", () => {

@@ -61,7 +61,9 @@ export function GroupCard(props: {
   const builtIn = Boolean(group.system_key);
 
   return (
-    <Card data-group-card={group.id} className={archived ? "opacity-80" : undefined}>
+    // Muted by its surface, never its ink (R5 X5-6): `opacity-80` faded the text with the card and
+    // the Archived badge fell to 3.24:1. A dashed edge and the muted fill say "set aside" instead.
+    <Card data-group-card={group.id} className={archived ? "border-dashed bg-bg-muted shadow-none" : undefined}>
       <CardHeader>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <CardTitle asChild><h2>{group.name}</h2></CardTitle>

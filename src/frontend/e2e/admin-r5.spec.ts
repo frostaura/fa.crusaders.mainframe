@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { type Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { memberShellRoutes } from "./playersKit";
@@ -160,4 +161,50 @@ test.describe("R5 §3.16 — Boards on a phone", () => {
     // 234px each before (the activity toggle had a line of its own); the toggle now joins the strip.
     for (const h of heights) expect(h, "one board's card at 390").toBeLessThanOrEqual(200);
   });
+});
+
+/** A group as the API sends it. */
+function group(overrides: Record<string, unknown>) {
+  return {
+    description: null, status: "active", sort_order: 0, is_system_default: false,
+    pricing: { mode: "inherit_court", multiplier_bps: 10_000, flat_slice_price_credits: null },
+    caps: { max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null },
+    windows: [], member_count: 0, system_key: null, credits_per_zar: null, peak_priority: null,
+    ...overrides,
+  };
+}
+
+const GROUPS = [
+  group({ id: "g-league", name: "League", system_key: "league", credits_per_zar: 2.4, peak_priority: true, member_count: 41 }),
+  group({ id: "g-social", name: "Social evenings", member_count: 17, sort_order: 1, peak_priority: false }),
+  group({ id: "g-old", name: "Winter league 2025", status: "archived", sort_order: 2, peak_priority: true }),
+];
+
+test.describe("R5 F5-5 / X5-6 — Groups", () => {
+  test("two groups share the row at 1920, with no empty third track", async ({ page }) => {
+    await open(page, "/admin/groups", { width: 1920, height: 1080 }, false, [
+      { path: "/api/v1/admin/member-groups", body: { groups: GROUPS } },
+    ]);
+    const cards = page.locator("[data-group-card='g-league'], [data-group-card='g-social']");
+    await expect(cards).toHaveCount(2);
+    const grid = page.locator("[data-group-card='g-league']").locator("xpath=ancestor::*[@data-auto-grid][1]");
+    const [gridBox, a, b] = [await grid.boundingBox(), await cards.nth(0).boundingBox(), await cards.nth(1).boundingBox()];
+    // Together they reach the grid's far edge: nothing is left for an empty track.
+    expect(b!.x + b!.width, "the pair fills the row").toBeGreaterThan(gridBox!.x + gridBox!.width - 2);
+    expect(a!.width, "each takes half, not a third").toBeGreaterThan(gridBox!.width / 2 - 40);
+  });
+
+  for (const scheme of ["light", "dark"] as const) {
+    test(`an archived card passes axe colour contrast (${scheme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await open(page, "/admin/groups", { width: 1280 }, false, [
+        { path: "/api/v1/admin/member-groups", body: { groups: GROUPS } },
+      ]);
+      const archived = page.locator("[data-group-card='g-old']");
+      await expect(archived).toBeVisible();
+      const result = await new AxeBuilder({ page }).withRules(["color-contrast"]).include("[data-group-card='g-old']").analyze();
+      expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+      expect(await archived.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+    });
+  }
 });

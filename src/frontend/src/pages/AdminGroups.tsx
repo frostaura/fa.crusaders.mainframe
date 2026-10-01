@@ -521,7 +521,8 @@ function Cards(props: Parameters<typeof GroupList>[0] & { groups: MemberGroup[] 
   return (
     // By the box (R4 form factor, SPEC §3.13): a 26rem card at the least, three across at 1920
     // beside the rail, two at 1280, one on a phone — `xl:grid-cols-2` was the viewport's answer.
-    <AutoGrid min="panel" max={3} gap="lg">
+    // `fit` (R5 F5-5): two groups at 1920 sat in two of three tracks with the third left empty.
+    <AutoGrid min="panel" max={3} gap="lg" fill="fit">
       {groups.map((group) => (
         <GroupCard
           key={group.id}
