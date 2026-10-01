@@ -17,41 +17,78 @@ namespace Crusaders.Mainframe.Tests;
 
 public abstract partial class AdminSettingsHttpTests
 {
-    /// <summary>The money keys: slice price, economics bounds, the top-up cap and the league rates that moved to groups.</summary>
+    /// <summary>The money keys: the economics bounds, and the money keys P13 retired (bound and ignored).</summary>
     public sealed class Economics(PostgresFixture pg) : AdminSettingsHttpTests(pg), IClassFixture<PostgresFixture>
     {
+        /// <summary>The retired money keys (P13 §3.9): no longer served, bound and ignored on the PUT.</summary>
+        private static readonly string[] RetiredKeys =
+            ["slice_price_credits", "credits_per_zar_regular", "credits_per_zar_league", "topup_block_zar", "topup_max_zar_per_member"];
+
         /// <summary>
-        /// The nine keys the engine has always read and the admin API never showed. Until
-        /// now the only way to change one was to hand-edit a JSON column on a live money
-        /// system — no validation, no audit trail, and a conversion rate a typo away from
-        /// making every top-up worthless.
+        /// P13 §3.9: the slice price, the regular conversion rate, the top-up block and the cap are
+        /// gone — a booking costs its length in minutes and packages have no cap — so the settings
+        /// GET no longer serves them. The keys that stay (the penalty, the share lapse, the
+        /// failure cooldown) still round-trip.
         /// </summary>
         [SkippableFact]
-        public Task The_economics_keys_are_readable_and_writable()
+        public async Task The_retired_money_keys_are_not_served_and_the_rest_still_round_trip()
         {
-            // P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite
-            Assert.Fail($"P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite");
-            return Task.CompletedTask;
+            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+            await using var factory = CreateFactory();
+            var seeded = await SeedAsync(factory, """{"slice_price_credits": 8, "credits_per_zar_regular": 1.6, "topup_block_zar": 100, "topup_max_zar_per_member": 1000}""");
+            var client = AdminClient(factory, seeded);
+
+            var body = Baseline();
+            body["penaltyPct"] = 25m;
+            body["share_lapse_hours"] = 36;
+            body["topup_failure_cooldown_minutes"] = 45;
+            var save = await client.PutAsJsonAsync(SettingsPath, body);
+            Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+
+            var read = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+            foreach (var key in RetiredKeys) Assert.False(read.TryGetProperty(key, out _), key);
+            Assert.Equal(25m, read.GetProperty("penalty_pct").GetDecimal());
+            Assert.Equal(36, read.GetProperty("share_lapse_hours").GetInt32());
+            Assert.Equal(45, read.GetProperty("topup_failure_cooldown_minutes").GetInt32());
         }
 
         /// <summary>
-        /// D2: a settings PUT that still carries the league rate is REFUSED, not silently ignored —
-        /// an admin typing a league rate into an old screen and reading "saved" would believe the
-        /// club charged it. Both spellings, and the refusal writes nothing at all.
+        /// The hygiene rule (<c>memory/decisions-backend-hygiene.md</c>): the PWA sends the whole
+        /// settings page back, so an older cached PWA still carrying a retired key must not be
+        /// refused on every save. Each is BOUND and IGNORED whatever it holds — a value the old
+        /// validators refused included — and nothing it says reaches the stored document.
+        /// The league rate is no longer refused either (§12.9): there is no rate to point anyone to.
         /// </summary>
         [SkippableTheory]
-        [InlineData("creditsPerZarLeague")]
-        [InlineData("CreditsPerZarLeague")]
-        public Task A_league_rate_on_the_settings_PUT_is_refused_because_it_moved_to_groups(string key)
+        [InlineData("slicePriceCredits", -500)]
+        [InlineData("slicePriceCredits", 8.005)]
+        [InlineData("creditsPerZarRegular", 0)]
+        [InlineData("creditsPerZarLeague", 2.4)]
+        [InlineData("CreditsPerZarLeague", 2.4)]
+        [InlineData("topupBlockZar", 500)]
+        [InlineData("topupMaxZarPerMember", 100)]
+        public async Task A_retired_money_key_on_the_settings_PUT_is_bound_and_ignored(string key, double value)
         {
-            // P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite
-            Assert.Fail($"P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite ({key})");
-            return Task.CompletedTask;
+            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+            await using var factory = CreateFactory();
+            var seeded = await SeedAsync(factory);
+            var client = AdminClient(factory, seeded);
+
+            var body = Baseline();
+            body.Remove("slicePriceCredits");
+            body[key] = (decimal)value;
+            var save = await client.PutAsJsonAsync(SettingsPath, body);
+            Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var stored = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(x => x.TenantId == seeded.TenantId);
+            foreach (var retired in RetiredKeys) Assert.DoesNotContain($"\"{retired}\"", stored.SettingsJson);
         }
 
         [SkippableTheory]
-        [InlineData("creditsPerZarRegular", 0, "credits_per_zar_regular_out_of_range")]
-        [InlineData("creditsPerZarRegular", -1, "credits_per_zar_regular_out_of_range")]
         [InlineData("memberPerDayMaxMinutes", 2000, "member_per_day_max_minutes_out_of_range")]
         [InlineData("retentionYears", 0, "retention_years_out_of_range")]
         [InlineData("noShowLookbackDays", 0, "no_show_lookback_days_out_of_range")]
@@ -75,8 +112,7 @@ public abstract partial class AdminSettingsHttpTests
             var seeded = await SeedAsync(factory);
             var client = AdminClient(factory, seeded);
 
-            // A conversion rate of zero makes every top-up worthless; a negative one credits
-            // the member for paying. These are values a form should never be able to submit.
+            // Values a form should never be able to submit.
             var payload = new Dictionary<string, object>
             {
                 ["sliceMinutes"] = 15,
@@ -94,76 +130,6 @@ public abstract partial class AdminSettingsHttpTests
             Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
             var body = await save.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal(expected, body.GetProperty("error").GetString());
-        }
-
-        [SkippableFact]
-        public async Task A_top_up_cap_below_the_block_size_is_refused()
-        {
-            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-            await using var factory = CreateFactory();
-            var seeded = await SeedAsync(factory);
-            var client = AdminClient(factory, seeded);
-
-            // No top-up would ever be legal, which reads to a member as the payment page
-            // being broken rather than as a setting being wrong.
-            var save = await client.PutAsJsonAsync(SettingsPath, new
-            {
-                sliceMinutes = 15,
-                slicePriceCredits = 8,
-                advanceBookingDays = 14,
-                dayStartMinute = 360,
-                dayEndMinute = 1320,
-                penaltyPct = 30m,
-                graceWindowMinutes = 5,
-                penaltyWindowMinutes = 15,
-                topupBlockZar = 500m,
-                topupMaxZarPerMember = 100m,
-            });
-
-            Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
-            var body = await save.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("topup_max_below_block", body.GetProperty("error").GetString());
-        }
-
-        /// <summary>
-        /// <b>D2-B06.</b> <c>slice_price_credits</c> was required, written unconditionally, and
-        /// validated by nothing. The court POST refuses a negative price and then falls back to
-        /// this setting when one is omitted, so a club could be given a court on which every
-        /// booking CREDITED the member — <c>{"saved":true}</c> and no sign anywhere.
-        /// </summary>
-        [SkippableTheory]
-        [InlineData(-500, "slice_price_credits_out_of_range")]
-        [InlineData(-0.01, "slice_price_credits_out_of_range")]
-        [InlineData(100_000_000, "slice_price_credits_out_of_range")]
-        public Task A_slice_price_outside_its_bounds_is_refused(decimal price, string expected)
-        {
-            // P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite
-            Assert.Fail($"P13-B2: slice_price_credits, credits_per_zar_* and the top-up block and cap are retired (bound and ignored, §3.9); rewrite ({price} {expected})");
-            return Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// Half a cent is not a price. The ledger column is <c>numeric(10,2)</c>, so the database
-        /// rounds it and every figure quoted back to the member then disagrees with the row —
-        /// the same failure the admin credit adjustment already refuses <c>amount_not_whole_cents</c> for.
-        /// </summary>
-        [SkippableFact]
-        public async Task A_slice_price_that_is_not_whole_cents_is_refused()
-        {
-            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-            await using var factory = CreateFactory();
-            var seeded = await SeedAsync(factory);
-            var client = AdminClient(factory, seeded);
-
-            var body = Baseline();
-            body["slicePriceCredits"] = 8.005m;
-            var save = await client.PutAsJsonAsync(SettingsPath, body);
-
-            Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
-            Assert.Equal("slice_price_credits_not_whole_cents",
-                (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
         }
     }
 }

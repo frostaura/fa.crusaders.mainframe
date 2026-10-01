@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// D2 over HTTP, on the real schema: a group's top-up rate and peak priority through the admin
+/// D2/P13 over HTTP, on the real schema: a group's package discount and peak priority through the admin
 /// group API (both spellings, the three states of a PATCH, the change record), the member-groups
 /// PUT that replaced the class endpoint, the admin reads that replaced <c>member_class</c>, the
 /// peak refusal a group withholds — and another club reaching none of it.
@@ -28,12 +28,16 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
 
     private static string MemberGroupsPath(Guid userId) => $"/api/v1/admin/members/{userId}/groups";
 
-    /// <summary>The club's league group, as the migration and the seeder leave it.</summary>
+    /// <summary>The league discount the fixtures give the league group (the seeder gives none, P13 §4.6).</summary>
+    private const int LeagueBps = 1000;
+
+    /// <summary>The club's league group, as the seeder leaves it, at <see cref="LeagueBps"/> off packages.</summary>
     private static async Task<Guid> AddLeagueGroupAsync(TestWebAppFactory factory, DoorClub club, params Guid[] members)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var league = TestHost.LeagueGroup(club.TenantId);
+        league.PackageDiscountBps = LeagueBps;
         db.MemberGroups.Add(league);
         foreach (var userId in members)
         {
@@ -72,11 +76,11 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
 
     /// <summary>
     /// The two new fields go in under either spelling and come back snake_case; a PATCH tells
-    /// "absent" (unchanged) from <c>null</c> (back to the club default); every change is one
+    /// "absent" (unchanged) from <c>null</c> (no say); every change is one
     /// <c>group.updated</c> row naming exactly the fields it moved.
     /// </summary>
     [SkippableFact]
-    public async Task A_groups_rate_and_peak_priority_round_trip_under_either_spelling_and_are_recorded()
+    public async Task A_groups_discount_and_peak_priority_round_trip_under_either_spelling_and_are_recorded()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -84,31 +88,33 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var club = await DoorClub.SeedAsync(factory, "d2rate");
         var admin = club.AdminClient(factory);
 
-        var id = await CreateAsync(admin, new { name = "Seniors", creditsPerZar = 2.25m, peakPriority = true });
+        var id = await CreateAsync(admin, new { name = "Seniors", packageDiscountBps = 1500, peakPriority = true });
         var created = await GroupAsync(admin, id);
-        Assert.Equal(2.25m, created.GetProperty("credits_per_zar").GetDecimal());
+        Assert.Equal(1500, created.GetProperty("package_discount_bps").GetInt32());
+        Assert.False(created.TryGetProperty("credits_per_zar", out _));
+        Assert.False(created.TryGetProperty("pricing", out _));
         Assert.True(created.GetProperty("peak_priority").GetBoolean());
         Assert.Equal(JsonValueKind.Null, created.GetProperty("system_key").ValueKind);
 
         var snake = await admin.PatchAsJsonAsync($"{Groups}/{id}", new Dictionary<string, object?>
         {
-            ["credits_per_zar"] = 2.5m,
+            ["package_discount_bps"] = 2000,
             ["peak_priority"] = false,
             ["reason"] = "Committee rate review",
         });
         Assert.Equal(HttpStatusCode.OK, snake.StatusCode);
         var patched = await GroupAsync(admin, id);
-        Assert.Equal(2.5m, patched.GetProperty("credits_per_zar").GetDecimal());
+        Assert.Equal(2000, patched.GetProperty("package_discount_bps").GetInt32());
         Assert.False(patched.GetProperty("peak_priority").GetBoolean());
 
-        // Absent is unchanged: a name-only PATCH does not touch the rate.
+        // Absent is unchanged: a name-only PATCH does not touch the discount.
         await admin.PatchAsJsonAsync($"{Groups}/{id}", new { name = "Seniors 65+" });
-        Assert.Equal(2.5m, (await GroupAsync(admin, id)).GetProperty("credits_per_zar").GetDecimal());
+        Assert.Equal(2000, (await GroupAsync(admin, id)).GetProperty("package_discount_bps").GetInt32());
 
-        // An explicit null clears it — the group inherits the club's default rate again.
-        var cleared = await admin.PatchAsJsonAsync($"{Groups}/{id}", new Dictionary<string, object?> { ["creditsPerZar"] = null });
+        // An explicit null clears it — the group has no say again.
+        var cleared = await admin.PatchAsJsonAsync($"{Groups}/{id}", new Dictionary<string, object?> { ["packageDiscountBps"] = null });
         Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
-        Assert.Equal(JsonValueKind.Null, (await GroupAsync(admin, id)).GetProperty("credits_per_zar").ValueKind);
+        Assert.Equal(JsonValueKind.Null, (await GroupAsync(admin, id)).GetProperty("package_discount_bps").ValueKind);
 
         var rows = await ChangesAsync(factory, club.TenantId, id);
         var updates = rows.Where(r => r.Action == AdminChangeActions.GroupUpdated).ToList();
@@ -117,53 +123,62 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         using (var before = JsonDocument.Parse(updates[0].BeforeJson!))
         using (var after = JsonDocument.Parse(updates[0].AfterJson!))
         {
-            Assert.Equal(2.25m, before.RootElement.GetProperty("credits_per_zar").GetDecimal());
-            Assert.Equal(2.5m, after.RootElement.GetProperty("credits_per_zar").GetDecimal());
+            Assert.Equal(1500, before.RootElement.GetProperty("package_discount_bps").GetInt32());
+            Assert.Equal(2000, after.RootElement.GetProperty("package_discount_bps").GetInt32());
             Assert.True(before.RootElement.GetProperty("peak_priority").GetBoolean());
             Assert.False(after.RootElement.GetProperty("peak_priority").GetBoolean());
             Assert.Equal("Committee rate review", updates[0].Reason);
         }
         using (var after = JsonDocument.Parse(updates[1].AfterJson!))
         {
-            Assert.False(after.RootElement.TryGetProperty("credits_per_zar", out _)); // the rename only
+            Assert.False(after.RootElement.TryGetProperty("package_discount_bps", out _)); // the rename only
         }
         using (var after = JsonDocument.Parse(updates[2].AfterJson!))
         {
-            Assert.Equal(JsonValueKind.Null, after.RootElement.GetProperty("credits_per_zar").ValueKind);
+            Assert.Equal(JsonValueKind.Null, after.RootElement.GetProperty("package_discount_bps").ValueKind);
         }
     }
 
     /// <summary>
-    /// A rate of zero takes a member's money and credits nothing; a fifth decimal would be rounded
-    /// by the column into a rate nobody typed; a string is not a number. All refused, nothing saved.
+    /// A discount below 0 or above 100% (10 000 bps), a fraction of a basis point the column would
+    /// round into a discount nobody typed, and anything that is not a number: all refused with
+    /// <c>group_package_discount_invalid</c>, nothing saved (P13 §3.8).
     /// </summary>
     [SkippableTheory]
-    [InlineData("0")]
     [InlineData("-1")]
+    [InlineData("10001")]
     [InlineData("1000.5")]
-    [InlineData("2.12345")]
-    [InlineData("\"2.4\"")]
+    [InlineData("\"1000\"")]
     [InlineData("true")]
-    public async Task A_rate_the_club_could_not_honour_is_refused(string rateJson)
+    public async Task A_discount_the_club_could_not_honour_is_refused(string rateJson)
     {
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "d2bad");
         var admin = club.AdminClient(factory);
-        var id = await CreateAsync(admin, new { name = "Seniors", creditsPerZar = 2.4m });
+        var id = await CreateAsync(admin, new { name = "Seniors", packageDiscountBps = 1000 });
 
         var res = await admin.PatchAsync($"{Groups}/{id}",
-            new StringContent($"{{\"credits_per_zar\":{rateJson}}}", System.Text.Encoding.UTF8, "application/json"));
+            new StringContent($"{{\"package_discount_bps\":{rateJson}}}", System.Text.Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
-        Assert.Equal("group_credits_per_zar_invalid",
-            (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
-        Assert.Equal(2.4m, (await GroupAsync(admin, id)).GetProperty("credits_per_zar").GetDecimal());
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("group_package_discount_invalid", body.GetProperty("error").GetString());
+        Assert.Equal(0, body.GetProperty("min").GetInt32());
+        Assert.Equal(10_000, body.GetProperty("max").GetInt32());
+        Assert.Equal(1000, (await GroupAsync(admin, id)).GetProperty("package_discount_bps").GetInt32());
 
         var onCreate = await admin.PostAsync(Groups,
-            new StringContent($"{{\"name\":\"Other\",\"creditsPerZar\":{rateJson}}}", System.Text.Encoding.UTF8, "application/json"));
+            new StringContent($"{{\"name\":\"Other\",\"packageDiscountBps\":{rateJson}}}", System.Text.Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, onCreate.StatusCode);
+
+        // The bounds themselves are legal: 0 is "no discount here", 10 000 is free.
+        foreach (var edge in new[] { 0, 10_000 })
+        {
+            var ok = await admin.PatchAsJsonAsync($"{Groups}/{id}", new { packageDiscountBps = edge });
+            Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        }
     }
 
     /// <summary>The league group replaced a member class; the product relies on it, so it cannot be deleted.</summary>
@@ -241,8 +256,8 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// Review D2-P2: archiving the league group would move every league member to the regular
-    /// rate and out of the peak window at a click. It is refused exactly as its delete is; the
+    /// Review D2-P2: archiving the league group would take every league member's discount and
+    /// peak window away at a click. It is refused exactly as its delete is; the
     /// group, its members' tariff and the change record are untouched. Other edits still work.
     /// </summary>
     [SkippableFact]
@@ -264,7 +279,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
 
         Assert.Equal("active", (await GroupAsync(admin, leagueId)).GetProperty("status").GetString());
         var rules = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}/booking-rules");
-        Assert.Equal(TestHost.LeagueCreditsPerZar, rules.GetProperty("tariff").GetProperty("top_up_credits_per_zar").GetDecimal());
+        Assert.Equal(LeagueBps, rules.GetProperty("tariff").GetProperty("package_discount_bps").GetInt32());
         Assert.True(rules.GetProperty("tariff").GetProperty("peak_priority").GetBoolean());
         Assert.Empty(await ChangesAsync(factory, club.TenantId, leagueId));
 
@@ -288,7 +303,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var club = await DoorClub.SeedAsync(factory, "d2aud");
         var admin = club.AdminClient(factory);
         var leagueId = await AddLeagueGroupAsync(factory, club);
-        var coachingId = await CreateAsync(admin, new { name = "Coaching", creditsPerZar = 2.0m });
+        var coachingId = await CreateAsync(admin, new { name = "Coaching", packageDiscountBps = 500 });
 
         var put = await admin.PutAsJsonAsync(MemberGroupsPath(club.MemberUserId),
             new { groupIds = new[] { leagueId }, reason = "Registered for league" });
@@ -312,12 +327,12 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         Assert.All(rows, r => Assert.Equal(club.TenantId, r.TenantId));
         Assert.All(rows, r => Assert.Equal(club.AdminUserId, r.ActorUserId));
 
-        // (rate before, rate after, peak before, peak after, group added, group removed)
-        var expected = new (decimal? RateBefore, decimal RateAfter, bool PeakBefore, bool PeakAfter, Guid? Added, Guid? Removed)[]
+        // (discount before, discount after, peak before, peak after, group added, group removed)
+        var expected = new (int? RateBefore, int RateAfter, bool PeakBefore, bool PeakAfter, Guid? Added, Guid? Removed)[]
         {
-            (null, TestHost.LeagueCreditsPerZar, false, true, leagueId, null),
-            (TestHost.LeagueCreditsPerZar, 2.0m, true, true, coachingId, null),
-            (2, 2, true, false, null, leagueId),
+            (null, LeagueBps, false, true, leagueId, null),
+            (LeagueBps, 500, true, true, coachingId, null),
+            (500, 500, true, false, null, leagueId),
         };
         for (var i = 0; i < expected.Length; i++)
         {
@@ -325,8 +340,9 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
             var (rateBefore, rateAfter, peakBefore, peakAfter, added, removed) = expected[i];
             var tb = d.RootElement.GetProperty("tariff_before");
             var ta = d.RootElement.GetProperty("tariff_after");
-            if (rateBefore is { } rb) Assert.Equal(rb, tb.GetProperty("top_up_credits_per_zar").GetDecimal());
-            Assert.Equal(rateAfter, ta.GetProperty("top_up_credits_per_zar").GetDecimal());
+            if (rateBefore is { } rb) Assert.Equal(rb, tb.GetProperty("package_discount_bps").GetInt32());
+            else Assert.Equal(JsonValueKind.Null, tb.GetProperty("package_discount_bps").ValueKind);
+            Assert.Equal(rateAfter, ta.GetProperty("package_discount_bps").GetInt32());
             Assert.Equal(peakBefore, tb.GetProperty("peak_priority").GetBoolean());
             Assert.Equal(peakAfter, ta.GetProperty("peak_priority").GetBoolean());
             Assert.Equal(added is null ? 0 : 1, d.RootElement.GetProperty("added").GetArrayLength());
@@ -337,8 +353,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         using (var first = JsonDocument.Parse(rows[0].DetailsJson!))
         {
             Assert.Equal("Registered for league", first.RootElement.GetProperty("reason").GetString());
-            Assert.NotEqual(TestHost.LeagueCreditsPerZar,
-                first.RootElement.GetProperty("tariff_before").GetProperty("top_up_credits_per_zar").GetDecimal());
+            Assert.Equal(leagueId, first.RootElement.GetProperty("tariff_after").GetProperty("discount_group_id").GetGuid());
         }
 
         // Answerable from the member's side: the trace carries the rows, naming the action.
@@ -361,7 +376,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var club = await DoorClub.SeedAsync(factory, "d2put");
         var admin = club.AdminClient(factory);
         var leagueId = await AddLeagueGroupAsync(factory, club);
-        var coachingId = await CreateAsync(admin, new { name = "Coaching", creditsPerZar = 2.0m, peakPriority = false });
+        var coachingId = await CreateAsync(admin, new { name = "Coaching", packageDiscountBps = 500, peakPriority = false });
         var oldId = await CreateAsync(admin, new { name = "Old promo" });
         await admin.PatchAsJsonAsync($"{Groups}/{oldId}", new { status = "archived", reason = "Promo ended" });
 
@@ -371,8 +386,8 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var body = await put.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, body.GetProperty("groups").GetArrayLength());
         var tariff = body.GetProperty("tariff");
-        Assert.Equal(2.0m, tariff.GetProperty("top_up_credits_per_zar").GetDecimal()); // the lower of 2.4 and 2.0
-        Assert.Equal(coachingId, tariff.GetProperty("rate_group_id").GetGuid());
+        Assert.Equal(500, tariff.GetProperty("package_discount_bps").GetInt32()); // the lower of 1000 and 500
+        Assert.Equal(coachingId, tariff.GetProperty("discount_group_id").GetGuid());
         Assert.False(tariff.GetProperty("peak_priority").GetBoolean());
         Assert.Equal("Coaching", tariff.GetProperty("peak_withheld_by")[0].GetString());
 
@@ -441,7 +456,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var group = Assert.Single(member.GetProperty("groups").EnumerateArray());
         Assert.Equal(leagueId, group.GetProperty("id").GetGuid());
         Assert.Equal("league", group.GetProperty("system_key").GetString());
-        Assert.Equal(2.4m, group.GetProperty("credits_per_zar").GetDecimal());
+        Assert.False(group.TryGetProperty("credits_per_zar", out _));
 
         var adminRow = list.EnumerateArray().Single(r => r.GetProperty("user_id").GetGuid() == club.AdminUserId);
         Assert.Equal("Regular", adminRow.GetProperty("member_class").GetString());
@@ -450,8 +465,8 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var detail = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}");
         Assert.Equal(leagueId, detail.GetProperty("groups")[0].GetProperty("id").GetGuid());
         var tariff = detail.GetProperty("tariff");
-        Assert.Equal(2.4m, tariff.GetProperty("top_up_credits_per_zar").GetDecimal());
-        Assert.Equal(leagueId, tariff.GetProperty("rate_group_id").GetGuid());
+        Assert.Equal(LeagueBps, tariff.GetProperty("package_discount_bps").GetInt32());
+        Assert.Equal(leagueId, tariff.GetProperty("discount_group_id").GetGuid());
         Assert.True(tariff.GetProperty("peak_priority").GetBoolean());
 
         // The member's own view: their groups by name, and what those add up to — never who else is in them.
@@ -459,7 +474,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var own = Assert.Single(profile.GetProperty("groups").EnumerateArray());
         Assert.Equal("League members", own.GetProperty("name").GetString());
         Assert.False(own.TryGetProperty("member_count", out _));
-        Assert.Equal(2.4m, profile.GetProperty("top_up_credits_per_zar").GetDecimal());
+        Assert.Equal(LeagueBps, profile.GetProperty("package_discount_bps").GetInt32());
         Assert.True(profile.GetProperty("peak_priority").GetBoolean());
 
         var rules = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}/booking-rules");
@@ -532,7 +547,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         var theirList = await intruder.GetFromJsonAsync<JsonElement>(Groups);
         Assert.DoesNotContain(theirList.GetProperty("groups").EnumerateArray(), g => g.GetProperty("id").GetGuid() == leagueId);
 
-        var patch = await intruder.PatchAsJsonAsync($"{Groups}/{leagueId}", new { creditsPerZar = 100m, peakPriority = false });
+        var patch = await intruder.PatchAsJsonAsync($"{Groups}/{leagueId}", new { packageDiscountBps = 10_000, peakPriority = false });
         Assert.Equal(HttpStatusCode.NotFound, patch.StatusCode);
 
         var setTheirs = await intruder.PutAsJsonAsync(MemberGroupsPath(club.MemberUserId), new { groupIds = Array.Empty<Guid>() });
@@ -548,7 +563,7 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var league = await db.MemberGroups.IgnoreQueryFilters().FirstAsync(g => g.Id == leagueId);
-        Assert.Null(league.PackageDiscountBps);
+        Assert.Equal(LeagueBps, league.PackageDiscountBps);
         Assert.True(league.PeakPriority);
         Assert.True(await db.MemberGroupMembers.IgnoreQueryFilters().AnyAsync(m => m.GroupId == leagueId && m.UserId == club.MemberUserId));
         Assert.False(await db.MemberGroupMembers.IgnoreQueryFilters().AnyAsync(m => m.GroupId == leagueId && m.UserId == other.MemberUserId));

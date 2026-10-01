@@ -11,7 +11,7 @@ namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
 /// The admin actions the change-record vocabulary could name and nothing wrote: a by-hand
-/// credit movement, and every group write (decision R19's gap list, 2026-09-23). Postgres-backed
+/// minutes movement, and every group write (decision R19's gap list, 2026-09-23). Postgres-backed
 /// because the change record is only trustworthy if the row flushes in the same transaction as
 /// the change it describes, and the in-memory provider has no transactions.
 /// </summary>
@@ -52,8 +52,9 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
 
 
     /// <summary>
-    /// A by-hand credit movement is in the undeletable record: an adjustment code as
-    /// <c>credit.adjusted</c>, a top-up code as <c>credit.topped_up</c>, each with the admin's
+    /// A by-hand minutes movement is in the undeletable record: an adjustment as
+    /// <c>credit.adjusted</c>, a package sold at the desk as <c>credit.topped_up</c> (codes kept,
+    /// P13 §2.5), each with the admin's
     /// reason and both balances. Another club's record carries neither.
     /// </summary>
     [SkippableFact]
@@ -65,15 +66,23 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         var club = await SeedAsync(factory, "gmcredit", memberMinutes: 40);
         var other = await SeedAsync(factory, "gmcredx", memberMinutes: 0);
         var admin = club.AdminClient(factory);
-        var path = $"/api/v1/admin/credit/{club.MemberUserId}/adjust";
+        var path = $"/api/v1/admin/minutes/{club.MemberUserId}/adjust";
+        Guid hour;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            await MinutePackageSeeder.EnsureAsync(db, club.TenantId, club.AdminUserId);
+            hour = await db.MinutePackages.IgnoreQueryFilters()
+                .Where(p => p.TenantId == club.TenantId && p.Minutes == 60).Select(p => p.Id).SingleAsync();
+        }
 
         var adjusted = await admin.PostAsJsonAsync(path, new
         {
             amountMinutes = 10, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
         });
-        var toppedUp = await admin.PostAsJsonAsync(path, new
+        var toppedUp = await admin.PostAsJsonAsync($"/api/v1/admin/minutes/{club.MemberUserId}/sell", new
         {
-            amountMinutes = 100, reason = "Paid cash at the bar", reasonCode = "top_up_cash", zarReceived = 100m, idempotencyKey = "gm_top",
+            packageId = hour, reason = "Paid cash at the bar", reasonCode = "top_up_cash", zarReceived = 100m, idempotencyKey = "gm_top",
         });
         Assert.Equal(HttpStatusCode.OK, adjusted.StatusCode);
         Assert.Equal(HttpStatusCode.OK, toppedUp.StatusCode);
@@ -93,9 +102,20 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
             Assert.Equal(50m, after.RootElement.GetProperty("balance_minutes").GetDecimal());
             Assert.Equal("goodwill", after.RootElement.GetProperty("reason_code").GetString());
         }
+        // A desk sale: the adjust shape in whole minutes, plus the package it sold (P13 §3.7).
+        Assert.Equal("Paid cash at the bar", topUp.Reason);
+        Assert.Equal(AdminChangeAreas.Credit, topUp.Area);
+        using (var before = JsonDocument.Parse(topUp.BeforeJson!))
         using (var after = JsonDocument.Parse(topUp.AfterJson!))
         {
-            Assert.Equal(150m, after.RootElement.GetProperty("balance_minutes").GetDecimal());
+            Assert.Equal(50, before.RootElement.GetProperty("balance_minutes").GetInt32());
+            Assert.Equal(110, after.RootElement.GetProperty("balance_minutes").GetInt32());
+            Assert.Equal(60, after.RootElement.GetProperty("amount_minutes").GetInt32());
+            Assert.Equal("top_up_cash", after.RootElement.GetProperty("reason_code").GetString());
+            Assert.Equal(100m, after.RootElement.GetProperty("zar_received").GetDecimal());
+            Assert.Equal(hour, after.RootElement.GetProperty("package_id").GetGuid());
+            Assert.Equal("1 hour", after.RootElement.GetProperty("package_name").GetString());
+            Assert.Equal(JsonValueKind.Null, after.RootElement.GetProperty("related_booking_id").ValueKind);
         }
 
         // A replayed click is not a second decision.
@@ -131,7 +151,7 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
 
         var renamed = await admin.PatchAsJsonAsync($"{Groups}/{id}", new
         {
-            name = "Junior squad", pricing = new { mode = "multiplier", multiplierBps = 5_000 },
+            name = "Junior squad", packageDiscountBps = 500,
         });
         Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
         var unchanged = await admin.PatchAsJsonAsync($"{Groups}/{id}", new { name = "Junior squad" });
@@ -159,7 +179,9 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         {
             Assert.Equal("Juniors", before.RootElement.GetProperty("name").GetString());
             Assert.Equal("Junior squad", after.RootElement.GetProperty("name").GetString());
-            Assert.Equal(5_000, after.RootElement.GetProperty("multiplier_bps").GetInt32());
+            Assert.Equal(500, after.RootElement.GetProperty("package_discount_bps").GetInt32());
+            Assert.Equal(JsonValueKind.Null, before.RootElement.GetProperty("package_discount_bps").ValueKind);
+            Assert.False(after.RootElement.TryGetProperty("multiplier_bps", out _));
             // Changed fields only.
             Assert.False(after.RootElement.TryGetProperty("description", out _));
         }

@@ -7,7 +7,8 @@ namespace Crusaders.Mainframe.Api.Persistence;
 
 /// <summary>
 /// Creates the minimum set of rows a production deployment needs in order to be usable at all:
-/// one tenant, its settings row, one admin who must change their password, and the club's courts.
+/// one tenant, its settings row, one admin who must change their password, the club's courts and
+/// its opening shelf of minutes packages.
 ///
 /// <para>
 /// This exists because there was no way to do it. <see cref="Seeder"/> runs only under
@@ -118,6 +119,10 @@ public static class ProductionBootstrap
         tenantContext.Set(tenant.Id, tenant.Slug);
         await EnsureAdminAsync(db, hasher, tenant, plan, logger, created);
         await EnsureCourtsAsync(db, tenant, plan, created);
+        // P13 §4.6: a new club's buy screen is never empty. Only for a club that has never had a
+        // package, so an admin's own shelf is never touched. The system is the author.
+        if (await MinutePackageSeeder.EnsureAsync(db, tenant.Id, Guid.Empty))
+            created.Add("the opening minutes packages (1, 5 and 10 hours)");
 
         Report(plan, created, logger);
     }
@@ -137,21 +142,16 @@ public static class ProductionBootstrap
         string DisplayName,
         string AdminEmail,
         string AdminPassword,
-        int CourtCount,
-        decimal SlicePriceCredits)
+        int CourtCount)
     {
         public static BootstrapPlan From(IConfiguration config) => new(
             (config["Bootstrap:TenantSlug"] ?? "").Trim().ToLowerInvariant(),
             (config["Bootstrap:TenantDisplayName"] ?? "").Trim(),
             (config["Bootstrap:AdminEmail"] ?? "").Trim().ToLowerInvariant(),
             config["Bootstrap:AdminPassword"] ?? "",
-            config.GetValue("Bootstrap:Courts", 4),
-            // Must be > 0. Court.SlicePriceCredits defaults to 0m and each court carries its OWN
-            // price — AdminConfigEndpoints reads court.SlicePriceCredits, not the tenant setting,
-            // when it charges a booking. Courts created without this are free to book, silently
-            // and for as long as nobody checks the ledger. The default matches the accessor's
-            // slice_price_credits fallback so a bootstrapped club and a configured one agree.
-            config.GetValue("Bootstrap:SlicePriceCredits", 8m));
+            // Courts carry no price (P13): a booking costs its own length in minutes, so there is
+            // no bootstrap slice price any more, and a stale one left in a compose file is ignored.
+            config.GetValue("Bootstrap:Courts", 4));
     }
 
     /// <summary>The club's tenant row and its settings row, creating either if it is missing.</summary>
@@ -271,11 +271,10 @@ public static class ProductionBootstrap
                 CourtNumber = i,
                 Name = $"Court {i}",
                 CourtType = CourtType.Squash,
-                // P13-B2: courts carry no price; Bootstrap:SlicePriceCredits and its check go (§2.2).
             });
         }
         await db.SaveChangesAsync();
-        created.Add($"{plan.CourtCount} squash court(s) at {plan.SlicePriceCredits} credits/slice");
+        created.Add($"{plan.CourtCount} squash court(s)");
     }
 
     /// <summary>What happened, at a level an operator reading container logs will actually see.</summary>
@@ -319,7 +318,7 @@ public static class ProductionBootstrap
     /// </summary>
     private static void Validate(BootstrapPlan plan)
     {
-        var (slug, displayName, adminEmail, adminPassword, courtCount, slicePriceCredits) = plan;
+        var (slug, displayName, adminEmail, adminPassword, courtCount) = plan;
         var problems = new List<string>();
 
         if (string.IsNullOrWhiteSpace(slug))
@@ -344,9 +343,6 @@ public static class ProductionBootstrap
 
         if (courtCount is < 1 or > 64)
             problems.Add($"Bootstrap__Courts must be between 1 and 64 (got {courtCount}).");
-
-        if (slicePriceCredits <= 0m)
-            problems.Add($"Bootstrap__SlicePriceCredits must be greater than 0 (got {slicePriceCredits}). Courts created at 0 are free to book.");
 
         if (problems.Count == 0) return;
 

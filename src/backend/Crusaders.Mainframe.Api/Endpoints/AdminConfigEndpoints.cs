@@ -1100,7 +1100,7 @@ public static class AdminConfigEndpoints
         // Defaults come from TenantSettingsAccessor, never from literals here.
         //
         // They used to be written twice and had drifted: this endpoint answered 30
-        // minutes and 50 credits where the engine used 15 and 8. On a tenant with
+        // minutes and a slice price of 50 where the engine used 15 and 8. On a tenant with
         // no explicit value that is not a cosmetic difference — the admin screen
         // reads back what it was shown and PUTs it, so opening the settings page
         // and pressing save doubled every slice and repriced every court, silently.
@@ -1352,7 +1352,7 @@ public sealed record UpdateSettingsRequest(
     // screen that edits only booking settings cannot revert an economics change made from
     // another one.
     /// <summary>
-    /// RETIRED (P13, "minutes, not credits"), with <see cref="SlicePriceCredits"/>,
+    /// RETIRED (P13, minutes as the unit of account), with <see cref="SlicePriceCredits"/>,
     /// <see cref="CreditsPerZarLeague"/>, <see cref="TopupBlockZar"/> and
     /// <see cref="TopupMaxZarPerMember"/>. Still bound, and ignored whatever they hold, so an
     /// older PWA that sends the whole page back saves it instead of being refused for settings

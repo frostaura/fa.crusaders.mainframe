@@ -9,38 +9,18 @@ namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
 /// Tests for Phase 8 client-blueprint deltas:
-///   8.2 credits unit of account + group-driven conversion (R100 → 160 / 240 credits; class until D2)
+///   8.2 (retired by P13: minutes are bought in packages — see TopUpFlowTests)
 ///   8.3 charge-at-booking (the debit fires at CreateAsync; activation only settles WHO pays)
 ///   8.4 per-day cap (with same-day relaxation) + peak-hours league exclusivity
 ///   8.5 at-court payer override (BookedByUserId vs PaidByUserId)
 /// </summary>
 public class Phase8Tests
 {
-    // ---- 8.2 Credits + class-driven conversion ----
-
-    [Fact]
-    public Task Top_up_for_regular_member_converts_R100_to_160_credits()
-    {
-        // P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)
-        Assert.Fail($"P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)");
-        return Task.CompletedTask;
-    }
-
-    [Fact]
-    public Task Top_up_for_league_member_converts_R100_to_240_credits()
-    {
-        // P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)
-        Assert.Fail($"P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)");
-        return Task.CompletedTask;
-    }
-
-    [Fact]
-    public Task Ledger_records_zar_paid_and_conversion_rate_on_topup_rows()
-    {
-        // P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)
-        Assert.Fail($"P13-B2: conversion rates are gone; a purchase credits the locked package minutes (§3.4, §4.4)");
-        return Task.CompletedTask;
-    }
+    // ---- 8.2 ----
+    // The conversion of rand to credits is gone (P13): a member buys a package of whole minutes,
+    // and the purchase credits the minutes locked on its row. Pinned in TopUpFlowTests
+    // (A_purchase_credits_the_locked_minutes_whatever_happens_to_the_package, the discount lock)
+    // and PackageShelfTests.
 
     // ---- 8.3 Charge at booking ----
 

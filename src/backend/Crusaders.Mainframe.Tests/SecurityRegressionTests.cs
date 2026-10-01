@@ -341,7 +341,7 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
 
         using var admin = ClientFor(factory, club, club.AdminId, role: "admin");
         var response = await admin.PostAsJsonAsync(
-            $"/api/v1/admin/credit/{outsiderId}/adjust", new { amountMinutes = 1000, reason = "gift" });
+            $"/api/v1/admin/minutes/{outsiderId}/adjust", new { amountMinutes = 1000, reason = "gift" });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(0, await BalanceAsync(factory, club.TenantId, outsiderId));
@@ -493,14 +493,14 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
 
         // The victim's booking id, pasted into an adjustment on the other member's wallet.
         var crossed = await admin.PostAsJsonAsync(
-            $"/api/v1/admin/credit/{club.AttackerId}/adjust",
+            $"/api/v1/admin/minutes/{club.AttackerId}/adjust",
             new { amountMinutes = 10, reason = "goodwill", relatedBookingId = club.BookingId });
         Assert.Equal(HttpStatusCode.BadRequest, crossed.StatusCode);
         Assert.Contains("booking_not_members", await crossed.Content.ReadAsStringAsync());
 
         // A booking id that is not one at all.
         var invented = await admin.PostAsJsonAsync(
-            $"/api/v1/admin/credit/{club.AttackerId}/adjust",
+            $"/api/v1/admin/minutes/{club.AttackerId}/adjust",
             new { amountMinutes = 10, reason = "goodwill", relatedBookingId = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.BadRequest, invented.StatusCode);
         Assert.Contains("booking_not_found", await invented.Content.ReadAsStringAsync());
@@ -511,7 +511,7 @@ public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
         // The member's own booking is accepted, so the refusal is about ownership and not
         // about the field.
         var owned = await admin.PostAsJsonAsync(
-            $"/api/v1/admin/credit/{club.VictimId}/adjust",
+            $"/api/v1/admin/minutes/{club.VictimId}/adjust",
             new { amountMinutes = 10, reason = "goodwill", relatedBookingId = club.BookingId });
         Assert.Equal(HttpStatusCode.OK, owned.StatusCode);
     }

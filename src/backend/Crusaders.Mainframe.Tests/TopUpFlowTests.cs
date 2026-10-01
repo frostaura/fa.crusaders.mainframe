@@ -1,335 +1,506 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Claims;
-using System.Text;
 using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Email;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Payments;
 using Crusaders.Mainframe.Api.Payments.PayFast;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
-using Crusaders.Mainframe.Api.Email;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.IdentityModel.Tokens;
+using static Crusaders.Mainframe.Tests.PurchaseKit;
 
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// The member-facing top-up path, end to end over real HTTP against real SQL.
+/// A member buying minutes (P13 §3.4, §4.4), end to end over real HTTP against real SQL: the
+/// shelf, the purchase that hands the member to PayFast with a signed form, the purchase lock, and
+/// the ITN that credits the LOCKED minutes and nothing else.
 ///
 /// <para>
-/// Nothing covered this. <see cref="PayFastProviderTests"/> proved the provider builds and
-/// signs a form and <see cref="PayFastSignatureTests"/> proved the algorithm, and between
-/// them sat an endpoint that never returned the form, never set the cancel URL and settled
-/// at whatever conversion rate happened to be live when the notification arrived. All three
-/// were invisible to a suite that stopped at the provider's own boundary.
+/// The lock is the money test. Everything a member is shown — the package, its minutes, the list
+/// price, their discount and the price after it — is copied onto the <c>pending_topups</c> row
+/// before the gateway is called, and the ITN reads that row and never the live package. An admin
+/// editing the package, archiving it, or changing a group's discount while the member sits on
+/// PayFast's card page changes nothing about what money already paid buys.
 /// </para>
 /// </summary>
-public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
+public sealed class TopUpFlowTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
+    private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    public TopUpFlowTests(PostgresFixture pg) => _pg = pg;
+    private TestWebAppFactory CreateFactory() => pg.SharedHost;
 
-    private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
-    private const string Passphrase = "not-a-real-passphrase-test-fixture-only";
-    private const string MerchantId = "10000100";
+    private static async Task<HttpResponseMessage> PostPurchaseAsync(HttpClient client, Guid packageId, decimal quoted)
+        => await client.PostAsJsonAsync("/api/v1/minutes/purchase", new { packageId, quotedPriceZar = quoted });
 
-    private sealed record Seeded(Guid TenantId, string Slug, Guid MemberUserId, string Email, Guid LeagueGroupId);
+    private static async Task<string> ErrorOf(HttpResponseMessage res)
+        => (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString()!;
 
-    private TestWebAppFactory CreateFactory() => _pg.SharedHost;
-
-    /// <summary>
-    /// Invariant formatting, not the ambient culture: this machine's is en-ZA, so
-    /// <c>1.6m.ToString()</c> writes "1,6" and Postgres refuses the document as invalid
-    /// JSON — a failure that reads as a schema problem and is a locale problem.
-    /// </summary>
-    private static string N(decimal v) => v.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-    private static string SettingsJson(decimal regularRate = 1.6m, decimal blockZar = 100m, decimal maxZar = 1000m) =>
-        $$"""
-        {
-          "credits_per_zar_regular": {{N(regularRate)}},
-          "topup_block_zar": {{N(blockZar)}},
-          "topup_max_zar_per_member": {{N(maxZar)}},
-          "payfast": {
-            "merchant_id": "{{MerchantId}}",
-            "merchant_key": "46f0cd694581a",
-            "passphrase": "{{Passphrase}}",
-            "environment": "test"
-          }
-        }
-        """;
-
-    private static async Task<Seeded> SeedAsync(TestWebAppFactory factory, string? settingsJson = null)
-    {
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        await db.Database.MigrateAsync();
-
-        var slug = $"tu-{Guid.NewGuid():N}"[..20];
-        var tenant = new Tenant { Slug = slug, DisplayName = "Top-up Club" };
-        db.Tenants.Add(tenant);
-        db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settingsJson ?? SettingsJson() });
-
-        var email = $"{slug}@test.local";
-        var member = new User { TenantId = tenant.Id, Email = email, PasswordHash = "x", EmailVerified = true };
-        db.Users.Add(member);
-        db.Memberships.Add(new Membership
-        {
-            TenantId = tenant.Id,
-            UserId = member.Id,
-            FullName = "Naledi Khoza",
-            MembershipNumber = slug,
-            Status = MembershipStatus.Active,
-        });
-        // D2: the club's league group, at 2.4 with peak priority, with nobody in it yet.
-        var league = TestHost.LeagueGroup(tenant.Id);
-        db.MemberGroups.Add(league);
-
-        await db.SaveChangesAsync();
-        return new Seeded(tenant.Id, slug, member.Id, email, league.Id);
-    }
-
-    private static HttpClient MemberClient(WebApplicationFactory<Program> factory, Seeded s)
-    {
-        var token = new JwtSecurityToken(
-            issuer: "crusaders.mainframe",
-            audience: "crusaders.mainframe.app",
-            claims:
-            [
-                new Claim(JwtRegisteredClaimNames.Sub, s.MemberUserId.ToString()),
-                new Claim("tenant_id", s.TenantId.ToString()),
-                new Claim("tenant_slug", s.Slug),
-                new Claim("purpose", "access"),
-            ],
-            notBefore: DateTime.UtcNow,
-            expires: DateTime.UtcNow.AddMinutes(10),
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Secret)), SecurityAlgorithms.HmacSha256));
-
-        var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", new JwtSecurityTokenHandler().WriteToken(token));
-        return client;
-    }
-
-    /// <summary>An ITN as PayFast composes it: fields in posted order, signature last.</summary>
-    private static HttpContent SignedItn(string mPaymentId, string gross, string status = "COMPLETE", bool withPaymentId = true)
-    {
-        var fields = new List<KeyValuePair<string, string?>>
-        {
-            new("m_payment_id", mPaymentId),
-            new("pf_payment_id", Random.Shared.Next(1_000_000, 9_999_999).ToString()),
-            new("payment_status", status),
-            new("item_name", "Crusaders credits top-up"),
-            new("amount_gross", gross),
-            new("amount_fee", "-2.30"),
-            new("amount_net", "97.70"),
-            new("merchant_id", MerchantId),
-        };
-        if (!withPaymentId) fields.RemoveAll(f => f.Key == "pf_payment_id");
-
-        var body = string.Join("&", fields
-            .Select(f => $"{f.Key}={PayFastSignature.UrlEncode(f.Value!)}")
-            .Append($"signature={PayFastSignature.Compute(fields, Passphrase)}"));
-
-        return new StringContent(body, Encoding.UTF8, "application/x-www-form-urlencoded");
-    }
-
-    private static async Task<JsonElement> RegisterAsync(HttpClient client, decimal amountZar)
-    {
-        // amountZar, not amountMinutes. The client posted the latter for the life of the
-        // screen, so AmountZar bound to 0, the positivity guard fired, and no member could
-        // top up at all — the error even told them the amount was a bad multiple of R100.
-        var res = await client.PostAsJsonAsync("/api/v1/credit/topup", new { amountZar });
-        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        return await res.Content.ReadFromJsonAsync<JsonElement>();
-    }
-
-    // ---- F2: the hand-off carries a signed form -----------------------------
+    // ---- the hand-off carries a signed form ---------------------------------
 
     /// <summary>
-    /// The endpoint returned <c>redirect_url</c> alone — the bare process URL, no query
-    /// string — and the frontend followed it as a GET. That is a request to PayFast with no
-    /// merchant id, no amount and no signature: no payment can start from it.
+    /// The form is the payment: PayFast has no server-side registration, the browser POSTs this
+    /// signed form. The amount is the locked price; the return and cancel URLs are the new
+    /// <c>/wallet/buy/{id}</c> page; the item name is ASCII-hyphenated (§12.13).
     /// </summary>
     [SkippableFact]
-    public async Task Registering_a_topup_returns_the_signed_form_the_browser_must_post()
+    public async Task Buying_a_package_returns_the_signed_form_the_browser_must_post()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tu");
+        var bought = await BuyAsync(Member(factory, club), club.FiveHours);
 
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-
-        var body = await RegisterAsync(client, 100);
-
-        var fields = body.GetProperty("form_fields").EnumerateArray()
+        var fields = bought.Body.GetProperty("form_fields").EnumerateArray()
             .Select(f => (Name: f.GetProperty("name").GetString()!, Value: f.GetProperty("value").GetString()!))
             .ToList();
 
         Assert.Contains(fields, f => f.Name == "merchant_id" && f.Value == MerchantId);
-        Assert.Contains(fields, f => f.Name == "amount" && f.Value == "100.00");
-        Assert.Contains(fields, f => f.Name == "m_payment_id" && f.Value == body.GetProperty("checkout_id").GetString());
+        Assert.Contains(fields, f => f.Name == "amount" && f.Value == "550.00");
+        Assert.Contains(fields, f => f.Name == "m_payment_id" && f.Value == bought.CheckoutId);
+        Assert.Contains(fields, f => f.Name == "item_name" && f.Value == "Crusaders - 5 hours (5 h)");
+        Assert.EndsWith($"/wallet/buy/{bought.Id}", Assert.Single(fields, f => f.Name == "return_url").Value);
+        Assert.EndsWith($"/wallet/buy/{bought.Id}?cancelled=1", Assert.Single(fields, f => f.Name == "cancel_url").Value);
 
-        // PayFast requires cancel_url and it was never set, so a member who backed out at
-        // the gateway had nowhere to land.
-        var cancel = Assert.Single(fields, f => f.Name == "cancel_url").Value;
-        Assert.Contains("/wallet/topup/", cancel);
+        var package = bought.Body.GetProperty("package");
+        Assert.Equal(club.FiveHours, package.GetProperty("id").GetGuid());
+        Assert.Equal(300, package.GetProperty("minutes").GetInt32());
+        Assert.Equal(550m, bought.AmountZar);
 
-        // And the signature must verify over the rest, in the order emitted.
         var signature = Assert.Single(fields, f => f.Name == "signature").Value;
         Assert.True(PayFastSignature.Verify(
             fields.Where(f => f.Name != "signature").Select(f => new KeyValuePair<string, string?>(f.Name, f.Value)),
             Passphrase, signature));
     }
 
-    // ---- F3: the rate is the one quoted, not the one live at settlement -----
+    // ---- §4.4: the purchase lock -----------------------------------------------
 
     /// <summary>
-    /// <b>The money test.</b> A member registers at 1.6, an admin moves the club to 2.4
-    /// while they are on PayFast's card page, and the ITN lands. The member paid R100
-    /// against 160 credits and must receive 160.
+    /// <b>The money test</b> (§10.3, non-negotiable). The member buys 5 hours for R550; while they
+    /// are on PayFast's card page an admin re-prices it, changes its minutes, or archives it. The
+    /// ITN for R550 credits exactly the 300 minutes the member was sold.
     ///
     /// <para>
-    /// Mutation-proved: reverting <c>CompleteAsync</c> to
-    /// <c>settings.ConversionRateFor(memberClass)</c> makes this fail with 240 against 160.
-    /// It cuts the other way too, which is the damaging direction — a member quoted 320
-    /// credits for R200 was credited 200 after the rate moved down.
+    /// Mutation check (§1.4): reading <c>minute_packages</c> in the callback instead of the locked
+    /// row credits 600 minutes in the first row, refuses the R550 as a mismatch in the second, and
+    /// cannot find the package in the third — each turns this red.
     /// </para>
     /// </summary>
     [SkippableTheory]
-    [InlineData(1.6, 2.4, 160)]  // rate raised after checkout — the club must not over-credit
-    [InlineData(1.6, 1.0, 160)]  // rate cut after checkout — the member must not be short-changed
-    public Task A_topup_settles_at_the_rate_quoted_at_checkout(double registered, double atCallback, double expectedMinutes)
+    [InlineData("minutes")]
+    [InlineData("price")]
+    [InlineData("archive")]
+    public async Task A_purchase_credits_the_locked_minutes_whatever_happens_to_the_package(string edit)
     {
-        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
-        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4) ({registered} {atCallback} {expectedMinutes})");
-        return Task.CompletedTask;
-    }
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tl");
+        var member = Member(factory, club);
+        var bought = await BuyAsync(member, club.FiveHours);
 
-    // ---- D2: the rate is the member's GROUPS', and still locked at checkout -----
-
-    /// <summary>Puts the member into a group, optionally a new one with the given rate and status.</summary>
-    private static async Task<Guid> JoinAsync(
-        TestWebAppFactory factory, Seeded s, Guid? groupId = null, string? name = null, decimal? rate = null,
-        MemberGroupStatus status = MemberGroupStatus.Active)
-    {
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var id = groupId ?? Guid.NewGuid();
-        if (groupId is null)
+        await EditPackageAsync(factory, club.FiveHours, p =>
         {
-            db.MemberGroups.Add(new MemberGroup
-            {
-                Id = id,
-                TenantId = s.TenantId,
-                Name = name!,
-                // P13-B2: the rate is gone; a group's say is PackageDiscountBps now.
-                Status = status,
-                SortOrder = 3,
-            });
-        }
-        db.MemberGroupMembers.Add(new MemberGroupMember
-        {
-            TenantId = s.TenantId,
-            GroupId = id,
-            UserId = s.MemberUserId,
-            AddedByUserId = s.MemberUserId,
+            if (edit == "minutes") p.Minutes = 600;
+            if (edit == "price") p.PriceZar = 400m;
+            if (edit == "archive") p.Status = MinutePackageStatus.Archived;
         });
-        await db.SaveChangesAsync();
-        return id;
+
+        var itn = await PostItnAsync(factory, club, bought.CheckoutId, "550.00");
+        Assert.Equal(HttpStatusCode.OK, itn.StatusCode);
+        var answer = await itn.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(300, answer.GetProperty("minutes").GetInt32());
+        Assert.Equal(club.FiveHours, answer.GetProperty("package_id").GetGuid());
+
+        var entry = Assert.Single(await LedgerAsync(factory, club, club.MemberUserId));
+        Assert.Equal(300, entry.AmountMinutes);
+        Assert.Equal(550m, entry.ZarPaid);
+        Assert.Equal(LedgerEntryType.TopUp, entry.Type);
     }
 
     /// <summary>
-    /// <b>The D2 money test.</b> A league member is quoted the league GROUP's rate, the pending
-    /// row locks both the rate and the group it came from, an admin then moves the group's rate
-    /// while the member is on PayFast's card page — and the ITN still credits the quoted rate.
-    /// The rate lock survived the class becoming a group.
+    /// The DISCOUNT is locked too, with the group it came from. A league member is sold the club's
+    /// 5 hours at 10% off (R495); the admin then moves the league to 50% while the member is
+    /// paying. The row keeps 1000 bps, R550 list, R495 and the league group; the ITN for R495
+    /// credits 300 minutes.
     /// </summary>
     [SkippableFact]
-    public Task A_group_rate_is_locked_at_checkout_with_the_group_it_came_from()
+    public async Task A_group_discount_is_locked_at_checkout_with_the_group_it_came_from()
     {
-        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
-        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)");
-        return Task.CompletedTask;
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "td");
+        await SetDiscountAsync(factory, club.LeagueGroupId, 1000);
+        await JoinAsync(factory, club, club.MemberUserId, club.LeagueGroupId);
+        var member = Member(factory, club);
+
+        var bought = await BuyAsync(member, club.FiveHours);
+        Assert.Equal(495m, bought.AmountZar);
+
+        await SetDiscountAsync(factory, club.LeagueGroupId, 5000);
+
+        var row = await RowAsync(factory, bought.Id);
+        Assert.Equal((300, 550m, 1000, 495m), (row.Minutes, row.ListPriceZar, row.DiscountBps, row.AmountZar));
+        Assert.Equal(club.LeagueGroupId, row.GroupId);
+        Assert.Equal("5 hours", row.PackageName);
+
+        // The live shelf has moved on; the purchase has not.
+        Assert.Equal(275m, await PriceAsync(member, club.FiveHours));
+        Assert.Equal(HttpStatusCode.OK, (await PostItnAsync(factory, club, bought.CheckoutId, "495.00")).StatusCode);
+        Assert.Equal(300, Assert.Single(await LedgerAsync(factory, club, club.MemberUserId)).AmountMinutes);
+
+        var status = await member.GetFromJsonAsync<JsonElement>($"/api/v1/minutes/purchase/{bought.Id}");
+        Assert.Equal("Completed", status.GetProperty("status").GetString());
+        Assert.Equal(1000, status.GetProperty("discount_bps").GetInt32());
+        Assert.Equal(550m, status.GetProperty("list_price_zar").GetDecimal());
+        Assert.Equal(495m, status.GetProperty("amount_zar").GetDecimal());
     }
 
     /// <summary>
-    /// Several groups: the LOWEST rate any active group sets is quoted and locked, with that
-    /// group named; a group with no rate and an archived group have no say.
+    /// Several groups: the LOWEST discount any active group sets is the one quoted and locked,
+    /// with that group named; a group with no say and an archived group take no part (§3.8).
+    /// Mutation check (§1.4): "highest wins" locks 2500 and R412.50 instead.
     /// </summary>
     [SkippableFact]
-    public Task The_lowest_rate_among_the_members_active_groups_is_quoted_and_locked()
+    public async Task The_lowest_discount_among_the_members_active_groups_is_quoted_and_locked()
     {
-        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
-        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)");
-        return Task.CompletedTask;
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tw");
+        await SetDiscountAsync(factory, club.LeagueGroupId, 1000);
+        await JoinAsync(factory, club, club.MemberUserId, club.LeagueGroupId);
+        await JoinAsync(factory, club, club.MemberUserId, name: "Students", discountBps: 2500);
+        await JoinAsync(factory, club, club.MemberUserId, name: "Juniors", discountBps: null);
+        await JoinAsync(factory, club, club.MemberUserId, name: "Old promo", discountBps: 500, status: MemberGroupStatus.Archived);
+        var member = Member(factory, club);
+
+        var shelf = await ShelfAsync(member);
+        Assert.Equal(1000, shelf.GetProperty("discount").GetProperty("bps").GetInt32());
+        Assert.Equal(club.LeagueGroupId, shelf.GetProperty("discount").GetProperty("group").GetProperty("id").GetGuid());
+
+        var bought = await BuyAsync(member, club.FiveHours);
+        var row = await RowAsync(factory, bought.Id);
+        Assert.Equal(1000, row.DiscountBps);
+        Assert.Equal(495m, row.AmountZar);
+        Assert.Equal(club.LeagueGroupId, row.GroupId);
     }
 
-    // ---- F13: failure reasons are codes, and a cancellation is not a failure
+    // ---- §3.4: the shelf --------------------------------------------------------
+
+    /// <summary>
+    /// Dean's answer 2 on the wire: a group member sees the group's own packages AND the club's,
+    /// the club's at their discount; a package of a group they are not in is not on their shelf.
+    /// The saving is the contract's own example. A member with no group sees no discount.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_shelf_shows_the_clubs_packages_at_the_members_discount_and_their_groups_own()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "ts");
+        await SetDiscountAsync(factory, club.LeagueGroupId, 1000);
+        await JoinAsync(factory, club, club.MemberUserId, club.LeagueGroupId);
+        var leagueOnly = await AddPackageAsync(factory, club, "League night", 120, 150m, club.LeagueGroupId);
+        var coaching = await JoinAsync(factory, club, club.OtherUserId, name: "Coaching", discountBps: null);
+        await AddPackageAsync(factory, club, "Coaching block", 300, 400m, coaching);
+
+        var shelf = await ShelfAsync(Member(factory, club));
+        var discount = shelf.GetProperty("discount");
+        Assert.Equal(1000, discount.GetProperty("bps").GetInt32());
+        Assert.Equal("League members", discount.GetProperty("group").GetProperty("name").GetString());
+
+        var items = shelf.GetProperty("packages").EnumerateArray().ToList();
+        Assert.Equal(["1 hour", "5 hours", "10 hours", "League night"], items.Select(i => i.GetProperty("name").GetString()));
+        var five = items[1];
+        Assert.Equal(300, five.GetProperty("minutes").GetInt32());
+        Assert.Equal(550m, five.GetProperty("list_price_zar").GetDecimal());
+        Assert.Equal(1000, five.GetProperty("discount_bps").GetInt32());
+        Assert.Equal(495m, five.GetProperty("price_zar").GetDecimal());
+        Assert.Equal(45m, five.GetProperty("saving_zar").GetDecimal());
+        Assert.Equal(8, five.GetProperty("saving_pct").GetInt32());
+        Assert.Equal("club", five.GetProperty("source").GetString());
+        Assert.Equal(JsonValueKind.Null, five.GetProperty("group").ValueKind);
+        Assert.Equal(JsonValueKind.Null, items[0].GetProperty("saving_zar").ValueKind);
+
+        var own = items[3];
+        Assert.Equal(leagueOnly, own.GetProperty("id").GetGuid());
+        Assert.Equal("group", own.GetProperty("source").GetString());
+        Assert.Equal(0, own.GetProperty("discount_bps").GetInt32());
+        Assert.Equal(150m, own.GetProperty("price_zar").GetDecimal());
+        Assert.Equal(club.LeagueGroupId, own.GetProperty("group").GetProperty("id").GetGuid());
+        Assert.Empty(shelf.GetProperty("open_checkouts").EnumerateArray());
+
+        // The other member is in Coaching only: no discount, the club shelf at list, and Coaching's block.
+        var other = await ShelfAsync(Client(factory, club, club.OtherUserId));
+        Assert.Equal(JsonValueKind.Null, other.GetProperty("discount").ValueKind);
+        Assert.Equal(["1 hour", "5 hours", "10 hours", "Coaching block"],
+            other.GetProperty("packages").EnumerateArray().Select(i => i.GetProperty("name").GetString()));
+        Assert.Equal(550m, other.GetProperty("packages")[1].GetProperty("price_zar").GetDecimal());
+    }
+
+    // ---- §3.4: refusals ---------------------------------------------------------
+
+    /// <summary>
+    /// The club moves the price under an open tab and the member is stopped and shown the new
+    /// figure rather than sent to the gateway at it — both triggers: an admin editing the package,
+    /// and an admin giving the member's group a discount. <b>No row is written.</b> Compared
+    /// exactly, so R549.99 against R550 is a change.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("package")]
+    [InlineData("discount")]
+    public async Task A_price_the_club_has_moved_away_from_is_refused_rather_than_silently_repriced(string trigger)
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tq");
+        await JoinAsync(factory, club, club.MemberUserId, club.LeagueGroupId);
+        var member = Member(factory, club);
+        var quoted = await PriceAsync(member, club.FiveHours);
+        Assert.Equal(550m, quoted);
+
+        if (trigger == "package") await EditPackageAsync(factory, club.FiveHours, p => p.PriceZar = 549.99m);
+        else await SetDiscountAsync(factory, club.LeagueGroupId, 1000);
+
+        var res = await PostPurchaseAsync(member, club.FiveHours, quoted);
+
+        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("package_price_changed", body.GetProperty("error").GetString());
+        Assert.Equal(trigger == "package" ? 549.99m : 495m, body.GetProperty("package").GetProperty("price_zar").GetDecimal());
+        Assert.Equal(300, body.GetProperty("package").GetProperty("minutes").GetInt32());
+        Assert.Empty(await ReadAsync(factory, db => db.PendingTopups.IgnoreQueryFilters()
+            .Where(x => x.UserId == club.MemberUserId).ToListAsync()));
+    }
+
+    [SkippableFact]
+    public async Task A_purchase_missing_its_package_or_its_quote_is_refused_by_name()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tm");
+        var member = Member(factory, club);
+
+        var noPackage = await member.PostAsJsonAsync("/api/v1/minutes/purchase", new { quotedPriceZar = 120m });
+        Assert.Equal(HttpStatusCode.BadRequest, noPackage.StatusCode);
+        Assert.Equal("package_id_required", await ErrorOf(noPackage));
+
+        var noQuote = await member.PostAsJsonAsync("/api/v1/minutes/purchase", new { packageId = club.OneHour });
+        Assert.Equal(HttpStatusCode.BadRequest, noQuote.StatusCode);
+        Assert.Equal("quoted_price_required", await ErrorOf(noQuote));
+    }
+
+    /// <summary>
+    /// <c>package_unavailable</c> for everything not on THIS member's shelf now: an archived
+    /// package, another group's package, a package of a group that has since been archived, and
+    /// <b>another club's package</b> (cross-tenant injection, §10.3) — the last two leave no row.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_package_not_on_the_members_shelf_is_unavailable_including_another_clubs()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tx");
+        var rival = await SeedAsync(factory, "txr");
+        var member = Member(factory, club);
+
+        var coaching = await JoinAsync(factory, club, club.OtherUserId, name: "Coaching", discountBps: null);
+        var coachingOnly = await AddPackageAsync(factory, club, "Coaching block", 300, 400m, coaching);
+        var archivedPackage = await AddPackageAsync(factory, club, "Old", 30, 50m);
+        await EditPackageAsync(factory, archivedPackage, p => p.Status = MinutePackageStatus.Archived);
+        var dormant = await JoinAsync(factory, club, club.MemberUserId, name: "Dormant", discountBps: null);
+        var dormantOnly = await AddPackageAsync(factory, club, "Dormant block", 60, 90m, dormant);
+        await WriteAsync(factory, async db => (await db.MemberGroups.IgnoreQueryFilters().SingleAsync(g => g.Id == dormant)).Status = MemberGroupStatus.Archived);
+
+        foreach (var (id, price) in new[] { (archivedPackage, 50m), (coachingOnly, 400m), (dormantOnly, 90m), (rival.FiveHours, 550m) })
+        {
+            var res = await PostPurchaseAsync(member, id, price);
+            Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+            Assert.Equal("package_unavailable", await ErrorOf(res));
+        }
+
+        Assert.Empty(await ReadAsync(factory, db => db.PendingTopups.IgnoreQueryFilters()
+            .Where(x => x.UserId == club.MemberUserId || x.TenantId == rival.TenantId).ToListAsync()));
+    }
+
+    /// <summary>A purchase or its cancel addressed to another member's — or another club's — row is a stranger's: 404.</summary>
+    [SkippableFact]
+    public async Task Another_members_or_another_clubs_purchase_is_not_found()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "ty");
+        var rival = await SeedAsync(factory, "tyr");
+        var theirs = await BuyAsync(Member(factory, rival), rival.OneHour);
+        var neighbours = await BuyAsync(Client(factory, club, club.OtherUserId), club.OneHour);
+        var member = Member(factory, club);
+
+        foreach (var id in new[] { theirs.Id, neighbours.Id })
+        {
+            Assert.Equal(HttpStatusCode.NotFound, (await member.GetAsync($"/api/v1/minutes/purchase/{id}")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await member.PostAsync($"/api/v1/minutes/purchase/{id}/cancel", null)).StatusCode);
+        }
+        Assert.Equal(TopUpStatus.Pending, (await RowAsync(factory, theirs.Id)).Status);
+        Assert.Equal(TopUpStatus.Pending, (await RowAsync(factory, neighbours.Id)).Status);
+    }
+
+    /// <summary>A 100% discount makes a package free, which PayFast cannot take; the desk can sell it (§3.7).</summary>
+    [SkippableFact]
+    public async Task A_package_free_after_the_discount_cannot_go_to_the_gateway()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tz");
+        await SetDiscountAsync(factory, club.LeagueGroupId, 10_000);
+        await JoinAsync(factory, club, club.MemberUserId, club.LeagueGroupId);
+
+        var res = await PostPurchaseAsync(Member(factory, club), club.OneHour, 0m);
+        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+        Assert.Equal("package_price_zero", await ErrorOf(res));
+    }
+
+    [SkippableFact]
+    public async Task A_club_without_payment_settings_answers_503_and_writes_nothing()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tn", payments: false);
+
+        var res = await PostPurchaseAsync(Member(factory, club), club.OneHour, 120m);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+        Assert.Equal("payments_not_configured", await ErrorOf(res));
+        Assert.Empty(await ReadAsync(factory, db => db.PendingTopups.IgnoreQueryFilters().Where(x => x.TenantId == club.TenantId).ToListAsync()));
+    }
+
+    /// <summary>The retired amount-based routes are gone with the cap and the rate (§3.1); only the ITN keeps its path.</summary>
+    [SkippableFact]
+    public async Task The_retired_top_up_routes_are_gone()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tg");
+        var member = Member(factory, club);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await member.GetAsync("/api/v1/credit/topup/options")).StatusCode);
+        Assert.NotEqual(HttpStatusCode.OK, (await member.PostAsJsonAsync("/api/v1/credit/topup", new { amountZar = 100m })).StatusCode);
+    }
+
+    // ---- the ITN ------------------------------------------------------------------
+
+    /// <summary>
+    /// The amount PayFast reports must be the LOCKED price (§4.4, §10.3): R100 against a R550
+    /// purchase is refused, the row fails with a code — never an internal string — and nothing is
+    /// credited. Mutation check: comparing against the list price or not at all goes red.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("100.00")]
+    [InlineData("550.01")]
+    public async Task An_amount_mismatch_is_refused_and_surfaces_a_code(string gross)
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "ta");
+        var member = Member(factory, club);
+        var bought = await BuyAsync(member, club.FiveHours);
+
+        var itn = await PostItnAsync(factory, club, bought.CheckoutId, gross);
+        Assert.Equal(HttpStatusCode.BadRequest, itn.StatusCode);
+        Assert.Equal("amount_mismatch", await ErrorOf(itn));
+
+        var status = await member.GetFromJsonAsync<JsonElement>($"/api/v1/minutes/purchase/{bought.Id}");
+        Assert.Equal("Failed", status.GetProperty("status").GetString());
+        Assert.Equal("amount_mismatch", status.GetProperty("failure_code").GetString());
+        Assert.DoesNotContain("reported=", status.GetRawText());
+        Assert.Empty(await LedgerAsync(factory, club, club.MemberUserId));
+    }
+
+    /// <summary>A discounted purchase is paid at the discounted price: the list price is a mismatch.</summary>
+    [SkippableFact]
+    public async Task A_discounted_purchase_paid_at_the_list_price_is_a_mismatch()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tb");
+        await SetDiscountAsync(factory, club.LeagueGroupId, 1000);
+        await JoinAsync(factory, club, club.MemberUserId, club.LeagueGroupId);
+        var bought = await BuyAsync(Member(factory, club), club.FiveHours);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await PostItnAsync(factory, club, bought.CheckoutId, "550.00")).StatusCode);
+        Assert.Empty(await LedgerAsync(factory, club, club.MemberUserId));
+    }
+
+    /// <summary>The ledger reason names the package, the minutes in words and the rand, in the club's own symbol.</summary>
+    [SkippableFact]
+    public async Task A_completed_purchase_posts_one_top_up_row_with_the_package_in_its_reason()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tr");
+        var bought = await BuyAsync(Member(factory, club), club.TenHours);
+
+        Assert.Equal(HttpStatusCode.OK, (await PostItnAsync(factory, club, bought.CheckoutId, "1000.00", "8800001")).StatusCode);
+
+        var entry = Assert.Single(await LedgerAsync(factory, club, club.MemberUserId));
+        Assert.Equal("PayFast purchase: 10 hours (10 hours) for R1000.00", entry.Reason);
+        Assert.Equal($"topup:{club.TenantId:N}:8800001", entry.ExternalReference);
+        Assert.Equal(600, entry.AmountMinutes);
+        Assert.DoesNotContain("credit", entry.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// <c>minutes.purchased</c> (§5) carries every figure from the locked row — the package, its
+    /// minutes, the list price, the discount and its group, and what was paid.
+    /// </summary>
+    [Fact]
+    public void The_minutes_purchased_payload_is_the_locked_row()
+    {
+        var group = Guid.NewGuid();
+        var row = new PendingTopup
+        {
+            IdempotencyKey = "tu_x", PackageId = Guid.NewGuid(), PackageName = "5 hours", Minutes = 300,
+            ListPriceZar = 550m, DiscountBps = 1000, GroupId = group, AmountZar = 495m,
+        };
+        var groups = new List<Dictionary<string, object?>> { new() { ["id"] = group, ["name"] = "League", ["system_key"] = "league" } };
+
+        var data = TopUpEndpoints.PurchasedData(row, groups, "pf123");
+
+        Assert.Equal(row.Id, data["purchase_id"]);
+        Assert.Equal(row.PackageId, data["package_id"]);
+        Assert.Equal("5 hours", data["package_name"]);
+        Assert.Equal(300, data["minutes"]);
+        Assert.Equal(550m, data["list_price_zar"]);
+        Assert.Equal(1000, data["discount_bps"]);
+        Assert.Equal(495m, data["zar_paid"]);
+        Assert.Equal(group, data["discount_group_id"]);
+        Assert.Same(groups, data["groups"]);
+        Assert.Equal("pf123", data["external_reference"]);
+        Assert.False(data.ContainsKey("conversion_rate"));
+        Assert.False(data.ContainsKey("member_class"));
+        Assert.False(data.ContainsKey("credits"));
+    }
 
     [SkippableFact]
     public async Task A_cancelled_payment_is_cancelled_rather_than_failed()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tc");
+        var member = Member(factory, club);
+        var bought = await BuyAsync(member, club.OneHour);
 
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
+        await PostItnAsync(factory, club, bought.CheckoutId, "120.00", status: "CANCELLED");
 
-        var body = await RegisterAsync(client, 100);
-        await factory.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "CANCELLED"));
-
-        var status = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/v1/credit/topup/{body.GetProperty("topup_id").GetGuid()}");
-
+        var status = await member.GetFromJsonAsync<JsonElement>($"/api/v1/minutes/purchase/{bought.Id}");
         Assert.Equal("Cancelled", status.GetProperty("status").GetString());
         Assert.Equal("cancelled", status.GetProperty("failure_code").GetString());
     }
 
-    /// <summary>
-    /// The status page rendered <c>amount_mismatch:reported=100,00:expected=500,00</c> to a
-    /// member as the explanation for a failed R500 payment. A code, and the numbers stay in
-    /// the log where the person who needs them is.
-    /// </summary>
-    [SkippableFact]
-    public async Task An_amount_mismatch_surfaces_a_code_and_not_an_internal_string()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+    // ---- the mails ----------------------------------------------------------------
 
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-
-        var body = await RegisterAsync(client, 500);
-        var itn = await factory.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00"));
-        Assert.Equal(HttpStatusCode.BadRequest, itn.StatusCode);
-
-        var status = await client.GetFromJsonAsync<JsonElement>(
-            $"/api/v1/credit/topup/{body.GetProperty("topup_id").GetGuid()}");
-
-        Assert.Equal("Failed", status.GetProperty("status").GetString());
-        Assert.Equal("amount_mismatch", status.GetProperty("failure_code").GetString());
-        Assert.DoesNotContain("reported=", status.GetRawText());
-    }
-
-    // ---- the failure email the status screen promises -----------------------
-
-    /// <summary>
-    /// The app with email captured into <paramref name="mail"/>, so the ITN's background
-    /// dispatch lands somewhere a test can read instead of dialling SMTP.
-    /// </summary>
     private static WebApplicationFactory<Program> WithMail(TestWebAppFactory factory, StubEmailService mail)
         => factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
         {
@@ -337,11 +508,7 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
             s.AddSingleton<IEmailService>(mail);
         }));
 
-    /// <summary>
-    /// The notice is dispatched on a background task — PayFast retries an ITN until it is
-    /// acknowledged, so the handler must not wait on SMTP — which means it has not
-    /// necessarily arrived by the time the response has.
-    /// </summary>
+    /// <summary>The ITN dispatches mail in the background, so it may land after the response.</summary>
     private static async Task<EmailMessage?> PollMailAsync(StubEmailService mail)
     {
         var deadline = DateTime.UtcNow.AddSeconds(5);
@@ -355,405 +522,196 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// <c>feature-spec.md</c> §11: every player-affecting event sends an email. A top-up
-    /// that ends without credits is the one terminal outcome of a member handing over card
-    /// details that sent nothing at all — confirmation was mailed, failure was silent — so a
-    /// member who closed the tab after PayFast could only find out by hunting for the status
-    /// page again. It is also the promise <c>TopUpStatus.tsx</c> makes in as many words on
-    /// the branch where it cannot reach the club ("we'll email you either way"), which is
-    /// precisely the branch where this mail is the only channel left.
+    /// <c>feature-spec.md</c> §11: every player-affecting event sends an email, and a purchase that
+    /// ends without minutes is the one outcome of handing over card details that once sent nothing.
     /// </summary>
     [SkippableFact]
     public async Task A_declined_payment_emails_the_member_that_nothing_was_charged()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 100);
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "te");
+        var bought = await BuyAsync(Member(factory, club), club.FiveHours);
 
         var mail = new StubEmailService();
         await using var quiet = WithMail(factory, mail);
-        await quiet.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "FAILED"));
+        await quiet.CreateClient().PostAsync($"{CallbackPath}?tenant={club.Slug}", Itn(bought.CheckoutId, "550.00", status: "FAILED"));
 
         var notice = await PollMailAsync(mail);
         Assert.NotNull(notice);
-        Assert.Equal(seeded.Email, notice!.To);
-        Assert.Contains("didn't go through", notice.Subject, StringComparison.Ordinal);
-        Assert.Contains("R100.00", notice.Subject, StringComparison.Ordinal);
+        Assert.Equal(club.MemberEmail, notice!.To);
+        Assert.Contains("5 hours", notice.Subject, StringComparison.Ordinal);
+        Assert.Contains("R550.00", notice.HtmlBody, StringComparison.Ordinal);
         Assert.Contains("declined the payment", notice.HtmlBody, StringComparison.Ordinal);
         Assert.Contains("nothing was charged", notice.HtmlBody, StringComparison.Ordinal);
-
-        // Never a code, never an internal string: the column once held
-        // amount_mismatch:reported=100,00:expected=500,00 and it was shown to a member.
         Assert.DoesNotContain("amount_mismatch", notice.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("gateway_error", notice.HtmlBody, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// A member who backed out at PayFast is told nothing was taken, and is not told their
-    /// payment failed — the same distinction the status badge draws.
-    /// </summary>
     [SkippableFact]
     public async Task A_cancelled_payment_emails_the_member_without_calling_it_a_failure()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 100);
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tf");
+        var bought = await BuyAsync(Member(factory, club), club.OneHour);
 
         var mail = new StubEmailService();
         await using var quiet = WithMail(factory, mail);
-        await quiet.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "CANCELLED"));
+        await quiet.CreateClient().PostAsync($"{CallbackPath}?tenant={club.Slug}", Itn(bought.CheckoutId, "120.00", status: "CANCELLED"));
 
         var notice = await PollMailAsync(mail);
         Assert.NotNull(notice);
         Assert.Contains("cancelled", notice!.Subject, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("failed", notice.Subject, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("didn't go through", notice.Subject, StringComparison.Ordinal);
         Assert.Contains("You cancelled this payment", notice.HtmlBody, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// The one failure where money may genuinely have moved. The member is told what to send
-    /// the club rather than left to guess, and the reference is in the mail because that is
-    /// what a dispute turns on.
-    /// </summary>
+    /// <summary>The one failure where money may genuinely have moved: the member is told what to send the club.</summary>
     [SkippableFact]
     public async Task An_amount_mismatch_emails_the_member_with_the_reference_to_quote()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 500);
-        var checkoutId = body.GetProperty("checkout_id").GetString()!;
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "th");
+        var bought = await BuyAsync(Member(factory, club), club.FiveHours);
 
         var mail = new StubEmailService();
         await using var quiet = WithMail(factory, mail);
-        var itn = await quiet.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(checkoutId, "100.00"));
+        var itn = await quiet.CreateClient().PostAsync($"{CallbackPath}?tenant={club.Slug}", Itn(bought.CheckoutId, "100.00"));
         Assert.Equal(HttpStatusCode.BadRequest, itn.StatusCode);
 
         var notice = await PollMailAsync(mail);
         Assert.NotNull(notice);
-        Assert.Contains("R500.00", notice!.Subject, StringComparison.Ordinal);
+        Assert.Contains("R550.00", notice!.HtmlBody, StringComparison.Ordinal);
         Assert.Contains("send the club the reference below", notice.HtmlBody, StringComparison.Ordinal);
-        Assert.Contains(checkoutId, notice.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains(bought.CheckoutId, notice.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("reported=", notice.HtmlBody, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// PayFast retries an ITN until it is acknowledged, and the handler's idempotency check
-    /// short-circuits only on <c>Completed</c> — so an already-failed row is re-judged on
-    /// every retry. One failure, one email.
-    /// </summary>
+    /// <summary>A completed purchase mails the receipt: the package, the minutes, the list price, the discount and the reference.</summary>
+    [SkippableFact]
+    public async Task A_completed_purchase_emails_the_package_receipt()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tk");
+        await SetDiscountAsync(factory, club.LeagueGroupId, 1000);
+        await JoinAsync(factory, club, club.MemberUserId, club.LeagueGroupId);
+        var bought = await BuyAsync(Member(factory, club), club.FiveHours);
+
+        var mail = new StubEmailService();
+        await using var quiet = WithMail(factory, mail);
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().PostAsync(
+            $"{CallbackPath}?tenant={club.Slug}", Itn(bought.CheckoutId, "495.00", "9900001"))).StatusCode);
+
+        var receipt = await PollMailAsync(mail);
+        Assert.NotNull(receipt);
+        Assert.Equal(club.MemberEmail, receipt!.To);
+        Assert.Contains("5 hours", receipt.Subject, StringComparison.Ordinal);
+        Assert.Contains("R495.00", receipt.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("R550.00", receipt.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("League members", receipt.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("9900001", receipt.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("credit", receipt.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>PayFast retries an ITN until it is acknowledged. One failure, one email.</summary>
     [SkippableFact]
     public async Task A_retried_notification_does_not_email_the_member_twice()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-        var body = await RegisterAsync(client, 100);
-        var checkoutId = body.GetProperty("checkout_id").GetString()!;
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "ti");
+        var bought = await BuyAsync(Member(factory, club), club.OneHour);
 
         var mail = new StubEmailService();
         await using var quiet = WithMail(factory, mail);
         var itnClient = quiet.CreateClient();
-        await itnClient.PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}", SignedItn(checkoutId, "100.00", status: "FAILED"));
+        await itnClient.PostAsync($"{CallbackPath}?tenant={club.Slug}", Itn(bought.CheckoutId, "120.00", status: "FAILED"));
         Assert.NotNull(await PollMailAsync(mail));
+        await itnClient.PostAsync($"{CallbackPath}?tenant={club.Slug}", Itn(bought.CheckoutId, "120.00", status: "FAILED"));
 
-        await itnClient.PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}", SignedItn(checkoutId, "100.00", status: "FAILED"));
-
-        // Give the second dispatch the same window the first one was polled over.
         await Task.Delay(500);
         Assert.Single(mail.Sent);
     }
 
-    // ---- F6: the screen's numbers come from the tenant's settings ----------
-
-    /// <summary>
-    /// Everything the top-up screen used to hardcode, served from
-    /// <c>tenant_settings</c>. With a club on R50 blocks to a R300 cap at 1.0 credits/R1,
-    /// the old screen still offered R100–R1000 in R100 blocks at 1.60.
-    /// </summary>
-    [SkippableFact]
-    public async Task Topup_options_come_from_the_tenants_settings()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory, SettingsJson(regularRate: 1.0m, blockZar: 50m, maxZar: 300m));
-        var client = MemberClient(factory, seeded);
-
-        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
-
-        Assert.Equal(50m, options.GetProperty("block_zar").GetDecimal());
-        Assert.Equal(50m, options.GetProperty("min_zar").GetDecimal());
-        Assert.Equal(300m, options.GetProperty("max_zar").GetDecimal());
-        Assert.Equal(1.0m, options.GetProperty("conversion_rate").GetDecimal());
-        Assert.Equal("Regular", options.GetProperty("member_class").GetString()); // deprecated, one release (D2)
-        Assert.Equal(JsonValueKind.Null, options.GetProperty("rate_group").ValueKind);
-        Assert.Equal(
-            [50, 100, 250, 300],
-            options.GetProperty("presets_zar").EnumerateArray().Select(x => x.GetDecimal()));
-
-        // And what the screen offers is what the server accepts: R150 is legal here and was
-        // refused by the old screen; R500 was offered by it and refused by the server.
-        Assert.Equal(HttpStatusCode.OK,
-            (await client.PostAsJsonAsync("/api/v1/credit/topup", new { amountZar = 150m })).StatusCode);
-        var overCap = await client.PostAsJsonAsync("/api/v1/credit/topup", new { amountZar = 500m });
-        Assert.Equal(HttpStatusCode.BadRequest, overCap.StatusCode);
-        Assert.Equal("amount_exceeds_member_cap",
-            (await overCap.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
-    }
-
-    // ---- R3 L-F1 / N-F1 / K-F3: the rate on the screen is the rate registered ----
-
-    /// <summary>
-    /// The screen's own sentence, kept: <i>"This rate is locked in when you continue, so it
-    /// can't change while you're paying."</i>
-    ///
-    /// <para>
-    /// It was measured from the POST, and the member's figure came from a
-    /// <c>/topup/options</c> fetched once on mount and never revalidated — so the half of the
-    /// window the member actually looks at was unprotected. Two finders reproduced the same
-    /// thing on the same day from opposite directions: an admin changing that member's class,
-    /// and an admin editing <c>credits_per_zar_regular</c> for the whole club. A member offered
-    /// 240 credits for R100 pressed Continue and was registered for 160, with a card form as
-    /// the next thing she saw.
-    /// </para>
-    /// </summary>
-    [SkippableFact]
-    public Task A_topup_registers_at_exactly_the_rate_the_screen_quoted()
-    {
-        // P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)
-        Assert.Fail($"P13-B2: conversion rates are gone; the purchase lock is the package row (minutes, list price, discount, §2.3, §4.4)");
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// <b>The money test.</b> The club moves the price under an open tab, and the member is
-    /// stopped and shown the new figure rather than sent to the gateway at it.
-    ///
-    /// <para>
-    /// Both triggers a finder used, because they are different code paths to the same lie: one
-    /// admin editing the club's own <c>credits_per_zar_regular</c> hits <b>every</b> member with
-    /// the screen open, and a per-member class change hits one. Neither reaches the tab, which
-    /// keeps saying 240 credits and "this rate is locked in".
-    /// </para>
-    ///
-    /// <para>
-    /// A refusal rather than an honoured quote: the posted rate is a number the client chose, so
-    /// obeying it would let anyone name their own price. And <b>no row is written</b> — a
-    /// pending top-up registered at a rate the member was never shown is the defect itself, not
-    /// a harmless artefact of it.
-    /// </para>
-    ///
-    /// <para>
-    /// Mutation-proved: making <see cref="Crusaders.Mainframe.Api.Endpoints.TopUpEndpoints.RefuseStaleQuote"/>
-    /// return null unconditionally puts both cases back to 200 with a 160.00-credit pending row
-    /// against a 240.00 quote, and this test fails on the status code. The two rows of the
-    /// theory vary the fixture as well as the rule — one moves the club rate down, the other
-    /// moves this member into the league group (their class, before D2) — so a fixture that stopped discriminating in one direction
-    /// still fails in the other.
-    /// </para>
-    /// </summary>
-    [SkippableTheory]
-    [InlineData(true, 1.0)]   // an admin edits credits_per_zar_regular: 1.6 -> 1.0, for everyone
-    [InlineData(false, 2.4)]  // an admin puts this member in the league group: 1.6 -> 2.4 (D2)
-    public async Task A_quote_the_club_has_moved_away_from_is_refused_rather_than_silently_repriced(
-        bool moveTheClubRate, double newRate)
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-
-        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
-        var quoted = options.GetProperty("conversion_rate").GetDecimal();
-        Assert.Equal(1.6m, quoted);
-
-        // The club moves, while the member's tab sits on the quoted figure.
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            if (moveTheClubRate)
-            {
-                var row = await db.TenantSettings.IgnoreQueryFilters().FirstAsync(x => x.TenantId == seeded.TenantId);
-                row.SettingsJson = SettingsJson(regularRate: (decimal)newRate);
-            }
-            else
-            {
-                db.MemberGroupMembers.Add(new MemberGroupMember
-                {
-                    TenantId = seeded.TenantId,
-                    GroupId = seeded.LeagueGroupId,
-                    UserId = seeded.MemberUserId,
-                    AddedByUserId = seeded.MemberUserId,
-                });
-            }
-            await db.SaveChangesAsync();
-        }
-
-        var res = await client.PostAsJsonAsync(
-            "/api/v1/credit/topup", new { amountZar = 100m, quotedConversionRate = quoted });
-
-        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
-        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("topup_rate_changed", body.GetProperty("error").GetString());
-        // The new figures, so the screen can show them instead of the stale ones.
-        Assert.Equal((decimal)newRate, body.GetProperty("conversion_rate").GetDecimal());
-        Assert.Equal(100m * (decimal)newRate, body.GetProperty("quoted_credits").GetDecimal());
-
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            Assert.Empty(await db.PendingTopups.IgnoreQueryFilters()
-                .Where(x => x.UserId == seeded.MemberUserId).ToListAsync());
-        }
-    }
-
-    /// <summary>
-    /// A client that quotes nothing gets the live rate, as before. The field is nullable so an
-    /// older build — or a script — is not answered with a 400 for omitting a field that did not
-    /// exist yesterday; only a quote that is present and stale is refused.
-    /// </summary>
-    [SkippableFact]
-    public async Task A_request_carrying_no_quote_is_registered_at_the_live_rate()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = MemberClient(factory, seeded);
-
-        var body = await RegisterAsync(client, 100);
-
-        Assert.Equal(1.6m, body.GetProperty("conversion_rate").GetDecimal());
-        Assert.Equal(160m, body.GetProperty("quoted_credits").GetDecimal());
-    }
-
     // ---- R23: the failures the club has to look at reach its admins ---------
 
-    private static async Task<List<AdminNotification>> TopUpNoticesAsync(TestWebAppFactory factory, Guid tenantId)
-    {
-        using var scope = factory.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().AdminNotifications
-            .IgnoreQueryFilters().Where(n => n.TenantId == tenantId && n.Kind == AdminEventCatalogue.TopUpFailed)
-            .ToListAsync();
-    }
+    private static async Task<List<AdminNotification>> NoticesAsync(TestWebAppFactory factory, Guid tenantId)
+        => await ReadAsync(factory, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == tenantId && n.Kind == AdminEventCatalogue.TopUpFailed).ToListAsync());
 
-    /// <summary>
-    /// A gateway that reports a different amount is the club's problem, not the member's: one
-    /// notice, staged with the row that records the refusal, and one however often PayFast retries.
-    /// </summary>
     [SkippableFact]
     public async Task An_amount_mismatch_raises_one_admin_notice_however_often_it_is_retried()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tn1");
+        var bought = await BuyAsync(Member(factory, club), club.FiveHours);
 
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 500);
-        var checkoutId = body.GetProperty("checkout_id").GetString()!;
+        for (var i = 0; i < 3; i++) await PostItnAsync(factory, club, bought.CheckoutId, "100.00");
 
-        for (var i = 0; i < 3; i++)
-        {
-            await factory.CreateClient().PostAsync(
-                $"/api/v1/credit/topup/callback?tenant={seeded.Slug}", SignedItn(checkoutId, "100.00"));
-        }
-
-        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
+        var notice = Assert.Single(await NoticesAsync(factory, club.TenantId));
         var payload = JsonSerializer.Deserialize<TopUpFailedPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
         Assert.Equal("amount_mismatch", payload.Reason);
-        Assert.Equal(500m, payload.AmountZar);
+        Assert.Equal(550m, payload.AmountZar);
         Assert.Equal("Naledi Khoza", payload.MemberName);
+        // P13 §5: the notice names the package and its minutes.
+        Assert.Equal("5 hours", payload.PackageName);
+        Assert.Equal(300, payload.Minutes);
     }
 
-    /// <summary>A decline is the member's card and a cancellation is the member's choice: the member is told, the desk is not.</summary>
     [SkippableTheory]
     [InlineData("FAILED")]
     [InlineData("CANCELLED")]
     public async Task A_decline_or_a_cancellation_raises_no_admin_notice(string status)
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tn2");
+        var bought = await BuyAsync(Member(factory, club), club.OneHour);
 
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 100);
-
-        var itn = await factory.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: status));
-        Assert.Equal(HttpStatusCode.OK, itn.StatusCode);
-
-        Assert.Empty(await TopUpNoticesAsync(factory, seeded.TenantId));
+        Assert.Equal(HttpStatusCode.OK, (await PostItnAsync(factory, club, bought.CheckoutId, "120.00", status: status)).StatusCode);
+        Assert.Empty(await NoticesAsync(factory, club.TenantId));
     }
 
-    /// <summary>
-    /// A gateway answer nobody recognises IS the club's to look at, and is the control that keeps
-    /// the two cases above from passing because nothing is ever raised.
-    /// </summary>
     [SkippableFact]
     public async Task An_unrecognised_gateway_answer_raises_an_admin_notice()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tn3");
+        var bought = await BuyAsync(Member(factory, club), club.OneHour);
 
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 100);
+        await PostItnAsync(factory, club, bought.CheckoutId, "120.00", status: "SOMETHING_ELSE");
 
-        await factory.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "SOMETHING_ELSE"));
-
-        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
-        Assert.Equal("topup.failed:gateway_error:" + body.GetProperty("topup_id").GetGuid().ToString("N"), notice.DedupeKey);
+        var notice = Assert.Single(await NoticesAsync(factory, club.TenantId));
+        Assert.Equal("topup.failed:gateway_error:" + bought.Id.ToString("N"), notice.DedupeKey);
     }
 
-    /// <summary>
-    /// The ITN route is anonymous. A flood of unsigned notifications is one notice a day, not
-    /// one per request — bounded by the dedupe key, not by the sender's manners. It was one an
-    /// hour, which let anybody who knew the slug mail every admin twenty-four times a day.
-    /// </summary>
+    /// <summary>The ITN route is anonymous: a flood of unsigned notifications is one notice a day.</summary>
     [SkippableFact]
     public async Task Unsigned_notifications_raise_at_most_one_notice_a_day()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tn4");
 
         for (var i = 0; i < 4; i++)
         {
             var forged = await factory.CreateClient().PostAsync(
-                $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+                $"{CallbackPath}?tenant={club.Slug}",
                 new StringContent("m_payment_id=tu_x&payment_status=COMPLETE&amount_gross=100.00&signature=forged",
-                    Encoding.UTF8, "application/x-www-form-urlencoded"));
+                    System.Text.Encoding.UTF8, "application/x-www-form-urlencoded"));
             Assert.Equal(HttpStatusCode.Unauthorized, forged.StatusCode);
         }
 
-        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
+        var notice = Assert.Single(await NoticesAsync(factory, club.TenantId));
         Assert.Equal("topup.failed:signature_invalid:" + DateTimeOffset.UtcNow.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture),
             notice.DedupeKey);
     }
 
-    /// <summary>The day, not the hour: two instants hours apart on one UTC day are one identity; the next day is another.</summary>
     [Fact]
     public void An_unsigned_notifications_identity_is_its_utc_day()
     {
@@ -762,38 +720,26 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
         Assert.NotEqual(TopUpAlerts.DayOf(morning), TopUpAlerts.DayOf(morning.AddDays(1)));
     }
 
-    /// <summary>
-    /// Review F6/F2: a COMPLETE with no payment reference is refused (nothing makes it idempotent)
-    /// and the desk is told — the member has paid and nobody else will say so. The row stays
-    /// open and the member is not mailed, which is exactly what the admin mail now says.
-    /// </summary>
+    /// <summary>A COMPLETE with no payment reference is refused and the desk is told; the row stays open and the member is not mailed.</summary>
     [SkippableFact]
-    public async Task A_payment_with_no_reference_raises_an_admin_notice_and_leaves_the_top_up_open()
+    public async Task A_payment_with_no_reference_raises_an_admin_notice_and_leaves_the_purchase_open()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tn5");
         var mail = new StubEmailService();
         await using var app = WithMail(factory, mail);
-        var body = await RegisterAsync(MemberClient(factory, seeded), 100);
-        var topupId = body.GetProperty("topup_id").GetGuid();
+        var bought = await BuyAsync(Member(factory, club), club.OneHour);
 
-        var itn = await app.CreateClient().PostAsync(
-            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
-            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", withPaymentId: false));
+        var itn = await app.CreateClient().PostAsync($"{CallbackPath}?tenant={club.Slug}", Itn(bought.CheckoutId, "120.00", pfPaymentId: ""));
         Assert.Equal(HttpStatusCode.BadRequest, itn.StatusCode);
 
-        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
-        Assert.Equal($"topup.failed:payment_id_missing:{topupId:N}", notice.DedupeKey);
+        var notice = Assert.Single(await NoticesAsync(factory, club.TenantId));
+        Assert.Equal($"topup.failed:payment_id_missing:{bought.Id:N}", notice.DedupeKey);
         var payload = JsonSerializer.Deserialize<TopUpFailedPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
-        Assert.Equal(100m, payload.AmountZar);
+        Assert.Equal(120m, payload.AmountZar);
         Assert.Equal("Naledi Khoza", payload.MemberName);
-
-        using var scope = factory.Services.CreateScope();
-        var row = await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().PendingTopups
-            .IgnoreQueryFilters().SingleAsync(p => p.Id == topupId);
-        Assert.Equal(TopUpStatus.Pending, row.Status);
+        Assert.Equal(TopUpStatus.Pending, (await RowAsync(factory, bought.Id)).Status);
         Assert.Null(await PollMailAsync(mail));
     }
 
@@ -812,32 +758,26 @@ public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
             real.GetStatusAsync(checkoutId, creds, ct);
     }
 
-    /// <summary>
-    /// Review F6: the club's payment settings refusing a checkout is the club's to fix, staged in
-    /// the same save that records the top-up as failed.
-    /// </summary>
     [SkippableFact]
     public async Task A_checkout_the_gateway_refuses_to_start_raises_an_admin_notice()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
+        Skip.IfNot(pg.Available, Skipped);
+        var factory = CreateFactory();
+        var club = await SeedAsync(factory, "tn6");
         await using var app = factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
         {
             s.RemoveAll<IPaymentProvider>();
-            s.AddScoped<Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
-            s.AddScoped<IPaymentProvider>(sp => new RefusingProvider(
-                sp.GetRequiredService<Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>()));
+            s.AddScoped<PayFastProvider>();
+            s.AddScoped<IPaymentProvider>(sp => new RefusingProvider(sp.GetRequiredService<PayFastProvider>()));
         }));
 
-        var res = await MemberClient(app, seeded).PostAsJsonAsync("/api/v1/credit/topup", new { amountZar = 100m });
+        var res = await PostPurchaseAsync(Member(app, club), club.OneHour, 120m);
         Assert.Equal((HttpStatusCode)502, res.StatusCode);
 
-        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
+        var notice = Assert.Single(await NoticesAsync(factory, club.TenantId));
         var payload = JsonSerializer.Deserialize<TopUpFailedPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
         Assert.Equal("provider_register_failed", payload.Reason);
-        Assert.Equal(100m, payload.AmountZar);
+        Assert.Equal(120m, payload.AmountZar);
         Assert.StartsWith("topup.failed:provider_register_failed:", notice.DedupeKey, StringComparison.Ordinal);
     }
 }

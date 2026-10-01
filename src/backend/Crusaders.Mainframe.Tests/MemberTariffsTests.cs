@@ -7,8 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// D2: what a member's groups add up to for money and for the peak window — "most restrictive
-/// rules for multi-group (min rate; peak only if all groups grant)". The pure rule first, then
+/// D2/P13: what a member's groups add up to for money and for the peak window — "most
+/// restrictive rules for multi-group (lowest package discount; peak only if all groups grant)". The pure rule first, then
 /// the two readers that must agree on it (the booking path and the grid), on the in-memory host.
 /// </summary>
 public class MemberTariffsTests
@@ -17,24 +17,53 @@ public class MemberTariffsTests
         => new(Guid.NewGuid(), name, key, discount, peak, sort);
 
     [Fact]
-    public void A_member_in_no_group_tops_up_at_the_club_default_and_has_no_peak_priority()
+    public void A_member_in_no_group_has_no_package_discount_and_no_peak_priority()
     {
-        // P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)
-        Assert.Fail($"P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)");
+        var t = MemberTariffs.Resolve([]);
+        Assert.Null(t.PackageDiscountBps);
+        Assert.Null(t.DiscountGroup);
+        Assert.False(t.PeakPriority);
+        Assert.Equal("Regular", t.LegacyMemberClass);
+    }
+
+    /// <summary>
+    /// P13 §3.8: the LOWEST discount among the groups that set one wins, and a group with none
+    /// (null) has no opinion — it neither takes the discount away nor counts as 0%. Mutation
+    /// check (§1.4): "highest wins" makes the first assertion read 2500.
+    /// </summary>
+    [Fact]
+    public void The_lowest_discount_any_group_sets_wins_and_a_group_with_none_has_no_opinion()
+    {
+        var league = G("League", 1000, peak: true, key: MemberGroupSystemKeys.League);
+        var students = G("Students", 2500, peak: null, sort: 1);
+        var juniors = G("Juniors", null, peak: null, sort: 2);
+
+        var both = MemberTariffs.Resolve([students, league, juniors]);
+        Assert.Equal(1000, both.PackageDiscountBps);
+        Assert.Equal(league.Id, both.DiscountGroup!.Id);
+
+        var onlyJuniors = MemberTariffs.Resolve([juniors]);
+        Assert.Null(onlyJuniors.PackageDiscountBps);
+        Assert.Null(onlyJuniors.DiscountGroup);
+
+        // An explicit 0 is a say ("no discount here"), and it is the lowest.
+        var zero = MemberTariffs.Resolve([league, G("Staff rate off", 0, peak: null, sort: 3)]);
+        Assert.Equal(0, zero.PackageDiscountBps);
+        Assert.Equal("Staff rate off", zero.DiscountGroup!.Name);
     }
 
     [Fact]
-    public void The_lowest_rate_any_group_sets_wins_and_a_group_with_no_rate_has_no_opinion()
+    public void Tied_discounts_name_the_group_first_in_the_clubs_own_order()
     {
-        // P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)
-        Assert.Fail($"P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)");
-    }
+        var b = G("Bravo", 1000, peak: null, sort: 2);
+        var a = G("Alpha", 1000, peak: null, sort: 1);
+        var c = G("Charlie", 1000, peak: null, sort: 1);
 
-    [Fact]
-    public void Tied_rates_name_the_group_first_in_the_clubs_own_order()
-    {
-        // P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)
-        Assert.Fail($"P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)");
+        var t = MemberTariffs.Resolve([b, c, a]);
+        Assert.Equal(1000, t.PackageDiscountBps);
+        // Sort order first, then name: Alpha (1) before Charlie (1) before Bravo (2).
+        Assert.Equal("Alpha", t.DiscountGroup!.Name);
+        Assert.Equal(["Alpha", "Charlie", "Bravo"], t.Groups.Select(g => g.Name));
     }
 
     /// <summary>
@@ -86,8 +115,11 @@ public class MemberTariffsTests
     [Fact]
     public void The_deprecated_class_is_the_league_group_and_nothing_else()
     {
-        // P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)
-        Assert.Fail($"P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)");
+        var coaching = G("Coaching", 2000, peak: true, sort: 1);
+        Assert.Equal("Regular", MemberTariffs.Resolve([coaching]).LegacyMemberClass);
+
+        var league = G("League", null, peak: null, key: MemberGroupSystemKeys.League);
+        Assert.Equal("LeagueOrSenior", MemberTariffs.Resolve([league]).LegacyMemberClass);
     }
 
     /// <summary>
@@ -95,11 +127,26 @@ public class MemberTariffsTests
     /// group has NO SAY (null) — so a league member an admin also drops into it keeps the priority.
     /// </summary>
     [Fact]
-    public Task The_seeded_non_league_group_has_no_say_on_peak()
+    public async Task The_seeded_non_league_group_has_no_say_on_peak()
     {
-        // P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)
-        Assert.Fail($"P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)");
-        return Task.CompletedTask;
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var tenantId = Guid.NewGuid();
+
+        await MemberGroupSeeder.EnsureAsync(db, tenantId);
+
+        var seeded = await db.MemberGroups.IgnoreQueryFilters().Where(g => g.TenantId == tenantId).ToListAsync();
+        var league = Assert.Single(seeded, g => g.SystemKey == MemberGroupSystemKeys.League);
+        var other = Assert.Single(seeded, g => g.SystemKey is null);
+        Assert.True(league.PeakPriority);
+        // P13 §4.6: League starts with no package discount; neither seeded group has a say.
+        Assert.Null(league.PackageDiscountBps);
+        Assert.Null(other.PackageDiscountBps);
+        Assert.Null(other.PeakPriority);
+        var t = MemberTariffs.Resolve([MemberTariffs.From(league), MemberTariffs.From(other)]);
+        Assert.True(t.PeakPriority);
+        Assert.Null(t.PackageDiscountBps);
     }
 
     // ---- the two readers, on the in-memory host -------------------------------------------
@@ -157,11 +204,20 @@ public class MemberTariffsTests
 
     /// <summary>An ARCHIVED group contributes neither a rate nor a peak refusal.</summary>
     [Fact]
-    public Task An_archived_group_contributes_nothing_to_the_tariff()
+    public async Task An_archived_group_contributes_nothing_to_the_tariff()
     {
-        // P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)
-        Assert.Fail($"P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)");
-        return Task.CompletedTask;
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        await AddGroupAsync(host, db, "Promo", discount: 1500, peak: true);
+        await AddGroupAsync(host, db, "Old promo", discount: 500, peak: false, archived: true);
+
+        var t = await MemberTariffs.ForAsync(db, host.LeaguePlayerUser.Id, default);
+        Assert.Equal(1500, t.PackageDiscountBps);
+        Assert.Equal("Promo", t.DiscountGroup!.Name);
+        Assert.True(t.PeakPriority);
+        Assert.DoesNotContain(t.Groups, g => g.Name == "Old promo");
     }
 
     /// <summary>
@@ -170,10 +226,22 @@ public class MemberTariffsTests
     /// move every league member to the regular rate or out of the peak window.
     /// </summary>
     [Fact]
-    public Task Switching_group_restrictions_off_leaves_the_league_tariff_in_force()
+    public async Task Switching_group_restrictions_off_leaves_the_league_tariff_in_force()
     {
-        // P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)
-        Assert.Fail($"P13-B2: the top-up rate is gone; rewrite as package_discount_bps (lowest wins, null = no say, §3.8)");
-        return Task.CompletedTask;
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var league = await db.MemberGroups.FirstAsync(g => g.SystemKey == MemberGroupSystemKeys.League);
+        league.PackageDiscountBps = 1000;
+        var row = await db.TenantSettings.FirstAsync(x => x.TenantId == host.Tenant.Id);
+        row.SettingsJson = row.SettingsJson.TrimEnd('}') + ",\"member_groups_enabled\":false}";
+        await db.SaveChangesAsync();
+
+        var s = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        Assert.False(s.MemberGroupsEnabled);
+
+        var t = await MemberTariffs.ForAsync(db, host.LeaguePlayerUser.Id, default);
+        Assert.Equal(1000, t.PackageDiscountBps);
+        Assert.True(t.PeakPriority);
     }
 }

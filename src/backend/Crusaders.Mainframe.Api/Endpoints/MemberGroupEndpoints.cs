@@ -309,6 +309,17 @@ public static class MemberGroupEndpoints
                 statusCode: StatusCodes.Status409Conflict);
         }
 
+        // P13: a package names its group for good (minute_packages.GroupId, ON DELETE RESTRICT),
+        // archived packages included, because purchase rows name the package. Refused by name
+        // here rather than left to the foreign key as a 500; archiving is the way out.
+        var packageCount = await db.MinutePackages.CountAsync(p => p.GroupId == id, ct);
+        if (packageCount > 0)
+        {
+            return Results.Json(
+                new { error = "group_has_packages", package_count = packageCount },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         var windows = await db.MemberGroupWindows.Where(w => w.GroupId == id).ToListAsync(ct);
         await changes.StageAsync(new AdminChange(
             Action: AdminChangeActions.GroupDeleted,
@@ -536,7 +547,7 @@ public static class MemberGroupEndpoints
     private static async Task<object> ResolvedAsync(
         BookingRules rules, MainframeDbContext db, TenantSettingsView s, Guid userId, DateOnly day, CancellationToken ct)
         => Resolved(s, await rules.GroupsForAsync(userId, day.DayOfWeek, s, ct), day,
-            await MemberTariffs.ForAsync(db, userId, s, ct));
+            await MemberTariffs.ForAsync(db, userId, ct));
 
     private static object Resolved(
         TenantSettingsView s, IReadOnlyList<MemberGroupRules> groups, DateOnly day, MemberTariff tariff)

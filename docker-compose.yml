@@ -85,7 +85,6 @@ services:
       Bootstrap__AdminEmail: ${BOOTSTRAP_ADMIN_EMAIL:-}
       Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       Bootstrap__Courts: ${BOOTSTRAP_COURTS:-4}
-      Bootstrap__SlicePriceCredits: ${BOOTSTRAP_SLICE_PRICE_CREDITS:-8}
       # Inherent administrators of the deployment — club-admin rights in every club where that
       # address already has an account. Deployment-owned, not club-owned; not a secret, but
       # security-relevant. The full note is in docker-compose.prod.yml and appsettings.json.

@@ -7,9 +7,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// Review round 1, the money half of lane B: a desk cash top-up is counted as revenue but carried
-/// no rand, so the month's income read R0.00 for it (B7); ledger rows did not say who moved the
-/// money on a member's behalf (B9).
+/// Review round 1, the money half of lane B: a desk cash sale is counted as revenue but carried
+/// no rand, so the month's income read R0.00 for it (B7) — since P13 a sale defaults to the
+/// member's shelf price; ledger rows did not say who moved the money on a member's behalf (B9).
 /// </summary>
 public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
@@ -20,7 +20,17 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
 
-    private static string Adjust(PlayersClub club, Guid who) => $"/api/v1/admin/credit/{who}/adjust";
+    private static string Adjust(PlayersClub club, Guid who) => $"/api/v1/admin/minutes/{who}/adjust";
+
+    private static string Sell(Guid who) => $"/api/v1/admin/minutes/{who}/sell";
+
+    /// <summary>The club's opening shelf; returns the 1-hour package (R120).</summary>
+    private static async Task<Guid> ShelfAsync(TestWebAppFactory f, PlayersClub club)
+    {
+        await PurchaseKit.WriteAsync(f, db => Crusaders.Mainframe.Api.Persistence.MinutePackageSeeder.EnsureAsync(db, club.TenantId, club.Admin));
+        return await PlayersClub.ReadAsync(f, db => db.MinutePackages.IgnoreQueryFilters()
+            .Where(p => p.TenantId == club.TenantId && p.Minutes == 60).Select(p => p.Id).SingleAsync());
+    }
 
     [SkippableFact]
     public async Task A_desk_top_up_states_the_rand_it_took_and_the_revenue_report_counts_it()
@@ -30,22 +40,19 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         var club = await PlayersClub.SeedAsync(f, "r1zar");
         var admin = club.Client(f, club.Admin, admin: true);
 
-        // Every top-up code must say how much money changed hands.
-        foreach (var code in new[] { "top_up_cash", "top_up_eft", "top_up_card_offline" })
-        {
-            var missing = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountMinutes = 240, reason = "Cash at the bar", reasonCode = code });
-            Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
-            Assert.Equal("zar_received_required", (await JsonAsync(missing)).GetProperty("error").GetString());
-        }
-        var negative = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountMinutes = 240, reason = "Cash", reasonCode = "top_up_cash", zarReceived = -1m });
+        var hour = await ShelfAsync(f, club);
+
+        // A sale states the rand it took; when the desk says nothing it is the member's shelf price.
+        var negative = await admin.PostAsJsonAsync(Sell(club.Sam), new { packageId = hour, reason = "Cash", reasonCode = "top_up_cash", zarReceived = -1m });
         Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
         Assert.Equal(0, await PlayersClub.BalanceAsync(f, club.Sam));
 
-        var ok = await admin.PostAsJsonAsync(Adjust(club, club.Sam), new { amountMinutes = 240, reason = "Cash at the bar, slip 12", reasonCode = "top_up_cash", zarReceived = 100m });
+        var ok = await admin.PostAsJsonAsync(Sell(club.Sam), new { packageId = hour, reason = "Cash at the bar, slip 12", reasonCode = "top_up_cash", zarReceived = 100m });
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         Assert.Equal(100m, (await JsonAsync(ok)).GetProperty("zar_received").GetDecimal());
-        var snake = await admin.PostAsJsonAsync(Adjust(club, club.Alex), new { amountMinutes = 48, reason = "EFT cleared", reason_code = "top_up_eft", zar_received = 20m });
+        var snake = await admin.PostAsJsonAsync(Sell(club.Alex), new { packageId = hour, reason = "EFT cleared", reason_code = "top_up_eft" });
         Assert.Equal(HttpStatusCode.OK, snake.StatusCode);
+        Assert.Equal(120m, (await JsonAsync(snake)).GetProperty("zar_received").GetDecimal());
 
         // A goodwill credit is not money the club took: no rand asked, none stored.
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(Adjust(club, club.Jo), new { amountMinutes = 10, reason = "Sorry about the lights", reasonCode = "goodwill", zarReceived = 999m })).StatusCode);
@@ -53,12 +60,12 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         var rows = await PlayersClub.ReadAsync(f, db => db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == club.TenantId && l.ActorUserId == club.Admin).ToListAsync());
         Assert.Equal(100m, rows.Single(r => r.UserId == club.Sam).ZarPaid);
-        Assert.Equal(20m, rows.Single(r => r.UserId == club.Alex).ZarPaid);
+        Assert.Equal(120m, rows.Single(r => r.UserId == club.Alex).ZarPaid);
         Assert.Null(rows.Single(r => r.UserId == club.Jo).ZarPaid);
 
         var report = await JsonAsync(await admin.GetAsync("/api/v1/admin/reports/revenue"));
-        Assert.Equal(120m, report.GetProperty("net_zar").GetDecimal());
-        Assert.Equal(120m, report.GetProperty("gross_topups_zar").GetDecimal());
+        Assert.Equal(220m, report.GetProperty("net_zar").GetDecimal());
+        Assert.Equal(220m, report.GetProperty("gross_topups_zar").GetDecimal());
     }
 
     [SkippableFact]
@@ -73,7 +80,7 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await JsonAsync(response);
         Assert.Equal("amount_out_of_range", body.GetProperty("error").GetString());
-        Assert.True(body.GetProperty("max").GetDecimal() > 0m);
+        Assert.Equal(999_999, body.GetProperty("max_minutes").GetInt32());
     }
 
     [SkippableFact]

@@ -14,12 +14,13 @@ using Microsoft.IdentityModel.Tokens;
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// The desk's manual credit adjustment, posted twice.
+/// The desk moving a member's minutes by hand (P13 §3.7): an adjustment, and a package sold at
+/// the counter — both idempotent on the caller's key, both on the club's records.
 ///
 /// <para>
 /// A double-click on Apply put two identical <c>AdminAdjustment</c> rows on the ledger and
-/// moved the member's balance twice: 444 → 458 where 7 credits were typed. On a slow club
-/// connection, four impatient clicks granted 44 credits where 11 were typed. Money is
+/// moved the member's balance twice: 444 → 458 where 7 minutes were typed. On a slow club
+/// connection, four impatient clicks granted 44 minutes where 11 were typed. Money is
 /// ledger-only, so a duplicated row <b>is</b> the wrong balance, and there is nothing on
 /// the ledger to say which of two identical rows was the mistake — a dispute replayed from
 /// the ledger reads them both as real.
@@ -41,7 +42,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 
-    private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId);
+    private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid FiveHours);
 
     private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
@@ -85,7 +86,10 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
             });
 
         await db.SaveChangesAsync();
-        return new Seeded(tenant.Id, slug, admin.Id, member.Id);
+        await MinutePackageSeeder.EnsureAsync(db, tenant.Id, admin.Id);
+        var fiveHours = await db.MinutePackages.IgnoreQueryFilters()
+            .Where(p => p.TenantId == tenant.Id && p.Minutes == 300).Select(p => p.Id).SingleAsync();
+        return new Seeded(tenant.Id, slug, admin.Id, member.Id, fiveHours);
     }
 
     private static HttpClient AdminClient(TestWebAppFactory factory, Seeded s)
@@ -135,7 +139,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
     private static Task<HttpResponseMessage> AdjustAsync(
         HttpClient client, Seeded s, decimal amount, string reason, string? idempotencyKey)
     {
-        return client.PostAsJsonAsync($"/api/v1/admin/credit/{s.MemberUserId}/adjust", new
+        return client.PostAsJsonAsync($"/api/v1/admin/minutes/{s.MemberUserId}/adjust", new
         {
             amountMinutes = amount,
             reason,
@@ -311,16 +315,27 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 
     // ---- "Admins top me up" — the capability, made honest -------------------
 
-    private static Task<HttpResponseMessage> TopUpAsync(
-        HttpClient client, Seeded s, decimal amount, string reasonCode, string? idempotencyKey = null)
+    /// <summary>A package sold at the desk (P13 §3.7): the 5-hour package unless told otherwise.</summary>
+    private static Task<HttpResponseMessage> SellAsync(
+        HttpClient client, Seeded s, string reasonCode, decimal? zarReceived = null, string? idempotencyKey = null, Guid? packageId = null)
     {
-        return client.PostAsJsonAsync($"/api/v1/admin/credit/{s.MemberUserId}/adjust", new
+        return client.PostAsJsonAsync($"/api/v1/admin/minutes/{s.MemberUserId}/sell", new
+        {
+            packageId = packageId ?? s.FiveHours,
+            reason = "Cash at the desk, receipt 0412",
+            reasonCode,
+            zarReceived,
+            idempotencyKey,
+        });
+    }
+
+    private static Task<HttpResponseMessage> AdjustWithCodeAsync(HttpClient client, Seeded s, long amount, string reasonCode)
+    {
+        return client.PostAsJsonAsync($"/api/v1/admin/minutes/{s.MemberUserId}/adjust", new
         {
             amountMinutes = amount,
-            reason = "R200 cash at the desk, receipt 0412",
+            reason = "Sorry about the lights",
             reasonCode,
-            zarReceived = 200m,
-            idempotencyKey,
         });
     }
 
@@ -339,17 +354,16 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
     /// <para>
     /// <c>docs/specs/reporting.md</c> defines Revenue as <c>top_up</c> net of
     /// <c>payment_reversal</c>, and an <c>AdminAdjustment</c> sits in the Adjustment bucket — so
-    /// before this, every rand the club took over the counter was invisible to the club's own
-    /// revenue figure. The three top-up codes now post an <c>AdminTopUp</c>, which lives in the
-    /// Funding bucket beside a PayFast top-up, because a R200 note and a R200 card payment are
-    /// the same event to the club's books.
+    /// before the sale codes, every rand the club took over the counter was invisible to the
+    /// club's own revenue figure. A sale posts an <c>AdminTopUp</c> for the package's minutes,
+    /// with the rand taken — by default the member's shelf price.
     /// </para>
     /// </summary>
     [SkippableTheory]
     [InlineData("top_up_cash")]
     [InlineData("top_up_eft")]
     [InlineData("top_up_card_offline")]
-    public async Task A_desk_top_up_posts_an_AdminTopUp_and_counts_as_funding(string code)
+    public async Task A_desk_sale_posts_an_AdminTopUp_for_the_packages_minutes_and_counts_as_funding(string code)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -357,24 +371,50 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, 200, code);
+        var res = await SellAsync(client, seeded, code);
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
 
         var body = await res.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("AdminTopUp", body.GetProperty("type").GetString());
         Assert.Equal(code, body.GetProperty("reason_code").GetString());
-        Assert.Equal(200m, body.GetProperty("amount_minutes").GetDecimal());
+        Assert.Equal(300, body.GetProperty("amount_minutes").GetInt32());
+        Assert.Equal(550m, body.GetProperty("zar_received").GetDecimal());
+        Assert.Equal(seeded.FiveHours, body.GetProperty("package").GetProperty("id").GetGuid());
+        Assert.Equal("5 hours", body.GetProperty("package").GetProperty("name").GetString());
+        Assert.Equal(550m, body.GetProperty("package").GetProperty("price_zar").GetDecimal());
 
-        // The admin reads back where they took the member FROM and TO, in one answer, rather
-        // than composing it client-side from a figure fetched before the movement.
-        Assert.Equal(0m, body.GetProperty("balance_before_minutes").GetDecimal());
-        Assert.Equal(200m, body.GetProperty("balance_after_minutes").GetDecimal());
+        // The admin reads back where they took the member FROM and TO, in one answer.
+        Assert.Equal(0, body.GetProperty("balance_before_minutes").GetInt32());
+        Assert.Equal(300, body.GetProperty("balance_after_minutes").GetInt32());
 
         Assert.Equal(LedgerEntryType.AdminTopUp, await LastTypeAsync(factory, seeded));
         Assert.Contains(LedgerEntryType.AdminTopUp, LedgerEntryTypes.Funding);
     }
 
-    /// <summary>And a goodwill credit is not revenue, which is the other half of the same rule.</summary>
+    /// <summary>The desk may state rand that differs from the price — a rounded cash sale is the desk's call to record.</summary>
+    [SkippableFact]
+    public async Task A_desk_sale_records_the_rand_the_desk_states()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var res = await SellAsync(client, seeded, "top_up_cash", zarReceived: 500m);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal(500m, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("zar_received").GetDecimal());
+
+        foreach (var (zar, error) in new[] { (-1m, "zar_received_out_of_range"), (1_000_000.01m, "zar_received_out_of_range"), (10.005m, "zar_received_not_whole_cents") })
+        {
+            var bad = await SellAsync(client, seeded, "top_up_cash", zarReceived: zar);
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+            Assert.Equal(error, (await bad.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        }
+        Assert.Equal(300, await BalanceAsync(factory, seeded));
+    }
+
+    /// <summary>And a goodwill movement is not revenue, which is the other half of the same rule.</summary>
     [SkippableTheory]
     [InlineData("goodwill")]
     [InlineData("correction")]
@@ -388,20 +428,22 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, 50, code);
+        var res = await AdjustWithCodeAsync(client, seeded, 50, code);
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        Assert.Equal("AdminAdjustment",
-            (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("type").GetString());
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("AdminAdjustment", body.GetProperty("type").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("zar_received").ValueKind);
+        Assert.False(body.TryGetProperty("package", out _));
         Assert.Equal(LedgerEntryType.AdminAdjustment, await LastTypeAsync(factory, seeded));
     }
 
     /// <summary>
-    /// A top-up is money the club TOOK, so it is strictly positive. A negative one is a refund or
-    /// a correction and has codes of its own; mixing signs inside a directional bucket is what
-    /// makes a per-row listing unreadable.
+    /// A sale is its own route (P13 §12.8): a top-up code on <c>/adjust</c> is refused with the
+    /// four adjustment codes, and an adjustment code on <c>/sell</c> with the three sale codes.
+    /// Nothing moves either way.
     /// </summary>
     [SkippableFact]
-    public async Task A_negative_top_up_is_refused()
+    public async Task Each_route_refuses_the_others_codes_with_its_own_valid_set()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -409,10 +451,20 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, -200, "top_up_cash");
-        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
-        Assert.Equal("amount_must_be_positive_for_top_up",
-            (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        var onAdjust = await AdjustWithCodeAsync(client, seeded, 200, "top_up_cash");
+        Assert.Equal(HttpStatusCode.BadRequest, onAdjust.StatusCode);
+        var adjustBody = await onAdjust.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("reason_code_invalid", adjustBody.GetProperty("error").GetString());
+        Assert.Equal(["goodwill", "correction", "refund_outside_system", "other"],
+            adjustBody.GetProperty("valid").EnumerateArray().Select(v => v.GetString()));
+
+        var onSell = await SellAsync(client, seeded, "goodwill");
+        Assert.Equal(HttpStatusCode.BadRequest, onSell.StatusCode);
+        var sellBody = await onSell.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("reason_code_invalid", sellBody.GetProperty("error").GetString());
+        Assert.Equal(["top_up_cash", "top_up_eft", "top_up_card_offline"],
+            sellBody.GetProperty("valid").EnumerateArray().Select(v => v.GetString()));
+
         Assert.Equal(0, await BalanceAsync(factory, seeded));
     }
 
@@ -426,12 +478,12 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await TopUpAsync(client, seeded, 200, "cash-ish");
+        var res = await AdjustWithCodeAsync(client, seeded, 200, "cash-ish");
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
 
         var body = await res.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("reason_code_invalid", body.GetProperty("error").GetString());
-        Assert.Equal(7, body.GetProperty("valid").GetArrayLength());
+        Assert.Equal(4, body.GetProperty("valid").GetArrayLength());
     }
 
     /// <summary>
@@ -455,7 +507,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal("other", body.GetProperty("reason_code").GetString());
     }
 
-    /// <summary>The code binds under the snake_case spelling too — see AdjustRequest.ReasonCodeEither.</summary>
+    /// <summary>The code and the rand bind under the snake_case spelling too, on both routes.</summary>
     [SkippableFact]
     public async Task The_reason_code_binds_under_either_spelling()
     {
@@ -465,17 +517,26 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var res = await client.PostAsJsonAsync($"/api/v1/admin/credit/{seeded.MemberUserId}/adjust", new
+        var sale = await client.PostAsJsonAsync($"/api/v1/admin/minutes/{seeded.MemberUserId}/sell", new
         {
-            amountMinutes = 200,
+            packageId = seeded.FiveHours,
             reason = "cash at the desk",
             reason_code = "top_up_cash",
-            zar_received = 200m,
+            zar_received = 540m,
         });
+        Assert.Equal(HttpStatusCode.OK, sale.StatusCode);
+        var saleBody = await sale.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("AdminTopUp", saleBody.GetProperty("type").GetString());
+        Assert.Equal(540m, saleBody.GetProperty("zar_received").GetDecimal());
 
-        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        Assert.Equal("AdminTopUp",
-            (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("type").GetString());
+        var adjust = await client.PostAsJsonAsync($"/api/v1/admin/minutes/{seeded.MemberUserId}/adjust", new
+        {
+            amountMinutes = 15,
+            reason = "lights",
+            reason_code = "correction",
+        });
+        Assert.Equal(HttpStatusCode.OK, adjust.StatusCode);
+        Assert.Equal("correction", (await adjust.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("reason_code").GetString());
     }
 
     /// <summary>
@@ -542,7 +603,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200, "top_up_cash")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await SellAsync(client, seeded, "top_up_cash")).StatusCode);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -555,8 +616,12 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         var details = JsonDocument.Parse(row.DetailsJson!).RootElement;
         Assert.Equal("AdminTopUp", details.GetProperty("entry_type").GetString());
         Assert.Equal("top_up_cash", details.GetProperty("reason_code").GetString());
-        Assert.Equal(0m, details.GetProperty("balance_before_minutes").GetDecimal());
-        Assert.Equal(200m, details.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(0, details.GetProperty("balance_before_minutes").GetInt32());
+        Assert.Equal(300, details.GetProperty("balance_after_minutes").GetInt32());
+        // P13 §3.7: the sale names the package it sold.
+        Assert.Equal(seeded.FiveHours, details.GetProperty("package_id").GetGuid());
+        Assert.Equal("5 hours", details.GetProperty("package_name").GetString());
+        Assert.Equal(300, details.GetProperty("minutes").GetInt32());
     }
 
     /// <summary>
@@ -580,13 +645,13 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 
         try
         {
-            Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200, "top_up_cash")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await SellAsync(client, seeded, "top_up_cash")).StatusCode);
 
             var frames = new List<Crusaders.Mainframe.Api.Services.Realtime.RealtimeMessage>();
             while (channel.Reader.TryRead(out var frame)) frames.Add(frame);
 
             var named = Assert.Single(frames, f => f.Event == "balance");
-            Assert.Contains("\"delta_minutes\":200", named.JsonPayload);
+            Assert.Contains("\"delta_minutes\":300", named.JsonPayload);
             Assert.Contains("\"reason\":\"admin_top_up\"", named.JsonPayload);
         }
         finally

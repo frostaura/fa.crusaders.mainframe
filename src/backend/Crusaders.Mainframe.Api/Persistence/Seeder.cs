@@ -48,14 +48,10 @@ public static class Seeder
                 SettingsJson = """
                 {
                   "slice_minutes": 15,
-                  "slice_price_credits": 8.00,
                   "penalty_pct": 30.0,
                   "grace_window_minutes": 5,
                   "penalty_window_minutes": 15,
                   "advance_booking_days": 14,
-                  "credits_per_zar_regular": 1.6,
-                  "topup_block_zar": 100.00,
-                  "topup_max_zar_per_member": 1000.00,
                   "member_per_day_max_minutes": 60,
                   "peak_hours": "16:00-19:00",
                   "peak_advance_hours_for_regular": 1,
@@ -140,6 +136,10 @@ public static class Seeder
             await db.SaveChangesAsync();
             logger.LogInformation("Seeded 4 squash courts");
         }
+
+        // P13 §4.6: the opening shelf, only for a club that has never had a package.
+        if (await MinutePackageSeeder.EnsureAsync(db, tenant.Id, admin.Id))
+            logger.LogInformation("Seeded the opening minutes packages");
 
         await SeedSampleMembersAndBookingsAsync(db, tenant.Id, admin.Id, logger);
     }
@@ -306,7 +306,7 @@ public static class Seeder
                     EndsAt = endsAtUtc,
                     SliceMinutes = 30,
                     SliceCount = 1,
-                    AmountChargedMinutes = 30, // P13-B2: SliceMinutes × SliceCount
+                    AmountChargedMinutes = 30, // a booking costs its length: SliceMinutes × SliceCount
                     Status = Domain.BookingStatus.Booked,
                 };
                 db.Bookings.Add(booking);

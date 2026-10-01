@@ -12,184 +12,15 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 
 public static partial class TopUpEndpoints
 {
-    // P13-B2: transitional stand-ins for the retired settings (topup_block_zar, the cap and
-    // credits_per_zar_regular, at their old defaults) so this amount-based route compiles until
-    // B2 replaces it with POST /api/v1/minutes/purchase and the package shelf. Not economics.
-    private const decimal LegacyBlockZar = 100m;
-    private const decimal LegacyMaxZar = 1000m;
-    private const decimal LegacyRate = 1.6m;
-
     public static IEndpointRouteBuilder MapTopUpEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/v1/credit").RequireAuthorization();
-
-        // What the top-up screen is allowed to offer, and at what rate.
-        //
-        // The screen used to carry `MIN_ZAR = 100`, `MAX_ZAR = 1000`, `BLOCK_ZAR = 100` and
-        // two hardcoded conversion rates. An admin who moved any of them left the member
-        // quoted 60% more credits than they would get, offered amounts the club had stopped
-        // accepting and refused amounts it did accept — the screen disagreeing with the
-        // server in both directions at once. Every configurable number is
-        // tenant_settings.<key>; this is where the member's screen reads them.
-        g.MapGet("/topup/options", async (
-            HttpContext ctx,
-            MainframeDbContext db,
-            TenantSettingsAccessor settings,
-            CancellationToken ct) =>
-        {
-            var s = await settings.GetAsync(ct);
-            var userId = ctx.User.Id() ?? Guid.Empty;
-            var tariff = await MemberTariffs.ForAsync(db, userId, s, ct);
-
-            // What this member has already put in, so the screen can say "R200 of your R1000
-            // left" instead of offering an amount the POST is about to refuse. The cap is per
-            // MEMBER (D2-B05) and a screen that cannot see the running total can only ever
-            // show the per-transaction half of it.
-            // M5-2: paid and waiting apart, and the checkouts still waiting, so the screen can say
-            // "R0 paid, R1000 waiting on payments you started" and offer each one's Cancel.
-            var open = await OpenCheckoutsAsync(db, userId, ct);
-            var paid = await PaidZarAsync(db, userId, ct);
-            var waiting = open.Sum(o => o.AmountZar);
-            var already = paid + waiting;
-            return Results.Ok(new
-            {
-                block_zar = LegacyBlockZar,
-                min_zar = LegacyBlockZar,
-                max_zar = LegacyMaxZar,
-                already_zar = already,
-                paid_zar = paid,
-                waiting_zar = waiting,
-                open_checkouts = open.Select(OpenWire).ToList(),
-                remaining_zar = Math.Max(LegacyMaxZar - already, 0m),
-                presets_zar = Presets(LegacyBlockZar, LegacyMaxZar),
-                conversion_rate = LegacyRate,
-                rate_group = (object?)null,
-                // Deprecated for one release; derived from the league group. See MemberTariff.
-                member_class = tariff.LegacyMemberClass,
-            });
-        });
-
-        g.MapPost("/topup", async (
-            TopUpRequest req,
-            HttpContext ctx,
-            MainframeDbContext db,
-            IPaymentProvider provider,
-            TenantSecretsAccessor secrets,
-            TenantSettingsAccessor settings,
-            IConfiguration config,
-            Crusaders.Mainframe.Api.Multitenancy.ITenantContext tenant,
-            Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox outbox,
-            CancellationToken ct) =>
-        {
-            var s = await settings.GetAsync(ct);
-
-            // Blueprint A.3: top-ups in blocks of R100 to a max of R1000 for non-admin members.
-            // Admins bypass the cap (their manual-adjustment path is the admin-unlimited route — this
-            // endpoint is the member-facing PayFast flow).
-            var isAdmin = ctx.User.IsInRole("admin");
-            if (RefuseAmount(req.AmountZar, s, isAdmin) is { } refusal) return refusal;
-
-            var creds = await secrets.GetPaymentsAsync(ct);
-            if (creds is null) return Results.Json(new { error = "payments_not_configured" }, statusCode: 503);
-
-            var userId = ctx.User.Id() ?? Guid.Empty;
-
-            // M4-1: the ceiling is read and the new row written under the member's lock, so two
-            // registrations sent together cannot both fit in the same remaining rand. Released
-            // before the gateway is called.
-            await using var capLock = await PayerLock.BeginAsync(db, tenant.TenantId, userId, outbox, ct);
-
-            // D2-B05. The per-transaction half of the cap is above; this is the half the key's
-            // own name promises and nothing implemented. See RefuseCumulativeAsync.
-            if (await RefuseCumulativeAsync(db, userId, req.AmountZar, s, isAdmin, ct) is { } overCap)
-                return overCap;
-
-            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-            if (user is null) return Results.Unauthorized();
-
-            // The rate is captured HERE, with the offer, not re-resolved when the ITN lands.
-            // See PendingTopup.ConversionRate: settling at the live rate meant an admin
-            // editing credits_per_zar_* while a member sat on PayFast's card page changed
-            // what that member got for money already paid.
-            // D2: the rate is the member's GROUPS' (the lowest any of them sets, else the club
-            // default), and the group it came from is locked beside it.
-            var tariff = await MemberTariffs.ForAsync(db, userId, s, ct);
-            var rate = LegacyRate;
-
-            // ...and the offer the member is looking at has to still be this one.
-            if (RefuseStaleQuote(req.QuotedConversionRate, req.AmountZar, tariff) is { } stale)
-                return stale;
-
-            var pending = new PendingTopup
-            {
-                TenantId = tenant.TenantId,
-                UserId = userId,
-                AmountZar = req.AmountZar,
-                // P13-B2: the purchase lock, filled from the legacy amount until packages exist.
-                PackageId = Guid.Empty,
-                PackageName = "Top-up",
-                Minutes = Convert(req.AmountZar, rate),
-                ListPriceZar = req.AmountZar,
-                GroupId = null,
-                IdempotencyKey = $"tu_{Guid.NewGuid():N}",
-                Status = TopUpStatus.Pending,
-            };
-            db.PendingTopups.Add(pending);
-            await db.SaveChangesAsync(ct);
-            await capLock.CommitAsync(ct);
-
-            var publicBase = config["App:PublicBaseUrl"] ?? "http://localhost:8089";
-            var register = await provider.RegisterCheckoutAsync(new RegisterCheckoutRequest(
-                creds, tenant.TenantId, userId, user.Email, req.AmountZar,
-                pending.IdempotencyKey,
-                ReturnUrl: $"{publicBase}/wallet/topup/{pending.Id}",
-                NotificationUrl: $"{publicBase}/api/v1/credit/topup/callback?tenant={tenant.TenantSlug}")
-            {
-                // PayFast requires a cancel_url and it was never set, so the field was empty,
-                // dropped from the signed list, and a member who backed out at the gateway had
-                // nowhere to land. Same page as the return URL — it polls the status and will
-                // show them the cancellation the ITN reports.
-                CancelUrl = $"{publicBase}/wallet/topup/{pending.Id}?cancelled=1",
-            }, ct);
-
-            if (!register.Ok)
-            {
-                pending.Status = TopUpStatus.Failed;
-                pending.FailureReason = FailureCodes.ProviderRegisterFailed;
-                await TopUpAlerts.StageAsync(db, tenant.TenantId, pending, ct);
-                await db.SaveChangesAsync(ct);
-                return Results.Json(new { error = "provider_register_failed", reason = register.FailureReason }, statusCode: 502);
-            }
-
-            pending.GatewayCheckoutId = register.CheckoutId;
-            await db.SaveChangesAsync(ct);
-
-            // form_fields is the payment. PayFast has no server-side checkout registration —
-            // the browser POSTs a SIGNED FORM to the process URL — and this endpoint used to
-            // return the bare process URL and nothing else, which the frontend then followed
-            // as a GET with no merchant id, no amount and no signature. No payment could
-            // start. The provider had been building and signing the field list all along and
-            // nothing outside its own unit test ever read it.
-            return Results.Ok(new
-            {
-                topup_id = pending.Id,
-                checkout_id = register.CheckoutId,
-                redirect_url = register.RedirectUrl,
-                form_fields = register.FormFields.Select(f => new { name = f.Key, value = f.Value }).ToList(),
-                quoted_minutes = pending.Minutes,
-                conversion_rate = rate,
-            });
-        });
-
-        g.MapGet("/topup/{topupId:guid}", async (Guid topupId, HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
-        {
-            var userId = ctx.User.Id() ?? Guid.Empty;
-            var p = await db.PendingTopups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == topupId && x.UserId == userId, ct);
-            return p is null ? Results.NotFound() : Results.Ok(StatusWire(p));
-        });
-
-        // M4-1: the member came back through the cancel URL (TopUpEndpoints.Abandoned.cs).
-        MapCancelReturn(g);
+        // P13: a member buys PACKAGES (PackageEndpoints) and the club defines them
+        // (AdminPackageEndpoints). Mapped from here so the one registration Program.cs makes for
+        // the money-in path still brings all of it up. The old amount-based top-up routes are
+        // gone with the cap and the conversion rate; only the ITN below keeps its path,
+        // because PayFast holds it for every checkout already in flight.
+        app.MapPackageEndpoints();
+        app.MapAdminPackageEndpoints();
 
         // Callback — PayFast ITN. Anonymous and signed; identifies the tenant via querystring.
         app.MapPost("/api/v1/credit/topup/callback", async (
@@ -262,7 +93,7 @@ public static partial class TopUpEndpoints
             // signed COMPLETE for the same m_payment_id fell straight through to CompleteAsync
             // and credited at the originally-quoted figure, for a top-up the member had already
             // been emailed about as failed. R1 reported against a R1000 registration, refused,
-            // and then 1600 credits issued for one rand. Cancelled had the same shape: a member
+            // and then the whole purchase issued for one rand. Cancelled had the same shape: a member
             // who deliberately backed out could be credited by a later notification.
             //
             // 200 rather than a 4xx, for the reason above it: PayFast retries until it is
@@ -361,7 +192,7 @@ public static partial class TopUpEndpoints
     }
 
     /// <summary>
-    /// Tells the member their top-up ended without credits — <c>feature-spec.md</c> §11.
+    /// Tells the member their purchase ended without minutes — <c>feature-spec.md</c> §11.
     ///
     /// <para>
     /// This was the one terminal outcome of handing over card details that sent nothing.
@@ -393,10 +224,11 @@ public static partial class TopUpEndpoints
 
         EmailDispatch.InBackground(
             mailer.Email, mailer.Logger,
-            EmailTemplates.TopUpNotCompleted(
-                await mailer.Club.GetAsync(ct), recipient, pending.AmountZar, pending.FailureReason,
-                pending.ExternalReference ?? pending.IdempotencyKey, symbol),
-            $"top-up failure notice for {pending.Id}");
+            EmailTemplates.PurchaseNotCompleted(
+                await mailer.Club.GetAsync(ct), recipient, new PackagePurchaseAttempt(
+                    pending.PackageName, pending.Minutes, pending.AmountZar, pending.FailureReason,
+                    pending.ExternalReference ?? pending.IdempotencyKey, symbol)),
+            $"purchase failure notice for {pending.Id}");
     }
 
     /// <summary>
@@ -429,12 +261,13 @@ public static partial class TopUpEndpoints
     }
 
     /// <summary>
-    /// Converts a completed payment to credits and posts it.
+    /// Posts a completed purchase: the LOCKED minutes on the purchase row (P13 §4.4, invariant 8).
     ///
     /// <para>
-    /// The rate is <see cref="PendingTopup.ConversionRate"/> — what the member was quoted —
-    /// falling back to the live tenant rate only for rows written before that column
-    /// existed. Re-resolving it here is the defect this method exists to hold shut.
+    /// Never the live package: an admin editing or archiving it while the member sat on PayFast's
+    /// card page has not changed what money already paid buys, and re-reading it here is the
+    /// defect this method exists to hold shut — the same one the conversion-rate lock held shut
+    /// before minutes became the unit.
     /// </para>
     /// </summary>
     private static async Task<IResult> CompleteAsync(
@@ -448,11 +281,10 @@ public static partial class TopUpEndpoints
         pending.FailureReason = null;
         c.Db.Entry(pending).Property(p => p.FailureReason).IsModified = true;
 
-        var settings = await c.Settings.GetAsync(ct);
+        var symbol = CurrencySymbol.For(await c.Settings.GetAsync(ct));
 
-        // The LOCKED minutes on the purchase row, never a live package or rate (P13 invariant 8).
+        // The LOCKED minutes on the purchase row, never a live package (P13 invariant 8).
         var minutes = pending.Minutes;
-        Guid? discountGroupId = pending.GroupId;
 
         // D2-B02. The unique index on ledger_entries.ExternalReference carries no TenantId
         // while every READ of the table is scoped by the tenant query filter.
@@ -482,8 +314,7 @@ public static partial class TopUpEndpoints
                 // The club's own money symbol, frozen into the row. A ledger reason is written
                 // once and read for ever: a club that changes its symbol later has not changed
                 // what this member paid, and re-rendering the history would be the lie.
-                // P13-B2: becomes "PayFast purchase: {PackageName} ({minutes}) for {rand}" (§3.4).
-                Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar, CurrencySymbol.For(settings))} → {EmailTemplates.Cr(minutes)})",
+                Reason: PurchaseReason(pending, symbol),
                 ExternalReference: reference), ct);
 
             await c.Db.SaveChangesAsync(ct);
@@ -496,33 +327,58 @@ public static partial class TopUpEndpoints
             // read-then-write short-circuit above: under READ COMMITTED neither can see the
             // other's uncommitted row, so the filtered unique index is what decides it, and the
             // loser escaped as a 500 that PayFast then retried into.
-            return await AlreadyCreditedAsync(c, pending, interp, reference, ct);
+            return await AlreadySettledAsync(c, pending, interp, reference, ct);
         }
 
-        var balanceAfter = await c.Ledger.GetBalanceAsync(pending.UserId, ct);
+        await AnnounceAsync(c, pending, tenantRow, paymentId, symbol, ct);
+        return Results.Ok(new { ok = true, minutes, package_id = pending.PackageId });
+    }
 
-        // feature-spec.md §11 has required a top-up confirmation since it was written and
-        // nothing sent one, so the single event where a member hands over real money was
-        // the one event that produced no email. Dispatched in the background: PayFast
-        // retries an ITN until it is acknowledged, so a slow SMTP handshake here becomes a
-        // duplicate notification.
+    /// <summary>
+    /// The ledger reason a purchase is written with, once and read for ever:
+    /// <c>PayFast purchase: 5 hours (5 hours) for R495.00</c>. Minutes in words, rand in the
+    /// club's own symbol frozen into the row — a club that changes its symbol later has not changed
+    /// what this member paid. Invariant separators, as everywhere money is written.
+    /// </summary>
+    internal static string PurchaseReason(PendingTopup pending, string symbol)
+        => $"PayFast purchase: {pending.PackageName} ({MoneyFormat.Minutes(pending.Minutes)}) for {EmailTemplates.Zar(pending.AmountZar, symbol)}";
+
+    /// <summary>
+    /// The confirmation mail and the <c>minutes.purchased</c> event, after the money has posted.
+    ///
+    /// <para>
+    /// The mail is dispatched in the background: PayFast retries an ITN until it is acknowledged,
+    /// so a slow SMTP handshake here becomes a duplicate notification. It states the package, the
+    /// minutes added, the list price, the discount when one applied, what was paid and the
+    /// PayFast reference (P13 §6).
+    /// </para>
+    /// </summary>
+    private static async Task AnnounceAsync(
+        TopUpCompletion c, PendingTopup pending, Tenant tenantRow, string paymentId, string symbol, CancellationToken ct)
+    {
+        var balanceAfter = await c.Ledger.GetBalanceAsync(pending.UserId, ct);
+        var discountGroupName = pending.GroupId is { } groupId
+            ? await c.Db.MemberGroups.AsNoTracking().Where(g => g.Id == groupId).Select(g => g.Name).FirstOrDefaultAsync(ct)
+            : null;
+
         var recipient = await c.Db.Users.AsNoTracking()
             .Where(u => u.Id == pending.UserId).Select(u => u.Email).FirstOrDefaultAsync(ct);
         if (!string.IsNullOrEmpty(recipient))
         {
             EmailDispatch.InBackground(
                 c.Email, c.Logger,
-                EmailTemplates.TopUpConfirmation(
-                    await c.Club.GetAsync(ct), recipient, new TopUpReceipt(
+                EmailTemplates.PurchaseConfirmation(
+                    await c.Club.GetAsync(ct), recipient, new PackagePurchaseReceipt(
+                        PackageName: pending.PackageName,
+                        Minutes: pending.Minutes,
+                        ListPriceZar: pending.ListPriceZar,
+                        DiscountBps: pending.DiscountBps,
+                        DiscountGroupName: pending.DiscountBps > 0 ? discountGroupName : null,
                         AmountZar: pending.AmountZar,
-                        MinutesAdded: minutes,
-                        ConversionRate: LegacyRate, // P13-B4: PurchaseConfirmation replaces this receipt (§6)
                         BalanceAfterMinutes: balanceAfter,
-                        Reference: interp.PaymentId ?? pending.IdempotencyKey,
-                        // The club's own symbol, for the one figure on this receipt that is
-                        // money. The three credit figures beside it take none.
-                        CurrencySymbol: CurrencySymbol.For(settings))),
-                $"top-up confirmation for {pending.Id}");
+                        Reference: paymentId,
+                        CurrencySymbol: symbol)),
+                $"purchase confirmation for {pending.Id}");
         }
 
         await c.Bus.EmitAsync(new DomainEvent(
@@ -531,19 +387,27 @@ public static partial class TopUpEndpoints
             TenantId: tenantRow.Id, TenantSlug: tenantRow.Slug,
             OccurredAt: DateTimeOffset.UtcNow,
             ActorUserId: pending.UserId, ActorIsAdmin: false, SubjectUserId: pending.UserId,
-            Data: new()
-            {
-                // P13-B2: add package_id, package_name, list_price_zar and discount_bps (§5).
-                ["purchase_id"] = pending.Id,
-                ["zar_paid"] = pending.AmountZar,
-                ["minutes"] = minutes,
-                // The group whose discount was locked at checkout (null: none).
-                ["discount_group_id"] = discountGroupId,
-                ["groups"] = await GroupsWireAsync(c.Db, pending.UserId, ct),
-                ["external_reference"] = interp.PaymentId,
-            }), ct);
+            Data: PurchasedData(pending, await GroupsWireAsync(c.Db, pending.UserId, ct), paymentId)), ct);
+    }
 
-        return Results.Ok(new { ok = true, minutes, package_id = pending.PackageId });
+    /// <summary>The <c>minutes.purchased</c> payload (P13 §5), every figure from the locked row.</summary>
+    internal static Dictionary<string, object?> PurchasedData(
+        PendingTopup pending, List<Dictionary<string, object?>> groups, string paymentId)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["purchase_id"] = pending.Id,
+            ["package_id"] = pending.PackageId,
+            ["package_name"] = pending.PackageName,
+            ["minutes"] = pending.Minutes,
+            ["list_price_zar"] = pending.ListPriceZar,
+            ["discount_bps"] = pending.DiscountBps,
+            ["zar_paid"] = pending.AmountZar,
+            // The group whose discount was locked at checkout (null: none applied).
+            ["discount_group_id"] = pending.GroupId,
+            ["groups"] = groups,
+            ["external_reference"] = paymentId,
+        };
     }
 
     /// <summary>
@@ -617,7 +481,7 @@ public static partial class TopUpEndpoints
     /// tells the two apart so the member is not lied to about which happened.
     /// </para>
     /// </summary>
-    private static async Task<IResult> AlreadyCreditedAsync(
+    private static async Task<IResult> AlreadySettledAsync(
         TopUpCompletion c, PendingTopup pending, CallbackInterpretation interp, string reference, CancellationToken ct)
     {
         c.Db.ChangeTracker.Clear();
@@ -638,128 +502,8 @@ public static partial class TopUpEndpoints
             "topup {Key}: PayFast payment {PaymentId} is already spent on another top-up in this club — refusing",
             pending.IdempotencyKey, interp.PaymentId);
         return Results.Json(
-            new { error = "payment_id_conflict", topup_id = pending.Id },
+            new { error = "payment_id_conflict", purchase_id = pending.Id },
             statusCode: StatusCodes.Status409Conflict);
-    }
-
-    /// <summary>
-    /// How much rand this member has PAID — settled top-ups only. The ceiling counts this plus what
-    /// is in flight (<see cref="OpenCheckoutsAsync"/>); the two are kept apart since M5-2 so the
-    /// screen never calls a checkout nobody paid "used".
-    ///
-    /// <para>
-    /// <b>D2-B05.</b> <c>topup_max_zar_per_member</c> compared one <c>amountZar</c> against the
-    /// setting and summed nothing, so blueprint A.3's R1000-per-member ceiling bounded a single
-    /// transaction and a member could register ten of them. The key's own name says per member.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Pending rows count.</b> A member with four R1000 registrations open in four tabs has
-    /// not paid yet but is one card form away from it, and counting only settled money is the
-    /// same hole one round narrower. <c>Failed</c> and <c>Cancelled</c> do not count — a
-    /// declined card is not money the member topped up, and charging their ceiling for it would
-    /// lock them out of their own account.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Only a FRESH <c>Pending</c> counts</b> (M4-1): PayFast never reports a checkout the
-    /// member abandoned, so an old Pending row is not money in flight and counting it locked the
-    /// member out for good. See <see cref="PendingLifetime"/>.
-    /// </para>
-    /// </summary>
-    private static async Task<decimal> PaidZarAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
-    {
-        // Settled money only (M5-2). What is still in flight is OpenCheckoutsAsync's, and the
-        // ceiling counts the two together — but a screen must never call unpaid money "used".
-        return await db.PendingTopups
-            .Where(p => p.UserId == userId && p.Status == TopUpStatus.Completed)
-            .SumAsync(p => (decimal?)p.AmountZar, ct) ?? 0m;
-    }
-
-    /// <summary>
-    /// The refusal for a member who has reached their ceiling, or null when they have not.
-    ///
-    /// <para>
-    /// Every figure the sentence needs is in the body — the ceiling, what they have already put
-    /// in, and what is left — so the screen never has to compose a number from two requests.
-    /// Admins are exempt on the same terms they are exempt from the block rule: blueprint A.3
-    /// says admin credit is unlimited, and this endpoint is the member-facing PayFast flow.
-    /// </para>
-    /// </summary>
-    private static async Task<IResult?> RefuseCumulativeAsync(
-        MainframeDbContext db, Guid userId, decimal amountZar, TenantSettingsView s, bool isAdmin, CancellationToken ct)
-    {
-        if (isAdmin) return null;
-
-        var paid = await PaidZarAsync(db, userId, ct);
-        var waiting = (await OpenCheckoutsAsync(db, userId, ct)).Sum(o => o.AmountZar);
-        var already = paid + waiting;
-        var remaining = Math.Max(LegacyMaxZar - already, 0m);
-        if (amountZar <= remaining) return null;
-
-        return Results.BadRequest(new
-        {
-            error = "amount_exceeds_member_cap",
-            max_zar = LegacyMaxZar,
-            already_zar = already,
-            paid_zar = paid,
-            waiting_zar = waiting,
-            remaining_zar = remaining,
-        });
-    }
-
-    /// <summary>
-    /// The refusal for a quote the club has moved away from, or null when the screen and the
-    /// server still agree.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>/topup/options</c> is fetched once when the top-up screen mounts and never
-    /// revalidated, and the screen promises the member the rate beside the figure "is locked
-    /// in when you continue, so it can't change while you're paying". It was locked from the
-    /// POST onward and not before it, so the half of the window the member actually looks at
-    /// was unprotected: an admin changing that member's groups (their class, before D2), or editing
-    /// a group's rate or <c>credits_per_zar_regular</c>, moved the price under an open tab and the
-    /// member was handed to the gateway at the new one. Two independent testers reproduced it
-    /// on the same day — R100 offered at 240 credits, settled at 160.
-    /// </para>
-    /// <para>
-    /// The answer is a refusal rather than an honoured quote. The posted rate is a number the
-    /// client chose, so obeying it would let anyone name their own price; comparing it costs
-    /// the club nothing and keeps the promise, because the member either gets the figure they
-    /// were shown or is stopped and shown the new one. 409, not 400: nothing about the request
-    /// is malformed, the world moved.
-    /// </para>
-    /// <para>
-    /// Exact equality is the right test. Both sides come from the same
-    /// <c>MemberTariffs.Resolve</c> over the same numeric(8,4) values, so a rate that has not been
-    /// edited round-trips identically through JSON; a tolerance here would silently accept
-    /// exactly the small edits (1.6 → 1.5999) this exists to catch.
-    /// </para>
-    /// </remarks>
-    internal static IResult? RefuseStaleQuote(decimal? quotedRate, decimal amountZar, MemberTariff tariff)
-    {
-        var liveRate = LegacyRate;
-        if (quotedRate is null || quotedRate.Value == liveRate) return null;
-        return Results.Json(new
-        {
-            error = "topup_rate_changed",
-            conversion_rate = liveRate,
-            quoted_minutes = Convert(amountZar, liveRate),
-            rate_group = RateGroupWire(tariff),
-            // Deprecated for one release — see MemberTariff.LegacyMemberClass.
-            member_class = tariff.LegacyMemberClass,
-        }, statusCode: StatusCodes.Status409Conflict);
-    }
-
-    /// <summary>P13-B2: rand → whole minutes at the legacy rate, rounded down. Removed with this route.</summary>
-    internal static int Convert(decimal amountZar, decimal rate)
-        => (int)Math.Floor(amountZar * rate);
-
-    /// <summary>The group a rate came from, as the wire names it; null for the club's default rate.</summary>
-    internal static object? RateGroupWire(MemberTariff tariff)
-    {
-        return tariff.DiscountGroup is { } g ? new { id = g.Id, name = g.Name, system_key = g.SystemKey } : null;
     }
 
     /// <summary>A member's active groups for an event payload: id, name and system key only.</summary>
@@ -768,56 +512,6 @@ public static partial class TopUpEndpoints
     {
         return (await MemberTariffs.GroupsOfAsync(db, userId, ct))
             .Select(g => new Dictionary<string, object?> { ["id"] = g.Id, ["name"] = g.Name, ["system_key"] = g.SystemKey })
-            .ToList();
-    }
-
-    /// <summary>
-    /// The deprecated <c>member_class</c> of a locked top-up: <c>LeagueOrSenior</c> when the
-    /// locked rate group is the league system group, <c>Regular</c> otherwise. The tenant
-    /// query filter applies, so an id that is not this club's reads as Regular.
-    /// </summary>
-    private static async Task<string> LegacyClassOfGroupAsync(MainframeDbContext db, Guid? groupId, CancellationToken ct)
-    {
-        if (groupId is not { } id) return MemberGroupSystemKeys.RegularClassName;
-        var key = await db.MemberGroups.AsNoTracking().Where(g => g.Id == id).Select(g => g.SystemKey).FirstOrDefaultAsync(ct);
-        return key == MemberGroupSystemKeys.League
-            ? MemberGroupSystemKeys.LeagueClassName
-            : MemberGroupSystemKeys.RegularClassName;
-    }
-
-    /// <summary>
-    /// The refusal for an amount the club will not take, or null when it will.
-    ///
-    /// <para>
-    /// Lifted out of the handler so the same three rules can be quoted to the screen by
-    /// <c>/topup/options</c> and enforced here, rather than being written twice and
-    /// drifting — which is exactly what happened.
-    /// </para>
-    /// </summary>
-    internal static IResult? RefuseAmount(decimal amountZar, TenantSettingsView s, bool isAdmin)
-    {
-        if (amountZar <= 0)
-            return Results.BadRequest(new { error = "amount_must_be_positive" });
-        if (!isAdmin && LegacyBlockZar > 0 && amountZar % LegacyBlockZar != 0m)
-            return Results.BadRequest(new { error = "amount_must_be_multiple_of_block", block_zar = LegacyBlockZar });
-        if (!isAdmin && amountZar > LegacyMaxZar)
-            return Results.BadRequest(new { error = "amount_exceeds_member_cap", max_zar = LegacyMaxZar });
-        return null;
-    }
-
-    /// <summary>
-    /// The quick-pick amounts, derived from the tenant's own block and cap rather than
-    /// hardcoded on the screen. 1×, 2×, 5× the block plus the cap itself, keeping only the
-    /// ones the rules above would actually accept.
-    /// </summary>
-    internal static List<decimal> Presets(decimal blockZar, decimal maxZar)
-    {
-        if (blockZar <= 0) return [];
-        var candidates = new List<decimal> { blockZar, blockZar * 2, blockZar * 5, maxZar };
-        return candidates
-            .Where(v => v > 0 && v <= maxZar && v % blockZar == 0m)
-            .Distinct()
-            .OrderBy(v => v)
             .ToList();
     }
 
@@ -910,36 +604,3 @@ public static partial class TopUpEndpoints
     }
 
 }
-
-/// <summary>
-/// The amount a member wants to pay, in <b>rand</b>.
-///
-/// <para>
-/// The client posted <c>amountMinutes</c> against this record for as long as the screen
-/// existed, so <c>AmountZar</c> bound to 0, the first guard fired, and no member could
-/// ever top up — the screen told them the amount was wrong. The field is rand because
-/// PayFast is paid in rand; the credits are what comes back.
-/// </para>
-/// </summary>
-/// <param name="QuotedConversionRate">
-/// The rate the member was looking at when they pressed Continue, as
-/// <c>/topup/options</c> handed it to the screen.
-///
-/// <para>
-/// It exists so the club cannot take money at a rate the member was never shown. The screen
-/// says, in as many words, that the rate is locked in when you continue — and Continue
-/// registered the <b>live</b> rate, so an admin changing the member's class or editing
-/// <c>credits_per_zar_*</c> while the tab sat open sent a member who had been offered 240
-/// credits for R100 to the gateway for 160. There is no confirmation step between Continue
-/// and the card form, so nothing told her.
-/// </para>
-///
-/// <para>
-/// Honouring the posted number instead would let any client name its own price, so the
-/// server compares rather than trusts: equal and the offer stands, different and the
-/// request is refused with <c>topup_rate_changed</c> and the new figures, for the screen to
-/// show before the member commits. Nullable, because a client that sends nothing — an
-/// older build, or a script — gets the old behaviour rather than a 400.
-/// </para>
-/// </param>
-public sealed record TopUpRequest(decimal AmountZar, decimal? QuotedConversionRate = null);

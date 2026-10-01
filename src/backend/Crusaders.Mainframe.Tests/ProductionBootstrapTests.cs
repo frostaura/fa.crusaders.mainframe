@@ -1,3 +1,4 @@
+using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
@@ -174,24 +175,53 @@ public class ProductionBootstrapTests
     }
 
     /// <summary>
-    /// Court.SlicePriceCredits defaults to 0m and each court carries its OWN price, so courts
-    /// created without one are free to book — silently, and for as long as nobody reads the
-    /// ledger. This is the money bug in this type, and it is one line away at all times.
+    /// The court count comes from configuration, and courts carry no price (P13): a booking costs
+    /// its own length in minutes. A <c>Bootstrap:SlicePriceCredits</c> left in an old compose file
+    /// — even the 0 that used to stop the container — is ignored rather than refused.
     /// </summary>
     [Fact]
-    public Task Bootstrapped_courts_are_never_free_to_book()
+    public async Task The_court_count_comes_from_configuration_and_a_stale_slice_price_is_ignored()
     {
-        // P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)
-        Assert.Fail($"P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)");
-        return Task.CompletedTask;
+        var sp = await EmptyAsync();
+
+        await RunAsync(sp, Config(("Bootstrap:Courts", "6"), ("Bootstrap:SlicePriceCredits", "0")));
+
+        var courts = await Db(sp).Courts.IgnoreQueryFilters().OrderBy(c => c.CourtNumber).ToListAsync();
+        Assert.Equal([1, 2, 3, 4, 5, 6], courts.Select(c => c.CourtNumber));
     }
 
+    /// <summary>
+    /// P13 §4.6: a new club's buy screen is never empty. The opening shelf is three club packages
+    /// — 1 hour R120, 5 hours R550, 10 hours R1000 — written once, and never again: a second boot
+    /// adds nothing, and a club whose admin has archived the lot keeps its own empty shelf.
+    /// </summary>
     [Fact]
-    public Task The_court_count_and_price_come_from_configuration()
+    public async Task A_new_club_gets_the_opening_shelf_once_and_never_over_its_own()
     {
-        // P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)
-        Assert.Fail($"P13-B2: courts carry no price and Bootstrap:SlicePriceCredits goes (§2.2)");
-        return Task.CompletedTask;
+        var sp = await EmptyAsync();
+
+        await RunAsync(sp, Config());
+
+        var shelf = await Db(sp).MinutePackages.IgnoreQueryFilters().OrderBy(p => p.SortOrder).ToListAsync();
+        Assert.Equal(["1 hour", "5 hours", "10 hours"], shelf.Select(p => p.Name));
+        Assert.Equal([60, 300, 600], shelf.Select(p => p.Minutes));
+        Assert.Equal([120.00m, 550.00m, 1000.00m], shelf.Select(p => p.PriceZar));
+        Assert.All(shelf, p => Assert.Null(p.GroupId));
+        Assert.All(shelf, p => Assert.Equal(MinutePackageStatus.Active, p.Status));
+        Assert.Null((await Db(sp).MemberGroups.IgnoreQueryFilters().SingleAsync(g => g.SystemKey == MemberGroupSystemKeys.League)).PackageDiscountBps);
+
+        // The admin archives the whole shelf; the next boot must not put it back.
+        using (var scope = sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            foreach (var p in await db.MinutePackages.IgnoreQueryFilters().ToListAsync()) p.Status = MinutePackageStatus.Archived;
+            await db.SaveChangesAsync();
+        }
+        await RunAsync(sp, Config());
+
+        var after = await Db(sp).MinutePackages.IgnoreQueryFilters().ToListAsync();
+        Assert.Equal(3, after.Count);
+        Assert.All(after, p => Assert.Equal(MinutePackageStatus.Archived, p.Status));
     }
 
     /// <summary>
@@ -320,7 +350,6 @@ public class ProductionBootstrapTests
     [InlineData("Bootstrap:TenantDisplayName", null, "TenantDisplayName")]
     [InlineData("Bootstrap:Courts", "0", "between 1 and 64")]
     [InlineData("Bootstrap:Courts", "500", "between 1 and 64")]
-    [InlineData("Bootstrap:SlicePriceCredits", "0", "greater than 0")]
     public async Task Unusable_configuration_stops_the_container_and_names_the_key(string key, string? value, string expected)
     {
         var sp = await EmptyAsync();

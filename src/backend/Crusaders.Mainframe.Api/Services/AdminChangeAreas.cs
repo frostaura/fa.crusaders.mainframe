@@ -42,5 +42,8 @@ public static class AdminChangeSubjects
     /// <summary>D14: one recorded match (<c>match_results</c>).</summary>
     public const string MatchResult = "match_result";
 
-    public static readonly string[] All = [User, Schedule, Booking, Group, Device, Setting, Court, MatchResult, Webhook];
+    /// <summary>P13: one of the club's minutes packages (<c>minute_packages</c>).</summary>
+    public const string Package = "package";
+
+    public static readonly string[] All = [User, Schedule, Booking, Group, Device, Setting, Court, MatchResult, Webhook, Package];
 }

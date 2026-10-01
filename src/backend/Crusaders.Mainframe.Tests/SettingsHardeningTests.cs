@@ -46,15 +46,6 @@ public class SettingsHardeningTests
         Assert.Equal(15, view.SliceMinutes);
     }
 
-    /// <summary>The decimal twin, for the same reason — this one prices a court.</summary>
-    [Fact]
-    public Task A_decimal_the_column_cannot_hold_falls_back_instead_of_throwing()
-    {
-        // P13-B2: the slice price setting is retired (§2.2, §3.9)
-        Assert.Fail($"P13-B2: the slice price setting is retired (§2.2, §3.9)");
-        return Task.CompletedTask;
-    }
-
     /// <summary>
     /// D2-B16. A stored <c>"19:00-16:00"</c> made <c>inPeak</c> permanently false, so peak
     /// protection was silently off for every Regular member with nothing anywhere saying so.
@@ -115,20 +106,6 @@ public class SettingsHardeningTests
         var view = await ReadAsync("{}");
         Assert.Equal(15, view.GateUnlockSeconds);
         Assert.Equal(15, GateAccess.UnlockSecondsFor(view));
-    }
-
-    /// <summary>
-    /// D2-B06's read side. <c>slice_price_credits</c> was touched by none of the validators and
-    /// seeds new courts, so a negative one produced a court on which every booking CREDITED the
-    /// member. The PUT refuses it now (see <c>AdminSettingsHttpTests</c>) and the reader floors
-    /// it, because the PUT is not the only way a number reaches the column.
-    /// </summary>
-    [Fact]
-    public Task A_negative_stored_slice_price_is_floored_on_read()
-    {
-        // P13-B2: the slice price setting is retired (§2.2, §3.9)
-        Assert.Fail($"P13-B2: the slice price setting is retired (§2.2, §3.9)");
-        return Task.CompletedTask;
     }
 
     /// <summary>Every new key in this wave answers its documented default on an empty document.</summary>

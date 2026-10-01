@@ -13,29 +13,19 @@ namespace Crusaders.Mainframe.Api.Services;
 /// </para>
 ///
 /// <list type="bullet">
-///   <item><b>Rand</b> — what a member hands PayFast. <c>topup_block_zar</c>,
-///     <c>topup_max_zar_per_member</c>, the revenue report's net. This IS money, and this is
-///     its symbol.</item>
-///   <item><b>Credits</b> — the wallet balance and what a slot costs. A member pays R100 and
-///     receives <c>credits_per_zar_regular</c> × 100 credits, which ships at <b>1.6</b>.
-///     Credits are the unit of account (<c>CLAUDE.md</c>), and a credit figure wearing a
-///     money sign is a money-correctness bug, not a copy choice.</item>
+///   <item><b>Rand</b> — what a member hands PayFast for a package, what the desk takes over the
+///     counter, the revenue report's net. This IS money, and this is its symbol.</item>
+///   <item><b>Minutes</b> — the wallet balance and what a booking costs (P13). Minutes are the
+///     unit of account (<c>CLAUDE.md</c>); a minutes figure wearing a money sign is a
+///     money-correctness bug, not a copy choice, and minutes are written in words or
+///     <c>45 min</c>, never with a currency symbol (<see cref="MoneyFormat"/>).</item>
 /// </list>
 ///
 /// <para>
-/// The second bullet is not hypothetical and it is not new. <see cref="Email.EmailTemplates"/>'s
-/// own <c>Cr</c> header records it: every money email printed a rand sign over a credit figure —
-/// "Charged R50,00" for a court that cost the member R31.25 at the club's own 1.6 rate — on the
-/// one artifact a member reconciles a bank statement against. The frontend shipped the same
-/// defect in six places at once. At the Regular rate the overstatement is 60%; at the League
-/// rate, 140%.
-/// </para>
-///
-/// <para>
-/// <b>So this symbol reaches rand and stops there, and credits keep a unit of their own.</b>
-/// The ask has been narrowed, deliberately and visibly. A club that genuinely wants its credits
-/// shown as money wants <c>credits_per_zar_* = 1</c> first, and that is the founder's call to
-/// make against blueprint Rev 2 — which sets R100 → 160 credits — not this file's.
+/// <b>So this symbol reaches rand and stops there.</b> Before P13 the second unit was a
+/// rand-denominated token at a conversion rate, and every money email once printed a rand sign
+/// over it — the overstatement was the rate itself. Minutes made the rule easier to keep, not
+/// unnecessary.
 /// </para>
 ///
 /// <para>

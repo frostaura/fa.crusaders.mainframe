@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
-public static class WalletEndpoints
+public static partial class WalletEndpoints
 {
     /// <summary>
     /// <c>GET /wallet</c>'s query string. <c>include=share_bookings</c> (perf round, 2026-09-30) adds
@@ -113,12 +113,13 @@ public static class WalletEndpoints
         // client so admin top-ups land in the member's session without a reload.
         g.MapGet("/wallet/stream", StreamAsync);
 
-        // Admin: manual credit adjustment
-        // The one route in the API that moves money by hand, and the only limiter on it was the
-        // global 600/min per IP. A desk that can be scripted is a desk that can be drained — so
-        // it is bounded per admin, by `writes` (a flood bound) rather than `auth` (a guessing
-        // bound): the desk crediting a queue of members at the counter is not guessing.
-        var admin = app.MapGroup("/api/v1/admin/credit")
+        // Admin: the desk moving a member's minutes by hand (P13 §3.7) — an adjustment, a package
+        // sold over the counter, and the member's shelf for the sale. The only routes in the API
+        // that move money by hand, and the only limiter on them was the global 600/min per IP. A
+        // desk that can be scripted is a desk that can be drained — so they are bounded per admin,
+        // by `writes` (a flood bound) rather than `auth` (a guessing bound): the desk serving a
+        // queue of members at the counter is not guessing.
+        var admin = app.MapGroup("/api/v1/admin/minutes")
             .RequireAuthorization(p => p.RequireRole("admin"))
             .RequireRateLimiting(Security.RateLimitPolicies.Writes);
 
@@ -127,6 +128,8 @@ public static class WalletEndpoints
         // inline it pushed MapWalletEndpoints past the complexity gate, where the reported
         // number belongs to no single decision anybody could reason about.
         admin.MapPost("/{userId:guid}/adjust", AdjustAsync);
+        admin.MapPost("/{userId:guid}/sell", SellAsync);
+        admin.MapGet("/{userId:guid}/packages", DeskShelfAsync);
 
         return app;
     }
@@ -259,38 +262,35 @@ public static class WalletEndpoints
     }
 
     /// <summary>
-    /// The largest adjustment the column can hold, and the smallest unit it can express.
+    /// The largest adjustment the desk may type, either way (P13 §3.7).
     ///
     /// <para>
-    /// <c>ledger_entries.AmountMinutes</c> is <c>numeric(10,2)</c>. Neither bound was
-    /// checked, and both failed badly at opposite ends. A desk typing 999999999999 got a
-    /// <b>500</b> with an EF <c>DbUpdateException</c> and a Postgres 22003 numeric overflow
-    /// — an unhandled database exception is the wrong failure mode for a money endpoint
-    /// whatever the amount. At the other end 0.005 was accepted, stored as 0.01 because the
-    /// column rounded it, and echoed back as 0.005 by the in-memory entity: half a cent
-    /// created from nothing and an API response disagreeing with the ledger it had just
-    /// written. Credits are counted in cents; an amount that is not a whole number of them
-    /// is a typo, and rounding it silently is how the two figures diverge.
+    /// The amount binds as a <c>long</c> so a typo of twelve digits is refused by name here,
+    /// <c>amount_out_of_range</c> with the bound, instead of failing to bind into an <c>int</c>
+    /// with an empty 400 the console cannot word. A fraction of a minute still fails binding: the
+    /// ledger holds whole minutes and nothing rounds one silently.
     /// </para>
     /// </summary>
     internal const int MaxAdjustmentMinutes = 999_999;
 
-    internal static IResult? RefuseAmount(int amountMinutes)
+    /// <summary>The refusal for an amount the desk may not post, or null when it may.</summary>
+    internal static IResult? RefuseAmount(long amountMinutes)
     {
+        if (amountMinutes == 0) return Results.BadRequest(new { error = "amount_zero" });
         if (Math.Abs(amountMinutes) > MaxAdjustmentMinutes)
             return Results.BadRequest(new { error = "amount_out_of_range", max_minutes = MaxAdjustmentMinutes });
-        // P13-B2: an int cannot hold a fraction, so amount_not_whole_cents went; a JSON 1.5 is refused by binding.
         return null;
     }
 
-
     /// <summary>
-    /// An admin moving a member's balance by hand.
+    /// An admin adjusting a member's minutes by hand — goodwill and corrections. A package sold
+    /// at the desk is <see cref="SellAsync"/>.
     ///
     /// <para>
     /// Idempotent when the caller names the movement. See <see cref="IdempotencyReference"/>
     /// for why the reference carries the tenant, and <c>AdminCreditAdjustHttpTests</c> for
-    /// what a double-clicked Apply button used to do to the ledger.
+    /// what a double-clicked Apply button used to do to the ledger. The adjustment may take a
+    /// balance below zero, as it always could (P13 §12.8).
     /// </para>
     /// </summary>
     private static async Task<IResult> AdjustAsync(
@@ -298,67 +298,94 @@ public static class WalletEndpoints
         [AsParameters] AdjustServices services,
         CancellationToken ct)
     {
-        var (ledger, db, tenant, email, loggerFactory, _, _, _) = services;
-        var logger = loggerFactory.CreateLogger("CreditAdjustment");
+        var logger = services.LoggerFactory.CreateLogger("MinutesAdjustment");
 
-        var (refusal, kind) = RefuseRequest(req, logger);
-        if (refusal is not null) return refusal;
+        if (RefuseAmount(req.AmountMinutes) is { } badAmount) return badAmount;
+        if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
+        if (AdminCreditReasons.ResolveAdjustment(req.ReasonCodeEither, logger) is not { } kind)
+        {
+            return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.AdjustmentCodes });
+        }
 
-        var reference = IdempotencyReference(tenant.TenantId, req.IdempotencyKey);
+        var reference = IdempotencyReference(services.Tenant.TenantId, req.IdempotencyKey);
         if (reference is { Length: 0 }) return Results.BadRequest(new { error = "idempotency_key_invalid" });
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-        if (user is null) return Results.NotFound();
-        if (await RefuseRelatedBooking(db, userId, req.RelatedBookingId, ct) is { } badBooking) return badBooking;
+        if (!await services.Db.Users.AnyAsync(u => u.Id == userId, ct)) return Results.NotFound();
+        if (await RefuseRelatedBooking(services.Db, userId, req.RelatedBookingId, ct) is { } badBooking) return badBooking;
 
-        var balanceBefore = await ledger.GetBalanceAsync(userId, ct);
+        var movement = new DeskMovement(userId, kind, (int)req.AmountMinutes, null, req.Reason, req.Reason)
+        {
+            RelatedBookingId = req.RelatedBookingId,
+            IdempotencyKey = req.IdempotencyKey,
+            Reference = reference,
+        };
+        return await MoveAsync(movement, ctx, services, ct);
+    }
+
+    /// <summary>
+    /// Posts one desk movement — an adjustment or a sale — idempotently, records it, mails the
+    /// member and answers. 404 for a member this club does not have.
+    /// </summary>
+    private static async Task<IResult> MoveAsync(
+        DeskMovement movement, HttpContext ctx, AdjustServices services, CancellationToken ct)
+    {
+        var db = services.Db;
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == movement.UserId, ct);
+        if (user is null) return Results.NotFound();
+
+        var balanceBefore = await services.Ledger.GetBalanceAsync(movement.UserId, ct);
 
         // A double-click on the desk's Apply button posted the movement twice, and a slow club
-        // connection with four impatient clicks posted it four times: 44 credits granted where
+        // connection with four impatient clicks posted it four times: 44 minutes granted where
         // 11 were typed. Money is ledger-only, so a duplicated row IS the wrong balance, and
         // there is nothing on the ledger to say which of the identical rows was the mistake.
-        if (reference is not null && await ExistingAdjustmentAsync(db, reference, ct) is { } already)
+        if (movement.Reference is { } key && await ExistingAdjustmentAsync(db, key, ct) is { } already)
         {
-            return Replay(already, req, kind!.Value, balanceBefore, user);
+            return Replay(already, movement, balanceBefore, user);
         }
 
         // One unit of work for the money AND its record. See PostAndRecordAsync.
-        var (posted, raced) = await PostAndRecordAsync(
-            new AdjustmentWork(userId, req, kind!.Value, reference, ctx), services, ct);
+        var (posted, raced) = await PostAndRecordAsync(movement, ctx, services, ct);
         if (posted is null)
         {
             // The lookup above loses the race when both clicks are in flight at once, which is
             // exactly what a double-click produces. The unique filtered index on
             // ExternalReference is what actually holds the line; this turns its violation into
-            // the same answer the first request got, so the desk sees one success rather than a
-            // 500 beside a movement that did happen. The transaction has already rolled back, so
+            // the same answer the first request got. The transaction has already rolled back, so
             // the re-read runs on a clean connection.
             db.ChangeTracker.Clear();
-            var twin = await ExistingAdjustmentAsync(db, reference!, ct);
+            var twin = await ExistingAdjustmentAsync(db, movement.Reference!, ct);
             if (twin is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(raced!);
-            return Replay(twin!, req, kind!.Value, balanceBefore, user);
+            return Replay(twin!, movement, balanceBefore, user);
         }
 
-        var (entry, balanceAfter) = (posted.Entry, posted.BalanceAfter);
-        balanceBefore = posted.BalanceBefore;
-
         // D11: an adjustment naming a booking moves the organiser's Owed, so the partners' shares
-        // follow — here, after the commit, however old the booking is. ShareWorker's sweep only
-        // looks back share_lapse_hours + 7 days, so a correction to an older game was never
-        // reconciled at all. The hook never throws; a failure is left to the log.
-        if (req.RelatedBookingId is { } adjustedBooking) await ctx.AfterSettlementAsync([adjustedBooking], ct);
+        // follow — here, after the commit, however old the booking is. The hook never throws.
+        if (movement.RelatedBookingId is { } adjustedBooking) await ctx.AfterSettlementAsync([adjustedBooking], ct);
 
         // "Every player-affecting event sends an email" — and an admin moving a member's balance
-        // by hand is about as player-affecting as it gets. Nothing was sent, so the first a
-        // member knew of a desk adjustment was the next time they opened their wallet. Background
-        // dispatch: an admin is waiting on this form and SMTP is not what decides whether the
-        // movement stands.
+        // by hand is about as player-affecting as it gets. Background dispatch: an admin is
+        // waiting on this form and SMTP is not what decides whether the movement stands.
         Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
-            email, logger,
-            Crusaders.Mainframe.Api.Email.EmailTemplates.CreditAdjustment(
-                await services.Club.GetAsync(ct), user.Email, entry.AmountMinutes, balanceAfter, req.Reason),
-            $"credit adjustment {entry.Id}");
+            services.Email, services.LoggerFactory.CreateLogger("MinutesAdjustment"),
+            await DeskMailAsync(movement, user.Email, posted, services, ct),
+            $"desk minutes movement {posted.Entry.Id}");
 
-        return AdjustmentResult(entry, kind!.Value, balanceBefore, balanceAfter, user);
+        return MovementResult(posted.Entry, movement, posted.BalanceBefore, posted.BalanceAfter, user);
+    }
+
+    /// <summary>The member's mail for a desk movement: a package sold, or minutes adjusted (P13 §6).</summary>
+    private static async Task<Crusaders.Mainframe.Api.Email.EmailMessage> DeskMailAsync(
+        DeskMovement movement, string to, AdjustmentPosted posted, AdjustServices services, CancellationToken ct)
+    {
+        var club = await services.Club.GetAsync(ct);
+        if (movement.Package is { } item)
+        {
+            var symbol = CurrencySymbol.For(await services.Settings.GetAsync(ct));
+            return Crusaders.Mainframe.Api.Email.EmailTemplates.PackageSoldAtDesk(club, to, new Crusaders.Mainframe.Api.Email.DeskPackageSale(
+                item.Package.Name, item.Package.Minutes, posted.Entry.ZarPaid ?? 0m, posted.BalanceAfter, symbol));
+        }
+        return Crusaders.Mainframe.Api.Email.EmailTemplates.MinutesAdjusted(
+            club, to, posted.Entry.AmountMinutes, posted.BalanceAfter, movement.GivenReason);
     }
 
     /// <summary>
@@ -370,176 +397,153 @@ public static class WalletEndpoints
     /// second was two commits: a record that failed to save — or a request aborted between the
     /// two, which is what a desk closing the tab does — left the money moved with no audit row,
     /// no change-log row and no email, and answered 500. The admin then retried, and without an
-    /// idempotency key the retry credited the member again. Proven with a trigger that refused
-    /// the change-log insert: two +25 adjusts left 50 credits on the ledger and nothing in
-    /// either record. Now the post joins a transaction the lock owns, the two records flush
-    /// beside it, and a failure anywhere rolls all three back — the ledger never holds a
-    /// by-hand movement the club's record cannot show.
+    /// idempotency key the retry credited the member again. Now the post joins a transaction the
+    /// lock owns, the two records flush beside it, and a failure anywhere rolls all three back —
+    /// the ledger never holds a by-hand movement the club's record cannot show.
     /// </para>
     ///
     /// <para>
     /// The lock is <see cref="PayerLock"/>, the same one a booking takes on this wallet, so the
     /// two balances in the record are read where nothing else can move them, and the live
-    /// balance frame waits for the commit (D2-B07) instead of announcing money that may yet roll
-    /// back. Returns the exception instead of a result when the post lost an idempotency race,
-    /// AFTER the transaction has rolled back, so the caller can re-read on a clean connection.
+    /// balance frame waits for the commit (D2-B07). Returns the exception instead of a result
+    /// when the post lost an idempotency race, AFTER the transaction has rolled back, so the
+    /// caller can re-read on a clean connection.
     /// </para>
     /// </summary>
     private static async Task<(AdjustmentPosted? Posted, DbUpdateException? Raced)> PostAndRecordAsync(
-        AdjustmentWork work, AdjustServices services, CancellationToken ct)
+        DeskMovement m, HttpContext ctx, AdjustServices services, CancellationToken ct)
     {
         var (ledger, db, tenant) = (services.Ledger, services.Db, services.Tenant);
-        var (userId, req, kind, ctx) = (work.UserId, work.Request, work.Kind, work.Http);
         var actorId = ctx.User.Id() ?? Guid.Empty;
 
-        await using var payerLock = await PayerLock.BeginAsync(db, tenant.TenantId, userId, services.Outbox, ct);
-        var balanceBefore = await ledger.GetBalanceAsync(userId, ct);
+        await using var payerLock = await PayerLock.BeginAsync(db, tenant.TenantId, m.UserId, services.Outbox, ct);
+        var balanceBefore = await ledger.GetBalanceAsync(m.UserId, ct);
 
         LedgerEntry entry;
         try
         {
             entry = await ledger.PostAsync(new LedgerPosting(
-                UserId: userId,
-                Type: kind.Type,
-                AmountMinutes: req.AmountMinutes,
+                UserId: m.UserId,
+                Type: m.Kind.Type,
+                AmountMinutes: m.AmountMinutes,
                 ActorUserId: actorId,
                 // Naming the booking is what nets this adjustment, per leg, against a late
                 // box upload's automatic reversal of the same no-show, instead of correcting
                 // the member twice. See BookingService.SettledLegsAsync and the settlement
                 // model's I3/I4.
-                RelatedBookingId: req.RelatedBookingId,
-                Reason: req.Reason,
-                ExternalReference: work.Reference,
-                // B7: the rand the desk took, on a top-up code only — what the revenue report sums.
-                ZarPaid: kind.Type == LedgerEntryType.AdminTopUp ? req.ZarReceivedEither : null), ct);
+                RelatedBookingId: m.RelatedBookingId,
+                Reason: m.LedgerReason,
+                ExternalReference: m.Reference,
+                // B7: the rand the desk took, on a sale only — what the revenue report sums.
+                ZarPaid: m.ZarPaid), ct);
         }
-        catch (DbUpdateException ex) when (work.Reference is not null)
+        catch (DbUpdateException ex) when (m.Reference is not null)
         {
             return (null, ex);
         }
 
-        var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
+        var balanceAfter = await ledger.GetBalanceAsync(m.UserId, ct);
+        db.AuditLogs.Add(DeskAudit(m, entry, (balanceBefore, balanceAfter), ctx));
 
-        // D2-B08. The ONE by-hand money movement in the system wrote nothing to the club's audit
-        // trail, while a member-class change and a password reset both write one. Reconstructing
-        // "who moved what by hand" meant joining ledger_entries on Type and trusting
-        // ActorUserId — which for every system posting is the empty Guid (D2-B41).
-        //
-        // The two balance figures are the point: an adjustment is only reviewable if the row says
-        // where it took the member FROM and TO, and re-deriving that later means replaying every
-        // row that has landed since.
-        db.AuditLogs.Add(new Domain.AuditLog
-        {
-            TenantId = tenant.TenantId,
-            ActorUserId = actorId,
-            SubjectUserId = userId,
-            Action = AdminCreditReasons.AuditAction,
-            IpAddress = ctx.Connection.RemoteIpAddress?.ToString(),
-            UserAgent = ctx.Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? ua : null,
-            DetailsJson = JsonSerializer.Serialize(new
-            {
-                user_id = userId,
-                entry_id = entry.Id,
-                entry_type = kind.Type.ToString(),
-                amount_minutes = req.AmountMinutes,
-                reason = req.Reason,
-                reason_code = kind.Code,
-                zar_received = entry.ZarPaid,
-                balance_before_minutes = balanceBefore,
-                balance_after_minutes = balanceAfter,
-                related_booking_id = req.RelatedBookingId,
-                idempotency_key = req.IdempotencyKey,
-            }),
-        });
-
-        // The club's undeletable record. The vocabulary has carried credit.adjusted and
-        // credit.topped_up since the change record was built, and nothing wrote either — so the
-        // one by-hand money movement in the product was the one admin action the change record
-        // could not show. audit_log has a delete path; this table does not. A top-up code files
-        // as credit.topped_up because it counts as revenue and a club reads the two differently;
-        // every other code is an adjustment. Both require a reason, which RefuseRequest already
-        // demands.
+        // The club's undeletable record. A sale files as credit.topped_up because it counts as
+        // revenue and a club reads the two differently; every other code is an adjustment. Both
+        // require a reason, which both routes already demand. The codes keep "credit" (P13 §2.5).
         await services.Changes.StageAsync(new AdminChange(
-            Action: kind.Type == LedgerEntryType.AdminTopUp
+            Action: m.Kind.Type == LedgerEntryType.AdminTopUp
                 ? AdminChangeActions.CreditToppedUp
                 : AdminChangeActions.CreditAdjusted,
             ActorUserId: actorId,
             SubjectKind: AdminChangeSubjects.User,
-            SubjectId: userId,
-            SubjectLabel: PersonNames.Of(userId, await PersonNames.ForAsync(db, [userId], ct)),
-            Reason: req.Reason,
+            SubjectId: m.UserId,
+            SubjectLabel: PersonNames.Of(m.UserId, await PersonNames.ForAsync(db, [m.UserId], ct)),
+            Reason: m.GivenReason,
             Before: new { balance_minutes = balanceBefore },
-            After: new
-            {
-                balance_minutes = balanceAfter,
-                amount_minutes = req.AmountMinutes,
-                reason_code = kind.Code,
-                zar_received = entry.ZarPaid,
-                entry_id = entry.Id,
-                related_booking_id = req.RelatedBookingId,
-            }), ct);
+            After: DeskChangeAfter(m, entry, balanceAfter)), ct);
         await db.SaveChangesAsync(ct);
         await payerLock.CommitAsync(ct);
 
         return (new AdjustmentPosted(entry, balanceBefore, balanceAfter), null);
     }
 
-    /// <summary>One by-hand movement to post, bundled for the complexity gate's parameter bound.</summary>
-    private sealed record AdjustmentWork(
-        Guid UserId, AdjustRequest Request, AdminCreditReasons.Kind Kind, string? Reference, HttpContext Http);
+    /// <summary>
+    /// D2-B08: the by-hand movement on the club's audit trail, with the two balances it moved
+    /// between — an adjustment is only reviewable if the row says where it took the member FROM
+    /// and TO. A sale adds the package it sold (P13 §3.7).
+    /// </summary>
+    private static Domain.AuditLog DeskAudit(DeskMovement m, LedgerEntry entry, (int Before, int After) balance, HttpContext ctx)
+    {
+        var details = new Dictionary<string, object?>
+        {
+            ["user_id"] = m.UserId,
+            ["entry_id"] = entry.Id,
+            ["entry_type"] = m.Kind.Type.ToString(),
+            ["amount_minutes"] = m.AmountMinutes,
+            ["reason"] = m.GivenReason,
+            ["reason_code"] = m.Kind.Code,
+            ["zar_received"] = entry.ZarPaid,
+            ["balance_before_minutes"] = balance.Before,
+            ["balance_after_minutes"] = balance.After,
+            ["related_booking_id"] = m.RelatedBookingId,
+            ["idempotency_key"] = m.IdempotencyKey,
+        };
+        if (m.Package is { } item)
+        {
+            details["package_id"] = item.Package.Id;
+            details["package_name"] = item.Package.Name;
+            details["minutes"] = item.Package.Minutes;
+        }
+
+        return new Domain.AuditLog
+        {
+            TenantId = entry.TenantId,
+            ActorUserId = ctx.User.Id() ?? Guid.Empty,
+            SubjectUserId = m.UserId,
+            Action = AdminCreditReasons.AuditAction,
+            IpAddress = ctx.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = ctx.Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? ua : null,
+            DetailsJson = JsonSerializer.Serialize(details),
+        };
+    }
+
+    /// <summary>
+    /// The change record's after side: the adjust shape, plus the package's id and name on a sale.
+    /// </summary>
+    private static Dictionary<string, object?> DeskChangeAfter(DeskMovement m, LedgerEntry entry, int balanceAfter)
+    {
+        var after = new Dictionary<string, object?>
+        {
+            ["balance_minutes"] = balanceAfter,
+            ["amount_minutes"] = m.AmountMinutes,
+            ["reason_code"] = m.Kind.Code,
+            ["zar_received"] = entry.ZarPaid,
+            ["entry_id"] = entry.Id,
+            ["related_booking_id"] = m.RelatedBookingId,
+        };
+        if (m.Package is { } item)
+        {
+            after["package_id"] = item.Package.Id;
+            after["package_name"] = item.Package.Name;
+        }
+        return after;
+    }
+
+    /// <summary>
+    /// One desk movement, resolved and validated: who, what kind, how many minutes, the rand on a
+    /// sale, the ledger's reason and the reason the admin typed. Bundled for the parameter gate.
+    /// </summary>
+    private sealed record DeskMovement(
+        Guid UserId, AdminCreditReasons.Kind Kind, int AmountMinutes, decimal? ZarPaid, string LedgerReason, string GivenReason)
+    {
+        public Guid? RelatedBookingId { get; init; }
+        public string? IdempotencyKey { get; init; }
+        public string? Reference { get; init; }
+
+        /// <summary>The package sold, on a sale; null on an adjustment.</summary>
+        public ShelfItem? Package { get; init; }
+    }
 
     /// <summary>A committed by-hand movement and the two balances it moved between.</summary>
     private sealed record AdjustmentPosted(LedgerEntry Entry, int BalanceBefore, int BalanceAfter);
-
-    /// <summary>
-    /// Everything that can refuse a by-hand movement before anything is read from the database,
-    /// and the kind of movement it turns out to be.
-    ///
-    /// <para>
-    /// Its own method because <c>AdjustAsync</c> is the most consequential route in this file —
-    /// it moves a member's balance by hand — and a reader asking "what will this refuse" should
-    /// not have to walk the whole handler to find out.
-    /// </para>
-    /// </summary>
-    private static (IResult? Refusal, AdminCreditReasons.Kind? Kind) RefuseRequest(
-        AdjustRequest req, ILogger logger)
-    {
-        if (req.AmountMinutes == 0) return (Results.BadRequest(new { error = "amount_zero" }), null);
-        if (string.IsNullOrWhiteSpace(req.Reason)) return (Results.BadRequest(new { error = "reason_required" }), null);
-        if (RefuseAmount(req.AmountMinutes) is { } badAmount) return (badAmount, null);
-
-        if (AdminCreditReasons.Resolve(req.ReasonCodeEither, logger) is not { } kind)
-        {
-            return (Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.All }), null);
-        }
-
-        // A top-up is money the club TOOK. A negative one is a refund or a correction and has
-        // codes of its own; mixing signs inside a directional bucket is what makes a per-row
-        // listing unreadable and a revenue figure a guess.
-        if (kind.Type == LedgerEntryType.AdminTopUp && req.AmountMinutes < 0)
-        {
-            return (Results.BadRequest(new { error = "amount_must_be_positive_for_top_up" }), null);
-        }
-
-        // Review round 1, B7: a top-up code is counted as the club's REVENUE, and revenue is rand
-        // (ZarPaid), never credits — so a desk top-up with no rand figure reported R0.00 in the
-        // month's income. The desk says how much money it took; nothing else can know.
-        if (kind.Type == LedgerEntryType.AdminTopUp && RefuseZar(req.ZarReceivedEither) is { } badZar) return (badZar, null);
-
-        return (null, kind);
-    }
-
-    /// <summary>The largest rand figure a desk top-up may state — well past any counter, well short of a typo's reach.</summary>
-    public const decimal MaxZarReceived = 1_000_000m;
-
-    /// <summary>The rand a top-up code must carry (B7): present, not negative, whole cents, bounded.</summary>
-    private static IResult? RefuseZar(decimal? zar)
-    {
-        if (zar is not { } value) return Results.BadRequest(new { error = "zar_received_required" });
-        if (value < 0 || value > MaxZarReceived) return Results.BadRequest(new { error = "zar_received_out_of_range", max = MaxZarReceived });
-        if (decimal.Round(value, 2, MidpointRounding.AwayFromZero) != value) return Results.BadRequest(new { error = "zar_received_not_whole_cents" });
-        return null;
-    }
 
     /// <summary>
     /// What a reused idempotency key answers.
@@ -547,25 +551,18 @@ public static class WalletEndpoints
     /// <para>
     /// <b>D2-B10.</b> The replay matched on <c>ExternalReference</c> alone and compared nothing
     /// else, so adjusting +11 with key <c>k1</c> and then +110 with <c>k1</c> answered 200 with
-    /// <c>amount_minutes: 11</c>. A console that mints one key per FORM SESSION rather than per
-    /// INTENDED MOVEMENT therefore silently discarded a corrected amount — and the admin was
-    /// told it had been applied.
-    /// </para>
-    ///
-    /// <para>
-    /// A matching payload replays, exactly as before, because that is what a retried request is.
-    /// A changed one is <c>409 idempotency_key_reused</c> carrying what is actually stored, for
-    /// the admin to look at: silently discarding the correction is the worse of the two failures,
-    /// and it is the one that leaves no trace.
+    /// the 11. A console that mints one key per FORM SESSION rather than per INTENDED MOVEMENT
+    /// therefore silently discarded a corrected amount — and the admin was told it had been
+    /// applied. A matching payload replays; a changed one is <c>409 idempotency_key_reused</c>
+    /// carrying what is actually stored.
     /// </para>
     /// </summary>
-    private static IResult Replay(
-        LedgerEntry stored, AdjustRequest req, AdminCreditReasons.Kind kind, int balanceBefore, Domain.User user)
+    private static IResult Replay(LedgerEntry stored, DeskMovement m, int balanceBefore, Domain.User user)
     {
-        var same = stored.AmountMinutes == req.AmountMinutes
-                && stored.Type == kind.Type
-                && stored.RelatedBookingId == req.RelatedBookingId
-                && stored.ZarPaid == (kind.Type == LedgerEntryType.AdminTopUp ? req.ZarReceivedEither : null);
+        var same = stored.AmountMinutes == m.AmountMinutes
+                && stored.Type == m.Kind.Type
+                && stored.RelatedBookingId == m.RelatedBookingId
+                && stored.ZarPaid == m.ZarPaid;
 
         if (!same)
         {
@@ -585,13 +582,13 @@ public static class WalletEndpoints
         // The stored movement already happened, so the balance it left behind is the one before
         // it plus itself — read back rather than recomputed, so a replay quotes the same pair the
         // original did.
-        return AdjustmentResult(stored, kind, balanceBefore - stored.AmountMinutes, balanceBefore, user);
+        return MovementResult(stored, m, balanceBefore - stored.AmountMinutes, balanceBefore, user);
     }
 
     /// <summary>
-    /// The prefix that keeps a desk adjustment's idempotency key out of the payment
+    /// The prefix that keeps a desk movement's idempotency key out of the payment
     /// gateway's namespace. <c>ledger_entries.ExternalReference</c> is uniquely indexed
-    /// across every row, and a top-up already stores a PayFast transaction id there.
+    /// across every row, and a purchase already stores a PayFast transaction id there.
     /// </summary>
     internal const string AdjustmentReferencePrefix = "adjust:";
 
@@ -606,9 +603,8 @@ public static class WalletEndpoints
     /// index on <c>ExternalReference</c> is global, while every read of the table is scoped
     /// by the tenant query filter — so two clubs sending the same key would collide in the
     /// index, and the second club's lookup for its "existing" row would find nothing,
-    /// because the row belongs to the first. Left un-scoped that is a 500 on a real
-    /// adjustment at best, and one club's ledger row answering another club's request at
-    /// worst. Scoping the reference means the keys of two clubs can never meet.
+    /// because the row belongs to the first. Scoping the reference means the keys of two clubs
+    /// can never meet.
     /// </para>
     /// </summary>
     internal static string? IdempotencyReference(Guid tenantId, string? key)
@@ -627,23 +623,34 @@ public static class WalletEndpoints
     // Block body, not an expression body: lizard's C# parser reads the `{` of an object
     // initialiser as the end of the function and dumps the whole rest of the file into a
     // *global* pseudo-function whose reported length trips `-L 200`. See memory/gotchas.md.
-    private static IResult AdjustmentResult(
-        LedgerEntry entry, AdminCreditReasons.Kind kind, int balanceBefore, int balanceAfter, Domain.User user)
+    private static IResult MovementResult(
+        LedgerEntry entry, DeskMovement m, int balanceBefore, int balanceAfter, Domain.User user)
     {
-        return Results.Ok(new
+        var body = new Dictionary<string, object?>
         {
-            entry_id = entry.Id,
-            type = entry.Type.ToString(),
-            reason_code = kind.Code,
-            amount_minutes = entry.AmountMinutes,
-            zar_received = entry.ZarPaid,
+            ["entry_id"] = entry.Id,
+            ["type"] = entry.Type.ToString(),
+            ["reason_code"] = m.Kind.Code,
+            ["amount_minutes"] = entry.AmountMinutes,
+            ["zar_received"] = entry.ZarPaid,
             // balance_before is here because the admin has to read back what they just did, and
-            // because the console's confirmation ("Priya: 40.00 -> 240.00") must not be composed
-            // client-side from a number it fetched separately and may have fetched before.
-            balance_before_minutes = balanceBefore,
-            balance_after_minutes = balanceAfter,
-            member = new { user_id = user.Id, email = user.Email },
-        });
+            // the console's confirmation must not be composed client-side from a number it
+            // fetched separately and may have fetched before.
+            ["balance_before_minutes"] = balanceBefore,
+            ["balance_after_minutes"] = balanceAfter,
+            ["member"] = new { user_id = user.Id, email = user.Email },
+        };
+        if (m.Package is { } item)
+        {
+            body["package"] = new
+            {
+                id = item.Package.Id,
+                name = item.Package.Name,
+                minutes = item.Package.Minutes,
+                price_zar = item.PriceZar,
+            };
+        }
+        return Results.Ok(body);
     }
 
     /// <summary>
@@ -747,7 +754,9 @@ public sealed record AdjustServices(
     AdminChangeRecorder Changes,
     // The adjustment's live balance frame is held until its transaction commits; see
     // WalletEndpoints.PostAndRecordAsync.
-    RealtimeOutbox Outbox);
+    RealtimeOutbox Outbox,
+    // The club's money symbol, for the desk-sale mail's rand figure (P13 §6).
+    TenantSettingsAccessor Settings);
 
 /// <summary>
 /// <paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates
@@ -762,10 +771,14 @@ public sealed record AdjustServices(
 /// by hand has nothing to retry — but then nothing stops a repeat.
 /// </para>
 /// </summary>
+/// <param name="AmountMinutes">
+/// Signed whole minutes, never 0, at most <c>999 999</c> either way. A <c>long</c> so an
+/// over-long typo is refused by name rather than failing to bind (P13 §3.7).
+/// </param>
 /// <param name="ReasonCode">
-/// WHAT KIND of by-hand movement this is — see <see cref="AdminCreditReasons"/>. The three
-/// top-up codes post an <c>AdminTopUp</c> and count as revenue; the other four post an
-/// <c>AdminAdjustment</c> and do not.
+/// WHAT KIND of adjustment this is — one of <see cref="AdminCreditReasons.AdjustmentCodes"/>,
+/// each posting an <c>AdminAdjustment</c>. A package sold at the desk is the separate
+/// <c>/sell</c> route; its top-up codes are refused here.
 ///
 /// <para>
 /// Nullable for one release only, read as <c>other</c> and logged as deprecated, because the
@@ -774,7 +787,7 @@ public sealed record AdjustServices(
 /// </para>
 /// </param>
 public sealed record AdjustRequest(
-    int AmountMinutes,
+    long AmountMinutes,
     string Reason,
     Guid? RelatedBookingId = null,
     string? IdempotencyKey = null,
@@ -783,11 +796,9 @@ public sealed record AdjustRequest(
     decimal? ZarReceived = null,
     [property: System.Text.Json.Serialization.JsonPropertyName("zar_received")] decimal? ZarReceivedSnake = null)
 {
-    /// <summary>The rand the desk took (B7), under either spelling — required on a top-up code.</summary>
-    public decimal? ZarReceivedEither => ZarReceived ?? ZarReceivedSnake;
-
     /// <summary>
-    /// The code the caller sent under either spelling.
+    /// The code the caller sent under either spelling. <c>zarReceived</c> / <c>zar_received</c>
+    /// stay bound and are ignored: an adjustment is not money the club took (P13 §3.7).
     ///
     /// <para>
     /// Both bind for the reason the settings PUT already documents at length: this API's GET

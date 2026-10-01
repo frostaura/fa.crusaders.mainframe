@@ -93,10 +93,18 @@ public sealed record MemberTariff(
 public static class MemberTariffs
 {
     /// <summary>The tariff for one member, read from their active groups.</summary>
-    // P13-B2: the settings parameter is unused since the tenant default rate went; kept so callers compile.
-    public static async Task<MemberTariff> ForAsync(
-        MainframeDbContext db, Guid userId, TenantSettingsView settings, CancellationToken ct)
+    public static async Task<MemberTariff> ForAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
         => Resolve(await GroupsOfAsync(db, userId, ct));
+
+    /// <summary>
+    /// The same tariff; <paramref name="settings"/> is not read. Since P13 no club setting takes
+    /// part in it — the club-wide top-up rate it once fell back to is gone, and a member in no
+    /// group simply has no discount. Kept as an overload so the callers outside this lane move to
+    /// the three-argument form on their own schedule; delete it when nothing calls it.
+    /// </summary>
+    public static Task<MemberTariff> ForAsync(
+        MainframeDbContext db, Guid userId, TenantSettingsView settings, CancellationToken ct)
+        => ForAsync(db, userId, ct);
 
     /// <summary>A member's active groups, in the club's order. Two indexed reads, no N+1.</summary>
     public static async Task<IReadOnlyList<TariffGroup>> GroupsOfAsync(

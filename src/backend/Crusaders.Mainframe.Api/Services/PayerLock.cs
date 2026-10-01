@@ -13,7 +13,7 @@ namespace Crusaders.Mainframe.Api.Services;
 /// right design and is not negotiable — but it means there is no row to constrain and no
 /// column to check. <c>GetBalanceAsync</c> is an unlocked <c>SUM</c>, so two requests for the
 /// same member both read 200, both find it sufficient, and both debit 200. A member with one
-/// booking's worth of credits could take two courts at once and finish at −200; the GiST
+/// booking's worth of minutes could take two courts at once and finish at −200; the GiST
 /// exclusion constraint protects the <i>slot</i> and nothing protected the <i>balance</i>.
 /// </para>
 ///

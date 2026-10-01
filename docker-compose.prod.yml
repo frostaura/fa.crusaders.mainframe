@@ -81,10 +81,6 @@ services:
       Bootstrap__AdminEmail: dean.martin@frostaura.net
       Bootstrap__AdminPassword: CHANGE-ME-at-least-12-characters
       Bootstrap__Courts: "4"
-      # Credits charged per booking slice on each court created above. Courts carry their own
-      # price, and a court created at 0 is free to book — so this is a money setting, not a
-      # cosmetic one. Change court prices afterwards from Admin → Settings.
-      Bootstrap__SlicePriceCredits: "8"
       # ---- Inherent administrators ----
       # Whoever is listed here holds club-admin rights in every club on this deployment where
       # that address ALREADY has an account. It is applied at sign-in, so an address added

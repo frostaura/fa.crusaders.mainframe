@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>
-/// Which top-up failures the club's admins are told about, and the notice each raises (R23).
+/// Which package-purchase failures the club's admins are told about, and the notice each raises
+/// (R23; the kind keeps its <c>topup.failed</c> code, P13 §12.2).
 ///
 /// <para>
 /// <b>Only the ones the club has to act on.</b> A decline is the member's card; a cancellation is
@@ -48,9 +49,9 @@ public static class TopUpAlerts
     {
         if (!IsClubFacing(pending.FailureReason)) return;
         var reason = pending.FailureReason!;
+        // P13 §5: the notice names the package and its minutes, from the purchase row.
         AdminNotices.Stage(db, tenantId, AdminNotices.TopUpFailed(
-            reason, pending.Id.ToString("N"), pending.AmountZar, await NameOfAsync(db, pending.UserId, ct),
-            pending.ExternalReference ?? pending.IdempotencyKey));
+            reason, pending.Id.ToString("N"), await NameOfAsync(db, pending.UserId, ct), pending));
     }
 
     /// <summary>
@@ -61,8 +62,7 @@ public static class TopUpAlerts
         MainframeDbContext db, Guid tenantId, string reason, string identity, PendingTopup? pending, CancellationToken ct)
     {
         var name = pending is null ? null : await NameOfAsync(db, pending.UserId, ct);
-        var notice = AdminNotices.TopUpFailed(
-            reason, identity, pending?.AmountZar, name, pending is null ? null : pending.ExternalReference ?? pending.IdempotencyKey);
+        var notice = AdminNotices.TopUpFailed(reason, identity, name, pending);
         await AdminNotices.RaiseAsync(db, tenantId, notice, DateTimeOffset.UtcNow, ct);
     }
 

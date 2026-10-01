@@ -3,8 +3,8 @@ using Crusaders.Mainframe.Api.Domain;
 namespace Crusaders.Mainframe.Api.Endpoints;
 
 /// <summary>
-/// What kind of by-hand money movement the desk is making — the closed set, and which ledger type
-/// each one posts.
+/// What kind of by-hand minutes movement the desk is making — the closed set, and which ledger
+/// type each one posts. The class keeps its name (P13 §2.5): it names no unit on the wire.
 ///
 /// <para>
 /// <b>Why a code at all.</b> One free-text <c>Reason</c> carried a cash top-up, an EFT, a
@@ -45,40 +45,49 @@ public static class AdminCreditReasons
     /// <summary>Everything else, which is also what a request carrying no code at all is read as.</summary>
     public const string Other = "other";
 
-    /// <summary>The whole closed set, served in the refusal so a client never has to guess.</summary>
-    public static readonly string[] All =
-        [TopUpCash, TopUpEft, TopUpCardOffline, Goodwill, Correction, RefundOutsideSystem, Other];
+    /// <summary>
+    /// The codes the desk SELLS a package under (<c>POST /admin/minutes/{id}/sell</c>, P13 §3.7):
+    /// money the club took, posted as <c>AdminTopUp</c> and counted as revenue.
+    /// </summary>
+    public static readonly string[] SaleCodes = [TopUpCash, TopUpEft, TopUpCardOffline];
+
+    /// <summary>
+    /// The codes the desk ADJUSTS a balance under (<c>POST /admin/minutes/{id}/adjust</c>):
+    /// goodwill and corrections, posted as <c>AdminAdjustment</c>. Since P13 a sale is its own
+    /// route, so a top-up code sent here is refused rather than read as a sale with a signed amount.
+    /// </summary>
+    public static readonly string[] AdjustmentCodes = [Goodwill, Correction, RefundOutsideSystem, Other];
 
     /// <summary>A resolved code and the ledger type it posts.</summary>
     public readonly record struct Kind(string Code, LedgerEntryType Type);
 
     /// <summary>
-    /// The kind a request names, or null when it names one that does not exist.
+    /// The adjustment kind a request names, or null when it names one the adjust route does not take.
     ///
     /// <para>
-    /// <b>An absent code is accepted for one release</b> as <see cref="Other"/> →
-    /// <c>AdminAdjustment</c>, which is today's exact behaviour, and is logged as deprecated. The
-    /// alternative — requiring it immediately — breaks every console build in the field the
-    /// moment this deploys, for a field the frontend is adding in the same wave. The grace is
-    /// one release and the log line is what says when it can go.
+    /// <b>An absent code is accepted for one release</b> as <see cref="Other"/>, which is the
+    /// pre-code behaviour, and is logged as deprecated — requiring it at once would break every
+    /// console build in the field the moment this deploys.
     /// </para>
     /// </summary>
-    public static Kind? Resolve(string? reasonCode, ILogger logger)
+    public static Kind? ResolveAdjustment(string? reasonCode, ILogger logger)
     {
         if (string.IsNullOrWhiteSpace(reasonCode))
         {
             logger.LogWarning(
-                "an admin credit adjustment arrived with no reason_code; defaulting to '{Code}'. "
+                "an admin minutes adjustment arrived with no reason_code; defaulting to '{Code}'. "
                 + "This grace lasts one release — after it the request is a 400.", Other);
             return new Kind(Other, LedgerEntryType.AdminAdjustment);
         }
 
         var code = reasonCode.Trim();
-        return code switch
-        {
-            TopUpCash or TopUpEft or TopUpCardOffline => new Kind(code, LedgerEntryType.AdminTopUp),
-            Goodwill or Correction or RefundOutsideSystem or Other => new Kind(code, LedgerEntryType.AdminAdjustment),
-            _ => null,
-        };
+        return AdjustmentCodes.Contains(code) ? new Kind(code, LedgerEntryType.AdminAdjustment) : null;
+    }
+
+    /// <summary>The sale kind a request names, or null when it is not one of <see cref="SaleCodes"/>. Never defaulted.</summary>
+    public static Kind? ResolveSale(string? reasonCode)
+    {
+        var code = reasonCode?.Trim();
+        return code is not null && SaleCodes.Contains(code) ? new Kind(code, LedgerEntryType.AdminTopUp) : null;
     }
 }

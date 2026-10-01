@@ -69,8 +69,15 @@ public static class AdminChangeActions
     public const string BookingShareSettledOutside = "booking.share_settled_outside";
     public const string BookingShareCollected = "booking.share_collected";
 
+    // Stored codes in an append-only table, so they keep "credit" (P13 §2.5); only their words
+    // changed: an adjustment of a member's minutes, and a package sold at the desk.
     public const string CreditAdjusted = "credit.adjusted";
     public const string CreditToppedUp = "credit.topped_up";
+
+    // P13 §4.5: the club's minutes packages. Area credit, subject kind package, none reason-required.
+    public const string PackageCreated = "package.created";
+    public const string PackageUpdated = "package.updated";
+    public const string PackageArchived = "package.archived";
 
     // ---- group ----
     public const string GroupCreated = "group.created";
@@ -193,7 +200,7 @@ public static class AdminChangeActions
         BookingsBulkCancelled, BookingsBulkBooked, BookingCancelledByAdmin, BookingBlocked, BookingBlockLifted,
         BookingBookedOnBehalf, BookingOverdraftAuthorised,
         BookingPlayerAdded, BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
-        CreditAdjusted, CreditToppedUp,
+        CreditAdjusted, CreditToppedUp, PackageCreated, PackageUpdated, PackageArchived,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
         MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
@@ -233,7 +240,8 @@ public static class AdminChangeActions
                 or BookingBookedOnBehalf or BookingOverdraftAuthorised
                 or BookingPlayerAdded or BookingPlayerRemoved or BookingPlayerAcceptedOnBehalf
                 or BookingShareSettledOutside or BookingShareCollected => AdminChangeAreas.Booking,
-            CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
+            CreditAdjusted or CreditToppedUp
+                or PackageCreated or PackageUpdated or PackageArchived => AdminChangeAreas.Credit,
             GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
                 or GroupDeleted => AdminChangeAreas.Group,
             MemberApproved or MemberRejected or MemberSuspended
@@ -283,8 +291,11 @@ public static class AdminChangeActions
             BookingShareSettledOutside => $"Recorded a share as paid outside the app{of}",
             BookingShareCollected => $"Collected a member's share of a booking{of}",
 
-            CreditAdjusted => $"Adjusted a member's credits{of}",
-            CreditToppedUp => $"Topped up a member's credits{of}",
+            CreditAdjusted => $"Adjusted a member's minutes{of}",
+            CreditToppedUp => $"Sold a member a package{of}",
+            PackageCreated => $"Created a minutes package{of}",
+            PackageUpdated => $"Changed a minutes package{of}",
+            PackageArchived => $"Archived a minutes package{of}",
 
             GroupCreated => $"Created a member group{of}",
             GroupUpdated => $"Changed a member group{of}",

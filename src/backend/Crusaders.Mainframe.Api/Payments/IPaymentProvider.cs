@@ -26,7 +26,7 @@ public sealed record RegisterCheckoutRequest(
     public string? NameLast { get; init; }
 
     /// <summary>Shown on the gateway's own payment page and on the member's card statement.</summary>
-    public string ItemName { get; init; } = "Crusaders credits top-up";
+    public string ItemName { get; init; } = "Court minutes";
 }
 
 public sealed record RegisterCheckoutResult(

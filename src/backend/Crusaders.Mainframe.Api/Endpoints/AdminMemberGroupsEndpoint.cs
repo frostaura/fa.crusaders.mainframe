@@ -47,7 +47,7 @@ public static class AdminMemberGroupsEndpoint
 
     private static async Task<IResult> SetAsync(
         Guid userId, MemberGroupsSetRequest req, [AsParameters] GroupDeps deps,
-        TenantSettingsAccessor settings, HttpContext ctx, CancellationToken ct)
+        HttpContext ctx, CancellationToken ct)
     {
         var db = deps.Db;
         if (!await db.Users.AnyAsync(u => u.Id == userId, ct))
@@ -70,8 +70,7 @@ public static class AdminMemberGroupsEndpoint
 
         if (Refuse(wanted, current, groups) is { } refusal) return refusal;
 
-        var s = await settings.GetAsync(ct);
-        var before = await MemberTariffs.ForAsync(db, userId, s, ct);
+        var before = await MemberTariffs.ForAsync(db, userId, ct);
         var added = wanted.Where(id => current.All(c => c.GroupId != id)).ToList();
         var removed = current.Where(c => !wanted.Contains(c.GroupId)).ToList();
 
@@ -102,7 +101,7 @@ public static class AdminMemberGroupsEndpoint
         }
         await db.SaveChangesAsync(ct);
 
-        var tariff = await MemberTariffs.ForAsync(db, userId, s, ct);
+        var tariff = await MemberTariffs.ForAsync(db, userId, ct);
         return Results.Ok(new
         {
             user_id = userId,

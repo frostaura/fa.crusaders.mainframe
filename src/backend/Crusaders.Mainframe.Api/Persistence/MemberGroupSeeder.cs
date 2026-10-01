@@ -93,7 +93,8 @@ public static class MemberGroupSeeder
             AdvanceBookingDays = null,
             IsSystemDefault = true,
             SystemKey = league ? MemberGroupSystemKeys.League : null,
-            // P13-B2: no package discount on either seeded group — League starts with none (§4.6).
+            // PackageDiscountBps stays null on both: League starts with no discount (P13 §4.6),
+            // and a club that wants one sets it on the group.
             // The non-league group has no say (null), not "withholds" — a league member who is
             // also put in it must keep the priority the league group grants.
             PeakPriority = league ? true : null,
