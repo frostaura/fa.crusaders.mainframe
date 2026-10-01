@@ -12,7 +12,9 @@ import { ADMIN_NAV, ADMIN_NAV_ITEMS, PENDING_APPLICATIONS_HREF, type AdminNavIte
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, CaretRight, CheckCircle, SealCheck, WarningCircle } from "@/components/ui/icons";
+import { AutoGrid } from "@/components/ui/auto-grid";
 import { Interactable } from "@/components/ui/interactable";
+import { WithAside } from "@/components/ui/with-aside";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -71,7 +73,8 @@ const TONE_CHIP: Record<CardTone, string> = {
   warning: "bg-warning-soft text-warning-strong",
 };
 
-const CARD = "flex min-h-40 flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left shadow-xs sm:p-5";
+/** No height floor on a phone (R4 form factor): three 160px boxes pushed everything else down. */
+const CARD = "flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left shadow-xs sm:min-h-40 sm:p-5";
 
 type AttentionCardProps = {
   item: AdminNavItem;
@@ -204,7 +207,9 @@ function FaultBreakdown({ counts }: { counts: AdminAttention["faultCounts"] }) {
 function AttentionGrid({ attention }: { attention: AdminAttention }) {
   const failed = new Set(attention.failed);
   return (
-    <div className="grid gap-4 md:grid-cols-3">
+    // Sized by the box (R4 form factor): beside the alerts rail, inside the rail-less 1024 frame and
+    // at 200 % text alike — `md:grid-cols-3` was the viewport's answer, wrong beside the rail.
+    <AutoGrid min="card" max={3} gap="lg">
       <AttentionCard
         item={itemById("members")}
         href={PENDING_APPLICATIONS_HREF}
@@ -249,7 +254,7 @@ function AttentionGrid({ attention }: { attention: AdminAttention }) {
           detail: <FaultBreakdown counts={attention.faultCounts} />,
         }}
       />
-    </div>
+    </AutoGrid>
   );
 }
 
@@ -257,7 +262,7 @@ function AttentionSkeleton() {
   return (
     <div data-attention-loading="" aria-busy="true">
       <p role="status" className="sr-only">Checking what needs attention…</p>
-      <div className="grid gap-4 md:grid-cols-3">
+      <AutoGrid min="card" max={3} gap="lg">
         {[0, 1, 2].map((key) => (
           <div key={key} className={cn(CARD, "shadow-none")} aria-hidden="true">
             <span className="flex items-center gap-2">
@@ -268,7 +273,7 @@ function AttentionSkeleton() {
             <Skeleton className="h-4 w-3/4" />
           </div>
         ))}
-      </div>
+      </AutoGrid>
     </div>
   );
 }
@@ -372,7 +377,9 @@ function QuickLinkGroup({ label, children }: { label: string; children: ReactNod
       <h3 id={id} className={typography({ variant: "overline" })}>{label}</h3>
       {/* `grid-cols-1` is minmax(0, 1fr): an implicit column is floored at its longest word, and
           at 200% text on a phone that pushed every card past the screen (R3 X-4). */}
-      <ul aria-labelledby={id} className="grid grid-cols-1 gap-3 sm:grid-cols-2">{children}</ul>
+      {/* AutoGrid's tiles are `min(100%, 18rem)`, never an implicit column, so 200 % text on a
+          phone still gets one column that fits (R3 X-4). Three across where the box holds them. */}
+      <AutoGrid as="ul" min="card" max={3} aria-labelledby={id}>{children}</AutoGrid>
     </div>
   );
 }
@@ -398,19 +405,30 @@ export default function AdminHome() {
         )}
         freshness={<Freshness at={attention.checkedAt} />}
       />
-      <Section title="Needs attention">
-        <NeedsAttention attention={attention} />
-      </Section>
-      <Section title={RECENT_ALERTS_COPY.title} description={RECENT_ALERTS_COPY.description}>
-        <RecentAlerts feed={alerts} />
-        {/* F3.11: the switches lived only in Profile as far as anyone could find them. */}
-        <TextLink variant="standalone" to={EMAIL_ALERTS_HREF} className="self-start text-sm">
-          {EMAIL_ALERTS_COPY.chooseLink}
-        </TextLink>
-      </Section>
-      <Section title="Console" description="Every section, and what it is for.">
-        <QuickLinks attention={attention} />
-      </Section>
+      {/* R4 form factor (SPEC §3.10): from a 64rem box the alerts are a rail beside the work —
+          sticky, scrolling on their own — instead of a 1,000px list between the attention cards and
+          the console. Narrower, they follow the attention cards as before. */}
+      <WithAside
+        at="64rem"
+        asideWidth="24rem"
+        asideLabel={RECENT_ALERTS_COPY.title}
+        aside={(
+          <Section title={RECENT_ALERTS_COPY.title} description={RECENT_ALERTS_COPY.description}>
+            <RecentAlerts feed={alerts} />
+            {/* F3.11: the switches lived only in Profile as far as anyone could find them. */}
+            <TextLink variant="standalone" to={EMAIL_ALERTS_HREF} className="self-start text-sm">
+              {EMAIL_ALERTS_COPY.chooseLink}
+            </TextLink>
+          </Section>
+        )}
+      >
+        <Section title="Needs attention">
+          <NeedsAttention attention={attention} />
+        </Section>
+        <Section title="Console" description="Every section, and what it is for.">
+          <QuickLinks attention={attention} />
+        </Section>
+      </WithAside>
     </PageShell>
   );
 }
