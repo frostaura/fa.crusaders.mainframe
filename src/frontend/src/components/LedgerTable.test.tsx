@@ -154,6 +154,9 @@ describe("LedgerTable — what survives a 375px screen", () => {
     // back and repeating the name under the amount would be noise.
     for (const cell of amounts) {
       expect(cell.querySelector("span")!.className).toContain("sm:hidden");
+      // R4 form factor: the amount cell is nowrap; the name under it wraps, or a long one held
+      // the column wide and squeezed the movement beside it on a phone.
+      expect(cell.querySelector("span")!.className.split(" ")).toEqual(expect.arrayContaining(["whitespace-normal", "break-words"]));
     }
   });
   /**

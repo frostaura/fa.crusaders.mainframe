@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
  * </p>
  */
 type At = "56rem" | "64rem" | "72rem";
-type AsideWidth = "18rem" | "20rem" | "22rem" | "24rem";
+type AsideWidth = "18rem" | "20rem" | "22rem" | "24rem" | "28rem";
 
 /** Every class written whole, so Tailwind's scanner sees it. */
 const GRID: Record<At, string> = {
@@ -63,6 +63,7 @@ const WIDTH: Record<AsideWidth, string> = {
   "20rem": "[--aside-w:20rem] 3xl:[--aside-w:24rem]",
   "22rem": "[--aside-w:22rem] 3xl:[--aside-w:24rem]",
   "24rem": "[--aside-w:24rem]",
+  "28rem": "[--aside-w:28rem]",
 };
 /** `first`: DOM-first, drawn in the second column. */
 const SECOND_COLUMN: Record<At, string> = {

@@ -35,6 +35,7 @@ type Breakpoint = "sm" | "md" | "lg" | "xl";
 /** Written whole, so Tailwind's scanner sees every class. */
 const HIDE_FROM: Record<Breakpoint, string> = { sm: "sm:hidden", md: "md:hidden", lg: "lg:hidden", xl: "xl:hidden" };
 const SHOW_FROM: Record<Breakpoint, string> = { sm: "hidden sm:flex", md: "hidden md:flex", lg: "hidden lg:flex", xl: "hidden xl:flex" };
+const STICKY_FROM: Record<Breakpoint, string> = { sm: "static sm:sticky", md: "static md:sticky", lg: "static lg:sticky", xl: "static xl:sticky" };
 
 export type ContextBarProps = {
   position: "top" | "bottom";
@@ -48,6 +49,11 @@ export type ContextBarProps = {
   primary?: ReactNode;
   /** A `bottom` bar shows only below this breakpoint; a `top` bar only from it. */
   until?: Breakpoint;
+  /**
+   * `top` only: the strip is drawn at every width but STICKS only from this breakpoint — below it
+   * a tall filter strip would hold half a phone's screen (admin Transactions).
+   */
+  stickyFrom?: Breakpoint;
   /**
    * `top` only: run the bar out to the page frame's edges (through the gutters), as a page-level
    * strip. Off inside a column, where the bleed would run over the column beside it.
@@ -74,7 +80,7 @@ function Parts({ summary, actions, primary, children }: Pick<ContextBarProps, "s
 
 export function ContextBar(props: ContextBarProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { position, label, summary, actions, primary, until, bleed = true, className, children } = props;
+  const { position, label, summary, actions, primary, until, stickyFrom, bleed = true, className, children } = props;
   const ref = useRef<HTMLDivElement>(null);
   usePublishDockedHeight(ref, position === "bottom");
   const parts = <Parts summary={summary} actions={actions} primary={primary}>{children}</Parts>;
@@ -103,6 +109,7 @@ export function ContextBar(props: ContextBarProps) {
         "sticky top-0 z-sticky flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-bg-surface py-2",
         bleed ? "-mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 3xl:-mx-12 3xl:px-12" : "rounded-b-xl px-3",
         until && SHOW_FROM[until],
+        stickyFrom && STICKY_FROM[stickyFrom],
         className,
       )}
     >

@@ -43,5 +43,7 @@ Page shell, "Use the width"). Admin screens: `decisions-admin-layout`.
   so a docked bar inside a PageShell still docks to the viewport.
 - **A skeleton bar with a rem width beside a switch** (`w-48` = 384px at 200 %) pushed a 390 phone
   179px sideways while the switches were read: `min-w-0` on the column, `max-w-full` on the bar.
+- **lizard reads `<Columns min="panel" max={3} …>` as a TS generic** and the component runs to the
+  end of the file (Profile's AccountCards: "408 length"); an attribute before `min` fixes it.
 - **Under load (≥40) Playwright lazy-route tests time out on "Opening the page…"** and look like
   defects; rerun alone before believing one.

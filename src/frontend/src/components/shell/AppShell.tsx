@@ -84,15 +84,20 @@ const HEADER_FRAME = [
   "mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
   "3xl:px-12 3xl:group-has-[[data-page-frame=full]]/shell:max-w-page",
 ].join(" ");
-const HEADER_OVER_RAIL = "xl:max-w-none xl:gap-x-8 xl:pl-0";
+/** 3xl: the frame's gutter is 3rem, so the gap from the crest box is too (3xl:px-12 would put the pl back). */
+const HEADER_OVER_RAIL = "xl:max-w-none xl:gap-x-8 xl:pl-0 3xl:gap-x-12 3xl:pl-0";
 /** The rail is `w-64` and its items start 24px in (px-3 + px-3). */
 const CREST_OVER_RAIL = "xl:w-64 xl:pl-6";
+
+const BANNER = "mx-auto w-full max-w-wide px-4 pt-4 empty:hidden print:hidden sm:px-6 lg:px-8 3xl:px-12";
+/** On /admin from xl the shut-doors banner starts where the content does: right of the 16rem rail. */
+const BANNER_BESIDE_RAIL = "xl:ml-64 xl:w-auto xl:max-w-none";
 
 /** The frame the bar follows: the admin console's (over the rail) or a member page's. */
 function chromeFrame(admin: boolean) {
   return admin
-    ? { name: "admin", header: cn(HEADER_FRAME, HEADER_OVER_RAIL), crest: cn("flex shrink-0", CREST_OVER_RAIL) }
-    : { name: "member", header: HEADER_FRAME, crest: "flex shrink-0" };
+    ? { name: "admin", header: cn(HEADER_FRAME, HEADER_OVER_RAIL), crest: cn("flex shrink-0", CREST_OVER_RAIL), banner: cn(BANNER, BANNER_BESIDE_RAIL) }
+    : { name: "member", header: HEADER_FRAME, crest: "flex shrink-0", banner: BANNER };
 }
 
 export default function AppShell() {
@@ -208,7 +213,7 @@ export default function AppShell() {
           card that goes in a cupboard does not carry "the doors are shut" until March (B14).
         */}
         {isAdmin ? (
-          <div className="mx-auto w-full max-w-wide px-4 pt-4 empty:hidden print:hidden sm:px-6 lg:px-8 3xl:px-12">
+          <div className={frame.banner}>
             <ShutDoorsBanner chrome={doors} />
           </div>
         ) : null}

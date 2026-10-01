@@ -51,8 +51,10 @@ export const CELL: Record<Column, (r: LedgerRow, note?: string) => ReactNode> = 
       <TableCell className={cn(CELL_CLASS.amount, amountInk(r.signedAmountCredits))}>
         {formatSignedCredits(r.signedAmountCredits)}
         {/* On a phone the From/To columns are hidden, so the counterparty rides under the
-            amount rather than being lost — picked by sign, because the member is the other end. */}
-        <span className="block text-xs font-normal text-text-muted sm:hidden">{credit ? r.from : r.to}</span>
+            amount rather than being lost — picked by sign, because the member is the other end.
+            R4 form factor: it WRAPS (the amount's cell is nowrap, and a long name such as
+            "Dispute Partner Organiser" held the column wide and squeezed the movement beside it). */}
+        <span className="block whitespace-normal break-words text-xs font-normal text-text-muted sm:hidden">{credit ? r.from : r.to}</span>
       </TableCell>
     );
   },

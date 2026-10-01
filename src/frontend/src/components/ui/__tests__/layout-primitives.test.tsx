@@ -154,6 +154,11 @@ describe("WithAside", () => {
     expect(aside.className.split(" ")).toEqual(expect.arrayContaining(["hidden", "@[64rem]/aside:flex"]));
     expect(aside.parentElement!.className).toContain("3xl:[--aside-w:24rem]");
   });
+
+  it("takes a 28rem rail where a catalogue needs it", () => {
+    render(<WithAside asideLabel="Catalogue" asideWidth="28rem" aside={<p>Vars</p>}><p>Endpoints</p></WithAside>);
+    expect(screen.getByRole("complementary", { name: "Catalogue" }).parentElement!.className).toContain("[--aside-w:28rem]");
+  });
 });
 
 describe("AutoGrid and Columns", () => {
@@ -187,6 +192,13 @@ describe("ContextBar", () => {
     expect(within(bar).getByText("Last 30 days")).toBeInTheDocument();
     expect(within(bar).getByRole("button", { name: "Download CSV" })).toBeInTheDocument();
     expect(document.documentElement.style.getPropertyValue("--context-bar-height")).toBe("");
+  });
+
+  it("a top bar can stick only from a breakpoint, drawn in the flow below it", () => {
+    render(<ContextBar position="top" label="Filters and totals" stickyFrom="lg" summary="All types" />);
+    const bar = screen.getByRole("region", { name: "Filters and totals" });
+    expect(bar.className.split(" ")).toEqual(expect.arrayContaining(["static", "lg:sticky"]));
+    expect(bar.className).not.toContain("hidden");
   });
 
   it("a bottom bar docks above the tab bar, hides from its breakpoint, and reserves its room while mounted", () => {

@@ -136,12 +136,7 @@ function ProfileCard(props: { title: string; description?: ReactNode; children: 
   );
 }
 
-/*
- * The last row is item 16's third recall point: dismissible help must stay reachable from a
- * permanent place. The other two are the home tile and the link under the code; this is the one
- * a member reaches for when already looking for the thing that explains this, which for most
- * people is the account screen.
- */
+/** The page in two tabs: My game (default) and Account (R4 form factor, SPEC 3.7). */
 function ProfileSections({ profile }: { profile: MyProfile }) {
   const [tab, setTab] = useProfileTab();
   return (
@@ -154,41 +149,58 @@ function ProfileSections({ profile }: { profile: MyProfile }) {
         <MyGameSection />
       </TabsContent>
       <TabsContent value="account" className="pt-6">
-        {/* Unequal cards in columns (masonry-like): two at lg, three on a wide page. */}
-        <Columns min="panel" max={3} data-account-cards="">
-          <ProfileCard title={DETAILS_TITLE}>
-            <PhotoPicker profile={profile} />
-            <div className="border-t border-border pt-4">
-              {/* NOT keyed on the saved name (F4.7): a key change remounted the form on every save,
-                  and the Save button the member had just pressed left the document with focus on it. */}
-              <NameForm profile={profile} />
-            </div>
-          </ProfileCard>
-          <PasswordCard />
-          <MemberDoorHistory />
-          <PasskeysCard />
-          <ProfileCard title={SIGN_OUT_EVERYWHERE_COPY.title} description={SIGN_OUT_EVERYWHERE_COPY.description}>
-            <div><SignOutEverywhere /></div>
-          </ProfileCard>
-          <ProfileCard title={PRIVACY_COPY.title} description={PRIVACY_COPY.description}>
-            <PrivacySwitches />
-          </ProfileCard>
-          {profile.is_admin ? (
-            <ProfileCard title={EMAIL_ALERTS_COPY.profileTitle} description={EMAIL_ALERTS_COPY.description}>
-              <EmailAlertSwitches />
-              <p className="text-sm text-text-secondary">{EMAIL_ALERTS_COPY.feedNote}</p>
-            </ProfileCard>
-          ) : null}
-          <div className="flex items-start gap-3 rounded-xl border border-dashed border-border px-4 py-3 sm:px-6">
-            <BookOpen aria-hidden="true" size={20} className="mt-3 shrink-0 text-text-muted" />
-            <div className="flex min-w-0 flex-col items-start">
-              <TextLink to={GUIDE_PATH} variant="standalone">{GUIDE_LINK_LABEL}</TextLink>
-              <p className="text-sm text-text-secondary">{GUIDE_TILE_HINT}.</p>
-            </div>
-          </div>
-        </Columns>
+        <AccountCards profile={profile} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+/**
+ * The Account tab: unequal cards in columns (masonry-like) — two at lg, three on a wide page.
+ *
+ * <p>
+ * The last card is item 16's third recall point: dismissible help must stay reachable from a
+ * permanent place. The other two are the home tile and the link under the code; this is the one
+ * a member reaches for when already looking for the thing that explains this, which for most
+ * people is the account screen.
+ * </p>
+ */
+function AccountCards({ profile }: { profile: MyProfile }) {
+  return (
+    // Attribute order matters to lizard: `<Columns min="panel" max={3}` right after the tag is
+    // read as a generic and the function runs to the end of the file (the complexity gate's 200).
+    <Columns data-account-cards="" min="panel" max={3}>
+      <ProfileCard title={DETAILS_TITLE}>
+        <PhotoPicker profile={profile} />
+        <div className="border-t border-border pt-4">
+          {/* NOT keyed on the saved name (F4.7): a key change remounted the form on every save,
+              and the Save button the member had just pressed left the document with focus on it. */}
+          <NameForm profile={profile} />
+        </div>
+      </ProfileCard>
+      <PasswordCard />
+      <MemberDoorHistory />
+      <PasskeysCard />
+      <ProfileCard title={SIGN_OUT_EVERYWHERE_COPY.title} description={SIGN_OUT_EVERYWHERE_COPY.description}>
+        <div><SignOutEverywhere /></div>
+      </ProfileCard>
+      <ProfileCard title={PRIVACY_COPY.title} description={PRIVACY_COPY.description}>
+        <PrivacySwitches />
+      </ProfileCard>
+      {profile.is_admin ? (
+        <ProfileCard title={EMAIL_ALERTS_COPY.profileTitle} description={EMAIL_ALERTS_COPY.description}>
+          <EmailAlertSwitches />
+          <p className="text-sm text-text-secondary">{EMAIL_ALERTS_COPY.feedNote}</p>
+        </ProfileCard>
+      ) : null}
+      <div className="flex items-start gap-3 rounded-xl border border-dashed border-border px-4 py-3 sm:px-6">
+        <BookOpen aria-hidden="true" size={20} className="mt-3 shrink-0 text-text-muted" />
+        <div className="flex min-w-0 flex-col items-start">
+          <TextLink to={GUIDE_PATH} variant="standalone">{GUIDE_LINK_LABEL}</TextLink>
+          <p className="text-sm text-text-secondary">{GUIDE_TILE_HINT}.</p>
+        </div>
+      </div>
+    </Columns>
   );
 }
 

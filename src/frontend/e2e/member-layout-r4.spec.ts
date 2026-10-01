@@ -546,3 +546,36 @@ test.describe("How it works (SPEC P3)", () => {
     });
   }
 });
+
+test.describe("the app bar follows the page frame (SPEC 2.1)", () => {
+  const adminRoutes = (): ApiRoute[] => [
+    { path: "/api/v1/whoami", body: { ...SESSION_MEMBER, is_admin: true } },
+    { path: "/api/v1/me/profile", body: { ...PROFILE, is_admin: true } },
+    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/admin/members", body: [] },
+    { path: "/api/v1/admin/doors", body: { doors: [], timezone: "Africa/Johannesburg", shut_all_at: null } },
+    { path: "/api/v1/admin/courts/", body: [] },
+  ];
+  for (const width of [1280, 1920] as const) {
+    test(`/admin at ${width}: the crest over the rail, the nav at the content's edge`, async ({ page }, info) => {
+      test.skip(info.project.name !== "desktop", "a desktop width");
+      await open(page, "/admin/courts", adminRoutes(), width);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      const crest = (await box(page, "[data-app-crest]"))!;
+      const rail = (await box(page, "[data-admin-rail]"))!;
+      const nav = (await page.locator("header nav li").first().boundingBox())!;
+      const h1 = (await page.getByRole("heading", { level: 1 }).boundingBox())!;
+      expect(crest.right, "the crest's box is the rail's width").toBeLessThanOrEqual(rail.right + 1);
+      expect(Math.abs(nav.x - h1.x), "the nav starts where the content does").toBeLessThanOrEqual(2);
+    });
+  }
+
+  test("a member page that widens at 3xl takes the bar with it", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "a desktop width");
+    await open(page, `/bookings?date=${BOOK_DAY}`, bookingsRoutes(), 1920);
+    await page.waitForSelector('[role="grid"]');
+    const crest = (await box(page, "[data-app-crest]"))!;
+    const h1 = (await page.getByRole("heading", { level: 1 }).boundingBox())!;
+    expect(Math.abs(crest.x - h1.x)).toBeLessThanOrEqual(2);
+  });
+});

@@ -92,7 +92,7 @@ export default function AdminLedgerPage() {
       {/* R4 form factor (SPEC §3.9): the filters and the range's totals are ONE bar that stays in
           view while the book scrolls under it (from lg); on a phone the filters fold behind one
           button that says what they are set to, and the bar scrolls away with the page. */}
-      <ContextBar position="top" label="Filters and totals" className="max-lg:static">
+      <ContextBar position="top" label="Filters and totals" stickyFrom="lg">
         <div className="flex min-w-0 flex-[3_1_36rem] flex-col gap-2">
           <FiltersToggle open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} from={from} to={to} type={type} />
           <LedgerFilterBar from={from} to={to} type={type} query={userQuery} onChange={setFilter} className={filtersOpen ? "flex" : "hidden lg:flex"} />
