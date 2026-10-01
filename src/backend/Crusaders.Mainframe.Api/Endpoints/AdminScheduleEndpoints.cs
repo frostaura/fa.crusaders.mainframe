@@ -607,10 +607,43 @@ public static class AdminScheduleEndpoints
             status = HasEnded(s, today) ? "ended" : "active",
             courts = courts.GetValueOrDefault(s.Id, []).Select(c => new { id = c.Id, name = c.Name }).ToList(),
             next_occurrence = next.GetValueOrDefault(s.Id),
+            rules = Rules(s, today),
             materialised_through = s.MaterialisedThrough,
             created_by_name = PersonNames.Of(s.CreatedByUserId, names),
             created_at = s.CreatedAt,
         };
+    }
+
+    /// <summary>
+    /// Every rule the series has had, oldest first, each with the dates it governs (review round 5,
+    /// A5-4). The top-level days and hours are the LATEST rule; a console that described the series
+    /// from them alone said "Saturdays" for a series still on Sundays until a change took over, and
+    /// counted the wrong weekdays in its End dialog. <c>until</c> is exclusive and null on the last;
+    /// <c>in_force</c> marks the one governing today (the first, before the series starts).
+    /// </summary>
+    private static List<object> Rules(BookingSchedule s, DateOnly today)
+    {
+        var periods = new List<(DateOnly From, DateOnly? Until, ScheduleRule Rule)>();
+        var from = s.StartDate;
+        // A rule replaced before the series' first date governed nothing, so it is not listed.
+        foreach (var earlier in ScheduleRuleHistory.Earlier(s).Where(e => e.Until > s.StartDate))
+        {
+            periods.Add((from, earlier.Until, earlier.Rule));
+            from = earlier.Until;
+        }
+        periods.Add((from, null, ScheduleRuleHistory.Current(s)));
+
+        var governing = periods.FindIndex(p => p.Until is not { } until || today < until);
+        return periods.Select((p, i) => (object)new
+        {
+            from = p.From,
+            until = p.Until,
+            days = ScheduleRequestParsing.DayKeys(p.Rule.DaysOfWeek),
+            start = ScheduleRequestParsing.Clock(p.Rule.StartMinute),
+            end = ScheduleRequestParsing.Clock(p.Rule.EndMinute),
+            interval_weeks = p.Rule.IntervalWeeks,
+            in_force = i == governing,
+        }).ToList();
     }
 
     /// <summary>
