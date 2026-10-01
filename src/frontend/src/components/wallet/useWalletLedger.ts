@@ -143,13 +143,7 @@ export function useWalletLedger() {
   const held = liveHeld ?? readHeld;
   if (rows === null && kept) {
     // Nothing read in this visit yet: the kept page, whole, with its "as of".
-    const page = kept.value as WalletResponse;
-    const keptBalance = live.balance ?? page.balance_credits;
-    return {
-      rows: page.entries, shareBookings: shareBookingsFrom(page.share_bookings), cardBalance: page.balance_credits,
-      total: page.total_entries, busy, error, readAt: kept.at, stale, offline: unreachable, balance: keptBalance,
-      painted: countUp ?? keptBalance, load, held: liveHeld ?? heldFrom(page),
-    };
+    return { ...fromKept(kept.value as WalletResponse, live.balance, liveHeld, countUp), busy, error, readAt: kept.at, stale, offline: unreachable, load };
   }
   return { rows, shareBookings, cardBalance, total, busy, error, readAt, stale: stale && rows !== null, offline: unreachable, balance, painted: countUp ?? balance, load, held };
 }
@@ -192,6 +186,15 @@ function useMoneyAnnouncement(
       durationMs: MONEY_TOAST_MS,
     });
   }, [delta, rows, toast]);
+}
+
+/** The page the phone kept, as the figures the card and ledger draw — the live figure still wins. */
+function fromKept(page: WalletResponse, liveBalance: number | null, liveHeld: HeldFigures | null, countUp: number | null) {
+  const balance = liveBalance ?? page.balance_credits;
+  return {
+    rows: page.entries, shareBookings: shareBookingsFrom(page.share_bookings), cardBalance: page.balance_credits,
+    total: page.total_entries, balance, painted: countUp ?? balance, held: liveHeld ?? heldFrom(page),
+  };
 }
 
 /**

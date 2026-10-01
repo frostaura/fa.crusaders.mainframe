@@ -3,7 +3,7 @@ import type { MyProfile } from "./api";
 import { useAuth } from "./auth";
 import { memberReads } from "./offline/memberReads";
 import { fetchQuery, peekQuery, primeQuery } from "./offline/queryCache";
-import { isConnectionFailure, useCachedRead, useDataOwner } from "./offline/useCachedRead";
+import { isConnectionFailure, useCachedRead, useDataOwner, type CachedRead } from "./offline/useCachedRead";
 
 type ProfileState = {
   /** The signed-in member's profile — never an earlier member's. Null until read. */
@@ -95,16 +95,20 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
 
   // A manual refresh's failure stands until the profile on hand moves on from it.
   const manualError = manual && manual.base === base && manual.at === read.readAt ? manual.error : null;
-  const error = read.error ?? manualError;
-  const profile = key ? read.data : null;
-  return (
-    <ProfileContext.Provider value={{
-      profile, loading: read.loading, failed: Boolean(error), error: error ?? null, refresh, setLocal,
-      readAt: profile ? read.readAt : null, stale: profile !== null && (read.stale || Boolean(manualError)),
-      offline: read.offline || isConnectionFailure(manualError),
-    }}
-    >
-      {children}
-    </ProfileContext.Provider>
-  );
+  const value = profileState(key ? read : null, manualError, refresh, setLocal);
+  return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
+}
+
+/** What the provider says, from its read and a manual refresh's failure (null read: nobody's). */
+function profileState(
+  read: CachedRead<MyProfile> | null, manualError: unknown, refresh: () => Promise<void>, setLocal: (next: MyProfile | null) => void,
+): ProfileState {
+  const error = read?.error ?? manualError ?? null;
+  const profile = read?.data ?? null;
+  return {
+    profile, loading: read?.loading ?? false, failed: Boolean(error), error, refresh, setLocal,
+    readAt: profile ? read?.readAt ?? null : null,
+    stale: profile !== null && (Boolean(read?.stale) || Boolean(manualError)),
+    offline: Boolean(read?.offline) || isConnectionFailure(manualError),
+  };
 }
