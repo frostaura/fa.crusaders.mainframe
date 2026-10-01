@@ -180,6 +180,12 @@ public sealed class ControlBoardReader
             ["next"] = NextBlock(next, data, now),
             ["device"] = DeviceBlock(device, relay, data, now, effective, offlineAfter),
 
+            // Review round 4 wave B: the tile reads `door`, and the key was never sent. It is
+            // null, honestly: nothing maps a door to a court — a gate carries no court numbers,
+            // and a door is never a court's evidence (memory/decisions-device-alerts.md). The
+            // day a club can say "Court 2's door", this is where it goes.
+            ["door"] = null,
+
             // Review round 3, A-11: how many ENABLED boxes claim this court, and the ones the tile
             // is not reporting. More than one is a wiring or commissioning mistake the console
             // must warn about, not a choice the board may make silently.

@@ -348,6 +348,9 @@ public static class AdminMemberTraceEndpoints
                 : new { id = e.Court.Id, number = e.Court.Number, name = e.Court.Name },
             amount_credits = e.AmountCredits,
             balance_after_credits = e.BalanceAfterCredits,
+            approximate = e.Approximate,
+            device_code = e.DeviceCode,
+            outage_id = e.OutageId,
             source = e.Source,
             source_id = e.SourceId,
         };

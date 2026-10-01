@@ -384,17 +384,25 @@ public static class MemberGroupEndpoints
         var members = await db.Memberships.AsNoTracking()
             .Where(m => userIds.Contains(m.UserId))
             .ToDictionaryAsync(m => m.UserId, ct);
+        var adders = await PersonNames.ForAsync(db, rows.Select(r => (Guid?)r.AddedByUserId), ct);
 
+        // Review round 4 wave B: the console prints "Added <when> by <added_by_name>", shows the
+        // face, and pages on `cursor` — none of which this sent. The photo is always a LINK
+        // (PhotoEndpoints), never the stored data URI: a group can hold the whole club. `cursor`
+        // is always null — every member comes in this one reply, so the console's loop ends.
         return Results.Ok(new
         {
             members = rows.Select(r => new
             {
                 user_id = r.UserId,
                 name = members.GetValueOrDefault(r.UserId)?.FullName,
+                photo_url = PhotoEndpoints.Link(r.UserId, members.GetValueOrDefault(r.UserId)?.PhotoUrl),
                 membership_number = members.GetValueOrDefault(r.UserId)?.MembershipNumber,
                 added_at = r.AddedAt,
+                added_by_name = PersonNames.Of(r.AddedByUserId, adders),
             }).ToList(),
             total = rows.Count,
+            cursor = (string?)null,
         });
     }
 

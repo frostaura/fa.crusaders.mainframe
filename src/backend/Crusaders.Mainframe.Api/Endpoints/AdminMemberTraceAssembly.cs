@@ -28,6 +28,24 @@ public sealed record TraceEventRow(
     decimal? BalanceAfterCredits,
     IReadOnlyDictionary<string, object?> Detail)
 {
+    /// <summary>
+    /// The code of the board the row happened at — a door row's gate, a receipt's court box — or
+    /// null for a row no board wrote. The night's burst key: two doors in one minute are two
+    /// stories (review round 4 wave B; nothing was sent and the console keyed on the door name).
+    /// </summary>
+    public string? DeviceCode { get; init; }
+
+    /// <summary>
+    /// The instant is the board's own clock and the server overruled it or cannot reconcile it —
+    /// <see cref="DoorActivityView.TimeUncertain"/>, the door log's <c>time_uncertain</c>, one rule
+    /// for one fact. False on every row the server timed itself (ledger, online scans) and on a
+    /// relay receipt, which keeps no record of a clamp.
+    /// </summary>
+    public bool Approximate { get; init; }
+
+    /// <summary>The board's outage the row's instant fell inside — the club could not hear that board then — or null.</summary>
+    public Guid? OutageId { get; init; }
+
     /// <summary>The strand, derived from the word rather than carried twice.</summary>
     public string Strand => TraceKinds.StrandOf(Kind);
 
@@ -101,7 +119,14 @@ public static class AdminMemberTraceAssembly
     private sealed record Strands(
         List<AuditLog> Audit, List<LedgerEntry> Ledger, List<ReceiptRow> Receipts,
         Dictionary<Guid, TraceCourtRef> Courts, Dictionary<Guid, Guid> BookingCourts,
-        List<Guid> NotADoor, Dictionary<Guid, string> Names, HashSet<Guid> Admins, decimal Opening);
+        List<Guid> NotADoor, Dictionary<Guid, string> Names, HashSet<Guid> Admins, decimal Opening)
+    {
+        /// <summary>The boards the rows name, by id → code.</summary>
+        public Dictionary<Guid, string> DeviceCodes { get; init; } = [];
+
+        /// <summary>Those boards' outages that reach into the night.</summary>
+        public List<DeviceOutage> Outages { get; init; } = [];
+    }
 
     public static async Task<TraceNight> BuildAsync(
         MainframeDbContext db, AdminMemberTraceQuery query, CancellationToken ct)
@@ -166,10 +191,53 @@ public static class AdminMemberTraceAssembly
         var admins = await AdminsAsync(
             db, audit.Select(a => a.ActorUserId).Concat(ledger.Select(l => l.ActorUserId)), ct);
 
+        var boards = await BoardsAsync(db, audit, receipts, q, ct);
         return new Strands(
             audit, ledger, receipts, courts, bookingCourts,
             await DoorTrail.NotADoorIdsAsync(db, ct), names, admins,
-            await OpeningBalanceAsync(db, q, ct));
+            await OpeningBalanceAsync(db, q, ct))
+        {
+            DeviceCodes = boards.Codes,
+            Outages = boards.Outages,
+        };
+    }
+
+    /// <summary>
+    /// The codes of the boards the rows name, and those boards' outages that reach into the
+    /// night (review round 4 wave B). Two reads, and none when no row names a board. An offline
+    /// row prints at its scan, which can be earlier than the range it was heard in, so the
+    /// outage window opens at the earliest scan.
+    /// </summary>
+    private static async Task<(Dictionary<Guid, string> Codes, List<DeviceOutage> Outages)> BoardsAsync(
+        MainframeDbContext db, List<AuditLog> audit, List<ReceiptRow> receipts, AdminMemberTraceQuery q,
+        CancellationToken ct)
+    {
+        var ids = audit.Select(a => DoorTrail.DeviceIdOf(DoorActivityView.Details(a.DetailsJson)))
+            .Where(id => id is not null).Select(id => id!.Value)
+            .Concat(receipts.Select(r => r.DeviceId))
+            .Distinct().ToList();
+        if (ids.Count == 0) return ([], []);
+
+        var codes = await db.Devices.AsNoTracking()
+            .Where(d => ids.Contains(d.Id))
+            .ToDictionaryAsync(d => d.Id, d => d.DeviceCode, ct);
+
+        var floor = audit.Select(a => a.ScanAt).Append(q.From).Min().ToUniversalTime();
+        var to = q.To.ToUniversalTime();
+        var outages = await db.DeviceOutages.AsNoTracking()
+            .Where(o => ids.Contains(o.DeviceId) && o.StartedAt < to && (o.EndedAt == null || o.EndedAt > floor))
+            .ToListAsync(ct);
+        return (codes, outages);
+    }
+
+    /// <summary>The outage of <paramref name="deviceId"/> that <paramref name="at"/> fell inside, or null.</summary>
+    private static Guid? OutageAt(Strands s, Guid? deviceId, DateTimeOffset at)
+    {
+        if (deviceId is not { } id) return null;
+        return s.Outages
+            .Where(o => o.DeviceId == id && o.StartedAt <= at && (o.EndedAt is not { } end || at < end))
+            .Select(o => (Guid?)o.Id)
+            .FirstOrDefault();
     }
 
     /// <summary>
@@ -294,7 +362,8 @@ public static class AdminMemberTraceAssembly
             if (kind is null) continue;
 
             var court = CourtOf(details, s.Courts);
-            var actorKind = ActorKindOf(row.ActorUserId, DoorTrail.DeviceIdOf(details) is not null, s.Admins);
+            var deviceId = DoorTrail.DeviceIdOf(details);
+            var actorKind = ActorKindOf(row.ActorUserId, deviceId is not null, s.Admins);
             var actorName = PersonNames.Of(row.ActorUserId, s.Names);
 
             yield return new TraceEventRow(
@@ -318,7 +387,13 @@ public static class AdminMemberTraceAssembly
                 Court: court,
                 AmountCredits: null,
                 BalanceAfterCredits: null,
-                Detail: AuditDetail(row.Action, details));
+                Detail: AuditDetail(row.Action, details))
+            {
+                // A removed board keeps the code its rows were written with.
+                DeviceCode = deviceId is { } id && s.DeviceCodes.TryGetValue(id, out var code) ? code : Text(details, "device_code"),
+                Approximate = DoorActivityView.TimeUncertain(details, row.CreatedAt),
+                OutageId = OutageAt(s, deviceId, row.ScanAt),
+            };
         }
     }
 
@@ -412,7 +487,11 @@ public static class AdminMemberTraceAssembly
                 Detail: Detail(
                     ("booking_id", row.BookingId),
                     ("relay", row.Relay),
-                    ("device_id", row.DeviceId)));
+                    ("device_id", row.DeviceId)))
+            {
+                DeviceCode = s.DeviceCodes.GetValueOrDefault(row.DeviceId),
+                OutageId = OutageAt(s, row.DeviceId, row.OccurredAt),
+            };
         }
     }
 

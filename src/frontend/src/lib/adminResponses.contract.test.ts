@@ -74,9 +74,9 @@ describe("control board", () => {
     exact(only(at(READER, "BuildAsync", /\["realtime"\] = /)), F.controlBoardRealtime());
   });
 
-  // BUG (not fixed here): CourtTile.tsx reads `court.door` for a "Door · online · heard …" line, and
-  // ControlBoardReader.Tile never writes a `door` key — the door line never appears on any tile.
-  it.fails("every key a court tile reads is one the server writes (door is never sent)", () => {
+  // R4 wave B: the tile's `door` is sent — null, because no door is mapped to a court (a gate
+  // carries no court numbers; a door is never a court's evidence).
+  it("every key a court tile reads is one the server writes", () => {
     exact(serverDictionaryKeys(READER, "Tile"), F.controlBoardCourt());
   });
 
@@ -134,12 +134,10 @@ describe("the night trace", () => {
     exact(only(ok(FILE, "Summary")), F.traceSummary());
   });
 
-  // BUG (not fixed here): nightTimeline.ts / MemberNight.tsx read `approximate` (the "≈" before a
-  // board-clock time and the explanation above the rail) and `device_code` (the burst key that keeps
-  // two doors in one minute apart); `outage_id` is declared too. Event() writes none of the three, so
-  // no time on a member's night is ever marked approximate, and scans at two different doors inside
-  // one burst window collapse into one row.
-  it.fails("every key the night reads off an event is one the server writes", () => {
+  // R4 wave B: `approximate` (the "≈" and the rail's explanation), `device_code` (the burst key that
+  // keeps two doors in one minute apart) and `outage_id` (the board's outage the event fell inside)
+  // are sent on every event.
+  it("every key the night reads off an event is one the server writes", () => {
     exact(only(ok(FILE, "Event")), F.traceEvent());
   });
 
@@ -181,18 +179,19 @@ describe("member groups (the rest)", () => {
     exact(last(ok(FILE, "PatchAsync")), F.memberGroupSaved());
   });
 
-  // BUG (not fixed here): GroupMembers.tsx prints "Added <when> by <added_by_name>" and
-  // useMembersData.ts pages on `cursor`; MembersAsync writes neither (nor `photo_url`). The "by …"
-  // attribution never appears. The cursor is benign: the server sends every member in one reply, so
-  // the paging loop ends after its first read.
-  it.fails("every key the group's member list is read for is one the server writes", () => {
+  // R4 wave B: "Added <when> by <added_by_name>", the photo (a link) and `cursor` are sent; the
+  // cursor is always null — every member comes in one reply, so the paging loop ends at once.
+  it("every key the group's member list is read for is one the server writes", () => {
     exact(only(ok(FILE, "MembersAsync")), F.memberGroupMembers());
     exact(only(at(FILE, "MembersAsync", "Select(r => ")), F.memberGroupMember());
   });
 
-  it("the member list answers members and a total, each { user_id, name, membership_number, added_at }", () => {
-    exact(only(ok(FILE, "MembersAsync")), { members: [], total: 0 });
-    exact(only(at(FILE, "MembersAsync", "Select(r => ")), { user_id: "", name: "", membership_number: "", added_at: "" });
+  it("the member list answers members, a total and a null cursor, each naming who added them", () => {
+    exact(only(ok(FILE, "MembersAsync")), { members: [], total: 0, cursor: null });
+    exact(
+      only(at(FILE, "MembersAsync", "Select(r => ")),
+      { user_id: "", name: "", photo_url: null, membership_number: "", added_at: "", added_by_name: null },
+    );
   });
 
   it("the preview answers what applies now and what would", () => {
