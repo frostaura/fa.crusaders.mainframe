@@ -135,12 +135,12 @@ type DoorFacts = ReturnType<typeof useDoorFacts>;
  *
  * <ul>
  *   <li><b>Phone and tablet:</b> one column in reading order — the pass first (it is the point of
- *   the screen at the court), then what it is for, what's next, the guide, the doors, setup and
- *   the way to a human — unchanged; the wallet glance is drawn only beside the pass.</li>
+ *   the screen at the court), then setup (while it is unfinished), what it is for, what's next,
+ *   the guide, the doors and the way to a human — unchanged; the wallet glance is drawn only beside the pass.</li>
  *   <li><b>60rem:</b> `[pass 24rem] [the rest]`, the pass sticky so it stays in reach while the
  *   door facts scroll.</li>
  *   <li><b>72rem</b> (the `wide` frame from 2xl): the rest splits again —
- *   `[today + doors] [wallet + setup 20rem]`.</li>
+ *   `[setup + today + doors] [wallet + the way to a human 20rem]`.</li>
  * </ul>
  * The DOM order is the phone's order in every layout, so Tab order is reading order.
  */
@@ -192,6 +192,9 @@ export default function MyCodePage() {
 
         <div data-my-code-rest="" className={REST}>
           <div className={COLUMN}>
+            {/* Setup leads the rest (Dean, R5): a to-do list is read first or not at all, and it
+                is dismissable (its ×), so it costs a finished member nothing. */}
+            {view.signedOut ? null : <SetupChecklist />}
             <p className="text-sm text-text-secondary">{codeUseLine(facts.doorsClub)}</p>
             <WhatsNextCard booking={facts.door?.next_booking} timezone={facts.door?.timezone} doors={facts.doorsKnowledge} />
             <Link to={GUIDE_PATH} className={MEMBER_DOOR_LINK_TAPPABLE}>{GUIDE_FROM_CODE}</Link>
@@ -200,7 +203,6 @@ export default function MyCodePage() {
           <div data-my-code-side="" className={COLUMN}>
             {/* Beside the pass only: on a phone the chip in the bar already carries the balance. */}
             {view.signedOut ? null : <div className="hidden @[60rem]/page:block"><WalletGlance /></div>}
-            {view.signedOut ? null : <SetupChecklist />}
             <DoorFooter doorsKnowledge={facts.doorsKnowledge} contact={facts.contact} />
           </div>
         </div>
