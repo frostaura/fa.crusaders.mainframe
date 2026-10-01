@@ -1,4 +1,5 @@
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -44,11 +45,12 @@ public sealed class AdminBulkBookingService
     private readonly BookingService _bookings;
     private readonly AdminBlockService _blocks;
     private readonly LedgerService _ledger;
+    private readonly AdminChangeRecorder _changes;
 
     public AdminBulkBookingService(
         MainframeDbContext db, ITenantContext tenant, BookingService bookings,
-        AdminBlockService blocks, LedgerService ledger)
-    { _db = db; _tenant = tenant; _bookings = bookings; _blocks = blocks; _ledger = ledger; }
+        AdminBlockService blocks, LedgerService ledger, AdminChangeRecorder changes)
+    { _db = db; _tenant = tenant; _bookings = bookings; _blocks = blocks; _ledger = ledger; _changes = changes; }
 
     /// <summary>
     /// The reference one item's refund and penalty are posted under.
@@ -145,7 +147,7 @@ public sealed class AdminBulkBookingService
 
         if (booking.Status == BookingStatus.AdminBlock)
         {
-            var lifted = await _blocks.RemoveAsync(booking.Id, actorId, ct);
+            var lifted = await _blocks.RemoveAsync(booking.Id, actorId, reason, ct);
             return lifted
                 ? label with { Status = BulkCancelStatuses.BlockLifted }
                 : label with { Status = BulkCancelStatuses.AlreadyCancelled };
@@ -156,11 +158,18 @@ public sealed class AdminBulkBookingService
             return label with { Status = BulkCancelStatuses.AlreadyCancelled };
         }
 
+        // Review round 5 (A5-2): each booking the batch cancels is on the record about its member,
+        // exactly as a desk cancel is — staged before the cancellation so it flushes in that save,
+        // withdrawn when nothing was cancelled. The batch row is the summary, not the only record.
+        var record = await AdminCancelRecord.StageAsync(
+            _db, _changes, new AdminCancelFacts(booking.Id, actorId, reason, PartOfBatch: true), ct);
+
         var waive = item.WaivePenalty ?? waivePenaltyDefault;
         var outcome = await _bookings.CancelAsync(
             booking.Id, actorId, actorIsAdmin: true, waivePenalty: waive, ct,
             waiveReason: reason,
             externalReferencePrefix: CancelReference(idempotencyKey, booking.Id));
+        if (outcome is not CancellationResult.Ok) AdminCancelRecord.Withdraw(_db, record);
 
         return outcome switch
         {
@@ -402,6 +411,7 @@ public sealed class AdminBulkBookingService
     private sealed record BulkContext(
         IReadOnlyDictionary<Guid, string> Names, IReadOnlyDictionary<Guid, string> Courts)
     {
+        /// <summary>One row's names: the member's, or for a club hold its label (A5-2).</summary>
         public BulkCancelResult Describe(Booking booking) => new(
             BookingId: booking.Id,
             Status: BulkCancelStatuses.Failed,
@@ -410,6 +420,7 @@ public sealed class AdminBulkBookingService
             MemberName: PersonNames.Of(booking.UserId, Names),
             CourtName: Courts.TryGetValue(booking.CourtId, out var name) ? name : null,
             StartsAt: booking.StartsAt,
-            Error: null);
+            Error: null,
+            BlockLabel: booking.Status == BookingStatus.AdminBlock ? booking.BlockLabel : null);
     }
 }

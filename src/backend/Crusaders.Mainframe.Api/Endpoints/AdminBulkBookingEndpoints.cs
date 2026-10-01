@@ -104,14 +104,18 @@ public static class AdminBulkBookingEndpoints
             refunds[r.BookingId] = await split.AfterAsync(r.BookingId, paidBefore.GetValueOrDefault(r.BookingId) ?? [], ct);
         }
 
-        // ONE row per BATCH, not per item. The batch row is the INTENT — the admin's own words
-        // about why a list of courts went away — and CancelAsync's per-booking audit_log rows
-        // are the EFFECTS, which the night trace reads. Recording the intent per item would
-        // store the same sentence forty times and still not say that they were one decision.
+        // ONE summary row per BATCH — the INTENT, the admin's own words about why a list of courts
+        // went away. Since review round 5 (A5-2) it is not the only record: each booking the batch
+        // cancelled also has the member-facing booking.cancelled_by_admin row a single desk cancel
+        // writes (staged in AdminBulkBookingService, in that booking's own save), because a
+        // member's record never showed a court the desk took from a list.
+        // Review round 5 (A5-2): the summary names its bookings — a label for the list and one
+        // entry per item — so it reads as one decision about named courts, not a row of ids.
         await recorder.StageAsync(new AdminChange(
             Action: AdminChangeActions.BookingsBulkCancelled,
             ActorUserId: actorId,
             SubjectKind: AdminChangeSubjects.Booking,
+            SubjectLabel: BulkRecordLabels.Of(outcome.Results.Select(r => r.MemberName ?? r.BlockLabel).ToList()),
             Reason: reason,
             After: new
             {
@@ -121,6 +125,17 @@ public static class AdminBulkBookingEndpoints
                 total_refunded_credits = outcome.TotalRefundedCredits,
                 total_penalty_credits = outcome.TotalPenaltyCredits,
                 booking_ids = outcome.Results.Select(r => r.BookingId).ToList(),
+                bookings = outcome.Results.Select(r => new
+                {
+                    booking_id = r.BookingId,
+                    member_name = r.BlockLabel is null ? r.MemberName : null,
+                    block_label = r.BlockLabel,
+                    court = r.CourtName,
+                    starts_at = r.StartsAt,
+                    status = r.Status,
+                    refund_credits = r.RefundCredits,
+                    penalty_credits = r.PenaltyCredits,
+                }).ToList(),
             }), ct);
         await db.SaveChangesAsync(ct);
 
@@ -183,13 +198,18 @@ public static class AdminBulkBookingEndpoints
 
         var after = context.PayerUserId is { } payerAfter ? await ledger.GetBalanceAsync(payerAfter, ct) : (decimal?)null;
         var succeeded = outcome.Results.Count(r => r.Succeeded);
+        var payerName = context.PayerUserId is { } id
+            ? PersonNames.Of(id, await PersonNames.ForAsync(db, [id], ct))
+            : null;
 
+        // A5-2: the row is labelled with whom the batch was for (the payer, else the guest) — it
+        // was null for every member batch — and lists each item it tried.
         await recorder.StageAsync(new AdminChange(
             Action: AdminChangeActions.BookingsBulkBooked,
             ActorUserId: actorId,
             SubjectKind: context.PayerUserId is null ? AdminChangeSubjects.Booking : AdminChangeSubjects.User,
             SubjectId: context.PayerUserId,
-            SubjectLabel: context.GuestName,
+            SubjectLabel: payerName ?? context.GuestName,
             Reason: req.Note?.Trim(),
             After: new
             {
@@ -199,12 +219,18 @@ public static class AdminBulkBookingEndpoints
                 total_charged_credits = outcome.TotalChargedCredits,
                 booking_ids = outcome.Results.Where(r => r.BookingId is not null)
                     .Select(r => r.BookingId!.Value).ToList(),
+                bookings = outcome.Results.Select(r => new
+                {
+                    index = r.Index,
+                    booking_id = r.BookingId,
+                    court = r.CourtName,
+                    starts_at = r.StartsAt,
+                    status = r.Status,
+                    error = r.Error,
+                    amount_credits = r.AmountCredits,
+                }).ToList(),
             }), ct);
         await db.SaveChangesAsync(ct);
-
-        var payerName = context.PayerUserId is { } id
-            ? PersonNames.Of(id, await PersonNames.ForAsync(db, [id], ct))
-            : null;
 
         return Results.Ok(new
         {
@@ -464,3 +490,23 @@ public sealed record BulkQuoteRequest(
     [property: JsonPropertyName("user_id")] Guid? UserId = null,
     [property: JsonPropertyName("items")] IReadOnlyList<BulkQuoteRequestItem>? Items = null,
     [property: JsonPropertyName("userId")] Guid? UserIdCamel = null);
+
+/// <summary>
+/// The label a bulk change row carries (review round 5, A5-2): how many bookings, and whose —
+/// "3 bookings — Olga Smith, Ben Ng and 1 more". It was null, so the record read "Cancelled
+/// several bookings at once" about nobody. Names are distinct, in the batch's order.
+/// </summary>
+public static class BulkRecordLabels
+{
+    private const int Named = 2;
+
+    public static string Of(IReadOnlyList<string?> names)
+    {
+        var count = names.Count == 1 ? "1 booking" : $"{names.Count} bookings";
+        var distinct = names.Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!.Trim()).Distinct().ToList();
+        if (distinct.Count == 0) return count;
+        var shown = string.Join(", ", distinct.Take(Named));
+        var more = distinct.Count - Named;
+        return more > 0 ? $"{count} — {shown} and {more} more" : $"{count} — {shown}";
+    }
+}

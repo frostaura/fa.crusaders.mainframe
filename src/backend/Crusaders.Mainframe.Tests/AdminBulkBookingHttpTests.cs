@@ -405,16 +405,18 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// One undeletable change row per BATCH, carrying the admin's own words — not one per item.
+    /// One undeletable summary row per BATCH, carrying the admin's own words — and, since review
+    /// round 5 (A5-2), one <c>booking.cancelled_by_admin</c> row per booking it cancelled.
     ///
     /// <para>
-    /// The batch row is the INTENT; <c>CancelAsync</c>'s per-booking <c>audit_log</c> rows are
-    /// the EFFECTS, and the night trace reads the effects. Recording the intent per item would
-    /// store the same sentence forty times and still not say they were one decision.
+    /// The batch row is the INTENT. It used to be the only record, so a member's own record never
+    /// showed the desk cancelling their court when it was done from a list; each booking now
+    /// carries the row a single desk cancel writes, with the batch's reason, marked
+    /// <c>part_of_batch</c>.
     /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task One_batch_writes_one_undeletable_change_row_carrying_the_reason()
+    public async Task One_batch_writes_one_summary_row_and_one_row_per_cancelled_booking()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -432,14 +434,18 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
         });
 
         var rows = await ChangeRowsAsync(factory, club.TenantId);
-        var row = Assert.Single(rows);
+        var row = Assert.Single(rows, r => r.Action == AdminChangeActions.BookingsBulkCancelled);
 
-        Assert.Equal(AdminChangeActions.BookingsBulkCancelled, row.Action);
         Assert.Equal(AdminChangeAreas.Booking, row.Area);
         Assert.Equal("Burst pipe in the gallery", row.Reason);
         Assert.Equal("Door Admin", row.ActorName);
         Assert.Contains(a.ToString(), row.AfterJson);
         Assert.Contains(b.ToString(), row.AfterJson);
+
+        var perBooking = rows.Where(r => r.Action == AdminChangeActions.BookingCancelledByAdmin).ToList();
+        Assert.Equal(2, perBooking.Count);
+        Assert.All(perBooking, r => Assert.Equal("Burst pipe in the gallery", r.Reason));
+        Assert.Equal(3, rows.Count);
     }
 
     // ------------------------------------------------------------------ bulk book

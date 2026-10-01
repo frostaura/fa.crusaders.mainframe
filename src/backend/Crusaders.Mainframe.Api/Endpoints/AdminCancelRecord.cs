@@ -20,10 +20,23 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </summary>
 internal static class AdminCancelRecord
 {
-    public static async Task<AdminChangeLog?> StageAsync(
+    public static Task<AdminChangeLog?> StageAsync(
         HttpContext ctx, Guid bookingId, Guid actorId, string reason, CancellationToken ct)
     {
-        var db = ctx.RequestServices.GetRequiredService<MainframeDbContext>();
+        return StageAsync(
+            ctx.RequestServices.GetRequiredService<MainframeDbContext>(),
+            ctx.RequestServices.GetRequiredService<AdminChangeRecorder>(),
+            new AdminCancelFacts(bookingId, actorId, reason), ct);
+    }
+
+    /// <summary>
+    /// The same row for one booking of a bulk cancel (review round 5, A5-2), marked
+    /// <c>part_of_batch</c> so it reads beside the batch's <c>bookings.bulk_cancelled</c> summary.
+    /// </summary>
+    public static async Task<AdminChangeLog?> StageAsync(
+        MainframeDbContext db, AdminChangeRecorder recorder, AdminCancelFacts what, CancellationToken ct)
+    {
+        var (bookingId, actorId, reason) = (what.BookingId, what.ActorId, what.Reason);
         var booking = await db.Bookings.AsNoTracking()
             .Where(b => b.Id == bookingId && b.Status == BookingStatus.Booked && b.UserId != null)
             .Select(b => new { b.Id, b.UserId, b.CourtId, b.StartsAt, b.SliceMinutes, b.SliceCount, b.AmountChargedCredits })
@@ -32,7 +45,6 @@ internal static class AdminCancelRecord
 
         var court = await db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var label = PersonNames.Of(booking.UserId, await PersonNames.ForAsync(db, [booking.UserId], ct));
-        var recorder = ctx.RequestServices.GetRequiredService<AdminChangeRecorder>();
 
         return await recorder.StageAsync(new AdminChange(
             Action: AdminChangeActions.BookingCancelledByAdmin,
@@ -42,14 +54,18 @@ internal static class AdminCancelRecord
             SubjectLabel: label,
             Reason: reason,
             Before: Facts(booking.Id, court, booking.StartsAt, booking.SliceMinutes * booking.SliceCount, booking.AmountChargedCredits),
-            After: new { status = "cancelled" }), ct);
+            After: what.PartOfBatch ? new { status = "cancelled", part_of_batch = true } : new { status = "cancelled" }), ct);
     }
 
     /// <summary>Nothing was cancelled, so nothing is recorded.</summary>
     public static void Withdraw(HttpContext ctx, AdminChangeLog? row)
+        => Withdraw(ctx.RequestServices.GetRequiredService<MainframeDbContext>(), row);
+
+    /// <summary>Nothing was cancelled, so nothing is recorded — and a bulk batch's next save cannot carry it in.</summary>
+    public static void Withdraw(MainframeDbContext db, AdminChangeLog? row)
     {
         if (row is null) return;
-        ctx.RequestServices.GetRequiredService<MainframeDbContext>().Entry(row).State = EntityState.Detached;
+        db.Entry(row).State = EntityState.Detached;
     }
 
     private static object Facts(Guid bookingId, string? court, DateTimeOffset startsAt, int minutes, decimal charged)
@@ -65,3 +81,6 @@ internal static class AdminCancelRecord
         };
     }
 }
+
+/// <summary>Which booking the desk cancelled, who did it, why, and whether it was one item of a batch.</summary>
+internal readonly record struct AdminCancelFacts(Guid BookingId, Guid ActorId, string Reason, bool PartOfBatch = false);

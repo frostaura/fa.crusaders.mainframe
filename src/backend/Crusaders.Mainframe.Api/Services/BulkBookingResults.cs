@@ -26,7 +26,7 @@ public readonly record struct BulkBookRequestContext(
 /// <summary>One row of a bulk cancel's answer.</summary>
 public sealed record BulkCancelResult(
     Guid BookingId, string Status, decimal RefundCredits, decimal PenaltyCredits,
-    string? MemberName, string? CourtName, DateTimeOffset? StartsAt, string? Error)
+    string? MemberName, string? CourtName, DateTimeOffset? StartsAt, string? Error, string? BlockLabel = null)
 {
     public static BulkCancelResult Failure(Guid bookingId, string error)
         => new(bookingId, BulkCancelStatuses.Failed, 0m, 0m, null, null, null, error);
