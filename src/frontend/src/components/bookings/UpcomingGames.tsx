@@ -11,7 +11,7 @@ import { bookingsApi, type UpcomingGame, type UpcomingPlayer } from "@/lib/booki
 import { firstName } from "@/lib/playersCopy";
 import { memberReads } from "@/lib/offline/memberReads";
 import { useGamesRead } from "./useGamesRead";
-import { SHOWN, when } from "./gameWhen";
+import { GAMES_ITEM, GAMES_LIST, SHOWN, when } from "./gameWhen";
 import { RESULT_READABLE } from "@/lib/bookingLink";
 
 /**
@@ -51,8 +51,8 @@ export function UpcomingGames({ refreshKey, fallbackZone }: { refreshKey: unknow
   return (
     <section aria-labelledby={headingId} data-upcoming="" className="grid gap-2">
       <h2 id={headingId} className="text-sm font-semibold text-text-primary">{UPCOMING.title}</h2>
-      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map((game) => <li key={game.booking_id}><GameCard game={game} zone={zone} /></li>)}
+      <ul className={GAMES_LIST}>
+        {shown.map((game) => <li key={game.booking_id} className={GAMES_ITEM}><GameCard game={game} zone={zone} /></li>)}
       </ul>
       {hidden > 0 ? (
         <Button variant="ghost" size="sm" className="justify-self-start" aria-expanded={all} onClick={() => setAll((v) => !v)}>
@@ -81,10 +81,15 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
             {badges ?? (game.needs_action ? <Badge tone="warning">{UPCOMING.needsAction}</Badge> : null)}
           </span>
           <span className="text-sm tabular-nums text-text-secondary">{time}</span>
-          <GamePeople players={game.players} />
-          {/* R3 V-9: its own line, never "· your share" trailing the names — at 320 the share
-              wrapped and the separator dangled at the start of the line. */}
-          <MoneyLine game={game} />
+          {/* R4 form factor: in the phone's sideways strip the card is court, time and what it
+              needs, ~72px tall, so the grid starts on the first screen; the faces and the money
+              are a tap away on the booking's page, and on the card wherever the rail is wider. */}
+          <span className="hidden min-w-0 flex-col gap-1 @[40rem]/aside:flex">
+            <GamePeople players={game.players} />
+            {/* R3 V-9: its own line, never "· your share" trailing the names — at 320 the share
+                wrapped and the separator dangled at the start of the line. */}
+            <MoneyLine game={game} />
+          </span>
         </span>
         <CaretRight size={16} aria-hidden="true" className="shrink-0 text-text-muted" />
       </Link>

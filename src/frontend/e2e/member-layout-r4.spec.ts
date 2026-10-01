@@ -156,3 +156,86 @@ test.describe("Home, signed out (SPEC 3.18)", () => {
     await healthy(page);
   });
 });
+
+const COURTS = [1, 2, 3, 4].map((n) => ({ id: `aaaaaaaa-0000-4000-8000-00000000000${n}`, courtNumber: n, name: `Court ${n}`, slicePriceCredits: 50 }));
+const inDays = (n: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const BOOK_DAY = inDays(2);
+
+function game(n: number) {
+  const start = new Date(`${inDays(3 + n)}T10:00:00Z`);
+  return {
+    booking_id: `bbbbbbbb-0000-4000-8000-00000000000${n}`, court_name: `Court ${n}`,
+    starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3_600_000).toISOString(),
+    role: "organiser", status: "Confirmed", players: [], my_share_credits: 50, needs_action: false,
+  };
+}
+
+function bookingsRoutes(): ApiRoute[] {
+  return [
+    ...baseRoutes(),
+    {
+      path: "/api/v1/schedule",
+      body: {
+        date: BOOK_DAY, timezone: "UTC", sliceMinutes: 15, dayStartMinute: 8 * 60, dayEndMinute: 20 * 60,
+        advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15, courts: COURTS, slots: [],
+      },
+    },
+    { path: "/api/v1/me/bookings/upcoming", body: { timezone: "UTC", items: [game(1), game(2), game(3)] } },
+    { path: "/api/v1/me/bookings/recent", body: { timezone: "UTC", items: [] } },
+    { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+  ];
+}
+
+async function openBookings(page: Page, width: Width) {
+  await open(page, `/bookings?date=${BOOK_DAY}`, bookingsRoutes(), width);
+  await page.waitForSelector('[role="grid"]');
+  await expect(page.locator("[data-upcoming] li").first()).toBeVisible();
+}
+
+test.describe("Bookings (SPEC 3.1)", () => {
+  for (const width of WIDTHS) {
+    test(`${width}px: games strip on a phone, cards in rows, then a rail beside the grid from a 72rem page`, async ({ page }, info) => {
+      test.skip(info.project.name !== "desktop", "one project sweeps the widths");
+      await openBookings(page, width);
+      await healthy(page);
+      const host = (await box(page, "[data-with-aside]"))!;
+      const rail = (await box(page, "aside[data-aside]"))!;
+      const grid = (await box(page, '[role="grid"]'))!;
+      const cards = await page.locator("[data-upcoming] li").evaluateAll((els) => els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.x), y: Math.round(r.y), height: r.height };
+      }));
+      if (host.width >= 72 * 16) {
+        expect(rail.x, "the rail stands beside the grid").toBeGreaterThanOrEqual(grid.right);
+        expect(new Set(cards.map((c) => c.x)).size, "a vertical list in the rail").toBe(1);
+        await expect(page.getByRole("group", { name: "Your wallet" })).toBeVisible();
+        expect(await widthUsed(page)).toBeGreaterThanOrEqual(0.85);
+      } else {
+        expect(rail.bottom, "stacked: the games come first").toBeLessThanOrEqual(grid.y);
+        await expect(page.getByRole("group", { name: "Your wallet" })).toBeHidden();
+        if (host.width < 40 * 16) {
+          expect(new Set(cards.map((c) => c.y)).size, "a sideways strip").toBe(1);
+          for (const c of cards) expect(c.height).toBeLessThan(96);
+        }
+      }
+      if (width >= 1800) {
+        // Four courts are not stretched to 300px each: a court column stops at 18rem.
+        const head = await page.locator('[role="columnheader"]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));
+        for (const w of head) expect(w).toBeLessThanOrEqual(18 * 16 + 1);
+      }
+    });
+  }
+
+  test("390: the grid's first slot row is on the first screen, above the tab bar", async ({ page }) => {
+    await openBookings(page, 390);
+    const firstCell = (await page.locator('[role="grid"] [role="gridcell"]').first().boundingBox())!;
+    const tabBar = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-bottom-bar-height")) || 0);
+    expect(firstCell.y + firstCell.height).toBeLessThanOrEqual(844 - tabBar);
+  });
+
+  test("390 at 200 % text: nothing off screen, the strip still scrolls sideways inside itself", async ({ page }) => {
+    await openBookings(page, 390);
+    await bigText(page);
+    await healthy(page);
+  });
+});

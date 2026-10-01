@@ -23,6 +23,10 @@ import { playersWhen } from "./playersCopy";
 
 export const BOOKINGS_COPY = {
   title: "Bookings",
+  /** R4 form factor (SPEC 3.1) — the rail beside the grid from a 72rem page. */
+  railLabel: "Your day and your games",
+  summaryTitle: "Your wallet",
+  summarySpendable: "You can spend",
   /** The sr-only h2 the grid is named by — the court names are already the visible headers. */
   gridHeading: "Courts and times",
   dayStripLabel: "Choose a day",

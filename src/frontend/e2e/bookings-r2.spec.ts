@@ -104,6 +104,9 @@ test("F1-10 — at 200% text on a 390px phone the month caption never breaks ins
 
 test("F1-10 — at 200% text the upcoming card shows the whole share amount", async ({ page }) => {
   await atTwiceTheText(page);
+  // R4 form factor (SPEC 3.1): a phone's games strip shows court, time and status only — the money
+  // is on the card wherever the games list is 40rem or wider, which at 200 % text is a desktop.
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await open(page);
   const card = page.locator("[data-upcoming] a").first();
   const share = card.getByText(UPCOMING.share(1250.5), { exact: false });

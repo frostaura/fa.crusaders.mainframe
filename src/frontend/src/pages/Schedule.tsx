@@ -18,11 +18,13 @@ import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { isConnectionFailure } from "../lib/offline/useCachedRead";
 import { phoneIsOffline } from "../lib/api";
 import type { BoardContext } from "../components/ScheduleCells";
-import { BookingBoard, BookingGridHeading, BookingGridSkeleton, SELECTION_ROOM_PX } from "../components/bookings/BookingGrid";
+import { BookingBoard, BookingGridHeading, BookingGridSkeleton } from "../components/bookings/BookingGrid";
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
 import { BookingForBar } from "../components/bookings/BookingForBar";
 import { useBookingFor, type BookingFor } from "../components/bookings/useBookingFor";
 import { UpcomingGames } from "../components/bookings/UpcomingGames";
+import { DaySummary } from "../components/bookings/DaySummary";
+import { WithAside } from "@/components/ui/with-aside";
 import { useScheduleLiveness } from "../components/bookings/useScheduleLiveness";
 import { RecentGames } from "../components/bookings/RecentGames";
 import type { CancelledOutcome } from "../components/bookings/CancelSheet";
@@ -158,7 +160,9 @@ export default function BookingsPage() {
   const collapsed = explainer.collapsedRows(schedule.timeSlices, schedule.pastThresholdMs, showEarlier, isAdmin, schedule.slotsByCourt);
 
   return (
-    <PageShell width="wide">
+    // R4 form factor (SPEC 3.1): `wide`, then the 120rem frame from 3xl, where the grid's courts are
+    // capped and the extra width goes to the rail rather than to 300px-wide slots.
+    <PageShell width="wide" fullFrom3xl>
       <PageHeader
         title={BOOKINGS_COPY.title}
         actions={(
@@ -169,46 +173,61 @@ export default function BookingsPage() {
         )}
         freshness={<Freshness at={schedule.readAt} />}
       />
-      {/* Room under the grid while the floating bar is up, so it never covers the last row —
-          padding, not a spacer element, because a spacer would also take the shell's section gap. */}
-      <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
+      {/* The floating bar's room under the grid is the shell's: a docked bar publishes its height
+          and <main> grows by it (R4 form factor), so the last row is never under the bar. */}
+      <div className="flex flex-col gap-4">
         <StaleNotice stale={schedule.stale} readAt={schedule.readAt} offline={offlineGrid} extra={offlineGrid ? OFFLINE_COPY.gridStale : undefined} />
-        {bookAsUserId
-          ? <BookingForBar booking={bookingFor} sliceMinutes={day?.sliceMinutes ?? 15} />
-          : (
+        {bookAsUserId ? <BookingForBar booking={bookingFor} sliceMinutes={day?.sliceMinutes ?? 15} /> : null}
+        {/*
+          The rail (SPEC 3.1): on a phone it is the compact games strip above the week (first in
+          reading order, so the grid starts on the first screen); from a 72rem page it stands
+          beside the grid — the day at a glance, then the games and the invites waiting.
+        */}
+        <WithAside
+          placement="first"
+          asideLabel={BOOKINGS_COPY.railLabel}
+          gap="md"
+          aside={(
             <>
-              <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
-              {/* R2 F1-1 — finished games, whose results are recorded here. */}
-              <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
+              <DaySummary className="hidden @[72rem]/aside:flex" />
+              {bookAsUserId ? null : (
+                <>
+                  <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
+                  {/* R2 F1-1 — finished games, whose results are recorded here. */}
+                  <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
+                </>
+              )}
+              <InvitesBadgeLink />
             </>
           )}
-        <InvitesBadgeLink />
-        <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} rateLine={explainer.rateLine} />
-        <ScheduleNotices
-          notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
-          onDismiss={explainer.dismiss} onNextDay={schedule.nextDay}
-        />
-        <BookingGridHeading />
-        <StateBlock
-          loading={!shown && schedule.loading}
-          error={shown ? null : schedule.error}
-          action={BOOKINGS_COPY.loadAction}
-          onRetry={schedule.refresh}
-          empty={Boolean(shown && shown.courts.length === 0)}
-          emptyTitle={BOOKINGS_COPY.noCourts}
-          emptyHint={BOOKINGS_COPY.noCourtsHint}
-          emptyIcon={SquaresFour}
-          skeleton={<BookingGridSkeleton courts={day?.courts.length || 3} />}
         >
-          {ctx ? (
-            <BookingBoard
-              ctx={ctx} slotsByCourt={schedule.slotsByCourt} timeSlices={schedule.timeSlices}
-              pastThresholdMs={schedule.pastThresholdMs} peakNowMs={schedule.peakNowMs}
-              collapsedRows={collapsed.rows} earlierLabel={collapsed.label} onExpandEarlier={() => setEarlierShownFor(date)}
-              showNow={date === today} underSheet={sheets.underSheet} holding={holding}
-            />
-          ) : null}
-        </StateBlock>
+          <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} rateLine={explainer.rateLine} />
+          <ScheduleNotices
+            notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
+            onDismiss={explainer.dismiss} onNextDay={schedule.nextDay}
+          />
+          <BookingGridHeading />
+          <StateBlock
+            loading={!shown && schedule.loading}
+            error={shown ? null : schedule.error}
+            action={BOOKINGS_COPY.loadAction}
+            onRetry={schedule.refresh}
+            empty={Boolean(shown && shown.courts.length === 0)}
+            emptyTitle={BOOKINGS_COPY.noCourts}
+            emptyHint={BOOKINGS_COPY.noCourtsHint}
+            emptyIcon={SquaresFour}
+            skeleton={<BookingGridSkeleton courts={day?.courts.length || 3} />}
+          >
+            {ctx ? (
+              <BookingBoard
+                ctx={ctx} slotsByCourt={schedule.slotsByCourt} timeSlices={schedule.timeSlices}
+                pastThresholdMs={schedule.pastThresholdMs} peakNowMs={schedule.peakNowMs}
+                collapsedRows={collapsed.rows} earlierLabel={collapsed.label} onExpandEarlier={() => setEarlierShownFor(date)}
+                showNow={date === today} underSheet={sheets.underSheet} holding={holding}
+              />
+            ) : null}
+          </StateBlock>
+        </WithAside>
       </div>
       <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
       <BookSheet

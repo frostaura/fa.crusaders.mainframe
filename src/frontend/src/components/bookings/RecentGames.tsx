@@ -6,10 +6,11 @@ import { Warning } from "@/components/ui/icons";
 import { RECENT, UPCOMING } from "@/lib/bookingsCopy";
 import { bookingsApi, recentAction, type RecentGame } from "@/lib/bookingsApi";
 import { GameCard } from "./UpcomingGames";
-import { SHOWN, when } from "./gameWhen";
+import { GAMES_ITEM, GAMES_LIST, SHOWN, when } from "./gameWhen";
 import { memberReads } from "@/lib/offline/memberReads";
 import { useGamesRead } from "./useGamesRead";
 import { RESULT_READABLE } from "@/lib/bookingLink";
+import { cn } from "@/lib/utils";
 
 /**
  * R2 F1-1 — the games that finished within the result window (contract C3), under the upcoming
@@ -43,8 +44,8 @@ export function RecentGames({ refreshKey, fallbackZone }: { refreshKey: unknown;
   return (
     <section aria-labelledby={headingId} data-recent="" className="grid gap-2">
       <h2 id={headingId} className="text-sm font-semibold text-text-primary">{RECENT.title}</h2>
-      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map((game) => <li key={game.booking_id} className="grid gap-1.5"><RecentCard game={game} zone={zone} /></li>)}
+      <ul className={GAMES_LIST}>
+        {shown.map((game) => <li key={game.booking_id} className={cn(GAMES_ITEM, "grid content-start gap-1.5")}><RecentCard game={game} zone={zone} /></li>)}
       </ul>
       {hidden > 0 ? (
         <Button variant="ghost" size="sm" className="justify-self-start" aria-expanded={all} onClick={() => setAll((v) => !v)}>

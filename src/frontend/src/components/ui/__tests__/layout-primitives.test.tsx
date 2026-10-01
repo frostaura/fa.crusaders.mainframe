@@ -20,6 +20,16 @@ afterEach(() => {
 });
 
 describe("PageShell full", () => {
+  it("widens to the full frame from 3xl when asked, and tells the app bar so", () => {
+    const { container } = render(<PageShell width="wide" fullFrom3xl><p>body</p></PageShell>);
+    const shell = container.firstElementChild as HTMLElement;
+    expect(shell).toHaveAttribute("data-page-shell", "wide");
+    expect(shell).toHaveAttribute("data-page-frame", "full");
+    expect(shell.className.split(" ")).toEqual(expect.arrayContaining(["max-w-wide", "3xl:max-w-page"]));
+    const plain = render(<PageShell width="wide"><p>body</p></PageShell>).container.firstElementChild!;
+    expect(plain).not.toHaveAttribute("data-page-frame");
+  });
+
   it("is the 120rem frame, a named container, with the 3xl gutter", () => {
     const { container } = render(<PageShell width="full"><p>body</p></PageShell>);
     const shell = container.firstElementChild as HTMLElement;
@@ -125,6 +135,17 @@ describe("WithAside", () => {
     const main = container.querySelector("[data-aside-main]")!;
     expect(aside.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(aside.parentElement!.className).toContain("@[72rem]/aside:grid-cols-[var(--aside-w)_minmax(0,1fr)]");
+  });
+
+  it("a `first` rail leads the reading order but stands in the second column, with the tight gap", () => {
+    const { container } = render(<WithAside asideLabel="Your games" placement="first" gap="md" aside={<p>Games</p>}><p>Grid</p></WithAside>);
+    const aside = screen.getByRole("complementary", { name: "Your games" });
+    const main = container.querySelector<HTMLElement>("[data-aside-main]")!;
+    expect(aside.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(aside.className).toContain("@[72rem]/aside:col-start-2");
+    expect(main.className).toContain("@[72rem]/aside:col-start-1");
+    expect(main.className.split(" ")).toContain("gap-4");
+    expect(aside.parentElement!.className).toContain("@[72rem]/aside:grid-cols-[minmax(0,1fr)_var(--aside-w)]");
   });
 
   it("draws a `sheet` rail only beside the main column, and widens from 3xl", () => {

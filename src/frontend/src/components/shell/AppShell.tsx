@@ -82,7 +82,7 @@ const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-
  */
 const HEADER_FRAME = [
   "mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
-  "3xl:px-12 3xl:group-has-[[data-page-shell=full]]/shell:max-w-page",
+  "3xl:px-12 3xl:group-has-[[data-page-frame=full]]/shell:max-w-page",
 ].join(" ");
 const HEADER_OVER_RAIL = "xl:max-w-none xl:gap-x-8 xl:pl-0";
 /** The rail is `w-64` and its items start 24px in (px-3 + px-3). */

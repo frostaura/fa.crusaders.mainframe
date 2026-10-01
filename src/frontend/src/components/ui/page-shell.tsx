@@ -38,13 +38,19 @@ const WIDTH: Record<PageWidth, string> = {
   full: "max-w-page",
 };
 
-export type PageShellProps = ComponentProps<"div"> & { width?: PageWidth };
+export type PageShellProps = ComponentProps<"div"> & {
+  width?: PageWidth;
+  /** Widen to the `full` frame (120rem) from 3xl — a member screen with a rail to give the room to. */
+  fullFrom3xl?: boolean;
+};
 
-export function PageShell({ width = "content", className, children, ...rest }: PageShellProps) {
+export function PageShell({ width = "content", fullFrom3xl, className, children, ...rest }: PageShellProps) {
   return (
     <div
       data-page-shell={width}
-      className={cn("@container/page mx-auto flex w-full flex-col gap-8 px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8 3xl:px-12", WIDTH[width], className)}
+      // What the app bar follows from 3xl (AppShell reads it by :has()).
+      data-page-frame={width === "full" || fullFrom3xl ? "full" : undefined}
+      className={cn("@container/page mx-auto flex w-full flex-col gap-8 px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8 3xl:px-12", WIDTH[width], fullFrom3xl && "3xl:max-w-page", className)}
       {...rest}
     >
       {children}

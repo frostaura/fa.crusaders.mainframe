@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
  * <ul>
  *   <li><b>`after`</b> (default) — the rail on the right; stacked, it follows the main column.</li>
  *   <li><b>`before`</b> — the rail on the left and FIRST in reading order; stacked, above.</li>
+ *   <li><b>`first`</b> — the rail on the right, but FIRST in reading order; stacked, above. For a
+ *   rail that a phone wants at the top (the Bookings page's games) and a desktop beside.</li>
  *   <li><b>`sheet`</b> — the rail on the right; stacked, it is not drawn at all, because the page
  *   carries the same content another way (a bottom sheet, a ContextBar button). Never the only
  *   home of an action on a phone.</li>
@@ -62,6 +64,17 @@ const WIDTH: Record<AsideWidth, string> = {
   "22rem": "[--aside-w:22rem] 3xl:[--aside-w:24rem]",
   "24rem": "[--aside-w:24rem]",
 };
+/** `first`: DOM-first, drawn in the second column. */
+const SECOND_COLUMN: Record<At, string> = {
+  "56rem": "@[56rem]/aside:col-start-2 @[56rem]/aside:row-start-1",
+  "64rem": "@[64rem]/aside:col-start-2 @[64rem]/aside:row-start-1",
+  "72rem": "@[72rem]/aside:col-start-2 @[72rem]/aside:row-start-1",
+};
+const FIRST_COLUMN: Record<At, string> = {
+  "56rem": "@[56rem]/aside:col-start-1 @[56rem]/aside:row-start-1",
+  "64rem": "@[64rem]/aside:col-start-1 @[64rem]/aside:row-start-1",
+  "72rem": "@[72rem]/aside:col-start-1 @[72rem]/aside:row-start-1",
+};
 const SHOW_AT: Record<At, string> = {
   "56rem": "hidden @[56rem]/aside:flex",
   "64rem": "hidden @[64rem]/aside:flex",
@@ -72,26 +85,31 @@ export type WithAsideProps = {
   aside: ReactNode;
   /** The landmark's name: "Today", "Your balance", "Money". */
   asideLabel: string;
-  placement?: "after" | "before" | "sheet";
+  placement?: "after" | "before" | "first" | "sheet";
   /** The BOX width at which the rail stands beside the main column. */
   at?: At;
   asideWidth?: AsideWidth;
   sticky?: boolean;
+  /** The space between blocks (stacked, and inside each column): `lg` (32px, sections) or `md` (16px, one tool). The columns themselves stay 32px apart. */
+  gap?: "md" | "lg";
   className?: string;
   children: ReactNode;
 };
 
 export function WithAside(props: WithAsideProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { aside, asideLabel, placement = "after", at = "72rem", asideWidth = "20rem", sticky = true, className, children } = props;
+  const { aside, asideLabel, placement = "after", at = "72rem", asideWidth = "20rem", sticky = true, gap = "lg", className, children } = props;
   const before = placement === "before";
+  const first = placement === "first";
   const rail = (
     <aside
       aria-label={asideLabel}
       data-aside={placement}
       className={cn(
-        "min-w-0 flex-col gap-6",
+        "min-w-0 flex-col",
+        gap === "md" ? "gap-4" : "gap-6",
         placement === "sheet" ? SHOW_AT[at] : "flex",
+        first && SECOND_COLUMN[at],
         // Room for a focus outline inside the rail's own scroller.
         sticky && cn(STICKY[at], "overscroll-contain p-1 -m-1"),
       )}
@@ -102,11 +120,11 @@ export function WithAside(props: WithAsideProps) {
   return (
     <div data-with-aside="" className={cn("@container/aside min-w-0", className)}>
       <div
-        className={cn("flex flex-col gap-8", WIDTH[asideWidth], GRID[at], before ? COLS_START[at] : COLS_END[at])}
+        className={cn("flex flex-col", gap === "md" ? "gap-4" : "gap-8", WIDTH[asideWidth], GRID[at], before ? COLS_START[at] : COLS_END[at])}
       >
-        {before ? rail : null}
-        <div data-aside-main="" className="flex min-w-0 flex-col gap-8">{children}</div>
-        {before ? null : rail}
+        {before || first ? rail : null}
+        <div data-aside-main="" className={cn("flex min-w-0 flex-col", gap === "md" ? "gap-4" : "gap-8", first && FIRST_COLUMN[at])}>{children}</div>
+        {before || first ? null : rail}
       </div>
     </div>
   );

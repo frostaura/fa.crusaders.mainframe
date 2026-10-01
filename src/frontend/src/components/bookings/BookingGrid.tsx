@@ -6,6 +6,7 @@ import type { ScheduleCourt, ScheduleSlot } from "../../lib/api";
 import { cn } from "../../lib/utils";
 import { isSlotHead, peakRestricted, slotAt, type TimeSlice } from "../../lib/scheduleGrid";
 import { selectionKey } from "../../lib/gridSelection";
+import { ScrollArea } from "../ScrollArea";
 import { BOOKINGS_COPY, CELL_TEXT, courtChipLabel, slicePriceLine } from "../../lib/bookingsCopy";
 import { useGridInteractions } from "../../lib/useGridInteractions";
 import { useTicker } from "../../lib/useTicker";
@@ -77,7 +78,8 @@ export function BookingBoard(props: BoardProps) {
   return (
     <div className="flex flex-col gap-3">
       {chips.overflow ? <CourtChips courts={day.courts} active={chips.active} onPick={chips.jump} /> : null}
-      <div className="overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs">
+      {/* 3xl: the frame hugs the capped grid (R4 form factor — never four 300px courts). */}
+      <div className="overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs 3xl:w-fit 3xl:max-w-full">
         <div
           ref={scroller}
           data-grid-scroller=""
@@ -99,6 +101,9 @@ export function BookingBoard(props: BoardProps) {
             className={cn(
               "relative grid w-max min-w-full gap-x-1.5 gap-y-1 px-2 pb-2",
               "grid-cols-[48px_repeat(var(--courts),minmax(104px,1fr))] md:grid-cols-[64px_repeat(var(--courts),minmax(120px,1fr))]",
+              // R4 form factor (SPEC 3.1): from 3xl a court column stops at 18rem; the width left
+              // over goes to the rail beside the grid, not to slots too wide to scan across.
+              "3xl:grid-cols-[64px_repeat(var(--courts),minmax(120px,18rem))]",
               // A marquee would otherwise paint a text selection across every court name it crosses.
               "select-none",
             )}
@@ -143,9 +148,13 @@ export function BookingBoard(props: BoardProps) {
 const PAGE_BOTTOM_PX = 42;
 export const SELECTION_ROOM_PX = 64;
 
-function scrollerMaxHeight(selecting: boolean): string {
-  const reserve = PAGE_BOTTOM_PX + (selecting ? SELECTION_ROOM_PX : 0);
-  return `max(280px, calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - ${reserve}px))`;
+/**
+ * R4 form factor: the selection bar's room is the bar's MEASURED height (`--context-bar-height`,
+ * published by every docked bar and added to `<main>`'s padding by the shell), not a guessed 64px
+ * — the page and the grid now reserve the same pixels, once.
+ */
+function scrollerMaxHeight(): string {
+  return `max(280px, calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - var(--context-bar-height, 0px) - ${PAGE_BOTTOM_PX}px))`;
 }
 
 /**
@@ -156,7 +165,7 @@ function scrollerMaxHeight(selecting: boolean): string {
  */
 function scrollerStyle(selecting: boolean): CSSProperties {
   return {
-    maxHeight: scrollerMaxHeight(selecting),
+    maxHeight: scrollerMaxHeight(),
     scrollPaddingTop: "var(--grid-head, 64px)",
     scrollPaddingLeft: "var(--grid-time, 56px)",
     // The floating bar sits 12px above the bottom edge; its room, that gap and a little air.
@@ -381,16 +390,20 @@ function chipInView(event: FocusEvent<HTMLElement>) {
 
 function CourtChips({ courts, active, onPick }: { courts: ScheduleCourt[]; active: number; onPick: (i: number) => void }) {
   return (
-    <div role="group" aria-label={BOOKINGS_COPY.courtChips} className="-mx-4 flex scroll-px-4 gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:scroll-px-0 sm:px-0">
-      {courts.map((c, i) => (
-        // R2 F1-12: 44px targets (`md`), not 36. R2 F1-11: under forced colours the current chip
-        // is drawn in the system highlight — the secondary fill was thrown away with the rest.
-        <Button key={c.id} size="md" variant={i === active ? "secondary" : "outline"} aria-pressed={i === active}
-          aria-label={courtChipLabel(c.name)} onClick={() => onPick(i)} onFocus={chipInView} className={cn("shrink-0 rounded-full", FORCED_PRESSED)}>
-          {c.name}
-        </Button>
-      ))}
-    </div>
+    // R4 form factor (SPEC 2.6): the row says it scrolls — the last chip was cut at the screen's
+    // edge ("C") with no fade. Not a tab stop of its own: every chip is one, and brings itself in.
+    <ScrollArea label={BOOKINGS_COPY.courtChips} tabbable={false} fade="app" className="-mx-4 sm:mx-0">
+      <div role="group" aria-label={BOOKINGS_COPY.courtChips} className="flex w-max scroll-px-4 gap-2 px-4 pb-1 sm:scroll-px-0 sm:px-0">
+        {courts.map((c, i) => (
+          // R2 F1-12: 44px targets (`md`), not 36. R2 F1-11: under forced colours the current chip
+          // is drawn in the system highlight — the secondary fill was thrown away with the rest.
+          <Button key={c.id} size="md" variant={i === active ? "secondary" : "outline"} aria-pressed={i === active}
+            aria-label={courtChipLabel(c.name)} onClick={() => onPick(i)} onFocus={chipInView} className={cn("shrink-0 rounded-full", FORCED_PRESSED)}>
+            {c.name}
+          </Button>
+        ))}
+      </div>
+    </ScrollArea>
   );
 }
 
