@@ -79,8 +79,8 @@ describe("member detail — approving a turned-down application (R3 A-2)", () =>
     renderMember();
     await screen.findByText(OVERVIEW_COPY.turnedDownBecause("Not a club member"));
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: MEMBER_COPY.moreActions("Thandi Mokoena") }), { button: 0, ctrlKey: false });
-    fireEvent.click(await screen.findByRole("menuitem", { name: ACTIONS_COPY.approve }));
+    // R4 form factor: on the header, beside the name — no longer behind the ⋯.
+    fireEvent.click(screen.getByRole("button", { name: ACTIONS_COPY.approve }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: ACTIONS_COPY.approveConfirm }));
 

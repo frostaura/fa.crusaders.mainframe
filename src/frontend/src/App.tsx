@@ -232,15 +232,18 @@ export function AppRoutes() {
         {/* R16 — one Admin tab. Everything the gear menu held is in here now. */}
         <Route path="/admin" element={<RequireAuth admin><Lazy><AdminLayout /></Lazy></RequireAuth>}>
           <Route index element={<AdminHomePage />} />
-          <Route path="/admin/members" element={<Lazy><AdminMembersPage /></Lazy>} />
-          {/* Absolute child paths, so every `path=` here is a whole URL the title table can name. */}
-          <Route path="/admin/members/:userId" element={<Lazy><MemberDetailLayout /></Lazy>}>
-            <Route index element={<Lazy><MemberOverview /></Lazy>} />
-            <Route path="/admin/members/:userId/wallet" element={<Lazy><MemberWallet /></Lazy>} />
-            <Route path="/admin/members/:userId/bookings" element={<Lazy><MemberBookings /></Lazy>} />
-            <Route path="/admin/members/:userId/doors" element={<Lazy><MemberDoors /></Lazy>} />
-            <Route path="/admin/members/:userId/night" element={<Lazy><MemberNightTab /></Lazy>} />
-            <Route path="/admin/members/:userId/access" element={<Lazy><MemberAccess /></Lazy>} />
+          {/* R4 form factor: the member is a CHILD of the list, so the list stays mounted beside it
+              (SplitView, from a 64rem box) and keeps its filters, its page and its scroll. */}
+          <Route path="/admin/members" element={<Lazy><AdminMembersPage /></Lazy>}>
+            {/* Absolute child paths, so every `path=` here is a whole URL the title table can name. */}
+            <Route path="/admin/members/:userId" element={<Lazy><MemberDetailLayout /></Lazy>}>
+              <Route index element={<Lazy><MemberOverview /></Lazy>} />
+              <Route path="/admin/members/:userId/wallet" element={<Lazy><MemberWallet /></Lazy>} />
+              <Route path="/admin/members/:userId/bookings" element={<Lazy><MemberBookings /></Lazy>} />
+              <Route path="/admin/members/:userId/doors" element={<Lazy><MemberDoors /></Lazy>} />
+              <Route path="/admin/members/:userId/night" element={<Lazy><MemberNightTab /></Lazy>} />
+              <Route path="/admin/members/:userId/access" element={<Lazy><MemberAccess /></Lazy>} />
+            </Route>
           </Route>
           <Route path="/admin/groups" element={<Lazy><AdminGroupsPage /></Lazy>} />
           {/* P12 — disputed results, and removing a wrong one. */}

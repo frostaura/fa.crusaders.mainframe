@@ -48,7 +48,20 @@ export const MEMBERS_PAGE = {
     total === null
       ? `Reading the rest of the club's members — ${read} so far. Counts cover those.`
       : `Reading the rest of the club's members — ${read} of ${total} so far. Counts cover those.`,
+  /**
+   * R4 form factor: the list draws a page of rows at a time — 281 members as cards were 72,000px
+   * of phone. Every row is still read (the counts are the club's); only the drawing waits.
+   */
+  showMore: (left: number) => `Show ${Math.min(left, MEMBERS_PAGE_SIZE)} more`,
+  showing: (shown: number, of: number) => `Showing ${shown} of ${of}`,
+  /** The list beside a member (R4 SplitView): its region and its heading. */
+  pickerLabel: "Members list",
+  pickerTitle: "Members",
+  allMembers: "All members",
 } as const;
+
+/** How many rows the members list draws before "Show more" (R4 form factor). */
+export const MEMBERS_PAGE_SIZE = 50;
 
 /** "142 members in total" / "12 shown · 142 in total" — the only place the word "total" appears. */
 export function membersCount(shown: number, total: number): string {
@@ -139,6 +152,8 @@ export const ADMIN_BADGE = {
 
 export const COLUMNS = {
   member: "Member",
+  /** R4 form factor (V-14): its own column only where the table's box is 76rem — 2xl beside the rail. */
+  email: "Email",
   status: "Status",
   groups: "Groups",
   joined: "Joined",

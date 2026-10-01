@@ -9,11 +9,11 @@ import { baseRoutes, detailFixture, renderMember, serve } from "./memberKit";
  * failed." on the member's page. The stubs perform the approval (the next read says Active) and
  * then fail the reply, exactly as the lost reply did.
  */
-const POINTER = { button: 0, ctrlKey: false, pointerType: "mouse" } as const;
 
-async function approveFromMenu(name: string) {
-  fireEvent.pointerDown(await screen.findByRole("button", { name: MEMBER_COPY.moreActions(name) }), POINTER);
-  fireEvent.click(await screen.findByRole("menuitem", { name: ACTIONS_COPY.approve }));
+/** R4 form factor: an application's decision is a worded button on the record's header, not in the ⋯. */
+async function approveFromHeader(name: string) {
+  await screen.findByRole("button", { name: MEMBER_COPY.moreActions(name) });
+  fireEvent.click(await screen.findByRole("button", { name: ACTIONS_COPY.approve }));
   const dialog = await screen.findByRole("dialog");
   fireEvent.click(within(dialog).getByRole("button", { name: ACTIONS_COPY.approveConfirm }));
 }
@@ -33,7 +33,7 @@ describe("member detail — an approval whose reply was lost", () => {
     ]);
     renderMember();
 
-    await approveFromMenu(name);
+    await approveFromHeader(name);
 
     expect(await screen.findByText(ACTIONS_COPY.approvedAfterLostReply(name))).toBeInTheDocument();
     expect(screen.queryByText(/couldn't approve|Approval failed/i)).not.toBeInTheDocument();

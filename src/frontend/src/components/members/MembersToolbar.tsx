@@ -18,16 +18,25 @@ import type { StatusCounts } from "./membersModel";
  * the screen cannot make, and it once sent an admin home with applications waiting.
  * </p>
  */
-export function MembersToolbar({ query, onQuery, status, onStatus, counts }: {
+export type MembersToolbarProps = {
   query: string;
   onQuery: (next: string) => void;
   status: StatusFilter;
   onStatus: (next: StatusFilter) => void;
   counts: StatusCounts | null;
-}) {
+  /**
+   * One column whatever the viewport (R4 form factor): beside a member's record the list is a
+   * 28rem pane, and `lg:flex-row` squeezed the search beside five chips.
+   */
+  stacked?: boolean;
+};
+
+export function MembersToolbar(props: MembersToolbarProps) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { query, onQuery, status, onStatus, counts, stacked = false } = props;
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="relative w-full lg:max-w-sm">
+    <div className={cn("flex flex-col gap-3", !stacked && "lg:flex-row lg:items-center lg:justify-between")}>
+      <div className={cn("relative w-full", !stacked && "lg:max-w-sm")}>
         <MagnifyingGlass size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
         <Input
           type="search"
@@ -44,7 +53,7 @@ export function MembersToolbar({ query, onQuery, status, onStatus, counts }: {
         aria-label={COPY.filterLabel}
         value={status}
         onValueChange={(next) => { if (next) onStatus(next as StatusFilter); }}
-        className="rounded-lg bg-bg-muted p-1"
+        className={cn("rounded-lg bg-bg-muted p-1", stacked && "flex-wrap justify-start")}
       >
         {STATUS_FILTERS.map((f) => (
           <ToggleGroupItem key={f.value} value={f.value} className="data-[state=on]:bg-bg-surface data-[state=on]:shadow-xs">

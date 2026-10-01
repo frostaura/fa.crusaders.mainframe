@@ -48,11 +48,16 @@ describe("the admin members table", () => {
     expect(region.querySelector("table")).not.toBeNull();
   });
 
-  it("labels every field, so the phone card says what the header row would have said", async () => {
+  /**
+   * Every cell but the member names its column (`data-label`, which the layout specs read). R4 form
+   * factor: the compact phone card no longer prints the labels — a balance in "cr" beside a name
+   * needs none — and the address has its own column where the table's box is 76rem (V-14).
+   */
+  it("labels every cell with its column", async () => {
     renderMembers(GROUP_ROUTES);
     await screen.findByText("League");
     const labelled = Array.from(document.querySelectorAll("tbody td[data-label]")).map((td) => td.getAttribute("data-label"));
-    expect(labelled).toEqual([COLUMNS.status, COLUMNS.groups, COLUMNS.joined, COLUMNS.balance, COLUMNS.actions]);
+    expect(labelled).toEqual([COLUMNS.email, COLUMNS.status, COLUMNS.groups, COLUMNS.joined, COLUMNS.balance, COLUMNS.actions]);
   });
 
   it("keeps the member's name in place while the rest of the row scrolls", async () => {
@@ -121,6 +126,7 @@ describe("the admin members table", () => {
     await screen.findByText("League");
 
     const expected: Record<string, string> = {
+      [COLUMNS.email]: "[@container(min-width:76rem)]:!table-cell",
       [COLUMNS.groups]: "[@container(min-width:59rem)]:!table-cell",
       [COLUMNS.joined]: "[@container(min-width:65rem)]:!table-cell",
     };
@@ -129,7 +135,8 @@ describe("the admin members table", () => {
       expect(header.className, `${label} header`).toMatch(/(^|\s)hidden(\s|$)/);
       expect(header.className, `${label} header`).toContain(threshold);
       const cell = document.querySelector<HTMLElement>(`tbody td[data-label="${label}"]`)!;
-      expect(cell.className, `${label} cell`).toContain(`${TABLE}:hidden`);
+      // Hidden on the compact card too (R4 form factor), so the base is `hidden`.
+      expect(cell.className, `${label} cell`).toMatch(/(^|\s)hidden(\s|$)/);
       expect(cell.className, `${label} cell`).toContain(threshold);
     }
     // Identity, state, money and the things an admin came here to press never drop.

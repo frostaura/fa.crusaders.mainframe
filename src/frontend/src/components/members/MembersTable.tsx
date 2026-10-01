@@ -69,8 +69,14 @@ const TABLE = "block [@container(min-width:48rem)]:table [@container(min-width:4
 const HEAD = "hidden [@container(min-width:48rem)]:table-header-group";
 const BODY = "grid gap-3 [@container(min-width:36rem)]:grid-cols-2 [@container(min-width:48rem)]:table-row-group";
 
+/**
+ * A card is COMPACT (R4 form factor, SPEC §3.8/§4.3): a wrapping row — who, then the balance on
+ * the same line; status, then the actions on the next — about 100px a member where it was 250,
+ * and the list draws a page at a time (281 cards were 72,000px of phone). Groups, the date and
+ * the address are the record's to show; the search still finds a member by address.
+ */
 const ROW = cn(
-  "no-lift group grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs",
+  "no-lift group flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-bg-surface p-3 shadow-xs",
   "hover:border-control",
   "[@container(min-width:48rem)]:table-row [@container(min-width:48rem)]:rounded-none",
   "[@container(min-width:48rem)]:border-0 [@container(min-width:48rem)]:p-0 [@container(min-width:48rem)]:shadow-none",
@@ -85,30 +91,35 @@ const CELL = cn(
   "transition-colors duration-fast ease-standard motion-reduce:transition-none",
 );
 
-/** The column's name printed above the value, in card mode only — the header row says it in a table. */
-const CARD_LABEL = cn(
-  "before:mb-1 before:block before:text-xs before:font-medium before:text-text-muted before:content-[attr(data-label)]",
-  "[@container(min-width:48rem)]:before:content-none",
-);
+/** The address under the name: a table narrower than the Email column's 76rem. One rule per range (gotchas-frontend-layout). */
+const EMAIL_UNDER_NAME = "[@container(min-width:48rem)_and_(max-width:75.99rem)]:block";
+
+/** The table's own Email column (V-14): from a 76rem box — 2xl beside the rail, 1920 with room to spare. */
+const EMAIL_COLUMN = "hidden [@container(min-width:48rem)]:hidden [@container(min-width:76rem)]:!table-cell";
+/** Groups widen to 12rem where the email has its own column and the member column has the room. */
+const GROUPS_WIDE = "[@container(min-width:76rem)]:w-48";
 
 const COL = {
   identity: cn(
     CELL,
-    "col-span-2 row-start-1",
+    "order-1 flex-[1_1_12rem]",
     "[@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:left-0 [@container(min-width:48rem)]:z-raised",
   ),
-  status: cn(CELL, "col-start-1 row-start-2 self-center [@container(min-width:48rem)]:w-32"),
-  groups: cn(CELL, CARD_LABEL, "col-span-2 [@container(min-width:48rem)]:hidden [@container(min-width:59rem)]:!table-cell [@container(min-width:48rem)]:w-36"),
-  date: cn(CELL, "col-span-2 [@container(min-width:48rem)]:hidden [@container(min-width:65rem)]:!table-cell [@container(min-width:48rem)]:w-24"),
+  email: cn(CELL, EMAIL_COLUMN, "[@container(min-width:48rem)]:w-72"),
+  status: cn(CELL, "order-3 flex-[1_1_auto] self-center [@container(min-width:48rem)]:w-32"),
+  // `hidden` at the table's own threshold too: CELL makes every cell a table-cell from 48rem, and
+  // a cell drawn under a header that is not shifts every column after it (`hidden` sorts last).
+  groups: cn(CELL, "hidden [@container(min-width:48rem)]:hidden [@container(min-width:59rem)]:!table-cell [@container(min-width:48rem)]:w-36", GROUPS_WIDE),
+  date: cn(CELL, "hidden [@container(min-width:48rem)]:hidden [@container(min-width:65rem)]:!table-cell [@container(min-width:48rem)]:w-24"),
   balance: cn(
-    CELL, CARD_LABEL,
-    "col-start-2 row-start-2 text-right",
+    CELL,
+    "order-2 ml-auto shrink-0 text-right",
     "[@container(min-width:48rem)]:w-36 [@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:right-64",
     "[@container(min-width:48rem)]:z-raised [@container(min-width:48rem)]:border-l",
   ),
   actions: cn(
     CELL,
-    "col-span-2 border-t border-border pt-3",
+    "order-4 ml-auto",
     "[@container(min-width:48rem)]:w-64 [@container(min-width:48rem)]:min-w-64 [@container(min-width:48rem)]:sticky",
     "[@container(min-width:48rem)]:right-0 [@container(min-width:48rem)]:z-raised",
   ),
@@ -127,8 +138,9 @@ const COL = {
  */
 const TH = {
   identity: "sticky left-0 z-sticky",
+  email: cn("w-72", EMAIL_COLUMN),
   status: "w-32",
-  groups: "hidden w-36 [@container(min-width:59rem)]:!table-cell",
+  groups: cn("hidden w-36 [@container(min-width:59rem)]:!table-cell", GROUPS_WIDE),
   date: "hidden w-24 [@container(min-width:65rem)]:!table-cell",
   balance: "w-36 sticky right-64 z-sticky border-l border-border text-right",
   actions: "w-64 min-w-64 sticky right-0 z-sticky text-right",
@@ -158,6 +170,7 @@ export function MembersTable(props: MembersTableProps) {
           <TableHeader className={HEAD}>
             <tr>
               <SortHead label={COLUMNS.member} k="full_name" sort={sort} onSort={onSort} className={TH.identity} />
+              <TableHead className={TH.email}>{COLUMNS.email}</TableHead>
               <SortHead label={COLUMNS.status} k="status" sort={sort} onSort={onSort} className={TH.status} />
               {groupsOf ? <TableHead className={TH.groups}>{COLUMNS.groups}</TableHead> : null}
               <SortHead label={dateColumn === "lastSeen" ? COLUMNS.lastSeen : COLUMNS.joined} k={dateKey} sort={sort} onSort={onSort} className={TH.date} />
@@ -224,6 +237,9 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
   return (
     <tr data-interactive="" data-member-row={row.user_id} onClick={rowClick(onOpen)} className={ROW}>
       <td className={COL.identity}><Identity row={row} /></td>
+      <td data-label={COLUMNS.email} className={COL.email}>
+        <p className="break-words text-xs text-text-secondary" title={row.email}><EmailWithBreaks email={row.email} /></p>
+      </td>
       <td data-label={COLUMNS.status} className={COL.status}><StatusCell row={row} /></td>
       {groupsOf ? (
         <td data-label={COLUMNS.groups} className={cn(COL.groups, groupsHiddenOnCard(row, groupsOf))}>
@@ -274,7 +290,9 @@ function Identity({ row }: { row: MemberRow }) {
             cut to "wa…" and "Membership number d…" beside columns with room to spare. The
             number and the address are two lines; an address breaks anywhere, a reason at words. */}
         {row.membership_number ? <p className="truncate text-xs text-text-muted" title={row.membership_number}>{row.membership_number}</p> : null}
-        <p className="break-words text-xs text-text-muted" title={sub}><EmailWithBreaks email={row.email} /></p>
+        {/* Under the name only in a table without its own Email column (V-14); a compact card
+            leaves it to the record. */}
+        <p className={cn("hidden break-words text-xs text-text-muted", EMAIL_UNDER_NAME)} title={sub}><EmailWithBreaks email={row.email} /></p>
         {row.rejection_reason ? (
           <p className="line-clamp-2 break-words text-xs text-danger-strong" title={row.rejection_reason}>{row.rejection_reason}</p>
         ) : null}

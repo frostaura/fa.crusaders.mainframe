@@ -1,9 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useOutlet } from "react-router-dom";
 import { GroupAssign } from "../components/members/GroupAssign";
 import { MemberDialogs, type MemberDialogState } from "../components/members/MemberDialogs";
 import { MembersTable, MembersTableSkeleton } from "../components/members/MembersTable";
 import { MembersToolbar } from "../components/members/MembersToolbar";
+import { MemberPicker } from "../components/members/MemberPicker";
+import { MembersSplitContext } from "../components/members/membersSplit";
+import { useMembersFilters } from "../components/members/useMembersFilters";
 import { RelatedBookingField } from "../components/members/RelatedBookingField";
 import type { RowActionHandlers } from "../components/members/RowActions";
 import { TopUpSheet } from "../components/members/TopUpSheet";
@@ -17,11 +20,13 @@ import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
 import { Users } from "../components/ui/icons";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { SplitView } from "../components/ui/split-view";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { StateBlock } from "../components/ui/state-block";
 import {
-  GROUPS_COPY, MEMBERS_PAGE as COPY, membersCount, statusFilterFrom, type StatusFilter,
+  GROUPS_COPY, MEMBERS_PAGE as COPY, MEMBERS_PAGE_SIZE, membersCount, type StatusFilter,
 } from "../lib/membersCopy";
+import { typography } from "../lib/typography";
 import { describeFailure } from "../lib/errors";
 
 /**
@@ -48,10 +53,11 @@ import { describeFailure } from "../lib/errors";
  */
 export default function AdminMembersPage() {
   const list = useMembersList();
-  const [params, setParams] = useSearchParams();
-  const status = statusFilterFrom(params.get("status"));
-  const query = params.get("q") ?? "";
+  const record = useOutlet();
+  const filters = useMembersFilters(record === null);
+  const { status, query } = filters;
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
+  const paging = usePaging(`${status}|${query}|${sort.key}|${sort.dir}`);
   const [dialog, setDialog] = useState<MemberDialogState>(null);
   const [assigning, setAssigning] = useState<MemberRow | null>(null);
   const groups = useGroupMemberships(listSends(list.members, "groups"));
@@ -59,16 +65,9 @@ export default function AdminMembersPage() {
   const lifecycle = useMemberLifecycle({ load: list.load, setMembers: list.setMembers });
   const credit = useCreditAdjust(list.setMembers);
 
-  const setParam = useCallback((key: "status" | "q", value: string | null) => {
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (value) next.set(key, value); else next.delete(key);
-      return next;
-    }, { replace: true });
-  }, [setParams]);
-
   const counts = useMemo(() => statusCounts(list.members), [list.members]);
   const rows = useMemo(() => visibleRows(list.members ?? [], status, query, sort), [list.members, status, query, sort]);
+  const split = useMemo(() => ({ listHref: filters.listHref }), [filters.listHref]);
 
   const handlers: RowActionHandlers = {
     approve: lifecycle.approve,
@@ -84,8 +83,53 @@ export default function AdminMembersPage() {
     fingerprintCount: (member) => prints.byUser[member.user_id]?.templates.length ?? 0,
   };
 
+  const toolbar = (
+    <MembersToolbar
+      query={query}
+      onQuery={(q) => filters.set("q", q)}
+      status={status}
+      onStatus={(s: StatusFilter) => filters.set("status", s === "all" ? null : s)}
+      counts={counts}
+      stacked={record !== null}
+    />
+  );
+  const overlays = (
+    <MemberOverlays
+      dialog={dialog}
+      setDialog={setDialog}
+      lifecycle={lifecycle}
+      prints={prints}
+      assigning={assigning}
+      setAssigning={setAssigning}
+      list={list}
+      groups={groups}
+      credit={credit}
+    />
+  );
+
+  // A member is open: the list beside the record from a 64rem box, the record alone below it.
+  if (record !== null) {
+    return (
+      <PageShell width="full">
+        <SplitView
+          listLabel={COPY.pickerLabel}
+          listWidth="28rem"
+          detail={<MembersSplitContext.Provider value={split}>{record}</MembersSplitContext.Provider>}
+          list={(
+            <>
+              <h2 className={typography({ variant: "h2" })}>{COPY.pickerTitle}</h2>
+              {toolbar}
+              <PickerBody list={list} rows={rows} shown={paging.shown} onMore={paging.more} onClearFilters={filters.clear} filtered={status !== "all" || query.trim() !== ""} />
+            </>
+          )}
+        />
+        {overlays}
+      </PageShell>
+    );
+  }
+
   return (
-    <PageShell width="wide">
+    <PageShell width="full">
       <PageHeader
         title={COPY.title}
         description={COPY.description}
@@ -93,24 +137,54 @@ export default function AdminMembersPage() {
         freshness={<Freshness at={list.readAt} />}
       />
       <div className="flex flex-col gap-4">
-        <MembersToolbar
-          query={query}
-          onQuery={(q) => setParam("q", q)}
-          status={status}
-          onStatus={(s: StatusFilter) => setParam("status", s === "all" ? null : s)}
-          counts={counts}
-        />
+        {toolbar}
         <MembersBody
           list={list}
           rows={rows}
+          shown={paging.shown}
+          onMore={paging.more}
           groups={groups}
           sort={sort}
           onSort={(key: SortKey) => setSort((s) => nextSort(s, key))}
           handlers={handlers}
           filtered={status !== "all" || query.trim() !== ""}
-          onClearFilters={() => setParams(new URLSearchParams(), { replace: true })}
+          onClearFilters={filters.clear}
         />
       </div>
+      {overlays}
+    </PageShell>
+  );
+}
+
+/**
+ * How many rows are drawn (R4 form factor): a page at a time, back to one page whenever the
+ * filter, the search or the sort changes — `key` names that view, so a new view starts over
+ * without an effect.
+ */
+function usePaging(key: string) {
+  const [state, setState] = useState({ key, shown: MEMBERS_PAGE_SIZE });
+  const shown = state.key === key ? state.shown : MEMBERS_PAGE_SIZE;
+  const more = useCallback(() => setState({ key, shown: shown + MEMBERS_PAGE_SIZE }), [key, shown]);
+  return { shown, more };
+}
+
+type OverlayProps = {
+  dialog: MemberDialogState;
+  setDialog: React.Dispatch<React.SetStateAction<MemberDialogState>>;
+  lifecycle: ReturnType<typeof useMemberLifecycle>;
+  prints: ReturnType<typeof useFingerprints>;
+  assigning: MemberRow | null;
+  setAssigning: (row: MemberRow | null) => void;
+  list: ReturnType<typeof useMembersList>;
+  groups: { state: GroupsState; retry: () => Promise<void> };
+  credit: ReturnType<typeof useCreditAdjust>;
+};
+
+/** The list's dialogs and sheets — the same whichever shape the page is in. */
+function MemberOverlays(props: OverlayProps) {
+  const { dialog, setDialog, lifecycle, prints, assigning, setAssigning, list, groups, credit } = props;
+  return (
+    <>
       <MemberDialogs
         dialog={dialog}
         setDialog={setDialog}
@@ -146,13 +220,45 @@ export default function AdminMembersPage() {
           )}
         />
       ) : null}
-    </PageShell>
+    </>
+  );
+}
+
+type PickerBodyProps = {
+  list: ReturnType<typeof useMembersList>;
+  rows: MemberRow[];
+  shown: number;
+  onMore: () => void;
+  filtered: boolean;
+  onClearFilters: () => void;
+};
+
+/** The list pane beside a record: failed · loading · empty · the dense rows, as the table's body says them. */
+function PickerBody(props: PickerBodyProps) {
+  const { list, rows, shown, onMore, filtered, onClearFilters } = props;
+  if (list.error) return <ListFailed error={list.error} retrying={list.loading} onRetry={() => void list.load()} />;
+  const state = bodyState(list.members, rows, filtered);
+  return (
+    <StateBlock
+      action={COPY.loadAction}
+      loading={list.members === null}
+      skeleton={<MembersTableSkeleton />}
+      empty={state.empty}
+      emptyIcon={Users}
+      emptyTitle={state.emptyTitle}
+      emptyHint={state.emptyHint}
+      emptyAction={state.offerClear ? <Button variant="outline" onClick={onClearFilters}>{COPY.clearFilters}</Button> : null}
+    >
+      <MemberPicker rows={rows} total={state.total} shown={shown} onMore={onMore} />
+    </StateBlock>
   );
 }
 
 type BodyProps = {
   list: ReturnType<typeof useMembersList>;
   rows: MemberRow[];
+  shown: number;
+  onMore: () => void;
   groups: { state: GroupsState; retry: () => Promise<void> };
   sort: Sort;
   onSort: (key: SortKey) => void;
@@ -196,7 +302,7 @@ function MembersBody(props: BodyProps) {
         emptyAction={state.offerClear ? <Button variant="outline" onClick={onClearFilters}>{COPY.clearFilters}</Button> : null}
       >
         <MembersTable
-          rows={rows}
+          rows={rows.slice(0, props.shown)}
           groupsOf={groupsLookup(groups.state)}
           dateColumn={listSends(list.members, "last_login_at") ? "lastSeen" : "joined"}
           sort={props.sort}
@@ -204,8 +310,20 @@ function MembersBody(props: BodyProps) {
           now={list.readAt ?? 0}
           handlers={props.handlers}
         />
+        <ShowMore shown={Math.min(props.shown, rows.length)} of={rows.length} onMore={props.onMore} />
       </StateBlock>
     </>
+  );
+}
+
+/** "Showing 50 of 281 · Show 50 more" under a list longer than a page; nothing under one that is not. */
+function ShowMore({ shown, of, onMore }: { shown: number; of: number; onMore: () => void }) {
+  if (shown >= of) return null;
+  return (
+    <div data-members-more="" className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+      <span className="text-sm text-text-secondary">{COPY.showing(shown, of)}</span>
+      <Button variant="outline" onClick={onMore}>{COPY.showMore(of - shown)}</Button>
+    </div>
   );
 }
 

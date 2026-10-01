@@ -20,7 +20,8 @@ import { MEMBER_COPY, MEMBER_TABS, STATUS_WORD, statusTone } from "@/lib/memberD
 import { heldLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { typography } from "@/lib/typography";
 import { cn, formatCredits } from "@/lib/utils";
-import { MemberActions } from "./MemberActions";
+import { useMembersSplit } from "@/components/members/membersSplit";
+import { MemberActions, MemberDecision } from "./MemberActions";
 import { zoneNow } from "./memberTime";
 import { displayName, useMemberDetailRead, type MemberDetailContext, type MemberDetailState } from "./useMemberDetail";
 import { useMemberTopUp } from "./useMemberTopUp";
@@ -63,7 +64,7 @@ export default function MemberDetailLayout() {
   if (!context) return <MemberPending state={state} />;
 
   return (
-    <PageShell width="wide">
+    <RecordFrame>
       <MemberHeader state={state} detail={context.detail} name={context.name} onTopUp={topUp.show} />
       <div className="flex min-w-0 flex-col gap-6">
         <MemberTabs userId={userId} />
@@ -82,8 +83,25 @@ export default function MemberDetailLayout() {
           )}
         />
       ) : null}
-    </PageShell>
+    </RecordFrame>
   );
+}
+
+/**
+ * The record's own frame — or none, beside the members list (R4 form factor, SPEC §3.8), whose
+ * `PageShell` already frames both panes: a second shell there doubled the gutters and nested one
+ * page container in another.
+ */
+function RecordFrame({ children }: { children: ReactNode }) {
+  const split = useMembersSplit();
+  if (split) return <div data-member-record="" className="flex min-w-0 flex-col gap-8">{children}</div>;
+  return <PageShell width="full">{children}</PageShell>;
+}
+
+/** Back to the list as the admin left it (status, search) when it stands beside this record. */
+function useBackTo(): { to: string; label: string } {
+  const split = useMembersSplit();
+  return { to: split?.listHref ?? MEMBER_COPY.backTo, label: MEMBER_COPY.back };
 }
 
 /* ─────────────────────────────── before the first answer ─────────────────────────────── */
@@ -91,9 +109,10 @@ export default function MemberDetailLayout() {
 /** Loading, failed, or not this club's member — never an empty person. */
 function MemberPending({ state }: { state: MemberDetailState }) {
   const notFound = errorCode(state.error) === "member_not_found";
+  const back = useBackTo();
   return (
-    <PageShell width="wide">
-      <PageHeader back={{ to: MEMBER_COPY.backTo, label: MEMBER_COPY.back }} title={notFound ? MEMBER_COPY.notFoundTitle : MEMBER_COPY.eyebrow} />
+    <RecordFrame>
+      <PageHeader back={back} title={notFound ? MEMBER_COPY.notFoundTitle : MEMBER_COPY.eyebrow} />
       {notFound ? (
         <StateBlock
           empty
@@ -111,7 +130,7 @@ function MemberPending({ state }: { state: MemberDetailState }) {
           skeleton={<MemberSkeleton />}
         />
       )}
-    </PageShell>
+    </RecordFrame>
   );
 }
 
@@ -138,6 +157,7 @@ type HeaderProps = { state: MemberDetailState; detail: MemberDetail; name: strin
 
 function MemberHeader(props: HeaderProps) {
   const { state, detail, name, onTopUp } = props;
+  const back = useBackTo();
   // An address may break after its "@" and before each "." (R4 V4-9: at 320 with 200% text the
   // one-word address ran 58px off the screen).
   const subline = (
@@ -149,13 +169,16 @@ function MemberHeader(props: HeaderProps) {
   return (
     <>
       <PageHeader
-        back={{ to: MEMBER_COPY.backTo, label: MEMBER_COPY.back }}
+        back={back}
         // No "Member" eyebrow: the back link above already says "Members", and on a phone the
         // repeated word cost a line of a header that pushed the tabs off the first screen (P10).
         title={name}
         description={subline}
         actions={(
           <>
+            {/* R4 form factor: an application's decision is ON the header, beside the record it is
+                about — the queue is cleared with ↓, Enter, Approve — not two menus deep. */}
+            <MemberDecision detail={detail} name={name} onChanged={state.reload} />
             <RefreshButton label={MEMBER_COPY.refresh} onRefresh={() => void state.reload()} loading={state.loading} />
             <MemberActions detail={detail} name={name} onChanged={state.reload} />
           </>

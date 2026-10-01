@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
+import { Button } from "@/components/ui/button";
 import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMenu";
 import { useResetMemberCodeConfirm } from "@/components/member-code/useResetMemberCodeConfirm";
 import { useToast } from "@/components/Toast";
@@ -50,12 +52,14 @@ function useLifecycleToast() {
     toast.push(notified ? { tone: "success", text: done } : { tone: "warning", text: unnotified, durationMs: 8000 });
 }
 
-function useLifecycleItems({ detail, name, onChanged }: Props) {
+type LifecycleItems = Record<"approve" | "reject" | "reactivate" | "suspend", ActionsMenuItem>;
+
+function useLifecycleItems({ detail, name, onChanged }: Props): LifecycleItems | null {
   const say = useLifecycleToast();
   const toast = useToast();
   const [reason, setReason] = useState("");
   const id = detail.membership_id;
-  if (!id) return [];
+  if (!id) return null;
   const settle = async () => { setReason(""); await onChanged(); };
   const reasonField = <ReasonField id="member-action-reason" value={reason} onChange={setReason} />;
 
@@ -115,11 +119,15 @@ function useLifecycleItems({ detail, name, onChanged }: Props) {
     },
   };
 
-  switch (detail.status) {
-    case "PendingApproval": return [approve, reject];
-    case "Active": return [suspend];
-    case "Suspended": return [reactivate];
-    case "Rejected": return [approve];
+  return { approve, reject, reactivate, suspend };
+}
+
+/** What the ⋯ holds for a status — an application's decision is on the header (MemberDecision), not here. */
+function menuLifecycle(status: MemberDetail["status"], items: LifecycleItems | null): ActionsMenuItem[] {
+  if (!items) return [];
+  switch (status) {
+    case "Active": return [items.suspend];
+    case "Suspended": return [items.reactivate];
     default: return [];
   }
 }
@@ -134,7 +142,7 @@ function useResetCodeItem({ detail, name, onChanged }: Props): ActionsMenuItem |
 export function MemberActions(props: Props) {
   const { detail, name } = props;
   const toast = useToast();
-  const lifecycle = useLifecycleItems(props);
+  const lifecycle = menuLifecycle(detail.status, useLifecycleItems(props));
 
   const resend: ActionsMenuItem | null = detail.email_verified ? null : {
     label: COPY.resendVerification, icon: <Envelope aria-hidden="true" />,
@@ -147,4 +155,32 @@ export function MemberActions(props: Props) {
   const resetCode = useResetCodeItem(props);
 
   return <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[resend, resetCode, ...lifecycle]} />;
+}
+
+/**
+ * An application's decision on the record's header (R4 form factor, SPEC §3.8): Approve and
+ * Reject for a pending applicant, Approve for a turned-down one (A-2) — worded buttons beside the
+ * name, each opening the same confirm the ⋯ used to, with the same lost-reply read-back. Nothing
+ * for anyone else: their lifecycle stays behind the ⋯.
+ */
+export function MemberDecision(props: Props) {
+  const items = useLifecycleItems(props);
+  const status = props.detail.status;
+  if (!items || (status !== "PendingApproval" && status !== "Rejected")) return null;
+  return (
+    <div data-member-decision="" className="flex flex-wrap items-center gap-2">
+      <DecisionButton item={items.approve} variant={status === "Rejected" ? "outline" : "primary"} icon={<UserPlus aria-hidden="true" />} />
+      {status === "PendingApproval" ? <DecisionButton item={items.reject} variant="danger-soft" icon={<UserMinus aria-hidden="true" />} /> : null}
+    </div>
+  );
+}
+
+function DecisionButton({ item, variant, icon }: { item: ActionsMenuItem; variant: "primary" | "outline" | "danger-soft"; icon: ReactNode }) {
+  if (!item.confirm) return null;
+  return (
+    <ConfirmDialog
+      {...item.confirm}
+      trigger={<Button variant={variant} icon={icon} className="!h-auto min-h-touch whitespace-normal py-2">{item.label}</Button>}
+    />
+  );
 }
