@@ -179,32 +179,7 @@ export default function AppShell() {
           paddingRight: "env(safe-area-inset-right)",
         }}
       >
-        {/*
-          `justify-end` and the bell's own `ml-auto` (P11): the bell is a ROW item, not one of the
-          actions, so that when large text wraps the row it stays up beside the crest and the
-          chip and avatar drop to the next line together, right-aligned — two lines, not three.
-          On one line the bell's auto margin takes the free space and the actions follow it.
-          V5-3: it pulls the chip closer by 0.75rem, not 1rem — at 1rem the chip sat OVER the
-          bell's box, and over the count hanging off its glyph.
-        */}
-        <div className={frame.header}>
-          <div data-app-crest="" className={frame.crest}>
-            <CrestLink to={memberChrome ? LANDING_PATH : "/"} />
-          </div>
-          {memberChrome ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
-          {/*
-            P5-6 (review round 5) — for the member this phone confirmed, not only once the club has
-            said so again: on one bar of signal the check is out for many seconds, and the bell,
-            the chip and Sign out went with it while the page and the tab bar were already drawn.
-          */}
-          {memberChrome ? <NotificationBell className="ml-auto @[44rem]/appbar:-mr-3" /> : null}
-          <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !memberChrome && "ml-auto")}>
-            {memberChrome ? <><CreditsChip /><AccountMenu /></> : null}
-            {auth.status === "anonymous" ? (
-              <Button asChild variant="outline" size="sm"><Link to="/login">Sign in</Link></Button>
-            ) : null}
-          </div>
-        </div>
+        <BarRow frame={frame} memberChrome={memberChrome} isAdmin={isAdmin} attention={attention} anonymous={auth.status === "anonymous"} />
         <RoutePendingBar />
       </header>
       {/*
@@ -250,6 +225,47 @@ export default function AppShell() {
       {/* P12 — a badge or a goal, once. It keeps its own rules: signed in only, and never over the pass (§9.3). */}
       <CelebrationOverlay />
     </div>
+  );
+}
+
+/** The bar's one row: crest, the tabs (inline where there is room), the bell and the actions. */
+function BarRow(props: {
+  frame: ReturnType<typeof chromeFrame>;
+  memberChrome: boolean;
+  isAdmin: boolean;
+  attention: ReturnType<typeof useAdminAttention>;
+  anonymous: boolean;
+}) {
+  const { frame, memberChrome, isAdmin, attention, anonymous } = props;
+  return (
+    <>
+    {/*
+      `justify-end` and the bell's own `ml-auto` (P11): the bell is a ROW item, not one of the
+      actions, so that when large text wraps the row it stays up beside the crest and the
+      chip and avatar drop to the next line together, right-aligned — two lines, not three.
+      On one line the bell's auto margin takes the free space and the actions follow it.
+      V5-3: it pulls the chip closer by 0.75rem, not 1rem — at 1rem the chip sat OVER the
+      bell's box, and over the count hanging off its glyph.
+    */}
+    <div className={frame.header}>
+      <div data-app-crest="" className={frame.crest}>
+        <CrestLink to={memberChrome ? LANDING_PATH : "/"} />
+      </div>
+      {memberChrome ? <PrimaryNav isAdmin={isAdmin} attention={attention} /> : null}
+      {/*
+        P5-6 (review round 5) — for the member this phone confirmed, not only once the club has
+        said so again: on one bar of signal the check is out for many seconds, and the bell,
+        the chip and Sign out went with it while the page and the tab bar were already drawn.
+      */}
+      {memberChrome ? <NotificationBell className="ml-auto @[44rem]/appbar:-mr-3" /> : null}
+      <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !memberChrome && "ml-auto")}>
+        {memberChrome ? <><CreditsChip /><AccountMenu /></> : null}
+        {anonymous ? (
+          <Button asChild variant="outline" size="sm"><Link to="/login">Sign in</Link></Button>
+        ) : null}
+      </div>
+    </div>
+    </>
   );
 }
 
