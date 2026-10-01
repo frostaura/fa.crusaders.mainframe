@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { typography } from "@/lib/typography";
@@ -11,7 +11,7 @@ import { AttentionCount, attentionName } from "@/components/admin/AdminRail";
 import { ADMIN_NAV, ADMIN_NAV_ITEMS, PENDING_APPLICATIONS_HREF, type AdminNavItem } from "@/components/admin/adminNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, CaretRight, CheckCircle, SealCheck, WarningCircle } from "@/components/ui/icons";
+import { ArrowRight, CaretDown, CaretRight, CheckCircle, SealCheck, WarningCircle } from "@/components/ui/icons";
 import { AutoGrid } from "@/components/ui/auto-grid";
 import { Interactable } from "@/components/ui/interactable";
 import { WithAside } from "@/components/ui/with-aside";
@@ -20,7 +20,9 @@ import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RecentAlerts } from "@/components/notifications/RecentAlerts";
 import { useRecentAlerts } from "@/components/notifications/useRecentAlerts";
-import { EMAIL_ALERTS_COPY, EMAIL_ALERTS_HREF, RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
+import {
+  CONSOLE_COPY, EMAIL_ALERTS_COPY, EMAIL_ALERTS_HREF, RECENT_ALERTS_COPY, RECENT_ALERTS_SHOWN,
+} from "@/lib/notificationsCopy";
 import { TextLink } from "@/components/ui/text-link";
 
 /**
@@ -358,14 +360,38 @@ function QuickLink({ item, attention }: { item: AdminNavItem; attention: AdminAt
   );
 }
 
+/**
+ * Every section, as cards. On a phone (a box under 48rem) the list repeats the section switcher at
+ * the top of the screen — 1,752px of it at 390 (R5 A5-6) — so there it is folded behind one toggle;
+ * from 48rem the toggle goes and the list is always open. Measured by the box, so it holds beside
+ * the rail and at 200 % text alike.
+ */
 function QuickLinks({ attention }: { attention: AdminAttention }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
   return (
-    <div className="flex flex-col gap-6">
-      {ADMIN_NAV.filter((group) => group.id !== "overview").map((group) => (
-        <QuickLinkGroup key={group.id} label={group.label}>
-          {group.items.map((item) => <QuickLink key={item.id} item={item} attention={attention} />)}
-        </QuickLinkGroup>
-      ))}
+    <div className="flex flex-col gap-4 [container-type:inline-size]">
+      <Button
+        variant="outline"
+        className="self-start whitespace-normal [@container(min-width:48rem)]:hidden"
+        aria-expanded={open}
+        aria-controls={listId}
+        icon={<CaretDown aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", open && "rotate-180")} />}
+        onClick={() => setOpen((was) => !was)}
+      >
+        {open ? CONSOLE_COPY.hide : CONSOLE_COPY.show}
+      </Button>
+      <div
+        id={listId}
+        data-folded={open ? "false" : "true"}
+        className={cn("flex-col gap-6 [@container(min-width:48rem)]:flex", open ? "flex" : "hidden")}
+      >
+        {ADMIN_NAV.filter((group) => group.id !== "overview").map((group) => (
+          <QuickLinkGroup key={group.id} label={group.label}>
+            {group.items.map((item) => <QuickLink key={item.id} item={item} attention={attention} />)}
+          </QuickLinkGroup>
+        ))}
+      </div>
     </div>
   );
 }
@@ -414,7 +440,7 @@ export default function AdminHome() {
         asideLabel={RECENT_ALERTS_COPY.title}
         aside={(
           <Section title={RECENT_ALERTS_COPY.title} description={RECENT_ALERTS_COPY.description}>
-            <RecentAlerts feed={alerts} />
+            <RecentAlerts feed={alerts} shown={RECENT_ALERTS_SHOWN} />
             {/* F3.11: the switches lived only in Profile as far as anyone could find them. */}
             <TextLink variant="standalone" to={EMAIL_ALERTS_HREF} className="self-start text-sm">
               {EMAIL_ALERTS_COPY.chooseLink}

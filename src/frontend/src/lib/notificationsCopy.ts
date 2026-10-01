@@ -18,6 +18,20 @@ export const RECENT_ALERTS_COPY = {
   loadMoreFailed: "Couldn’t read older alerts. What is shown above is still right — try again.",
   cursorExpired: "The list moved on since it was read. Refresh the Overview to start again from the newest.",
   listLabel: "Recent alerts, newest first",
+  /** R5 A5-6: the Overview shows the five newest; the rest open in place. */
+  seeAll: (count: number) => `See all ${count} alerts`,
+} as const;
+
+/** How many alerts the Overview shows before "See all" (R5 A5-6: 34 cards were 3,025px on a phone). */
+export const RECENT_ALERTS_SHOWN = 5;
+
+/**
+ * The Overview's Console list on a phone (R5 A5-6): it repeats the section switcher above it, so
+ * there it is one toggle.
+ */
+export const CONSOLE_COPY = {
+  show: "Show every section",
+  hide: "Hide the sections",
 } as const;
 
 /** The delivery badge: a word and a tone, so the tone is never the only carrier. */

@@ -6,7 +6,7 @@ import {
   doorFixture, doorsServer, memberFixture, refuse, renderPage, signIn, signOut, stubFetch, type StubRoute,
 } from "@/test/harness";
 import { noticeFixture } from "@/components/notifications/fixtures";
-import { EMAIL_ALERTS_COPY, EMAIL_ALERTS_HREF, RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
+import { CONSOLE_COPY, EMAIL_ALERTS_COPY, EMAIL_ALERTS_HREF, RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
 
 /**
  * The console's Overview: "Needs attention", then every section.
@@ -231,6 +231,27 @@ describe("the admin Overview", () => {
   });
 });
 
+/**
+ * R5 A5-6: on a phone the Console list (1,752px) repeats the section switcher above it. It is one
+ * toggle there; from a 48rem box it is the list, as before.
+ */
+describe("the Overview's Console on a phone", () => {
+  it("folds behind one toggle that names what it opens and says whether it is open", async () => {
+    setup();
+    renderHome();
+    const console = screen.getByRole("region", { name: "Console" });
+    const toggle = within(console).getByRole("button", { name: CONSOLE_COPY.show });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const list = document.getElementById(toggle.getAttribute("aria-controls")!);
+    expect(list).not.toBeNull();
+    expect(list!).toHaveAttribute("data-folded", "true");
+
+    fireEvent.click(toggle);
+    expect(within(console).getByRole("button", { name: CONSOLE_COPY.hide })).toHaveAttribute("aria-expanded", "true");
+    expect(list!).toHaveAttribute("data-folded", "false");
+  });
+});
+
 describe("the Overview's Recent alerts (R23)", () => {
   const alerts = () => screen.getByRole("region", { name: RECENT_ALERTS_COPY.title });
   const feedCalls = (stub: ReturnType<typeof setup>) => stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/notifications"));
@@ -335,6 +356,27 @@ describe("the Overview's Recent alerts (R23)", () => {
     fireEvent.click(await within(alerts()).findByRole("button", { name: RECENT_ALERTS_COPY.loadMore }));
     expect(await within(alerts()).findByText(RECENT_ALERTS_COPY.cursorExpired)).toBeInTheDocument();
     expect(within(alerts()).getByRole("link", { name: "Newest one" })).toBeInTheDocument();
+  });
+
+  /**
+   * R5 A5-6 / F5 §3.10: all 20 (and then 34) alerts were drawn — 3,025px of a 5,790px phone page.
+   * Five, then "See all", which shows the rest in place and puts focus on the first one it revealed.
+   */
+  it("shows the five newest, then the rest in place behind See all", async () => {
+    const items = Array.from({ length: 8 }, (_, i) => noticeFixture({ headline: `Alert ${i + 1}` }));
+    setup({ notices: { body: { items, next_cursor: "c1" } } });
+    renderHome();
+
+    expect(await within(alerts()).findByRole("link", { name: "Alert 5" })).toBeInTheDocument();
+    expect(within(alerts()).queryByRole("link", { name: "Alert 6" })).toBeNull();
+    // Older pages come after the ones already read, never before them.
+    expect(within(alerts()).queryByRole("button", { name: RECENT_ALERTS_COPY.loadMore })).toBeNull();
+
+    fireEvent.click(within(alerts()).getByRole("button", { name: RECENT_ALERTS_COPY.seeAll(8) }));
+    const sixth = await within(alerts()).findByRole("link", { name: "Alert 6" });
+    expect(within(alerts()).getByRole("link", { name: "Alert 8" })).toBeInTheDocument();
+    await waitFor(() => expect(sixth).toHaveFocus());
+    expect(within(alerts()).getByRole("button", { name: RECENT_ALERTS_COPY.loadMore })).toBeInTheDocument();
   });
 
   it("is re-read by the Overview's own refresh", async () => {
