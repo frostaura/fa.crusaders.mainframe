@@ -169,6 +169,30 @@ describe("with no signal", () => {
     expect(screen.queryByText(OFFLINE_COPY.staleTitle)).toBeNull();
   });
 
+  it("R5 M5-5: Mark all read with the club unreachable is refused before sending — 'needs a connection… Nothing was sent'", async () => {
+    signIn({ isAdmin: false });
+    localStorage.setItem(LAST_IDENTITY_KEY, ANA);
+    setDataOwner(ANA);
+    primeQuery(ANA, memberReads.inbox.key, ANAS);
+    // The phone believes it has signal (LiE-Fi): only the failed session check says otherwise.
+    const sent = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      void input; void init;
+      return Promise.reject(new TypeError("Failed to fetch"));
+    });
+    vi.stubGlobal("fetch", sent);
+
+    renderOffline("/inbox");
+    expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
+    await screen.findByText(OFFLINE_COPY.staleTitle);
+    fireEvent.click(screen.getByRole("button", { name: INBOX_COPY.markAll }));
+
+    expect(await screen.findByText(new RegExp(OFFLINE_COPY.writeCause.slice(0, 40)))).toBeInTheDocument();
+    expect(screen.queryByText(INBOX_COPY.markUnknown)).toBeNull();
+    expect(sent.mock.calls.some(([, init]) => (init?.method ?? "GET").toUpperCase() === "POST" && true)).toBe(false);
+    // Nothing was drawn as if it had been sent.
+    expect(document.querySelectorAll("li[data-unread]").length).toBe(1);
+  });
+
   it("with nothing on the phone it says it cannot reach the club — never an empty inbox", async () => {
     signIn({ isAdmin: false });
     localStorage.setItem(LAST_IDENTITY_KEY, ANA);

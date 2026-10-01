@@ -3,6 +3,7 @@ import { playersEndpoints, type MemberNotification, type MemberNotificationPage 
 import { INBOX_COPY } from "@/lib/playersCopy";
 import { useToast } from "@/components/Toast";
 import { describeFailure } from "@/lib/errors";
+import { OfflineError, phoneIsOffline } from "@/lib/api";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { failureOf, knownUnchanged, markAllOrProve, markReadOrProve } from "./inboxReadBack";
 import { memberReads } from "@/lib/offline/memberReads";
@@ -110,13 +111,19 @@ export function useInbox() {
     );
   }, [marks, noteRead, refreshCount]);
 
-  const before = useRef(0);
+  const before = useRef<number | null>(null);
   const toast = useToast();
+  // R5 M5-5 — the page already says "You're offline" (the club was never reached): Mark all read
+  // is refused before sending, as every write is offline ("needs a connection… Nothing was sent"),
+  // instead of a send that dies on the wire and a read-back that cannot look either.
+  const unreachable = read.offline;
+  const cannotSend = useCallback(() => unreachable || phoneIsOffline(), [unreachable]);
   // Lost-reply audit (R3): read back off the unread count; "Nothing changed" only when it is known.
-  const markAll = useAsyncAction(() => markAllOrProve(), {
+  const markAll = useAsyncAction(() => (cannotSend() ? Promise.reject(new OfflineError()) : markAllOrProve()), {
     optimistic: {
-      apply: () => { before.current = countRef.current; marks.markAll(true); setCount(0); },
-      rollback: () => { marks.markAll(false); setCount(before.current); },
+      // Refused before sending: nothing is drawn as if it had been.
+      apply: () => { before.current = cannotSend() ? null : countRef.current; if (before.current !== null) { marks.markAll(true); setCount(0); } },
+      rollback: () => { if (before.current !== null) { marks.markAll(false); setCount(before.current); } },
     },
     failure: (error) => {
       const unchanged = knownUnchanged(error);
