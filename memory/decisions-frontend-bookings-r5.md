@@ -32,6 +32,8 @@ Earlier rounds: `decisions-frontend-bookings.md`, `-r4.md`. Tests: `pages/bookin
 - **Desktop**: the selection bar spans the grid frame from 1024px (V5-10, ActionBar `style`); from
   3xl the main column hugs the capped grid (F5-6, `HUG_GRID`); the rail's day summary says
   "You can book N more slots today" under a cap, today only (§3.1).
+- **The desk's "book as" picker is lazy** (`BookAsChoice` via `lazyParts`, lane B's perf lead):
+  a member's Schedule chunk no longer pulls the member combobox / cmdk; `lazyParts.test` guards it.
 - **Split late cancel toast** subtracts the penalty from a `net_credits` equal to gross − partners
   (M5-7) — remove once the server's net counts it (lane F, R5).
 
