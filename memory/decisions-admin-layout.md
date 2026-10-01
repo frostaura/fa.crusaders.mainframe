@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-admin-layout
-description: "R4 form factor (L2): the admin console uses the full frame; Members is a list beside the record; Transactions keeps filters and totals in view with the movement beside the book; rails for alerts, settings, catalogue."
+description: "R4-R5 form factor: the admin console uses the full frame; Members beside the record; Transactions keeps totals in view; rails for alerts and settings; R5 phone density for Overview, Faults, Boards, schedules."
 type: decision
 last_verified: 2026-10-01
 ---
@@ -48,4 +48,13 @@ Spec: the round's `SPEC.md` §3/§4. Primitives: `components/ui` (`SplitView`, `
   drop the rows, R12), Courts, Webhooks, Settings (and its draft), Schedules (same list only).
 - **Not built (no data or another lane's file):** the Overview's court-occupancy strip and the
   board's live-event rail; split views for Groups/Schedules/Boards (cards instead); Settings'
-  third help column; "show 5 alerts" (`components/notifications`).
+  third help column.
+- **R5 (lane E2) — phones and large text.** Overview: 5 alerts, then "See all N" opens the rest IN
+  PLACE (there is no alerts page), focus on the first revealed; the Console folds under a 48rem box
+  (*why:* it repeats the section switcher; 5,790 → ~2,000px at 390). Faults: text takes the row,
+  "Mark resolved" under it; resolving REQUIRES "What did you do?" (`note`, the record's reason).
+  Boards: the activity toggle joins the action strip (234 → 186px). Groups `fill="fit"`; archived
+  cards muted by surface, never `opacity` (badge fell to 3.24:1). The switcher WRAPS rather than
+  break a word; its total wears the header tab's danger fill. Schedules state the rule IN FORCE and
+  "From <date> it holds …, instead." per later rule; End counts each date's own weekday; "from this
+  date on" can change the days. Tests: `e2e/admin-r5.spec.ts`.

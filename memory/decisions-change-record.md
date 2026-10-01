@@ -36,10 +36,10 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   opt-out switch can warn that nobody else will be told (the dispatcher's own recipient test).
 - **The console words the diff the server renders** (review round 2, F3-7, `presentChanges` in
   `lib/changeRecordCopy.ts`): ids hidden, credits and rand formatted, states and reason codes in
-  words, `balance_before/after_credits` joined into one Balance row, one-sided values listed as
-  facts rather than a "Before" with a dash. *Why:* writers store keys and tokens (`pending_approval`,
-  `top_up_cash`, UUIDs); a new writer's key falls back to words. R3 (A-7): instants in club day+clock,
-  ISO dates short, lengths and repeats in words; `spendable_credits` pairs as "Can spend".
+  words, balance halves joined, one-sided values as facts — EXCEPT a group edit's cleared peak say
+  or rate, an edit ("yes → no say"; R5 A5-3: a fact read as the change TO yes). *Why:* writers store
+  keys and tokens; a new key falls back to words. R3: club day+clock, short dates, lengths in words,
+  `spendable_credits` as "Can spend"; R5: a rate is "1.6 cr per R1"; a batch's `bookings` a line each.
 - **R3 (lane B):** a REJECTED applicant can be approved (A-2) — the same approval, reason cleared;
   nothing else is approvable. *Why:* the console offered it and got a bare 404.
   **Both admin-grant mails carry the reason** (A-3) — required since B10, dropped on the way out.
