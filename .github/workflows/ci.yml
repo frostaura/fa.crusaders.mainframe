@@ -65,7 +65,27 @@ jobs:
       # A threshold a tier cannot structurally satisfy teaches people to edit the threshold.
       # The number is now taken where the whole suite actually runs.
       - name: Test
-        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --results-directory ./TestResults --logger "trx;LogFileName=backend.trx"
+
+      # `-v q` prints only a failed test's NAME; the trx keeps its message (R4: a reset-mail test
+      # failed here once and passed 15/15 under local stress, with nothing to read).
+      - name: Show failed tests
+        if: failure()
+        run: |
+          TRX=$(find ./TestResults -name "backend.trx" | head -1)
+          [ -n "$TRX" ] || { echo "No trx written."; exit 0; }
+          python3 - "$TRX" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          root = ET.parse(sys.argv[1]).getroot()
+          for r in root.iterfind(".//t:UnitTestResult[@outcome='Failed']", ns):
+              print("=" * 100)
+              print(r.get("testName"))
+              msg = r.find(".//t:Message", ns)
+              print((msg.text or "")[:60000] if msg is not None else "(no message)")
+              st = r.find(".//t:StackTrace", ns)
+              print((st.text or "")[:6000] if st is not None else "")
+          PY
 
   # ============================================================================
   # Frontend — lint, build, test (Node 22 / React 19 / Vite 7)
