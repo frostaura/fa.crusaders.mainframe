@@ -504,17 +504,17 @@ function Summary({ options, pay, receive }: { options: TopUpOptions; pay: number
     // arrow between them is the conversion. Live — it moves as they type or pick a chip.
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-bg-muted p-4">
       <dl className="flex flex-col gap-1 text-sm">
-        <div className="flex items-baseline justify-between gap-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4">
           <dt className="text-text-secondary">You pay</dt>
-          <dd className="text-base font-semibold tabular-nums text-text-primary">{pay === null ? "—" : formatMoney(pay)}</dd>
+          <dd className="min-w-0 text-base font-semibold tabular-nums text-text-primary [overflow-wrap:anywhere]">{pay === null ? "—" : formatMoney(pay)}</dd>
         </div>
         <ArrowDown size={16} weight="bold" aria-hidden="true" className="ml-auto mr-6 text-text-muted" />
-        <div className="flex items-baseline justify-between gap-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4">
           <dt className="inline-flex items-center gap-1.5 text-text-secondary">
             <Coins size={16} aria-hidden="true" className="text-accent-strong" />
             You receive
           </dt>
-          <dd className={cn("text-xl font-bold tabular-nums", receive === null ? "text-text-muted" : "text-accent-strong")}>
+          <dd className={cn("min-w-0 text-xl font-bold tabular-nums [overflow-wrap:anywhere]", receive === null ? "text-text-muted" : "text-accent-strong")}>
             {receive === null ? "—" : formatCredits(receive, { long: true })}
           </dd>
         </div>

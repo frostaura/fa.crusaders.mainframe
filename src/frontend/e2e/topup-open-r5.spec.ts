@@ -70,3 +70,42 @@ test("open checkouts are listed and one Cancel frees the limit", async ({ page }
     await expect(page.getByText(/R0\.00 paid, R800\.00 waiting on PayFast, of your R1000\.00/)).toBeVisible();
     await page.screenshot({ path: info.outputPath(`after-${width}.png`), fullPage: true });
 });
+
+/**
+ * X5-11 (lane A's relay): at 320px with 200% text the top-up page scrolled sideways by 66px. The
+ * presets, the field and the summary now wrap inside the column; measured with the open-payments
+ * list showing as well.
+ */
+test("nothing scrolls sideways at 320px with 200% text", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await signIn(page);
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    if (path === "/api/v1/credit/topup/options") {
+      return json({ ...BASE, already_zar: 200, paid_zar: 0, waiting_zar: 200, remaining_zar: 800, open_checkouts: [OPEN[1]] });
+    }
+    if (path.startsWith("/api/v1/whoami")) return json(SESSION_MEMBER);
+    if (path.startsWith("/api/v1/wallet")) return json({ balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 });
+    if (path.startsWith("/api/v1/me/profile")) {
+      return json({ full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1" });
+    }
+    return route.fulfill({ status: 501, contentType: "application/json", body: "{}" });
+  });
+  await page.goto("/wallet/topup");
+  await page.addStyleTag({ content: "html { font-size: 32px; }" });
+  await expect(page.getByRole("button", { name: "Continue to PayFast" })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const { scroll, wide } = await page.evaluate(() => {
+    const vw = document.documentElement.clientWidth;
+    const main = document.getElementById("main-content");
+    const scroll = Math.max(...[document.documentElement, main].filter(Boolean).map((el) => el!.scrollWidth - el!.clientWidth));
+    const wide = [...(main ?? document.body).querySelectorAll("*")]
+      .filter((el) => el.getBoundingClientRect().right > vw + 1 && !el.closest(".sr-only"))
+      .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)} @${Math.round(el.getBoundingClientRect().right)}`)
+      .slice(0, 12);
+    return { scroll, wide };
+  });
+  expect(wide, "laid out past the right edge").toEqual([]);
+  expect(scroll, "sideways scroll").toBeLessThanOrEqual(1);
+});
