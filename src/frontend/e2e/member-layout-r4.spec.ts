@@ -387,6 +387,8 @@ test.describe("Invites (SPEC 3.5)", () => {
         await expect(page.getByText(INVITES_COPY.pickTitle)).toBeVisible();
         await cards.nth(1).click();
         await expect(page).toHaveURL(/seat=p0000000-0000-0000-0000-000000000009/);
+        // The pane draws after the URL moves (its read answers first): measure it once it is there.
+        await expect(page.locator("[data-invite-detail]")).toBeVisible();
         const pane = (await box(page, "[data-invite-detail]"))!;
         const l = (await list.boundingBox())!;
         expect(pane.x).toBeGreaterThanOrEqual(l.x + l.width);
@@ -495,10 +497,12 @@ test.describe("Profile (SPEC 3.7, §4.6)", () => {
 
       await page.getByRole("tab", { name: "Account" }).click();
       await expect(page).toHaveURL(/tab=account/);
-      const cards = await page.locator("[data-account-cards] > *").evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().x)));
-      const columns = new Set(cards).size;
-      if (width >= 1280) expect(columns).toBeGreaterThanOrEqual(2);
-      if (width < 768) expect(columns).toBe(1);
+      await expect(page.getByRole("region", { name: "Your details" })).toBeVisible();
+      // The cards settle as their reads answer (skeletons first): poll the column count, not one frame.
+      const columns = () => page.locator("[data-account-cards] > *")
+        .evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().x))).size);
+      if (width >= 1280) await expect.poll(columns).toBeGreaterThanOrEqual(2);
+      if (width < 768) await expect.poll(columns).toBe(1);
       await healthy(page);
     });
   }
