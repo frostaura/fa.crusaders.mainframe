@@ -127,8 +127,11 @@ type KindRowProps = { kind: AdminNoticeKind; on: boolean; pending: boolean; onCh
 function KindRow({ kind, on, pending, onChange }: KindRowProps) {
   const reasonId = useId();
   return (
-    <li data-alert-kind={kind.kind} className="py-3 first:pt-0 last:pb-0">
-      <Field className="grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4">
+    // R5 X5-5: beside an 88px switch and a 32px gap (both rem) the words had ~120px at 390 / 200 %
+    // and broke mid-word. When the ROW is under 20rem (320px at normal text, 640px at 200 %) the
+    // switch goes under the words, which then have the row's whole width.
+    <li data-alert-kind={kind.kind} className="py-3 [container-type:inline-size] first:pt-0 last:pb-0">
+      <Field className="grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 [@container(max-width:20rem)]:grid-cols-1">
         <div className="flex min-w-0 flex-col gap-0.5">
           <FieldLabel className="break-words">{kind.title}</FieldLabel>
           <FieldDescription className="break-words">{kind.description}</FieldDescription>
@@ -140,7 +143,7 @@ function KindRow({ kind, on, pending, onChange }: KindRowProps) {
           )}
           {kind.optional && !on ? <StillTold othersReceiving={kind.others_receiving} /> : null}
         </div>
-        <div className="col-start-2 row-span-full flex min-h-touch items-center gap-2">
+        <div className="col-start-2 row-span-full flex min-h-touch items-center gap-2 [@container(max-width:20rem)]:col-start-1 [@container(max-width:20rem)]:[grid-row:auto]">
           {pending ? <Spinner className="text-text-secondary" label={COPY.saving} /> : null}
           {kind.optional ? (
             <Switch

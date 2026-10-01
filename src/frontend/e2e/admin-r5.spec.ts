@@ -208,3 +208,29 @@ test.describe("R5 F5-5 / X5-6 — Groups", () => {
     });
   }
 });
+
+const KINDS = [
+  { kind: "member.registered", title: "New membership applications", description: "Somebody has applied to join and is waiting for approval.", optional: true, opted_out: false },
+  { kind: "member.application_pending", title: "Applications still waiting", description: "A daily reminder while any application has waited longer than the club's reminder threshold.", optional: true, opted_out: false },
+  { kind: "device.offline", title: "Court box or door stopped reporting", description: "A board the club has acknowledged has gone silent.", optional: true, opted_out: true },
+  { kind: "code.forgery_suspected", title: "Suspected forged codes", description: "A board accepted a code this club could not have issued.", optional: false, opted_out: false },
+];
+
+test.describe("R5 X5-5 — email alert switches at 390 / 200 %", () => {
+  test("labels wrap by word, never mid-word", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await signIn(page);
+    await serveApi(page, adminRoutes([
+      { path: "/api/v1/admin/notifications/kinds", body: { kinds: KINDS } },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+      { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null, retention_days: 90, timezone: ZONE } },
+    ]));
+    await page.goto("/profile?tab=account");
+    await page.addStyleTag({ content: "html { font-size: 32px; }" });
+    const card = page.getByRole("region", { name: "Email alerts" });
+    await expect(card.getByRole("switch", { name: "Suspected forged codes" })).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(() => document.fonts.ready);
+    await noWordBroken(page, "[data-alert-kind] label, [data-alert-kind] [data-slot='field-description']");
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});
