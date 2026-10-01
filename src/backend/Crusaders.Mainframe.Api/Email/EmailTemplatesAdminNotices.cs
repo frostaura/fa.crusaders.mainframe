@@ -10,10 +10,15 @@ public sealed record FaultSpike(int Faults, int Minutes, IReadOnlyList<string> B
 public sealed record DoorRefusalSpike(string DoorName, string DeviceCode, string? GateKey, int Refusals, int Minutes, string ConsoleUrl);
 
 /// <summary>
-/// A top-up that went wrong in a way an admin can act on. <see cref="AmountZar"/> is money —
-/// what the member was asked for — and carries the club's symbol; nothing else here does.
+/// A package purchase that went wrong in a way an admin can act on (admin-notice kind
+/// <c>topup.failed</c>, whose code is kept — contract §12.2). <see cref="AmountZar"/> is money —
+/// what the member was asked for — and carries the club's symbol; <see cref="Minutes"/> is the
+/// package's minutes and never does. Both package fields are null on a notice raised before P13,
+/// or for a notification that names no purchase.
 /// </summary>
-public sealed record TopUpFailure(string Reason, decimal? AmountZar, string? MemberName, string? Reference, string Symbol, string ConsoleUrl);
+public sealed record TopUpFailure(
+    string Reason, decimal? AmountZar, string? MemberName, string? Reference, string Symbol, string ConsoleUrl,
+    string? PackageName = null, int? Minutes = null);
 
 /// <summary>A club webhook the delivery worker has switched off.</summary>
 public sealed record WebhookDisabled(string Destination, string? Description, int Failures, bool Blocked, string ConsoleUrl);
@@ -21,12 +26,12 @@ public sealed record WebhookDisabled(string Destination, string? Description, in
 /// <summary>A repeating booking with nights it could not place.</summary>
 public sealed record ScheduleConflictNotice(string ScheduleName, string FirstDate, int Collisions, IReadOnlyList<string> Dates, string ConsoleUrl);
 
-/// <summary>An admin's booking that took a balance below zero. Every figure is credits.</summary>
+/// <summary>An admin's booking that took a balance below zero. Every figure is minutes.</summary>
 public sealed record OverdraftNotice(
     string ActorName, string MemberName, bool Self, string CourtName, string StartsAtLocal,
     int AmountMinutes, int BalanceAfterMinutes, string ConsoleUrl)
 {
-    /// <summary>Credits held for partners' shares; null on a notice queued before it was carried.</summary>
+    /// <summary>Minutes held for partners' shares; null on a notice queued before it was carried.</summary>
     public int? HeldMinutes { get; init; }
 }
 
@@ -109,21 +114,22 @@ public static partial class EmailTemplates
             ],
             WhyThis: WhyAdmin));
 
-    /// <summary>A top-up that failed for a reason the club, not the member, has to look at.</summary>
+    /// <summary>A package purchase that failed for a reason the club, not the member, has to look at.</summary>
     public static EmailMessage AdminTopUpFailed(ClubIdentity club, string to, TopUpFailure t)
     {
         var facts = new List<FactRow> { new("What happened", TopUpFailureReason(t.Reason)) };
         if (t.MemberName is not null) facts.Add(new FactRow("Member", t.MemberName));
+        if (t.PackageName is not null) facts.Add(new FactRow("Package", t.Minutes is { } m ? $"{t.PackageName} ({Min(m)})" : t.PackageName));
         if (t.AmountZar is { } amount) facts.Add(new FactRow("Amount asked for", Zar(amount, t.Symbol)));
         if (t.Reference is not null) facts.Add(new FactRow("Reference", t.Reference));
 
         return EmailChrome.Compose(club, to, new EmailContent(
-            Subject: "A top-up needs looking at",
+            Subject: "A package purchase needs looking at",
             Preheader: TopUpFailureReason(t.Reason),
-            Heading: "A top-up did not go through",
+            Heading: "A package purchase did not go through",
             Blocks:
             [
-                new Paragraph($"A card payment at {club.Name} did not become credits, for a reason the member cannot fix themselves."),
+                new Paragraph($"A card payment at {club.Name} did not become minutes, for a reason the member cannot fix themselves."),
                 new Facts(facts),
                 TopUpFailureOutcome(t.Reason),
                 new CallToAction("Open Transactions", t.ConsoleUrl),
@@ -177,7 +183,7 @@ public static partial class EmailTemplates
             WhyThis: WhyAdmin));
 
     /// <summary>
-    /// An admin took a balance below zero. Every figure is credits; the club's money symbol is
+    /// An admin took a balance below zero. Every figure is minutes; the club's money symbol is
     /// deliberately absent.
     /// </summary>
     public static EmailMessage AdminOverdraftAuthorised(ClubIdentity club, string to, OverdraftNotice o) =>
@@ -201,15 +207,15 @@ public static partial class EmailTemplates
     /// <summary>
     /// The figure the overdraft was decided on (review round 3, A-8): what the member may SPEND
     /// after the booking — the balance less the shares held for partners — which is exactly what
-    /// the desk's confirm step showed ("takes to −80.00"). The raw balance said −30.00 beside it,
+    /// the desk's confirm step showed ("takes to −1 h 20 min"). The raw balance said −30 minutes beside it,
     /// with a hyphen, and the two read as a contradiction. A notice queued before the held figure
     /// was carried keeps the old label, because its figure is the balance.
     /// </summary>
     private static string OverdraftHeadlineFigure(OverdraftNotice o)
     {
         return o.HeldMinutes is { } held
-            ? $"Can spend after: {Cr(o.BalanceAfterMinutes - held)}"
-            : $"Balance after: {Cr(o.BalanceAfterMinutes)}";
+            ? $"Can spend after: {Min(o.BalanceAfterMinutes - held)}"
+            : $"Balance after: {Min(o.BalanceAfterMinutes)}";
     }
 
     private static IReadOnlyList<FactRow> OverdraftFacts(OverdraftNotice o)
@@ -218,20 +224,20 @@ public static partial class EmailTemplates
         {
             new("Court", o.CourtName),
             new("When", o.StartsAtLocal),
-            new("Charged", Cr(o.AmountMinutes)),
+            new("Charged", Min(o.AmountMinutes)),
         };
         if (o.HeldMinutes is not { } held)
         {
-            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterMinutes)));
+            rows.Add(new FactRow("Balance after", Min(o.BalanceAfterMinutes)));
             return rows;
         }
 
-        rows.Add(new FactRow("Can spend after", Cr(o.BalanceAfterMinutes - held)));
+        rows.Add(new FactRow("Can spend after", Min(o.BalanceAfterMinutes - held)));
         // Only when they differ: a second figure that always equals the first is noise.
         if (held != 0)
         {
-            rows.Add(new FactRow("Held for partners", Cr(held)));
-            rows.Add(new FactRow("Balance after", Cr(o.BalanceAfterMinutes)));
+            rows.Add(new FactRow("Held for partners", Min(held)));
+            rows.Add(new FactRow("Balance after", Min(o.BalanceAfterMinutes)));
         }
         return rows;
     }
@@ -285,8 +291,8 @@ public static partial class EmailTemplates
     /// <summary>
     /// What has and has not happened to the member's money, and whether anybody told them — per
     /// reason, because the paths differ. One sentence for all of them ("has been emailed that
-    /// their top-up did not complete") was false on two: a gateway reporting a payment with no
-    /// reference is a member who HAS PAID, whose top-up is still open and who has been told
+    /// their purchase did not complete") was false on two: a gateway reporting a payment with no
+    /// reference is a member who HAS PAID, whose purchase is still open and who has been told
     /// nothing; a checkout the gateway refused to start took no money and was shown on screen,
     /// not mailed. Block body for the lizard reason in <c>memory/gotchas-build.md</c>.
     /// </summary>
@@ -296,23 +302,23 @@ public static partial class EmailTemplates
         {
             case "payment_id_missing":
                 return new Callout(CalloutTone.Warning,
-                    "The gateway says this member paid, but no credits were added and the member has not been told anything. "
-                    + "The top-up is still open: if the gateway sends a complete notification it will be credited then. "
-                    + "If it does not, check the payment in the gateway's own dashboard before crediting the member by hand.");
+                    "The gateway says this member paid, but no minutes were added and the member has not been told anything. "
+                    + "The purchase is still open: if the gateway sends a complete notification the minutes are added then. "
+                    + "If it does not, check the payment in the gateway's own dashboard before selling the member the package at the desk.");
             case "provider_register_failed":
                 return new Paragraph(
-                    "No payment was taken and no credits were added. The member saw an error on the top-up screen and was not emailed; "
-                    + "nobody can top up until the club's payment settings are fixed.");
+                    "No payment was taken and no minutes were added. The member saw an error on the buy-minutes screen and was not emailed; "
+                    + "nobody can buy minutes online until the club's payment settings are fixed.");
             case "signature_invalid":
                 return new Paragraph(
-                    "Nothing was credited and nothing was changed: the notification was ignored. If the club's payment settings "
+                    "No minutes were added and nothing was changed: the notification was ignored. If the club's payment settings "
                     + "changed recently the passphrase may not match; otherwise somebody may be sending notifications that did not come from the gateway.");
             default:
-                return new Paragraph("No credits were added. The member has been emailed that their top-up did not complete.");
+                return new Paragraph("No minutes were added. The member has been emailed that their purchase did not complete.");
         }
     }
 
-    /// <summary>Why a top-up failed, in the words an admin reads. Block body for the lizard reason in <c>memory/gotchas-build.md</c>.</summary>
+    /// <summary>Why a package purchase failed, in the words an admin reads. Block body for the lizard reason in <c>memory/gotchas-build.md</c>.</summary>
     private static string TopUpFailureReason(string reason)
     {
         switch (reason)
@@ -321,7 +327,7 @@ public static partial class EmailTemplates
             case "gateway_error": return "The gateway reported an error it did not explain.";
             case "provider_register_failed": return "The gateway refused to start the payment — the club's payment settings may be wrong.";
             case "signature_invalid": return "A payment notification arrived that did not carry the club's signature.";
-            case "payment_id_missing": return "The gateway reported a payment with no payment reference, so it could not be credited safely.";
+            case "payment_id_missing": return "The gateway reported a payment with no payment reference, so no minutes could be added safely.";
             default: return "The payment did not complete.";
         }
     }

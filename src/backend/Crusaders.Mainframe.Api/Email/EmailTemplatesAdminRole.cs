@@ -43,7 +43,7 @@ public static partial class EmailTemplates
             [
                 new Paragraph($"Hello {change.SubjectName}. {change.ActorName} has made you an administrator at {club.Name}."),
                 .. GrantReason(change),
-                new Paragraph("You can now approve members, adjust credits, manage courts and devices, and see the club's change record. Everything you do there is recorded against your name."),
+                new Paragraph("You can now approve members, adjust members' minutes, manage courts and devices, and see the club's change record. Everything you do there is recorded against your name."),
                 new Callout(CalloutTone.Warning, "If the app is already open, sign out and back in — or wait a few minutes — before the admin console appears."),
                 new CallToAction("Open the admin console", change.ConsoleUrl),
                 new Paragraph("If you weren't expecting this, tell the club committee."),
@@ -60,7 +60,7 @@ public static partial class EmailTemplates
             [
                 new Paragraph($"Hello {change.SubjectName}. {change.ActorName} has removed your administrator rights at {club.Name}."),
                 new Callout(CalloutTone.Danger, change.Reason ?? "No reason was given."),
-                new Paragraph("Your membership, your credits and your bookings are exactly as they were. Only the admin console has gone."),
+                new Paragraph("Your membership, your minutes and your bookings are exactly as they were. Only the admin console has gone."),
                 new Paragraph("If that looks like a mistake, speak to the club committee."),
             ],
             WhyThis: WhyAccount));

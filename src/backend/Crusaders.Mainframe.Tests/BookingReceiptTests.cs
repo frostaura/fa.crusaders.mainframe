@@ -28,8 +28,6 @@ namespace Crusaders.Mainframe.Tests;
 /// </remarks>
 public sealed class BookingReceiptTests
 {
-    private const decimal SlicePriceCredits = 8;
-
     /// <summary>The page content, as text. Uncompressed streams are readable; that is the point.</summary>
     private static string TextOf(byte[] pdf) => Encoding.Latin1.GetString(pdf);
 
@@ -55,11 +53,11 @@ public sealed class BookingReceiptTests
     }
 
     [Fact]
-    public void A_receipt_states_the_amount_in_credits_and_names_the_booking()
+    public void A_receipt_states_the_amount_in_minutes_and_names_the_booking()
     {
         var pdf = ReceiptPdf.ForBooking(
             "Crusaders Squash Club", "Erin AgentE", "0f2b-booking-ref", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 50, 450, "Thu 01 Jan 1970 00:00");
+            "Sat 05 Sep 12:45", "45 min", 45, 1530, "Thu 01 Jan 1970 00:00");
 
         var text = TextOf(pdf);
         Assert.Contains("Crusaders Squash Club", text, StringComparison.Ordinal);
@@ -70,16 +68,36 @@ public sealed class BookingReceiptTests
         Assert.Contains("Court 1", text, StringComparison.Ordinal);
         Assert.Contains("Sat 05 Sep 12:45", text, StringComparison.Ordinal);
 
-        // Credits, never rand. Credits are the unit of account here; a rand sign over a credit
-        // figure overstates the charge by the conversion rate, which is a defect this repo has
-        // already carried once.
-        Assert.Contains("50.00 cr", text, StringComparison.Ordinal);
-        Assert.Contains("450.00 cr", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("R50", text, StringComparison.Ordinal);
-        // And a full stop, whatever the server's locale is. en-ZA — the club's own — uses a
-        // comma, so a receipt rendered in the ambient culture would say "50,00" beside an email
-        // saying "50.00" and read as a different number to somebody scanning both.
-        Assert.DoesNotContain("50,00", text, StringComparison.Ordinal);
+        // Minutes, in words, whole — never rand, never a decimal, never "cr" (contract §6):
+        // "Charged: 45 minutes", and a balance past a day written in days.
+        Assert.Contains("(Charged) Tj", text, StringComparison.Ordinal);
+        Assert.Contains("(45 minutes) Tj", text, StringComparison.Ordinal);
+        Assert.Contains("(1 day 1 hour 30 minutes) Tj", text, StringComparison.Ordinal);
+        Assert.Contains("Minutes are its unit of account.", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("R45", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(".00", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(" cr", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("redit", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A balance below zero keeps its sign on the receipt. The prose formatter writes a real
+    /// minus (U+2212), which the receipt's WinAnsi text cannot carry and its escaper drops — so
+    /// "−45 minutes" would have printed as "45 minutes", a debt reading as money in hand on the
+    /// one document a member keeps. It prints as an ASCII minus instead.
+    /// </summary>
+    [Theory]
+    [InlineData(-45, "-45 minutes")]
+    [InlineData(-90, "-1 hour 30 minutes")]
+    public void A_receipt_keeps_the_sign_of_a_balance_below_zero(int balanceAfter, string expected)
+    {
+        var pdf = ReceiptPdf.ForBooking(
+            "Crusaders Squash Club", "Erin AgentE", "b1", "Court 1",
+            "Sat 05 Sep 12:45", "1 h", 60, balanceAfter, "Thu 01 Jan 1970 00:00");
+
+        var text = TextOf(pdf);
+        Assert.Contains($"({expected}) Tj", text, StringComparison.Ordinal);
+        Assert.Contains("(1 hour) Tj", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -124,15 +142,14 @@ public sealed class BookingReceiptTests
 
         var text = TextOf(receipt.Content);
         Assert.StartsWith("%PDF", text, StringComparison.Ordinal);
-        // What the member was actually charged, and what they have left — the two numbers the
-        // email quotes, on the document they will keep.
-        //
-        // Formatted invariantly on BOTH sides, and that is load-bearing rather than tidy: the
-        // club's own locale is en-ZA, whose decimal separator is a comma. This assertion caught
-        // itself doing "8,00" on a machine set that way, which is exactly the disagreement that
-        // would otherwise ship as a receipt reading "8,00 cr" beside an email reading "8.00 cr".
-        Assert.Contains($"{SlicePriceCredits.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
-        Assert.Contains($"{ok.BalanceAfterMinutes.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
+        // What the member was actually charged — the booking's own minutes, SliceMinutes ×
+        // SliceCount, read off the row rather than restated — and what they have left: the two
+        // numbers the email quotes, on the document they will keep, in the same words.
+        var charged = ok.Booking.AmountChargedMinutes;
+        Assert.Equal(ok.Booking.SliceMinutes * ok.Booking.SliceCount, charged);
+        Assert.Contains($"({MoneyFormat.Minutes(charged)}) Tj", text, StringComparison.Ordinal);
+        Assert.Contains($"({MoneyFormat.Minutes(ok.BalanceAfterMinutes)}) Tj", text, StringComparison.Ordinal);
+        Assert.Contains($"Charged: {MoneyFormat.Minutes(charged)}", MailText.Unwrap(confirmation.PlainBody));
         Assert.Contains(ok.Booking.Id.ToString(), text, StringComparison.Ordinal);
     }
 

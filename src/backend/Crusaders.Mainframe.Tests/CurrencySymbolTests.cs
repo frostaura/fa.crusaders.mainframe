@@ -121,64 +121,67 @@ public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
     // ---- The emails: the symbol reaches rand and stops there ---------------
 
     [Fact]
-    public void A_topup_confirmation_is_denominated_in_the_clubs_own_currency()
+    public void A_purchase_confirmation_is_denominated_in_the_clubs_own_currency()
     {
-        var mail = EmailTemplates.TopUpConfirmation(Club, "member@test.local", new TopUpReceipt(
-            AmountZar: 100m, MinutesAdded: 160, ConversionRate: 1.6m,
-            BalanceAfterMinutes: 210, Reference: "1089250", CurrencySymbol: "CHF"));
+        var mail = EmailTemplates.PurchaseConfirmation(Club, "member@test.local", new PackagePurchaseReceipt(
+            PackageName: "5 hours", Minutes: 300, ListPriceZar: 550m, DiscountBps: 1000, DiscountGroupName: "League",
+            AmountZar: 495m, BalanceAfterMinutes: 345, Reference: "1089250", CurrencySymbol: "CHF"));
 
-        Assert.Contains("CHF100.00", mail.HtmlBody);
-        // The rate is quoted per ONE of the club's own currency, not per a hardcoded rand.
-        Assert.Contains("1.6 credits per CHF1", mail.HtmlBody);
-        Assert.DoesNotContain("R100.00", mail.HtmlBody);
-        Assert.DoesNotContain("per R1", mail.HtmlBody);
+        // Both rand figures wear the club's own symbol, in both bodies.
+        foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
+        {
+            Assert.Contains("CHF550.00", body);
+            Assert.Contains("CHF495.00", body);
+            Assert.DoesNotContain("R550.00", body);
+            Assert.DoesNotContain("R495.00", body);
+        }
 
-        // And the credit figures are untouched by it. This is the whole decision: the two
-        // quantities in this one email are 100 of the club's money and 160 credits, and at
-        // the shipped 1.6 rate they are not the same size.
-        Assert.Contains("160.00 credits", mail.HtmlBody);
-        Assert.Contains("210.00 credits", mail.HtmlBody);
-        Assert.DoesNotContain("CHF160", mail.HtmlBody);
-        Assert.DoesNotContain("CHF210", mail.HtmlBody);
+        // And the minutes figures are untouched by it: 300 minutes is not 300 of anybody's money.
+        Assert.Contains("5 hours", mail.HtmlBody);
+        Assert.Contains("5 hours 45 minutes", mail.HtmlBody);
+        Assert.DoesNotContain("CHF300", mail.HtmlBody);
+        Assert.DoesNotContain("CHF345", mail.HtmlBody);
     }
 
     [Fact]
-    public void A_topup_that_did_not_complete_is_denominated_in_the_clubs_own_currency()
+    public void A_purchase_that_did_not_complete_is_denominated_in_the_clubs_own_currency()
     {
-        var mail = EmailTemplates.TopUpNotCompleted(
-            Club, "member@test.local", amountZar: 250m, failureReason: null,
+        var mail = EmailTemplates.PurchaseNotCompleted(
+            Club, "member@test.local", packageName: "10 hours", minutes: 600, amountZar: 250m, failureReason: null,
             reference: "1089251", currencySymbol: "R$");
 
-        Assert.Contains("R$250.00", mail.Subject);
+        Assert.Contains("10 hours", mail.Subject);
         Assert.Contains("R$250.00", mail.HtmlBody);
         // Both bodies: the text part is the half nobody looks at, and therefore the half that
         // would go on printing a hardcoded rand sign unnoticed.
         Assert.Contains("R$250.00", MailText.Unwrap(mail.PlainBody));
-        // Nothing was credited, and zero credits is still credits.
-        Assert.Contains("0.00 credits", mail.HtmlBody);
+        // Nothing was added, and zero minutes is still minutes — never a currency figure.
+        Assert.Contains("0 minutes", mail.HtmlBody);
         Assert.DoesNotContain("R$0.00", mail.HtmlBody);
+        Assert.DoesNotContain("R$600", mail.HtmlBody);
     }
 
     /// <summary>
-    /// The symbol does not reach a credit email, whatever it is set to. Every one of these
-    /// templates renders a credit figure and nothing else, so the club's money symbol
-    /// appearing in one of them would be the exact defect <c>Cr</c>'s header describes.
+    /// The symbol does not reach a minutes email, whatever it is set to. Every one of these
+    /// templates renders a minutes figure and nothing else, so the club's money symbol
+    /// appearing in one of them would be the exact defect <c>Min</c>'s header describes.
     /// </summary>
     [Fact]
-    public void No_credit_email_carries_a_money_symbol()
+    public void No_minutes_email_carries_a_money_symbol()
     {
         var confirmation = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
-            CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
-            AmountMinutes: 50, BalanceAfterMinutes: 60,
+            CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "45 min",
+            AmountMinutes: 45, BalanceAfterMinutes: 90,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
-        var cancellation = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50, 15);
-        var adjustment = EmailTemplates.CreditAdjustment(Club, "member@test.local", 25, 145, "desk credit");
+        var cancellation = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 45, 13);
+        var adjustment = EmailTemplates.MinutesAdjusted(Club, "member@test.local", 25, 145, "desk goodwill");
 
         foreach (var mail in new[] { confirmation, cancellation, adjustment })
         {
-            Assert.Contains("credits", mail.HtmlBody);
-            Assert.DoesNotContain("R50", mail.HtmlBody);
-            Assert.DoesNotContain("R60", mail.HtmlBody);
+            Assert.Contains("minutes", mail.HtmlBody);
+            Assert.DoesNotContain("credit", mail.HtmlBody, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("R45", mail.HtmlBody);
+            Assert.DoesNotContain("R90", mail.HtmlBody);
             Assert.DoesNotContain("R145", mail.HtmlBody);
             Assert.DoesNotContain("R25", mail.HtmlBody);
         }

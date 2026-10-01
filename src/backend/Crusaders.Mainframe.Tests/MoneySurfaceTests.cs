@@ -27,36 +27,46 @@ public class MoneySurfaceTests
     private static readonly ClubIdentity Club =
         new("Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
 
-    // ---- Emails are in credits, and quote the tenant's own policy ----------
+    // ---- Emails are in minutes, and quote the tenant's own policy ----------
 
     /// <summary>
-    /// "Charged R50,00" for a court that cost R31.25 at the club's 1.6 rate. Every figure in
-    /// both money emails is credits, and <c>CLAUDE.md</c> calls a field that mixes the two
-    /// units a money-correctness bug.
+    /// "Charged R50,00" for a court the member had not paid R50 for. Every figure in both
+    /// booking emails is minutes, in prose and whole — never a decimal, never "credits", never
+    /// a currency sign — and <c>CLAUDE.md</c> calls a field that mixes the two units a
+    /// money-correctness bug. Varied across the three shapes the formatter has: under an hour,
+    /// hours and minutes, and days from 24 h.
     /// </summary>
-    [Fact]
-    public void The_booking_confirmation_states_credits_and_never_rand()
+    [Theory]
+    [InlineData(45, 90, "45 minutes", "1 hour 30 minutes")]
+    [InlineData(90, 1500, "1 hour 30 minutes", "1 day 1 hour")]
+    [InlineData(60, -45, "1 hour", "−45 minutes")]
+    public void The_booking_confirmation_states_minutes_and_never_rand(int charged, int after, string chargedText, string afterText)
     {
         var mail = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
-            CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
-            AmountMinutes: 50, BalanceAfterMinutes: 60,
+            CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "45 min",
+            AmountMinutes: charged, BalanceAfterMinutes: after,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
 
-        Assert.Contains("50.00 credits", mail.HtmlBody);
-        Assert.Contains("60.00 credits", mail.HtmlBody);
-        Assert.DoesNotContain("R50", mail.HtmlBody);
-        Assert.DoesNotContain("R60", mail.HtmlBody);
+        foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
+        {
+            Assert.Contains(chargedText, body);
+            Assert.Contains(afterText, body);
+            Assert.DoesNotContain("credit", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(".00", body);
+            Assert.DoesNotContain($"R{charged}", body);
+        }
     }
 
     [Fact]
-    public void The_cancellation_email_states_credits_and_never_rand()
+    public void The_cancellation_email_states_minutes_and_never_rand()
     {
-        var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50, 15);
+        var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 90, 27);
 
-        Assert.Contains("50.00 credits", mail.HtmlBody);
-        Assert.Contains("15.00 credits", mail.HtmlBody);
-        Assert.DoesNotContain("R50", mail.HtmlBody);
-        Assert.DoesNotContain("R15", mail.HtmlBody);
+        Assert.Contains("1 hour 30 minutes", mail.HtmlBody);
+        Assert.Contains("27 minutes", mail.HtmlBody);
+        Assert.DoesNotContain("credit", mail.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("R90", mail.HtmlBody);
+        Assert.DoesNotContain("R27", mail.HtmlBody);
     }
 
     /// <summary>
@@ -67,7 +77,7 @@ public class MoneySurfaceTests
     public void The_booking_confirmation_quotes_the_tenants_penalty_policy_not_a_literal()
     {
         var mail = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
-            "Court 3", "Wed 16 Sep 10:00", "15 min", 50, 60,
+            "Court 3", "Wed 16 Sep 10:00", "1 h 30 min", 90, 60,
             PenaltyWindowMinutes: 30, PenaltyPct: 50m));
 
         // Both bodies, because the plain-text half is the one nobody looks at and therefore
@@ -75,10 +85,34 @@ public class MoneySurfaceTests
         foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
         {
             Assert.Contains("30 minutes before the start", body);
-            Assert.Contains("50% of the price", body);
+            // Contract §6: "{penalty_pct}% of the booking's minutes ({Min(penalty)})" — 50% of 90.
+            Assert.Contains("50% of the booking", body);
+            Assert.Contains("minutes (45 minutes)", body);
             Assert.DoesNotContain("15 minutes", body);
-            Assert.DoesNotContain("30% of the price", body);
+            Assert.DoesNotContain("30% of the booking", body);
         }
+        Assert.Contains("50% of the booking's minutes (45 minutes)", MailText.Unwrap(mail.PlainBody));
+    }
+
+    /// <summary>
+    /// The figure the penalty sentence quotes is the one the server would charge: rounded DOWN
+    /// to a whole minute, in the member's favour (contract §1.2). 30% of 45 is 13.5 — the mail
+    /// says 13, and a mutant rounding to nearest or up says 14.
+    /// </summary>
+    [Theory]
+    [InlineData(45, 30, 13)]
+    [InlineData(50, 30, 15)]
+    [InlineData(1, 99, 0)]
+    [InlineData(90, 33.4, 30)]
+    [InlineData(0, 30, 0)]
+    [InlineData(60, 0, 0)]
+    public void The_quoted_penalty_rounds_down_to_a_whole_minute(int charged, double pct, int expected)
+    {
+        Assert.Equal(expected, EmailTemplates.PenaltyOf(charged, (decimal)pct));
+
+        var mail = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
+            "Court 3", "Wed 16 Sep 10:00", "45 min", charged, 100, PenaltyWindowMinutes: 15, PenaltyPct: (decimal)pct));
+        Assert.Contains($"of the booking's minutes ({MoneyFormat.Minutes(expected)})", MailText.Unwrap(mail.PlainBody));
     }
 
     /// <summary>
@@ -161,17 +195,14 @@ public class MoneySurfaceTests
                 .FirstAsync()).Reason;
 
             Assert.NotNull(reason);
-            var invariant = settled.AmountMinutes.ToString("0.00", CultureInfo.InvariantCulture);
-            var ambient = settled.AmountMinutes.ToString("0.00", commaDecimal);
-            // Guard the premise before asserting on it. If the two spellings ever coincide,
-            // the pair below stops being a test and becomes a contradiction — which is exactly
-            // how this failed on CI while passing here.
-            Assert.NotEqual(invariant, ambient);
-
-            Assert.Contains(invariant, reason!);
-            // The defect, named: under the ambient culture this figure renders with a comma.
-            Assert.DoesNotContain(ambient, reason!);
-            Assert.Contains("credits", reason!);
+            // Since P13 the figure is whole minutes in prose — there is no decimal separator
+            // left to get wrong, and that is asserted rather than assumed: no comma figure, no
+            // ".00", and the minutes the release returned, in MoneyFormat's words.
+            Assert.True(settled.AmountMinutes > 0);
+            Assert.Contains($"{MoneyFormat.Minutes(settled.AmountMinutes)} returned", reason!);
+            Assert.DoesNotContain(settled.AmountMinutes.ToString("0.00", commaDecimal), reason!);
+            Assert.DoesNotContain(".00", reason!);
+            Assert.DoesNotContain("credit", reason!, StringComparison.OrdinalIgnoreCase);
         }
         finally { Thread.CurrentThread.CurrentCulture = previous; }
     }
@@ -184,45 +215,102 @@ public class MoneySurfaceTests
         try
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("af-ZA");
-            var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50, 15);
-            Assert.Contains("50.00 credits", mail.HtmlBody);
-            Assert.DoesNotContain("50,00", mail.HtmlBody);
+            var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 1815, 15);
+            Assert.Contains("1 day 6 hours 15 minutes", mail.HtmlBody);
+            Assert.DoesNotContain("1,815", mail.HtmlBody);
+            Assert.DoesNotContain(",00", mail.HtmlBody);
         }
         finally { Thread.CurrentThread.CurrentCulture = previous; }
     }
 
     /// <summary>
-    /// Two templates required by <c>feature-spec.md</c> §11 since it was written, neither of
-    /// which existed — so the one event where a member hands over real money, and the one
-    /// where somebody else moves their balance, both sent nothing at all.
+    /// The purchase confirmation (contract §6): the package, the minutes added, the list price,
+    /// the discount line with the group it came from, the amount paid, the PayFast reference and
+    /// the balance after — rand in the club's symbol, minutes in words, never mixed.
     /// </summary>
     [Fact]
-    public void A_topup_confirmation_shows_the_rand_paid_the_rate_and_the_credits_received()
+    public void A_purchase_confirmation_shows_the_package_the_discount_the_rand_paid_and_the_minutes()
     {
-        var mail = EmailTemplates.TopUpConfirmation(Club, "member@test.local", new TopUpReceipt(
-            AmountZar: 100m, MinutesAdded: 160,
-            ConversionRate: 1.6m, BalanceAfterMinutes: 210, Reference: "1089250",
+        var mail = EmailTemplates.PurchaseConfirmation(Club, "member@test.local", new PackagePurchaseReceipt(
+            PackageName: "5 hours", Minutes: 300, ListPriceZar: 550m, DiscountBps: 1000, DiscountGroupName: "League",
+            AmountZar: 495m, BalanceAfterMinutes: 1530, Reference: "1089250",
             // A club on the default symbol. What happens when it is NOT the default is
             // CurrencySymbolTests' — this case is here to hold the shape of the mail itself.
             CurrencySymbol: CurrencySymbol.Default));
 
-        Assert.Contains("R100.00", mail.HtmlBody);
-        Assert.Contains("1.6 credits per R1", mail.HtmlBody);
-        Assert.Contains("160.00 credits", mail.HtmlBody);
-        Assert.Contains("210.00 credits", mail.HtmlBody);
-        Assert.Contains("1089250", mail.HtmlBody);
+        foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
+        {
+            Assert.Contains("5 hours", body);
+            Assert.Contains("R550.00", body);
+            Assert.Contains("10% off — League", body);
+            Assert.Contains("R495.00", body);
+            Assert.Contains("1089250", body);
+            Assert.Contains("1 day 1 hour 30 minutes", body);
+            Assert.DoesNotContain("credit", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("top up", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("top-up", body, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Contains("5 hours", mail.Subject);
+    }
+
+    /// <summary>
+    /// The discount line appears ONLY when a discount was applied — a member who paid list price
+    /// is not shown "0% off" — and a fractional discount keeps its fraction ("12.5% off").
+    /// </summary>
+    [Theory]
+    [InlineData(0, null, null)]
+    [InlineData(1250, "Seniors", "12.5% off — Seniors")]
+    [InlineData(10000, null, "100% off")]
+    public void A_purchase_confirmation_shows_a_discount_line_only_when_there_was_one(int bps, string? group, string? expected)
+    {
+        var mail = EmailTemplates.PurchaseConfirmation(Club, "member@test.local", new PackagePurchaseReceipt(
+            "1 hour", 60, 120m, bps, group, 120m * (10000 - bps) / 10000, 60, "pf-1", "R"));
+        var text = MailText.Unwrap(mail.PlainBody);
+
+        if (expected is null)
+        {
+            Assert.DoesNotContain("Discount", text);
+            Assert.DoesNotContain("% off", text);
+        }
+        else
+        {
+            Assert.Contains($"Discount: {expected}", text);
+        }
     }
 
     [Theory]
-    [InlineData(25, "Credit added")]
-    [InlineData(-10, "Credit deducted")]
-    public void A_credit_adjustment_email_says_which_way_the_money_went(int amount, string expectedSubject)
+    [InlineData(45, "Minutes added — 45 minutes", "+45 minutes")]
+    [InlineData(-90, "Minutes taken off — 1 hour 30 minutes", "−1 hour 30 minutes")]
+    [InlineData(2880, "Minutes added — 2 days", "+2 days")]
+    public void A_minutes_adjustment_email_says_which_way_the_minutes_went(int amount, string expectedSubject, string signed)
     {
-        var mail = EmailTemplates.CreditAdjustment(Club, "member@test.local", amount, 145, "desk credit");
+        var mail = EmailTemplates.MinutesAdjusted(Club, "member@test.local", amount, 145, "lights failed on court 2");
 
-        Assert.StartsWith(expectedSubject, mail.Subject);
-        Assert.Contains("145.00 credits", mail.HtmlBody);
-        Assert.Contains("desk credit", mail.HtmlBody);
+        Assert.Equal(expectedSubject, mail.Subject);
+        Assert.Contains(signed, MailText.Unwrap(mail.PlainBody));
+        Assert.Contains("2 hours 25 minutes", mail.HtmlBody);
+        Assert.Contains("lights failed on court 2", mail.HtmlBody);
+        Assert.DoesNotContain("credit", mail.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A desk sale names the package, the minutes added, the money RECEIVED (which may differ
+    /// from the shelf price, contract §3.7) and the balance after.
+    /// </summary>
+    [Fact]
+    public void A_package_sold_at_the_desk_states_what_was_received_and_what_it_bought()
+    {
+        var mail = EmailTemplates.PackageSoldAtDesk(Club, "member@test.local", "10 hours", 600, 900m, 645, "R");
+
+        foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
+        {
+            Assert.Contains("10 hours", body);
+            Assert.Contains("R900.00", body);
+            Assert.Contains("10 hours 45 minutes", body);
+            Assert.DoesNotContain("R600", body);
+            Assert.DoesNotContain("credit", body, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Contains("10 hours", mail.Subject);
     }
 
     // ---- F19: an adjustment is club money, not the admin's own -------------
@@ -254,43 +342,6 @@ public class MoneySurfaceTests
         Assert.Equal(to, row.To);
         // Who did it is not lost — it moves to the field a statement should carry it in.
         Assert.Equal("Crusaders Admin", row.ActorName);
-    }
-
-    // ---- F12 / F16: what an adjustment endpoint will accept ---------------
-
-    /// <summary>
-    /// <c>ledger_entries.AmountMinutes</c> is <c>numeric(10,2)</c>. Above it, an unvalidated
-    /// insert answered a member-facing 500 with a Postgres overflow dump; below it, 0.005 was
-    /// stored as 0.01 and echoed back as 0.005 — half a cent from nothing and an API response
-    /// disagreeing with the ledger it had just written.
-    /// </summary>
-    [Theory]
-    [InlineData(999999999999.0)]
-    [InlineData(-999999999999.0)]
-    [InlineData(0.005)]
-    [InlineData(1.001)]
-    public void An_adjustment_outside_what_the_column_holds_is_refused(double amount)
-        // P13-B2: the adjustment is whole minutes (amountMinutes int, bound 999999, §3.7); amount_not_whole_cents is gone
-        => Assert.Fail($"P13-B2: rewrite for whole-minute adjustments ({amount})");
-
-    [Theory]
-    [InlineData(0.01)]
-    [InlineData(-10.5)]
-    [InlineData(99999999.99)]
-    public void An_adjustment_the_column_holds_exactly_is_accepted(double amount)
-        // P13-B2: the adjustment is whole minutes (amountMinutes int, bound 999999, §3.7); amount_not_whole_cents is gone
-        => Assert.Fail($"P13-B2: rewrite for whole-minute adjustments ({amount})");
-
-    // ---- F6: the presets a screen may offer -------------------------------
-
-    [Fact]
-    public void Presets_are_derived_from_the_tenants_block_and_cap()
-    {
-        Assert.Equal([100, 200, 500, 1000], TopUpEndpoints.Presets(100, 1000));
-        Assert.Equal([50, 100, 250, 300], TopUpEndpoints.Presets(50, 300));
-        // Nothing above the cap, and nothing that is not a whole block.
-        Assert.Equal([100, 200], TopUpEndpoints.Presets(100, 200));
-        Assert.Empty(TopUpEndpoints.Presets(0, 1000));
     }
 
     // ---- F2: the process URL is configurable ------------------------------
@@ -456,7 +507,7 @@ public class MoneySurfaceTests
         // false for being in the half a plain-text client renders.
         foreach (var body in new[] { walkUp.HtmlBody, MailText.Unwrap(walkUp.PlainBody) })
         {
-            Assert.DoesNotContain("30% of the price", body);
+            Assert.DoesNotContain("30% of the booking", body);
             Assert.DoesNotContain("Cancel more than", body);
             Assert.DoesNotContain("You&#39;re booked", body);
             Assert.DoesNotContain("You're booked", body);
@@ -473,7 +524,7 @@ public class MoneySurfaceTests
         var reservation = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             "Court 2", "Sun 06 Sep 22:51", "15 min", 50, 100,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
-        Assert.Contains("30% of the price", reservation.HtmlBody);
+        Assert.Contains("30% of the booking&#39;s minutes (15 minutes)", reservation.HtmlBody);
         Assert.Contains(">Starts</th>", reservation.HtmlBody);
     }
 
@@ -520,7 +571,7 @@ public class MoneySurfaceTests
 
         var mail = await PollMail(host, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
         Assert.NotNull(mail);
-        Assert.DoesNotContain("30% of the price", mail!.HtmlBody);
+        Assert.DoesNotContain("30% of the booking", mail!.HtmlBody);
         Assert.Contains("not refunded once the lights have been on", mail.HtmlBody);
     }
 
@@ -542,7 +593,7 @@ public class MoneySurfaceTests
         Assert.Contains("The club cancelled your booking", byClub.HtmlBody);
         Assert.Contains("Court double-booked by the desk", byClub.HtmlBody);
         Assert.Contains("waived", byClub.HtmlBody);
-        Assert.Contains("50.00 credits", byClub.HtmlBody);
+        Assert.Contains("50 minutes", byClub.HtmlBody);
         Assert.Contains("club", byClub.Subject);
 
         // A member cancelling their own court is a different event and keeps its own mail —

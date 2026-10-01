@@ -45,7 +45,7 @@ public readonly record struct TraceFacts
     /// <summary>The court's name, for a booking, court or lights sentence.</summary>
     public string? CourtName { get; init; }
 
-    /// <summary>The movement, in credits, unsigned — the sentence carries the direction.</summary>
+    /// <summary>The movement, in minutes, unsigned — the sentence carries the direction.</summary>
     public int? AmountMinutes { get; init; }
 
     /// <summary>Who did it, when naming them makes the sentence say something.</summary>
@@ -190,8 +190,8 @@ public static class TraceKinds
     ///
     /// <para>
     /// <b>Its own word rather than <see cref="WalletToppedUp"/>'s, and not
-    /// <see cref="WalletAdjustedByAdmin"/>'s either.</b> The member did not do it, so "Topped up
-    /// 200 credits" is a sentence about somebody who was not there; and it is not an adjustment,
+    /// <see cref="WalletAdjustedByAdmin"/>'s either.</b> The member did not do it, so "Bought
+    /// 5 hours" is a sentence about somebody who was not there; and it is not an adjustment,
     /// because <see cref="LedgerEntryType.AdminTopUp"/> is money the club TOOK and counts as
     /// revenue, while an adjustment is a book correction. Borrowing either word is the
     /// guessed-sentence failure the vocabulary exists to prevent — a member disputing a figure
@@ -209,7 +209,7 @@ public static class TraceKinds
     /// <summary>Money kept by the club for a missed or late-cancelled booking.</summary>
     public const string WalletPenalised = "wallet.penalised";
 
-    /// <summary>An admin moved credits by hand.</summary>
+    /// <summary>An admin moved minutes by hand.</summary>
     public const string WalletAdjustedByAdmin = "wallet.adjusted_by_admin";
 
     /// <summary>A payment was clawed back after the fact. <b>Added beyond D2 §6.2.</b></summary>
@@ -302,8 +302,9 @@ public static class TraceKinds
         "booking.lit_window_narrowed",
         "booking.payer_reassigned",
         "booking.block_lifted",
-        // The desk's credit movement is on the wallet strand already (its ledger row, with the
-        // balance beside it); its audit twin made one top-up read twice (review round 1, F3).
+        // The desk's minutes movement is on the wallet strand already (its ledger row, with the
+        // balance beside it); its audit twin made one desk sale read twice (review round 1, F3).
+        // The stored audit code is kept (contract §2.5).
         "credit.adjusted",
         DoorAuditActions.EventTimeClamped,
         Endpoints.AdminMemberDoorEndpoints.ViewedAction,
@@ -510,14 +511,14 @@ public static class TraceKinds
             LightsOn => $"{court} lights came on",
             LightsOff => $"{court} lights went off",
 
-            WalletToppedUp => $"Topped up {Credits(facts)} credits",
+            WalletToppedUp => $"Bought {Amount(facts)}",
             WalletToppedUpAtTheDesk => ToppedUpAtTheDesk(facts),
             WalletSpent => Spent(facts),
             WalletRefunded => Refunded(facts),
             WalletPenalised => Penalised(facts),
             WalletAdjustedByAdmin => AdjustedByAdmin(facts),
-            WalletReversed => $"A payment of {Credits(facts)} credits was reversed",
-            WalletShareMoved => $"A share of a split booking moved: {Credits(facts)} credits",
+            WalletReversed => $"A payment for {Amount(facts)} was reversed",
+            WalletShareMoved => $"A share of a split booking moved: {Amount(facts)}",
 
             _ => AccountHeadline(kind, facts),
         };
@@ -543,13 +544,16 @@ public static class TraceKinds
         };
     }
 
-    /// <summary>The movement as a club reads it, or a dash when the row carries none.</summary>
-    private static string Credits(TraceFacts facts)
+    /// <summary>
+    /// The movement as a club reads it — "45 minutes", "1 hour 30 minutes", whole minutes in prose
+    /// (contract §7.2) — or a dash when the row carries none.
+    /// </summary>
+    private static string Amount(TraceFacts facts)
     {
         // Block body for the lizard reason in `memory/gotchas.md`: a `{ }` property pattern in
         // an expression-bodied member costs this file its scope in lizard's C# parser.
         return facts.AmountMinutes is { } amount
-            ? Math.Abs(amount).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+            ? MoneyFormat.Minutes(Math.Abs(amount))
             : "—";
     }
 
@@ -573,35 +577,35 @@ public static class TraceKinds
 
     private static string Refunded(TraceFacts facts)
         => BySystem(facts)
-            ? $"The club's automatic check returned {Credits(facts)} credits"
-            : $"Got {Credits(facts)} credits back";
+            ? $"The club's automatic check returned {Amount(facts)}"
+            : $"Got {Amount(facts)} back";
 
     private static string Penalised(TraceFacts facts)
         => BySystem(facts)
-            ? $"The club's automatic check charged a penalty of {Credits(facts)} credits"
-            : $"Was charged a penalty of {Credits(facts)} credits";
+            ? $"The club's automatic check charged a penalty of {Amount(facts)}"
+            : $"Was charged a penalty of {Amount(facts)}";
 
     private static string AdjustedByAdmin(TraceFacts facts)
-        => $"{Who(facts)} changed their credits by {Credits(facts)}";
+        => $"{Who(facts)} changed their minutes by {Amount(facts)}";
 
     /// <summary>
-    /// A top-up the club took by hand. It names the actor for the reason
+    /// A package the club sold by hand. It names the actor for the reason
     /// <see cref="AdjustedByAdmin"/> does: the member was not the one who did it, and a night
-    /// that says "Topped up 200 credits" about a payment somebody else keyed in is a sentence
-    /// the member cannot check.
+    /// that says "Bought 5 hours" about a payment somebody else keyed in is a sentence the member
+    /// cannot check.
     /// </summary>
     private static string ToppedUpAtTheDesk(TraceFacts facts)
-        => $"{Who(facts)} added {Credits(facts)} credits at the desk";
+        => $"{Who(facts)} sold them {Amount(facts)} at the desk";
 
     /// <summary>
     /// What they paid for, named when the row knows it. D2 §6.2's own example sentence is
-    /// "Paid 36.00 credits for Court 2", and the court is what makes it answer a question — but
+    /// "Paid 36 minutes for Court 2", and the court is what makes it answer a question — but
     /// a ledger row carries no court of its own, so the sentence degrades rather than inventing
     /// one. Block body for the lizard reason in <c>memory/gotchas.md</c>.
     /// </summary>
     private static string Spent(TraceFacts facts)
     {
-        var paid = $"Paid {Credits(facts)} credits";
+        var paid = $"Paid {Amount(facts)}";
         return string.IsNullOrWhiteSpace(facts.CourtName) ? paid : $"{paid} for {facts.CourtName.Trim()}";
     }
 }

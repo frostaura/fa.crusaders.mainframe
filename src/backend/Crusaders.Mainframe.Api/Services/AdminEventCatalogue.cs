@@ -38,7 +38,13 @@ public sealed record FaultSpikePayload(int Faults, int Minutes, string[] Boards)
 
 public sealed record RefusalSpikePayload(Guid DeviceId, string DoorName, string DeviceCode, string? GateKey, int Refusals, int Minutes);
 
-public sealed record TopUpFailedPayload(string Reason, decimal? AmountZar, string? MemberName, string? Reference);
+/// <remarks>
+/// The kind keeps its stored code <c>topup.failed</c> (contract §12.2): admins' opt-outs and the
+/// outbox dedupe keys name it. <see cref="PackageName"/> and <see cref="Minutes"/> are additive
+/// (P13) and null on a row queued before them, or on a notification that names no purchase.
+/// </remarks>
+public sealed record TopUpFailedPayload(
+    string Reason, decimal? AmountZar, string? MemberName, string? Reference, string? PackageName = null, int? Minutes = null);
 
 public sealed record WebhookDisabledPayload(Guid EndpointId, string Destination, string? Description, int Failures, bool Blocked);
 
@@ -88,7 +94,7 @@ public sealed record AdminMailContext(
 /// <b>Cooldowns are not here.</b> A cooldown is a number and every configurable number is a
 /// tenant setting, so the kinds that have one read it at delivery — see
 /// <see cref="AdminNotificationDispatcher.Cooldown"/> and <see cref="AdminNotificationSettings"/>:
-/// the spikes reuse <c>device_alert_cooldown_minutes</c>, a top-up failure reads
+/// the spikes reuse <c>device_alert_cooldown_minutes</c>, a package-purchase failure reads
 /// <c>topup_failure_cooldown_minutes</c> and an overdraft <c>overdraft_cooldown_minutes</c>.
 /// </para>
 /// </summary>
@@ -129,8 +135,8 @@ public static class AdminEventCatalogue
             "Several different faults opened across the club's boards inside the club's window."),
         new(RefusalSpike, "A door turning people away",
             "One door refused more scans than the club's threshold inside its window."),
-        new(TopUpFailed, "Top-ups that need looking at",
-            "A card payment failed for a reason the club has to deal with — not a decline or a cancellation."),
+        new(TopUpFailed, "Package purchases that need looking at",
+            "A card payment for minutes failed for a reason the club has to deal with — not a decline or a cancellation."),
         new(WebhookAutoDisabled, "Webhook switched off",
             "A club webhook failed too many times, or points somewhere it may not, and has been switched off.",
             Security: true),
@@ -241,7 +247,8 @@ public static class AdminEventCatalogue
     {
         var p = c.Payload<TopUpFailedPayload>();
         return EmailTemplates.AdminTopUpFailed(c.Club, c.To, new TopUpFailure(
-            p.Reason, p.AmountZar, p.MemberName, p.Reference, CurrencySymbol.For(c.Settings), c.ConsoleUrl));
+            p.Reason, p.AmountZar, p.MemberName, p.Reference, CurrencySymbol.For(c.Settings), c.ConsoleUrl,
+            p.PackageName, p.Minutes));
     }
 
     private static EmailMessage ComposeWebhookDisabled(AdminMailContext c)

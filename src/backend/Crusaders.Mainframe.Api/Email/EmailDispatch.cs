@@ -7,7 +7,7 @@ namespace Crusaders.Mainframe.Api.Email;
 /// Two of these mails are raised on paths that must answer fast for reasons that have
 /// nothing to do with mail: the PayFast ITN, which the gateway <b>retries</b> until it is
 /// acknowledged — so a slow EHLO turns into a duplicate notification — and the desk's
-/// credit adjustment, where an admin is waiting on a form. Neither can fail because the
+/// minutes adjustment or package sale, where an admin is waiting on a form. Neither can fail because the
 /// mail server is down: the money has already moved and the ledger is the record.
 /// </para>
 ///

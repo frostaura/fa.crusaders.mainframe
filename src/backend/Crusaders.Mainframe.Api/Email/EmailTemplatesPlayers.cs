@@ -55,7 +55,7 @@ public sealed record ShareReminderNotice(
 public sealed record ShareLapsedNotice(
     string OtherName, string CourtName, string StartsAtLocal, int UnpaidMinutes, bool ToOrganiser, string BookingUrl);
 
-/// <summary>A paid share on its way back to a partner, waiting until the organiser's credits cover it.</summary>
+/// <summary>A paid share on its way back to a partner, waiting until the organiser's minutes cover it.</summary>
 public sealed record ShareReturnWaitingNotice(
     string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes, bool ToOrganiser, string BookingUrl);
 
@@ -75,8 +75,8 @@ public sealed record PlayersChange(
 /// <remarks>
 /// <para>
 /// A partial of <see cref="EmailTemplates"/> for the length reason the admin-role partial gives.
-/// Every figure is CREDITS — a share is a slice of a court price, and a credit figure wearing a
-/// money sign would overstate it by the conversion rate.
+/// Every figure is MINUTES — a share is a slice of a booking's minutes, and a minutes figure
+/// never wears a money sign.
 /// </para>
 /// <para>
 /// <b>No mail here ever says the reader owes anything.</b> A partner who does not pay is not in
@@ -94,7 +94,7 @@ public static partial class EmailTemplates
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"{n.OrganiserName} invited you to play — {n.CourtName}",
             Preheader: n.ShareMinutes > 0
-                ? $"{n.StartsAtLocal}. Your share would be {Cr(n.ShareMinutes)}."
+                ? $"{n.StartsAtLocal}. Your share would be {Min(n.ShareMinutes)}."
                 : $"{n.StartsAtLocal}. {n.OrganiserName} is covering the court.",
             Heading: "You've been invited to a game",
             Blocks:
@@ -104,7 +104,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Court", n.CourtName),
                     new FactRow("When", n.StartsAtLocal),
-                    new FactRow("Your share", n.ShareMinutes > 0 ? Cr(n.ShareMinutes) : "Nothing — covered"),
+                    new FactRow("Your share", n.ShareMinutes > 0 ? Min(n.ShareMinutes) : "Nothing — covered"),
                 ]),
                 new CallToAction("See the invite", n.AcceptUrl),
                 new Footnote("Nothing is taken until you accept. If you would rather not play, decline and the seat goes back to the organiser."),
@@ -126,7 +126,7 @@ public static partial class EmailTemplates
         {
             new("Court", m.CourtName),
             new("When", m.StartsAtLocal),
-            new(m.Direction is ShareDirection.Paid or ShareDirection.Returned ? "Taken from your balance" : "Added to your balance", Cr(m.AmountMinutes)),
+            new(m.Direction is ShareDirection.Paid or ShareDirection.Returned ? "Taken from your balance" : "Added to your balance", Min(m.AmountMinutes)),
         };
         if (m.HeldUntilLocal is { } held) facts.Add(new("Held until", held));
         var blocks = new List<EmailBlock> { new Paragraph(ShareSentence(m)) };
@@ -145,7 +145,7 @@ public static partial class EmailTemplates
         if (m.ByClub && m.BalanceAfterMinutes is { } after && after < 0)
         {
             blocks.Add(new Callout(CalloutTone.Warning,
-                $"Your balance is now {Cr(after)}, below zero. Top up before you book again."));
+                $"Your balance is now {Min(after)}, below zero. Buy minutes before you book again."));
         }
         blocks.Add(new CallToAction("Open the booking", m.BookingUrl));
         blocks.Add(new Footnote("Shares move between players only. The club's price for the court is unchanged."));
@@ -172,7 +172,7 @@ public static partial class EmailTemplates
             [
                 new FactRow("Court", n.CourtName),
                 new FactRow("When", n.StartsAtLocal),
-                new FactRow("Your share", n.ShareMinutes > 0 ? Cr(n.ShareMinutes) : "Nothing — covered"),
+                new FactRow("Your share", n.ShareMinutes > 0 ? Min(n.ShareMinutes) : "Nothing — covered"),
             ]),
         };
         if (n.ShareMinutes > 0)
@@ -189,7 +189,7 @@ public static partial class EmailTemplates
     public static EmailMessage ShareReminder(ClubIdentity club, string to, ShareReminderNotice n) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: n.FromOrganiser ? $"{n.OrganiserName} is waiting for your answer — {n.CourtName}" : $"Your invite is still open — {n.CourtName}",
-            Preheader: $"Your share is {Cr(n.ShareMinutes)}. It can be paid until {n.DeadlineLocal}.",
+            Preheader: $"Your share is {Min(n.ShareMinutes)}. It can be paid until {n.DeadlineLocal}.",
             Heading: "Your share is still open",
             Blocks:
             [
@@ -198,7 +198,7 @@ public static partial class EmailTemplates
                     : $"You have an open invite from {n.OrganiserName} for {n.CourtName} at {n.StartsAtLocal}."),
                 new Facts(
                 [
-                    new FactRow("Your share", Cr(n.ShareMinutes)),
+                    new FactRow("Your share", Min(n.ShareMinutes)),
                     new FactRow("Open until", n.DeadlineLocal),
                 ]),
                 new CallToAction("Answer the invite", n.AcceptUrl),
@@ -215,27 +215,27 @@ public static partial class EmailTemplates
             Blocks:
             [
                 new Paragraph(n.ToOrganiser
-                    ? $"{n.OtherName} did not pay {Cr(n.UnpaidMinutes)} of their share for {n.CourtName} at {n.StartsAtLocal} before it closed. Your booking already covered the court, so nothing else moves."
+                    ? $"{n.OtherName} did not pay {Min(n.UnpaidMinutes)} of their share for {n.CourtName} at {n.StartsAtLocal} before it closed. Your booking already covered the court, so nothing else moves."
                     : $"Your share for {n.CourtName} at {n.StartsAtLocal} closed before it was paid. {n.OtherName}'s booking covers it and nothing is owed."),
                 new CallToAction("Open the booking", n.BookingUrl),
             ],
             WhyThis: WhyGame));
 
     /// <summary>
-    /// A return of a paid share is waiting: the organiser's credits do not cover it yet. Told once
-    /// to each side. It moves on its own the moment they do — a top-up is enough — and the
+    /// A return of a paid share is waiting: the organiser's minutes do not cover it yet. Told once
+    /// to each side. It moves on its own the moment they do — buying a package is enough — and the
     /// wording says so, and no more: nobody here is in anybody's debt.
     /// </summary>
     public static EmailMessage ShareReturnWaiting(ClubIdentity club, string to, ShareReturnWaitingNotice n) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: n.ToOrganiser ? $"{Cr(n.AmountMinutes)} for {n.OtherName} is waiting — {n.CourtName}" : $"{Cr(n.AmountMinutes)} is on its way back — {n.CourtName}",
+            Subject: n.ToOrganiser ? $"{Min(n.AmountMinutes)} for {n.OtherName} is waiting — {n.CourtName}" : $"{Min(n.AmountMinutes)} is on its way back — {n.CourtName}",
             Preheader: n.ToOrganiser ? "It goes back as soon as your balance covers it." : "It reaches you as soon as it can be sent.",
             Heading: "A share is on its way back",
             Blocks:
             [
                 new Paragraph(n.ToOrganiser
-                    ? $"{Cr(n.AmountMinutes)} of {n.OtherName}'s share for {n.CourtName} at {n.StartsAtLocal} is due back to them. Your balance doesn't cover it right now, so it will go back automatically the next time it does."
-                    : $"{Cr(n.AmountMinutes)} of your share for {n.CourtName} at {n.StartsAtLocal} is due back to you from {n.OtherName}. It will reach your balance automatically as soon as it can be sent."),
+                    ? $"{Min(n.AmountMinutes)} of {n.OtherName}'s share for {n.CourtName} at {n.StartsAtLocal} is due back to them. Your balance doesn't cover it right now, so it will go back automatically the next time it does."
+                    : $"{Min(n.AmountMinutes)} of your share for {n.CourtName} at {n.StartsAtLocal} is due back to you from {n.OtherName}. It will reach your balance automatically as soon as it can be sent."),
                 new CallToAction("Open the booking", n.BookingUrl),
             ],
             WhyThis: WhyGame));
@@ -269,7 +269,7 @@ public static partial class EmailTemplates
         {
             new Paragraph(ChangeSentence(c)),
         };
-        if (!c.Removed && c.NewShareMinutes is { } share) blocks.Add(new Facts([new FactRow("Your share now", Cr(share))]));
+        if (!c.Removed && c.NewShareMinutes is { } share) blocks.Add(new Facts([new FactRow("Your share now", Min(share))]));
         if (c.NeedsConsent) blocks.Add(new Callout(CalloutTone.Warning, "Your share went up. Nothing more is taken until you accept the new figure."));
         blocks.Add(new CallToAction("Open the booking", c.BookingUrl));
         return blocks;
@@ -319,10 +319,10 @@ public static partial class EmailTemplates
         if (m.ClubRemoved) return ClubRemovedSentence(m);
         switch (m.Direction)
         {
-            case ShareDirection.Paid: return $"You paid {Cr(m.AmountMinutes)} to {m.OtherName} for your share of the court.";
-            case ShareDirection.Received: return $"{m.OtherName} paid you {Cr(m.AmountMinutes)} for their share of your booking.";
-            case ShareDirection.Refunded: return $"{Cr(m.AmountMinutes)} of your share came back from {m.OtherName}.";
-            default: return $"{Cr(m.AmountMinutes)} of {m.OtherName}'s share went back to them from your balance.";
+            case ShareDirection.Paid: return $"You paid {Min(m.AmountMinutes)} to {m.OtherName} for your share of the court.";
+            case ShareDirection.Received: return $"{m.OtherName} paid you {Min(m.AmountMinutes)} for their share of your booking.";
+            case ShareDirection.Refunded: return $"{Min(m.AmountMinutes)} of your share came back from {m.OtherName}.";
+            default: return $"{Min(m.AmountMinutes)} of {m.OtherName}'s share went back to them from your balance.";
         }
     }
 
@@ -333,15 +333,15 @@ public static partial class EmailTemplates
     private static string ClubRemovedSentence(ShareMovement m)
     {
         return m.Direction == ShareDirection.Refunded
-            ? $"The club took you off the game {m.OtherName} booked, and {Cr(m.AmountMinutes)} of your share came back to your balance."
-            : $"The club took {m.OtherName} off your game, and {Cr(m.AmountMinutes)} of their share went back to them from your balance.";
+            ? $"The club took you off the game {m.OtherName} booked, and {Min(m.AmountMinutes)} of your share came back to your balance."
+            : $"The club took {m.OtherName} off your game, and {Min(m.AmountMinutes)} of their share went back to them from your balance.";
     }
 
     /// <summary>B8: a share the CLUB collected — "You paid your share…" told the partner they had done something they had not.</summary>
     private static string ClubShareSentence(ShareMovement m)
     {
         return m.Direction == ShareDirection.Paid
-            ? $"The club collected {Cr(m.AmountMinutes)} from your balance for your share of the court {m.OtherName} booked."
-            : $"The club collected {Cr(m.AmountMinutes)} from {m.OtherName} for their share of your booking.";
+            ? $"The club collected {Min(m.AmountMinutes)} from your balance for your share of the court {m.OtherName} booked."
+            : $"The club collected {Min(m.AmountMinutes)} from {m.OtherName} for their share of your booking.";
     }
 }

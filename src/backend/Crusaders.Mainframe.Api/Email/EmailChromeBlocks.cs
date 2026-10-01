@@ -50,7 +50,7 @@ public static partial class EmailChrome
     /// </summary>
     /// <remarks>
     /// <c>th scope="row"</c> rather than a second <c>td</c>: these are the money rows, they are
-    /// the reason the message exists, and a screen reader reading "50.00 credits" with no idea
+    /// the reason the message exists, and a screen reader reading "50 minutes" with no idea
     /// which of four numbers it is has told the member nothing. The banding is a painted
     /// background on the cell rather than a CSS class, because <c>:nth-child</c> reaches
     /// roughly none of the clients this has to survive.
@@ -155,7 +155,7 @@ public static partial class EmailChrome
     /// <remarks>
     /// <para>
     /// Reading order is the block order, which is the reading order of the HTML, because both
-    /// walk the same list. Figures keep their labels — <c>Charged: 50.00 credits</c> rather
+    /// walk the same list. Figures keep their labels — <c>Charged: 50 minutes</c> rather
     /// than a column that has lost its header to a line break — and the action prints its
     /// address in full, since a text client has no button to press.
     /// </para>

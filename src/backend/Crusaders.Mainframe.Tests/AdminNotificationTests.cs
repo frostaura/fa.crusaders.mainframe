@@ -75,7 +75,7 @@ public class AdminNotificationTests
 
     private static AdminNotice Overdraft(Guid actor, Guid member, string court = "Court 1") =>
         AdminNotices.OverdraftAuthorised(Guid.NewGuid(), actor, member, new OverdraftPayload(
-            Guid.NewGuid(), "Desk Admin", "Mo Member", Self: actor == member, court, "Tue 29 Sep, 18:00", 24, -16));
+            Guid.NewGuid(), "Desk Admin", "Mo Member", Self: actor == member, court, "Tue 29 Sep, 18:00", 45, -90));
 
     // ------------------------------------------------------------------ recipients
 
@@ -147,9 +147,13 @@ public class AdminNotificationTests
         var mail = Assert.Single(host.EmailService.Sent);
         Assert.Equal(colleague.Email, mail.To);
         Assert.Equal("Desk Admin took Mo Member below zero", mail.Subject);
-        // A real minus sign, U+2212, as every screen prints it (review round 3, A-8).
-        Assert.Contains("\u221216.00 credits", MailText.Unwrap(mail.PlainBody), StringComparison.Ordinal);
-        Assert.DoesNotContain("-16.00", MailText.Unwrap(mail.PlainBody), StringComparison.Ordinal);
+        // A real minus sign, U+2212, as every screen prints it (review round 3, A-8), on whole
+        // minutes in words (P13): 90 below zero is "−1 hour 30 minutes", never "-90.00 credits".
+        var text = MailText.Unwrap(mail.PlainBody);
+        Assert.Contains("\u22121 hour 30 minutes", text, StringComparison.Ordinal);
+        Assert.Contains("Charged: 45 minutes", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("-1 hour", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("credit", text, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -865,8 +869,8 @@ public class AdminNotificationTests
     [InlineData("payment_id_missing", "has not been told anything")]
     [InlineData("provider_register_failed", "was not emailed")]
     [InlineData("signature_invalid", "the notification was ignored")]
-    [InlineData("amount_mismatch", "The member has been emailed that their top-up did not complete.")]
-    [InlineData("gateway_error", "The member has been emailed that their top-up did not complete.")]
+    [InlineData("amount_mismatch", "The member has been emailed that their purchase did not complete.")]
+    [InlineData("gateway_error", "The member has been emailed that their purchase did not complete.")]
     public void The_top_up_mail_says_what_happened_to_the_member_for_each_reason(string reason, string expected)
     {
         var message = Crusaders.Mainframe.Api.Email.EmailTemplates.AdminTopUpFailed(
@@ -878,6 +882,52 @@ public class AdminNotificationTests
         {
             Assert.DoesNotContain("has been emailed", MailText.Unwrap(message.PlainBody), StringComparison.Ordinal);
         }
+        Assert.DoesNotContain("credit", MailText.Unwrap(message.PlainBody), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// P13 (contract §5, §12.2): the kind keeps its stored code <c>topup.failed</c> — admins'
+    /// opt-outs and the outbox dedupe keys name it — while its words become a package purchase,
+    /// and the notice raised from a purchase row carries the package and its minutes all the way
+    /// to the admin's mail. A notice with no purchase behind it (a forged notification) names none.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_purchase_notice_keeps_its_code_and_names_the_package()
+    {
+        Assert.Equal("topup.failed", AdminEventCatalogue.TopUpFailed);
+        var kind = AdminEventCatalogue.Find("topup.failed")!;
+        Assert.Equal("Package purchases that need looking at", kind.Title);
+        Assert.True(kind.OptOutable);
+
+        var pending = new PendingTopup
+        {
+            Id = Guid.NewGuid(), UserId = Guid.NewGuid(), AmountZar = 495m, IdempotencyKey = "idem-1",
+            ExternalReference = "pf-77", PackageName = "5 hours", Minutes = 300,
+        };
+        var notice = AdminNotices.TopUpFailed("amount_mismatch", pending.Id.ToString("N"), "Naledi Khoza", pending);
+        Assert.Equal("topup.failed", notice.Kind);
+        Assert.StartsWith("topup.failed:amount_mismatch:", notice.DedupeKey, StringComparison.Ordinal);
+        Assert.Equal("Package purchase problem — amount mismatch (Naledi Khoza)", notice.Headline);
+        var payload = Assert.IsType<TopUpFailedPayload>(notice.Payload);
+        Assert.Equal(("5 hours", 300, 495m, "pf-77"), (payload.PackageName, payload.Minutes, payload.AmountZar, payload.Reference));
+
+        await using var host = await TestHost.CreateAsync();
+        var colleague = await AddPersonAsync(host, "purchases.admin", isAdmin: true);
+        await StageAsync(host, notice);
+        await host.DeliverAdminNoticesAsync(T0);
+
+        var mail = Assert.Single(host.EmailService.Sent, m => m.To == colleague.Email);
+        var text = MailText.Unwrap(mail.PlainBody);
+        Assert.Equal("A package purchase needs looking at", mail.Subject);
+        Assert.Contains("Package: 5 hours (5 hours)", text, StringComparison.Ordinal);
+        Assert.Contains("R495.00", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("R300", text, StringComparison.Ordinal);
+
+        // A forged notification has no purchase row, and so no package line.
+        var forged = AdminNotices.TopUpFailed("signature_invalid", "20261001", null, null);
+        var forgedPayload = Assert.IsType<TopUpFailedPayload>(forged.Payload);
+        Assert.Null(forgedPayload.PackageName);
+        Assert.Null(forgedPayload.AmountZar);
     }
 
     /// <summary>

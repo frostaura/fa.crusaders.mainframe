@@ -14,7 +14,7 @@ public static partial class EmailTemplates
     public static EmailMessage YouPaidForACourt(ClubIdentity club, string to, PaidForCourt p) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"You paid for {p.CourtName}",
-            Preheader: $"{Cr(p.AmountMinutes)} for {p.OtherName}'s booking, paid at the court box.",
+            Preheader: $"{Min(p.AmountMinutes)} for {p.OtherName}'s booking, paid at the court box.",
             Heading: "You paid for a court at the box",
             Blocks:
             [
@@ -23,7 +23,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Court", p.CourtName),
                     new FactRow("Time", p.StartsAtLocal),
-                    new FactRow("Charged", Cr(p.AmountMinutes)),
+                    new FactRow("Charged", Min(p.AmountMinutes)),
                 ]),
                 new Footnote($"{p.OtherName} has been refunded the same amount. If this was not you, tell the club — your code may have been used by somebody holding your phone."),
             ],
@@ -33,7 +33,7 @@ public static partial class EmailTemplates
     public static EmailMessage YourCourtWasPaidFor(ClubIdentity club, string to, PaidForCourt p) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"{p.OtherName} paid for your court",
-            Preheader: $"{Cr(p.AmountMinutes)} is back in your wallet.",
+            Preheader: $"{Min(p.AmountMinutes)} is back in your wallet.",
             Heading: "Somebody paid for your court",
             Blocks:
             [
@@ -42,7 +42,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Court", p.CourtName),
                     new FactRow("Time", p.StartsAtLocal),
-                    new FactRow("Refunded to you", Cr(p.AmountMinutes)),
+                    new FactRow("Refunded to you", Min(p.AmountMinutes)),
                 ]),
                 new Footnote("The refund is its own line in your wallet. Your booking is unchanged."),
             ],

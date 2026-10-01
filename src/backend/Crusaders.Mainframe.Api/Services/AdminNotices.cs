@@ -175,18 +175,32 @@ public static class AdminNotices
     }
 
     /// <summary>
-    /// A top-up failure an admin must look at. Keyed on the top-up where there is one; cooled down
-    /// per reason, so a gateway outage is one mail rather than one per member who tried.
+    /// A package-purchase failure an admin must look at (kind <c>topup.failed</c>, code kept —
+    /// contract §12.2). Keyed on the purchase where there is one; cooled down per reason, so a
+    /// gateway outage is one mail rather than one per member who tried.
     /// </summary>
-    public static AdminNotice TopUpFailed(string reason, string identity, decimal? amountZar, string? memberName, string? reference)
+    public static AdminNotice TopUpFailed(string reason, string identity, decimal? amountZar, string? memberName, string? reference) =>
+        PurchaseFailed(reason, identity, memberName, new TopUpFailedPayload(reason, amountZar, memberName, reference));
+
+    /// <summary>
+    /// The same notice, carrying the package from the purchase row (contract §5: the payload gains
+    /// <c>package_name</c> and <c>minutes</c>). <paramref name="pending"/> is null for a notification
+    /// that names no purchase.
+    /// </summary>
+    public static AdminNotice TopUpFailed(string reason, string identity, string? memberName, PendingTopup? pending) =>
+        PurchaseFailed(reason, identity, memberName, new TopUpFailedPayload(
+            reason, pending?.AmountZar, memberName, pending is null ? null : pending.ExternalReference ?? pending.IdempotencyKey,
+            pending?.PackageName, pending?.Minutes));
+
+    private static AdminNotice PurchaseFailed(string reason, string identity, string? memberName, TopUpFailedPayload payload)
     {
         var headline = memberName is null
-            ? $"Top-up problem — {Words(reason)}"
-            : $"Top-up problem — {Words(reason)} ({memberName})";
+            ? $"Package purchase problem — {Words(reason)}"
+            : $"Package purchase problem — {Words(reason)} ({memberName})";
         return new AdminNotice(
             AdminEventCatalogue.TopUpFailed,
             $"{AdminEventCatalogue.TopUpFailed}:{reason}:{identity}",
-            new TopUpFailedPayload(reason, amountZar, memberName, reference),
+            payload,
             headline,
             "/admin/transactions")
         {

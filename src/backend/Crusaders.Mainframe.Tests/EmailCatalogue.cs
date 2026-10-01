@@ -59,10 +59,10 @@ internal static class EmailCatalogue
     /// Every message, named. The name is the template it came from, for a readable failure.
     /// </summary>
     /// <param name="symbol">
-    /// The club's money symbol. It reaches the two top-up templates and nothing else, which is
-    /// the invariant <see cref="EmailDesignTests"/> sweeps this catalogue to hold: credits are
-    /// the unit of account and a credit figure wearing a money sign overstates a balance by the
-    /// conversion rate. Defaults to the product's own default so every other rule in that file
+    /// The club's money symbol. It reaches the templates about a package bought for rand and
+    /// nothing else, which is the invariant <see cref="EmailDesignTests"/> sweeps this catalogue
+    /// to hold: minutes are the unit of account and a minutes figure wearing a money sign is a
+    /// unit lie. Defaults to the product's own default so every other rule in that file
     /// reads the mail a real club gets.
     /// </param>
     internal static IReadOnlyList<(string Name, EmailMessage Message)> All(
@@ -116,12 +116,16 @@ internal static class EmailCatalogue
             ("BookingReinstated", EmailTemplates.BookingReinstated(club, to, "Court 3", "Tue 29 Sep, 18:00")),
             ("CancelledBookingLightsCharged", EmailTemplates.CancelledBookingLightsCharged(club, to, "Court 3", 40, 18)),
             ("NoShowReversed", EmailTemplates.NoShowReversed(club, to, "Court 1", 24, 7)),
-            ("TopUpConfirmation", EmailTemplates.TopUpConfirmation(club, to, new TopUpReceipt(100, 160, 1.6m, 296, "pf-2026-09-22-0041", symbol))),
-            ("TopUpNotCompleted", EmailTemplates.TopUpNotCompleted(club, to, 100, "declined", "pf-2026-09-22-0042", symbol)),
-            ("TopUpCancelled", EmailTemplates.TopUpNotCompleted(club, to, 100, "cancelled", "pf-2026-09-22-0043", symbol)),
-            ("TopUpMismatched", EmailTemplates.TopUpNotCompleted(club, to, 100, "amount_mismatch", "pf-2026-09-22-0044", symbol)),
-            ("CreditAdjustment", EmailTemplates.CreditAdjustment(club, to, 50, 186, "Refund for the lights on court 4")),
-            ("CreditAdjustmentDeduction", EmailTemplates.CreditAdjustment(club, to, -50, 86, "Duplicate top-up reversed")),
+            ("PurchaseConfirmation", EmailTemplates.PurchaseConfirmation(club, to, new PackagePurchaseReceipt(
+                "5 hours", 300, 550m, 1000, "League members", 495m, 1530, "pf-2026-09-22-0041", symbol))),
+            ("PurchaseConfirmationNoDiscount", EmailTemplates.PurchaseConfirmation(club, to, new PackagePurchaseReceipt(
+                "1 hour", 60, 120m, 0, null, 120m, 105, "pf-2026-09-22-0046", symbol))),
+            ("PurchaseNotCompleted", EmailTemplates.PurchaseNotCompleted(club, to, "5 hours", 300, 495m, "declined", "pf-2026-09-22-0042", symbol)),
+            ("PurchaseCancelled", EmailTemplates.PurchaseNotCompleted(club, to, "5 hours", 300, 495m, "cancelled", "pf-2026-09-22-0043", symbol)),
+            ("PurchaseMismatched", EmailTemplates.PurchaseNotCompleted(club, to, "5 hours", 300, 495m, "amount_mismatch", "pf-2026-09-22-0044", symbol)),
+            ("MinutesAdjusted", EmailTemplates.MinutesAdjusted(club, to, 45, 186, "Refund for the lights on court 4")),
+            ("MinutesAdjustedDeduction", EmailTemplates.MinutesAdjusted(club, to, -90, 86, "Duplicate desk sale reversed")),
+            ("PackageSoldAtDesk", EmailTemplates.PackageSoldAtDesk(club, to, "10 hours", 600, 900m, 645, symbol)),
             ("AdminPeripheralUnhealthy", EmailTemplates.AdminPeripheralUnhealthy(club, to, peripheral)),
             ("AdminPeripheralRecovered", EmailTemplates.AdminPeripheralRecovered(club, to, peripheral)),
             ("AdminGateUnhealthy", EmailTemplates.AdminGateUnhealthy(club, to, gate)),
@@ -140,7 +144,7 @@ internal static class EmailCatalogue
             ("AdminApplicationsWaitingOne", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(1, "Jason Fourie", 26, ConsoleUrl))),
             ("AdminFaultSpike", EmailTemplates.AdminFaultSpike(club, to, new FaultSpike(6, 15, ["box-2ad001", "gate-44c101"], ConsoleUrl))),
             ("AdminDoorRefusalSpike", EmailTemplates.AdminDoorRefusalSpike(club, to, new DoorRefusalSpike("Front door", "gate-44c101", "front-door", 9, 20, ConsoleUrl))),
-            ("AdminTopUpFailed", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("amount_mismatch", 100, "Thandi Mokoena", "pf-2026-09-22-0045", symbol, ConsoleUrl))),
+            ("AdminTopUpFailed", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("amount_mismatch", 495m, "Thandi Mokoena", "pf-2026-09-22-0045", symbol, ConsoleUrl, "5 hours", 300))),
             ("AdminTopUpFailedUnsigned", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("signature_invalid", null, null, null, symbol, ConsoleUrl))),
             ("AdminWebhookDisabled", EmailTemplates.AdminWebhookDisabled(club, to, new WebhookDisabled("https://hooks.riverside.review.test", "Results board", 6, false, ConsoleUrl))),
             ("AdminWebhookDisabledBlocked", EmailTemplates.AdminWebhookDisabled(club, to, new WebhookDisabled("http://10.0.0.4", null, 1, true, ConsoleUrl))),

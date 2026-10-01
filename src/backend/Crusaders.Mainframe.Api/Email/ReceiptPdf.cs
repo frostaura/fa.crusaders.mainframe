@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 
 namespace Crusaders.Mainframe.Api.Email;
@@ -40,17 +39,15 @@ public static class ReceiptPdf
     private const int PageWidth = 595;
     private const int PageHeight = 842;
 
-    private const string Currency = "cr";
-
     /// <summary>
     /// Renders the receipt for one booking.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Every figure passed in is <b>credits</b>. Credits are the unit of account in this system —
-    /// rand exists only on the top-up row for reconciliation — and a receipt that printed a rand
-    /// sign over a credit figure would overstate the charge by the conversion rate, which is the
-    /// exact defect this repo already carried once.
+    /// Every figure passed in is <b>minutes</b>, the unit of account (contract §6), written in
+    /// prose by <see cref="Services.MoneyFormat.Minutes"/> — "Charged: 45 minutes", never a decimal
+    /// and never a currency sign. This is a <b>booking</b> receipt; what a member paid in rand for a
+    /// package is on the purchase confirmation (contract §12.5), not here.
     /// </para>
     /// <para>
     /// <b>Both</b> times are the club's own wall clock, and that is why this takes
@@ -85,17 +82,14 @@ public static class ReceiptPdf
             new("Starts", startsAtLocal),
             new("Duration", duration),
             new(""),
-            new("Charged", Credits(amountMinutes)),
-            new("Balance after", Credits(balanceAfterMinutes)),
+            new("Charged", Services.MoneyFormat.Minutes(amountMinutes)),
+            new("Balance after", Services.MoneyFormat.Minutes(balanceAfterMinutes)),
             new(""),
-            new("Times are this club's local time. Credits are its unit of account."),
+            new("Times are this club's local time. Minutes are its unit of account."),
             new("This receipt records one ledger movement; your wallet holds the full history."),
         };
         return Render(lines);
     }
-
-    private static string Credits(decimal amount)
-        => $"{amount.ToString("0.00", CultureInfo.InvariantCulture)} {Currency}";
 
     /// <summary>Draws the lines onto a single page and assembles the file.</summary>
     private static byte[] Render(IReadOnlyList<Line> lines)
@@ -135,6 +129,11 @@ public static class ReceiptPdf
     /// input on a document the club emails out. Anything outside printable ASCII is dropped
     /// rather than guessed at: the standard-font encoding is WinAnsi, and a mis-encoded byte
     /// renders as a wrong character rather than as nothing, which is worse on a receipt.
+    /// <para>
+    /// <b>Except the minus sign.</b> A balance below zero is written with U+2212, which is not
+    /// printable ASCII — dropped, "−45 minutes" would print as "45 minutes" and make a debt read as money in hand
+    /// on the one document a member keeps. It becomes an ASCII hyphen-minus instead.
+    /// </para>
     /// </remarks>
     private static string EscapeText(string value)
     {
@@ -142,6 +141,7 @@ public static class ReceiptPdf
         foreach (var ch in value)
         {
             if (ch is '(' or ')' or '\\') sb.Append('\\').Append(ch);
+            else if (ch == '\u2212') sb.Append('-');
             else if (ch >= ' ' && ch <= '~') sb.Append(ch);
         }
         return sb.ToString();

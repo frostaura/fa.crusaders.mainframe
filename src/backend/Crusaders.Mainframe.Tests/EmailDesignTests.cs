@@ -243,16 +243,15 @@ public class EmailDesignTests
     // ---- the two units ----
 
     /// <summary>
-    /// <b>No credit figure anywhere in the catalogue carries the club's money symbol.</b>
+    /// <b>No minutes figure anywhere in the catalogue carries the club's money symbol.</b>
     /// </summary>
     /// <remarks>
     /// <para>
     /// This product renders two quantities and only one of them is money. Rand is what a member
-    /// hands PayFast; credits are the unit of account, at <c>credits_per_zar_regular</c> — which
-    /// ships at 1.6 — per rand. A credit figure wearing a money sign therefore overstates a
-    /// balance by 60% at the Regular rate and by 140% at the League one, on the one artifact a
-    /// member reconciles a bank statement against. That is not hypothetical: every money email
-    /// once printed "Charged R50,00" for a court that cost the member R31.25.
+    /// hands PayFast or the desk for a package; minutes are the unit of account (P13). A minutes
+    /// figure wearing a money sign is a unit lie on the one artifact a member reconciles a bank
+    /// statement against. That is not hypothetical: every money email once printed
+    /// "Charged R50,00" for a court the member had not paid R50 for.
     /// </para>
     /// <para>
     /// <b>Swept over the whole catalogue rather than asserted template by template.</b> The two
@@ -269,14 +268,17 @@ public class EmailDesignTests
     /// </para>
     /// </remarks>
     [Fact]
-    public void No_credit_figure_in_any_message_carries_the_clubs_money_symbol()
+    public void No_minutes_figure_in_any_message_carries_the_clubs_money_symbol()
     {
         const string symbol = EmailCatalogue.ProbeSymbol;
 
-        // Every figure on the whole catalogue that legitimately IS money, and there are two:
-        // the amount the member handed the gateway, and the "1" the conversion rate is quoted
-        // per. Anything else the symbol touches is a credit figure, which is the defect.
-        var money = new HashSet<string>(StringComparer.Ordinal) { symbol + "100.00", symbol + "1" };
+        // The rand figures the catalogue legitimately states: list prices, the discounted price
+        // paid, and what the desk received. Anything else the symbol touches is a minutes
+        // figure, which is the defect.
+        var money = new HashSet<string>(StringComparer.Ordinal)
+        {
+            symbol + "550.00", symbol + "495.00", symbol + "120.00", symbol + "900.00",
+        };
 
         // The symbol, then an amount. The decimal group is anchored on digits so a sentence's
         // full stop is not swallowed into the match and reported as a different figure.
@@ -293,9 +295,8 @@ public class EmailDesignTests
                 {
                     Assert.True(money.Contains(figure.Value),
                         $"{name} prints {figure.Value}. The club's money symbol may only denominate "
-                        + "rand — what the member handed the gateway. Every other figure this product "
-                        + "renders is credits, which convert at 1.6 and are not the same size as the "
-                        + "money, so a money sign on one overstates it by 60%.");
+                        + "rand — what the member paid for a package. Every other figure this product "
+                        + "renders is minutes, and a minutes figure never wears a currency sign.");
                     carriesMoney.Add(name);
                 }
             }
@@ -305,19 +306,46 @@ public class EmailDesignTests
         // the templates that state real money, so a renderer that simply stopped printing it
         // does not pass this test by rendering nothing.
         Assert.Equal(
-            ["AdminTopUpFailed", "TopUpCancelled", "TopUpConfirmation", "TopUpMismatched", "TopUpNotCompleted"],
+            ["AdminTopUpFailed", "PackageSoldAtDesk", "PurchaseCancelled", "PurchaseConfirmation",
+             "PurchaseConfirmationNoDiscount", "PurchaseMismatched", "PurchaseNotCompleted"],
             carriesMoney.Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList());
 
-        // And the credit figures on the one template that shows both units are stated as
-        // credits, in both bodies — 160 credited and 296 after, against 100 of money.
+        // And the minutes figures on the template that shows both quantities are stated as
+        // minutes, in both bodies — 300 added and 1 530 after, against 495 of money.
         var receipt = EmailCatalogue.All(EmailCatalogue.Riverside, symbol)
-            .Single(c => c.Name == "TopUpConfirmation").Message;
+            .Single(c => c.Name == "PurchaseConfirmation").Message;
         foreach (var body in new[] { receipt.HtmlBody, MailText.Unwrap(receipt.PlainBody) })
         {
-            Assert.Contains("160.00 credits", body, StringComparison.Ordinal);
-            Assert.Contains("296.00 credits", body, StringComparison.Ordinal);
+            Assert.Contains("5 hours", body, StringComparison.Ordinal);
+            Assert.Contains("1 day 1 hour 30 minutes", body, StringComparison.Ordinal);
+            Assert.DoesNotContain(symbol + "300", body, StringComparison.Ordinal);
+            Assert.DoesNotContain(symbol + "1530", body, StringComparison.Ordinal);
         }
     }
+
+    /// <summary>
+    /// <b>No message the product can send says "credit" or "cr", or tells a member to "top up"</b>
+    /// (contract §6). Swept over the whole catalogue, subject and both bodies, for the reason the
+    /// symbol sweep above is: a word that holds only where somebody last looked comes back in
+    /// the template nobody looked at. "credential" is not a hit; the scan is on whole words.
+    /// </summary>
+    [Fact]
+    public void No_message_speaks_of_credits_or_topping_up()
+    {
+        var banned = new Regex(@"\bcredit(s|ed|ing)?\b|\bcr\b|\btop(ped)?[- ]?up", RegexOptions.IgnoreCase);
+        foreach (var (name, message) in Catalogue())
+        {
+            var visible = Regex.Replace(message.HtmlBody, "<[^>]+>", " ");
+            foreach (var body in new[] { message.Subject, visible, MailText.Unwrap(message.PlainBody) })
+            {
+                var hit = banned.Match(body);
+                Assert.False(hit.Success, $"{name} says \"{hit.Value}\": …{Around(body, hit.Index)}…");
+            }
+        }
+    }
+
+    private static string Around(string body, int at) =>
+        body.Substring(Math.Max(0, at - 40), Math.Min(80, body.Length - Math.Max(0, at - 40)));
 
     // ---- the club, and only the club ----
 
@@ -519,7 +547,7 @@ public class EmailDesignTests
         var messages = new[]
         {
             EmailTemplates.MembershipRejected(club, "m@riverside.review.test", payload),
-            EmailTemplates.CreditAdjustment(club, "m@riverside.review.test", 10, 20, payload),
+            EmailTemplates.MinutesAdjusted(club, "m@riverside.review.test", 10, 20, payload),
             EmailTemplates.BookingCancellation(club, "m@riverside.review.test", payload, 5, null, new ClubCancellation(payload, false)),
         };
 
