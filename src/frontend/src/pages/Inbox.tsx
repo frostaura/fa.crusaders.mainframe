@@ -133,7 +133,7 @@ function UnreadBar({ feed, onMarkAll }: { feed: InboxFeed; onMarkAll: () => Prom
       <Button
         variant="outline"
         size="sm"
-        className="h-auto min-h-9 max-w-full whitespace-normal py-1.5"
+        className="h-auto min-h-touch max-w-full whitespace-normal py-1.5"
         pending={feed.markAll.pending}
         onClick={() => void onMarkAll()}
       >

@@ -177,6 +177,15 @@ describe("the inbox", () => {
     expect(screen.queryByRole("button", { name: INBOX_COPY.markAll })).toBeNull();
   });
 
+  it("R5 X5-12: Mark all read is a full 44px target, not a 36px one", async () => {
+    setup({});
+    renderInbox();
+    await list();
+    const button = await screen.findByRole("button", { name: INBOX_COPY.markAll });
+    expect(button.className.split(" ")).toContain("min-h-touch");
+    expect(button.className.split(" ")).not.toContain("min-h-9");
+  });
+
   it("R4 X4-5: Mark all read puts focus on the list, never <body>, and says \"All read\"", async () => {
     setup({ extra: [{ method: "POST", path: "/api/v1/me/notifications/read-all", body: { marked: 2 } }] });
     renderInbox();
