@@ -17,7 +17,7 @@ import { usePendingLinkInvite } from "@/components/players/invites/usePendingLin
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 import { SPLIT_PANE_COPY } from "@/lib/inboxCopy";
-import { inviteHeading } from "@/components/players/invites/inviteFacts";
+import { inviteHeading, organiserName } from "@/components/players/invites/inviteFacts";
 import { useSheetHistory } from "@/lib/bookingSheetHistory";
 
 /**
@@ -84,7 +84,11 @@ export default function InvitesPage() {
               ) : null}
               {items.map((invite) => (
                 <li key={invite.participant_id}>
-                  <InviteCard invite={invite} onOpen={wide ? picked.pick : sheet.openFor} current={wide && picked.invite?.participant_id === invite.participant_id} />
+                  <InviteCard
+                    invite={invite} onOpen={wide ? picked.pick : sheet.openFor}
+                    current={wide && picked.invite?.participant_id === invite.participant_id}
+                    actions={wide ? undefined : <CardAnswers invite={invite} onAnswer={sheet.openFor} />}
+                  />
                 </li>
               ))}
             </ul>
@@ -99,12 +103,32 @@ export default function InvitesPage() {
           <Button block onClick={() => sheet.openFor(only)}>{INVITES_COPY.answer}</Button>
         </ContextBar>
       ) : null}
-      <AcceptSheet invite={sheet.invite} open={sheet.open} onOpenChange={sheet.setOpen} onReread={reread} session={sheet.session} onBusyChange={sheet.onBusyChange} />
+      <AcceptSheet
+        invite={sheet.invite} open={sheet.open} onOpenChange={sheet.setOpen} onReread={reread}
+        session={sheet.session} onBusyChange={sheet.onBusyChange} startWith={sheet.startWith}
+      />
     </PageShell>
   );
 }
 
 const SPLIT_AT = "56rem";
+
+/**
+ * §3.5 (R5) — on a phone (the list stacked) each card carries its answers. Accept opens the sheet,
+ * where the share, the balance after and the cap are stated before anything is sent; Decline opens
+ * it on "Decline for good?", focus on the safe answer. Decline only where the seat can be declined.
+ */
+function CardAnswers({ invite, onAnswer }: { invite: Invite; onAnswer: (invite: Invite, startWith?: "decline") => void }) {
+  const declinable = invite.status === "invited" && !invite.open_link;
+  return (
+    <div role="group" aria-label={SPLIT_PANE_COPY.cardActionsLabel(organiserName(invite))} className="flex flex-wrap justify-end gap-2">
+      {declinable ? (
+        <Button variant="outline" onClick={() => onAnswer(invite, "decline")} data-card-decline="">{SPLIT_PANE_COPY.cardDecline}</Button>
+      ) : null}
+      <Button onClick={() => onAnswer(invite)} data-card-accept="">{SPLIT_PANE_COPY.cardAccept}</Button>
+    </div>
+  );
+}
 
 /**
  * The invite in the pane: `?seat=` when the member picked one, else — with exactly one waiting and
@@ -133,8 +157,10 @@ function useSheet(items: Invite[] | null) {
   const [opened, setOpened] = useState<Invite | null>(null);
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState(0);
-  const openFor = useCallback((invite: Invite) => {
+  const [startWith, setStartWith] = useState<"decline" | undefined>(undefined);
+  const openFor = useCallback((invite: Invite, intent?: "decline") => {
     setOpened(invite);
+    setStartWith(intent);
     setSession((n) => n + 1);
     setOpen(true);
   }, []);
@@ -145,5 +171,5 @@ function useSheet(items: Invite[] | null) {
   const onBusyChange = useCallback((next: boolean) => { busy.current = next; }, []);
   useSheetHistory(open, close, "accept");
   const latest = opened ? items?.find((i) => i.participant_id === opened.participant_id) ?? opened : null;
-  return { invite: latest, open, setOpen, openFor, session, onBusyChange };
+  return { invite: latest, open, setOpen, openFor, session, onBusyChange, startWith };
 }

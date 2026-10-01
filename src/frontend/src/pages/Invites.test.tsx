@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import InvitesPage from "./Invites";
+import { SPLIT_PANE_COPY } from "../lib/inboxCopy";
 import { refuse, renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../test/harness";
 import {
   INVITES_COPY, INVITE_REFUSAL, INVITE_UNSURE, OWED_BACK_EXPLAINER, PLAYERS_UNSURE, acceptLabel, askedAgainLine, owedBackLine, playersRefusal, shortByLine,
@@ -69,7 +70,8 @@ describe("the list", () => {
     openInvites({ invites: [invite(), invite({ participant_id: "p2", needs_consent: true, status: "accepted", share_credits: 30, to_pay_credits: 5 }),
       invite({ participant_id: "p3", status: "accepted", to_pay_credits: 10 })] });
     const list = await screen.findByRole("list", { name: INVITES_COPY.listLabel });
-    const cards = within(list).getAllByRole("button");
+    // Each card's open button (R5 §3.5: the card also carries its answers on a phone).
+    const cards = Array.from(list.querySelectorAll<HTMLElement>("[data-invite]"));
     expect(cards).toHaveLength(3);
     expect(cards[0]).toHaveTextContent("Sam invited you to play");
     expect(cards[0]).toHaveTextContent("Court 1");
@@ -560,3 +562,33 @@ describe("an answer on its way keeps the sheet open", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });
+
+describe("R5 §3.5 — the answers on the card at phone width", () => {
+  it("Decline on the card opens the sheet on 'Decline for good?', focus on the safe answer; nothing is sent", async () => {
+    const stub = openInvites();
+    const card = await screen.findByRole("group", { name: SPLIT_PANE_COPY.cardActionsLabel("Sam") });
+    fireEvent.click(within(card).getByRole("button", { name: SPLIT_PANE_COPY.cardDecline }));
+    const sheet = await screen.findByRole("dialog", { name: INVITES_COPY.sheetTitle });
+    const keep = await within(sheet).findByRole("button", { name: INVITES_COPY.declineKeep });
+    await waitFor(() => expect(keep).toHaveFocus());
+    expect(within(sheet).getByRole("button", { name: INVITES_COPY.declineConfirm })).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.method === "POST" && c.path === DECLINE)).toBe(false);
+  });
+
+  it("Accept on the card opens the sheet with the money stated first — nothing is sent until Accept & pay", async () => {
+    const stub = openInvites();
+    const card = await screen.findByRole("group", { name: SPLIT_PANE_COPY.cardActionsLabel("Sam") });
+    fireEvent.click(within(card).getByRole("button", { name: SPLIT_PANE_COPY.cardAccept }));
+    const sheet = await screen.findByRole("dialog", { name: INVITES_COPY.sheetTitle });
+    expect(within(sheet).getByRole("button", { name: acceptLabel(25) })).toBeInTheDocument();
+    expect(acceptCalls(stub)).toHaveLength(0);
+  });
+
+  it("an accepted seat with a share still to pay offers Accept only — it can no longer be declined", async () => {
+    openInvites({ invites: [invite({ status: "accepted", to_pay_credits: 10 })] });
+    const card = await screen.findByRole("group", { name: SPLIT_PANE_COPY.cardActionsLabel("Sam") });
+    expect(within(card).queryByRole("button", { name: SPLIT_PANE_COPY.cardDecline })).toBeNull();
+    expect(within(card).getByRole("button", { name: SPLIT_PANE_COPY.cardAccept })).toBeInTheDocument();
+  });
+});
+
