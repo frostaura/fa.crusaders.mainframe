@@ -142,6 +142,11 @@ export default defineConfig({
   },
   server: {
     port: Number(process.env.VITE_DEV_PORT ?? 4173),
+    // Compile every route's module graph in the background as soon as the server starts. The
+    // admin frame plus Settings alone is ~420 modules: ~1 s warm, but 9–14 s on a cold server
+    // under a parallel browser suite, past a spec's 5 s wait for the page to arrive. Warmed, the
+    // first visit is served from the transform cache, so the specs need no per-page budget.
+    warmup: { clientFiles: ["./src/main.tsx", "./src/pages/**/*.tsx", "!./src/**/*.test.tsx", "!./src/**/__tests__/**"] },
     // THE DEV SERVER MUST BE ABLE TO REACH A SYMLINKED node_modules, OR IT SERVES NO FONTS.
     //
     // This product self-hosts Figtree rather than pulling it from a CDN, so the faces come out
