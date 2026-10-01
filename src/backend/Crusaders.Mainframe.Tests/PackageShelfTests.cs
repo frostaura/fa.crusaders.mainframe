@@ -109,6 +109,9 @@ public class PackageShelfTests
         var thirds = PackageShelf.Savings([(3, 100m), (7, 200m)]);
         Assert.Equal(33.33m, thirds[1].Zar);
         Assert.Equal(14, thirds[1].Pct);
+
+        // 100 × 8 ÷ 3 = 266.666… − 266 = 0.666… → R0.66, never the nearest R0.67.
+        Assert.Equal(0.66m, PackageShelf.Savings([(3, 100m), (8, 266m)])[1].Zar);
     }
 
     /// <summary>A shelf whose smallest package is free (a 100% discount) has no saving to show, rather than dividing by zero.</summary>
@@ -127,6 +130,7 @@ public class PackageShelfTests
     [InlineData(120.00, 333, 116.00)]    // 120 × 0.9667 = 116.004 → 116.00
     [InlineData(99.99, 1500, 84.99)]     // 84.9915 → 84.99, never 85.00
     [InlineData(0.05, 5000, 0.02)]       // 0.025 → 0.02: the buyer keeps the fraction of a cent
+    [InlineData(10.00, 3333, 6.66)]      // 6.667 → 6.66, never the nearest 6.67
     [InlineData(1000.00, 0, 1000.00)]
     [InlineData(1000.00, 10000, 0.00)]
     public void A_discount_rounds_the_price_down_to_the_cent(double list, int bps, double expected)
@@ -146,6 +150,9 @@ public class PackageShelfTests
         var other = G("Coaching", null);
         var packages = Seeded.Append(P("League 10 hours", 600, 800m, 3, league.Id))
             .Append(P("Coaching block", 120, 150m, 4, other.Id))
+            // Cheaper per minute and SMALLER than anything on this member's shelf: were the saving
+            // measured against another shelf, it would become the baseline (mutation check §1.4).
+            .Append(P("Coaching taster", 30, 30m, 5, other.Id))
             .ToList();
 
         var shelf = PackageShelf.Build(packages, MemberTariffs.Resolve([league]));
@@ -233,6 +240,7 @@ public class PackageShelfTests
     // ---- the desk's bound ----------------------------------------------------------------
 
     [Theory]
+    [InlineData(0)]
     [InlineData(1_000_000)]
     [InlineData(-1_000_000)]
     [InlineData(99_999_999_999)]

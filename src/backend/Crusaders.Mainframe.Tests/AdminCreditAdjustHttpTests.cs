@@ -468,6 +468,42 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(0, await BalanceAsync(factory, seeded));
     }
 
+    /// <summary>
+    /// Whole minutes only (P13 §3.7): 0 is <c>amount_zero</c>; past ±999 999 is
+    /// <c>amount_out_of_range</c> with <c>max_minutes</c>; a fraction of a minute never binds — a
+    /// 400 with nothing posted, rather than a balance rounded into something the desk did not type.
+    /// The bounds themselves are accepted.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_adjustment_is_whole_minutes_inside_its_bound()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+        var path = $"/api/v1/admin/minutes/{seeded.MemberUserId}/adjust";
+
+        var zero = await AdjustWithCodeAsync(client, seeded, 0, "goodwill");
+        Assert.Equal("amount_zero", (await zero.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        var over = await AdjustWithCodeAsync(client, seeded, 1_000_000, "goodwill");
+        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+        var overBody = await over.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("amount_out_of_range", overBody.GetProperty("error").GetString());
+        Assert.Equal(999_999, overBody.GetProperty("max_minutes").GetInt32());
+
+        var fraction = await client.PostAsync(path, new StringContent(
+            """{"amountMinutes":30.5,"reason":"half a minute","reasonCode":"goodwill"}""", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, fraction.StatusCode);
+        Assert.Equal(0, await BalanceAsync(factory, seeded));
+
+        Assert.Equal(HttpStatusCode.OK, (await AdjustWithCodeAsync(client, seeded, 999_999, "correction")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await AdjustWithCodeAsync(client, seeded, -999_999, "correction")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await AdjustWithCodeAsync(client, seeded, 1, "correction")).StatusCode);
+        Assert.Equal(1, await BalanceAsync(factory, seeded));
+    }
+
     /// <summary>An unknown code is refused with the whole valid set, so a client never has to guess.</summary>
     [SkippableFact]
     public async Task An_unknown_reason_code_is_refused_with_the_valid_set()
