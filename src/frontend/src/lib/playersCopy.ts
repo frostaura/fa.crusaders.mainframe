@@ -412,6 +412,8 @@ export const BOOK_CONFIRM = {
 /** The booking's own page, `/bookings/:bookingId` — what every viewer reads. */
 export const DETAIL_COPY = {
   title: "Booking",
+  /** R4 form factor — the docked bar that holds the organiser's one verb on a phone. */
+  actionsLabel: "Booking actions",
   back: "Bookings",
   backToBookings: "Back to Bookings",
   readAction: "read this booking",

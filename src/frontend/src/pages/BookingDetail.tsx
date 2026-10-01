@@ -20,6 +20,8 @@ import {
 } from "@/components/players/detail/detailModel";
 import { ResultCard } from "@/components/play/ResultCard";
 import { Button } from "@/components/ui/button";
+import { ContextBar } from "@/components/ui/context-bar";
+import { useMediaQuery } from "@/components/ui/use-media-query";
 import { CalendarBlank } from "@/components/ui/icons";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
@@ -57,7 +59,8 @@ export default function BookingDetailPage() {
   // notice (said while the re-read was on its way) steps aside, so the page says it once.
   const shown = notice && !(notice.text === DETAIL_CANCEL.cancelled && read.data && isCancelled(read.data)) ? notice : null;
   return (
-    <PageShell width="content">
+    // R4 form factor (SPEC 3.3): `content` to xl, `wide` from it, where the money stands in a rail.
+    <PageShell width="content" className="xl:max-w-wide">
       <PageHeader
         back={{ to: "/bookings", label: DETAIL_COPY.back }}
         title={read.data ? detailTitle(read.data) : DETAIL_COPY.title}
@@ -146,6 +149,30 @@ function DetailBody({ read, say, earlyResult }: { read: DetailRead; say: (notice
   );
 }
 
+/**
+ * The body's layout (R4 form factor, SPEC 3.3), by the PAGE's width (`@container/page`):
+ *
+ * <ul>
+ *   <li><b>Phone:</b> Players, Money, at the court (your seat, attendance, the result), Cancel,
+ *   Admin — the order a member reads it in; the organiser's Invite docked above the tab bar.</li>
+ *   <li><b>56rem</b> (lg, `content`): Players across; Money beside the court column; Cancel.</li>
+ *   <li><b>72rem</b> (xl, `wide`): Players, then the court column's three blocks side by side,
+ *   with Money in a 22rem rail that sticks while the players are worked, Cancel at its foot.</li>
+ * </ul>
+ * DOM order is the phone's in every layout, so Tab order is reading order. Written whole.
+ */
+const LAYOUT = [
+  "flex flex-col gap-8",
+  "@[56rem]/page:grid @[56rem]/page:grid-cols-2 @[56rem]/page:items-start",
+  "@[72rem]/page:grid-cols-[minmax(0,1fr)_22rem]",
+].join(" ");
+const PLAYERS = "@[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-1 @[72rem]/page:row-start-1";
+const MONEY = "min-w-0 @[72rem]/page:sticky @[72rem]/page:top-6 @[72rem]/page:col-start-2 @[72rem]/page:row-span-2 @[72rem]/page:row-start-1";
+const COURT = "flex min-w-0 flex-col gap-8 @[72rem]/page:col-start-1 @[72rem]/page:row-start-2 @[72rem]/page:grid @[72rem]/page:grid-cols-2 @[72rem]/page:items-start";
+const CANCEL = "min-w-0 @[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-2 @[72rem]/page:row-start-3";
+const ADMIN = "min-w-0 @[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-1 @[72rem]/page:row-start-3";
+const LG_UP = "(min-width: 1024px)";
+
 type ViewProps = {
   detail: BookingDetail; readAt: number | null; reload: () => void; say: (notice: Notice) => void; earlyResult: EarlyResult | null;
 };
@@ -157,6 +184,8 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
   const admin = useAdminHands(detail, reload, say);
   const cancelled = isCancelled(detail);
   const canInvite = detail.permissions.can_invite && !cancelled;
+  // One Invite button, in one place: JS decides (a CSS-hidden twin is still a second button).
+  const wide = useMediaQuery(LG_UP);
   const seatActions = (p: DetailPlayer) => {
     const own = canInvite && (canNudge(p) || canShareLink(p) || canRemove(p));
     const god = isAdmin && adminActs(p).length > 0;
@@ -171,17 +200,22 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
   return (
     <>
       {cancelled ? <Alert tone="info" live="off" data-cancelled="">{DETAIL_CANCELLED.banner}</Alert> : null}
-      <Section
-        title={DETAIL_COPY.playersTitle}
-        description={cancelled ? DETAIL_CANCELLED.playersDescription : DETAIL_COPY.playersDescription}
-        actions={canInvite ? <InviteButton hands={organiser} /> : null}
-        data-players-section=""
-      >
-        <PlayerChips detail={detail} actions={seatActions} />
-      </Section>
-      <div className="grid gap-8 lg:grid-cols-2">
-        <MoneyPanel detail={detail} actions={detail.viewer.role === "organiser" ? <ChangeSplitButton hands={organiser} /> : null} />
-        <div className="flex flex-col gap-8">
+      <div data-detail-layout="" className={LAYOUT}>
+        <Section
+          title={DETAIL_COPY.playersTitle}
+          description={cancelled ? DETAIL_CANCELLED.playersDescription : DETAIL_COPY.playersDescription}
+          // From lg the organiser's verb is beside the heading; on a phone it is docked in thumb
+          // reach instead (SPEC §4 "wrong tap reach": top-right is the hardest place to reach).
+          actions={canInvite && wide ? <InviteButton hands={organiser} /> : null}
+          className={PLAYERS}
+          data-players-section=""
+        >
+          <PlayerChips detail={detail} actions={seatActions} />
+        </Section>
+        <div data-detail-money="" className={MONEY}>
+          <MoneyPanel detail={detail} actions={detail.viewer.role === "organiser" ? <ChangeSplitButton hands={organiser} /> : null} />
+        </div>
+        <div data-detail-court="" className={COURT}>
           <PlayerPanel detail={detail} reload={reload} say={say} />
           {/* A cancelled game nobody scanned has no attendance to report (R1 F2.10). */}
           {cancelled && !detail.attendance.checked_in_at ? null : <Attendance detail={detail} />}
@@ -189,9 +223,14 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
               Asked for only by the game's own players, and never on a cancelled game (R1 F2.15). */}
           {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} freshAt={readAt} firstRead={earlyResult} /> : null}
         </div>
+        <div data-detail-cancel="" className={CANCEL}>
+          <CancelPanel detail={detail} reload={reload} say={say} />
+        </div>
+        {isAdmin ? <div className={ADMIN}><AdminSection hands={admin} /></div> : null}
       </div>
-      <CancelPanel detail={detail} reload={reload} say={say} />
-      {isAdmin ? <AdminSection hands={admin} /> : null}
+      {canInvite && !wide ? (
+        <ContextBar position="bottom" until="lg" label={DETAIL_COPY.actionsLabel} primary={<InviteButton hands={organiser} />} />
+      ) : null}
       <OrganiserDialogs hands={organiser} />
       <AdminDialogs hands={admin} />
     </>

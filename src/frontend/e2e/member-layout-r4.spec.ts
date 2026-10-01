@@ -1,5 +1,7 @@
 import type { Page } from "@playwright/test";
 import { MEMBER_CODE, SESSION_ANON, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { BOOKING, detailFixture, memberShellRoutes } from "./playersKit";
+import { DETAIL_ACTIONS, DETAIL_COPY } from "../src/lib/playersCopy";
 import { HEIGHT, WIDTHS, bigText, box, fontsReady, sideways, textOffScreen, widthUsed, type Width } from "./layoutKit";
 
 /**
@@ -237,5 +239,59 @@ test.describe("Bookings (SPEC 3.1)", () => {
     await openBookings(page, 390);
     await bigText(page);
     await healthy(page);
+  });
+});
+
+test.describe("Booking detail (SPEC 3.3)", () => {
+  const twoSeats = () => {
+    const d = detailFixture() as Record<string, unknown> & { players: unknown[] };
+    return { ...d, players: d.players.slice(0, 2) };
+  };
+  async function openDetail(page: Page, width: Width) {
+    await open(page, `/bookings/${BOOKING}`, [
+      { path: `/api/v1/bookings/${BOOKING}`, body: twoSeats() },
+      ...memberShellRoutes(),
+    ], width);
+    await expect(page.locator("[data-players-section]")).toBeVisible();
+  }
+
+  for (const width of WIDTHS) {
+    test(`${width}px: players, money, the court; a money rail from xl; Invite in thumb reach on a phone`, async ({ page }, info) => {
+      test.skip(info.project.name !== "desktop", "one project sweeps the widths");
+      await openDetail(page, width);
+      await healthy(page);
+      const players = (await box(page, "[data-players-section]"))!;
+      const money = (await box(page, "[data-detail-money]"))!;
+      const court = (await box(page, "[data-detail-court]"))!;
+      const docked = page.getByRole("region", { name: DETAIL_COPY.actionsLabel });
+      if (width >= 1280) {
+        expect(money.x, "money stands in a rail beside the players").toBeGreaterThanOrEqual(players.right);
+        expect(court.y).toBeGreaterThanOrEqual(players.bottom);
+        expect(court.right).toBeLessThanOrEqual(money.x);
+      } else if (width >= 1024) {
+        expect(court.x, "money beside the court column").toBeGreaterThanOrEqual(money.right);
+      } else {
+        expect(money.y).toBeGreaterThanOrEqual(players.bottom);
+        expect(court.y).toBeGreaterThanOrEqual(money.bottom);
+      }
+      if (width >= 1024) {
+        await expect(docked).toHaveCount(0);
+        await expect(page.locator("[data-players-section]").getByRole("button", { name: DETAIL_ACTIONS.invite })).toBeVisible();
+      } else {
+        const button = docked.getByRole("button", { name: DETAIL_ACTIONS.invite });
+        await expect(button).toBeVisible();
+        const b = (await button.boundingBox())!;
+        expect(b.y + b.height, "in thumb reach").toBeGreaterThan(HEIGHT[width] * 0.75);
+        expect(b.height).toBeGreaterThanOrEqual(44);
+        await expect(page.locator("[data-players-section]").getByRole("button", { name: DETAIL_ACTIONS.invite })).toHaveCount(0);
+      }
+    });
+  }
+
+  test("390 at 200 % text: nothing off screen, the docked Invite still in reach", async ({ page }) => {
+    await openDetail(page, 390);
+    await bigText(page);
+    await healthy(page);
+    await expect(page.getByRole("region", { name: DETAIL_COPY.actionsLabel }).getByRole("button", { name: DETAIL_ACTIONS.invite })).toBeVisible();
   });
 });
