@@ -4,10 +4,11 @@ import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
 import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, slotRow } from "../test/bookingsKit";
 import { liftWithReason } from "../test/liftHold";
-import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET, OFFLINE_CELL, bookCellLabel } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, BOOK_SHEET, CANCEL_SHEET, LIFT_HOLD_SHEET, OFFLINE_CELL, SPLIT_CANCEL, bookCellLabel } from "../lib/bookingsCopy";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import type { ScheduleDay } from "../lib/api";
 import { HOLD_LIFTED } from "../lib/scheduleEnd";
+import { cancellationOutcome } from "../lib/bookingErrors";
 import { notYetOpenSentence } from "../lib/gridCopy";
 import { buildTimeSlices } from "../lib/scheduleGrid";
 
@@ -205,5 +206,45 @@ describe("V5-5 — a closed run nothing is booked in is one folded row", () => {
     expect(within(grid).getByRole("rowheader", { name: "00:30–06:00" })).toBeInTheDocument();
     expect(within(grid).getByRole("button", { name: /^Court 1 at 00:30–06:00 — the club is closed/ })).toHaveTextContent("Closed");
     expect(within(grid).queryByRole("rowheader", { name: "03:00" })).toBeNull();
+  });
+});
+
+describe("§3.1 — the rail's day summary says how many more slots today", () => {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg" }).format(new Date());
+  const capped = { maxSlotsPerDay: 4, bookedSlotsToday: 1, remainingToday: 3, adminExempt: false };
+
+  it("on today's grid, under a cap", async () => {
+    openBookings({ day: dayFixture({ date: today, rules: capped }), balance: 120 });
+    const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTitle });
+    expect(wallet).toHaveTextContent(BOOKINGS_COPY.summaryMoreToday(3));
+  });
+
+  it("says nothing on another day, or with no cap", async () => {
+    openBookings({ day: dayFixture({ rules: capped }), balance: 120 });
+    const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTitle });
+    expect(wallet.querySelector("[data-more-today]")).toBeNull();
+  });
+});
+
+describe("M5-7 (D1's ask) — a late split cancel says what came back, net of the penalty", () => {
+  const thandi = [{ name: "Thandi Third", credits: 25 }];
+
+  it("corrects a net that left the penalty out (gross 50, penalty 15, Thandi's 25 → 10 back)", () => {
+    const said = cancellationOutcome(50, 15, null, { net: 25, partners: thandi });
+    expect(said).toContain("10.00 cr back to your credit");
+    expect(said).toContain("25.00 cr to Thandi Third");
+    expect(said).toContain("15.00 cr kept as the late-cancellation penalty");
+  });
+
+  it("takes a net that already counts the penalty as it is", () => {
+    expect(cancellationOutcome(50, 15, null, { net: 10, partners: thandi })).toContain("10.00 cr back to your credit");
+  });
+
+  it("leaves a cancel with no penalty alone", () => {
+    expect(cancellationOutcome(50, 0, null, { net: 25, partners: thandi })).toContain("25.00 cr back to your credit");
+  });
+
+  it("names the organiser's row \"Back to you\", never \"You keep\"", () => {
+    expect(SPLIT_CANCEL.youKeep).toBe("Back to you");
   });
 });

@@ -17,16 +17,17 @@ export function when(game: UpcomingGame, zone: string | undefined): string {
  * lose to them in the cascade and, beside the grid, lie about the room the list has:
  *
  * <ul>
- *   <li><b>Phone:</b> a sideways strip of 16rem cards (scroll-snapped), so two games cost one
- *   72px row instead of ~220px and the grid's first slot is on the first screen.</li>
+ *   <li><b>Phone:</b> a row of 16rem cards lying flat in the rail's ONE sideways strip (R5 §4.2 —
+ *   `Schedule`'s rail strip scrolls and snaps; a list scrolling inside it would nest scrollers), so
+ *   upcoming, recent and the invites cost one row and the grid's first slot is on the first screen.</li>
  *   <li><b>40rem:</b> two cards a row; <b>56rem:</b> three.</li>
  *   <li><b>72rem</b> (the rail stands beside the grid): a vertical list in the rail.</li>
  * </ul>
  * Written whole, so Tailwind's scanner sees every class.
  */
 export const GAMES_LIST = [
-  "-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-2 overflow-x-auto px-4 pb-1",
-  "@[40rem]/aside:mx-0 @[40rem]/aside:grid @[40rem]/aside:grid-cols-2 @[40rem]/aside:overflow-visible @[40rem]/aside:px-0 @[40rem]/aside:pb-0",
+  "flex gap-2",
+  "@[40rem]/aside:grid @[40rem]/aside:grid-cols-2",
   "@[56rem]/aside:grid-cols-3",
   "@[72rem]/aside:flex @[72rem]/aside:flex-col",
 ].join(" ");

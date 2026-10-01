@@ -1,4 +1,4 @@
-import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ActionBar, ActionBarItem } from "@/components/ui/action-bar";
 import { Badge } from "@/components/ui/badge";
@@ -194,17 +194,28 @@ export default function BookingsPage() {
           placement="first"
           asideLabel={BOOKINGS_COPY.railLabel}
           gap="md"
+          // R5 F5-6 — from 3xl the courts are capped, so the main column hugs the grid (strip and
+          // picker align with it) and the rail stands right beside it: no ~180px dead gutter.
+          className={HUG_GRID}
           aside={(
             <>
-              <DaySummary className="hidden @[72rem]/aside:flex" bookingFor={bookAsUserId ? bookingFor : null} />
-              {bookAsUserId ? null : (
-                <>
-                  <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
-                  {/* R2 F1-1 — finished games, whose results are recorded here. */}
-                  <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
-                </>
-              )}
-              <InvitesBadgeLink />
+              <DaySummary
+                className="hidden @[72rem]/aside:flex" bookingFor={bookAsUserId ? bookingFor : null}
+                moreToday={date === today && !isAdmin && !rules.adminExempt && rules.maxSlotsPerDay !== null ? rules.remainingToday : null}
+              />
+              {/* R5 §4.2 — on a phone the games and the invites are ONE sideways strip (SPEC 3.1: the
+                  invite chip inline at its end), so the week and the grid start on the first screen. */}
+              <div data-rail-strip="" className={RAIL_STRIP}>
+                {bookAsUserId ? null : (
+                  <>
+                    <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />
+                    {/* R2 F1-1 — finished games, whose results are recorded here. */}
+                    <RecentGames refreshKey={changes} fallbackZone={day?.timezone} />
+                  </>
+                )}
+                {/* R5 X5-12 — a full 44px target, not the 36px small button; X5-11 — it wraps at 320/200 %. */}
+                <InvitesBadgeLink className={INVITES_LINK} />
+              </div>
             </>
           )}
         >
@@ -262,6 +273,21 @@ export default function BookingsPage() {
     </PageShell>
   );
 }
+
+/**
+ * R5 §4.2 — the rail's games and invites: a sideways, snapping strip on a phone (the lists inside
+ * it lie flat, `GAMES_LIST`), a column from a 40rem rail. Empty, it takes no room.
+ */
+const RAIL_STRIP = [
+  "-mx-4 flex snap-x snap-proximity scroll-px-4 items-end gap-4 overflow-x-auto px-4 pb-1 empty:hidden [&>*]:shrink-0",
+  "@[40rem]/aside:mx-0 @[40rem]/aside:flex-col @[40rem]/aside:items-stretch @[40rem]/aside:overflow-visible @[40rem]/aside:px-0 @[40rem]/aside:pb-0 @[40rem]/aside:[&>*]:shrink",
+].join(" ");
+
+/** R5 X5-12 / X5-11 — the invites link: a 44px target that wraps rather than running off a 320 phone at 200 %. */
+const INVITES_LINK = "min-h-touch max-w-full whitespace-normal text-left";
+
+/** R5 F5-6 — WithAside's inner grid, from 3xl: the main column as wide as its content (the capped grid), no wider. */
+const HUG_GRID = "3xl:[&>div]:grid-cols-[minmax(0,max-content)_var(--aside-w)] 3xl:[&>div]:justify-start";
 
 /**
  * `open`, unless the grid on screen is the phone's copy because the club could not be reached —
@@ -377,6 +403,7 @@ function SelectionBar(props: {
   onBook: (slots: SelectedSlot[]) => void; onCancel: (bookings: GridBooking[]) => void;
 }) {
   const { selection, day, priceOf, onBook, onCancel } = props;
+  const span = useGridSpan(selection.api.active);
   if (!selection.api.active) return null;
   const slots = toSelectedSlots(selection.keys, day, priceOf);
   const bookings = toGridBookings(selection.keys, day);
@@ -389,6 +416,7 @@ function SelectionBar(props: {
       // R4 M4-7 — a pick the daily cap refused is said HERE, where the member is looking.
       detail={selection.refusal ? <span data-cap-refusal="" className="text-warning-strong">{selection.refusal}</span> : describeSpan(selection.keys, day)}
       onClose={selection.api.leave} closeLabel={BOOKINGS_COPY.clearSelection} label={BOOKINGS_COPY.actionBarLabel}
+      style={span}
     >
       {bookings.length > 0 ? (
         <ActionBarItem asChild>
@@ -402,6 +430,35 @@ function SelectionBar(props: {
       ) : null}
     </ActionBar>
   );
+}
+
+/** From here the bar no longer spans the window, so it centres on the grid instead (R5 V5-10). */
+const GRID_SPAN_FROM_PX = 1024;
+
+/**
+ * R5 V5-10 — on a desktop the floating bar centred on the WINDOW, off to one side of a grid that
+ * shares the row with the rail (1280: ~130px left of the grid's centre). It spans the grid's
+ * frame instead, re-measured as the window or the frame changes. A phone keeps the window.
+ */
+function useGridSpan(active: boolean): CSSProperties | undefined {
+  const [span, setSpan] = useState<{ left: number; right: number } | null>(null);
+  useEffect(() => {
+    if (!active || typeof window === "undefined") return undefined;
+    const frame = document.querySelector("[data-grid-scroller]")?.parentElement;
+    if (!frame) return undefined;
+    const measure = () => {
+      if (window.innerWidth < GRID_SPAN_FROM_PX) { setSpan(null); return; }
+      const r = frame.getBoundingClientRect();
+      const next = { left: Math.round(r.left), right: Math.round(document.documentElement.clientWidth - r.right) };
+      setSpan((prev) => (prev && prev.left === next.left && prev.right === next.right ? prev : next));
+    };
+    measure();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(frame);
+    window.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+  }, [active]);
+  return active && span ? span : undefined;
 }
 
 /** Where one selection key sits on the day: its court, its first instant and its end. */

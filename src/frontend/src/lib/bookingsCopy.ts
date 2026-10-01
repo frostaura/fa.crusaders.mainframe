@@ -30,6 +30,11 @@ export const BOOKINGS_COPY = {
   /** R5 A5-9 — booking FOR a member, the rail's wallet is theirs, never the desk's. */
   summaryTheirTitle: (name: string) => `${name}'s wallet`,
   summaryTheirSpendable: (name: string) => `${name} can spend`,
+  /**
+   * R5 §3.1 — the rail's day summary says what is LEFT of today's cap (the pill beside the week
+   * says what is used). Only on today's grid, only under a cap.
+   */
+  summaryMoreToday: (n: number) => (n === 0 ? "No more slots today — that's your limit" : `You can book ${n} more ${n === 1 ? "slot" : "slots"} today`),
   /** The sr-only h2 the grid is named by — the court names are already the visible headers. */
   gridHeading: "Courts and times",
   dayStripLabel: "Choose a day",
@@ -571,7 +576,11 @@ export const BOOK_SEATS = {
 /** F1.13 — a split booking's cancel: what each partner gets back, and what the organiser keeps. */
 export const SPLIT_CANCEL = {
   partnerBack: (name: string) => `Back to ${name}`,
-  youKeep: "You keep",
+  /**
+   * R5 M5-7 (D1's ask) — what comes back to the organiser net of the partners' shares. "You keep"
+   * under "penalty −15.00" read as the penalty's opposite.
+   */
+  youKeep: "Back to you",
   note: "Partners get their shares back from what comes back to you.",
 } as const;
 

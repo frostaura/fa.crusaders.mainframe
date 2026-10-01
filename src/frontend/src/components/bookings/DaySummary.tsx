@@ -25,13 +25,19 @@ import type { BookingFor } from "./useBookingFor";
  * spend 0.00 cr — Top up" beside a grid booking for somebody else read as the member's figure.
  * Their spendable, named; no Top up (the desk's own top-up page would credit the desk).
  * </p>
+ *
+ * <p>
+ * <b>What is left of today's cap</b> (R5 §3.1, `moreToday`): the pill beside the week says what
+ * is USED ("2 of 4 slots today"); the rail says what is LEFT — two facts, one place each.
+ * </p>
  */
-export function DaySummary({ className, bookingFor = null }: { className?: string; bookingFor?: BookingFor | null }) {
+export function DaySummary(props: { className?: string; bookingFor?: BookingFor | null; moreToday?: number | null }) {
+  const { className, bookingFor = null, moreToday = null } = props;
   if (bookingFor) return <MemberSummary className={className} bookingFor={bookingFor} />;
-  return <OwnSummary className={className} />;
+  return <OwnSummary className={className} moreToday={moreToday} />;
 }
 
-function OwnSummary({ className }: { className?: string }) {
+function OwnSummary({ className, moreToday }: { className?: string; moreToday: number | null }) {
   const { balance, held } = useBalance();
   if (balance === null) return null;
   const spendable = held?.spendable ?? balance;
@@ -41,6 +47,7 @@ function OwnSummary({ className }: { className?: string }) {
       <div>
         <p className={typography({ variant: "overline" })}>{BOOKINGS_COPY.summarySpendable}</p>
         <p className={cn("mt-1 font-display text-2xl font-bold tabular-nums", level === "zero" && "text-danger-strong")}>{formatCredits(spendable)}</p>
+        {moreToday !== null ? <p data-more-today="" className="mt-1 text-sm text-text-secondary">{BOOKINGS_COPY.summaryMoreToday(moreToday)}</p> : null}
       </div>
       <Button asChild variant={level === "zero" ? "primary" : "secondary"} size="sm" className="self-start">
         <Link to="/wallet/topup">{TOP_UP_LABEL[level]}</Link>

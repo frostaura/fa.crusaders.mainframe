@@ -215,18 +215,22 @@ export function WeekStrip(props: WeekStripProps) {
 
   return (
     <div data-week-strip="" className={cn("flex flex-col gap-2", className)}>
-      <div className="flex items-center gap-1">
+      {/* R5 X5-11 — wraps as a ROW at large text: the caption takes its own line and the arrows
+          and calendar follow on the right, instead of "Sept / – / Oct / 2026" a word a line. */}
+      <div className="flex flex-wrap items-center gap-1">
         {/* Wraps rather than truncating (F1.16): at twice the text size "September – October
             2026" was cut to "Septem…", the one line saying which month the chips are in. */}
         {/* R2 F1-10: words wrap whole, never mid-letter ("Septemb/er"); a phone gets the short
             months so each word fits beside the arrows. The long form from `sm` up. */}
-        <p data-month="" className="min-w-0 flex-1 text-sm font-semibold text-text-primary">
+        <p data-month="" className="min-w-0 flex-1 basis-32 text-sm font-semibold text-text-primary">
           <span className="sm:hidden">{monthLabel(start, end, "short")}</span>
           <span className="hidden sm:inline">{monthLabel(start, end)}</span>
         </p>
-        <WeekNav direction="prev" blocked={start <= floor} onGo={() => go(-1)} />
-        <WeekNav direction="next" blocked={end >= max} onGo={() => go(1)} />
-        {trailing}
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <WeekNav direction="prev" blocked={start <= floor} onGo={() => go(-1)} />
+          <WeekNav direction="next" blocked={end >= max} onGo={() => go(1)} />
+          {trailing}
+        </span>
       </div>
       <ToggleGroup.Root
         type="single"

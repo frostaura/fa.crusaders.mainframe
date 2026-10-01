@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Toolbar } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { DOCK_BOTTOM, DOCK_PANEL, usePublishDockedHeight } from "./layout";
@@ -44,6 +44,11 @@ export type ActionBarProps = {
   /** Actions, secondary first, primary last (it lands on the right). */
   children?: ReactNode;
   className?: string;
+  /**
+   * The bar's horizontal span, when it should centre on a region rather than the window (R5
+   * V5-10: the Bookings bar centres on the grid) — `{ left, right }` in px from the window edges.
+   */
+  style?: CSSProperties;
 };
 
 /** A roving toolbar item. Wrap each action: `<ActionBarItem asChild><Button/></ActionBarItem>`. */
@@ -52,7 +57,7 @@ export const ActionBarItem = Toolbar.Button;
 export function ActionBar(props: ActionBarProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const {
-    count, countLabel, detail, onClose, closeLabel = "Clear selection", label = "Selection", children, className,
+    count, countLabel, detail, onClose, closeLabel = "Clear selection", label = "Selection", children, className, style,
   } = props;
   const headline = countLabel ?? `${count} selected`;
   const ref = useRef<HTMLDivElement>(null);
@@ -67,6 +72,7 @@ export function ActionBar(props: ActionBarProps) {
       ref={ref}
       data-action-bar=""
       className={cn("pointer-events-none fixed inset-x-0 z-actionbar px-4", DOCK_BOTTOM, className)}
+      style={style}
     >
       <Toolbar.Root
         aria-label={label}
