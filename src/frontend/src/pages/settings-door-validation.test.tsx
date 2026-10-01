@@ -311,7 +311,7 @@ describe("AdminSettings — an empty number is not zero", () => {
 
     await findControl(/Unlock time/);
     const captions = [
-      /Reserve window/, /Penalty \(% of slice price\)/, /Credits per R1 — members/,
+      /Reserve window/, /Penalty \(% of the booking's minutes\)/, /No-show sweep looks back/,
       /Court time per member per day/, /Heartbeat interval/, /Alert cooldown/,
       /Unlock time/, /Keep door scans for/, /Keep usage history/,
     ].map((label) => {

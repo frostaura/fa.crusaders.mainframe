@@ -387,13 +387,13 @@ function sectionExtras(id: SettingsSectionId, settings: AdminSettings): { before
       };
     case "hours":
       return { after: <OperatingHours /> };
-    case "credits":
-      // D2: the league rate is the League group's own rate now, set where the group is.
+    case "money":
+      // P13: packages and each group's package discount have their own pages.
       return {
         after: (
           <div className="flex flex-col gap-1">
-            <p className="max-w-prose text-sm text-text-secondary">{SETTINGS_COPY.groupRatesNote}</p>
-            <TextLink variant="standalone" to="/admin/groups" className="self-start text-sm">{SETTINGS_COPY.groupRatesLink}</TextLink>
+            <TextLink variant="standalone" to="/admin/packages" className="self-start text-sm">{SETTINGS_COPY.packagesLink}</TextLink>
+            <TextLink variant="standalone" to="/admin/groups" className="self-start text-sm">{SETTINGS_COPY.groupDiscountsLink}</TextLink>
           </div>
         ),
       };

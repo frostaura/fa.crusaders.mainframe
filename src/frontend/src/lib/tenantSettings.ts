@@ -279,8 +279,8 @@ export function settingAnchorId(key: string): string {
  * The bounds are on the inputs too, but a number input's <code>min</code> and
  * <code>max</code> stop the spinner and nothing else — a typed or pasted value passes
  * straight through, and Save here is not a native submit, so the browser never says a
- * word. That is the same gap the credits-per-rand <code>step</code> fell through, where
- * the field looked fine while the arrows moved the money conversion rate by a hundredth.
+ * word. That is the same gap the old conversion-rate <code>step</code> fell through, where
+ * the field looked fine while the arrows moved the rate by a hundredth.
  * The policy is checked against the closed list as well, so a document carrying a value
  * this build does not know about is refused here rather than saved back as a blank select.
  * </p>

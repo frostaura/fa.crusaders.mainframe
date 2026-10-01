@@ -189,18 +189,17 @@ test.describe("R4 V-14 — the members table at 1280", () => {
 test.describe("R4 V-13 — the save bar and a field reached by Tab", () => {
   test("lifts the field's complaint clear of the bar when Tab lands on it at the bottom edge", async ({ page }) => {
     const settings = {
-      slice_minutes: 15, slice_price_credits: 8, advance_booking_days: 14, day_start_minute: 360, day_end_minute: 1320,
+      slice_minutes: 15, advance_booking_days: 14, day_start_minute: 360, day_end_minute: 1320,
       penalty_pct: 30, grace_window_minutes: 5, penalty_window_minutes: 15, timezone: "Africa/Johannesburg",
       button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
-      operating_hours: { mon: "06:00-22:00" }, credits_per_zar_regular: 1.6, topup_block_zar: 100,
-      topup_max_zar_per_member: 1000, member_per_day_max_minutes: 60, peak_hours: "16:00-19:00",
+      operating_hours: { mon: "06:00-22:00" }, member_per_day_max_minutes: 60, peak_hours: "16:00-19:00",
       peak_advance_hours_for_regular: 1, retention_years: 2, no_show_lookback_days: 7, currency_symbol: "R",
     };
     await open(page, "/admin/settings", 1280, false, [{ path: "/api/v1/admin/settings/", body: settings }]);
-    await page.getByRole("searchbox", { name: "Search settings" }).fill("Top-up");
-    const field = page.getByRole("spinbutton", { name: /Top-up block/ });
+    await page.getByRole("searchbox", { name: "Search settings" }).fill("Reserve");
+    const field = page.getByRole("spinbutton", { name: /Reserve window/ });
     await expect(field).toBeVisible({ timeout: 30_000 });
-    await field.fill("0");
+    await field.fill("999");
     await page.keyboard.press("Tab");
     const bar = page.getByRole("region", { name: "Unsaved settings" });
     await expect(bar).toBeVisible();

@@ -107,8 +107,8 @@ describe("operating hours", () => {
  * The inputs carry the same min and max, and that is not enough on its own: a number input's
  * bounds stop the SPINNER and nothing else, and Save on that screen is not a native submit,
  * so a typed or pasted value goes to the API with the browser silent about it. That is the
- * same gap the credits-per-rand `step` fell through, where the field looked fine while the
- * arrows moved the money conversion rate by a hundredth.
+ * same gap the old conversion-rate `step` fell through, where the field looked fine while the
+ * arrows moved the rate by a hundredth.
  * </p>
  */
 describe("gateSettingsComplaint", () => {

@@ -47,7 +47,7 @@ import {
  */
 
 export type SettingsSectionId =
-  | "bookings" | "hours" | "cancellations" | "credits" | "schedules"
+  | "bookings" | "hours" | "cancellations" | "money" | "schedules"
   | "boxes" | "screens" | "doors" | "records" | "monitoring" | "alerts" | "play";
 
 /** What a help, a bound or a lede may depend on: the working copy and the club's money symbol. */
@@ -70,7 +70,7 @@ export type SettingDef = {
   /** The full guidance, behind the (i) and on `aria-describedby`. */
   help?: Dynamic<string>;
   kind: SettingKind;
-  /** Shown inside the control's edge: "min", "s", "%", "cr". `{currency}` allowed. */
+  /** Shown inside the control's edge: "min", "s", "%". `{currency}` allowed. */
   unit?: string;
   /** The unit reads before the number (money: "R 100"). */
   unitBefore?: boolean;
@@ -79,7 +79,7 @@ export type SettingDef = {
   step?: number;
   /** Whole numbers only — the range message says so. */
   integer?: boolean;
-  /** The lower bound is exclusive (a conversion rate must be MORE than zero). */
+  /** The lower bound is exclusive (the value must be MORE than `min`). */
   minExclusive?: boolean;
   /** Checked here against min/max. False where a module of its own already validates the key. */
   range?: boolean;
@@ -135,13 +135,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     lede: "What cancelling late and not turning up cost a member.",
   },
   {
-    id: "credits",
-    title: "Credits & top-ups",
-    // D2: the league rate moved to the League group. The club rate below is what a member gets
-    // unless one of their groups carries a rate of its own.
-    lede: ({ currency }) => `Credits are the unit of account. A member pays in ${currency} and receives credits at the`
-      + " club’s rate below, unless one of their groups has a rate of its own — so the two are different sizes, and the"
-      + " currency symbol never appears on a credit figure.",
+    // P13: minutes are the unit. A booking costs the minutes it is played for; members buy minutes
+    // in packages priced in rand, which are set on Packages, and a group's discount on Groups.
+    id: "money",
+    title: "Money & packages",
+    lede: ({ currency }) => `A booking costs the minutes it is played for. Members buy minutes in packages, paid in`
+      + ` ${currency} — the packages and each group's package discount are set on their own pages.`,
+    searchTerms: ["package", "price", "discount", "buy", "minutes", "rand", "currency"],
   },
   {
     id: "schedules",
@@ -224,7 +224,7 @@ const BOOKINGS: SettingDef[] = [
   {
     key: "slice_minutes", section: "bookings", label: "Slice length (minutes)", kind: "number", unit: "min",
     description: "The smallest piece of court time a member can book.",
-    help: "5–240. Each booking is one or more slices, e.g. 30 min. Court prices are per slice.",
+    help: "5–240. Each booking is one or more slices, e.g. 30 min, and costs the minutes it covers.",
     min: 5, max: 240, step: 5, integer: true, range: true, defaultValue: 15,
   },
   {
@@ -236,8 +236,8 @@ const BOOKINGS: SettingDef[] = [
   {
     key: "member_per_day_max_minutes", section: "bookings", label: "Court time per member per day (minutes)",
     kind: "number", unit: "min",
-    description: "The most court time one member can hold on a day. 0 turns the cap off.",
-    help: "0 turns the cap off. A slot starting today is allowed over the cap if the court is otherwise free.",
+    description: "The most court time one member can hold on a day. 0 means no limit.",
+    help: "0 means no limit. A slot starting today is allowed over the limit if the court is otherwise free.",
     min: 0, max: 1440, step: 15, integer: true, range: true, defaultValue: 60,
   },
   fromRule(rule(CAP_RULES, "member_max_slots_per_day"), "bookings",
@@ -284,10 +284,10 @@ const HOURS: SettingDef[] = [
 
 const CANCELLATIONS: SettingDef[] = [
   {
-    key: "penalty_pct", section: "cancellations", label: "Penalty (% of slice price)", kind: "number", unit: "%",
-    description: "What cancelling late costs, as a share of the booking's price.",
-    help: "0–100. Kept from the refund when a member cancels inside the late-cancel window. Cancelling earlier"
-      + " is refunded in full.",
+    key: "penalty_pct", section: "cancellations", label: "Penalty (% of the booking's minutes)", kind: "number", unit: "%",
+    description: "What cancelling late costs, as a share of the booking's minutes.",
+    help: "0–100. Kept from the minutes refunded when a member cancels inside the late-cancel window, rounded"
+      + " down to a whole minute. Cancelling earlier is refunded in full.",
     min: 0, max: 100, integer: true, range: true, defaultValue: 30,
   },
   {
@@ -312,40 +312,14 @@ const CANCELLATIONS: SettingDef[] = [
   },
 ];
 
-// step 0.01, not 0.1. A number input's valid values step from `min`, not from zero, so min=0.01
-// with step=0.1 made the valid set 0.01, 0.11, … 1.61 — and the club's own shipped rates, 1.6
-// and 2.4, were both stepMismatch while the arrows quietly moved the conversion rate by a
-// hundredth. Cents are the smallest unit anyone expresses a rate in (settings-rates.test.tsx).
-const RATE = { kind: "number", unit: "cr", min: 0.01, max: 1000, step: 0.01, minExclusive: true, range: true } as const;
-
-const CREDITS: SettingDef[] = [
+// The money section is the currency symbol alone (P13, contract §3.6 / §3.9): the conversion rate,
+// the slice price and the purchase block and cap are gone from the settings GET and the console
+// never sends them. Packages and each group's package discount are set on their own pages.
+const MONEY: SettingDef[] = [
   {
-    key: "currency_symbol", section: "credits", label: CURRENCY_SYMBOL_LABEL, kind: "text", optional: true,
-    description: "Goes in front of every money figure — never in front of credits.",
+    key: "currency_symbol", section: "money", label: CURRENCY_SYMBOL_LABEL, kind: "text", optional: true,
+    description: "Goes in front of every rand figure — package prices, takings. Never in front of minutes.",
     help: CURRENCY_SYMBOL_HINT, maxLength: MAX_CURRENCY_SYMBOL_LENGTH, placeholder: "R", defaultValue: "R",
-  },
-  {
-    ...RATE, key: "credits_per_zar_regular", section: "credits", label: "Credits per {currency}1 — members",
-    description: "Credits a member receives for every {currency}1 they top up, unless a group of theirs has its own rate.",
-    help: ({ currency }) => `More than 0, at most 1000. ${currency}100 at 1.6 gives 160 credits. A group with a rate of`
-      + " its own (League, say) overrides this for its members; where a member is in several, the lowest rate applies.",
-    defaultValue: 1.6,
-  },
-  // `credits_per_zar_league` is gone (D2): the league rate is the League group's own rate, and the
-  // API refuses a save that still carries it (400 credits_per_zar_league_moved_to_groups).
-  {
-    key: "topup_block_zar", section: "credits", label: "Top-up block ({currency})", kind: "number",
-    unit: "{currency}", unitBefore: true,
-    description: "Members top up in multiples of this.",
-    help: "1–100000. Members top up in multiples of this.",
-    min: 1, max: 100_000, integer: true, range: true, defaultValue: 100,
-  },
-  {
-    key: "topup_max_zar_per_member", section: "credits", label: "Top-up cap per member ({currency})", kind: "number",
-    unit: "{currency}", unitBefore: true,
-    description: "The most one member can top up.",
-    help: "1–100000. Must be at least one block, or no top-up is ever legal.",
-    min: 1, max: 100_000, integer: true, range: true, defaultValue: 1000,
   },
 ];
 
@@ -563,9 +537,9 @@ const ALERTS: SettingDef[] = [
     min: 5, max: 240, defaultValue: 15,
   },
   {
-    ...SNAKE, key: "topup_failure_cooldown_minutes", section: "alerts", label: "Top-up failure emails — quiet time (minutes)",
+    ...SNAKE, key: "topup_failure_cooldown_minutes", section: "alerts", label: "Failed purchase emails — quiet time (minutes)",
     unit: "min",
-    description: "Top-up failures for the same reason inside this time are one email, not one per member.",
+    description: "Package purchases that fail for the same reason inside this time are one email, not one per member.",
     help: "5–1440. A payment gateway having a bad quarter of an hour fails every member who tries; the club hears it"
       + " once per reason inside this window. It cannot go below 5, so a failing gateway never becomes an email per member.",
     min: 5, max: 1440, defaultValue: 30,
@@ -640,7 +614,7 @@ const PLAY: SettingDef[] = [
 
 /** Every setting on the page, in page order. */
 export const SETTINGS: readonly SettingDef[] = [
-  ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...CREDITS, ...SCHEDULES, ...BOXES, ...SCREENS, ...DOORS, ...RECORDS,
+  ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...MONEY, ...SCHEDULES, ...BOXES, ...SCREENS, ...DOORS, ...RECORDS,
   ...MONITORING, ...ALERTS, ...PLAY,
 ];
 

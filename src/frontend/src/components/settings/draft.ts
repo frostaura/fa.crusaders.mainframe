@@ -186,27 +186,34 @@ export function dirtySections(changed: readonly string[]): Set<SettingsSectionId
 }
 
 /**
+ * The settings P13 retired (contract §3.6, §3.9): the slice price, the conversion rates and the
+ * purchase block and cap. The server binds and ignores them and no longer serves them; an API
+ * mid-deploy that still does must never have them echoed back, so the console sends none.
+ */
+export const RETIRED_SETTING_KEYS: readonly string[] = [
+  "slice_price_credits", "credits_per_zar_regular", "credits_per_zar_league", "topup_block_zar", "topup_max_zar_per_member",
+];
+
+/**
  * What a save sends: the whole working copy EXCEPT the button map, which the Boards screen owns,
- * and the league rate, which is the League group's now (D2). The API reads an absent key as
- * unchanged, so leaving the map out is what stops this page reverting a remap somebody made
- * there; and it REFUSES the league rate (400 `credits_per_zar_league_moved_to_groups`), so an API
- * still serving it on the read must not have it echoed back on the save.
+ * and the retired keys above. The API reads an absent key as unchanged, so leaving the map out is
+ * what stops this page reverting a remap somebody made there.
  */
 export function savePayload(settings: AdminSettings): AdminSettings {
   const copy = { ...(settings as unknown as Held) };
   delete copy.button_map;
-  delete copy.credits_per_zar_league;
+  for (const key of RETIRED_SETTING_KEYS) delete copy[key];
   return copy as unknown as AdminSettings;
 }
 
-/** Sent back as read, camelCase: the tenant's default court price, which the PUT requires. */
-const ROUND_TRIP = ["slice_price_credits", "operating_hours"] as const;
+/** Sent back as read, camelCase: the weekday map (an empty one is an instruction, so it travels whole). */
+const ROUND_TRIP = ["operating_hours"] as const;
 
 const camel = (key: string) => key.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 
 /**
  * The PUT body: every row this page shows, under the spelling(s) the API binds for it (the
- * registry's `wire`), plus the two keys the API needs back as read. Nothing the page does not show
+ * registry's `wire`), plus the weekday map, sent back as read. Nothing the page does not show
  * is sent, so a save from here cannot revert a key another screen owns.
  *
  * <p>
@@ -336,15 +343,14 @@ export function reapplyMine(draft: AdminSettings, conflict: SettingsConflict): A
 
 /**
  * A refused save, in words. The shared device-error dictionary first (a code that HAS a sentence
- * gets it); then the two refusals this page can name better than a token read aloud: a value
- * outside the server's bound, named by the field's own caption — the only bound the page knows
- * for a cooldown the server added — and the league rate that moved to Groups.
+ * gets it); then the refusal this page can name better than a token read aloud: a value outside
+ * the server's bound, named by the field's own caption — the only bound the page knows for a
+ * cooldown the server added.
  */
 export function describeSaveFailure(err: unknown, currency: string): string {
   const said = describeDeviceError(err, SETTINGS_COPY.saveFailed);
   const code = err instanceof ApiError ? err.code : null;
   if (!code || said !== code.replace(/_/g, " ")) return said;
-  if (code === "credits_per_zar_league_moved_to_groups") return SETTINGS_COPY.leagueRateMoved;
   const key = /^(.+)_out_of_range$/.exec(code)?.[1];
   if (key && settingDef(key)) return `${settingLabel(key, currency)} is outside what the club’s system accepts. Nothing was saved.`;
   return said;
@@ -417,7 +423,7 @@ export function saveFailureOf(err: unknown, currency: string): SaveFailure {
   const code = err instanceof ApiError ? err.code : null;
   const raw = code !== null && said === code.replace(/_/g, " ");
   // Only a refusal that says NOTHING usable is replaced — no code, or the generic one. A token
-  // like "topup max below block" still names the problem better than any sentence here could.
+  // like "day end before start" still names the problem better than any sentence here could.
   const unnamed = err instanceof ApiError && err.status === 400 && fieldKey === null
     && (code === null || (raw && GENERIC_REFUSALS.has(code)));
   return { text: unnamed ? SETTINGS_COPY.saveRefusedUnnamed : said, fieldKey, sessionEnded: false };

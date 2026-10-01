@@ -320,17 +320,17 @@ describe("R13 — guidance and the first visit", () => {
     expect(screen.queryByText(SETTINGS_COPY.introTitle)).toBeNull();
   });
 
-  it("says group rates are set on each group, and links there (D2)", async () => {
+  it("says packages and group discounts are set on their own pages, and links to both (P13)", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Credits & top-ups" }));
-    const credits = screen.getByRole("region", { name: "Credits & top-ups" });
-    expect(within(credits).getByText(SETTINGS_COPY.groupRatesNote)).toBeInTheDocument();
-    expect(within(credits).getByRole("link", { name: SETTINGS_COPY.groupRatesLink })).toHaveAttribute("href", "/admin/groups");
-    // The "moving to Groups" interim notice is gone: the move happened.
-    expect(within(credits).queryByText(/moving to Groups/i)).toBeNull();
-    expect(screen.getByRole("button", { name: "Credits & top-ups" })).not.toHaveTextContent(/league/i);
+    fireEvent.click(await screen.findByRole("button", { name: "Money & packages" }));
+    const money = screen.getByRole("region", { name: "Money & packages" });
+    expect(within(money).getByRole("link", { name: SETTINGS_COPY.packagesLink })).toHaveAttribute("href", "/admin/packages");
+    expect(within(money).getByRole("link", { name: SETTINGS_COPY.groupDiscountsLink })).toHaveAttribute("href", "/admin/groups");
+    // The section holds the currency symbol alone: no rate, no block, no cap.
+    expect(within(money).queryAllByRole("spinbutton")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Money & packages" })).not.toHaveTextContent(/league|credit/i);
   });
 });
 

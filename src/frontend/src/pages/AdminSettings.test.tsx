@@ -19,9 +19,10 @@ vi.setConfig({ testTimeout: 20_000 });
  * The settings screen.
  *
  * <p>
- * Nine keys the engine has always read were editable only by hand-editing a JSON column
- * on a live money system — conversion rates, top-up caps, the per-day limit, peak hours,
- * retention. They are on the screen now, and these tests hold two things: that they are
+ * Keys the engine has always read were editable only by hand-editing a JSON column
+ * on a live money system — the per-day limit, peak hours, retention. (The conversion rates,
+ * slice price and purchase block and cap that were here are retired — P13, contract §3.9.)
+ * They are on the screen now, and these tests hold two things: that they are
  * actually there, and that saving them does not revert a button remap made from the
  * devices page.
  * </p>
@@ -39,16 +40,19 @@ describe("AdminSettings", () => {
     { path: "/api/v1/admin/courts/", body: [] },
   ];
 
-  it("shows the economics keys that used to need a database client", async () => {
-    stubFetch(routes());
+  /** An older API still serving the keys P13 retired (contract §3.6, §3.9). */
+  const RETIRED = { slice_price_credits: 8, credits_per_zar_regular: 1.6, credits_per_zar_league: 2.4, topup_block_zar: 100, topup_max_zar_per_member: 1000 };
+  const RETIRED_WIRE = /slice_?price|credits_?per_?zar|topup_?(block|max)/i;
+
+  it("shows the booking keys that used to need a database client, and no retired money key", async () => {
+    stubFetch([{ path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...RETIRED } }, { path: "/api/v1/admin/courts/", body: [] }]);
     renderPage(<AdminSettingsPage />);
 
-    expect(await findControl(/Credits per R1 — members/)).toHaveValue(1.6);
-    // D2: the league rate is the League group's now — no field for it here, whatever the API serves.
-    expect(queryControl(/Credits per R1 — league/)).toBeNull();
-    expect(control(/Top-up block/)).toHaveValue(100);
-    expect(control(/Top-up cap per member/)).toHaveValue(1000);
-    expect(control(/Court time per member per day/)).toHaveValue(60);
+    expect(await findControl(/Court time per member per day/)).toHaveValue(60);
+    // P13: no slice price, no conversion rate, no purchase block or cap — whatever the API serves.
+    for (const gone of [/Credits per/, /Top-up/, /slice price/i, /per R1/, /conversion/i]) expect(queryControl(gone)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/credit|top.?up|\bcr\b|slice price|per slice/i);
+    expect(control("Penalty (% of the booking's minutes)")).toHaveValue(30);
     // Peak hours is two pickers now (R7: times are chosen, never typed), one each end.
     expect(control("Peak starts")).toHaveTextContent("16:00");
     expect(control("Peak ends")).toHaveTextContent("19:00");
@@ -57,17 +61,17 @@ describe("AdminSettings", () => {
     expect(control(/No-show sweep looks back/)).toHaveValue(7);
   });
 
-  it("sends an edited economics value and leaves the button map and the moved league rate alone", async () => {
-    // An API mid-migration may still SERVE the league rate; this read does, on purpose.
+  it("sends an edited value and leaves the button map and every retired money key alone", async () => {
+    // An API mid-deploy may still SERVE the retired keys; this read does, on purpose.
     const stub = stubFetch([
-      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, credits_per_zar_league: 2.4 } },
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...RETIRED } },
       { path: "/api/v1/admin/courts/", body: [] },
       { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
     ]);
 
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await findControl(/Credits per R1 — members/), { target: { value: "1.8" } });
+    fireEvent.change(await findControl(/Court time per member per day/), { target: { value: "90" } });
     fireEvent.click(saveButton());
 
     await waitFor(() => {
@@ -75,12 +79,11 @@ describe("AdminSettings", () => {
       expect(save).toBeTruthy();
       const body = save!.body as Record<string, unknown>;
 
-      expect(body.creditsPerZarRegular).toBe(1.8);
+      expect(body.memberPerDayMaxMinutes).toBe(90);
 
-      // The read above SERVES credits_per_zar_league, and the
-      // API now refuses any save carrying it (400 credits_per_zar_league_moved_to_groups). Echoing
-      // the read back would make every save from this page fail.
-      expect(save!.raw).not.toMatch(/credits_?per_?zar_?league/i);
+      // The read above SERVES the retired keys. The server binds and ignores them (§3.9), and the
+      // console must not send them — under either spelling.
+      expect(save!.raw).not.toMatch(RETIRED_WIRE);
 
       // The button map is the devices page's business. Sending a stale copy from here
       // would silently undo a remap somebody made there — and the API cannot tell the
@@ -168,24 +171,24 @@ describe("AdminSettings", () => {
     });
   });
 
-  // "prices courts in credits, not rand" moved with the Courts editor to /admin/courts (plan P6):
-  // `pages/admin/__tests__/AdminCourts.test.tsx` holds the same invariant on the new page.
+  // Courts moved to /admin/courts (plan P6), and carry no price (P13):
+  // `pages/admin/__tests__/AdminCourts.test.tsx` holds that on the new page.
 
   it("shows the API's reason when a value is refused", async () => {
     stubFetch([
       ...routes(),
-      { method: "PUT", path: "/api/v1/admin/settings/", status: 400, body: { error: "topup_max_below_block" } },
+      { method: "PUT", path: "/api/v1/admin/settings/", status: 400, body: { error: "member_per_day_below_slice" } },
     ]);
 
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await findControl(/Top-up cap per member/), { target: { value: "50" } });
+    fireEvent.change(await findControl(/Court time per member per day/), { target: { value: "10" } });
     fireEvent.click(saveButton());
 
-    // A cap below the block size means no top-up is ever legal, which reads to a member
-    // as the payment page being broken. The admin has to be told which value, not just
+    // A daily limit below one slice means no booking is ever legal, which reads to a member
+    // as the booking grid being broken. The admin has to be told which value, not just
     // that something failed.
-    expect(await screen.findByText(/topup max below block/)).toBeInTheDocument();
+    expect(await screen.findByText(/member per day below slice/)).toBeInTheDocument();
   });
 });
 
@@ -583,8 +586,8 @@ describe("AdminSettings — door gates", () => {
    * <b>Validation, because the inputs are not enough.</b> A number input's min and max stop
    * the SPINNER and nothing else, and Save here is not a native submit, so a typed or pasted
    * value goes to the API with the browser silent about it — the same gap the
-   * credits-per-rand `step` fell through, where the field looked fine while the arrows moved
-   * the money conversion rate by a hundredth.
+   * old conversion-rate `step` fell through, where the field looked fine while the arrows moved
+   * the rate by a hundredth.
    */
   it("holds Save and names the bound when a value is typed past the range", async () => {
     const stub = stubFetch(routes());
@@ -653,14 +656,14 @@ describe("AdminSettings — door gates", () => {
     stubFetch([
       { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
       { path: "/api/v1/admin/courts/", body: [] },
-      { method: "PUT", path: "/api/v1/admin/settings/", status: 400, body: { error: "topup_max_below_block" } },
+      { method: "PUT", path: "/api/v1/admin/settings/", status: 400, body: { error: "member_per_day_below_slice" } },
     ]);
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await findControl(/Top-up cap per member/), { target: { value: "50" } });
+    fireEvent.change(await findControl(/Court time per member per day/), { target: { value: "10" } });
     fireEvent.click(saveButton());
 
-    expect(await screen.findByText(/topup max below block/)).toBeInTheDocument();
+    expect(await screen.findByText(/member per day below slice/)).toBeInTheDocument();
   });
 
   /**
@@ -871,7 +874,7 @@ describe("AdminSettings — alert cooldown", () => {
 
   /**
    * The input's bounds stop the spinner and nothing else, and Save is not a native submit —
-   * the same gap the credits-per-rand `step` fell through. The lower end is the one that
+   * the same gap the old conversion-rate `step` fell through. The lower end is the one that
    * matters: a cooldown of one minute is a club mailed once a sweep for as long as a board is
    * unplugged, which is the flapping the setting exists to stop.
    */
@@ -963,7 +966,7 @@ describe("AdminSettings — alert cooldown", () => {
     /**
      * A number input's min and max stop the spinner and nothing else — a typed or pasted
      * value passes straight through, and Save here is not a native submit, so the browser
-     * never says a word. The same gap the credits-per-rand `step` fell through.
+     * never says a word. The same gap the old conversion-rate `step` fell through.
      */
     it("refuses an out-of-range number here rather than at the API", async () => {
       stubFetch(withDoors());

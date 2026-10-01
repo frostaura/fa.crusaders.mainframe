@@ -52,7 +52,7 @@ const ALL = {
 describe("the club's money symbol", () => {
   /**
    * The row itself, and the narrowing stated where the person who would file it as a bug
-   * will read it: this symbol goes in front of MONEY, and credits keep their own unit.
+   * will read it: this symbol goes in front of MONEY, and minutes keep their own unit.
    */
   it("gives the currency symbol a row in the block it denominates", async () => {
     stubFetch(routes(ALL));
@@ -65,25 +65,19 @@ describe("the club's money symbol", () => {
   });
 
   /**
-   * The rest of the money block follows the symbol AS IT IS TYPED.
-   *
-   * <p>
-   * The captions are the point. "Credits per R1 — members" beside a club on CHF is the same
-   * class of defect as a figure wearing the wrong sign, one layer up in the copy — and the
-   * admin editing this very field is the one person who can see both at once.
-   * </p>
+   * The money section follows the symbol AS IT IS TYPED. (P13: its captions in rand are gone with
+   * the rates and the purchase cap; what is left in the club's money is the section's own line.)
    */
-  it("re-denominates the money captions as the symbol is typed", async () => {
+  it("re-denominates the money section's line as the symbol is typed", async () => {
     stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    await findControl(/Credits per R1 — members/);
+    await findControl(/Currency symbol/);
+    const trigger = screen.getByRole("button", { name: "Money & packages" });
+    expect(trigger).toHaveAccessibleDescription("Minutes bought in packages, priced in R");
     fireEvent.change(control(/Currency symbol/), { target: { value: "CHF" } });
 
-    expect(await findControl(/Credits per CHF1 — members/)).toBeInTheDocument();
-    expect(control(/Top-up block \(CHF\)/)).toBeInTheDocument();
-    expect(control(/Top-up cap per member \(CHF\)/)).toBeInTheDocument();
-    expect(queryControl(/Credits per R1 — members/)).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveAccessibleDescription(/^Minutes bought in packages, priced in CHF\b/));
   });
 
   /**
@@ -96,8 +90,9 @@ describe("the club's money symbol", () => {
     await findControl(/Currency symbol/);
     fireEvent.change(control(/Currency symbol/), { target: { value: "50" } });
 
-    // The caption falls back rather than reading "Credits per 501 — members".
-    expect(await findControl(/Credits per R1 — members/)).toBeInTheDocument();
+    // The line falls back rather than reading "priced in 50".
+    expect(await screen.findByRole("button", { name: "Money & packages" }))
+      .toHaveAccessibleDescription(/^Minutes bought in packages, priced in R\b/);
 
     fireEvent.click(saveButton());
     await waitFor(() => {

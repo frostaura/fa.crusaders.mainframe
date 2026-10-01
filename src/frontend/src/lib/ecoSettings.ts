@@ -139,7 +139,7 @@ export const MONITORING_RULES: readonly NumericSettingRule[] = [
 ] as const;
 
 /**
- * Real-time — how the control board and the credits badge stay current.
+ * Real-time — how the control board and the minutes badge stay current.
  *
  * <p>
  * `sse_keepalive_seconds` has the tightest reason of the four and the message says it: nginx
@@ -191,21 +191,18 @@ export const ECO_NUMERIC_RULES: readonly NumericSettingRule[] = [
  * The symbol the club's REAL MONEY figures wear.
  *
  * <p>
- * <b>The hint is where the narrowing is stated to the person who can act on it.</b> The owner
- * asked for the `cr` suffix to be replaced by this symbol. It governs rand — what a member
- * hands PayFast — and not credits, because a member pays R100 and receives
- * `credits_per_zar_regular` × 100 credits, which ships at 1.6: a wallet of 240 credits shown
- * as "R240.00" would tell the member they hold 60% more money than they do. An admin reading
- * this row is the person who would otherwise file that as a bug, so the row says it.
+ * <b>The hint is where the narrowing is stated to the person who can act on it.</b> It governs
+ * rand — what a member hands PayFast for a package — and never minutes, which are the unit a
+ * wallet and a booking are counted in (P13). An admin reading this row is the person who would
+ * otherwise expect it on a balance, so the row says it.
  * </p>
  */
 export const CURRENCY_SYMBOL_LABEL = "Currency symbol";
 
 export const CURRENCY_SYMBOL_HINT
-  = "Goes in FRONT of every rand figure — top-ups, the cap, the club's revenue. 1–4 letters "
-  + "or currency signs: R, R$, CHF. It does not change credit figures, which stay in credits: "
-  + "a member pays in rand and receives credits at the rate above, so the two are different "
-  + "sizes and showing one as the other would overstate what a member has.";
+  = "Goes in FRONT of every rand figure — package prices, the club's takings. 1–4 letters "
+  + "or currency signs: R, R$, CHF. It never goes on minutes: a wallet and a booking are "
+  + "counted in minutes, and a member buys them in packages priced in rand.";
 
 export const MAX_CURRENCY_SYMBOL_LENGTH = 4;
 

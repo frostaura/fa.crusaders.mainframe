@@ -109,8 +109,9 @@ describe("Settings → Admin alerts: the club's thresholds", () => {
     }));
     // A camelCase twin would be bound by nothing: {"saved": true} and no change.
     expect(put.raw).not.toMatch(/faultSpikeCount|applicationReminderHours/);
-    // And the older keys go on as they always have.
-    expect(put.body).toEqual(expect.objectContaining({ sliceMinutes: 15, creditsPerZarRegular: 1.6, slicePriceCredits: 8 }));
+    // And the older keys go on as they always have — without the money keys P13 retired (§3.9).
+    expect(put.body).toEqual(expect.objectContaining({ sliceMinutes: 15, penaltyPct: 30 }));
+    expect(put.raw).not.toMatch(/slice_?price|credits_?per_?zar|topup_?(block|max)/i);
   });
 
   it("an API without the thresholds gets no rows and no complaint — and the admin still has their switches", async () => {
@@ -151,7 +152,7 @@ describe("Settings → Admin alerts: the notifier's quiet times", () => {
     renderPage(<AdminSettingsPage />);
     const section = await openAlerts();
 
-    expect(control("Top-up failure emails — quiet time (minutes)")).toHaveValue(30);
+    expect(control("Failed purchase emails — quiet time (minutes)")).toHaveValue(30);
     expect(control("Below-zero booking emails — quiet time (minutes)")).toHaveValue(15);
     expect(within(section).getByText(/Allowed: 5–1440 min/)).toBeInTheDocument();
     expect(within(section).getByText(/Allowed: 1–240 min/)).toBeInTheDocument();
@@ -172,7 +173,7 @@ describe("Settings → Admin alerts: the notifier's quiet times", () => {
     renderPage(<AdminSettingsPage />);
     await openAlerts();
 
-    fireEvent.change(control("Top-up failure emails — quiet time (minutes)"), { target: { value: "45" } });
+    fireEvent.change(control("Failed purchase emails — quiet time (minutes)"), { target: { value: "45" } });
     fireEvent.change(control("Below-zero booking emails — quiet time (minutes)"), { target: { value: "5" } });
     expect(screen.getByText(SETTINGS_COPY.changes(2))).toBeInTheDocument();
     fireEvent.click(saveButton());
@@ -188,10 +189,10 @@ describe("Settings → Admin alerts: the notifier's quiet times", () => {
     renderPage(<AdminSettingsPage />);
     await openAlerts();
 
-    fireEvent.change(control("Top-up failure emails — quiet time (minutes)"), { target: { value: "0" } });
+    fireEvent.change(control("Failed purchase emails — quiet time (minutes)"), { target: { value: "0" } });
     fireEvent.click(saveButton());
     expect((await screen.findAllByText(
-      "Top-up failure emails — quiet time (minutes) has to be a whole number from 5 to 1440.",
+      "Failed purchase emails — quiet time (minutes) has to be a whole number from 5 to 1440.",
     )).length).toBeGreaterThanOrEqual(1);
     expect(stub.calls.some((call) => call.method === "PUT")).toBe(false);
   });
@@ -323,24 +324,20 @@ describe("Settings → Admin alerts: your email alerts", () => {
   });
 });
 
-describe("Settings → the league rate after D2", () => {
-  it("says where the league rate went when an older screen's save is refused for it", async () => {
-    stubFetch(routes({}, [
-      { method: "PUT", path: "/api/v1/admin/settings/", status: 400, body: { error: "credits_per_zar_league_moved_to_groups" } },
-    ]));
+/**
+ * P13 (contract §3.6, §3.9): the money section holds the currency symbol alone. The slice price,
+ * the conversion rates and the purchase block and cap are gone; packages and each group's
+ * package discount are set on their own pages, and the section says where.
+ */
+describe("Settings → Money & packages after P13", () => {
+  it("keeps the section's words in minutes and rand, and points at Packages and Groups", async () => {
+    stubFetch(routes({ currency_symbol: "R" }));
     renderPage(<AdminSettingsPage />);
-    fireEvent.change(await findControl(/Unlock time/), { target: { value: "16" } });
-    fireEvent.click(saveButton());
-
-    expect(await screen.findByText(/The league rate lives on the League group now/)).toBeInTheDocument();
-  });
-
-  it("keeps the section's own words free of classes", async () => {
-    stubFetch(routes());
-    renderPage(<AdminSettingsPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Credits & top-ups" }));
-    const credits = screen.getByRole("region", { name: "Credits & top-ups" });
-    expect(credits).not.toHaveTextContent(/over-65|their class/);
-    expect(sectionTrigger("Credits & top-ups")).toHaveAccessibleDescription(/R1 buys 1.6 cr unless a group says otherwise/);
+    fireEvent.click(await screen.findByRole("button", { name: "Money & packages" }));
+    const money = screen.getByRole("region", { name: "Money & packages" });
+    expect(money).not.toHaveTextContent(/credit|top.?up|\bcr\b|conversion|per R1|over-65|their class/i);
+    expect(within(money).getByRole("link", { name: SETTINGS_COPY.packagesLink })).toHaveAttribute("href", "/admin/packages");
+    expect(within(money).getByRole("link", { name: SETTINGS_COPY.groupDiscountsLink })).toHaveAttribute("href", "/admin/groups");
+    expect(sectionTrigger("Money & packages")).toHaveAccessibleDescription("Minutes bought in packages, priced in R");
   });
 });

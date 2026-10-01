@@ -629,10 +629,9 @@ describe("AdminDevices", () => {
 
       expect(body.buttonMap).toEqual(["court:D", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"]);
 
-      // The eight the API refuses a PUT without. Not this screen's to change, but there
+      // The seven the API once refused a PUT without. Not this screen's to change, but there
       // is no PATCH, so they are round-tripped and nothing else is.
       expect(body.sliceMinutes).toBe(15);
-      expect(body.slicePriceCredits).toBe(8);
       expect(body.advanceBookingDays).toBe(14);
       expect(body.dayStartMinute).toBe(360);
       expect(body.dayEndMinute).toBe(1320);
@@ -644,8 +643,10 @@ describe("AdminDevices", () => {
       // absent, so the API leaves each of them exactly as it is. Checked against the
       // serialised body as well, because a key present as undefined and a key that was
       // never there parse to the same thing.
+      // P13 (contract §3.9): the slice price, the rates and the purchase block and cap are
+      // retired — the settings GET no longer serves them, so nothing round-trips them.
       for (const absent of [
-        "creditsPerZarRegular", "creditsPerZarLeague", "topupBlockZar", "topupMaxZarPerMember",
+        "slicePriceCredits", "creditsPerZarRegular", "creditsPerZarLeague", "topupBlockZar", "topupMaxZarPerMember",
         "memberPerDayMaxMinutes", "peakHours", "peakAdvanceHoursForRegular", "retentionYears",
         "noShowLookbackDays", "walkUpMaxMinutes", "heartbeatSeconds",
         "activationForwardWindowMinutes", "activationCueWindowMinutes", "qrLifetimeSeconds",

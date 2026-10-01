@@ -43,7 +43,7 @@ function bookings(settings: AdminSettings): string {
   return join([
     slice !== null && `${slice}-min slices`,
     ahead !== null && `${plural(ahead, "day")} ahead`,
-    minutes !== null && (minutes > 0 ? `${minutes} min a day each` : "no daily time cap"),
+    minutes !== null && (minutes > 0 ? `${minutes} min a day each` : "no daily time limit"),
     slots !== null && slots > 0 && `${plural(slots, "slot")} a day`,
     peak && `peak ${peak.start}–${peak.end}`,
   ]);
@@ -67,16 +67,12 @@ function cancellations(settings: AdminSettings): string {
   ]);
 }
 
-function credits(settings: AdminSettings, currency: string): string {
-  // D2: the league rate is the League group's now; this line quotes the club's own rate only.
-  const regular = num(settings, "credits_per_zar_regular");
-  const block = num(settings, "topup_block_zar");
-  const cap = num(settings, "topup_max_zar_per_member");
-  return join([
-    regular !== null && `${currency}1 buys ${regular} cr unless a group says otherwise`,
-    block !== null && `top up in ${currency}${block}s`,
-    cap !== null && `up to ${currency}${cap}`,
-  ]);
+/**
+ * P13: the section holds the currency symbol alone — packages and group discounts live on their
+ * own pages — so the line says how money works here, in the club's own symbol.
+ */
+function money(_settings: AdminSettings, currency: string): string {
+  return `Minutes bought in packages, priced in ${currency}`;
 }
 
 function schedules(settings: AdminSettings): string {
@@ -155,7 +151,7 @@ function play(settings: AdminSettings): string {
 }
 
 const SUMMARY: Record<SettingsSectionId, (settings: AdminSettings, currency: string) => string> = {
-  bookings, hours, cancellations, credits, schedules, boxes, screens, doors, records, monitoring, alerts, play,
+  bookings, hours, cancellations, money, schedules, boxes, screens, doors, records, monitoring, alerts, play,
 };
 
 /** What a collapsed section says about itself. Never empty: an unserved section says so. */

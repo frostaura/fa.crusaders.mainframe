@@ -166,19 +166,20 @@ test("Settings → Admin alerts saves the club's thresholds snake_case, and the 
     fault_spike_count: 8, topup_failure_cooldown_minutes: 45, overdraft_cooldown_minutes: 15, sliceMinutes: 15,
   });
   expect(Object.keys(settingsPuts[0])).not.toContain("faultSpikeCount");
-  expect(JSON.stringify(settingsPuts[0])).not.toMatch(/league|buttonMap/i);
+  expect(JSON.stringify(settingsPuts[0])).not.toMatch(/league|buttonMap|slice_?price|credits_?per_?zar|topup_?(block|max)/i);
 });
 
-test("Settings → Credits says group rates live on each group", async ({ page }) => {
+test("Settings → Money & packages points at Packages and Groups, and holds no rate", async ({ page }) => {
   await signIn(page);
   await page.addInitScript(() => window.localStorage.setItem("crusaders:settings-intro-dismissed", "1"));
   await serveFeed(page);
   await page.goto("/admin/settings");
-  await page.getByRole("button", { name: "Credits & top-ups" }).click();
-  const credits = page.getByRole("region", { name: "Credits & top-ups" });
-  await expect(credits.getByText("Group rates are set on each group.")).toBeVisible();
-  await expect(credits.getByRole("link", { name: "Set group rates on Groups" })).toHaveAttribute("href", "/admin/groups");
-  await expect(credits.getByRole("spinbutton", { name: /league/i })).toHaveCount(0);
+  await page.getByRole("button", { name: "Money & packages" }).click();
+  const money = page.getByRole("region", { name: "Money & packages" });
+  await expect(money.getByRole("link", { name: "Set the club's packages on Packages" })).toHaveAttribute("href", "/admin/packages");
+  await expect(money.getByRole("link", { name: "Set a group's package discount on Groups" })).toHaveAttribute("href", "/admin/groups");
+  await expect(money.getByRole("spinbutton")).toHaveCount(0);
+  await expect(money).not.toContainText(/credit|top.?up|\bcr\b/i);
 });
 
 test("the Overview lists recent alerts, loads older ones, and links each to where it is dealt with", async ({ page }) => {
