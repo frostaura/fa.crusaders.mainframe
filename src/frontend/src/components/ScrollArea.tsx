@@ -27,13 +27,7 @@ const FADE = {
   app: { left: "from-bg-app", right: "from-bg-app" },
 } as const;
 
-export function ScrollArea({
-  label,
-  className,
-  tabbable = true,
-  fade = "surface",
-  children,
-}: {
+type ScrollAreaProps = {
   /** Names the region for assistive tech — "Wallet ledger", not "Table". */
   label: string;
   className?: string;
@@ -51,10 +45,24 @@ export function ScrollArea({
   tabbable?: boolean;
   /** What the region sits on, so the edge fades melt into it. */
   fade?: keyof typeof FADE;
+  /**
+   * R5 V5-6: be a scroller ONLY while the content is wider than the box. A box with
+   * `overflow: auto` is a scroll container in BOTH axes, so a sticky table header inside it sticks
+   * to a box that never scrolls vertically and leaves with the page. While the content fits, the
+   * region is a plain box (no tab stop, nothing to reach) and a sticky child sticks to the page's
+   * own scroller; once the content is wider, it scrolls sideways as before. The outer box carries
+   * `data-scrolls` while it does, so the children can pin a column against it.
+   */
+  onlyWhenWider?: boolean;
   children: React.ReactNode;
-}) {
+};
+
+export function ScrollArea(props: ScrollAreaProps) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { label, className, tabbable = true, fade = "surface", onlyWhenWider = false, children } = props;
   const ref = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const [wider, setWider] = useState(false);
 
   const measure = useCallback(() => {
     const el = ref.current;
@@ -63,6 +71,11 @@ export function ScrollArea({
     // content that fits perfectly, which would otherwise show a permanent fade on a full table.
     const max = el.scrollWidth - el.clientWidth;
     setMore({ left: el.scrollLeft > 1, right: max - el.scrollLeft > 1 });
+    // The content's own width, which does not depend on whether the box scrolls — so switching
+    // the box between the two modes cannot flip the answer back.
+    const content = el.firstElementChild;
+    const width = content ? content.getBoundingClientRect().width : el.scrollWidth;
+    setWider(width > el.clientWidth + 1 || max > 1);
   }, []);
 
   useEffect(() => {
@@ -73,6 +86,7 @@ export function ScrollArea({
     // loading, the parent flexing. jsdom has it; older browsers fall back to the window event.
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(el);
+    if (el.firstElementChild) observer?.observe(el.firstElementChild);
     window.addEventListener("resize", measure);
     return () => {
       observer?.disconnect();
@@ -80,8 +94,9 @@ export function ScrollArea({
     };
   }, [measure, children]);
 
+  const scrolls = !onlyWhenWider || wider;
   return (
-    <div className={cn("relative", className)}>
+    <div className={cn("relative", className)} data-scrolls={onlyWhenWider && wider ? "" : undefined}>
       <div
         ref={ref}
         onScroll={measure}
@@ -89,10 +104,13 @@ export function ScrollArea({
         // users cannot focus cannot be scrolled by keyboard at all, so its hidden content is
         // simply unreachable. role="region" + aria-label is what keeps the stop from being a
         // mystery when a screen reader lands on it.
-        tabIndex={tabbable ? 0 : undefined}
+        tabIndex={tabbable && scrolls ? 0 : undefined}
         role="region"
         aria-label={label}
-        className="overflow-auto h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong rounded-lg"
+        className={cn(
+          "h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong rounded-lg",
+          scrolls ? "overflow-auto" : "overflow-visible",
+        )}
       >
         {children}
       </div>

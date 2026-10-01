@@ -84,5 +84,42 @@ describe("the wallet ledger", () => {
     // And the Amount column is genuinely in the document — it is off-screen, not absent, and
     // the hint is what makes those two different things to a reader.
     expect(screen.getByRole("columnheader", { name: /Amount/ })).toBeInTheDocument();
+    // While it scrolls it is a tab stop, and says so to its children (the pinned Amount).
+    expect(el).toHaveAttribute("tabindex", "0");
+    expect(el.parentElement).toHaveAttribute("data-scrolls");
+  });
+});
+
+/**
+ * R5 V5-6: `overflow: auto` makes a box a scroll container in BOTH axes, so the ledger's sticky
+ * heads stuck to a box that never scrolls vertically and left with the page. `onlyWhenWider` is a
+ * plain box while the content fits — the heads stick to the page — and a scroller once it is wider.
+ */
+describe("ScrollArea onlyWhenWider", () => {
+  it("is a plain box while the content fits: no scroller, no tab stop, nothing pinned", () => {
+    render(<ScrollArea label="Wallet ledger" onlyWhenWider><div>rows</div></ScrollArea>);
+    const el = scroller();
+    expect(el.className).toContain("overflow-visible");
+    expect(el.className).not.toContain("overflow-auto");
+    expect(el).not.toHaveAttribute("tabindex");
+    expect(el.parentElement).not.toHaveAttribute("data-scrolls");
+  });
+
+  it("becomes the sideways scroller once the content is wider than the box, and back again", () => {
+    render(<ScrollArea label="Wallet ledger" onlyWhenWider><div>rows</div></ScrollArea>);
+    const el = scroller();
+    const content = el.firstElementChild as HTMLElement;
+    const width = (w: number) => { content.getBoundingClientRect = () => ({ width: w } as DOMRect); };
+    width(700);
+    stageOverflow(el, { scrollWidth: 375, clientWidth: 375, scrollLeft: 0 });
+    act(() => { el.dispatchEvent(new Event("scroll", { bubbles: true })); });
+    expect(el.className).toContain("overflow-auto");
+    expect(el).toHaveAttribute("tabindex", "0");
+    expect(el.parentElement).toHaveAttribute("data-scrolls");
+
+    width(375);
+    act(() => { el.dispatchEvent(new Event("scroll", { bubbles: true })); });
+    expect(el.className).toContain("overflow-visible");
+    expect(el.parentElement).not.toHaveAttribute("data-scrolls");
   });
 });
