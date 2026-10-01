@@ -232,8 +232,12 @@ async function dismissCelebrations(page: Page): Promise<void> {
   const moment = page.locator("[data-celebration]");
   for (let quiet = 0; quiet < 3;) {
     if (await moment.isVisible()) {
+      // The next queued moment takes the same dialog's place at once (a walk after 21:00 also
+      // earns "Night owl"), so "this one went" is the title changing or the dialog closing.
+      const title = await moment.getByRole("heading").first().textContent();
       await moment.getByRole("button", { name: CELEBRATION_COPY.keepPlaying }).click();
-      await expect(moment).toBeHidden();
+      await expect.poll(async () => ((await moment.isVisible()) ? await moment.getByRole("heading").first().textContent() : null))
+        .not.toBe(title);
       quiet = 0;
     } else {
       quiet += 1;

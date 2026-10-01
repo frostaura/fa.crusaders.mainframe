@@ -76,8 +76,19 @@ const ADMIN_SESSION_REUSE_MS = 5 * 60_000;
  * as a generic failure.
  * </p>
  */
+/** The global setup's own sign-in, while it is fresh: one auth call fewer per worker. */
+function adoptSetupLogin(): void {
+  const raw = process.env.E2E_REAL_ADMIN_LOGIN;
+  if (!raw) return;
+  const { at, ...body } = JSON.parse(raw) as LoginBody & { at: number };
+  if (Date.now() - at > ADMIN_SESSION_REUSE_MS) return;
+  adminSession = Promise.resolve(toSession(body));
+  adminSessionAt = at;
+}
+
 export function devAdminSession(request: APIRequestContext): Promise<Session> {
   if (adminSession && Date.now() - adminSessionAt > ADMIN_SESSION_REUSE_MS) adminSession = null;
+  if (!adminSession) adoptSetupLogin();
   if (!adminSession) adminSessionAt = Date.now();
   adminSession ??= (async () => {
     const res = await postWithBackoff(request, "/api/v1/auth/dev/admin-login", {});
