@@ -26,19 +26,7 @@ import { describe, expect, it } from "vitest";
  */
 const ALLOW: ReadonlyArray<readonly [file: string, lane: "F1" | "F2" | "F3" | "F4"]> = [
   // F2 — none left (P13 F2 migrated all twelve).
-  // F3
-  ["components/admin/LedgerDetailSheet.tsx", "F3"],
-  ["components/members/MemberPicker.tsx", "F3"],
-  ["components/members/MembersTable.tsx", "F3"],
-  ["components/members/TopUpSheet.tsx", "F3"],
-  ["lib/changeRecordCopy.ts", "F3"],
-  ["lib/courtsCopy.ts", "F3"],
-  ["lib/creditAdjustment.ts", "F3"],
-  ["lib/memberDetailCopy.ts", "F3"],
-  ["lib/membersCopy.ts", "F3"],
-  ["pages/AdminLedger.tsx", "F3"],
-  ["pages/admin/member/MemberDetailLayout.tsx", "F3"],
-  ["pages/admin/member/parts.tsx", "F3"],
+  // F3: none left (P13 lane F3 migrated all twelve).
   // F4 — none left (P13 F4 migrated all six).
 ];
 
