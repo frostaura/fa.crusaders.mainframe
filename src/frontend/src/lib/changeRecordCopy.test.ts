@@ -134,3 +134,49 @@ describe("a webhook added or removed (R3 A-5)", () => {
     expect(changed[0].label).not.toBe("Slice minutes");
   });
 });
+
+/**
+ * Review round 5, A5-3: a group edit that CLEARED a value (peak say back to "no say") was shown as
+ * a fact "Peak priority — yes", which reads as the change being TO yes; and a group's top-up rate
+ * was formatted as money ("R1.60") when it is a rate.
+ */
+describe("a group edit's cleared values and its rate (R5 A5-3)", () => {
+  it("says a cleared peak say as a change to 'no say', never as a bare fact", () => {
+    const { changed, facts } = presentChanges({
+      area: "group", action: "group.updated",
+      changes: [{ field: "peak_priority", label: "Peak priority", before: "yes", after: null }],
+    });
+    expect(facts).toEqual([]);
+    expect(changed).toEqual([{ field: "peak_priority", label: "Peak priority", before: "yes", after: "no say" }]);
+  });
+
+  it("says a group's top-up rate as a rate, and a cleared one as the club's rate", () => {
+    const { changed, facts } = presentChanges({
+      area: "group", action: "group.updated",
+      changes: [{ field: "credits_per_zar", label: "Credits per zar", before: "1.6", after: null }],
+    });
+    expect(facts).toEqual([]);
+    expect(changed).toEqual([{ field: "credits_per_zar", label: "Top-up rate", before: "1.6 cr per R1", after: "the club's rate" }]);
+    expect(JSON.stringify(changed)).not.toContain("R1.60");
+  });
+
+  it("keeps a NEW group's values as facts — nothing was cleared", () => {
+    const { changed, facts } = presentChanges({
+      area: "group", action: "group.created",
+      changes: [{ field: "credits_per_zar", before: null, after: "2" }],
+    });
+    expect(changed).toEqual([]);
+    expect(facts).toEqual([{ field: "credits_per_zar", label: "Top-up rate", value: "2 cr per R1" }]);
+  });
+});
+
+/** Review round 5, A5-8: the box's hint time was on the record as "Lcd hint seconds". */
+describe("every box screen setting has the Settings page's caption (R5 A5-8)", () => {
+  it("labels lcd_hint_seconds in words", () => {
+    const { changed } = presentChanges({
+      area: "setting", action: "settings.updated",
+      changes: [{ field: "lcd_hint_seconds", before: "3", after: "5" }],
+    });
+    expect(changed[0].label).not.toMatch(/lcd/i);
+  });
+});

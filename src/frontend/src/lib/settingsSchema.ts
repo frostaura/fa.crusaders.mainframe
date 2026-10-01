@@ -427,6 +427,16 @@ const SCREENS: SettingDef[] = [
     "How long the box's screen shows a result before going back to the start.", { unit: "s", wire: "both" }),
   fromRule(rule(DEVICE_TIMING_RULES, "rapid_scan_window_seconds"), "screens",
     "How long the box stays ready for the next person. 0 turns it off.", { unit: "s" }),
+  {
+    // R5 A5-8: settable through the API (BoxSettings 1–10, default 3) and so on the change record,
+    // where it had no caption and read "Lcd hint seconds". Snake_case only on the settings PUT.
+    key: "lcd_hint_seconds", section: "screens", label: "Short messages stay on the box's screen (seconds)",
+    kind: "number", unit: "s", advanced: true, optional: true, wire: "snake",
+    description: "How long a one-off message holds the bottom line of the box's screen.",
+    help: "1–10. How long a short one-off message holds the bottom line of the box's screen before that line"
+      + " goes back to what it was showing.",
+    min: 1, max: 10, integer: true, range: true, defaultValue: 3,
+  },
 ];
 
 const DOORS: SettingDef[] = [

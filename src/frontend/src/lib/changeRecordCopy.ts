@@ -177,8 +177,8 @@ function labelFor(row: { area?: string | null; action?: string | null }, change:
   if (isSettingsDiff(row)) return changeFieldLabel(row, change);
   const known = FIELD_LABEL[change.field];
   if (known) return known;
-  // A group's top-up rate: the server's "Credits per zar" lost its unit to the strip below (R4 A4-6).
-  if (change.field === "credits_per_zar") return `Credits per ${clubCurrencySymbol()}1`;
+  // A group's top-up rate: its value says the unit ("1.6 cr per R1", R5 A5-3), so the caption is the rate's name.
+  if (change.field === "credits_per_zar") return "Top-up rate";
   const server = change.label?.replace(/\s+(credits|zar)$/i, "").trim();
   return server || inWords(change.field);
 }
@@ -263,9 +263,17 @@ function multiplierInWords(token: string): string | null {
   return "×" + (n * BPS).toFixed(2) + " the court’s price";
 }
 
+/** "1.6" → "1.6 cr per R1": a group's top-up RATE, which money formatting read as "R1.60" (R5 A5-3). */
+function rateInWords(token: string): string | null {
+  const n = Number(token);
+  if (token === "" || !Number.isFinite(n)) return null;
+  return `${Number(n.toFixed(2))} cr per ${clubCurrencySymbol()}1`;
+}
+
 /** The fields whose values have their own words (R4 A4-6); undefined for every other field. */
 function fieldInWords(field: string, token: string): string | null | undefined {
   switch (field) {
+    case "credits_per_zar": return rateInWords(token);
     case "windows": return windowsInWords(token);
     case "pricing_mode": return PRICING_WORDS[token.toLowerCase()] ?? inWords(token);
     case "multiplier_bps": return multiplierInWords(token);
@@ -309,6 +317,21 @@ function codeInWords(field: string, token: string): string | null {
 
 type Row = { area?: string | null; action?: string | null; changes?: RawChange[] | null };
 
+/**
+ * A group field whose EMPTY value is itself a setting (R5 A5-3): a peak say cleared is "no say",
+ * a rate cleared is the club's. On an edit the empty side is said, so the row reads as the change
+ * it was ("yes → no say") — a one-sided value was listed as a fact ("Peak priority — yes"), which
+ * reads as the change being TO yes.
+ */
+const GROUP_EMPTY_WORDS: Record<string, string> = {
+  peak_priority: "no say",
+  credits_per_zar: "the club's rate",
+};
+
+function clearedGroupValue(row: Row, field: string): string | null {
+  return row.action === "group.updated" ? GROUP_EMPTY_WORDS[field] ?? null : null;
+}
+
 /** A collection or adjustment stores its balance as two AFTER fields; they are one change. */
 function balancePair(byField: Map<string, RawChange>): ChangeLine | null {
   const before = byField.get("balance_before_credits");
@@ -331,9 +354,14 @@ function presentOne(
   if (BALANCE_HALVES.has(c.field)) return null;
   if (c.field === "total" && repeatsACount(c, byField)) return null;
   const label = labelFor(row, c);
-  const was = changeValueInWords(c.field, c.before, timezone);
-  const is = changeValueInWords(c.field, c.after, timezone);
+  let was = changeValueInWords(c.field, c.before, timezone);
+  let is = changeValueInWords(c.field, c.after, timezone);
   if (was === null && is === null) return null;
+  const cleared = clearedGroupValue(row, c.field);
+  if (cleared !== null) {
+    was ??= cleared;
+    is ??= cleared;
+  }
   const oneSided = (was === null) !== (is === null);
   if (oneSided && !STATE_FIELDS.has(c.field) && !isSettingsDiff(row)) return { fact: { field: c.field, label, value: (is ?? was)! } };
   return { line: { field: c.field, label, before: was, after: is } };
