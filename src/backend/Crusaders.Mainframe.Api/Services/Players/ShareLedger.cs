@@ -81,8 +81,11 @@ public sealed class ShareLedger
     public static string Prefix(Guid participantId)
     {
         // Block body: lizard reads an interpolation's braces in an expression body as the end of the function.
-        return $"share:{participantId:N}:";
+        return $"{SharePrefix}{participantId:N}:";
     }
+
+    /// <summary>What every share reference starts with, before the seat id.</summary>
+    private const string SharePrefix = "share:";
 
     /// <summary>One leg's reference: <c>out</c> is the debited member's row, <c>in</c> the credited one's.</summary>
     public static string Reference(Guid participantId, int seq, string leg)
@@ -120,6 +123,37 @@ public sealed class ShareLedger
                         && l.ExternalReference != null && l.ExternalReference.StartsWith(prefix))
             .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
         return -sum;
+    }
+
+    /// <summary>
+    /// <see cref="PaidOfAsync"/> for many seats in ONE read (review round 5, P5-5): the wallet's
+    /// share summaries awaited one sum per seat — 37 connection opens for a page of twenty bookings.
+    /// Same rows, same sign: each seat's own <c>share:{seat}:*</c> rows on its partner's wallet,
+    /// grouped by the seat id the reference carries. A seat with no partner, or nothing paid, is 0.
+    /// </summary>
+    public static async Task<Dictionary<Guid, decimal>> PaidOfManyAsync(
+        MainframeDbContext db, IReadOnlyCollection<BookingParticipant> seats, CancellationToken ct)
+    {
+        var result = seats.Select(s => s.Id).Distinct().ToDictionary(id => id, _ => 0m);
+        var bySeat = seats.Where(s => s.UserId is not null).DistinctBy(s => s.Id).ToDictionary(s => s.Id.ToString("N"), s => s);
+        if (bySeat.Count == 0) return result;
+
+        var keys = bySeat.Keys.ToList();
+        var partners = bySeat.Values.Select(s => s.UserId!.Value).Distinct().ToList();
+        var start = SharePrefix.Length;
+        var sums = await db.LedgerEntries.AsNoTracking()
+            .Where(l => l.Type == LedgerEntryType.ShareTransfer && partners.Contains(l.UserId)
+                        && l.ExternalReference != null && l.ExternalReference.StartsWith(SharePrefix)
+                        && keys.Contains(l.ExternalReference.Substring(start, 32)))
+            .GroupBy(l => new { Seat = l.ExternalReference!.Substring(start, 32), l.UserId })
+            .Select(g => new { g.Key.Seat, g.Key.UserId, Sum = g.Sum(l => l.AmountCredits) })
+            .ToListAsync(ct);
+
+        foreach (var row in sums)
+        {
+            if (bySeat.TryGetValue(row.Seat, out var seat) && seat.UserId == row.UserId) result[seat.Id] = -row.Sum;
+        }
+        return result;
     }
 
     /// <summary>

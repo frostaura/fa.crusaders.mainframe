@@ -1,9 +1,14 @@
+using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Crusaders.Mainframe.Tests;
@@ -175,5 +180,53 @@ public sealed class PerfReadsHttpTests(PostgresFixture pg) : IClassFixture<Postg
             .ShareSummariesAsync([bookingId], club.Bystander, viewerIsAdmin: false, CancellationToken.None));
         Assert.Null(stranger[bookingId]);
         Assert.Equal(HttpStatusCode.NotFound, (await club.Client(f, club.Bystander).GetAsync($"/api/v1/bookings/{bookingId}")).StatusCode);
+    }
+
+    /// <summary>Every command the app sends while recording is on.</summary>
+    private sealed class RecordingInterceptor : DbCommandInterceptor
+    {
+        public ConcurrentQueue<string> Commands { get; } = new();
+
+        public volatile bool On;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (On) Commands.Enqueue(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Review round 5, P5-5: the wallet's share summaries read every partner's paid figure in ONE
+    /// query, whatever the number of seats. It awaited one sum per seat — two bookings of three
+    /// partners each was six reads, a page of twenty bookings 37 connection opens.
+    /// </summary>
+    [SkippableFact]
+    public async Task Share_summaries_read_every_seats_paid_figure_in_one_query()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var recorder = new RecordingInterceptor();
+        await using var f = CreateFactory();
+        await using var app = f.WithWebHostBuilder(b => b.ConfigureTestServices(s =>
+            s.ConfigureDbContext<MainframeDbContext>(o => o.AddInterceptors(recorder))));
+        var club = await PlayersClub.SeedAsync(app, "perfsharen1");
+        await club.CreditAsync(app, club.Organiser, 200m);
+        object[] three = [new { userId = club.Sam }, new { userId = club.Alex }, new { userId = club.Jo }];
+        var (first, _) = await club.BookWithPlayersAsync(app, three, at: PlayersClub.Tomorrow(8));
+        var (second, _) = await club.BookWithPlayersAsync(app, three, at: PlayersClub.Tomorrow(8).AddDays(1));
+
+        recorder.On = true;
+        var summaries = await club.InClubAsync(app, sp => sp.GetRequiredService<PlayersQuery>()
+            .ShareSummariesAsync([first, second], club.Organiser, viewerIsAdmin: false, CancellationToken.None));
+        recorder.On = false;
+
+        Assert.NotNull(summaries[first]);
+        Assert.NotNull(summaries[second]);
+        var paidReads = recorder.Commands.Count(sql =>
+            sql.Contains("FROM ledger_entries", StringComparison.Ordinal)
+            && sql.Contains("\"ExternalReference\"", StringComparison.Ordinal));
+        Assert.Equal(1, paidReads);
     }
 }

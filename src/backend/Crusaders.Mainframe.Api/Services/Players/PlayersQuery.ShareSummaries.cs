@@ -17,8 +17,8 @@ public sealed partial class PlayersQuery
     /// <b>The same answer the detail gives, by the same rules.</b> A booking the viewer is nobody to
     /// (a declined or removed seat, a stranger's) is <c>null</c>, as the detail's 404 was; the seats
     /// listed are the ones the detail's table shows that viewer (<see cref="IsShown"/>); a partner's
-    /// paid figure is <see cref="ShareLedger.PaidAsync"/>, net of returns, as the table's is.
-    /// Bookings, seats, people and courts are one read each, whatever the count.
+    /// paid figure is <see cref="ShareLedger.PaidAsync"/>'s, net of returns, as the table's is.
+    /// Bookings, seats, people, courts and paid figures are one read each, whatever the count (P5-5).
     /// </para>
     /// </summary>
     public async Task<Dictionary<Guid, object?>> ShareSummariesAsync(
@@ -36,6 +36,8 @@ public sealed partial class PlayersQuery
             .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         var people = await MembersAsync(
             seats.Values.SelectMany(list => list.Select(p => p.UserId)).Concat(bookings.Select(b => b.UserId)), ct);
+        // P5-5: every seat's paid figure in one read, not one per seat.
+        var paid = await ShareLedger.PaidOfManyAsync(_db, [.. seats.Values.SelectMany(list => list)], ct);
 
         foreach (var booking in bookings)
         {
@@ -50,25 +52,25 @@ public sealed partial class PlayersQuery
                 court_name = courts.GetValueOrDefault(booking.CourtId),
                 starts_at = booking.StartsAt,
                 organiser = Member(booking.UserId, people),
-                partners = await PartnersAsync(booking, mine, role, mySeat?.Id, people, ct),
+                partners = Partners(booking, mine, (role, mySeat?.Id), people, paid),
             };
         }
         return result;
     }
 
-    private async Task<List<object>> PartnersAsync(
-        Booking booking, List<BookingParticipant> seats, string role, Guid? mySeatId, Dictionary<Guid, PublicMember> people,
-        CancellationToken ct)
+    private static List<object> Partners(
+        Booking booking, List<BookingParticipant> seats, (string Role, Guid? MySeatId) viewer,
+        Dictionary<Guid, PublicMember> people, Dictionary<Guid, decimal> paid)
     {
         var partners = new List<object>();
         foreach (var s in seats)
         {
-            if (!IsShown(s, role, mySeatId) || PlayerViews.KindOf(s) != "member" || s.UserId == booking.UserId) continue;
+            if (!IsShown(s, viewer.Role, viewer.MySeatId) || PlayerViews.KindOf(s) != "member" || s.UserId == booking.UserId) continue;
             partners.Add(new
             {
                 user_id = s.UserId,
                 name = s.UserId is { } id && people.TryGetValue(id, out var m) ? m.Name : null,
-                paid_credits = await _shares.PaidAsync(s, ct),
+                paid_credits = paid.GetValueOrDefault(s.Id),
             });
         }
         return partners;
