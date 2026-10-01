@@ -149,6 +149,26 @@ describe("with no signal", () => {
     expect(screen.queryByText(/Can't reach the club/i)).toBeNull();
   });
 
+  it("R5 V5-2: a club that ANSWERS with a failure (503, online) is 'Couldn't refresh', never 'You're offline'", async () => {
+    signIn({ isAdmin: false });
+    localStorage.setItem(LAST_IDENTITY_KEY, ANA);
+    setDataOwner(ANA);
+    primeQuery(ANA, memberReads.inbox.key, ANAS);
+    const keptAt = peekQuery(ANA, memberReads.inbox.key)!.at;
+    stubFetch([
+      { path: "/api/v1/whoami", status: 503, body: { error: "unavailable" } },
+      { path: "/api/v1/me/notifications", status: 503, body: { error: "unavailable" } },
+      { path: "/api/v1/me/notifications/unread-count", status: 503, body: { error: "unavailable" } },
+    ]);
+
+    renderOffline("/inbox");
+
+    expect(within(await inboxList()).getByText(ANAS.items[0].headline)).toBeInTheDocument();
+    const note = (await screen.findByText(OFFLINE_COPY.refreshFailedTitle)).closest("[data-stale-notice]");
+    expect(note).toHaveTextContent(OFFLINE_COPY.refreshFailedLine(keptAt));
+    expect(screen.queryByText(OFFLINE_COPY.staleTitle)).toBeNull();
+  });
+
   it("with nothing on the phone it says it cannot reach the club — never an empty inbox", async () => {
     signIn({ isAdmin: false });
     localStorage.setItem(LAST_IDENTITY_KEY, ANA);

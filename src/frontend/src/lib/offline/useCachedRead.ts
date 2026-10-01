@@ -27,6 +27,12 @@ export type DataOwner = {
   live: boolean;
   /** The session check could not reach the club: draw what the phone has. */
   offline: boolean;
+  /**
+   * R5 V5-2 — and it failed because the club was never reached (no network, a dropped or timed-out
+   * connection), as opposed to a club that answered with a failure (a 5xx, a 429). Only this is
+   * worded "You're offline"; the other is "Couldn't refresh".
+   */
+  unreachable: boolean;
   /** The session check is still out (the phone's member is drawn meanwhile, P4-1). */
   checking: boolean;
 };
@@ -40,14 +46,16 @@ export function useDataOwner(): DataOwner {
   const auth = useOptionalAuth();
   const stored = useSyncExternalStore(subscribeDataOwner, getDataOwner, getDataOwner);
   // No session provider at all (a hook on its own): nobody's reads, kept nowhere, asked freely.
-  if (!auth) return { who: null, live: true, offline: false, checking: false };
+  if (!auth) return { who: null, live: true, offline: false, unreachable: false, checking: false };
   const checking = auth.status === "loading";
-  if (auth.status === "authenticated") return { who: auth.userId, live: !auth.mustChangePassword, offline: false, checking };
-  if ((checking || auth.status === "offline") && stored && tokenStore.get()) {
-    return { who: stored, live: checking, offline: auth.status === "offline", checking };
+  if (auth.status === "authenticated") return { who: auth.userId, live: !auth.mustChangePassword, offline: false, unreachable: false, checking };
+  const offline = auth.status === "offline";
+  const unreachable = auth.status === "offline" && (auth.cause === undefined || isConnectionFailure(auth.cause));
+  if ((checking || offline) && stored && tokenStore.get()) {
+    return { who: stored, live: checking, offline, unreachable, checking };
   }
   // Nobody this phone can vouch for yet: a signed-out page asks freely, anything else waits for the check.
-  return { who: null, live: auth.status === "anonymous", offline: auth.status === "offline", checking };
+  return { who: null, live: auth.status === "anonymous", offline, unreachable, checking };
 }
 
 export type CachedRead<T> = {
@@ -66,7 +74,12 @@ export type CachedRead<T> = {
    * (`StaleNotice`); never blank what is on screen for it.
    */
   stale: boolean;
-  /** The club could not be reached at all (no network, or the session check could not ask) — as opposed to answering with a failure. */
+  /**
+   * The club could not be reached at all — no network, or the read (or the session check) never
+   * got an answer — as opposed to answering with a failure. R5 V5-2: a 503 from the session check
+   * is the club answering, so it is NOT offline (it read "You're offline" on three pages while
+   * Bookings and Wallet said "Couldn't refresh" for the same outage).
+   */
   offline: boolean;
   reload: () => void;
   /** A write's answer applied to what is held, at once (a re-read follows if the caller wants one). */
@@ -107,7 +120,7 @@ const UNREACHABLE = new NetworkError("unreachable");
 export function useCachedRead<T>(key: string | null, load: () => Promise<T>, options: CachedReadOptions = {}): CachedRead<T> {
   const { persist = true, foreground = true, refresh = null, whileChecking = true } = options;
   const owner = useDataOwner();
-  const { who, offline } = owner;
+  const { who, offline, unreachable: ownerUnreachable } = owner;
   const live = owner.live && (whileChecking || !owner.checking);
   const subscribe = useCallback((fn: () => void) => (key ? subscribeQuery(who, key, fn) : noop), [who, key]);
   const snapshot = useCallback(() => (key ? peekQuery(who, key) : undefined), [who, key]);
@@ -168,7 +181,7 @@ export function useCachedRead<T>(key: string | null, load: () => Promise<T>, opt
     readAt: data === null ? null : at,
     stored: entry?.source === "stored",
     stale: data !== null && (offline || failure !== null),
-    offline: offline || isConnectionFailure(failure),
+    offline: ownerUnreachable || isConnectionFailure(failure),
     reload,
     patch,
   };
