@@ -32,6 +32,9 @@ export function SettingsIndex({ sections, dirty, onGo }: SettingsIndexProps) {
             <button
               type="button"
               data-settings-index={section.id}
+              // "Go to Bookings", not "Bookings": the section's own header is the button named
+              // that, and two controls with one name are two guesses (the visible words lead).
+              aria-label={SETTINGS_COPY.indexGo(section.title, dirty.has(section.id))}
               aria-current={current === section.id ? "true" : undefined}
               onClick={() => onGo(section.id)}
               className={cn(
@@ -46,7 +49,6 @@ export function SettingsIndex({ sections, dirty, onGo }: SettingsIndexProps) {
                 {dirty.has(section.id) ? (
                   <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-accent-strong">
                     <span aria-hidden="true" className="size-2 rounded-full bg-accent-strong" />
-                    <span className="sr-only">{SETTINGS_COPY.unsaved}</span>
                   </span>
                 ) : null}
               </span>

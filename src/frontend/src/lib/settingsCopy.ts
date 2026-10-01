@@ -34,6 +34,7 @@ export const SETTINGS_COPY = {
   unsaved: "Unsaved changes",
   /** R4 form factor: the sections, listed beside them where the page has the room. */
   indexLabel: "Settings sections",
+  indexGo: (title: string, unsaved: boolean) => `Go to ${title}${unsaved ? " (unsaved changes)" : ""}`,
   advancedShow: (n: number) => (n === 1 ? "Show 1 advanced setting" : `Show ${n} advanced settings`),
   advancedHide: "Hide advanced settings",
   notServed: "The club’s system is not serving these settings yet, so there is nothing to change here.",
