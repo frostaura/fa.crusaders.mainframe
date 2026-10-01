@@ -15,8 +15,7 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
 - **The desk's code reset requires a `reason`** (400 `reason_required`), records
   `member.code_reset` and emails the member (`MemberCodeReset`) (B6). *Why:* it signs them out
   everywhere and drops their passkeys; "who did this and why" had no answer.
-- **Granting admin requires a reason, like revoking** (B10) — who administers the club is the
-  change that can hide every other one, in both directions.
+- **Granting admin requires a reason, like revoking** (B10) — it can hide every other change.
 - **A settings change's `changes[].field` is the `tenant_settings` key** — the stable key the
   console maps to its own label (B17). No server label dictionary: the labels live in the
   frontend settings schema and a second copy would drift.
@@ -26,8 +25,7 @@ Vocabulary: `Services/AdminChangeActions.cs`. Tests: `R1ChangeRecordHttpTests`, 
   design — on another topology the worst case is the old duplicate, never a lost row.
 - **A desk top-up code must state the rand it took** (`zarReceived`, B7) on all three top-up codes
   (cash, EFT, card offline all post `AdminTopUp`, which revenue counts); stored as `ZarPaid`.
-  *Why:* revenue is rand, and a credits-only row reported R0.00 for money the club handled.
-  Other codes ignore the field — goodwill is not revenue.
+  *Why:* revenue is rand; a credits-only row read R0.00. Other codes ignore it (goodwill isn't revenue).
 - **Ledger rows carry `actor_name`** (B9): whoever moved money on the owner's behalf; null for
   the owner's own, the system's (`Guid.Empty`) and a member-to-member share unless an admin moved
   it. The older record fields stay camelCase; the round-1 additions use the contract's snake names.
