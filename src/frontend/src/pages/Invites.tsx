@@ -4,17 +4,19 @@ import { Envelope } from "@/components/ui/icons";
 import { PageHeader, PageShell } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { AcceptSheet } from "@/components/players/invites/AcceptSheet";
 import { InviteDetail } from "@/components/players/invites/InviteDetail";
 import { ContextBar } from "@/components/ui/context-bar";
 import { SplitView } from "@/components/ui/split-view";
-import { useMediaQuery } from "@/components/ui/use-media-query";
+import { usePickParam, useSplitLayout } from "@/components/ui/use-split-layout";
 import { InviteCard, InviteListSkeleton } from "@/components/players/invites/InviteCard";
 import { useMyInvites } from "@/components/players/invites/useMyInvites";
 import { usePendingLinkInvite } from "@/components/players/invites/usePendingLinkInvite";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
+import { SPLIT_PANE_COPY } from "@/lib/inboxCopy";
+import { inviteHeading } from "@/components/players/invites/inviteFacts";
 import { useSheetHistory } from "@/lib/bookingSheetHistory";
 
 /**
@@ -30,9 +32,11 @@ export default function InvitesPage() {
   const pending = usePendingLinkInvite(invites.items);
   const { refresh } = invites;
   const reread = useCallback(() => refresh(), [refresh]);
-  // R4 form factor (SPEC 3.5): from lg a card opens its invite in the pane beside the list (the
-  // URL keeps it: `?seat=`); on a phone it opens the accept sheet, as it always has.
-  const wide = useMediaQuery(LG_UP);
+  // R4 form factor (SPEC 3.5): beside a pane a card opens its invite there (the URL keeps it:
+  // `?seat=`); on a phone it opens the accept sheet, as it always has. R5 X5-3 — "beside a pane" is
+  // the split view's own measure (its box, in rem), never the viewport.
+  const layout = useSplitLayout(SPLIT_AT);
+  const wide = layout.split;
   const picked = usePicked(invites.items, wide);
   const items = invites.items ?? [];
   const only = items.length === 1 && !pending ? items[0] : null;
@@ -62,8 +66,12 @@ export default function InvitesPage() {
         skeleton={<InviteListSkeleton />}
       >
         <SplitView
+          layout={layout}
           listLabel={INVITES_COPY.listLabel}
-          splitAt="56rem"
+          splitAt={SPLIT_AT}
+          back={{ label: SPLIT_PANE_COPY.backToInvites, onBack: picked.unpick }}
+          pickedKey={picked.shown?.participant_id ?? null}
+          announce={picked.shown ? SPLIT_PANE_COPY.showing(inviteHeading(picked.shown, INVITES_COPY.sheetTitle).title) : undefined}
           list={(
             <ul aria-label={INVITES_COPY.listLabel} className="flex flex-col gap-3">
               {pending ? (
@@ -78,7 +86,7 @@ export default function InvitesPage() {
               ))}
             </ul>
           )}
-          detail={wide && picked.invite ? <InviteDetail key={picked.invite.participant_id} invite={picked.invite} onReread={reread} /> : null}
+          detail={picked.shown ? <InviteDetail key={picked.shown.participant_id} invite={picked.shown} onReread={reread} /> : null}
           placeholder={<StateBlock empty emptyIcon={Envelope} emptyTitle={INVITES_COPY.pickTitle} emptyHint={INVITES_COPY.pickHint} />}
         />
       </StateBlock>
@@ -93,24 +101,29 @@ export default function InvitesPage() {
   );
 }
 
-const LG_UP = "(min-width: 1024px)";
+const SPLIT_AT = "56rem";
 
 /**
- * The invite in the pane: `?seat=` when the member picked one, else — with exactly one waiting —
- * that one (SPEC 3.5: "with one invite, open it by default"). The last invite shown is held while
- * its answer lands, so "You're in" is not swapped for the placeholder when the re-read drops it.
+ * The invite in the pane: `?seat=` when the member picked one, else — with exactly one waiting and
+ * the list split — that one (SPEC 3.5: "with one invite, open it by default"). The last invite
+ * shown is held while its answer lands, so "You're in" is not swapped for the placeholder when the
+ * re-read drops it.
+ *
+ * <p>
+ * `shown` is what the pane draws: beside the list, the pick or the default; stacked (a phone, or
+ * 200 % text — R5 X5-3), only a pick the URL names, under the split view's back control, and never
+ * the one-invite default, which would hide the list the member came to see.
+ * </p>
  */
 function usePicked(items: Invite[] | null, wide: boolean) {
-  const [params, setParams] = useSearchParams();
-  const seat = params.get("seat");
+  const { value: seat, pick: pickSeat, unpick } = usePickParam("seat");
   const [held, setHeld] = useState<Invite | null>(null);
-  const fromList = items?.find((i) => i.participant_id === seat) ?? (seat === null && items?.length === 1 ? items[0] : null);
+  const fromList = items?.find((i) => i.participant_id === seat) ?? (seat === null && wide && items?.length === 1 ? items[0] : null);
   const invite = fromList ?? (held && held.participant_id === seat ? held : null);
-  if (wide && fromList && fromList !== held) setHeld(fromList);
-  const pick = useCallback((next: Invite) => {
-    setParams((was) => { const p = new URLSearchParams(was); p.set("seat", next.participant_id); return p; }, { replace: true });
-  }, [setParams]);
-  return { invite, pick };
+  if (fromList && fromList !== held) setHeld(fromList);
+  const pick = useCallback((next: Invite) => pickSeat(next.participant_id), [pickSeat]);
+  const shown = wide || seat !== null ? invite : null;
+  return { invite, shown, pick, unpick };
 }
 
 function useSheet(items: Invite[] | null) {

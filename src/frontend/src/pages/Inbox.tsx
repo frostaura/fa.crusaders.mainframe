@@ -1,5 +1,4 @@
 import { useCallback, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { InboxList } from "@/components/inbox/InboxList";
 import { useInbox, type InboxFeed } from "@/components/inbox/useInbox";
 import { Button } from "@/components/ui/button";
@@ -11,14 +10,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SplitView } from "@/components/ui/split-view";
 import { StateBlock } from "@/components/ui/state-block";
 import { TextLink } from "@/components/ui/text-link";
-import { useMediaQuery } from "@/components/ui/use-media-query";
+import { usePickParam, useSplitLayout } from "@/components/ui/use-split-layout";
 import { appPath } from "@/components/inbox/notificationKinds";
 import { InviteDetail } from "@/components/players/invites/InviteDetail";
 import { useMyInvites } from "@/components/players/invites/useMyInvites";
-import type { MemberNotification } from "@/lib/playersApi";
+import type { Invite, MemberNotification } from "@/lib/playersApi";
 import { BookingDetailPanel } from "./BookingDetail";
 import { StaleNotice } from "@/components/shell/StaleNotice";
+import { cn } from "@/lib/utils";
 import { INBOX_COPY as COPY, inboxUnreadLine } from "@/lib/playersCopy";
+import { SPLIT_PANE_COPY } from "@/lib/inboxCopy";
+import { typography } from "@/lib/typography";
 
 /**
  * `/inbox` — the member's notifications (P11, D11): invites, shares that moved, reminders, lapsed
@@ -41,8 +43,11 @@ export default function InboxPage() {
     const outcome = await feed.markAll.run();
     if (outcome.ok) setSaid(COPY.allRead);
   };
-  // R4 form factor (SPEC 3.6): from lg the list stands beside the notice's target, opened in place.
-  const wide = useMediaQuery(LG_UP);
+  // R4 form factor (SPEC 3.6): beside a pane, the list stands beside the notice's target, opened
+  // in place. R5 X5-3 — "beside a pane" is the split view's own measure (its box, in rem), never the
+  // viewport: at 200 % text on a desktop the two disagreed and a pick hid the list with no way back.
+  const layout = useSplitLayout(SPLIT_AT);
+  const wide = layout.split;
   const picked = usePickedNotice(feed.items);
   const listPane = (
     <div className="flex flex-col gap-4">
@@ -59,31 +64,30 @@ export default function InboxPage() {
         description={COPY.description}
         actions={<RefreshButton onRefresh={feed.retry} loading={feed.refreshing} label={COPY.refresh} />}
       />
-      {wide ? (
-        <SplitView
-          listLabel={COPY.listLabel}
-          listWidth="26rem"
-          splitAt="56rem"
-          list={listPane}
-          detail={picked.notice ? <NoticeTarget key={picked.notice.id} notice={picked.notice} /> : null}
-          placeholder={<StateBlock empty emptyIcon={Bell} emptyTitle={COPY.pickTitle} emptyHint={COPY.pickHint} />}
-        />
-      ) : listPane}
+      <SplitView
+        layout={layout}
+        listLabel={COPY.listLabel}
+        listWidth="26rem"
+        splitAt={SPLIT_AT}
+        list={listPane}
+        detail={picked.notice ? <NoticeTarget key={picked.notice.id} notice={picked.notice} /> : null}
+        placeholder={<StateBlock empty emptyIcon={Bell} emptyTitle={COPY.pickTitle} emptyHint={COPY.pickHint} />}
+        back={{ label: SPLIT_PANE_COPY.backToNotifications, onBack: picked.unpick }}
+        pickedKey={picked.notice?.id ?? null}
+        announce={picked.notice ? SPLIT_PANE_COPY.showing(picked.notice.headline) : undefined}
+      />
     </PageShell>
   );
 }
 
-const LG_UP = "(min-width: 1024px)";
+const SPLIT_AT = "56rem";
 
 /** The notice open in the pane: `?n=` — kept while the list re-reads around it. */
 function usePickedNotice(items: MemberNotification[]) {
-  const [params, setParams] = useSearchParams();
-  const id = params.get("n");
+  const { value: id, pick: pickId, unpick } = usePickParam("n");
   const notice = id ? items.find((n) => n.id === id) ?? null : null;
-  const pick = useCallback((next: MemberNotification) => {
-    setParams((was) => { const p = new URLSearchParams(was); p.set("n", next.id); return p; }, { replace: true });
-  }, [setParams]);
-  return { notice, pick };
+  const pick = useCallback((next: MemberNotification) => pickId(next.id), [pickId]);
+  return { notice, pick, unpick };
 }
 
 const INVITE_PATH = /^\/invites\/([^/?#]+)/;
@@ -104,7 +108,14 @@ function InviteTarget({ seat, notice }: { seat: string; notice: MemberNotificati
   const invites = useMyInvites();
   const { refresh } = invites;
   const reread = useCallback(() => refresh(), [refresh]);
-  const invite = invites.items?.find((i) => i.participant_id === seat) ?? null;
+  const fromList = invites.items?.find((i) => i.participant_id === seat) ?? null;
+  // R5 M5-4 — the invite answered here is held while its answer lands: an accepted seat leaves the
+  // open-invites list on the re-read, and the pane collapsed to the bare notice, losing "You're in —
+  // 16.00 cr paid to Olga". As the Invites page does, the last invite shown stays until another is
+  // picked (this component is keyed by the notice).
+  const [held, setHeld] = useState<Invite | null>(null);
+  if (fromList && fromList !== held) setHeld(fromList);
+  const invite = fromList ?? held;
   // Answered already, or gone: the notice and its link say what the club knows.
   if (!invite) return invites.items === null ? <Skeleton className="h-64 rounded-xl" /> : <NoticeCard notice={notice} />;
   return <InviteDetail invite={invite} onReread={reread} />;
@@ -114,7 +125,8 @@ function NoticeCard({ notice }: { notice: MemberNotification }) {
   const path = appPath(notice.link);
   return (
     <Panel role="region" aria-label={COPY.noticeLabel} className="flex flex-col gap-3">
-      <p className="break-words text-base font-semibold text-text-primary">{notice.headline}</p>
+      {/* A heading, so a pick opened while stacked has somewhere for focus to land (R5 X5-3). */}
+      <h2 className={cn(typography({ variant: "h3" }), "break-words")}>{notice.headline}</h2>
       {path ? <TextLink to={path} variant="standalone">{COPY.openTarget}</TextLink> : null}
     </Panel>
   );

@@ -50,7 +50,9 @@ export function InboxRow(props: { notice: MemberNotification; now: number; feed:
           aria-current={pick?.id === notice.id ? "true" : undefined}
           aria-labelledby={headlineId}
           aria-describedby={metaId}
-          className={cn(row, "no-underline transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none aria-[current=true]:bg-accent-soft")}
+          // R5 X5-7 — the picked row is marked by an EDGE, as Invites marks its card: the tint alone
+          // was ~1.15:1 and forced colours drop it; a border survives them (as CanvasText).
+          className={cn(row, pick?.id === notice.id && PICKED, "no-underline transition-colors duration-fast ease-standard hover:bg-bg-muted motion-reduce:transition-none")}
         >
           {body}
         </Link>
@@ -68,6 +70,12 @@ export function InboxRow(props: { notice: MemberNotification; now: number; feed:
  * and time, the caret goes (the whole row is the link), and the headline takes the row's whole
  * width under them.
  */
+/**
+ * The 4px edge takes 4px of the row's start padding, so the words do not move when it is picked.
+ * Only the picked row carries a border class: in forced colours `index.css` frames every link whose
+ * class names a border, so an always-present `aria-[current=true]:border-…` framed EVERY row.
+ */
+const PICKED = "border-l-4 border-accent-strong bg-accent-soft pl-3";
 const ROW = "grid min-h-touch w-full items-start gap-x-3 gap-y-1 px-4 py-3 text-left";
 // Whole class names, never built from parts: Tailwind finds classes by reading the source text.
 const ICON = "relative col-start-1 row-start-1 inline-flex shrink-0 items-center justify-center gap-1.5 self-center rounded-full text-text-secondary [@container(min-width:17rem)]:row-span-3 [@container(min-width:17rem)]:size-10 [@container(min-width:17rem)]:self-start [@container(min-width:17rem)]:bg-bg-muted";
