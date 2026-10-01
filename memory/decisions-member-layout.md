@@ -30,7 +30,17 @@ Page shell, "Use the width"). Admin screens: `decisions-admin-layout`.
   body under an h2, its own `@container/page`), an invite via `InviteDetail` (the sheet's flow,
   body and actions). Invites keep the pick in `?seat=`; Profile's tab in `?tab=` (a fragment other
   than `#my-game` opens Account, so My Code's `/profile#door-history` still lands).
-- **Not built:** the selection list docked in the Bookings rail; Accept / Record result as the
+- **An invitee's answer is docked too** (R5 F5): Review your share + Decline in a bottom
+  ContextBar ("Your answer") below lg, inline from it — same JS switch as the organiser's Invite.
+- **A no-show and a late cancel show the ledger's own rows** (R5 M5-3/M5-7): paid at booking (the
+  charge), refunded (the whole charge), the penalty, shares, cost; partners "Paid 16 · 11.20 came
+  back". Refund/penalty come from optional `money.refunded_credits`/`penalty_credits` (asked of
+  the backend), else refund = price and penalty = owed when nobody checked in — *why:* exact on
+  every real-stack booking checked, but an admin compensation naming the booking would break it.
+  A no-show's title ends at `sold_ends_at` (the sweep truncates `ends_at`). Figures never wrap
+  mid-value: `dd` nowrap, `keepAmounts` NBSP inside sentences. A 404 with `?seat=` reads the
+  member's own seat and says "You were taken off this game".
+- **Not built:** the selection list docked in the Bookings rail; Record result as the
   docked verb on booking detail; Wallet's 30-day mini totals (a new read); preselecting the
   first unread from the bell; How it works' sticky index; Top up's info aside.
 

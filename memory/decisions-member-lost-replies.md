@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-member-lost-replies
 description: "Review round 3 lane F2: every member players/play write reads the club's record back after a lost reply; the booking page re-reads itself at start/end, on return, on wallet moves and on a live poll."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-01
 ---
 
 # Live decisions — member writes after a lost reply, and a page that keeps up (R3, lane F2)
@@ -37,6 +37,9 @@ The admin side is `decisions-admin-lost-replies.md`; this is the member side (pl
   is checked in. **Why the poll:** a check-in moves no money for the viewer and sends no notice,
   and the box's cue window is a club setting the page does not read. The result card follows
   every booking read (`freshAt`), so Record appears at the start with no reload.
+- **Remove player and Change split hold the page while in flight** (R5 I5-2): both take a
+  `useSheetHistory` entry; Back/Escape/×/Keep are refused while the write is out (waiting line in
+  place of Keep/Cancel), and a landing after a forced teardown is a toast, not a dead page notice.
 - **Celebrations**: the frontend has no local trigger; B awards only on confirmation. A queued
   badge can still open over an unrelated pending result, so a badge moment says "Earned <date>".
 - **Onboarding names no code period and no menu position** (`CODE_KEEPS_CHANGING`): the step is a
