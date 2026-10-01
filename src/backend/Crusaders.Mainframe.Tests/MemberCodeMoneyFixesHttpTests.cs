@@ -40,12 +40,12 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         }
     }
 
-    private static Task TopUpAsync(MemberCodeClub club, WebApplicationFactory<Program> app, Guid user, int credits) =>
+    private static Task TopUpAsync(MemberCodeClub club, WebApplicationFactory<Program> app, Guid user, int minutes) =>
         club.WriteAsync(app, db =>
         {
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = user, Type = LedgerEntryType.TopUp, AmountMinutes = credits, ActorUserId = user, Reason = "seed",
+                TenantId = club.TenantId, UserId = user, Type = LedgerEntryType.TopUp, AmountMinutes = minutes, ActorUserId = user, Reason = "seed",
             });
             return Task.CompletedTask;
         });
@@ -79,7 +79,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
                         select (c.court, p.payer, token: club.Code(p.payer, at: clock.Now, stepOffset: c.offset), nonce: $"{c.court:x2}{p.j:x2}000000000000")).ToList();
         foreach (var a in attempts) Assert.Equal("ok", (await SendAsync(device, club.PayFor(a.token, a.court, a.nonce, confirm: false))).Body.GetProperty("reason").GetString());
 
-        var answers = await Task.WhenAll(attempts.Select(async a => (a, answer: await SendAsync(device, club.PayFor(a.token, a.court, a.nonce, confirm: true, label: "32")))));
+        var answers = await Task.WhenAll(attempts.Select(async a => (a, answer: await SendAsync(device, club.PayFor(a.token, a.court, a.nonce, confirm: true, label: "60")))));
 
         Assert.All(answers, x => Assert.Equal(HttpStatusCode.OK, x.answer.Status));
         foreach (var court in courts)
@@ -93,14 +93,14 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         // A losing nonce retried: decided, not stranded.
         foreach (var (a, answer) in answers.Where(x => !x.answer.Body.GetProperty("paid").GetBoolean()))
         {
-            var retry = await SendAsync(device, club.PayFor(a.token, a.court, a.nonce, confirm: true, label: "32"));
+            var retry = await SendAsync(device, club.PayFor(a.token, a.court, a.nonce, confirm: true, label: "60"));
             Assert.Equal(HttpStatusCode.OK, retry.Status);
         }
 
         // The money: three bookings' worth, moved once each.
         var total = 0;
         foreach (var p in payers) total += await club.BalanceAsync(app, p);
-        Assert.Equal(200 * 3 - 96, total);
+        Assert.Equal(200 * 3 - 180, total);   // three 60-minute bookings
         Assert.Equal(200, await club.BalanceAsync(app, club.Olga));
     }
 
@@ -125,21 +125,21 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
             db.DevicePayFors.Add(new DevicePayFor
             {
                 TenantId = club.TenantId, DeviceId = boxId, Nonce = nonce, BookingId = booking.Id, PayerUserId = club.Pam,
-                CourtNumber = 2, AmountMinutes = 32, AmountLabel = "32", CreatedAt = DateTimeOffset.UtcNow - age,
+                CourtNumber = 2, AmountMinutes = 60, AmountLabel = "60", CreatedAt = DateTimeOffset.UtcNow - age,
             });
             return Task.CompletedTask;
         });
 
         await Strand("aaaa000000000000", TimeSpan.FromSeconds(1));
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "aaaa000000000000", confirm: true, label: "32"))).Status);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "aaaa000000000000", confirm: true, label: "60"))).Status);
 
         await Strand("bbbb000000000000", TimeSpan.FromMinutes(2));
         await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "bbbb000000000000", confirm: false));
-        var paid = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "bbbb000000000000", confirm: true, label: "32"));
+        var paid = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "bbbb000000000000", confirm: true, label: "60"));
         Assert.Equal(HttpStatusCode.OK, paid.Status);
         Assert.True(paid.Body.GetProperty("paid").GetBoolean());
         Assert.False(paid.Body.GetProperty("replayed").GetBoolean());
-        Assert.Equal(168, await club.BalanceAsync(app, club.Pam));
+        Assert.Equal(140, await club.BalanceAsync(app, club.Pam));
     }
 
     // ---- #9: a claim is not burned by a throw -----------------------------------------------------
@@ -196,14 +196,14 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
 
         await SendAsync(device, club.PayFor(code, 1, nonce, confirm: false));
         ThrowOnce.Remaining = 1;
-        Assert.True(await FailedAsync(() => device.SendAsync(club.PayFor(code, 1, nonce, confirm: true, label: "24"))));
+        Assert.True(await FailedAsync(() => device.SendAsync(club.PayFor(code, 1, nonce, confirm: true, label: "45"))));
         Assert.Equal(0, await club.UsesAsync(app));
         Assert.Equal(0, await club.ReadAsync(app, db => db.DevicePayFors.IgnoreQueryFilters().CountAsync(p => p.TenantId == club.TenantId)));
         Assert.Equal(200, await club.BalanceAsync(app, club.Pam));
 
-        var retry = await SendAsync(device, club.PayFor(code, 1, nonce, confirm: true, label: "24"));
+        var retry = await SendAsync(device, club.PayFor(code, 1, nonce, confirm: true, label: "45"));
         Assert.True(retry.Body.GetProperty("paid").GetBoolean());
-        Assert.Equal(176, await club.BalanceAsync(app, club.Pam));
+        Assert.Equal(155, await club.BalanceAsync(app, club.Pam));
     }
 
     // ---- #10: nobody to refund ------------------------------------------------------------------
@@ -228,7 +228,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
 
         var quote = await SendAsync(device, club.PayFor(club.Code(club.Pam, at: clock.Now), 2, "0101010101010101", confirm: false));
         Assert.Equal("not_chargeable", quote.Body.GetProperty("reason").GetString());
-        var confirm = await SendAsync(device, club.PayFor(club.Code(club.Pam, at: clock.Now, stepOffset: -1), 2, "0202020202020202", confirm: true, label: "32"));
+        var confirm = await SendAsync(device, club.PayFor(club.Code(club.Pam, at: clock.Now, stepOffset: -1), 2, "0202020202020202", confirm: true, label: "60"));
         Assert.Equal("not_chargeable", confirm.Body.GetProperty("reason").GetString());
         Assert.Equal("already_paid", (await SendAsync(device, club.PayFor(club.Code(club.Pam, at: clock.Now), 3, "0303030303030303", confirm: false))).Body.GetProperty("reason").GetString());
 
@@ -256,7 +256,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         var code = club.Code(club.Pam);
 
         await SendAsync(device, club.PayFor(code, 2, "c0e0000000000000", confirm: false));
-        var paid = await SendAsync(device, club.PayFor(code, 2, "c0e0000000000000", confirm: true, label: "32"));
+        var paid = await SendAsync(device, club.PayFor(code, 2, "c0e0000000000000", confirm: true, label: "60"));
 
         Assert.True(paid.Body.GetProperty("paid").GetBoolean(), paid.Body.ToString());
         Assert.InRange(paid.Body.GetProperty("granted_seconds").GetInt32(), 49 * 60, 50 * 60 + 1);
@@ -283,16 +283,16 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         const string nonce = "1234123412341234";
 
         var quote = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: false));
-        Assert.Equal("32", quote.Body.GetProperty("amount_label").GetString());
+        Assert.Equal("60", quote.Body.GetProperty("amount_label").GetString());
 
         // The 17:00 slot ends between the two presses.
         await club.WriteAsync(app, async db => (await db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == five.Id)).EndsAt = DateTimeOffset.UtcNow.AddSeconds(-1));
 
-        var confirm = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: true, label: "32"));
+        var confirm = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: true, label: "60"));
         Assert.False(confirm.Body.GetProperty("paid").GetBoolean());
         Assert.Equal("price_changed", confirm.Body.GetProperty("reason").GetString());
 
-        var unquoted = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "9999999999999999", confirm: true, label: "32"));
+        var unquoted = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "9999999999999999", confirm: true, label: "60"));
         Assert.Equal("price_changed", unquoted.Body.GetProperty("reason").GetString());
 
         Assert.Equal(200, await club.BalanceAsync(app, club.Pam));
@@ -300,7 +300,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
 
         // Asked again, the glass names the 18:00 booking and the payer may agree to that.
         await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: false));
-        Assert.True((await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: true, label: "32"))).Body.GetProperty("paid").GetBoolean());
+        Assert.True((await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, nonce, confirm: true, label: "60"))).Body.GetProperty("paid").GetBoolean());
     }
 
     // ---- #14: identical walk-up retries in flight together ---------------------------------------
@@ -318,7 +318,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         var answers = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => device.SendAsync(club.WalkUp(code, court: 3, nonce: "eeeeeeeeeeeeeeee"))));
 
         foreach (var a in answers) Assert.Equal(HttpStatusCode.OK, a.StatusCode);
-        Assert.Equal(200 - 8, await club.BalanceAsync(app, club.Pam));
+        Assert.Equal(200 - 15, await club.BalanceAsync(app, club.Pam));
         Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Money));
     }
 

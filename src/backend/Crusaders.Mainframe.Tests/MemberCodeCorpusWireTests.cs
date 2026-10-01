@@ -227,11 +227,11 @@ public partial class MemberCodeCorpusTests
                     break;
                 case "payfor_quote":
                     Assert.Equal(text, JsonSerializer.Serialize(JsonSerializer.Deserialize<PayForQuoteResponse>(text)));
-                    AssertLabelRule(text, id);
+                    AssertLabelRule(text, id, c.GetProperty("expect"));
                     break;
                 case "payfor_confirm":
                     Assert.Equal(text, JsonSerializer.Serialize(JsonSerializer.Deserialize<PayForConfirmResponse>(text)));
-                    AssertLabelRule(text, id);
+                    AssertLabelRule(text, id, c.GetProperty("expect"));
                     break;
                 default:
                     Assert.Fail($"response '{id}' has a kind this suite does not know");
@@ -273,16 +273,21 @@ public partial class MemberCodeCorpusTests
         Assert.All(sync.Days, d => Assert.NotNull(MemberCodeWire.ParseDayElement(d)));
     }
 
-    /// <summary>A label the server writes is its own rendering of the amount, and ours agrees whenever it fits.</summary>
-    private static void AssertLabelRule(string text, string id)
+    /// <summary>
+    /// A label the server writes is its own rendering of the amount in whole minutes (P13 §3.16), and
+    /// ours agrees whenever it fits; a price the glass cannot show (over four digits) is in the corpus
+    /// only as a body the box must refuse, never one this server would send.
+    /// </summary>
+    private static void AssertLabelRule(string text, string id, JsonElement expect)
     {
         using var body = JsonDocument.Parse(text);
-        if (!body.RootElement.TryGetProperty("amount_minutes", out var credits)) return;
+        if (!body.RootElement.TryGetProperty("amount_minutes", out var amount)) return;
         var label = body.RootElement.GetProperty("amount_label").GetString()!;
-        // P13-B3: the corpus carries whole minutes once regenerated (§3.16); a "50.0" fails here until then.
-        Assert.True(credits.TryGetInt32(out var minutes), $"'{id}': amount {credits.GetRawText()} is not whole minutes");
+        Assert.True(amount.TryGetInt32(out var minutes), $"'{id}': amount {amount.GetRawText()} is not whole minutes");
+        Assert.Equal(amount.GetRawText(), JsonSerializer.Serialize(minutes));
         Assert.True(DevicePayForEndpoint.Label(minutes) == label, $"'{id}': label {label}");
-        Assert.Equal(credits.GetRawText(), JsonSerializer.Serialize(minutes));
+        if (minutes > DevicePayForEndpoint.MaxLabelMinutes)
+            Assert.True(expect.GetProperty("outcome").GetString() == "walkup", $"'{id}': an unshowable label must be refused by the box");
     }
 
     // ---- gate.json (door) ----------------------------------------------------------------------

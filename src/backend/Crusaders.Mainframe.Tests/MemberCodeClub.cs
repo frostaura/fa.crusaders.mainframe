@@ -23,7 +23,7 @@ namespace Crusaders.Mainframe.Tests;
 internal sealed class MemberCodeClub
 {
     public const string Settings =
-        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"Africa/Johannesburg","heartbeat_seconds":45,"slice_price_credits":8}""";
+        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"Africa/Johannesburg","heartbeat_seconds":45}""";
 
     public required Guid TenantId { get; init; }
     public required string Slug { get; init; }
@@ -285,7 +285,7 @@ internal sealed class MemberCodeClub
         {
             TenantId = TenantId, CourtId = Courts[courtIndex], UserId = user, BookedByUserId = user, PaidByUserId = user,
             ActorUserId = user, StartsAt = startsAt, EndsAt = startsAt.AddMinutes(minutes), SliceMinutes = 15,
-            SliceCount = minutes / 15, AmountChargedMinutes = 8 * (minutes / 15), Status = BookingStatus.Booked,
+            SliceCount = minutes / 15, AmountChargedMinutes = 15 * (minutes / 15), Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow, CheckedInAt = checkedIn ? DateTimeOffset.UtcNow.Storable() : null,
         };
         db.Bookings.Add(booking);

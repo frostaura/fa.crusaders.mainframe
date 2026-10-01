@@ -384,7 +384,7 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
         Assert.Equal("""{"error":"code_used"}""", await second.Content.ReadAsStringAsync());
 
-        Assert.Equal(200 - 8, await club.BalanceAsync(app, club.Pam));
+        Assert.Equal(200 - 15, await club.BalanceAsync(app, club.Pam));
         Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Money));
     }
 

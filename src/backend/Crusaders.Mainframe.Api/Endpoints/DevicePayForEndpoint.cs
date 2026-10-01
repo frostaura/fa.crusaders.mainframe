@@ -58,14 +58,17 @@ public static class DevicePayForEndpoint
     public const string NotChargeable = "not_chargeable";
 
     /// <summary>
-    /// A price whose label would not fit the glass (more than six characters). Not in the spec's
-    /// list: the box reads any reason it does not know as SEE THE DESK, which is the honest
+    /// A price whose label would not fit the glass: more than <see cref="MaxLabelMinutes"/>
+    /// minutes, i.e. more than four digits (P13 §3.16). Not in the spec's list: the box reads any reason it does not know as SEE THE DESK, which is the honest
     /// answer to "this court costs more than the box can show".
     /// </summary>
     public const string AmountUnshowable = "amount_unshowable";
 
-    /// <summary>The widest label the box's glass can show verbatim.</summary>
+    /// <summary>The widest label the wire accepts — it sizes the box's buffer. The content rule is <see cref="MaxLabelMinutes"/>.</summary>
     public const int MaxLabelLength = 6;
+
+    /// <summary>The largest price the box can show: four digits, so <c>PAY 9999 MIN?</c> fits the 16-column glass (P13 §8).</summary>
+    public const int MaxLabelMinutes = 9999;
 
     /// <summary>The nonce the box mints: sixteen lower-case hex characters. At most this many are accepted.</summary>
     public const int MaxNonceLength = 32;
@@ -224,8 +227,8 @@ public static class DevicePayForEndpoint
         if (booking.AmountChargedMinutes <= 0) return new Judgement(AlreadyPaid);
 
         var amount = booking.AmountChargedMinutes;
+        if (amount > MaxLabelMinutes) return new Judgement(AmountUnshowable);
         var label = Label(amount);
-        if (label.Length > MaxLabelLength) return new Judgement(AmountUnshowable);
 
         // No overdraft at a device (§9.2): god mode never reaches a device path.
         if (await services.Ledger.GetBalanceAsync(payer, ct) < amount) return new Judgement(InsufficientBalance, label);
@@ -551,9 +554,9 @@ public static class DevicePayForEndpoint
 
     /// <summary>
     /// The server's label for an amount (§9.2, P13 §3.16): the whole number of minutes in
-    /// invariant digits — <c>45</c>, <c>9999</c>. The box shows it verbatim.
+    /// invariant digits — <c>45</c>, <c>9999</c>. The box shows it verbatim. Callers refuse a price
+    /// above <see cref="MaxLabelMinutes"/> as <see cref="AmountUnshowable"/> before any money moves.
     /// </summary>
-    // P13-B3: refuse a price above 9999 minutes (amount_unshowable) before any money moves.
     public static string Label(int minutes) => MoneyFormat.MinutesLabel(minutes);
 }
 

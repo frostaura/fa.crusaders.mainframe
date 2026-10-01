@@ -27,7 +27,7 @@ public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassF
     {
         var body = JsonSerializer.SerializeToNode(new
         {
-            sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
+            sliceMinutes = 15, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
             penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15,
         })!.AsObject();
         foreach (var p in JsonSerializer.SerializeToNode(extra)!.AsObject().ToList()) body[p.Key] = p.Value?.DeepClone();
