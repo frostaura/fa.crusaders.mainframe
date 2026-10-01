@@ -41,7 +41,7 @@ async function open(page: Page, path: string, routes: ApiRoute[]) {
 const splitView = (page: Page) => page.locator("[data-split-view]");
 
 test.describe("Inbox (R5 X5-3, X5-7, X5-10)", () => {
-  test.beforeEach(({}, info) => { test.skip(info.project.name !== "desktop", "1280 only"); });
+  test.beforeEach(({ page }, info) => { void page; test.skip(info.project.name !== "desktop", "1280 only"); });
 
   test("1280: a pick opens beside the list, is announced, and focus stays on the row with an edge forced colours keep", async ({ page }) => {
     await open(page, "/inbox", inboxRoutes());
@@ -100,7 +100,7 @@ test.describe("Inbox (R5 X5-3, X5-7, X5-10)", () => {
 });
 
 test.describe("Invites (R5 X5-3)", () => {
-  test.beforeEach(({}, info) => { test.skip(info.project.name !== "desktop", "1280 only"); });
+  test.beforeEach(({ page }, info) => { void page; test.skip(info.project.name !== "desktop", "1280 only"); });
   const second = () => inviteFixture({ participant_id: "p0000000-0000-0000-0000-000000000009", court_name: "Court 2" });
 
   test("1280 at 200 % text: a card opens the accept sheet, never a pane the stacked view hides", async ({ page }) => {
