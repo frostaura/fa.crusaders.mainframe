@@ -193,6 +193,22 @@ describe("the Admin tab's attention badge", () => {
   });
 });
 
+describe("the page scroller keeps focus clear of the sticky bars", () => {
+  /**
+   * X5-2 (review round 5, WCAG 2.4.11): a focused ledger row scrolled under a sticky TOP bar. The
+   * scroller (`<main>`) is padded at the top by the stuck bar's published height (lane A's
+   * `--context-bar-top-height`), as it already was at the foot by the tab bar's and the dock's.
+   */
+  it("pads <main>'s scroll at the top by the stuck top bar's height", async () => {
+    memberClub();
+    renderShell("/my-code");
+    await screen.findByRole("navigation", { name: "Main" });
+    const main = document.getElementById("main-content")!;
+    expect(main.style.scrollPaddingTop).toBe("calc(var(--context-bar-top-height, 0px) + 0.5rem)");
+    expect(main.style.scrollPaddingBottom).toContain("--app-bottom-bar-height");
+  });
+});
+
 describe("the phone's bottom tab bar", () => {
   /**
    * The decision, as classes: fixed to the bottom where the top bar is narrower than 44rem, inline

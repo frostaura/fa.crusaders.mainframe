@@ -209,7 +209,8 @@ export default function AppShell() {
         the document taller than the screen, and a wheel or a focus scrolled the whole app —
         header and nav included — off-screen (admin /admin at 1280: scrollY 1588, all blank).
         `scroll-padding-bottom` (F4-4): the phone's tab bar is fixed over the foot of this
-        scroller, so a control focused by Tab is scrolled clear of it, not under it.
+        scroller, so a control focused by Tab is scrolled clear of it, not under it. And
+        `scroll-padding-top` (X5-2) for a page's sticky top bar.
       */}
       <main
         id="main-content"
@@ -218,6 +219,9 @@ export default function AppShell() {
         style={{
           paddingBottom: "calc(var(--app-bottom-bar-height, 0px) + var(--context-bar-height, 0px))",
           scrollPaddingBottom: "calc(var(--app-bottom-bar-height, 0px) + var(--context-bar-height, 0px) + 0.5rem)",
+          // X5-2 (R5, WCAG 2.4.11) — and clear of a sticky TOP bar while it is stuck: it publishes
+          // `--context-bar-top-height` (`ui/use-sticky-top`), unset (0) when it is not.
+          scrollPaddingTop: "calc(var(--context-bar-top-height, 0px) + 0.5rem)",
         }}
       >
         {/*
