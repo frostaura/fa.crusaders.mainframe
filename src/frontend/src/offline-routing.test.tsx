@@ -216,8 +216,8 @@ describe("while the session check is still out", () => {
  * R4 wave B ("offline & instant") — the member's own pages join My Code: their reads are kept on
  * the phone for the member it confirmed (`lib/offline`), so with no signal, or while the check is
  * out, they draw what the club last said instead of "can't reach the club". The same two
- * conditions hold them (a confirmed identity, and the route on the list); the desk, the invites
- * list, top-ups and a lapsed session stay where they were.
+ * conditions hold them (a confirmed identity, and the route on the list); the desk, top-ups and a
+ * lapsed session stay where they were. R5 M5-6: the invites list is kept too, so it opens offline.
  */
 describe("the member's own pages, kept on the phone", () => {
   const ID = "44444444-4444-4444-4444-444444444444";
@@ -237,7 +237,7 @@ describe("the member's own pages, kept on the phone", () => {
   }
 
   for (const [path, page] of [
-    ["/bookings", "/bookings"], ["/bookings/b1", "/bookings/:id"], ["/wallet", "/wallet"], ["/profile", "/profile"], ["/inbox", "/inbox"],
+    ["/bookings", "/bookings"], ["/bookings/b1", "/bookings/:id"], ["/bookings/invites", "/bookings/invites"], ["/wallet", "/wallet"], ["/profile", "/profile"], ["/inbox", "/inbox"],
   ]) {
     it(`opens ${path} with no signal for the member this device confirmed`, async () => {
       tokenStore.set("member.jwt.value");
@@ -249,7 +249,7 @@ describe("the member's own pages, kept on the phone", () => {
     });
   }
 
-  for (const path of ["/bookings/invites", "/wallet/topup", "/admin/members"]) {
+  for (const path of ["/wallet/topup", "/admin/members"]) {
     it(`keeps the connection notice on ${path}`, async () => {
       tokenStore.set("member.jwt.value");
       localStorage.setItem(LAST_IDENTITY_KEY, ID);

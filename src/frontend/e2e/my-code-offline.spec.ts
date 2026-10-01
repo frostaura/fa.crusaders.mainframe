@@ -456,7 +456,8 @@ test("offline: Bookings, Wallet and Inbox open from the phone, said as offline; 
   await page.goto(`${origin}/bookings`);
   await expect(page.locator('[role="grid"]')).toBeVisible();
   await expect(page.locator("[data-stale-notice]")).toContainText(OFFLINE_COPY.gridStale);
-  await page.getByRole("button", { name: /^Book Court 1 at/ }).last().click();
+  // R5 V5-8: offline, a free cell is muted "Free" with no price — `OFFLINE_CELL.label`.
+  await page.getByRole("button", { name: /^Court 1 at .* — free when last read; booking needs a connection$/ }).last().click();
   await expect(page.getByText(OFFLINE_COPY.bookNeedsConnection)).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });

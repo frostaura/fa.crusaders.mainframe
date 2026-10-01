@@ -31,7 +31,8 @@ const OFFLINE_CAPABLE: readonly RegExp[] = [
   // these pages draw what the club last said, with its "as of", instead of "can't reach the club".
   // Writes on them say "needs a connection" (`OfflineError`); nothing is queued.
   /^\/bookings\/?$/,
-  /^\/bookings\/(?!invites\/?$)[^/]+\/?$/,
+  // R5 M5-6: /bookings/invites joins them — the open invites are a kept read too (`useKeptInvites`).
+  /^\/bookings\/[^/]+\/?$/,
   /^\/wallet\/?$/,
   /^\/profile\/?$/,
   /^\/inbox\/?$/,
