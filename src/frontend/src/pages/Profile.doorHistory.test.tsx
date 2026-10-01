@@ -56,7 +56,7 @@ describe("My door history", () => {
       ...routes,
     ]);
     return render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/profile?tab=account"]}>
         <AuthProvider>
           <ProfileProvider>
             <ToastProvider><ProfilePage /></ToastProvider>
@@ -283,7 +283,7 @@ describe("My door history", () => {
       },
     ]);
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/profile?tab=account"]}>
         <AuthProvider>
           <ProfileProvider>
             <ToastProvider><ProfilePage /></ToastProvider>

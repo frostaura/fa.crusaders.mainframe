@@ -51,7 +51,7 @@ export function MyGameSection() {
         <CardTitle asChild><h2 id={titleId}>{MY_GAME.title}</h2></CardTitle>
         <CardDescription>{MY_GAME.description}</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-6">
+      <CardContent className="@container/game flex flex-col gap-6">
         <StateBlock
           loading={!read.data && read.loading}
           error={read.data ? null : read.error}
@@ -98,9 +98,30 @@ function MyGameSkeleton() {
 }
 
 /** One part of the section, headed — an `h3` under the card's `h2`. */
+/**
+ * R4 form factor (SPEC 3.7): from a 56rem card My game is two columns, by the CARD's width —
+ * the ring, the streak and the people you play with on the left; the stats, the badges and the
+ * celebrations switch on the right. Grid areas, so the DOM keeps the phone's order (ring, streak,
+ * stats, people, badges) and Tab order is reading order; the rules between parts give way to the
+ * grid's gap there. (The areas are an arbitrary variant: the container-queries plugin emits
+ * nothing for `@[56rem]/game:` in front of an arbitrary PROPERTY — measured.)
+ */
+const BODY = "flex flex-col gap-6 @[56rem]/game:grid @[56rem]/game:grid-cols-2 @[56rem]/game:items-start @[56rem]/game:gap-x-10 @[56rem]/game:gap-y-8";
+/** With and without the refresh-failed line: an empty area row would still take a row gap. */
+const AREAS = "[@container_game_(min-width:56rem)]:[grid-template-areas:'ring_stats'_'streak_stats'_'people_badges'_'cel_badges']";
+const AREAS_ALERT = "[@container_game_(min-width:56rem)]:[grid-template-areas:'alert_alert'_'ring_stats'_'streak_stats'_'people_badges'_'cel_badges']";
+const AREA: Record<string, string> = {
+  ring: "[@container_game_(min-width:56rem)]:[grid-area:ring]",
+  streak: "[@container_game_(min-width:56rem)]:[grid-area:streak]",
+  stats: "[@container_game_(min-width:56rem)]:[grid-area:stats]",
+  people: "[@container_game_(min-width:56rem)]:[grid-area:people]",
+  badges: "[@container_game_(min-width:56rem)]:[grid-area:badges]",
+  celebrations: "[@container_game_(min-width:56rem)]:[grid-area:cel]",
+};
+
 function Part({ title, children, part }: { title?: string; children: ReactNode; part: string }) {
   return (
-    <div data-my-game-part={part} className="flex flex-col gap-3 border-t border-border pt-5 first:border-0 first:pt-0">
+    <div data-my-game-part={part} className={cn("flex min-w-0 flex-col gap-3 border-t border-border pt-5 first:border-0 first:pt-0 @[56rem]/game:border-0 @[56rem]/game:pt-0", AREA[part])}>
       {title ? <h3 className="text-base font-semibold text-text-primary">{title}</h3> : null}
       {children}
     </div>
@@ -112,8 +133,8 @@ function MyGameBody({ game, read }: { game: MyPlay; read: MyGameRead }) {
   const toast = useToast();
   const year = clubYear(game.as_of, game.timezone);
   return (
-    <>
-      {read.error ? <Alert tone="warning" live="polite">{MY_GAME.refreshFailed}</Alert> : null}
+    <div data-my-game-body="" className={cn(BODY, read.error ? AREAS_ALERT : AREAS)}>
+      {read.error ? <div className="[@container_game_(min-width:56rem)]:[grid-area:alert]"><Alert tone="warning" live="polite">{MY_GAME.refreshFailed}</Alert></div> : null}
       <Part part="ring">
         <CourtTimeRing ring={game.ring} onEditGoal={() => setGoalOpen(true)} />
       </Part>
@@ -148,7 +169,7 @@ function MyGameBody({ game, read }: { game: MyPlay; read: MyGameRead }) {
           read.reload();
         }}
       />
-    </>
+    </div>
   );
 }
 

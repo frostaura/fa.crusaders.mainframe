@@ -28,13 +28,17 @@ import { EmailAlertSwitches } from "../components/notifications/EmailAlertSwitch
 import { EMAIL_ALERTS_COPY } from "../lib/notificationsCopy";
 // member-code §10 — end every session, this one included, from the page that holds the passkeys.
 import { SignOutEverywhere } from "../components/member-code/SignOutEverywhere";
-import { SIGN_OUT_EVERYWHERE_COPY } from "../lib/profileCopy";
+import { PROFILE_TABS, SIGN_OUT_EVERYWHERE_COPY } from "../lib/profileCopy";
 // P11 / D13 — the same two switches the welcome wizard's privacy step shows.
 import { PrivacySwitches } from "../components/players/privacy/PrivacySwitches";
 import { PRIVACY_COPY } from "../lib/playersCopy";
 // P12 / D14 — "My game", the FIRST section: a member opens Profile to see this far more often
 // than to change a password (play.md §9.1).
 import { MyGameSection } from "../components/play/MyGameSection";
+import { MY_GAME } from "../lib/playCopy";
+import { Columns } from "../components/ui/auto-grid";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { useLocation, useSearchParams } from "react-router-dom";
 // item 16 — the guide's third recall point. See the note beside the link.
 import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
 import {
@@ -72,7 +76,8 @@ export default function ProfilePage() {
   const failed = stalled || (readFailed && !profile && !loading);
 
   return (
-    <PageShell width="narrow">
+    // R4 form factor (SPEC 3.7): `wide`, in two tabs — My game, and Account in columns.
+    <PageShell width="wide">
       <PageHeader title={PROFILE_TITLE} description={PROFILE_DESCRIPTION} />
       <StaleNotice stale={stale} readAt={readAt} offline={offline} />
       <StateBlock
@@ -138,41 +143,74 @@ function ProfileCard(props: { title: string; description?: ReactNode; children: 
  * people is the account screen.
  */
 function ProfileSections({ profile }: { profile: MyProfile }) {
+  const [tab, setTab] = useProfileTab();
   return (
-    <>
-      <MyGameSection />
-      <ProfileCard title={DETAILS_TITLE}>
-        <PhotoPicker profile={profile} />
-        <div className="border-t border-border pt-4">
-          {/* NOT keyed on the saved name (F4.7): a key change remounted the form on every save,
-              and the Save button the member had just pressed left the document with focus on it. */}
-          <NameForm profile={profile} />
-        </div>
-      </ProfileCard>
-      <PasswordCard />
-      <MemberDoorHistory />
-      <PasskeysCard />
-      <ProfileCard title={SIGN_OUT_EVERYWHERE_COPY.title} description={SIGN_OUT_EVERYWHERE_COPY.description}>
-        <div><SignOutEverywhere /></div>
-      </ProfileCard>
-      <ProfileCard title={PRIVACY_COPY.title} description={PRIVACY_COPY.description}>
-        <PrivacySwitches />
-      </ProfileCard>
-      {profile.is_admin ? (
-        <ProfileCard title={EMAIL_ALERTS_COPY.profileTitle} description={EMAIL_ALERTS_COPY.description}>
-          <EmailAlertSwitches />
-          <p className="text-sm text-text-secondary">{EMAIL_ALERTS_COPY.feedNote}</p>
-        </ProfileCard>
-      ) : null}
-      <div className="flex items-start gap-3 rounded-xl border border-dashed border-border px-4 py-3 sm:px-6">
-        <BookOpen aria-hidden="true" size={20} className="mt-3 shrink-0 text-text-muted" />
-        <div className="flex min-w-0 flex-col items-start">
-          <TextLink to={GUIDE_PATH} variant="standalone">{GUIDE_LINK_LABEL}</TextLink>
-          <p className="text-sm text-text-secondary">{GUIDE_TILE_HINT}.</p>
-        </div>
-      </div>
-    </>
+    <Tabs variant="underline" value={tab} onValueChange={(next) => setTab(next as ProfileTab)}>
+      <TabsList aria-label={PROFILE_TABS.label}>
+        <TabsTrigger value="game">{PROFILE_TABS.game}</TabsTrigger>
+        <TabsTrigger value="account">{PROFILE_TABS.account}</TabsTrigger>
+      </TabsList>
+      <TabsContent value="game" className="pt-6">
+        <MyGameSection />
+      </TabsContent>
+      <TabsContent value="account" className="pt-6">
+        {/* Unequal cards in columns (masonry-like): two at lg, three on a wide page. */}
+        <Columns min="panel" max={3} data-account-cards="">
+          <ProfileCard title={DETAILS_TITLE}>
+            <PhotoPicker profile={profile} />
+            <div className="border-t border-border pt-4">
+              {/* NOT keyed on the saved name (F4.7): a key change remounted the form on every save,
+                  and the Save button the member had just pressed left the document with focus on it. */}
+              <NameForm profile={profile} />
+            </div>
+          </ProfileCard>
+          <PasswordCard />
+          <MemberDoorHistory />
+          <PasskeysCard />
+          <ProfileCard title={SIGN_OUT_EVERYWHERE_COPY.title} description={SIGN_OUT_EVERYWHERE_COPY.description}>
+            <div><SignOutEverywhere /></div>
+          </ProfileCard>
+          <ProfileCard title={PRIVACY_COPY.title} description={PRIVACY_COPY.description}>
+            <PrivacySwitches />
+          </ProfileCard>
+          {profile.is_admin ? (
+            <ProfileCard title={EMAIL_ALERTS_COPY.profileTitle} description={EMAIL_ALERTS_COPY.description}>
+              <EmailAlertSwitches />
+              <p className="text-sm text-text-secondary">{EMAIL_ALERTS_COPY.feedNote}</p>
+            </ProfileCard>
+          ) : null}
+          <div className="flex items-start gap-3 rounded-xl border border-dashed border-border px-4 py-3 sm:px-6">
+            <BookOpen aria-hidden="true" size={20} className="mt-3 shrink-0 text-text-muted" />
+            <div className="flex min-w-0 flex-col items-start">
+              <TextLink to={GUIDE_PATH} variant="standalone">{GUIDE_LINK_LABEL}</TextLink>
+              <p className="text-sm text-text-secondary">{GUIDE_TILE_HINT}.</p>
+            </div>
+          </div>
+        </Columns>
+      </TabsContent>
+    </Tabs>
   );
+}
+
+type ProfileTab = "game" | "account";
+
+/**
+ * Which tab is open: `?tab=account`, or any fragment other than My game's own — `/profile#door-history`
+ * (My Code's link to the door record) lands on Account, where that card is. My game by default.
+ * The choice replaces the history entry: a tab is a view of one page, not a page of its own.
+ */
+function useProfileTab(): [ProfileTab, (tab: ProfileTab) => void] {
+  const [params, setParams] = useSearchParams();
+  const { hash } = useLocation();
+  const asked = params.get("tab");
+  const tab: ProfileTab = asked === "account" || asked === "game" ? asked
+    : hash && hash !== `#${MY_GAME.anchor}` ? "account" : "game";
+  const setTab = (next: ProfileTab) => setParams((was) => {
+    const p = new URLSearchParams(was);
+    p.set("tab", next);
+    return p;
+  }, { replace: true });
+  return [tab, setTab];
 }
 
 /**

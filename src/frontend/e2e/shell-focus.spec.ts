@@ -16,7 +16,7 @@ import { GOAL_SHEET, RING_COPY } from "../src/lib/playCopy";
  *   <li><b>F4.11</b> — the monthly-goal card squeezed its words into a narrow column on a phone.</li>
  * </ul>
  */
-async function openProfile(page: Page) {
+async function openProfile(page: Page, tab: "game" | "account" = "account") {
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/me/play", body: myPlayFixture() },
@@ -26,10 +26,11 @@ async function openProfile(page: Page) {
     { method: "PUT", path: "/api/v1/me/profile", body: { full_name: "Nomsa Keyboard" } },
     ...memberShellRoutes(),
   ]);
-  await page.goto("/profile");
+  // R4 form factor: Profile is two tabs — My game, and the account cards.
+  await page.goto(`/profile?tab=${tab}`);
   // A cold dev server compiles Profile's chunk on first ask; under a loaded runner that alone has
   // taken most of a default timeout.
-  await expect(page.getByRole("region", { name: "My game" })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByRole("region", { name: tab === "game" ? "My game" : "Your details" })).toBeVisible({ timeout: 45_000 });
 }
 
 test.describe.configure({ timeout: 90_000 });
@@ -42,7 +43,7 @@ const focused = (page: Page) => page.evaluate(() => {
 });
 
 test("F4.5: a dialog opened with the keyboard gives focus back to what opened it, by Escape and by its close ×", async ({ page }) => {
-  await openProfile(page);
+  await openProfile(page, "game");
   const edit = page.getByRole("button", { name: RING_COPY.editGoal });
   await edit.focus();
 
@@ -83,7 +84,7 @@ test("F4.7: saving a name with the keyboard leaves focus on Save", async ({ page
 for (const width of [320, 390]) {
   test(`F4.11: the monthly-goal card gives its words a real width at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await openProfile(page);
+    await openProfile(page, "game");
     const words = page.locator("[data-ring-words]");
     await expect(words).toBeVisible();
     const box = (await words.boundingBox())!;

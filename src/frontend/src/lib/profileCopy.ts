@@ -6,6 +6,16 @@ import { clubShortDate } from "./clubClock";
  */
 
 export const PROFILE_TITLE = "Profile";
+
+/**
+ * R4 form factor (SPEC 3.7, §4.6) — the page in two tabs: what the member plays, and their
+ * account. One column of both was 5,628px on a phone, with the account settings burying My game.
+ */
+export const PROFILE_TABS = {
+  label: "Profile",
+  game: "My game",
+  account: "Account",
+} as const;
 export const PROFILE_DESCRIPTION
   = "Your photo and name are what other players see on the booking grid and on every booking.";
 

@@ -178,11 +178,13 @@ function SwitchesSkeleton() {
     <div className="flex flex-col gap-3" aria-hidden="true">
       {[0, 1, 2, 3].map((row) => (
         <div key={row} className="flex items-center gap-4">
-          <div className="flex flex-1 flex-col gap-1.5">
-            <Skeleton className="h-4 w-48" />
+          {/* R4 form factor: min-w-0 + max-w-full — a 12rem bar is 384px at 200 % text, and it pushed
+              a 390 phone sideways while the switches were read. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Skeleton className="h-4 w-48 max-w-full" />
             <Skeleton className="h-3 w-3/4" />
           </div>
-          <Skeleton className="h-6 w-11 rounded-full" />
+          <Skeleton className="h-6 w-11 shrink-0 rounded-full" />
         </div>
       ))}
     </div>

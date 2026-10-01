@@ -202,7 +202,7 @@ test("the Overview lists recent alerts, loads older ones, and links each to wher
 test("an admin's Profile carries the same email alerts", async ({ page }) => {
   await signIn(page);
   await serveFeed(page, [{ method: "PUT", path: "/api/v1/me/preferences", body: { admin_notification_optouts: [] } }]);
-  await page.goto("/profile");
+  await page.goto("/profile?tab=account");
 
   const card = page.getByRole("region", { name: "Email alerts" });
   await expect(card.getByRole("switch", { name: "Court box or door stopped reporting" })).not.toBeChecked();
@@ -227,7 +227,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(page.getByRole("link", { name: "Thandi Mokoena applied to join" })).toBeVisible();
     await check();
 
-    await page.goto("/profile");
+    await page.goto("/profile?tab=account");
     await expect(page.getByRole("switch", { name: "New membership applications" })).toBeVisible();
     await check();
   });
@@ -250,7 +250,7 @@ test("screenshots at 375 and 1440, both themes", async ({ page }) => {
     await noSidewaysScroll(page);
     await shoot(page, "overview");
 
-    await page.goto("/profile");
+    await page.goto("/profile?tab=account");
     await expect(page.getByRole("region", { name: "Email alerts" }).getByRole("switch").first()).toBeVisible();
     await noSidewaysScroll(page);
     await shoot(page, "profile");

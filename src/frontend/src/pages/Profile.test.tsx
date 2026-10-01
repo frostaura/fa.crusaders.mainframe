@@ -11,7 +11,7 @@ import { EMAIL_ALERTS_COPY } from "../lib/notificationsCopy";
 import { PRIVACY_COPY } from "../lib/playersCopy";
 import {
   PASSKEY_ADD, PASSKEY_NAME_LABEL, PASSKEY_NAME_MISSING, PHOTO_BAD_TYPE, PHOTO_BUTTON, PHOTO_CHANGE_LABEL,
-  passkeyRemoveConsequence,
+  PROFILE_TABS, passkeyRemoveConsequence,
 } from "../lib/profileCopy";
 
 /**
@@ -29,7 +29,7 @@ const PROFILE = {
   full_name: "Ada Lovelace", membership_number: "MEM-1001", photo_url: null, status: "active",
 };
 
-function renderProfile(routes: StubRoute[]) {
+function renderProfile(routes: StubRoute[], entry = "/profile?tab=account") {
   const whoami = signIn({ isAdmin: false });
   const stub = stubFetch([
     { path: "/api/v1/whoami", body: whoami },
@@ -39,7 +39,8 @@ function renderProfile(routes: StubRoute[]) {
     { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
   ]);
   render(
-    <MemoryRouter>
+    // R4 form factor: the account cards are on the Account tab (My game is the default).
+    <MemoryRouter initialEntries={[entry]}>
       <AuthProvider>
         <ProfileProvider>
           <ToastProvider><ProfilePage /></ToastProvider>
@@ -66,6 +67,31 @@ describe("Profile — reading, failing and the page's shape", () => {
     vi.unstubAllGlobals();
     Reflect.deleteProperty(navigator, "credentials");
     signOut();
+  });
+
+  /** R4 form factor (SPEC 3.7, §4.6): My game and the account in two tabs, My game first. */
+  it("opens on My game, with the account one tab away, and a door-record link lands on Account", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+      { path: "/api/v1/me/play", status: 503, body: { error: "unavailable" } },
+    ], "/profile");
+    const tabs = await screen.findByRole("tablist", { name: PROFILE_TABS.label });
+    expect(within(tabs).getByRole("tab", { name: PROFILE_TABS.game })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "My game" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Full name")).toBeNull();
+    fireEvent.mouseDown(within(tabs).getByRole("tab", { name: PROFILE_TABS.account }));
+    expect(await screen.findByLabelText("Full name")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "My game" })).toBeNull();
+  });
+
+  it("lands on Account from a fragment that names an account card", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+    ], "/profile#door-history");
+    expect(await screen.findByLabelText("Full name")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: PROFILE_TABS.account })).toHaveAttribute("aria-selected", "true");
   });
 
   it("is one page shell: a single h1, and each part a named section", async () => {

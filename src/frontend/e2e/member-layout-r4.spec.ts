@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { MEMBER_CODE, SESSION_ANON, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
+import { myPlayFixture } from "./playKit";
 import { DETAIL_ACTIONS, DETAIL_COPY, INVITES_COPY } from "../src/lib/playersCopy";
 import { WALLET_LAYOUT } from "../src/lib/walletCopy";
 import { HEIGHT, WIDTHS, bigText, box, fontsReady, sideways, textOffScreen, widthUsed, type Width } from "./layoutKit";
@@ -462,4 +463,70 @@ test.describe("Inbox (SPEC 3.6)", () => {
     await bigText(page);
     await healthy(page);
   });
+});
+
+test.describe("Profile (SPEC 3.7, §4.6)", () => {
+  const routes = (): ApiRoute[] => [
+    { path: "/api/v1/me/play", body: myPlayFixture() },
+    { path: "/api/v1/me/webauthn/credentials", body: [] },
+    { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
+    { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null } },
+    ...memberShellRoutes(),
+  ];
+
+  for (const width of WIDTHS) {
+    test(`${width}px: My game in two columns from a 56rem card; the account cards in columns`, async ({ page }, info) => {
+      test.skip(info.project.name !== "desktop", "one project sweeps the widths");
+      await open(page, "/profile", routes(), width);
+      await expect(page.locator('[data-my-game-part="stats"]')).toBeVisible();
+      await healthy(page);
+      const ring = (await box(page, '[data-my-game-part="ring"]'))!;
+      const stats = (await box(page, '[data-my-game-part="stats"]'))!;
+      const body = (await box(page, "[data-my-game-body]"))!;
+      if (body.width >= 56 * 16) expect(stats.x, "stats beside the ring").toBeGreaterThanOrEqual(ring.right);
+      else expect(stats.y).toBeGreaterThanOrEqual(ring.bottom);
+
+      await page.getByRole("tab", { name: "Account" }).click();
+      await expect(page).toHaveURL(/tab=account/);
+      const cards = await page.locator("[data-account-cards] > *").evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().x)));
+      const columns = new Set(cards).size;
+      if (width >= 1280) expect(columns).toBeGreaterThanOrEqual(2);
+      if (width < 768) expect(columns).toBe(1);
+      await healthy(page);
+    });
+  }
+
+  test("390: each tab is far shorter than the old 5,628px page", async ({ page }) => {
+    await open(page, "/profile", routes(), 390);
+    await expect(page.locator('[data-my-game-part="stats"]')).toBeVisible();
+    const tall = () => page.locator("#main-content").evaluate((el) => el.scrollHeight);
+    expect(await tall()).toBeLessThan(4000);
+    await page.getByRole("tab", { name: "Account" }).click();
+    await expect(page.getByRole("region", { name: "Your details" })).toBeVisible();
+    expect(await tall()).toBeLessThan(4000);
+  });
+
+  test("390 at 200 % text: both tabs, nothing off screen", async ({ page }) => {
+    await open(page, "/profile", routes(), 390);
+    await expect(page.locator('[data-my-game-part="stats"]')).toBeVisible();
+    await bigText(page);
+    await healthy(page);
+    await page.getByRole("tab", { name: "Account" }).click();
+    await expect(page.getByRole("region", { name: "Your details" })).toBeVisible();
+    await healthy(page);
+  });
+});
+
+test("Profile at 390 with 200 % text: the account's switch skeletons stay on the phone while they are read", async ({ page }) => {
+  await open(page, "/profile?tab=account", [
+    { path: "/api/v1/me/webauthn/credentials", body: [] },
+    { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null } },
+    ...memberShellRoutes(),
+  ], 390);
+  // The switches' read never answers: the skeleton is what is measured.
+  await page.route("**/api/v1/me/preferences", () => undefined);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Privacy" })).toBeVisible();
+  await bigText(page);
+  await healthy(page);
 });

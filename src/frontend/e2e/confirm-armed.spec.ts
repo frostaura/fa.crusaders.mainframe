@@ -107,7 +107,7 @@ function base(extra: ApiRoute[] = []): ApiRoute[] {
  * member's own passkey list on /profile — a phone-first page, which is the harder test.
  */
 const PAGES = [
-  { label: "profile passkeys", path: "/profile", ready: /iPhone 15/ },
+  { label: "profile passkeys", path: "/profile?tab=account", ready: /iPhone 15/ },
 ];
 
 const SIZES = [
@@ -369,7 +369,7 @@ for (const size of SIZES) {
  */
 test("keeps the frame round its words in pixels, whatever the root font size", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
-  await open(page, "/profile", 0);
+  await open(page, "/profile?tab=account", 0);
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const padding = async () => {
@@ -428,7 +428,7 @@ test("keeps the frame round its words in pixels, whatever the root font size", a
  */
 test("brings the armed block into view when the trigger was at the bottom edge", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await open(page, "/profile", 0);
+  await open(page, "/profile?tab=account", 0);
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).last();
@@ -518,7 +518,7 @@ test("brings the armed block into view when the trigger was at the bottom edge",
  * </p>
  */
 test("Tab from the armed way out reaches the confirm instead of leaving the control", async ({ page }) => {
-  await open(page, "/profile", 0);
+  await open(page, "/profile?tab=account", 0);
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).first();
@@ -555,7 +555,7 @@ test("Tab from the armed way out reaches the confirm instead of leaving the cont
  */
 test("says out loud what it is about to do, and that it did not do it", async ({ page }) => {
   // P6: /profile, the one page left with an armed confirm (see PAGES).
-  await open(page, "/profile", 0);
+  await open(page, "/profile?tab=account", 0);
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).first();
@@ -724,7 +724,7 @@ test.describe("under forced colours", () => {
   /** And the armed pair specifically, which is the control the finding was raised on. */
   test("an armed confirm keeps both of its buttons bounded", async ({ page }) => {
     await page.emulateMedia({ forcedColors: "active" });
-    await open(page, "/profile", 0);
+    await open(page, "/profile?tab=account", 0);
     await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
     const wrapper = page.locator(CONFIRMS).first();
@@ -745,7 +745,7 @@ test.describe("under forced colours", () => {
    */
   test("an armed pair fills its row, and neither label wraps when the row is wide", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await open(page, "/profile", 0);
+    await open(page, "/profile?tab=account", 0);
     await expect(page.getByText("iPhone 15").first()).toBeVisible();
     const wrapper = page.locator(CONFIRMS).first();
     await wrapper.locator(PAIR_BUTTONS).first().click();
@@ -779,7 +779,7 @@ test.describe("under forced colours", () => {
    * </p>
    */
   test("tells the destructive half from the safe half without using colour", async ({ page }) => {
-    await open(page, "/profile", 0);
+    await open(page, "/profile?tab=account", 0);
     await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
     const wrapper = page.locator(CONFIRMS).first();
@@ -816,7 +816,7 @@ test.describe("under forced colours", () => {
  * gesture lands ON the confirm — the worst case — and nothing may be removed.
  */
 test("a double-click arms the confirm and never commits it", async ({ page }) => {
-  await open(page, "/profile", 0);
+  await open(page, "/profile?tab=account", 0);
   await expect(page.getByText("iPhone 15").first()).toBeVisible();
   const deletes: string[] = [];
   page.on("request", (r) => { if (r.method() === "DELETE") deletes.push(r.url()); });

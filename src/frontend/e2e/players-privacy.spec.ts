@@ -65,7 +65,7 @@ test.describe("P11: privacy, off until the member says otherwise", () => {
     const recorder: Recorder = { puts: [] };
     await signIn(page);
     await serveApi(page, privacyRoutes(recorder, { findable: true, show_in_leaderboards: true }));
-    await page.goto("/profile");
+    await page.goto("/profile?tab=account");
 
     const card = page.getByRole("region", { name: PRIVACY_COPY.title });
     await expect(card).toBeVisible();

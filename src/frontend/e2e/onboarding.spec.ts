@@ -121,7 +121,7 @@ test.describe("the always-reachable guide", () => {
     await page.goto("/my-code");
     await expect(page.getByRole("link", { name: /How it works, step by step/ })).toBeVisible();
 
-    await page.goto("/profile");
+    await page.goto("/profile?tab=account");
     await expect(page.getByRole("link", { name: "How it works" })).toBeVisible();
   });
 

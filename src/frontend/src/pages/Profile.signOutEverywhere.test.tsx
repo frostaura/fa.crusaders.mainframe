@@ -46,7 +46,7 @@ function renderProfile(routes: StubRoute[]) {
     ...routes,
   ]);
   render(
-    <MemoryRouter initialEntries={["/profile"]}>
+    <MemoryRouter initialEntries={["/profile?tab=account"]}>
       <AuthProvider>
         <ProfileProvider>
           <ToastProvider>
