@@ -28,3 +28,7 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
   `mac_address`, because every auto-registered box is named "Court box". Same six queries.
 - **R4 A4-5 (console):** where two boxes share a name (every one is "Court box" out of the factory)
   each carries its code and MAC; "N boxes haven't called in" counts distinct boxes, never tiles.
+- **R4 form factor (L2):** the tile folds duplicates to one line ("18 boxes claim this court ·
+  Review") that opens the followed box, the others as a list and the advice — 30 lines at 18 boxes
+  buried the court state on a phone. It reads no `door` (always null). The standing notice stays
+  unfolded despite SPEC §3.11 — it is the sentence that keeps the board honest (`monitoringCopy`).

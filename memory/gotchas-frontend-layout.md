@@ -50,3 +50,7 @@ last_verified: 2026-10-01
   TEXT is large for the box — the switcher, the Overview's links and the member header use it.
 - **`auto-fit` cannot collapse a track that a `col-span-full` item spans**: the armed confirm's
   sentence kept three tracks open and the pair took two of three (R4 A-15). Give the pair its own grid.
+- **A utility's `display` beats the `hidden` ATTRIBUTE** (R4, L2): preflight's `[hidden]` and `.flex`
+  tie on specificity and utilities come later, so `<div hidden className="flex">` shows. Toggle a class.
+- **A hidden `CardAction` still leaves the header's second grid column** (R4, L2): the description
+  auto-placed into it and squeezed the title to a letter a line. Put a conditional control in its own row.
