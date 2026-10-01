@@ -29,8 +29,10 @@ export function CrestMark({ className }: { className?: string }) {
 /**
  * The crest and the club's name, as the way home. The name truncates first — it is the one thing
  * in the top bar that carries no action of its own — and is shown only where the bar has room for
- * it: hidden on a phone (the chip and the avatar need the width) and between `md` and `lg`, where
- * the four tabs join the bar. Its accessible name is always the club.
+ * it: hidden on a phone (the chip and the avatar need the width) and where the four tabs have just
+ * joined the bar (44–60rem). In the BAR's rem (`@container/appbar`, V5-3), not the viewport's, so
+ * at 200 % text it gives the room back instead of pushing the row onto three lines. Its
+ * accessible name is always the club.
  */
 export function CrestLink({ to }: { to: string }) {
   return (
@@ -41,7 +43,7 @@ export function CrestLink({ to }: { to: string }) {
       className="no-lift flex min-h-touch min-w-touch items-center justify-center gap-2.5 rounded-lg"
     >
       <CrestMark />
-      <span aria-hidden="true" className="hidden min-w-0 truncate font-display text-lg font-bold tracking-tight text-text-primary sm:block md:hidden lg:block">
+      <span aria-hidden="true" className="hidden min-w-0 truncate font-display text-lg font-bold tracking-tight text-text-primary @[24rem]/appbar:block @[44rem]/appbar:hidden @[60rem]/appbar:block">
         Crusaders Squash
       </span>
     </Link>

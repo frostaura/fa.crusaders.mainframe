@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { intentProps } from "@/routeChunks";
 import { Link, useNavigate } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -6,7 +6,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
   DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Desktop, HandWaving, MapTrifold, Moon, Question, SignOut, Sun, UserCircle, type Icon } from "@/components/ui/icons";
+import { Desktop, HandWaving, MapTrifold, Moon, Question, SignOut, Sun, UserCircle, Wallet, type Icon } from "@/components/ui/icons";
+import { walletHref } from "@/lib/balance";
+import { formatCredits } from "@/lib/utils";
+import { useChipBalance } from "./chipBalance";
 import { useAuth } from "@/lib/auth";
 import {
   ADMIN_TOUR_PATH, GET_STARTED_PATH, GUIDE_LINK_LABEL, GUIDE_PATH, REPLAY_ADMIN_TOUR, REPLAY_WELCOME,
@@ -100,9 +103,11 @@ export function AccountMenu() {
   const name = profile?.full_name?.trim() || profile?.email || "Your account";
   const member = (profile?.status ?? "").toLowerCase() === "active";
   const admin = auth.status === "authenticated" && auth.isAdmin;
+  /** V5-4 — the chip has folded away (large text on a phone): the figure is said here instead. */
+  const [chipFolded, setChipFolded] = useState(false);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => { if (open) setChipFolded(chipIsFolded()); }}>
       <DropdownMenuTrigger
         aria-label="Account menu"
         data-account-menu=""
@@ -124,6 +129,7 @@ export function AccountMenu() {
       >
         <Identity name={name} email={profile?.email ?? null} photo={profile?.photo_url ?? null} />
         <DropdownMenuSeparator />
+        {chipFolded ? <WalletItem onSelect={going} /> : null}
         <DropdownMenuItem asChild onSelect={going}>
           <Link to="/profile" {...intentProps("/profile")}>
             <UserCircle size={16} aria-hidden="true" className="text-text-muted" />
@@ -176,6 +182,30 @@ export function AccountMenu() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Whether the credits chip is in the bar but not drawn (its slot folded at large text, V5-4). */
+function chipIsFolded(): boolean {
+  const slot = document.querySelector<HTMLElement>("[data-credits-chip-slot]");
+  // `checkVisibility` (not a computed style: cheap, and absent — so "not folded" — in jsdom).
+  return slot !== null && typeof slot.checkVisibility === "function" && !slot.checkVisibility();
+}
+
+/** The chip's figure as a menu item, for when the chip has folded away (V5-4). */
+function WalletItem({ onSelect }: { onSelect: () => void }) {
+  const { figures } = useChipBalance();
+  const shown = figures.shown;
+  return (
+    <DropdownMenuItem asChild onSelect={onSelect}>
+      <Link to={walletHref(shown)}>
+        <Wallet size={16} aria-hidden="true" className="text-text-muted" />
+        Wallet
+        <span className="ml-auto whitespace-nowrap font-semibold tabular-nums">
+          {shown === null ? "— cr" : formatCredits(shown)}
+        </span>
+      </Link>
+    </DropdownMenuItem>
   );
 }
 

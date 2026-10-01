@@ -194,23 +194,27 @@ describe("the Admin tab's attention badge", () => {
 });
 
 describe("the phone's bottom tab bar", () => {
-  /** The decision, as classes: fixed to the bottom below `md`, inline in the top bar from it. */
-  it("is fixed to the bottom edge on a phone and inline from md", async () => {
+  /**
+   * The decision, as classes: fixed to the bottom where the top bar is narrower than 44rem, inline
+   * in it from there (V5-3: the bar's own width in rem, so 768 px at normal text, and the bottom bar
+   * wherever large text would not fit the row — the browser half is `e2e/app-chrome`).
+   */
+  it("is fixed to the bottom edge on a phone and inline where the bar has room", async () => {
     memberClub();
     renderShell("/my-code");
     const nav = await screen.findByRole("navigation", { name: "Main" });
 
-    for (const token of ["fixed", "bottom-0", "inset-x-0", "md:static"]) expect(nav.className).toContain(token);
+    for (const token of ["fixed", "bottom-0", "inset-x-0", "@[44rem]/appbar:static"]) expect(nav.className).toContain(token);
     // The home indicator's inset is a spacer inside the bar (`height: env(safe-area-inset-bottom)`
     // — jsdom drops `env()` as invalid, so the value itself is measured in the browser), so the
     // published height already includes it.
     const spacer = nav.lastElementChild as HTMLElement;
     expect(spacer).toHaveAttribute("aria-hidden", "true");
-    expect(spacer.className).toContain("md:hidden");
+    expect(spacer.className).toContain("@[44rem]/appbar:hidden");
     // Every tab is a 64px target on the phone and 44px in the top bar — never a 36px one.
     for (const link of within(nav).getAllByRole("link")) {
       expect(link.className).toContain("min-h-tabbar");
-      expect(link.className).toContain("md:min-h-touch");
+      expect(link.className).toContain("@[44rem]/appbar:min-h-touch");
     }
   });
 

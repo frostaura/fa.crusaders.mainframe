@@ -80,8 +80,16 @@ const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-
  *   at x=0.</li>
  * </ul>
  */
+/*
+ * `@container/appbar` (V5-3, review round 5): the bar is the query container for its own parts —
+ * whether the tabs sit inline (`PrimaryNav`), whether the club's name shows (`CrestLink`) and
+ * whether the chip stands in the row (`CreditsChip`) are decided by the bar's width in REM, so at
+ * 200 % text they follow what fits rather than the viewport's `md`/`lg`. A container does not
+ * capture the phone tab bar's `position: fixed` (checked in Chromium): only a transform, filter,
+ * backdrop-filter or layout/paint containment would.
+ */
 const HEADER_FRAME = [
-  "mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
+  "@container/appbar mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
   "3xl:px-12 3xl:group-has-[[data-page-frame=full]]/shell:max-w-page",
 ].join(" ");
 /** 3xl: the frame's gutter is 3rem, so the gap from the crest box is too (3xl:px-12 would put the pl back). */
@@ -172,6 +180,8 @@ export default function AppShell() {
           actions, so that when large text wraps the row it stays up beside the crest and the
           chip and avatar drop to the next line together, right-aligned — two lines, not three.
           On one line the bell's auto margin takes the free space and the actions follow it.
+          V5-3: it pulls the chip closer by 0.75rem, not 1rem — at 1rem the chip sat OVER the
+          bell's box, and over the count hanging off its glyph.
         */}
         <div className={frame.header}>
           <div data-app-crest="" className={frame.crest}>
@@ -183,7 +193,7 @@ export default function AppShell() {
             said so again: on one bar of signal the check is out for many seconds, and the bell,
             the chip and Sign out went with it while the page and the tab bar were already drawn.
           */}
-          {memberChrome ? <NotificationBell className="ml-auto md:-mr-4" /> : null}
+          {memberChrome ? <NotificationBell className="ml-auto @[44rem]/appbar:-mr-3" /> : null}
           <div data-app-header-actions="" className={cn("flex min-w-0 flex-wrap items-center justify-end gap-2", !memberChrome && "ml-auto")}>
             {memberChrome ? <><CreditsChip /><AccountMenu /></> : null}
             {auth.status === "anonymous" ? (

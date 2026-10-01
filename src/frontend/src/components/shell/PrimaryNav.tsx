@@ -13,7 +13,11 @@ import type { AdminAttention } from "@/lib/adminAttention";
  *   equal-width tabs (24px icon, filled when active, over an xs label) plus the home-indicator
  *   safe area. Its height is published as <code>--app-bottom-bar-height</code> so the page, the
  *   toast strip and the multiselect ActionBar all sit above it.</li>
- *   <li><b>From `md`</b> it is inline in the top bar: 44px pills, icon + label.</li>
+ *   <li><b>Where the top bar is 44rem wide or more</b> it is inline in the top bar: 44px pills, icon
+ *   + label. V5-3 (review round 5): this was the viewport's `md`, and at 200 % text from 768 to
+ *   1440 px the tabs did not fit beside the crest and the actions — the crest stood alone on a row,
+ *   the icons were squeezed to slivers. The bar's own width in rem (`@container/appbar` in
+ *   `AppShell`) is the same 768 px at normal text, and keeps the bottom bar where the words need it.</li>
  * </ul>
  *
  * <p>
@@ -35,11 +39,11 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
       data-primary-nav=""
       className={cn(
         "fixed inset-x-0 bottom-0 z-chrome border-t border-border bg-bg-surface shadow-md",
-        "md:static md:z-auto md:min-w-0 md:border-0 md:bg-transparent md:shadow-none",
+        "@[44rem]/appbar:static @[44rem]/appbar:z-auto @[44rem]/appbar:min-w-0 @[44rem]/appbar:border-0 @[44rem]/appbar:bg-transparent @[44rem]/appbar:shadow-none",
       )}
       style={{ paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" }}
     >
-      <ul className="grid auto-cols-fr grid-flow-col md:flex md:items-center md:gap-1">
+      <ul className="grid auto-cols-fr grid-flow-col @[44rem]/appbar:flex @[44rem]/appbar:items-center @[44rem]/appbar:gap-1">
         {items.map((item) => (
           <li key={item.to} className="min-w-0">
             <PrimaryLink item={item} badge={item.adminOnly ? attention : null} />
@@ -47,7 +51,7 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
         ))}
       </ul>
       {/* The home indicator's inset, on the phone bar only — it is 0 on a desktop anyway. */}
-      <div aria-hidden="true" className="md:hidden" style={{ height: "env(safe-area-inset-bottom)" }} />
+      <div aria-hidden="true" className="@[44rem]/appbar:hidden" style={{ height: "env(safe-area-inset-bottom)" }} />
     </nav>
   );
 }
@@ -55,9 +59,9 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
 const LINK = [
   "no-lift group relative flex min-h-tabbar flex-col items-center justify-center gap-1 px-0.5 text-xs font-medium",
   "transition-colors duration-fast ease-standard motion-reduce:transition-none",
-  "md:min-h-touch md:flex-row md:gap-2 md:rounded-lg md:px-2 md:text-sm lg:px-3",
-  // The label's size (TAB_LABEL): capped by the column on a phone, the row's text-sm from md.
-  "[--tab-label-size:min(0.75rem,5vw)] md:[--tab-label-size:0.875rem]",
+  "@[44rem]/appbar:min-h-touch @[44rem]/appbar:flex-row @[44rem]/appbar:gap-2 @[44rem]/appbar:rounded-lg @[44rem]/appbar:px-2 @[44rem]/appbar:text-sm @[56rem]/appbar:px-3",
+  // The label's size (TAB_LABEL): capped by the column on a phone, the row's text-sm inline.
+  "[--tab-label-size:min(0.75rem,5vw)] @[44rem]/appbar:[--tab-label-size:0.875rem]",
 ].join(" ");
 
 /**
@@ -83,7 +87,7 @@ const PILL_BOX = { height: 32, maxWidth: 56 } as const;
 
 const ICON_PILL = [
   "relative flex w-full items-center justify-center rounded-full transition-colors duration-fast ease-standard",
-  "motion-reduce:transition-none md:contents",
+  "motion-reduce:transition-none @[44rem]/appbar:contents",
 ].join(" ");
 
 /**
@@ -106,13 +110,14 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
       {...intentProps(to)}
       className={({ isActive }) => cn(
         LINK,
-        isActive ? "font-semibold text-accent-strong md:bg-accent-soft" : "text-text-secondary hover:text-text-primary md:hover:bg-bg-muted",
+        isActive ? "font-semibold text-accent-strong @[44rem]/appbar:bg-accent-soft" : "text-text-secondary hover:text-text-primary @[44rem]/appbar:hover:bg-bg-muted",
       )}
     >
       {({ isActive }) => (
         <>
           <span className={cn(ICON_PILL, isActive && "bg-accent-soft")} style={PILL_BOX}>
-            <Glyph size={24} weight={isActive ? "fill" : "regular"} aria-hidden="true" className="md:size-5" />
+            {/* shrink-0 (V5-3): inline, the icon is the link's own flex item, and a long label squeezed it to a sliver. */}
+            <Glyph size={24} weight={isActive ? "fill" : "regular"} aria-hidden="true" className="shrink-0 @[44rem]/appbar:size-5" />
             {badge ? <CountBadge attention={badge} /> : null}
           </span>
           {/*
@@ -122,7 +127,7 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
             its neighbours' words are shorter) rather than losing letters. The bar grows by the
             label's lines and publishes its new height, so nothing sits under it.
           */}
-          <span data-tab-label="" className="whitespace-normal break-normal text-center leading-tight md:whitespace-nowrap" style={TAB_LABEL}>{label}</span>
+          <span data-tab-label="" className="whitespace-normal break-normal text-center leading-tight @[44rem]/appbar:whitespace-nowrap" style={TAB_LABEL}>{label}</span>
         </>
       )}
     </NavLink>
@@ -149,9 +154,10 @@ function CountBadge({ attention }: { attention: Pick<AdminAttention, "total" | "
         // X-10: the digits grow with the text to 20 px and no further, and the box (BADGE_BOX) is
         // pixel-padded around them — a count whose number is also the link's accessible name, not
         // body text. At 200 % a rem box (40 px) was wider than the room right of the icon.
-        "absolute bottom-1/2 inline-flex items-center justify-center rounded-full",
+        // shrink-0 (V5-3): inline it is a flex item of the link, and squeezed its "96" out of the circle.
+        "absolute bottom-1/2 inline-flex shrink-0 items-center justify-center rounded-full",
         "bg-danger-solid text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
-        "md:static md:order-last md:ml-0 md:ring-0",
+        "@[44rem]/appbar:static @[44rem]/appbar:order-last @[44rem]/appbar:ml-0 @[44rem]/appbar:ring-0",
       )}
       style={BADGE_BOX}
     >

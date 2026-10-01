@@ -47,7 +47,9 @@ export function NotificationBell({ className }: { className?: string }) {
       aria-label={bellLabel(count)}
       aria-current={here ? "page" : undefined}
       className={cn(
-        "no-lift relative inline-flex size-touch shrink-0 items-center justify-center rounded-full border border-transparent",
+        // z-raised (V5-3): the count hangs off the glyph past the link's edge, and the credits chip
+        // beside it painted over it at large text.
+        "no-lift relative z-raised inline-flex size-touch shrink-0 items-center justify-center rounded-full border border-transparent",
         "text-text-secondary transition-colors duration-fast ease-standard hover:bg-bg-muted hover:text-text-primary motion-reduce:transition-none",
         here && "bg-accent-soft text-accent-strong",
         className,

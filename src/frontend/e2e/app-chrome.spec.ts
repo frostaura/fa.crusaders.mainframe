@@ -350,9 +350,13 @@ test.describe("B12 — the chrome at a large root font size", () => {
     expect(box.width).toBeGreaterThanOrEqual(44);
   });
 
-  /** The wallet chip once showed a balance of 0 as "0…". */
+  /**
+   * The wallet chip once showed a balance of 0 as "0…". V5-4 (review round 5): on a phone at this
+   * text size the chip folds into the account menu so the bar is one row — the figure is whole in
+   * both places it can be.
+   */
   test("never abbreviates the wallet balance", async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 568 });
+    await page.setViewportSize({ width: 768, height: 800 });
     await openAdmin(page, "/admin/settings", 32);
 
     const chip = page.locator('header[data-app-header] a[aria-label^="Wallet balance"]');
@@ -364,6 +368,18 @@ test.describe("B12 — the chrome at a large root font size", () => {
     expect(figure.text).not.toContain("…");
     expect(figure.text).toBe("0.00 cr");
     expect(figure.clipped, "the balance is cut off inside its own box").toBe(false);
+
+    await page.setViewportSize({ width: 320, height: 568 });
+    await expect(chip).toBeHidden();
+    await page.getByRole("button", { name: "Account menu" }).click();
+    const item = page.getByRole("menuitem", { name: /^Wallet/ });
+    await expect(item).toBeVisible();
+    const inMenu = await item.locator("span").last().evaluate((el) => ({
+      text: (el as HTMLElement).innerText,
+      clipped: el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().right > window.innerWidth,
+    }));
+    expect(inMenu.text).toBe("0.00 cr");
+    expect(inMenu.clipped, "the balance is cut off in the menu").toBe(false);
   });
 });
 
@@ -505,5 +521,84 @@ test.describe("the account menu", () => {
     await page.getByRole("menuitem", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login$/);
     expect(await page.evaluate(() => localStorage.getItem("crusaders.mainframe.token"))).toBeNull();
+  });
+});
+
+/**
+ * V5-3 / V4-11 (review round 5) — the top bar from `md` at 200 % text. At 768 the crest stood
+ * alone on a row (right-aligned), the tab icons were squeezed to slivers, the Admin count spilled
+ * out of its circle and the credits chip covered the bell's count; at 1024–1280 the crest was
+ * alone on the first of THREE rows. Large text now decides by the bar's own width in rem: where
+ * crest, tabs and actions do not fit one row, the tabs are the bottom tab bar (as on a phone).
+ */
+test.describe("V5-3 — the top bar at 200 % text from md", () => {
+  const withCounts = () => routes([
+    { path: "/api/v1/admin/members", body: [{ id: "m1", full_name: "Pending Person", email: "p@x.review.test", status: "PendingApproval" }] },
+    { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 3 } },
+  ]);
+
+  async function header(page: Page) {
+    return page.evaluate(() => {
+      const row = document.querySelector<HTMLElement>("header[data-app-header] > div")!;
+      const crest = document.querySelector<HTMLElement>("[data-crest-link]")!.getBoundingClientRect();
+      const others = [...row.children]
+        .filter((k) => !k.contains(document.querySelector("[data-crest-link]")) && getComputedStyle(k).position !== "fixed")
+        .map((k) => k.getBoundingClientRect())
+        .filter((b) => b.width > 0);
+      const icons = [...document.querySelectorAll<SVGElement>("nav[data-primary-nav] a svg")].map((s) => s.getBoundingClientRect().width);
+      const spilled = [...document.querySelectorAll<HTMLElement>("[data-attention-badge], [data-unread-badge]")]
+        .filter((b) => b.scrollWidth > b.clientWidth + 1 || b.scrollHeight > b.clientHeight + 1).length;
+      const badge = document.querySelector<HTMLElement>("[data-unread-badge]");
+      let onTop: string | null = null;
+      if (badge) {
+        const b = badge.getBoundingClientRect();
+        const hit = document.elementFromPoint(b.right - 3, b.top + b.height / 2);
+        onTop = hit && (hit === badge || badge.contains(hit)) ? "badge" : (hit?.closest("[data-credits-chip]") ? "chip" : hit?.tagName ?? null);
+      }
+      return {
+        crestShares: others.some((b) => b.top < crest.bottom && b.bottom > crest.top),
+        rows: new Set([...row.children].filter((k) => getComputedStyle(k).position !== "fixed").map((k) => Math.round(k.getBoundingClientRect().top))).size,
+        smallestIcon: Math.min(...icons),
+        spilled,
+        onTop,
+        docScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+  }
+
+  for (const size of [{ width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1280, height: 800 }, { width: 1920, height: 1080 }]) {
+    test(`never leaves the crest alone, nor squeezes an icon or a count, at ${size.width} px`, async ({ page }) => {
+      await page.setViewportSize(size);
+      await signIn(page);
+      await serveApi(page, withCounts());
+      await page.goto("/admin/settings");
+      await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
+      await expect(page.locator("[data-unread-badge]")).toBeVisible();
+      await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+      await page.waitForTimeout(200);
+
+      const h = await header(page);
+      expect(h.crestShares, "the crest is alone on its row").toBe(true);
+      expect(h.smallestIcon, "a tab's icon was squeezed").toBeGreaterThanOrEqual(16);
+      expect(h.spilled, "a count spilled out of its circle").toBe(0);
+      expect(h.onTop, "the credits chip covers the bell's count").toBe("badge");
+      expect(h.docScroll).toBeLessThanOrEqual(1);
+    });
+  }
+
+  /** V5-4 — at 320 px and 200 % text the bar is one row: the balance moves into the account menu. */
+  test("is one row on a 320 px phone at 200 % text, with the balance one tap away in the menu", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await openMember(page);
+    await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+    await page.waitForTimeout(200);
+
+    const height = await page.evaluate(() => document.querySelector<HTMLElement>("header[data-app-header]")!.getBoundingClientRect().height);
+    expect(height, `the top bar is ${height}px tall`).toBeLessThanOrEqual(64);
+
+    await page.getByRole("button", { name: "Account menu" }).click();
+    const wallet = page.getByRole("menuitem", { name: /Wallet.*500\.00 cr/ });
+    await expect(wallet).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
   });
 });
