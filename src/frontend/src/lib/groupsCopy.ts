@@ -1066,5 +1066,9 @@ export function rulesChangeLines(before: RulesForLines, after: RulesForLines): s
  * (F3.23: the page read "League members members get the club's limit").
  */
 export function membersOf(groupName: string): string {
-  return /\bmembers$/i.test(groupName.trim()) ? groupName.trim() : `${groupName} members`;
+  const name = groupName.trim();
+  if (/\bmembers$/i.test(name)) return name;
+  // The editor's stand-in for a group not yet named (R5 A5-10: "This group members get…").
+  if (/^this group$/i.test(name)) return `${name}'s members`;
+  return `${name} members`;
 }

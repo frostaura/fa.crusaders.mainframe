@@ -86,6 +86,15 @@ describe("AdminWebhooks", () => {
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value } });
   }
 
+  /** R5 A5-10: an endpoint with no description read "(no description)", and so did its menu's name. */
+  it("names an endpoint with no description by where it sends", async () => {
+    stubFetch([{ path: LIST, body: [{ ...endpointFixture(), description: null }] }]);
+    renderPage(<AdminWebhooksPage />);
+    expect(await screen.findByText("Endpoint to scoreboard.example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More actions for Endpoint to scoreboard.example.com" })).toBeInTheDocument();
+    expect(screen.queryByText(/no description/)).not.toBeInTheDocument();
+  });
+
   /**
    * D-F2. The five cells of the one row read
    * <code>["Invalid Date", "", "", "", "undefinedms"]</code> and React logged a duplicate-key

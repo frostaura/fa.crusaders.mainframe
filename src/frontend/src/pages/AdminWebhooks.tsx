@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { describeFailure } from "../lib/errors";
-import { LOST_CREATE } from "../lib/webhooksCopy";
+import { LOST_CREATE, endpointName } from "../lib/webhooksCopy";
 import { ActionsMenu } from "../components/admin/ActionsMenu";
 import { Alert } from "../components/Alert";
 import { StaleNotice } from "../components/shell/StaleNotice";
@@ -462,7 +462,7 @@ function EndpointRow(props: {
 }) {
   const { endpoint: w, open, deliveries } = props;
   const tokens = parseFilter(w.event_filter);
-  const name = w.description ?? "(no description)";
+  const name = endpointName(w);
   return (
     <li className="flex flex-col gap-3 p-4">
       <div className="flex items-start gap-3">

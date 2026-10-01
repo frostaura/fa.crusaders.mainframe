@@ -562,4 +562,9 @@ describe("membersOf (F3.23)", () => {
     expect(membersOf("League members")).toBe("League members");
     expect(membersOf("Juniors")).toBe("Juniors members");
   });
+
+  /** R5 A5-10: an unnamed group's editor said "This group members get…". */
+  it("says an unnamed group's members as a possessive", () => {
+    expect(membersOf("This group")).toBe("This group's members");
+  });
 });
