@@ -1,5 +1,6 @@
 import { Card } from "../components/ui/card";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { AutoGrid } from "../components/ui/auto-grid";
 import { TextLink } from "../components/ui/text-link";
 import { typography } from "../lib/typography";
 import { ILLUSTRATIONS } from "../components/onboarding/Illustrations";
@@ -52,14 +53,16 @@ export default function HowItWorksPage() {
   const steps = guideSteps({ doors });
 
   return (
-    <PageShell width="narrow">
+    // R4 form factor (SPEC P3): `content`, `wide` from xl, the steps as cards in rows (two at
+    // lg, three on a wide page) rather than one 36rem column of them.
+    <PageShell width="content" className="xl:max-w-wide">
       <PageHeader title={GUIDE_TITLE} description={GUIDE_INTRO} />
-      <ol className="flex flex-col gap-4">
+      <AutoGrid as="ol" min="card" max={3} gap="lg" className="items-start">
         {steps.map((step, index) => {
           const Illustration = step.illustration ? ILLUSTRATIONS[step.illustration] : null;
           return (
             <li key={step.id}>
-              <Card className="px-4 sm:px-6">
+              <Card className="@container/step px-4 sm:px-6">
                 <h2 className={`${typography({ variant: "h3" })} flex items-start gap-3`}>
                   {/* The step's number, as a badge — aria-hidden because the <ol> already says it. */}
                   <span
@@ -71,16 +74,17 @@ export default function HowItWorksPage() {
                   <span className="min-w-0 self-center break-words">{step.title}</span>
                 </h2>
                 {/*
-                  The drawing sits BESIDE the sentences from `sm` up and above them on a phone,
-                  and it never carries an instruction on its own — every one of the paragraphs
-                  below says the same thing in words.
+                  The drawing sits BESIDE the sentences in a card 28rem wide and above them in a
+                  narrower one (the card's width, not the viewport's: three cards a row on a desktop
+                  are narrow), and it never carries an instruction on its own — every one of the
+                  paragraphs below says the same thing in words.
                 */}
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                  <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm text-text-secondary sm:pl-11">
+                <div className="flex flex-col gap-4 @[28rem]/step:flex-row @[28rem]/step:items-start">
+                  <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm text-text-secondary @[28rem]/step:pl-11">
                     {step.body.map((line) => <p key={line}>{line}</p>)}
                   </div>
                   {Illustration && (
-                    <div className="shrink-0 self-center text-text-secondary sm:self-start">
+                    <div className="shrink-0 self-center text-text-secondary @[28rem]/step:self-start">
                       <Illustration />
                     </div>
                   )}
@@ -89,7 +93,7 @@ export default function HowItWorksPage() {
             </li>
           );
         })}
-      </ol>
+      </AutoGrid>
 
       {/* Where a member goes next. Links, because both navigate. */}
       <nav aria-label="Next steps" className="flex flex-wrap gap-x-6">

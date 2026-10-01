@@ -530,3 +530,19 @@ test("Profile at 390 with 200 % text: the account's switch skeletons stay on the
   await bigText(page);
   await healthy(page);
 });
+
+test.describe("How it works (SPEC P3)", () => {
+  for (const width of [390, 1280, 1920] as const) {
+    test(`${width}px: the steps in rows of cards on a desktop, one column on a phone`, async ({ page }, info) => {
+      test.skip(width !== 390 && info.project.name !== "desktop", "a desktop width");
+      await open(page, "/how-it-works", memberShellRoutes(), width);
+      const steps = page.locator("main ol > li");
+      await expect(steps.first()).toBeVisible();
+      await healthy(page);
+      const ys = await steps.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().y)));
+      const firstRow = ys.filter((y) => y === ys[0]).length;
+      if (width >= 1280) expect(firstRow).toBe(3);
+      else expect(firstRow).toBe(1);
+    });
+  }
+});
