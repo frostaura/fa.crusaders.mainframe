@@ -98,9 +98,9 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
      kRevertSeconds,
      kShowFlagCountdown},
     {ScreenId::InsufficientBalance,
-     {{"TOO FEW CREDITS", RowArg::None, ""},
-      {"Top up to play", RowArg::None, ""},
-      {"Top up in the app", RowArg::None, ""},
+     {{"TOO FEW MINUTES", RowArg::None, ""},
+      {"Buy more time", RowArg::None, ""},
+      {"Buy in the app", RowArg::None, ""},
       {"SCAN WHEN READY", RowArg::None, ""}},
      kRevertSeconds,
      kShowFlagCountdown},
@@ -285,23 +285,24 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
      0U},
 
     // --- D10: pay for somebody else's court ----------------------------------
-    // The founder's words are `CT2 BOOKED / PAY 50cr? PRESS CT2`. On the fitted
-    // 20x4 they would fit as two lines, but row 1 would then be nineteen columns
-    // and the safe-subset contract clips it at sixteen to `PAY 50cr? PRESS ` —
-    // a question with the instruction cut off. So the same words run down three
-    // rows: the verdict (row 0), the question (row 1), the instruction (row 2).
-    // On a 1602 the member still reads `CT2 BOOKED / PAY 50cr?`, which is true
-    // and complete as a question; the second press is the only answer there is.
+    // The founder's words are `CT2 BOOKED / PAY 50 MIN? PRESS CT2` (minutes, P13
+    // §8). On the fitted 20x4 they would not fit as two lines: row 1 would be
+    // twenty-two columns and the safe-subset contract clips it at sixteen to
+    // `PAY 50 MIN? PRES` — a question with the instruction cut off. So the same
+    // words run down three rows: the verdict (row 0), the question (row 1), the
+    // instruction (row 2). On a 1602 the member still reads `CT2 BOOKED / PAY 50
+    // MIN?`, which is true and complete as a question; the second press is the
+    // only answer there is. The widest question is `PAY 9999 MIN?`, thirteen.
     {ScreenId::PayForQuote,
      {{"CT", RowArg::CourtNumber, " BOOKED"},
-      {"PAY ", RowArg::Amount, "cr?"},
+      {"PAY ", RowArg::Amount, " MIN?"},
       {"PRESS CT", RowArg::CourtNumber, " TO PAY"},
       {"", RowArg::CourtCells, ""}},
      kChoiceSeconds,
      kShowFlagCountdown},
     {ScreenId::PayForPaid,
      {{"PAID FOR CT", RowArg::CourtNumber, ""},
-      {"", RowArg::Amount, "cr CHARGED"},
+      {"", RowArg::Amount, " MIN PAID"},
       {"Booker refunded", RowArg::None, ""},
       {"THANK YOU", RowArg::None, ""}},
      kRevertSeconds,

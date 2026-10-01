@@ -70,23 +70,15 @@ bool validAmountLabel(const char* label) {
     return false;
   }
   const size_t len = strlen(label);
-  if (len == 0U || len > kMaxAmountLabelLen || label[0] == '.' || label[len - 1U] == '.') {
+  if (len == 0U || len > kMaxAmountLabelDigits) {
     return false;
   }
-  size_t dot = len;
   for (size_t i = 0U; i < len; ++i) {
-    if (label[i] == '.') {
-      if (dot != len) {
-        return false; // a second point
-      }
-      dot = i;
-      continue;
-    }
     if (label[i] < '0' || label[i] > '9') {
-      return false;
+      return false; // a point, a sign, a separator: whole minutes are digits only
     }
   }
-  return dot == len || (len - dot - 1U) <= 2U;
+  return label[0] != '0' || len == 1U; // "0" is a number; "045" is not the server's
 }
 
 size_t renderPayForBody(char* out, size_t cap, const PayForRequest& request) {

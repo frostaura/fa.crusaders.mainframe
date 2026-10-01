@@ -207,8 +207,8 @@
     {
       "id": "payfor-quote-ok",
       "kind": "payfor_quote",
-      "note": "payable: the glass asks CT2 BOOKED / PAY 50cr? / PRESS CT2 TO PAY",
-      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530227d",
+      "note": "payable: the glass asks CT2 BOOKED / PAY 50 MIN? / PRESS CT2 TO PAY",
+      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f6d696e75746573223a35302c22616d6f756e745f6c6162656c223a223530227d",
       "expect": {
         "outcome": "quote",
         "court_number": 2,
@@ -216,26 +216,8 @@
         "screen": "PayForQuote",
         "rows": [
           "CT2 BOOKED",
-          "PAY 50cr?",
+          "PAY 50 MIN?",
           "PRESS CT2 TO PAY",
-          "A   B   C   D"
-        ]
-      }
-    },
-    {
-      "id": "payfor-quote-ok-fractional",
-      "kind": "payfor_quote",
-      "note": "amount_label is the SERVER's rendering — the box has no decimal arithmetic and must not invent one",
-      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a342c22616d6f756e745f63726564697473223a33322e352c22616d6f756e745f6c6162656c223a2233322e35227d",
-      "expect": {
-        "outcome": "quote",
-        "court_number": 4,
-        "amount_label": "32.5",
-        "screen": "PayForQuote",
-        "rows": [
-          "CT4 BOOKED",
-          "PAY 32.5cr?",
-          "PRESS CT4 TO PAY",
           "A   B   C   D"
         ]
       }
@@ -243,16 +225,16 @@
     {
       "id": "payfor-quote-widest",
       "kind": "payfor_quote",
-      "note": "the widest quote the contract allows: a four-digit court and a six-character label",
-      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a393939392c22616d6f756e745f63726564697473223a393939392e352c22616d6f756e745f6c6162656c223a22393939392e35227d",
+      "note": "the widest quote the contract allows: a four-digit court and a four-digit label of whole minutes — PAY 9999 MIN? is thirteen columns",
+      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a393939392c22616d6f756e745f6d696e75746573223a393939392c22616d6f756e745f6c6162656c223a2239393939227d",
       "expect": {
         "outcome": "quote",
         "court_number": 9999,
-        "amount_label": "9999.5",
+        "amount_label": "9999",
         "screen": "PayForQuote",
         "rows": [
           "CT9999 BOOKED",
-          "PAY 9999.5cr?",
+          "PAY 9999 MIN?",
           "PRESS CT9999 TO PAY",
           "A   B   C   D"
         ]
@@ -352,24 +334,34 @@
     {
       "id": "payfor-quote-bad-label",
       "kind": "payfor_quote",
-      "note": "a label the glass cannot show honestly (seven characters) is no decision: the box falls back to the walk-up choice rather than asking a member to agree to a number it cut",
-      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a31323334352e352c22616d6f756e745f6c6162656c223a2231323334352e35227d",
+      "note": "a label the glass cannot show honestly (five digits) is no decision: the box falls back to the walk-up choice rather than asking a member to agree to a number it cut. The server never sends one — it refuses such a price as amount_unshowable first",
+      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f6d696e75746573223a31323334352c22616d6f756e745f6c6162656c223a223132333435227d",
       "expect": {
         "outcome": "walkup"
+      }
+    },
+    {
+      "id": "payfor-quote-unshowable",
+      "kind": "payfor_quote",
+      "note": "the server's own refusal of a price above 9999 minutes: a reason the box does not know by name, so SEE THE DESK — which is where such a court is settled",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a22616d6f756e745f756e73686f7761626c65222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "SeeTheDesk"
       }
     },
     {
       "id": "payfor-confirm-paid",
       "kind": "payfor_confirm",
       "note": "paid: the booker is refunded and both are emailed server-side; the court is already lit, so granted_seconds is 0 and nothing is switched",
-      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f63726564697473223a3131382e302c227265706c61796564223a66616c73652c226772616e7465645f7365636f6e6473223a307d",
+      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f6d696e75746573223a35302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f6d696e75746573223a3131382c227265706c61796564223a66616c73652c226772616e7465645f7365636f6e6473223a307d",
       "expect": {
         "outcome": "paid",
         "granted_seconds": 0,
         "screen": "PayForPaid",
         "rows": [
           "PAID FOR CT2",
-          "50cr CHARGED"
+          "50 MIN PAID"
         ]
       }
     },
@@ -377,7 +369,7 @@
       "id": "payfor-confirm-paid-lights",
       "kind": "payfor_confirm",
       "note": "paid for a booking nobody has started: the server grants the remainder and the box lights the court as it would for an activation",
-      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f63726564697473223a3131382e302c227265706c61796564223a66616c73652c226772616e7465645f7365636f6e6473223a323730307d",
+      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f6d696e75746573223a35302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f6d696e75746573223a3131382c227265706c61796564223a66616c73652c226772616e7465645f7365636f6e6473223a323730307d",
       "expect": {
         "outcome": "paid",
         "granted_seconds": 2700,
@@ -388,7 +380,7 @@
       "id": "payfor-confirm-replayed",
       "kind": "payfor_confirm",
       "note": "the same nonce again after a lost answer: the FIRST payment, never a second",
-      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f63726564697473223a3131382e302c227265706c61796564223a747275652c226772616e7465645f7365636f6e6473223a307d",
+      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f6d696e75746573223a35302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f6d696e75746573223a3131382c227265706c61796564223a747275652c226772616e7465645f7365636f6e6473223a307d",
       "expect": {
         "outcome": "paid",
         "granted_seconds": 0,

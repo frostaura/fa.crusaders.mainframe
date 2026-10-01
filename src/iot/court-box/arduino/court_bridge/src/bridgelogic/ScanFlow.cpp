@@ -22,7 +22,7 @@ struct ReasonLines {
 
 constexpr ReasonLines kReasons[] = {
     {"no_booking", "NO BOOKING", "SEE THE DESK"},
-    {"insufficient_balance", "TOO FEW CREDITS", "TOP UP & RETRY"},
+    {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY"},
     {"wrong_court", "WRONG COURT", "SEE THE DESK"},
     {"not_recognised", "NOT RECOGNISED", "SEE THE DESK"},
     {"not_chargeable", "SEE THE DESK", ""},
@@ -41,7 +41,7 @@ constexpr ReasonLines kReasons[] = {
 };
 
 /// The one reason that says the API did NOT identify anybody. Every other
-/// reason is a verdict about a known member — no booking, no credit, wrong
+/// reason is a verdict about a known member — no booking, too few minutes, wrong
 /// court, too early — and a known member may still buy time at the buttons.
 constexpr char kNotRecognised[] = "not_recognised";
 

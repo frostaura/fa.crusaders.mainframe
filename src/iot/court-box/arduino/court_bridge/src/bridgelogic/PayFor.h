@@ -5,7 +5,7 @@
 // THE FLOW, AS THE FOUNDER SPECIFIED IT
 // -------------------------------------
 //   scan -> press the booked court's button -> the glass asks
-//   `CT2 BOOKED / PAY 50cr? / PRESS CT2 TO PAY` -> press it again -> paid.
+//   `CT2 BOOKED / PAY 50 MIN? / PRESS CT2 TO PAY` -> press it again -> paid.
 //
 // Two presses and two calls to `POST /api/v1/device/pay-for`: the first with
 // `confirm:false`, which moves no money and returns the price the glass will
@@ -36,7 +36,7 @@
 // --------------
 // Refused by the server (`split_booking`) and shown as `SPLIT BOOKING / PAY IN
 // APP`: each player's share is theirs to pay in the app, and a box that could
-// take one member's credit for everybody's share is a box that settles a debt
+// take one member's minutes for everybody's share is a box that settles a debt
 // nobody agreed to.
 //
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
@@ -105,9 +105,10 @@ struct PayForAnswer {
   uint32_t grantedSeconds = 0U;
 };
 
-/// A label the glass can show honestly: one to six characters, digits with at
-/// most one `.` that is neither first nor last and has one or two digits after
-/// it. Anything else is refused, never cut.
+/// A label the glass can show honestly: whole minutes, one to four ASCII digits
+/// (kMaxAmountLabelDigits) and nothing else — no point, no sign, no separator,
+/// and no leading zero except `0` itself (P13 §8). Anything else is refused,
+/// never cut.
 bool validAmountLabel(const char* label);
 
 /// Interprets the answer to a QUOTE for the court numbered `courtNumber`.

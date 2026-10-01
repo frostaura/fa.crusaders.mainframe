@@ -36,7 +36,7 @@ struct ErrorLines {
 
 constexpr ErrorLines kErrors[] = {
     // Priced: the API knows who this is and what they have.
-    {"insufficient_balance", "TOO FEW CREDITS", "TOP UP & RETRY", true},
+    {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY", true},
     // A verdict about the court, for a member the API identified.
     {"court_in_use", "COURT NOT FREE", "SCAN TO START", true},
     // Distinct from court_in_use: the court is empty and the next player is
@@ -113,7 +113,7 @@ constexpr char kClubClosed[] = "club_closed";
 /// so nothing here recognises anybody.
 court::Outcome byStatus(uint16_t status) {
   if (status == 402U) {
-    return lines("TOO FEW CREDITS", "TOP UP & RETRY");
+    return lines("TOO FEW MINUTES", "BUY & RETRY");
   }
   if (status == 409U) {
     return lines("COURT NOT FREE", "SCAN TO START");

@@ -689,19 +689,31 @@ void test_pay_for_confirm_that_got_no_decision_keeps_the_nonce(void) {
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Refused, bridgelogic::onPayForConfirm(404U, "", 0U, "50").kind);
   // Paid with no label of its own shows what the member agreed to.
   const char paid[] = "{\"paid\":true,\"reason\":\"ok\",\"court_number\":2}";
-  const bridgelogic::PayForAnswer a = bridgelogic::onPayForConfirm(200U, paid, strlen(paid), "32.5");
+  const bridgelogic::PayForAnswer a = bridgelogic::onPayForConfirm(200U, paid, strlen(paid), "45");
   TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Paid, a.kind);
-  TEST_ASSERT_EQUAL_STRING("32.5", a.amountLabel);
+  TEST_ASSERT_EQUAL_STRING("45", a.amountLabel);
   TEST_ASSERT_EQUAL_UINT32(0U, a.grantedSeconds);
 }
 
 void test_pay_for_labels_are_refused_rather_than_cut(void) {
+  // Whole minutes, one to four digits (P13 §8): `PAY 9999 MIN?` is the widest question.
   TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("50"));
-  TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("32.5"));
-  TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("9999.5"));
-  TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("0.25"));
+  TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("5"));
+  TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("0"));
+  TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("9999"));
   TEST_ASSERT_FALSE(bridgelogic::validAmountLabel(""));
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("12345"));
   TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("12345.5"));
+  // A fraction of a minute does not exist; a decimal label is an old server's, refused.
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("32.5"));
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("9999.5"));
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("0.25"));
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("50.0"));
+  // No padding: a leading zero is the server's only for "0" itself.
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("045"));
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("00"));
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("+5"));
+  TEST_ASSERT_FALSE(bridgelogic::validAmountLabel(" 50"));
   TEST_ASSERT_FALSE(bridgelogic::validAmountLabel(".5"));
   TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("5."));
   TEST_ASSERT_FALSE(bridgelogic::validAmountLabel("1.2.3"));

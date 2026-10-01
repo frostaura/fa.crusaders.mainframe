@@ -1040,19 +1040,15 @@ def http_cases():
     def pq(cid, note, body, expect):
         rs(cid, "payfor_quote", note, body, expect)
 
-    pq("payfor-quote-ok", "payable: the glass asks CT2 BOOKED / PAY 50cr? / PRESS CT2 TO PAY",
-       {"payable": True, "reason": "ok", "court_number": 2, "amount_credits": 50.0, "amount_label": "50"},
+    pq("payfor-quote-ok", "payable: the glass asks CT2 BOOKED / PAY 50 MIN? / PRESS CT2 TO PAY",
+       {"payable": True, "reason": "ok", "court_number": 2, "amount_minutes": 50, "amount_label": "50"},
        {"outcome": "quote", "court_number": 2, "amount_label": "50", "screen": "PayForQuote",
-        "rows": ["CT2 BOOKED", "PAY 50cr?", "PRESS CT2 TO PAY", "A   B   C   D"]})
-    pq("payfor-quote-ok-fractional", "amount_label is the SERVER's rendering — the box has no decimal arithmetic "
-       "and must not invent one",
-       {"payable": True, "reason": "ok", "court_number": 4, "amount_credits": 32.5, "amount_label": "32.5"},
-       {"outcome": "quote", "court_number": 4, "amount_label": "32.5", "screen": "PayForQuote",
-        "rows": ["CT4 BOOKED", "PAY 32.5cr?", "PRESS CT4 TO PAY", "A   B   C   D"]})
-    pq("payfor-quote-widest", "the widest quote the contract allows: a four-digit court and a six-character label",
-       {"payable": True, "reason": "ok", "court_number": 9999, "amount_credits": 9999.5, "amount_label": "9999.5"},
-       {"outcome": "quote", "court_number": 9999, "amount_label": "9999.5", "screen": "PayForQuote",
-        "rows": ["CT9999 BOOKED", "PAY 9999.5cr?", "PRESS CT9999 TO PAY", "A   B   C   D"]})
+        "rows": ["CT2 BOOKED", "PAY 50 MIN?", "PRESS CT2 TO PAY", "A   B   C   D"]})
+    pq("payfor-quote-widest", "the widest quote the contract allows: a four-digit court and a four-digit label "
+       "of whole minutes — PAY 9999 MIN? is thirteen columns",
+       {"payable": True, "reason": "ok", "court_number": 9999, "amount_minutes": 9999, "amount_label": "9999"},
+       {"outcome": "quote", "court_number": 9999, "amount_label": "9999", "screen": "PayForQuote",
+        "rows": ["CT9999 BOOKED", "PAY 9999 MIN?", "PRESS CT9999 TO PAY", "A   B   C   D"]})
     pq("payfor-quote-split", "a split booking is refused at the box: each player's share is theirs to pay in the "
        "app", {"payable": False, "reason": "split_booking", "court_number": 2},
        {"outcome": "refused", "screen": "PayForSplit", "rows": ["SPLIT BOOKING", "PAY IN APP"]})
@@ -1075,28 +1071,33 @@ def http_cases():
     pq("payfor-quote-unknown-reason", "a reason this build does not know is still a refusal",
        {"payable": False, "reason": "some_future_reason", "court_number": 2},
        {"outcome": "refused", "screen": "SeeTheDesk"})
-    pq("payfor-quote-bad-label", "a label the glass cannot show honestly (seven characters) is no decision: the "
-       "box falls back to the walk-up choice rather than asking a member to agree to a number it cut",
-       {"payable": True, "reason": "ok", "court_number": 2, "amount_credits": 12345.5, "amount_label": "12345.5"},
+    pq("payfor-quote-bad-label", "a label the glass cannot show honestly (five digits) is no decision: the box "
+       "falls back to the walk-up choice rather than asking a member to agree to a number it cut. The server "
+       "never sends one — it refuses such a price as amount_unshowable first",
+       {"payable": True, "reason": "ok", "court_number": 2, "amount_minutes": 12345, "amount_label": "12345"},
        {"outcome": "walkup"})
+    pq("payfor-quote-unshowable", "the server's own refusal of a price above 9999 minutes: a reason the box does "
+       "not know by name, so SEE THE DESK — which is where such a court is settled",
+       {"payable": False, "reason": "amount_unshowable", "court_number": 2},
+       {"outcome": "refused", "screen": "SeeTheDesk"})
 
     def pc(cid, note, body, expect):
         rs(cid, "payfor_confirm", note, body, expect)
 
     pc("payfor-confirm-paid", "paid: the booker is refunded and both are emailed server-side; the court is "
        "already lit, so granted_seconds is 0 and nothing is switched",
-       {"paid": True, "reason": "ok", "court_number": 2, "amount_credits": 50.0, "amount_label": "50",
-        "balance_after_credits": 118.0, "replayed": False, "granted_seconds": 0},
+       {"paid": True, "reason": "ok", "court_number": 2, "amount_minutes": 50, "amount_label": "50",
+        "balance_after_minutes": 118, "replayed": False, "granted_seconds": 0},
        {"outcome": "paid", "granted_seconds": 0, "screen": "PayForPaid",
-        "rows": ["PAID FOR CT2", "50cr CHARGED"]})
+        "rows": ["PAID FOR CT2", "50 MIN PAID"]})
     pc("payfor-confirm-paid-lights", "paid for a booking nobody has started: the server grants the remainder and "
        "the box lights the court as it would for an activation",
-       {"paid": True, "reason": "ok", "court_number": 2, "amount_credits": 50.0, "amount_label": "50",
-        "balance_after_credits": 118.0, "replayed": False, "granted_seconds": 2700},
+       {"paid": True, "reason": "ok", "court_number": 2, "amount_minutes": 50, "amount_label": "50",
+        "balance_after_minutes": 118, "replayed": False, "granted_seconds": 2700},
        {"outcome": "paid", "granted_seconds": 2700, "screen": "PayForPaid"})
     pc("payfor-confirm-replayed", "the same nonce again after a lost answer: the FIRST payment, never a second",
-       {"paid": True, "reason": "ok", "court_number": 2, "amount_credits": 50.0, "amount_label": "50",
-        "balance_after_credits": 118.0, "replayed": True, "granted_seconds": 0},
+       {"paid": True, "reason": "ok", "court_number": 2, "amount_minutes": 50, "amount_label": "50",
+        "balance_after_minutes": 118, "replayed": True, "granted_seconds": 0},
        {"outcome": "paid", "granted_seconds": 0, "screen": "PayForPaid"})
     pc("payfor-confirm-price-changed", "the price moved between the two presses: nothing is charged and the next "
        "press asks again", {"paid": False, "reason": "price_changed", "court_number": 2, "amount_label": "55"},

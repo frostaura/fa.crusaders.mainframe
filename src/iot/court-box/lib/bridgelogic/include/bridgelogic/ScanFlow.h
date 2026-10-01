@@ -6,7 +6,7 @@
 // The roster is a cache of NEAR-FUTURE bookings, pushed every heartbeat. It is
 // what keeps a court working through a router reboot, and it cannot answer
 // three things the API can: a booking made in the last thirty seconds, a
-// walk-up member with no booking, and whether a member with too little credit
+// walk-up member with no booking, and whether a member with too few minutes
 // may be let on. So a scan on a box that can reach the API asks the API, and
 // the API's answer is final — the roster is consulted only when there was no
 // answer, never to second-guess one (review C3).

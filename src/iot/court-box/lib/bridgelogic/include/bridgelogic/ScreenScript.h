@@ -183,7 +183,7 @@ enum class ScreenId : uint8_t {
   // APPENDED, never inserted: kScreenSpecs is indexed by this value.
 
   /// The member pressed a court somebody else has booked and the server quoted
-  /// it: `CT2 BOOKED` / `PAY 50cr?` / `PRESS CT2 TO PAY`, the court cells, and
+  /// it: `CT2 BOOKED` / `PAY 50 MIN?` / `PRESS CT2 TO PAY`, the court cells, and
   /// the choice window counting down. The second press is the only OK there is.
   PayForQuote,
   /// Paid. The booker is refunded and both are emailed by the server.
@@ -201,11 +201,16 @@ enum class ScreenId : uint8_t {
 
 inline constexpr uint8_t kScreenCount = 30U;
 
-/// The longest `amount_label` the glass will show: `PAY 9999.5cr?` is thirteen
-/// columns and `9999.5cr CHARGED` sixteen, both inside the safe subset. A
-/// longer label is refused, never cut — a member must never be asked to agree
-/// to a number the glass shortened.
+/// The buffer an `amount_label` is read into: six characters, the wire bound.
+/// It sizes storage only; what the box will SHOW is kMaxAmountLabelDigits.
 inline constexpr size_t kMaxAmountLabelLen = 6U;
+
+/// The longest `amount_label` the glass will show: four digits of whole
+/// minutes (P13 §8). `PAY 9999 MIN?` and `9999 MIN PAID` are thirteen columns
+/// each, inside the safe subset. A longer label is refused, never cut — a
+/// member must never be asked to agree to a number the glass shortened.
+inline constexpr size_t kMaxAmountLabelDigits = 4U;
+static_assert(kMaxAmountLabelDigits <= kMaxAmountLabelLen, "the digits must fit the buffer");
 
 /// Everything any screen might name. One struct rather than a parameter list
 /// because the complexity gate caps a function at six arguments and this is
@@ -228,8 +233,9 @@ struct ScreenFacts {
   char toTime[kDisplayTimeLen] = {};
   /// `member_display`, or empty for kNoName.
   char name[kMaxMemberNameLen + 1U] = {};
-  /// The server's own rendering of a credit amount (`50`, `32.5`) — the box
-  /// has no decimal arithmetic and must not invent one. See kMaxAmountLabelLen.
+  /// The server's own rendering of an amount in whole minutes (`45`, `9999`) —
+  /// the box does no arithmetic on it and shows it verbatim. See
+  /// kMaxAmountLabelDigits.
   char amount[kMaxAmountLabelLen + 1U] = {};
   /// The LIVE panel. Null falls back to the compiled-in default map, which is
   /// the original wiring — the same rule court::ButtonMap follows.

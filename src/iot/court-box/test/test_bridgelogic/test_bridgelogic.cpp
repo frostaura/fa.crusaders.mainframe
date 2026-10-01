@@ -363,7 +363,7 @@ void test_scan_flow_a_refusal_is_a_decision_the_roster_does_not_second_guess() {
 
   const Case cases[] = {
       {"{\"activated\":false,\"reason\":\"no_booking\"}", "NO BOOKING", "SEE THE DESK"},
-      {"{\"activated\":false,\"reason\":\"insufficient_balance\"}", "TOO FEW CREDITS", "TOP UP & RETRY"},
+      {"{\"activated\":false,\"reason\":\"insufficient_balance\"}", "TOO FEW MINUTES", "BUY & RETRY"},
       {"{\"activated\":false,\"reason\":\"wrong_court\",\"court_number\":42}", "WRONG COURT", "SEE THE DESK"},
       {"{\"activated\":false,\"reason\":\"not_recognised\"}", "NOT RECOGNISED", "SEE THE DESK"},
       {"{\"activated\":false,\"reason\":\"not_chargeable\"}", "SEE THE DESK", ""},
@@ -539,9 +539,9 @@ void test_walkup_nonce_is_reused_only_for_the_same_undecided_purchase() {
 
 void test_walkup_a_grant_and_a_replayed_grant_light_the_court_identically() {
   const char fresh[] = "{\"server_unix\":1750000000,\"booking_id\":\"b1\",\"granted_minutes\":20,"
-                       "\"amount_credits\":4,\"balance_after_credits\":36}";
+                       "\"amount_minutes\":4,\"balance_after_minutes\":36}";
   const char replayed[] = "{\"server_unix\":1750000005,\"booking_id\":\"b1\",\"granted_minutes\":20,"
-                          "\"amount_credits\":4,\"balance_after_credits\":36,\"replayed\":true}";
+                          "\"amount_minutes\":4,\"balance_after_minutes\":36,\"replayed\":true}";
 
   const bridgelogic::WalkUpResult a = bridgelogic::onWalkUpResponse(200U, fresh, len(fresh), 1U, 45U);
   const bridgelogic::WalkUpResult b = bridgelogic::onWalkUpResponse(200U, replayed, len(replayed), 1U, 45U);
@@ -574,7 +574,7 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
   };
 
   const Case cases[] = {
-      {402U, "{\"error\":\"insufficient_balance\"}", "TOO FEW CREDITS", true, true},
+      {402U, "{\"error\":\"insufficient_balance\"}", "TOO FEW MINUTES", true, true},
       {409U, "{\"error\":\"court_in_use\"}", "COURT NOT FREE", true, true},
       {409U, "{\"error\":\"no_time_available\"}", "NO TIME BEFORE", true, true},
       {409U, "{\"error\":\"purchase_ended\"}", "PURCHASE ENDED", true, true},
@@ -694,7 +694,7 @@ void test_walkup_recognised_comes_from_the_body_never_from_the_status() {
   };
 
   const Case cases[] = {
-      {402U, "{\"error\":\"insufficient_balance\",\"current_credits\":2.0}", true},
+      {402U, "{\"error\":\"insufficient_balance\",\"current_minutes\":2}", true},
       {409U, "{\"error\":\"court_in_use\"}", true},
       {409U, "{\"error\":\"no_time_available\"}", true},
       {409U, "{\"error\":\"purchase_ended\"}", true},
@@ -716,7 +716,7 @@ void test_walkup_recognised_comes_from_the_body_never_from_the_status() {
     TEST_ASSERT_EQUAL_MESSAGE(c.recognised, r.outcome.recognised, c.body);
   }
   // A bare status keeps its screen and loses only the window.
-  TEST_ASSERT_EQUAL_STRING("TOO FEW CREDITS",
+  TEST_ASSERT_EQUAL_STRING("TOO FEW MINUTES",
                            bridgelogic::onWalkUpResponse(402U, "", 0U, 1U, 30U).outcome.line1);
   TEST_ASSERT_EQUAL_STRING("COURT NOT FREE",
                            bridgelogic::onWalkUpResponse(409U, "", 0U, 1U, 30U).outcome.line1);
@@ -2772,7 +2772,7 @@ const ScreenContract kContract[] = {
     {bridgelogic::ScreenId::Grant, "COURT", false, false},
     {bridgelogic::ScreenId::AlreadyOn, "COURT", false, false},
     {bridgelogic::ScreenId::NoBooking, "BOOKING", true, false},
-    {bridgelogic::ScreenId::InsufficientBalance, "CREDITS", false, false},
+    {bridgelogic::ScreenId::InsufficientBalance, "MINUTES", false, false},
     {bridgelogic::ScreenId::WrongCourt, "COURT", false, false},
     {bridgelogic::ScreenId::TooEarly, "EARLY", false, false},
     {bridgelogic::ScreenId::NotRecognised, "CODE", false, false},
@@ -2819,8 +2819,8 @@ bridgelogic::ScreenFacts fullFacts(const court::ButtonMap* map) {
   snprintf(facts.fromTime, sizeof(facts.fromTime), "%s", "18:00");
   snprintf(facts.toTime, sizeof(facts.toTime), "%s", "18:45");
   snprintf(facts.name, sizeof(facts.name), "%s", "Dean");
-  // The widest label the glass accepts: six characters.
-  snprintf(facts.amount, sizeof(facts.amount), "%s", "9999.5");
+  // The widest label the glass accepts: four digits of whole minutes (P13 §8).
+  snprintf(facts.amount, sizeof(facts.amount), "%s", "9999");
   facts.buttons = map;
   return facts;
 }

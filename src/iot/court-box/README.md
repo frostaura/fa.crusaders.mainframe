@@ -142,10 +142,12 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.1.0 and Mega 2.0.0**: 2.1.0
-is the single rotating member code and D10 pay-for
+`platformio.ini`. The current images are **bridge 2.2.0 and Mega 2.0.0**: 2.2.0
+is the glass in minutes rather than credits (`PAY 45 MIN?`, `TOO FEW MINUTES`;
+[`docs/specs/minutes-and-packages.md`](../../../docs/specs/minutes-and-packages.md) §8),
+on top of 2.1.0's single rotating member code and D10 pay-for
 ([`docs/specs/member-code.md`](../../../docs/specs/member-code.md)), on the
-ESP8266 only — the Mega is not reflashed for it. 2.0.0 was a contract break:
+ESP8266 only — the Mega is reflashed for neither. 2.0.0 was a contract break:
 request signing, the discovery beacon, claim codes, provisioning, the device
 clock and the flash credential store are all gone, replaced by the bearer key
 above and the box's MAC in each request body.
