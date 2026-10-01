@@ -7,58 +7,80 @@ namespace Crusaders.Mainframe.Api.Services;
 ///
 /// <para>
 /// <b>It exists because the rule kept being re-implemented at the call site, and the call site
-/// kept getting it wrong.</b> Every figure this system shows a member is either <b>credits</b> —
-/// the unit of account — or <b>money</b>, which is what they handed the gateway. Both must be
-/// written with a dot, on every host, for two independent reasons: PayFast rejects the club's
-/// own <c>en-ZA</c> comma decimal outright, and a member reconciling a wallet history against a
-/// bank statement must not meet the same amount spelled two ways on two adjacent lines.
+/// kept getting it wrong.</b> Every figure this system shows a member is either <b>minutes</b> —
+/// the unit of account since P13 (<c>docs/specs/minutes-and-packages.md</c> §7.2) — or
+/// <b>money</b>, which is what they handed the gateway. Money must be written with a dot, on every
+/// host, for two independent reasons: PayFast rejects the club's own <c>en-ZA</c> comma decimal
+/// outright, and a member reconciling a wallet history against a bank statement must not meet
+/// the same amount spelled two ways on two adjacent lines.
 /// </para>
 ///
 /// <para>
-/// That is not hypothetical either. <c>BookingService</c>'s lights-release reason was built with
-/// a bare <c>{back:0.00}</c>, which takes <see cref="CultureInfo.CurrentCulture"/> — so on the
-/// club's own locale, the DEFAULT case rather than an exotic one, it wrote "8,00 credits" on a
-/// statement whose every other row said "8.00 credits". It was the last raw interpolation of its
-/// kind in the project, and the answer to "why did only that one drift" is that it was the only
-/// one that had to remember. Nothing here has to remember: there is one format string per
-/// quantity and it lives in this file only.
+/// That is not hypothetical either. <c>BookingService</c>'s lights-release reason was once built
+/// with a bare <c>{back:0.00}</c>, which takes <see cref="CultureInfo.CurrentCulture"/> — so on
+/// the club's own locale it wrote a comma decimal on a statement whose every other row used a
+/// dot. Nothing here has to remember: there is one rendering per quantity and it lives in this
+/// file only.
 /// </para>
 ///
 /// <para>
-/// <see cref="Email.EmailTemplates"/>'s <c>Cr</c>, <c>Zar</c> and <c>Num</c> are thin wrappers
-/// over these, kept because a template reads better for having them and because they are where
-/// the unit rules are argued. <b>They are wrappers and not copies</b> — duplicating the format
-/// string in the email layer and the service layer is precisely how the two halves came apart.
+/// <see cref="Email.EmailTemplates"/>' unit helpers and <c>Zar</c> are thin wrappers over these,
+/// kept because a template reads better for having them. <b>They are wrappers and not
+/// copies</b> — duplicating the rendering in the email layer and the service layer is precisely
+/// how the two halves came apart.
 /// </para>
 /// </summary>
 public static class MoneyFormat
 {
-    /// <summary>The invariant rendering of any figure this product calls an amount.</summary>
-    /// <remarks>
-    /// Private, and the only place the string "0.00" appears. Everything below is a unit
-    /// attached to this.
-    /// </remarks>
+    private const int MinutesPerHour = 60;
+    private const int MinutesPerDay = 1440;
+
+    /// <summary>The invariant rendering of any rand figure. The only place "0.00" appears.</summary>
     private static string Amount(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// A credit figure, with its unit — "8.00 credits".
+    /// Minutes in prose, for emails, receipts and ledger reasons: "45 minutes", "1 minute",
+    /// "1 hour 30 minutes", "2 hours", "1 day 6 hours 15 minutes", "0 minutes", "−45 minutes".
     /// </summary>
     /// <remarks>
-    /// The word is spelled out rather than suffixed "cr", because this string is read in prose:
-    /// in a ledger reason, in an email fact row, and in a sentence about a balance. Credits take
-    /// <b>no</b> currency symbol, ever — see <see cref="CurrencySymbol"/> for why that is a
-    /// money-correctness rule and not a copy preference.
+    /// Days from 1 440 upward, zero parts left out, exact — it never rounds. A negative value gets
+    /// ONE real minus sign (U+2212) on the whole figure, the sign every screen prints. Minutes
+    /// never carry a currency symbol; see <see cref="CurrencySymbol"/>.
     /// </remarks>
-    public static string Credits(decimal value) => SignedAmount(value) + " credits";
+    public static string Minutes(int n) =>
+        Render(n, (" day", " days"), (" hour", " hours"), (" minute", " minutes"));
 
     /// <summary>
-    /// A credit figure below zero carries a real minus sign, U+2212, never the ASCII hyphen
-    /// (review round 3, A-8) — the sign every screen of the app prints, so an email and the
-    /// console confirm step read the same "−80.00". Credits only: <see cref="Money"/> stays as
-    /// it is, because a rand figure can end up where a machine reads it.
+    /// Minutes in the compact form the screens use: "5 h", "45 min", "1 h 30 min", "1 d 6 h 15 min",
+    /// "0 min", "−1 h 30 min". Used for the PayFast <c>item_name</c>.
     /// </summary>
-    private static string SignedAmount(decimal value) =>
-        value < 0 ? "\u2212" + Amount(-value) : Amount(value);
+    public static string MinutesCompact(int n) =>
+        Render(n, (" d", " d"), (" h", " h"), (" min", " min"));
+
+    /// <summary>
+    /// The court box's <c>amount_label</c>: the whole number of minutes in invariant digits,
+    /// "45", "9999". Callers check <c>0 &lt; n ≤ 9999</c> first; this only renders.
+    /// </summary>
+    public static string MinutesLabel(int n) => n.ToString(CultureInfo.InvariantCulture);
+
+    private static string Render(int n, (string One, string Many) day, (string One, string Many) hour, (string One, string Many) minute)
+    {
+        long abs = Math.Abs((long)n);
+        if (abs == 0) return "0" + minute.Many;
+
+        var parts = new List<string>(3);
+        Part(parts, abs / MinutesPerDay, day);
+        Part(parts, abs % MinutesPerDay / MinutesPerHour, hour);
+        Part(parts, abs % MinutesPerHour, minute);
+        var text = string.Join(' ', parts);
+        return n < 0 ? "−" + text : text;
+    }
+
+    private static void Part(List<string> parts, long count, (string One, string Many) unit)
+    {
+        if (count == 0) return;
+        parts.Add(count.ToString(CultureInfo.InvariantCulture) + (count == 1 ? unit.One : unit.Many));
+    }
 
     /// <summary>
     /// Real money, in the club's own symbol — "R100.00", "-R50.00", "CHF1234567.89".
@@ -73,6 +95,6 @@ public static class MoneyFormat
     public static string Money(decimal value, string symbol) =>
         (value < 0 ? "-" : "") + symbol + Amount(Math.Abs(value));
 
-    /// <summary>A number with no trailing-zero noise, for percentages and conversion rates.</summary>
+    /// <summary>A number with no trailing-zero noise, for percentages.</summary>
     public static string Number(decimal value) => value.ToString("0.####", CultureInfo.InvariantCulture);
 }

@@ -32,7 +32,7 @@ public class WebhookEventCoverageTests
     }
 
     [Fact]
-    public async Task A_cancellation_refund_row_emits_credit_refunded()
+    public async Task A_cancellation_refund_row_emits_minutes_refunded()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -40,30 +40,30 @@ public class WebhookEventCoverageTests
         Drain(host);
 
         var entry = await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.CancellationRefund, 8m, host.PlayerUser.Id,
+            host.PlayerUser.Id, LedgerEntryType.CancellationRefund, 8, host.PlayerUser.Id,
             Reason: "Cancelled outside the penalty window"), default);
 
-        var evt = Assert.Single(Drain(host), e => e.Type == "credit.refunded");
+        var evt = Assert.Single(Drain(host), e => e.Type == MinutesEvents.Refunded);
         Assert.Equal(entry.Id, evt.Data["entry_id"]);
-        Assert.Equal(8m, evt.Data["amount_credits"]);
+        Assert.Equal(8, evt.Data["amount_minutes"]);
         Assert.Equal(host.PlayerUser.Id, evt.SubjectUserId);
     }
 
     [Theory]
     [InlineData(LedgerEntryType.NoShowPenalty)]
     [InlineData(LedgerEntryType.LateCancellationPenalty)]
-    public async Task A_penalty_row_emits_credit_penalty_applied(LedgerEntryType type)
+    public async Task A_penalty_row_emits_minutes_penalty_applied(LedgerEntryType type)
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         Drain(host);
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, type, -2.40m, host.AdminUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, type, -2, host.AdminUser.Id), default);
 
-        var evt = Assert.Single(Drain(host), e => e.Type == "credit.penalty_applied");
+        var evt = Assert.Single(Drain(host), e => e.Type == MinutesEvents.PenaltyApplied);
         Assert.Equal(type.ToString(), evt.Data["entry_type"]);
-        Assert.Equal(-2.40m, evt.Data["amount_credits"]);
+        Assert.Equal(-2, evt.Data["amount_minutes"]);
     }
 
     /// <summary>
@@ -81,17 +81,17 @@ public class WebhookEventCoverageTests
 
         await ledger.PostManyAsync(
         [
-            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.CancellationRefund, 8m, host.PlayerUser.Id),
-            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.LateCancellationPenalty, -2.40m, host.PlayerUser.Id),
+            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.CancellationRefund, 8, host.PlayerUser.Id),
+            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.LateCancellationPenalty, -2, host.PlayerUser.Id),
         ], default);
 
         var types = Drain(host).Select(e => e.Type).ToList();
-        Assert.Contains("credit.refunded", types);
-        Assert.Contains("credit.penalty_applied", types);
+        Assert.Contains(MinutesEvents.Refunded, types);
+        Assert.Contains(MinutesEvents.PenaltyApplied, types);
     }
 
     /// <summary>
-    /// <c>credit.adjusted</c> — the desk correction. The only movement in the system a human
+    /// <c>minutes.adjusted</c> — the desk correction. The only movement in the system a human
     /// decides by hand, and the one an accounting pipe fed by webhooks was silently missing
     /// while it saw every automatic charge and refund.
     ///
@@ -103,7 +103,7 @@ public class WebhookEventCoverageTests
     /// </para>
     /// </summary>
     [Fact]
-    public async Task An_admin_adjustment_emits_credit_adjusted()
+    public async Task An_admin_adjustment_emits_minutes_adjusted()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -111,12 +111,12 @@ public class WebhookEventCoverageTests
         Drain(host);
 
         var entry = await ledger.PostAsync(new LedgerPosting(
-            host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 25m, host.AdminUser.Id,
+            host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 25, host.AdminUser.Id,
             Reason: "Goodwill after the court was double-booked"), default);
 
-        var evt = Assert.Single(Drain(host), e => e.Type == "credit.adjusted");
+        var evt = Assert.Single(Drain(host), e => e.Type == MinutesEvents.Adjusted);
         Assert.Equal(entry.Id, evt.Data["entry_id"]);
-        Assert.Equal(25m, evt.Data["amount_credits"]);
+        Assert.Equal(25, evt.Data["amount_minutes"]);
         Assert.Equal("Goodwill after the court was double-booked", evt.Data["reason"]);
         Assert.Equal(host.PlayerUser.Id, evt.SubjectUserId);
 
@@ -124,6 +124,18 @@ public class WebhookEventCoverageTests
         // reconciling a member's own actions against the club's must be able to tell them apart.
         Assert.True(evt.ActorIsAdmin);
         Assert.Equal(host.AdminUser.Id, evt.ActorUserId);
+    }
+
+    /// <summary>
+    /// P13 §5: the money events are named once, in <see cref="MinutesEvents"/>, and these are the
+    /// names a webhook consumer subscribes to. Pinned literally so a rename is a contract change.
+    /// </summary>
+    [Fact]
+    public void The_money_event_names_are_the_contracts()
+    {
+        Assert.Equal(
+            ["minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk"],
+            MinutesEvents.All);
     }
 
     /// <summary>A top-up and a booking charge are not refunds; they have their own events or none.</summary>
@@ -135,8 +147,8 @@ public class WebhookEventCoverageTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         Drain(host);
 
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8, host.PlayerUser.Id), default);
 
         Assert.Empty(Drain(host));
     }
@@ -185,7 +197,7 @@ public class WebhookEventCoverageTests
             EndsAt = now.AddMinutes(-15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedCredits = 8m,
+            AmountChargedMinutes = 8,
             Status = BookingStatus.Booked,
             CheckedInAt = checkedIn ? now.AddMinutes(-29) : null,
         };

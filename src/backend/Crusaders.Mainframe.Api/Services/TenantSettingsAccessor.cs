@@ -25,7 +25,6 @@ public sealed class TenantSettingsAccessor
         var root = doc.RootElement;
 
         int sliceMinutes = TryInt(root, "slice_minutes", 15);                       // Blueprint B.4 — 15-minute default for Crusaders.
-        decimal slicePrice = TryDecimal(root, "slice_price_credits", 8m);                // Now read as credits per slice.
         decimal penaltyPct = TryDecimal(root, "penalty_pct", 30m);
         int graceMin = TryInt(root, "grace_window_minutes", 5);
         int penaltyMin = TryInt(root, "penalty_window_minutes", 15);
@@ -34,13 +33,10 @@ public sealed class TenantSettingsAccessor
         int dayEndMinute = TryInt(root, "day_end_minute", 22 * 60);      // 22:00 default — matches AdminConfigEndpoints.
         string tz = TryString(root, "timezone", "Africa/Johannesburg");
 
-        // Phase 8 additions per client blueprint Rev 2.
-        decimal creditsPerZarRegular = TryDecimal(root, "credits_per_zar_regular", 1.6m);    // A.8 — R100 → 160 credits.
-        // credits_per_zar_league is no longer read: the league rate lives on the league group
-        // (D2, migration GroupsReplaceClass), and the regular rate is the default for a member
-        // whose groups set none.
-        decimal topupBlockZar = TryDecimal(root, "topup_block_zar", 100m);                   // A.3 — block of R100.
-        decimal topupMaxZarPerMember = TryDecimal(root, "topup_max_zar_per_member", 1000m);  // A.3 — R1000 cap.
+        // Phase 8 additions per client blueprint Rev 2. The slice price, the two conversion rates,
+        // the top-up block and the per-member cap are no longer read (P13): a booking costs its
+        // length in minutes and members buy minutes packages with no cap. Old documents may
+        // still carry those keys; they are ignored (minutes-and-packages.md §3.9).
         int memberPerDayMaxMinutes = TryInt(root, "member_per_day_max_minutes", 60);         // A.4 / B.3 — 60 minutes per day per member.
         string peakHours = TryString(root, "peak_hours", TenantSettingsView.DefaultPeakHoursRange);  // A.12 — peak window.
         int peakAdvanceHoursForRegular = TryInt(root, "peak_advance_hours_for_regular", 1);  // A.12 — Regular members may grab a still-empty peak slot within 1h of start.
@@ -62,9 +58,7 @@ public sealed class TenantSettingsAccessor
         var operatingHours = OperatingHours.FromSettings(root);
 
         var view = new TenantSettingsView(
-            sliceMinutes, slicePrice, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
-            creditsPerZarRegular,
-            topupBlockZar, topupMaxZarPerMember,
+            sliceMinutes, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
             memberPerDayMaxMinutes,
             peakHours, peakAdvanceHoursForRegular,
             retentionYears,
@@ -321,15 +315,11 @@ public sealed class TenantSettingsAccessor
 
 public sealed record TenantSettingsView(
     int SliceMinutes,
-    decimal DefaultSlicePriceCredits,           // Unit is credits per blueprint A.8/A.9. Legacy field name kept.
     decimal PenaltyPct,
     int GraceWindowMinutes,
     int PenaltyWindowMinutes,
     int AdvanceBookingDays,
     string Timezone,
-    decimal CreditsPerZarRegular,
-    decimal TopupBlockZar,
-    decimal TopupMaxZarPerMember,
     int MemberPerDayMaxMinutes,
     string PeakHoursRange,
     int PeakAdvanceHoursForRegular,
@@ -716,15 +706,15 @@ public sealed record TenantSettingsView(
     public bool WalkUpHonoursDayCap { get; init; }
 
     /// <summary>
-    /// Whether member groups' BOOKING RESTRICTIONS (GOAL item 3 — windows, prices, caps) are
+    /// Whether member groups' BOOKING RESTRICTIONS (GOAL item 3 — windows, caps) are
     /// consulted. On by default and harmless there, because the seeded groups are unrestricted
     /// and inheriting: a club that never opens the groups screen behaves exactly as it does today.
     ///
     /// <para>
-    /// <b>It does not switch off a group's tariff</b> — its top-up rate and peak priority, the
+    /// <b>It does not switch off a group's tariff</b> — its package discount and peak priority, the
     /// two things the member class carried before D2. No switch ever turned the class off, and a
-    /// club that disabled restrictions must not silently move every league member to the regular
-    /// rate. See <see cref="MemberTariffs"/>.
+    /// club that disabled restrictions must not silently take every league member's package
+    /// discount away. See <see cref="MemberTariffs"/>.
     /// </para>
     /// </summary>
     public bool MemberGroupsEnabled { get; init; } = true;
@@ -735,9 +725,9 @@ public sealed record TenantSettingsView(
     /// decided rather than obeyed.
     ///
     /// <para>
-    /// <b>It is not the credit unit and must never become it.</b> Credits are the unit of
-    /// account and convert at <see cref="CreditsPerZarRegular"/>; a credit figure wearing this
-    /// symbol is the defect <see cref="Services.CurrencySymbol"/> documents.
+    /// <b>It is not the unit of account and must never become it.</b> Minutes are the unit of
+    /// account (P13); a minutes figure wearing this symbol is the defect
+    /// <see cref="Services.CurrencySymbol"/> documents.
     /// </para>
     /// </summary>
     public string CurrencySymbol { get; init; } = Services.CurrencySymbol.Default;

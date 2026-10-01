@@ -12,9 +12,10 @@ namespace Crusaders.Mainframe.Api.Services;
 /// The only path that writes to <see cref="LedgerEntry"/>. Balance is always recomputed from
 /// the sum of entries — there is no stored balance field, by design.
 /// <para>
-/// Per Phase 8 / client blueprint Rev 2: the ledger unit is <b>credits</b>. Top-up rows also
-/// capture <see cref="LedgerPosting.ZarPaid"/> + <see cref="LedgerPosting.ConversionRate"/> so the
-/// ZAR→credits conversion is auditable.
+/// The ledger unit is <b>whole minutes</b> (P13, <c>docs/specs/minutes-and-packages.md</c>): every
+/// balance, charge, refund, penalty, share and transfer is an <see cref="int"/>, and nothing in the
+/// system holds a fraction of a minute. Purchase rows also capture <see cref="LedgerPosting.ZarPaid"/>,
+/// the rand the package cost, so what the club took is auditable.
 /// </para>
 /// </summary>
 public sealed class LedgerService
@@ -37,20 +38,20 @@ public sealed class LedgerService
         _settings = new TenantSettingsAccessor(db, tenant);
     }
 
-    public async Task<decimal> GetBalanceAsync(Guid userId, CancellationToken ct)
+    public async Task<int> GetBalanceAsync(Guid userId, CancellationToken ct)
     {
         var sum = await _db.LedgerEntries
             .Where(l => l.UserId == userId)
-            .SumAsync(l => (decimal?)l.AmountCredits, ct);
-        return sum ?? 0m;
+            .SumAsync(l => (int?)l.AmountMinutes, ct);
+        return sum ?? 0;
     }
 
     /// <summary>
-    /// The credits a member has received as an organiser's shares that are held for their
+    /// The minutes a member has received as an organiser's shares that are held for their
     /// partners' possible returns (D11 — <see cref="ShareHolds"/>). Part of the balance, not
-    /// spendable until <see cref="HeldCredits.ReleasesAt"/>.
+    /// spendable until <see cref="HeldMinutes.ReleasesAt"/>.
     /// </summary>
-    public async Task<HeldCredits> GetHeldAsync(Guid userId, CancellationToken ct) =>
+    public async Task<HeldMinutes> GetHeldAsync(Guid userId, CancellationToken ct) =>
         await ShareHolds.ForAsync(_db, userId, await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct);
 
     /// <summary>
@@ -59,7 +60,7 @@ public sealed class LedgerService
     /// charge at the box, a volunteer paying for somebody, a partner paying a share. Only an
     /// admin's explicit overdraft looks past it, as it looks past the balance itself.
     /// </summary>
-    public async Task<decimal> GetSpendableAsync(Guid userId, CancellationToken ct) =>
+    public async Task<int> GetSpendableAsync(Guid userId, CancellationToken ct) =>
         await GetBalanceAsync(userId, ct) - (await GetHeldAsync(userId, ct)).Reserved;
 
     /// <summary>
@@ -70,18 +71,18 @@ public sealed class LedgerService
     /// this covers it, whatever the deadline, unless the desk named the overdraft. Read under the
     /// organiser's lock.
     /// </summary>
-    public async Task<decimal> GetCoverageAsync(Guid userId, Guid bookingId, Guid seatId, CancellationToken ct) =>
+    public async Task<int> GetCoverageAsync(Guid userId, Guid bookingId, Guid seatId, CancellationToken ct) =>
         await ShareHolds.CoverageAsync(_db, new CoverageAsk(userId, bookingId, seatId, await GetBalanceAsync(userId, ct)),
             await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct);
 
     /// <summary>
-    /// A member who has just RECEIVED credit — a top-up, a desk adjustment, a refund, anything but
+    /// A member who has just RECEIVED minutes — a purchase, a desk adjustment, a refund, anything but
     /// a share moving between players — may now cover a return that was waiting on them. Retried
     /// in the same post-commit callback as their balance frame (one deferred item per member, as
     /// the outbox has always had), rather than at the next sweep (review round 2, M1).
     /// </summary>
-    private static bool Credits(IEnumerable<LedgerPosting> postings) =>
-        postings.Any(p => p.AmountCredits > 0m && p.Type != LedgerEntryType.ShareTransfer);
+    private static bool MoneyIn(IEnumerable<LedgerPosting> postings) =>
+        postings.Any(p => p.AmountMinutes > 0 && p.Type != LedgerEntryType.ShareTransfer);
 
     /// <summary>
     /// A page of a member's movements, newest first.
@@ -140,7 +141,7 @@ public sealed class LedgerService
         // penalty animate the badge once, by their net.
         foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountCredits), ReasonFor(group), ct, Credits(group));
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group));
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
@@ -156,29 +157,29 @@ public sealed class LedgerService
     /// <b>Two frames, not one.</b> The unnamed <c>data:</c> frame is what ships today and what
     /// <c>balance.tsx</c> listens for as <c>message</c>; it is kept verbatim so a client on the
     /// current build keeps working through the rollout. The named <c>balance</c> frame beside it
-    /// carries <c>delta_credits</c> and <c>reason</c>, which is what GOAL item 8 actually needs:
-    /// "animate the credits badge while zero to entice a user to add funds" requires the badge to
+    /// carries <c>delta_minutes</c> and <c>reason</c>, which is what GOAL item 8 actually needs:
+    /// "animate the balance badge while zero to entice a user to add funds" requires the badge to
     /// know that money <i>arrived</i>, and today's payload is only the new total — from which a
     /// top-up and a cancellation refund are indistinguishable.
     /// </para>
     /// </summary>
     /// <summary>
     /// What is set aside for partners moved without a ledger row — a return started or stopped
-    /// waiting (review round 4) — so the member's spendable and <c>owed_back_credits</c> changed
+    /// waiting (review round 4) — so the member's spendable and <c>owed_back_minutes</c> changed
     /// while their balance did not. Their live wallet is told, after the commit like any movement,
-    /// with <c>delta_credits</c> 0 and the reason <see cref="SetAsideReason"/>.
+    /// with <c>delta_minutes</c> 0 and the reason <see cref="SetAsideReason"/>.
     /// </summary>
-    public Task PublishSetAsideAsync(Guid userId, CancellationToken ct) => PublishBalanceAsync(userId, 0m, SetAsideReason, ct);
+    public Task PublishSetAsideAsync(Guid userId, CancellationToken ct) => PublishBalanceAsync(userId, 0, SetAsideReason, ct);
 
     /// <summary>The balance frame's reason when only what is set aside moved (see <see cref="PublishSetAsideAsync"/>).</summary>
     public const string SetAsideReason = "share_set_aside";
 
-    private Task PublishBalanceAsync(Guid userId, decimal deltaCredits, string reason, CancellationToken ct, bool credited = false)
+    private Task PublishBalanceAsync(Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false)
     {
         var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);
         var topic = RealtimeTopic.Wallet(tenantId, userId);
         // Optional only for the unit suites' hand-built containers; the app always registers it.
-        var retry = credited ? _shares : null;
+        var retry = moneyIn ? _shares : null;
 
         return _outbox.EnqueueAsync(async token =>
         {
@@ -186,25 +187,25 @@ public sealed class LedgerService
             var held = await GetHeldAsync(userId, token);
 
             _realtime.Publish(topic, new RealtimeMessage(
-                string.Empty, JsonSerializer.Serialize(new { balance_credits = balance })));
+                string.Empty, JsonSerializer.Serialize(new { balance_minutes = balance })));
 
-            // D11: the held part rides on the named frame, so the badge can say "12 cr held until
+            // D11: the held part rides on the named frame, so the badge can say "12 min held until
             // Tue 18:00" beside the total. The legacy unnamed frame above stays verbatim.
             _realtime.Publish(topic, new RealtimeMessage(BalanceEvent, JsonSerializer.Serialize(new
             {
-                balance_credits = balance,
-                delta_credits = deltaCredits,
+                balance_minutes = balance,
+                delta_minutes = deltaMinutes,
                 reason,
                 at = DateTimeOffset.UtcNow,
-                held_credits = held.Held,
-                owed_back_credits = held.OwedBack,
-                spendable_credits = balance - held.Reserved,
+                held_minutes = held.Held,
+                owed_back_minutes = held.OwedBack,
+                spendable_minutes = balance - held.Reserved,
                 held_until = held.ReleasesAt,
-                // C4: one part per share deadline, soonest first, summing to held_credits; held_until is the first.
+                // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
                 held_parts = held.WireParts(),
             })));
 
-            // Money arrived: a return waiting on this member may be covered now (see Credits).
+            // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
             if (retry is not null) await retry.AfterCreditAsync(tenantId, slug, [userId], token);
         }, ct);
     }
@@ -251,8 +252,8 @@ public sealed class LedgerService
     }
 
     /// <summary>
-    /// <c>credit.refunded</c>, <c>credit.penalty_applied</c> and <c>credit.adjusted</c>
-    /// (spec §9), emitted where the spec says they happen — when the row is written.
+    /// <c>minutes.refunded</c>, <c>minutes.penalty_applied</c>, <c>minutes.adjusted</c> and
+    /// <c>minutes.sold_at_desk</c> (<see cref="MinutesEvents"/>; webhooks spec §9), emitted where the spec says they happen — when the row is written.
     ///
     /// <para>
     /// They are here rather than at the cancellation, no-show and admin-adjust call sites for
@@ -266,7 +267,7 @@ public sealed class LedgerService
     /// </para>
     ///
     /// <para>
-    /// <c>credit.adjusted</c> earns its place here rather than in the admin endpoint for the
+    /// <c>minutes.adjusted</c> earns its place here rather than in the admin endpoint for the
     /// same reason, and for one more: an adjustment is the only movement in the system a
     /// human decides by hand, so an accounting pipe fed by webhooks saw every automatic
     /// charge and refund and silently missed every desk correction.
@@ -282,10 +283,10 @@ public sealed class LedgerService
     {
         var type = entry.Type switch
         {
-            LedgerEntryType.CancellationRefund => "credit.refunded",
-            LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => "credit.penalty_applied",
-            LedgerEntryType.AdminAdjustment => "credit.adjusted",
-            LedgerEntryType.AdminTopUp => "credit.topped_up_by_admin",
+            LedgerEntryType.CancellationRefund => MinutesEvents.Refunded,
+            LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => MinutesEvents.PenaltyApplied,
+            LedgerEntryType.AdminAdjustment => MinutesEvents.Adjusted,
+            LedgerEntryType.AdminTopUp => MinutesEvents.SoldAtDesk,
             _ => null,
         };
         if (type is null) return;
@@ -309,7 +310,7 @@ public sealed class LedgerService
                 ["entry_id"] = entry.Id,
                 ["user_id"] = entry.UserId,
                 ["entry_type"] = entry.Type.ToString(),
-                ["amount_credits"] = entry.AmountCredits,
+                ["amount_minutes"] = entry.AmountMinutes,
                 ["booking_id"] = entry.RelatedBookingId,
                 ["reason"] = entry.Reason,
             }), token), ct);
@@ -362,9 +363,8 @@ public sealed class LedgerService
             TenantId = _tenant.TenantId,
             UserId = posting.UserId,
             Type = posting.Type,
-            AmountCredits = posting.AmountCredits,
+            AmountMinutes = posting.AmountMinutes,
             ZarPaid = posting.ZarPaid,
-            ConversionRate = posting.ConversionRate,
             RelatedBookingId = posting.RelatedBookingId,
             ActorUserId = posting.ActorUserId,
             Reason = posting.Reason,
@@ -379,9 +379,8 @@ public sealed class LedgerService
             TenantId = _tenant.TenantId,
             UserId = posting.UserId,
             Type = posting.Type,
-            AmountCredits = posting.AmountCredits,
+            AmountMinutes = posting.AmountMinutes,
             ZarPaid = posting.ZarPaid,
-            ConversionRate = posting.ConversionRate,
             RelatedBookingId = posting.RelatedBookingId,
             ActorUserId = posting.ActorUserId,
             Reason = posting.Reason,
@@ -391,7 +390,7 @@ public sealed class LedgerService
         await _db.SaveChangesAsync(ct);
 
         // Queued for after the commit, not published here — D2-B07 and RealtimeOutbox.
-        await PublishBalanceAsync(posting.UserId, posting.AmountCredits, ReasonFor(posting.Type), ct, Credits([posting]));
+        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor(posting.Type), ct, MoneyIn([posting]));
         await MirrorAsync(entry, ct);
 
         return entry;
@@ -401,10 +400,9 @@ public sealed class LedgerService
 public sealed record LedgerPosting(
     Guid UserId,
     LedgerEntryType Type,
-    decimal AmountCredits,                 // signed credits amount (legacy field name)
+    int AmountMinutes,                  // signed whole minutes: positive in, negative out
     Guid ActorUserId,
     Guid? RelatedBookingId = null,
     string? Reason = null,
     string? ExternalReference = null,
-    decimal? ZarPaid = null,            // populated on TopUp / PaymentReversal rows
-    decimal? ConversionRate = null);    // credits-per-rand applied for this posting (null on non-conversion rows)
+    decimal? ZarPaid = null);           // the rand that moved, on TopUp / AdminTopUp / PaymentReversal rows
