@@ -42,7 +42,9 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal(30, body.GetProperty("granted_minutes").GetInt32());
-            Assert.Equal(16m, body.GetProperty("amount_minutes").GetDecimal());
+            // A whole number of minutes on the wire, never 30.0 (contract §1.1).
+            Assert.Equal(JsonValueKind.Number, body.GetProperty("amount_minutes").ValueKind);
+            Assert.Equal("30", body.GetProperty("amount_minutes").GetRawText());
             Assert.False(body.GetProperty("replayed").GetBoolean());
 
             using var scope = factory.Services.CreateScope();
@@ -78,7 +80,7 @@ public abstract partial class DeviceEventHttpTests
                     EndsAt = startsAt.AddMinutes(30),
                     SliceMinutes = 15,
                     SliceCount = 2,
-                    AmountChargedMinutes = 16,
+                    AmountChargedMinutes = 30,
                     Status = BookingStatus.Booked,
                     ChargedAt = DateTimeOffset.UtcNow,
                 });
@@ -91,11 +93,11 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
 
-            // Twenty minutes is all there is to sell, and 8 credits per 15 minutes makes that
-            // 10.67 — the first fractional price in the system, and the reason this endpoint
-            // exists on the server rather than on the box.
+            // Twenty minutes and thirty seconds is all there is to sell: the box is granted the
+            // whole 20 and charged 20 — the part-minute stays with the member (§1.2), and the
+            // charge is not a slice count rounded up (that would be 30).
             Assert.Equal(20, body.GetProperty("granted_minutes").GetInt32());
-            Assert.Equal(10.67m, body.GetProperty("amount_minutes").GetDecimal());
+            Assert.Equal(20, body.GetProperty("amount_minutes").GetInt32());
         }
 
         /// <summary>
@@ -148,7 +150,7 @@ public abstract partial class DeviceEventHttpTests
         /// <c>amount_minutes</c> together, over HTTP, against a named closing instant. Five tests
         /// in this class met that pair by accident: they asserted a
         /// figure and got what was left of the club's day instead, for the last half-hour of
-        /// every UTC day. At 23:51 UTC on 2026-09-07 the box sold eight minutes for 4.27 credits,
+        /// every UTC day. At 23:51 UTC on 2026-09-07 the box sold eight minutes for 4.27 of the old credits,
         /// and the failures read as four unrelated bugs: a balance of 195.73 against an expected
         /// 184, a grant of 8 against 30, a grant of 8 against 20, and a member with 5 credits
         /// being SOLD a court the test expects to be refused — because 4.27 is inside 5.00. Not
@@ -183,9 +185,9 @@ public abstract partial class DeviceEventHttpTests
         [InlineData(150, 90)]   // the whole hard cap fits: nothing is truncated
         [InlineData(120, 30)]
         [InlineData(31, 30)]    // one minute of headroom: still the full sale
-        [InlineData(30, 60)]    // 16.00 credits
-        [InlineData(20, 60)]    // 10.67 — the figure the pro-rata tests above assert
-        [InlineData(7, 30)]     // 3.73
+        [InlineData(30, 60)]    // 29 or 30 minutes, charged exactly that
+        [InlineData(20, 60)]    // the figure the truncation test above asserts
+        [InlineData(7, 30)]     // a few minutes, still whole
         public async Task A_walk_up_is_truncated_at_closing_time_and_charged_pro_rata(int closesInMinutes, int requestedMinutes)
         {
             Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
@@ -220,10 +222,8 @@ public abstract partial class DeviceEventHttpTests
                 Assert.Equal(requestedMinutes, granted);
             }
 
-            // 8 credits per 15 minutes, rounded the way the ledger rounds.
-            Assert.Equal(
-                Math.Round(8m * granted / 15, 2, MidpointRounding.AwayFromZero), // P13-B1: now `granted` (§1.2)
-                body.GetProperty("amount_minutes").GetDecimal());
+            // A minute of court costs a minute: the charge is exactly the whole minutes granted.
+            Assert.Equal(granted, body.GetProperty("amount_minutes").GetInt32());
 
             using var scope = factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -254,9 +254,9 @@ public abstract partial class DeviceEventHttpTests
 
             Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-            // Both numbers, so the box can say "5.00 of 16.00" rather than "no".
-            Assert.Equal(5m, body.GetProperty("current_minutes").GetDecimal());
-            Assert.Equal(16m, body.GetProperty("required_minutes").GetDecimal());
+            // Both numbers, so the box can say "5 of 30" rather than "no".
+            Assert.Equal(5, body.GetProperty("current_minutes").GetInt32());
+            Assert.Equal(30, body.GetProperty("required_minutes").GetInt32());
         }
 
         [SkippableFact]
@@ -280,7 +280,7 @@ public abstract partial class DeviceEventHttpTests
                     EndsAt = DateTimeOffset.UtcNow.AddMinutes(25),
                     SliceMinutes = 15,
                     SliceCount = 2,
-                    AmountChargedMinutes = 16,
+                    AmountChargedMinutes = 30,
                     Status = BookingStatus.Booked,
                     ChargedAt = DateTimeOffset.UtcNow,
                 });

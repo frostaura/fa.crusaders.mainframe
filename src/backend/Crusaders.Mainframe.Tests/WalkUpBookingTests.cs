@@ -20,16 +20,14 @@ namespace Crusaders.Mainframe.Tests;
 /// </para>
 ///
 /// <para>
-/// Two things are genuinely new. A walk-up is <b>truncated at the next booking</b>, and it is
-/// therefore <b>charged pro rata</b> — the first fractional price in the system. Before this,
-/// <c>SliceCount</c> was an integer and the tariff a flat multiple of it, so a twenty-minute
-/// sale at a fifteen-minute tariff had no representation at all.
+/// Two things are genuinely its own. A walk-up is <b>truncated at the next booking</b>, and it
+/// is therefore <b>charged what it grants</b>: the whole minutes sold, rounded down off the wall
+/// clock so the member keeps the part-minute (P13, contract §1.2). A twenty-minute sale costs 20.
 /// </para>
 /// </summary>
 public class WalkUpBookingTests
 {
-    // TestHost fixture: 15-minute slices at 8 credits, so 0.5333… credits per minute.
-    private const int SlicePriceCredits = 8;
+    // TestHost fixture: 15-minute slices. A minute of court costs a minute (§1.1).
     private const int SliceMinutes = 15;
 
     private sealed record Fixture(
@@ -114,7 +112,7 @@ public class WalkUpBookingTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = SliceMinutes,
             SliceCount = minutes / SliceMinutes,
-            AmountChargedMinutes = SlicePriceCredits * (minutes / SliceMinutes),
+            AmountChargedMinutes = minutes,
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         });
@@ -370,9 +368,8 @@ public class WalkUpBookingTests
     // ---- Pricing ----------------------------------------------------------
 
     /// <summary>
-    /// A clear court sells exactly what was asked for, at the flat tariff. An hour is four
-    /// fifteen-minute slices, so pro rata and per-slice must agree here — if they disagree
-    /// on the easy case the arithmetic is wrong before truncation is even involved.
+    /// A clear court sells exactly what was asked for, at what an online booking of the same
+    /// length costs: an hour is 60 minutes, four fifteen-minute slices.
     /// </summary>
     [Fact]
     public async Task A_walk_up_on_a_clear_court_costs_the_ordinary_tariff()
@@ -383,18 +380,17 @@ public class WalkUpBookingTests
 
         var ok = Assert.IsType<BookingResult.Ok>(await WalkUpAsync(f, 60));
 
-        Assert.Equal(32, ok.Booking.AmountChargedMinutes);   // 4 slices at 8
-        Assert.Equal(200 - 32, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(60, ok.Booking.AmountChargedMinutes);
+        Assert.Equal(200 - 60, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
         Assert.Equal(60, (int)(ok.Booking.EndsAt - ok.Booking.StartsAt).TotalMinutes);
     }
 
     /// <summary>
-    /// The case the flat tariff could not express. Twenty minutes at 8 credits per fifteen
-    /// is 10.666…, and the ledger works to two places — so the member is charged 10.67 and
-    /// the club is not left holding a third of a cent it cannot account for.
+    /// A partial slice: twenty minutes on a fifteen-minute tariff. The sale is the whole minutes
+    /// granted, not a slice count rounded up (that would be 30) — so a twenty-minute sale costs 20.
     /// </summary>
     [Fact]
-    public async Task A_partial_slice_is_charged_pro_rata_and_rounded_to_the_ledger_scale()
+    public async Task A_partial_slice_is_charged_the_whole_minutes_it_grants()
     {
         var f = await CreateAsync();
         await using var _ = f.Host;
@@ -406,8 +402,8 @@ public class WalkUpBookingTests
         var ok = Assert.IsType<BookingResult.Ok>(await WalkUpAsync(f, 60));
 
         Assert.Equal(20, (int)(ok.Booking.EndsAt - ok.Booking.StartsAt).TotalMinutes);
-        Assert.Equal(10.67m, ok.Booking.AmountChargedMinutes);
-        Assert.Equal(200 - 10.67m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(20, ok.Booking.AmountChargedMinutes);
+        Assert.Equal(200 - 20, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -513,7 +509,7 @@ public class WalkUpBookingTests
         var charge = Assert.Single(await f.Db.LedgerEntries
             .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.LightsPurchase)
             .ToListAsync());
-        Assert.Equal(-16, charge.AmountMinutes);
+        Assert.Equal(-30, charge.AmountMinutes);
 
         Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "booking.walk_up_created").ToListAsync());
     }
@@ -547,7 +543,7 @@ public class WalkUpBookingTests
         Assert.Single(await f.Db.LedgerEntries
             .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.LightsPurchase)
             .ToListAsync());
-        Assert.Equal(200 - 16, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200 - 30, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -563,7 +559,7 @@ public class WalkUpBookingTests
 
         var refused = Assert.IsType<BookingResult.InsufficientBalance>(await WalkUpAsync(f, 30));
         Assert.Equal(5, refused.CurrentMinutes);
-        Assert.Equal(16, refused.RequiredMinutes);
+        Assert.Equal(30, refused.RequiredMinutes);
 
         Assert.Empty(await f.Db.Bookings.ToListAsync());
         Assert.Equal(5, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
@@ -750,7 +746,7 @@ public class WalkUpBookingTests
         Assert.Equal(booking.Id, body.GetProperty("booking_id").GetGuid());
 
         // Charged for court B, and the audit row says so.
-        Assert.Equal(200 - 16, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200 - 30, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
         var activated = Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
         Assert.Contains($"\"court_number\":{courtB.CourtNumber}", activated.DetailsJson);
     }
@@ -888,7 +884,7 @@ public class WalkUpBookingTests
         var booking = Assert.Single(await f.Db.Bookings.Where(b => b.UserId == f.Host.PlayerUser.Id).ToListAsync());
         var charge = Assert.Single(await f.Db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToListAsync());
         Assert.Equal(DeviceEventEndpoints.WalkUpReference(box.Id, nonce), charge.ExternalReference);
-        Assert.Equal(200 - 16, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(200 - 30, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
         Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
     }
 
@@ -933,103 +929,41 @@ public class WalkUpBookingTests
         Assert.Equal(error, body.GetProperty("error").GetString());
         Assert.Empty(await f.Db.Bookings.ToListAsync());
     }
-    // ---- R9: a court priced at zero, which nothing exercised ----
-
-    /// <summary>Prices a court at nothing, the way a club runs an open morning.</summary>
-    // P13-B1: courts carry no price (§2.2); a free court cannot be expressed. Rewrite the R9 cases.
-    private static Task FreeCourtAsync(Fixture f, int index)
-    {
-        Assert.Fail($"P13-B1: courts carry no price; rewrite this zero-price scenario ({f.Host.Courts[index].Id})");
-        return Task.CompletedTask;
-    }
+    // ---- R9 after P13: no court is free, and the purchase row carries the box's nonce ----
 
     /// <summary>
-    /// The one zero-credit posting I10 allows, and the reason it is allowed.
+    /// What the R9 free-court cases became. Courts carry no price since P13, so a walk-up can
+    /// never cost zero and I10's walk-up carve-out is never reached at zero; what it protected
+    /// — the purchase row under the box's nonce, the only record <c>ReplayAsync</c> reads — is
+    /// pinned here on the second court of a two-court box, where a per-court price used to differ.
+    /// The replay half is <see cref="A_retried_walk_up_with_the_same_nonce_returns_the_original_grant_and_charges_once"/>.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// I10 says a posting of zero credits is not written, and the ordinary booking charge
-    /// now obeys that absolutely. The walk-up charge does not, and the exception is written
-    /// into I10 rather than left as a local habit: this row's <c>ExternalReference</c> is the
-    /// box's own nonce, and it is the only record the purchase has. <c>ReplayAsync</c> finds
-    /// the purchase by reading that reference off the ledger and by no other route, so on a
-    /// free court a missing row is a missing purchase.
-    /// </para>
-    /// <para>
-    /// Nothing exercised the zero-price branch at all before this, in either direction.
-    /// </para>
-    /// </remarks>
     [Fact]
-    public async Task A_free_court_charges_nothing_and_still_leaves_a_record_of_the_purchase()
+    public async Task A_walk_up_on_any_court_charges_its_granted_minutes_under_the_box_reference()
     {
         var f = await CreateAsync();
         await using var _ = f.Host;
         using var __ = f.Scope;
 
         var box = await BoxOnAsync(f, 1, 2);
-        await FreeCourtAsync(f, 1);
         const string nonce = "0a1b2c3d4e5f6071";
 
         var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
-            box, Request(await CodeAsync(f), court: 2, minutes: 30, nonce), ServicesOf(f), default));
+            box, Request(await CodeAsync(f), court: 2, minutes: 45, nonce), ServicesOf(f), default));
 
         Assert.Equal(200, status);
-        Assert.Equal(0m, body.GetProperty("amount_minutes").GetDecimal());
-        Assert.Equal(200, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(JsonValueKind.Number, body.GetProperty("amount_minutes").ValueKind);
+        Assert.Equal(45, body.GetProperty("amount_minutes").GetInt32());
+        Assert.Equal(155, body.GetProperty("balance_after_minutes").GetInt32());
+        Assert.Equal(155, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
 
         var booking = await f.Db.Bookings.AsNoTracking().SingleAsync(b => b.UserId == f.Host.PlayerUser.Id);
-        Assert.NotNull(booking.CheckedInAt);
-
-        // The row exists, is zero, and carries the reference. Asserting the reference is the
-        // point: a zero row with no reference on it would be the phantom line I10 forbids.
+        Assert.Equal(f.Host.Courts[1].Id, booking.CourtId);
         var charge = Assert.Single(
             await f.Db.LedgerEntries.AsNoTracking().Where(l => l.RelatedBookingId == booking.Id).ToListAsync());
         Assert.Equal(LedgerEntryType.LightsPurchase, charge.Type);
-        Assert.Equal(0, charge.AmountMinutes);
+        Assert.Equal(-45, charge.AmountMinutes);
         Assert.Equal(DeviceEventEndpoints.WalkUpReference(box.Id, nonce), charge.ExternalReference);
-    }
-
-    /// <summary>
-    /// What that row buys: a box whose answer was lost retries the same nonce and gets its
-    /// purchase back, on a free court exactly as on a priced one.
-    /// </summary>
-    /// <remarks>
-    /// This is the direction that decides the invariant, and it was measured rather than
-    /// argued: with the carve-out removed so that a zero charge posts no row, this test fails
-    /// on the retry with <b>409 instead of 200</b>. The replay finds no entry under the
-    /// reference, falls through to a fresh purchase, and that purchase collides with the
-    /// member's own live booking — so the box is answered <c>court_in_use</c> and the glass
-    /// reads COURT NOT FREE about a court this member has already bought and cannot get into.
-    /// That is the H3 defect the nonce exists to prevent, reintroduced for free courts only.
-    /// </remarks>
-    [Fact]
-    public async Task A_free_court_is_bought_once_and_replays_to_the_same_purchase()
-    {
-        var f = await CreateAsync();
-        await using var _ = f.Host;
-        using var __ = f.Scope;
-
-        var box = await BoxOnAsync(f, 1, 2);
-        await FreeCourtAsync(f, 1);
-        var code = await CodeAsync(f);
-        const string nonce = "7e6d5c4b3a291807";
-
-        var (firstStatus, first) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
-            box, Request(code, court: 2, minutes: 30, nonce), ServicesOf(f), default));
-        Assert.Equal(200, firstStatus);
-        Assert.False(first.GetProperty("replayed").GetBoolean());
-
-        var (secondStatus, second) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
-            box, Request(code, court: 2, minutes: 30, nonce), ServicesOf(f), default));
-
-        Assert.Equal(200, secondStatus);
-        Assert.True(second.GetProperty("replayed").GetBoolean());
-        Assert.Equal(first.GetProperty("booking_id").GetGuid(), second.GetProperty("booking_id").GetGuid());
-
-        // One purchase, not two. This is the assertion that goes red when the zero row is
-        // dropped, whichever way the database happens to refuse the second attempt.
-        Assert.Single(await f.Db.Bookings.Where(b => b.UserId == f.Host.PlayerUser.Id).ToListAsync());
-        Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
     }
 
     // ---- R8: the confirmation follows the lights, and a refusal gives the money back ----
@@ -1186,8 +1120,8 @@ public class WalkUpBookingTests
         var confirmation = Assert.Single(sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
         // The figures are re-derived in a different request from the purchase, so they are
         // asserted rather than assumed: the price on the row, and the balance it left behind.
-        Assert.Contains("16.00 credits", confirmation.HtmlBody);
-        Assert.Contains("184.00 credits", confirmation.HtmlBody);
+        Assert.Contains(MoneyFormat.Minutes(30), confirmation.HtmlBody);
+        Assert.Contains(MoneyFormat.Minutes(170), confirmation.HtmlBody);
         Assert.Contains("not refunded once the lights have been on", confirmation.HtmlBody);
     }
 

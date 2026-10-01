@@ -45,20 +45,25 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
     private const string BookingsPath = "/api/v1/bookings/";
 
-    /// <summary>Slice price in the fixture below; a whole number so a wrong figure is obvious in a failure message.</summary>
-    private const decimal SlicePriceCredits = 50;
+    /// <summary>
+    /// What the money tests book: three 15-minute slices, so 45 minutes — a booking costs its
+    /// length (§1.1), and 30% of 45 is 13.5, the figure that tells rounding down from rounding
+    /// to nearest.
+    /// </summary>
+    private const int Slices = 3;
+    private const int BookingMinutes = 15 * Slices;
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, Guid MemberUserId, Guid LeagueUserId, Guid CourtId, Guid SecondCourtId);
 
     private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
     /// <summary>
-    /// Finder B's own club, verbatim: 15-minute slices at 50 credits, peak 16:00–19:00 with
+    /// Finder B's own club, verbatim: 15-minute slices, peak 16:00–19:00 with
     /// one hour of advance for Regulars, a 60-minute daily cap, and hours 06:00–22:00 every
     /// day so this file's assertions are about the rule under test and not about the clock.
     /// </summary>
     private const string SettingsJson = """
-        {"slice_minutes":15,"slice_price_credits":50,"penalty_pct":30,"grace_window_minutes":5,
+        {"slice_minutes":15,"penalty_pct":30,"grace_window_minutes":5,
          "penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC",
          "member_per_day_max_minutes":60,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,
          "day_start_minute":0,"day_end_minute":1440}
@@ -297,7 +302,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
 
     private static async Task<Guid> BookAsync(HttpClient client, Guid courtId, DateTimeOffset startsAt)
     {
-        var (status, body) = await PostBookingAsync(client, courtId, startsAt);
+        var (status, body) = await PostBookingAsync(client, courtId, startsAt, Slices);
         Assert.Equal(HttpStatusCode.OK, status);
         return body.GetProperty("booking_id").GetGuid();
     }
@@ -316,8 +321,8 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
 
         Assert.False(quote.GetProperty("insidePenaltyWindow").GetBoolean());
         Assert.False(quote.GetProperty("checkedIn").GetBoolean());
-        Assert.Equal(SlicePriceCredits, quote.GetProperty("refundMinutes").GetDecimal());
-        Assert.Equal(0m, quote.GetProperty("penaltyMinutes").GetDecimal());
+        Assert.Equal(BookingMinutes, quote.GetProperty("refundMinutes").GetInt32());
+        Assert.Equal(0, quote.GetProperty("penaltyMinutes").GetInt32());
     }
 
     [SkippableFact]
@@ -337,18 +342,18 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             var b = await db.Bookings.IgnoreQueryFilters().FirstAsync(x => x.Id == bookingId);
             b.StartsAt = DateTimeOffset.UtcNow.AddMinutes(5);
-            b.EndsAt = b.StartsAt.AddMinutes(15);
+            b.EndsAt = b.StartsAt.AddMinutes(BookingMinutes);
             await db.SaveChangesAsync();
         }
 
         var quote = await QuoteAsync(member, bookingId);
 
         Assert.True(quote.GetProperty("insidePenaltyWindow").GetBoolean());
-        // 30% of 50.00 is kept; 35.00 is what actually lands back in the wallet. The
-        // member was shown neither figure before this existed — the confirmation was a
-        // button that changed its own label.
-        Assert.Equal(15m, quote.GetProperty("penaltyMinutes").GetDecimal());
-        Assert.Equal(35m, quote.GetProperty("refundMinutes").GetDecimal());
+        // 30% of 45 is 13.5, and 13 is kept — rounded down, in the member's favour (§1.2);
+        // 32 is what actually lands back in the wallet. The member was shown neither figure
+        // before this existed — the confirmation was a button that changed its own label.
+        Assert.Equal(13, quote.GetProperty("penaltyMinutes").GetInt32());
+        Assert.Equal(32, quote.GetProperty("refundMinutes").GetInt32());
         Assert.Equal(30m, quote.GetProperty("penaltyPct").GetDecimal());
     }
 
@@ -376,9 +381,9 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         // the member scanned in at the box, cancelled from the sofa, lost the entire price
         // and was told "Booking cancelled — refund pending."
         Assert.True(quote.GetProperty("checkedIn").GetBoolean());
-        Assert.Equal(0m, quote.GetProperty("refundMinutes").GetDecimal());
-        Assert.Equal(0m, quote.GetProperty("penaltyMinutes").GetDecimal());
-        Assert.Equal(SlicePriceCredits, quote.GetProperty("amountChargedMinutes").GetDecimal());
+        Assert.Equal(0, quote.GetProperty("refundMinutes").GetInt32());
+        Assert.Equal(0, quote.GetProperty("penaltyMinutes").GetInt32());
+        Assert.Equal(BookingMinutes, quote.GetProperty("amountChargedMinutes").GetInt32());
     }
 
     [SkippableFact]
@@ -421,7 +426,7 @@ public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
         // in the product could have shown attendance even if it wanted to.
         var mine = await Slot(ClientFor(factory, s, s.MemberUserId));
         Assert.True(mine.GetProperty("checkedIn").GetBoolean());
-        Assert.Equal(SlicePriceCredits, mine.GetProperty("amountChargedMinutes").GetDecimal());
+        Assert.Equal(BookingMinutes, mine.GetProperty("amountChargedMinutes").GetInt32());
 
         // The admin sees it.
         Assert.True((await Slot(ClientFor(factory, s, s.AdminUserId, isAdmin: true))).GetProperty("checkedIn").GetBoolean());

@@ -251,7 +251,7 @@ public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
         var notice = Assert.Single(await NoticesAsync(app, club.TenantId, AdminEventCatalogue.OverdraftAuthorised));
         var payload = JsonSerializer.Deserialize<OverdraftPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
         Assert.True(payload.Self);
-        Assert.Equal(-8, payload.BalanceAfterMinutes);
+        Assert.Equal(-15, payload.BalanceAfterMinutes);   // one 15-minute slice, from zero
         Assert.Equal(club.AdminUserId, notice.ActorUserId);
         var balance = await PeopleClub.ReadAsync(app, db => db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.TenantId == club.TenantId && l.UserId == club.AdminUserId).SumAsync(l => l.AmountMinutes));

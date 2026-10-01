@@ -10,10 +10,10 @@ namespace Crusaders.Mainframe.Tests;
 /// Booking semantics as they actually are.
 ///
 /// <para>
-/// These five tests were left deliberately red for months (recorded in
-/// <c>memory/decisions.md</c>) because they encoded the pre-blueprint economics:
-/// R50 per 30-minute slice. The fixture has since moved to <b>8 credits per
-/// 15-minute slice</b>, so they were asserting a system that no longer existed.
+/// These tests were once left red for months because they encoded economics the system no
+/// longer had (R50 per 30-minute slice, then a per-slice court price). Since P13 there is
+/// nothing left to drift: <b>a booking costs its length in minutes</b>, so a 15-minute slice
+/// costs 15 and three of them cost 45, whatever the court or the member's groups.
 /// </para>
 ///
 /// <para>
@@ -35,9 +35,9 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public class BookingTests
 {
-    // TestHost fixture: slice_minutes 15, court price 8 credits, penalty_pct 30,
-    // penalty_window_minutes 15.
-    private const decimal SlicePriceCredits = 8;
+    // TestHost fixture: slice_minutes 15, penalty_pct 30, penalty_window_minutes 15. A slice
+    // costs its 15 minutes (contract §1.1).
+    private const int SliceMinutes = 15;
 
     [Fact]
     public async Task Booking_succeeds_when_balance_covers_cost_and_slot_free()
@@ -57,8 +57,8 @@ public class BookingTests
         // Booking reserves the slot AND debits, in one unit of work. The balance
         // returned is what the member has left, which is what the confirmation email
         // and the booking.created event both quote.
-        Assert.Equal(200 - SlicePriceCredits, ok.BalanceAfterMinutes);
-        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(200 - SliceMinutes, ok.BalanceAfterMinutes);
+        Assert.Equal(200 - SliceMinutes, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.NotNull(ok.Booking.ChargedAt);
     }
 
@@ -74,7 +74,7 @@ public class BookingTests
 
         var ib = Assert.IsType<BookingResult.InsufficientBalance>(result);
         Assert.Equal(0, ib.CurrentMinutes);
-        Assert.Equal(SlicePriceCredits, ib.RequiredMinutes);
+        Assert.Equal(SliceMinutes, ib.RequiredMinutes);
     }
 
     [Fact]
@@ -132,24 +132,29 @@ public class BookingTests
         // an InvalidCastException naming OutOfHours inside a test about cancellation
         // penalties. `now` comes FROM the move so the two cannot drift apart.
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var startsAt = (await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, 20)).AddMinutes(5);
-        var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
+        // Three slices, 45 minutes: 30% of 45 is 13.5, and the penalty is rounded DOWN to 13 in
+        // the member's favour (contract §1.2). 13.5 is the figure that tells the rules apart —
+        // round-to-nearest (either midpoint rule) and round-up all say 14; a one-slice 4.5 does
+        // not catch banker's rounding.
+        var startsAt = (await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, 50)).AddMinutes(5);
+        var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 3, default);
+        Assert.Equal(45, booked.Booking.AmountChargedMinutes);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
 
-        // The 8 credits taken at booking come back in full, and the penalty is taken as
+        // The 45 minutes taken at booking come back in full, and the penalty is taken as
         // its own movement rather than netted off the refund: a single net row cannot
         // answer "how much penalty did I pay?", which is the question a disputed
-        // cancellation actually asks. 30% of 8 credits = 2.40.
-        Assert.Equal(SlicePriceCredits, cancelled.RefundedMinutes);
-        Assert.Equal(2.40m, cancelled.PenaltyMinutes);
-        Assert.Equal(200 - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        // cancellation actually asks. floor(30% of 45) = 13.
+        Assert.Equal(45, cancelled.RefundedMinutes);
+        Assert.Equal(13, cancelled.PenaltyMinutes);
+        Assert.Equal(200 - 13, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // Both movements are on the statement, in full.
         var entries = await ledger.GetEntriesAsync(
             host.PlayerUser.Id, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), default);
-        Assert.Contains(entries, e => e.Type == LedgerEntryType.CancellationRefund && e.AmountMinutes == SlicePriceCredits);
-        Assert.Contains(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty && e.AmountMinutes == -2.40m);
+        Assert.Contains(entries, e => e.Type == LedgerEntryType.CancellationRefund && e.AmountMinutes == 45);
+        Assert.Contains(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty && e.AmountMinutes == -13);
     }
 
     [Fact]
@@ -168,7 +173,7 @@ public class BookingTests
 
         // Cancelled in good time: the booking charge comes straight back and no penalty
         // is taken, so the member is where they started.
-        Assert.Equal(SlicePriceCredits, cancelled.RefundedMinutes);
+        Assert.Equal(SliceMinutes, cancelled.RefundedMinutes);
         Assert.Equal(0, cancelled.PenaltyMinutes);
         Assert.Equal(200, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
@@ -266,7 +271,7 @@ public class BookingTests
         var now = await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, minutesNeeded: 45);
         var booked = (BookingResult.Ok)await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, now.AddMinutes(30), 1, default);
-        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(200 - SliceMinutes, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // They turned up and played. The clock is irrelevant; this stamp is not.
         var row = await db.Bookings.FirstAsync(b => b.Id == booked.Booking.Id);
@@ -278,33 +283,33 @@ public class BookingTests
 
         Assert.Equal(0, cancelled.RefundedMinutes);
         Assert.Equal(0, cancelled.PenaltyMinutes);
-        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(200 - SliceMinutes, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
-    /// A court a club prices at zero posts no ledger row for the booking at all (I10).
+    /// What replaced the free court (P13). Courts carry no price, so no booking can cost zero:
+    /// every one costs <c>SliceMinutes × SliceCount</c>, on every court, for every member. Two
+    /// courts and three lengths, so a per-court price or a flat per-booking price would both show.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Nothing exercised this branch, and it was writing a 0.00 <c>BookingCharge</c> — a row
-    /// that moves no money and reads on the member's statement as a movement that did not
-    /// happen, which is the harm I10 is written against, in the one place with no
-    /// idempotency reference to justify it. Free courts are not hypothetical: a club running
-    /// an open morning or a junior session sets <c>SlicePriceCredits</c> to zero and every
-    /// booking made in it left a phantom line.
-    /// </para>
-    /// <para>
-    /// The booking itself is unaffected — it is made, it holds the slot, and it is
-    /// cancellable. Only the row is gone. The flush that inserts it still happens inside the
-    /// same try that catches the overlap violation, so the slot race is decided exactly as
-    /// it is on a priced court; the second half of this test is that assertion.
-    /// </para>
-    /// </remarks>
-    [Fact]
-    public Task A_court_priced_at_zero_books_the_slot_and_posts_no_ledger_row()
+    [Theory]
+    [InlineData(0, 1, 15)]
+    [InlineData(1, 3, 45)]
+    [InlineData(1, 4, 60)]
+    public async Task A_booking_costs_its_length_in_minutes_on_every_court(int court, int slices, int expected)
     {
-        // P13-B1: courts carry no price; a booking always costs its length in minutes (§1.1)
-        Assert.Fail($"P13-B1: courts carry no price; a booking always costs its length in minutes (§1.1)");
-        return Task.CompletedTask;
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
+        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[court].Id, host.PlayerUser.Id, host.PlayerUser.Id, TestHost.BookableSlot(2), slices, default));
+
+        Assert.Equal(expected, ok.Booking.AmountChargedMinutes);
+        Assert.Equal(100 - expected, ok.BalanceAfterMinutes);
+        var charge = await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().LedgerEntries
+            .SingleAsync(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.BookingCharge);
+        Assert.Equal(-expected, charge.AmountMinutes);
     }
 }

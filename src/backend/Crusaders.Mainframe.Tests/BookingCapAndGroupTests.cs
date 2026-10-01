@@ -326,41 +326,72 @@ public class BookingCapAndGroupTests
     }
 
     /// <summary>
-    /// A member in NO group is unrestricted at the club's own rules and the court's own price.
-    /// Not refused, and not "the default group's rules" — a brand-new member must be able to book
-    /// before an admin has classified them, and a club that never opens the groups screen must
-    /// behave exactly as it does today. That is what makes this migration a no-op.
+    /// A member in NO group is unrestricted at the club's own rules, and pays what everyone pays:
+    /// the booking's length in minutes (P13, §1.1). Not refused, and not "the default group's
+    /// rules" — a brand-new member must be able to book before an admin has classified them, and a
+    /// club that never opens the groups screen must behave exactly as it does today. Two lengths so
+    /// a flat per-booking charge cannot pass.
     /// </summary>
-    [Fact]
-    public Task A_member_in_no_group_books_at_the_courts_own_price()
+    [Theory]
+    [InlineData(1, 15)]
+    [InlineData(3, 45)]
+    public async Task A_member_in_no_group_books_at_its_length_in_minutes(int slices, int expected)
     {
-        // P13-B1: courts carry no price; assert the charge is SliceMinutes x SliceCount (§1.1)
-        Assert.Fail($"P13-B1: courts carry no price; assert the charge is SliceMinutes x SliceCount (§1.1)");
-        return Task.CompletedTask;
+        await using var host = await TestHost.CreateAsync();
+        await GiveSettingsAsync(host, OpenAllHours);
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
+
+        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(3), slices, default));
+
+        Assert.Equal(expected, ok.Booking.AmountChargedMinutes);
+        Assert.Equal(5000 - expected, ok.BalanceAfterMinutes);
     }
 
     /// <summary>
-    /// <b>Most restrictive on a PRICE is the HIGHEST.</b> Taking the narrowest window and the
-    /// lowest price would be two different meanings of one word in one sentence — and it is the
-    /// only direction that is safe under admin error, because adding a member to an extra group
-    /// can then never make them cheaper by accident. A mis-click that costs a member a higher
-    /// price is visible to them before they confirm; the inverse costs the club revenue nobody
-    /// ever notices.
+    /// <b>Groups no longer set a price</b> (P13). What replaced the old "highest group price wins"
+    /// combinator is that there is nothing to combine: a member in one, two or three groups —
+    /// each with its own package discount, which is rand-only (§1.2: "A discount never changes
+    /// minutes") — pays exactly what a member in none pays, the booking's minutes.
     ///
     /// <para>
-    /// <b>Varied at 1, 2 and 3 groups.</b> The one-group case passes trivially and hides the
-    /// combinator completely.
+    /// <b>Varied at 0 to 3 groups</b>, and at a 45-minute booking, so a discount leaking into the
+    /// minutes (10% of 45 is 4.5) or a stale per-group multiplier would both show.
     /// </para>
     /// </summary>
     [Theory]
-    [InlineData(1, 4)]     // one group at 0.5x  → half price
-    [InlineData(2, 8)]     // plus a 1.0x group  → the dearer wins
-    [InlineData(3, 16)]    // plus a 2.0x group  → the dearest wins
-    public Task The_highest_of_a_members_group_prices_is_what_they_pay(int groupCount, decimal expected)
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task A_member_pays_the_same_minutes_however_many_groups_they_are_in(int groupCount)
     {
-        // P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1)
-        Assert.Fail($"P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1) ({groupCount} {expected})");
-        return Task.CompletedTask;
+        await using var host = await TestHost.CreateAsync();
+        await GiveSettingsAsync(host, OpenAllHours);
+
+        var ids = new List<Guid>();
+        var discounts = new int?[] { 1_000, null, 5_000 };
+        for (var i = 0; i < groupCount; i++)
+        {
+            var bps = discounts[i];
+            var group = await GroupAsync(host, $"discount-{i}", g => g.PackageDiscountBps = bps);
+            ids.Add(group.Id);
+        }
+        await JoinAsync(host, host.PlayerUser.Id, [.. ids]);
+
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
+
+        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(3), 3, default));
+
+        Assert.Equal(45, ok.Booking.AmountChargedMinutes);
+        Assert.Equal(5000 - 45, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -720,16 +751,35 @@ public class BookingCapAndGroupTests
     }
 
     /// <summary>
-    /// Review round 5 (I5-1, lane C's ask): the grid carries what THIS viewer pays on EACH court,
-    /// and it is what the booking then charges. One figure on the first court made the grid derive
-    /// the rest — wrong for a flat-per-slice group on a dearer court.
+    /// The grid carries no price (contract §3.12). Review round 5 (I5-1) made it carry what THIS
+    /// viewer paid on EACH court; since P13 a cell costs its minutes for everyone, so the client
+    /// computes <c>slices × slice_minutes</c> and the server sends no figure that could drift from
+    /// the charge. Pinned on the wire records, and on the charge for a discounted member on the
+    /// second court, which is where a per-court or per-group price used to differ.
     /// </summary>
     [Fact]
-    public Task The_grid_prices_every_court_at_the_viewers_own_price()
+    public async Task The_grid_carries_no_price_and_every_court_charges_its_minutes()
     {
-        // P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1)
-        Assert.Fail($"P13-B1: group and court prices are gone; a booking costs SliceMinutes x SliceCount (§1.1)");
-        return Task.CompletedTask;
+        Assert.DoesNotContain(typeof(ScheduleRules).GetProperties(), p => p.Name.Contains("Price", StringComparison.Ordinal));
+        Assert.DoesNotContain(typeof(ScheduleCourt).GetProperties(), p => p.Name.Contains("Price", StringComparison.Ordinal));
+        Assert.DoesNotContain(typeof(ScheduleSlot).GetProperties(), p => p.Name.Contains("Price", StringComparison.Ordinal));
+
+        await using var host = await TestHost.CreateAsync();
+        await GiveSettingsAsync(host, OpenAllHours);
+        var discounted = await GroupAsync(host, "Discounted", g => g.PackageDiscountBps = 5_000);
+        await JoinAsync(host, host.PlayerUser.Id, discounted.Id);
+
+        using var scope = host.NewScope();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
+
+        foreach (var (court, hour) in new[] { (0, 9), (1, 11) })
+        {
+            var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+                host.Courts[court].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(hour), 2, default));
+            Assert.Equal(30, ok.Booking.AmountChargedMinutes);
+        }
     }
 
     /// <summary>

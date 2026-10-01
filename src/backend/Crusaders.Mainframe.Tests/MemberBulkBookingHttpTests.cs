@@ -16,8 +16,8 @@ namespace Crusaders.Mainframe.Tests;
 /// <para>
 /// Every slot is at least a day ahead and before 16:00 in a UTC club, so neither the same-day cap
 /// relaxation nor peak-hour league exclusivity is in play unless a test puts it there
-/// (<c>memory/gotchas-clock.md</c>). The club's court is 8 credits a slice; four slices — an
-/// hour, the default per-day cap — cost 32.
+/// (<c>memory/gotchas-clock.md</c>). A booking costs its length in minutes (§1.1): four slices — an
+/// hour, the default per-day cap — cost 60.
 /// </para>
 /// </summary>
 public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
@@ -89,7 +89,7 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "mbulkok");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 100);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 150);
 
         var body = await PostAsync(club.MemberClient(factory), new
         {
@@ -102,12 +102,12 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
         Assert.All(results, r => Assert.Equal("booked", r.GetProperty("status").GetString()));
         Assert.Equal(0, results[0].GetProperty("index").GetInt32());
         Assert.Equal("Court 1", results[0].GetProperty("court_name").GetString());
-        Assert.Equal(32m, results[0].GetProperty("amount_minutes").GetDecimal());
-        Assert.Equal(64m, body.GetProperty("charged_now_minutes").GetDecimal());
-        Assert.Equal(100m, body.GetProperty("balance_before_minutes").GetDecimal());
-        Assert.Equal(36m, body.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(60, results[0].GetProperty("amount_minutes").GetInt32());
+        Assert.Equal(120, body.GetProperty("charged_now_minutes").GetInt32());
+        Assert.Equal(150, body.GetProperty("balance_before_minutes").GetInt32());
+        Assert.Equal(30, body.GetProperty("balance_after_minutes").GetInt32());
         Assert.Equal(JsonValueKind.Null, body.GetProperty("halted_at").ValueKind);
-        Assert.Equal(36, await BalanceAsync(factory, club.MemberUserId));
+        Assert.Equal(30, await BalanceAsync(factory, club.MemberUserId));
     }
 
     /// <summary>
@@ -149,7 +149,7 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         Assert.Equal(2, body.GetProperty("booked").GetInt32());
         Assert.Equal(2, body.GetProperty("refused").GetInt32());
-        Assert.Equal(500 - 64, await BalanceAsync(factory, club.MemberUserId));
+        Assert.Equal(500 - 120, await BalanceAsync(factory, club.MemberUserId));
     }
 
     /// <summary>
@@ -165,7 +165,7 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "mbulkneg");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 40);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 70);
 
         var body = await PostAsync(club.MemberClient(factory), new
         {
@@ -181,7 +181,7 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(1, body.GetProperty("halted_at").GetInt32());
         Assert.Equal("insufficient_balance", body.GetProperty("halted_reason").GetString());
 
-        Assert.Equal(8, await BalanceAsync(factory, club.MemberUserId));
+        Assert.Equal(10, await BalanceAsync(factory, club.MemberUserId));
         Assert.Equal(1, await LiveBookingsAsync(factory, club.TenantId));
     }
 
@@ -220,7 +220,7 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "mbulkidem");
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 32);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 60);
         var client = club.MemberClient(factory);
         var request = new
         {
@@ -236,12 +236,12 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
         var replay = Results(again);
         Assert.Equal(first[0].GetProperty("booking_id").GetGuid(), replay[0].GetProperty("booking_id").GetGuid());
         Assert.True(replay[0].GetProperty("replayed").GetBoolean());
-        Assert.Equal(32m, replay[0].GetProperty("amount_minutes").GetDecimal());
-        Assert.Equal(0m, again.GetProperty("charged_now_minutes").GetDecimal());
+        Assert.Equal(60, replay[0].GetProperty("amount_minutes").GetInt32());
+        Assert.Equal(0, again.GetProperty("charged_now_minutes").GetInt32());
         Assert.Equal(0, await BalanceAsync(factory, club.MemberUserId));
         Assert.Equal(1, await LiveBookingsAsync(factory, club.TenantId));
 
-        await CreditAsync(factory, club.TenantId, club.MemberUserId, 32);
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 60);
         var finished = Results(await PostAsync(client, request));
         Assert.True(finished[0].GetProperty("replayed").GetBoolean());
         Assert.Equal("booked", finished[1].GetProperty("status").GetString());
@@ -293,7 +293,7 @@ public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         Assert.False(theirs[0].GetProperty("replayed").GetBoolean());
         Assert.NotEqual(mine[0].GetProperty("booking_id").GetGuid(), theirs[0].GetProperty("booking_id").GetGuid());
-        Assert.Equal(68, await BalanceAsync(factory, club.AdminUserId));
+        Assert.Equal(40, await BalanceAsync(factory, club.AdminUserId));
     }
 
     /// <summary>

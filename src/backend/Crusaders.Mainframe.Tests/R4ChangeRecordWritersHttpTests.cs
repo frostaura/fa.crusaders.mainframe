@@ -51,7 +51,10 @@ public sealed class R4ChangeRecordWritersHttpTests(PostgresFixture pg) : IClassF
         var created = Assert.Single(await RowsAsync(club.TenantId, AdminChangeActions.CourtCreated));
         Assert.Equal((AdminChangeSubjects.Court, id, "Court 2", club.AdminUserId), (created.SubjectKind, created.SubjectId!.Value, created.SubjectLabel, created.ActorUserId));
         Assert.Equal("Court 2", After(created, "name"));
-        Assert.Equal("9", After(created, "slice_price_credits"));
+        // Courts carry no price since P13 (§3.9): an old console's slicePriceCredits is bound to
+        // nothing, and the snapshot names no price.
+        Assert.Null(After(created, "slice_price_credits"));
+        Assert.Null(After(created, "slice_price_minutes"));
 
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/v1/admin/courts/{id}", new { name = "Glass court", slicePriceCredits = 9 })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await admin.PatchAsJsonAsync($"/api/v1/admin/courts/{id}", new { name = "Glass court" })).StatusCode);

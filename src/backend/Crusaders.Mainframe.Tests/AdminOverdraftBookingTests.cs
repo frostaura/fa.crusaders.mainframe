@@ -33,9 +33,9 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public class AdminOverdraftBookingTests
 {
-    // TestHost fixture: slice_minutes 15, court price 8 credits, penalty_pct 30,
+    // TestHost fixture: slice_minutes 15 — one slice costs 15 minutes (§1.1) — penalty_pct 30,
     // penalty_window_minutes 15.
-    private const int SlicePriceCredits = 8;
+    private const int SliceMinutes = 15;
 
     /// <summary>Seeds the member with less than one slice costs, and hands back the pieces every test needs.</summary>
     private static async Task<(BookingService Bookings, LedgerService Ledger, MainframeDbContext Db)> ArrangeAsync(
@@ -71,7 +71,7 @@ public class AdminOverdraftBookingTests
 
         var refusal = Assert.IsType<BookingResult.InsufficientBalance>(result);
         Assert.Equal(3, refusal.CurrentMinutes);
-        Assert.Equal(SlicePriceCredits, refusal.RequiredMinutes);
+        Assert.Equal(SliceMinutes, refusal.RequiredMinutes);
 
         // Nothing moved and nothing was reserved: a refusal that left a row behind would be
         // a court sold for no money.
@@ -100,9 +100,9 @@ public class AdminOverdraftBookingTests
         Assert.Equal(host.PlayerUser.Id, ok.Booking.UserId);
         Assert.Equal(host.AdminUser.Id, ok.Booking.ActorUserId);
 
-        // 3 − 8 = −5, and the figure the response quotes is the figure the ledger holds.
-        Assert.Equal(-5, ok.BalanceAfterMinutes);
-        Assert.Equal(-5, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        // 3 − 15 = −12, and the figure the response quotes is the figure the ledger holds.
+        Assert.Equal(-12, ok.BalanceAfterMinutes);
+        Assert.Equal(-12, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // settlement-model.md S1: Owed(b) = P, posted as ONE BookingCharge at the quoted
         // price. An override that discounted the court, or split the debit, would satisfy
@@ -111,10 +111,10 @@ public class AdminOverdraftBookingTests
             .Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync();
         var charge = Assert.Single(rows);
         Assert.Equal(LedgerEntryType.BookingCharge, charge.Type);
-        Assert.Equal(-SlicePriceCredits, charge.AmountMinutes);
+        Assert.Equal(-SliceMinutes, charge.AmountMinutes);
         Assert.Equal(host.PlayerUser.Id, charge.UserId);
         Assert.Equal(host.AdminUser.Id, charge.ActorUserId);
-        Assert.Equal(SlicePriceCredits, ok.Booking.AmountChargedMinutes);
+        Assert.Equal(SliceMinutes, ok.Booking.AmountChargedMinutes);
     }
 
     /// <summary>
@@ -139,13 +139,13 @@ public class AdminOverdraftBookingTests
 
         var ok = Assert.IsType<BookingResult.Ok>(result);
         Assert.Equal(host.AdminUser.Id, ok.Booking.UserId);
-        Assert.Equal(-SlicePriceCredits, ok.BalanceAfterMinutes);
-        Assert.Equal(-SlicePriceCredits, await ledger.GetBalanceAsync(host.AdminUser.Id, default));
+        Assert.Equal(-SliceMinutes, ok.BalanceAfterMinutes);
+        Assert.Equal(-SliceMinutes, await ledger.GetBalanceAsync(host.AdminUser.Id, default));
 
         // Still one BookingCharge at the full price: god mode moves the wallet, never the price.
         var charge = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync());
-        Assert.Equal(-SlicePriceCredits, charge.AmountMinutes);
+        Assert.Equal(-SliceMinutes, charge.AmountMinutes);
     }
 
     /// <summary>
@@ -196,8 +196,8 @@ public class AdminOverdraftBookingTests
 
         using var before = JsonDocument.Parse(row.BeforeJson!);
         using var after = JsonDocument.Parse(row.AfterJson!);
-        Assert.Equal(0m, before.RootElement.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(-SlicePriceCredits, after.RootElement.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(0, before.RootElement.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(-SliceMinutes, after.RootElement.GetProperty("balance_minutes").GetInt32());
         Assert.True(after.RootElement.GetProperty("self").GetBoolean());
         Assert.Equal(ok.Booking.Id, after.RootElement.GetProperty("booking_id").GetGuid());
     }
@@ -300,10 +300,10 @@ public class AdminOverdraftBookingTests
 
         using var details = JsonDocument.Parse(audit.DetailsJson!);
         Assert.True(details.RootElement.GetProperty("overdrawn").GetBoolean());
-        Assert.Equal(3m, details.RootElement.GetProperty("balance_before_minutes").GetDecimal());
+        Assert.Equal(3, details.RootElement.GetProperty("balance_before_minutes").GetInt32());
         Assert.Equal(
             await ledger.GetBalanceAsync(host.PlayerUser.Id, default),
-            details.RootElement.GetProperty("balance_after_minutes").GetDecimal());
+            details.RootElement.GetProperty("balance_after_minutes").GetInt32());
         Assert.Equal(ok.Booking.Id, details.RootElement.GetProperty("booking_id").GetGuid());
     }
 
@@ -331,7 +331,7 @@ public class AdminOverdraftBookingTests
 
         using var details = JsonDocument.Parse(audit.DetailsJson!);
         Assert.False(details.RootElement.GetProperty("overdrawn").GetBoolean());
-        Assert.Equal(200 - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(200 - SliceMinutes, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>
@@ -352,13 +352,13 @@ public class AdminOverdraftBookingTests
             host.Courts[0].Id,
             new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
             TestHost.BookableSlot(5), sliceCount: 1, default));
-        Assert.Equal(-5, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Equal(-12, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         var cancelled = await bookings.CancelAsync(
             ok.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
 
         var done = Assert.IsType<CancellationResult.Ok>(cancelled);
-        Assert.Equal(SlicePriceCredits, done.RefundedMinutes);
+        Assert.Equal(SliceMinutes, done.RefundedMinutes);
         Assert.Equal(0, done.PenaltyMinutes);
         Assert.Equal(3, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
@@ -369,8 +369,8 @@ public class AdminOverdraftBookingTests
     }
 
     /// <summary>
-    /// The member's own confirmation. Left alone, the email states "Balance after: −5,00
-    /// credits" and nothing else — a negative number with no account of itself, on the one
+    /// The member's own confirmation. Left alone, the email states "Balance after: −12
+    /// minutes" and nothing else — a negative number with no account of itself, on the one
     /// artifact a member reconciles a bank statement against.
     /// </summary>
     [Fact]
@@ -379,15 +379,15 @@ public class AdminOverdraftBookingTests
         var club = new Crusaders.Mainframe.Api.Email.ClubIdentity(
             "Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
         var overdrawn = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8, -5, 15, 30));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 15, -12, 15, 30));
         var ordinary = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8, 192, 15, 30));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 15, 185, 15, 30));
 
         // Both bodies: the explanation is worth nothing in the half the member is not shown.
         foreach (var body in new[] { overdrawn.HtmlBody, MailText.Unwrap(overdrawn.PlainBody) })
         {
             Assert.Contains("The club made this booking for you", body);
-            Assert.Contains("Top up to clear it", body);
+            Assert.Contains("Buy minutes to clear it", body);
         }
         Assert.DoesNotContain("The club made this booking for you", ordinary.HtmlBody);
         Assert.DoesNotContain("The club made this booking for you", MailText.Unwrap(ordinary.PlainBody));
@@ -404,13 +404,13 @@ public class AdminOverdraftBookingTests
         var club = new Crusaders.Mainframe.Api.Email.ClubIdentity(
             "Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
         var own = EmailTemplates.BookingConfirmation(club, "desk@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8, -8, 15, 30, MadeByClub: false));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 15, -15, 15, 30, MadeByClub: false));
 
         foreach (var body in new[] { own.HtmlBody, MailText.Unwrap(own.PlainBody) })
         {
             Assert.DoesNotContain("The club made this booking for you", body);
             Assert.Contains("This booking takes your balance to", body);
-            Assert.Contains("Top up to clear it", body);
+            Assert.Contains("Buy minutes to clear it", body);
         }
     }
 

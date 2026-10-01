@@ -46,8 +46,9 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
     public ConcurrentDecisionTests(PostgresFixture pg) => _pg = pg;
 
-    private const int SlicePriceCredits = 8;
-    private const int BookingCost = SlicePriceCredits * 4;
+    // Four 15-minute slices: a booking costs its length in minutes (§1.1).
+    private const int SliceMinutes = 15;
+    private const int BookingCost = SliceMinutes * 4;
 
     private sealed record Club(Guid TenantId, string Slug, Guid CourtId, Guid MemberId, Guid VolunteerId, Guid DeviceId);
 
@@ -121,7 +122,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         return scope;
     }
 
-    private static async Task<decimal> BalanceAsync(TestWebAppFactory factory, Club club, Guid userId)
+    private static async Task<int> BalanceAsync(TestWebAppFactory factory, Club club, Guid userId)
     {
         using var scope = RequestScope(factory, club);
         return await scope.ServiceProvider.GetRequiredService<LedgerService>().GetBalanceAsync(userId, default);
@@ -374,7 +375,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         Assert.Equal(1, await CountAsync(factory, club, bookingId, LedgerEntryType.NoShowPenalty));
 
         // Charged once, refunded once, penalised once.
-        var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
+        var penalty = (int)Math.Floor(BookingCost * 0.30m);   // rounded down, in the member's favour (§1.2)
         Assert.Equal(200 - penalty, await BalanceAsync(factory, club, club.MemberId));
     }
 
@@ -401,7 +402,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
         var bookingId = await SeedDueNoShowAsync(factory, club);
 
         await Worker(factory).TickAsync(default);
-        var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
+        var penalty = (int)Math.Floor(BookingCost * 0.30m);   // rounded down, in the member's favour (§1.2)
         Assert.Equal(200 - penalty, await BalanceAsync(factory, club, club.MemberId));
 
         // Twenty minutes ago: inside the slot the sweep settled.
@@ -476,7 +477,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 
         // The sweep commits underneath it.
         await Worker(factory).TickAsync(default);
-        var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
+        var penalty = (int)Math.Floor(BookingCost * 0.30m);   // rounded down, in the member's favour (§1.2)
         Assert.Equal(200 - penalty, await BalanceAsync(factory, club, club.MemberId));
 
         var scannedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeSeconds());
@@ -671,7 +672,7 @@ public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
     /// no row to constrain: <c>GetBalanceAsync</c> is an unlocked <c>SUM</c>. Two requests
     /// for the same member on different courts both read the same balance, both find it
     /// sufficient, and both debit — leaving a member who could afford one court holding two
-    /// and a balance of −32. The GiST exclusion constraint protects the slot; nothing
+    /// and a balance of −60. The GiST exclusion constraint protects the slot; nothing
     /// protected the wallet.
     /// </para>
     ///

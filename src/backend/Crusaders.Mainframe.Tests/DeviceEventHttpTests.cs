@@ -308,7 +308,7 @@ public abstract partial class DeviceEventHttpTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = 15,
             SliceCount = Math.Max(1, minutes / 15),
-            AmountChargedMinutes = 8 * Math.Max(1, minutes / 15),
+            AmountChargedMinutes = 15 * Math.Max(1, minutes / 15),   // its length in minutes (§1.1)
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
         };
@@ -378,7 +378,7 @@ public abstract partial class DeviceEventHttpTests
         await worker.TickAsync(default);
     }
 
-    private static async Task<decimal> BalanceAsync(TestWebAppFactory factory, Guid userId)
+    private static async Task<int> BalanceAsync(TestWebAppFactory factory, Guid userId)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -403,7 +403,7 @@ public abstract partial class DeviceEventHttpTests
         Assert.Null(swept.CheckedInAt);
 
         var settled = await LedgerAsync(factory, booked.BookingId);
-        Assert.Equal(24, Assert.Single(settled, l => l.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
+        Assert.Equal(45, Assert.Single(settled, l => l.Type == LedgerEntryType.CancellationRefund).AmountMinutes);
         Assert.True(Assert.Single(settled, l => l.Type == LedgerEntryType.NoShowPenalty).AmountMinutes < 0);
         return (booked, swept);
     }
@@ -460,7 +460,7 @@ public abstract partial class DeviceEventHttpTests
             EndsAt = startsAt.AddMinutes(minutes),
             SliceMinutes = 15,
             SliceCount = Math.Max(1, minutes / 15),
-            AmountChargedMinutes = 8 * Math.Max(1, minutes / 15),
+            AmountChargedMinutes = 15 * Math.Max(1, minutes / 15),   // its length in minutes (§1.1)
             Status = status,
             ChargedAt = charged ? DateTimeOffset.UtcNow : null,
         };

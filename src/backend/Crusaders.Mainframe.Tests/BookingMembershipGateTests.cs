@@ -42,12 +42,12 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
     private const string MemberBookingsPath = "/api/v1/bookings/";
     private const string AdminBookingsPath = "/api/v1/admin/bookings/";
-    private const int SlicePriceCredits = 50;
+    private const int SliceMinutes = 15;   // a slice costs its 15 minutes (§1.1)
     private const int MemberFloatMinutes = 500;
 
     /// <summary>Hours wide open and no peak window, so nothing here depends on when the suite runs.</summary>
     private const string SettingsJson = """
-        {"slice_minutes":15,"slice_price_credits":50,"penalty_pct":30,"grace_window_minutes":5,
+        {"slice_minutes":15,"penalty_pct":30,"grace_window_minutes":5,
          "penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC",
          "member_per_day_max_minutes":600,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,
          "day_start_minute":0,"day_end_minute":1440}
@@ -247,12 +247,12 @@ public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
         var (ownCode, ownBody) = await PostAsync(member, MemberBookingsPath,
             new { courtId = s.CourtId, startsAt = SlotAt(9), sliceCount = 1 });
         Assert.Equal(HttpStatusCode.OK, ownCode);
-        Assert.Equal(MemberFloatMinutes - SlicePriceCredits, ownBody.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(MemberFloatMinutes - SliceMinutes, ownBody.GetProperty("balance_after_minutes").GetInt32());
 
         var admin = ClientFor(factory, s, s.AdminUserId, isAdmin: true);
         var (deskCode, deskBody) = await PostAsync(admin, AdminBookingsPath,
             new { courtId = s.CourtId, userId = s.MemberUserId, startsAt = SlotAt(11), sliceCount = 1 });
         Assert.Equal(HttpStatusCode.OK, deskCode);
-        Assert.Equal(MemberFloatMinutes - (2 * SlicePriceCredits), deskBody.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(MemberFloatMinutes - (2 * SliceMinutes), deskBody.GetProperty("balance_after_minutes").GetInt32());
     }
 }

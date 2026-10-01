@@ -23,8 +23,9 @@ namespace Crusaders.Mainframe.Tests;
 /// </para>
 ///
 /// <para>
-/// The member carries a group priced at 1.5× the court, so a quote that read the court's price
-/// instead of the member's would be visibly wrong — 32 where 48 is charged. A fixture with no
+/// Since P13 a booking costs its length in minutes for everyone (§1.1). The member still carries
+/// a group — one with a 20% package discount — so a quote or a charge that let a group's money
+/// rule leak into the minutes would be visibly wrong: 48 where 60 is charged. A fixture with no
 /// group would pass that defect (<c>memory/gotchas.md</c>, "green because of its FIXTURE").
 /// </para>
 /// </summary>
@@ -40,9 +41,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
     private const string BookPath = "/api/v1/admin/bookings/";
     private const string BulkBookPath = "/api/v1/admin/bookings/bulk";
 
-    /// <summary>DoorClub's court is 8 credits a slice; the member's group charges 1.5× that.</summary>
-    private const int CourtSliceMinutes = 8;
-    private const int GroupSliceMinutes = 12;
+    /// <summary>DoorClub's slice is 15 minutes, and a slice costs its 15 minutes — court or group alike.</summary>
+    private const int SliceMinutes = 15;
 
     private TestWebAppFactory CreateFactory() => _pg.SharedHost;
 
@@ -72,7 +72,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
     private static async Task<(HttpStatusCode Status, JsonElement Body)> ReadAsync(Task<HttpResponseMessage> pending)
         => await ReadAsync(await pending);
 
-    /// <summary>The club, with the member in a 1.5× group and holding <paramref name="memberMinutes"/>.</summary>
+    /// <summary>The club, with the member in a discount group and holding <paramref name="memberMinutes"/>.</summary>
     private static async Task<DoorClub> SeedAsync(TestWebAppFactory factory, string prefix, int memberMinutes)
     {
         var club = await DoorClub.SeedAsync(factory, prefix);
@@ -83,6 +83,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         {
             TenantId = club.TenantId,
             Name = "League",
+            // Rand only (§1.2): it must never reach a booking's minutes.
+            PackageDiscountBps = 2_000,
             CreatedByUserId = club.AdminUserId,
         };
         db.MemberGroups.Add(group);
@@ -138,12 +140,12 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         var (status, quote) = await QuoteAsync(admin, club.CourtId, Slot(10), 4, club.MemberUserId);
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(GroupSliceMinutes * 4, quote.GetProperty("price_minutes").GetDecimal());
-        Assert.Equal(5m, quote.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(5m - GroupSliceMinutes * 4, quote.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(SliceMinutes * 4, quote.GetProperty("price_minutes").GetInt32());
+        Assert.Equal(5, quote.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(5 - SliceMinutes * 4, quote.GetProperty("balance_after_minutes").GetInt32());
         Assert.True(quote.GetProperty("overdraws").GetBoolean());
         Assert.Equal(club.MemberUserId, quote.GetProperty("user_id").GetGuid());
-        // Credits only: the club's currency symbol is rand's and never fronts a credit figure.
+        // Minutes only: the club's currency symbol is rand's and never fronts a minutes figure.
         Assert.False(quote.TryGetProperty("currency_symbol", out _));
 
         var (bookStatus, booked) = await ReadAsync(admin.PostAsJsonAsync(BookPath, new
@@ -154,10 +156,10 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
 
         Assert.Equal(HttpStatusCode.OK, bookStatus);
         var charge = Assert.Single(await ChargesAsync(factory, club.TenantId, club.MemberUserId));
-        Assert.Equal(-quote.GetProperty("price_minutes").GetDecimal(), charge.AmountMinutes);
+        Assert.Equal(-quote.GetProperty("price_minutes").GetInt32(), charge.AmountMinutes);
         Assert.Equal(
-            quote.GetProperty("balance_after_minutes").GetDecimal(),
-            booked.GetProperty("balance_after_minutes").GetDecimal());
+            quote.GetProperty("balance_after_minutes").GetInt32(),
+            booked.GetProperty("balance_after_minutes").GetInt32());
 
         var actions = (await ChangesAsync(factory, club.TenantId)).Select(c => c.Action).ToList();
         Assert.Equal(2, actions.Count);
@@ -166,12 +168,12 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// The quote is PAYER-shaped, not court-shaped. The same slot costs the admin the court's
-    /// price and the member their group's, and each quote reads its own payer's wallet. Omitting
-    /// <c>userId</c> is the admin's own booking.
+    /// The quote is PAYER-shaped for the wallet and nothing else: the same slot costs the admin
+    /// and the discount-group member the same minutes (§1.1), and each quote reads its own payer's
+    /// wallet. Omitting <c>userId</c> is the admin's own booking.
     /// </summary>
     [SkippableFact]
-    public async Task A_quote_for_yourself_and_a_quote_for_a_member_read_different_prices_and_wallets()
+    public async Task A_quote_for_yourself_and_a_quote_for_a_member_read_the_same_minutes_and_different_wallets()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -183,12 +185,12 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         var (_, other) = await QuoteAsync(admin, club.CourtId, Slot(11), 4, club.MemberUserId);
 
         Assert.Equal(club.AdminUserId, self.GetProperty("user_id").GetGuid());
-        Assert.Equal(CourtSliceMinutes * 4, self.GetProperty("price_minutes").GetDecimal());
-        Assert.Equal(0m, self.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(SliceMinutes * 4, self.GetProperty("price_minutes").GetInt32());
+        Assert.Equal(0, self.GetProperty("balance_minutes").GetInt32());
         Assert.True(self.GetProperty("overdraws").GetBoolean());
 
-        Assert.Equal(GroupSliceMinutes * 4, other.GetProperty("price_minutes").GetDecimal());
-        Assert.Equal(100m, other.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(SliceMinutes * 4, other.GetProperty("price_minutes").GetInt32());
+        Assert.Equal(100, other.GetProperty("balance_minutes").GetInt32());
         Assert.False(other.GetProperty("overdraws").GetBoolean());
 
         // And the admin's own booking, overdrawn, charges what the self-quote said.
@@ -199,7 +201,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         }));
         Assert.Equal(HttpStatusCode.OK, status);
         var charge = Assert.Single(await ChargesAsync(factory, club.TenantId, club.AdminUserId));
-        Assert.Equal(-self.GetProperty("price_minutes").GetDecimal(), charge.AmountMinutes);
+        Assert.Equal(-self.GetProperty("price_minutes").GetInt32(), charge.AmountMinutes);
 
         // Self: an overdraft row, and no on-behalf row — the admin booked for nobody else.
         var row = Assert.Single(await ChangesAsync(factory, club.TenantId));
@@ -209,20 +211,20 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
     /// <summary>
     /// The boundary of <c>overdraws</c> is the booking's own guard, <c>balance &lt; price</c>. A
     /// member holding exactly the price does not overdraw — and the booking sent WITHOUT the
-    /// override proves it by landing on zero. One credit short, and it does.
+    /// override proves it by landing on zero. One slice more, and it does.
     /// </summary>
     [SkippableFact]
-    public async Task Holding_exactly_the_price_is_not_an_overdraft_and_one_credit_less_is()
+    public async Task Holding_exactly_the_price_is_not_an_overdraft_and_one_slice_more_is()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmedge", memberMinutes: GroupSliceMinutes * 4);
+        var club = await SeedAsync(factory, "gmedge", memberMinutes: SliceMinutes * 4);
         var admin = club.AdminClient(factory);
 
         var (_, exact) = await QuoteAsync(admin, club.CourtId, Slot(8), 4, club.MemberUserId);
         Assert.False(exact.GetProperty("overdraws").GetBoolean());
-        Assert.Equal(0m, exact.GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(0, exact.GetProperty("balance_after_minutes").GetInt32());
 
         var (_, exactBulk) = await ReadAsync(admin.PostAsJsonAsync(BulkQuotePath, new
         {
@@ -352,7 +354,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await SeedAsync(factory, "gmbulk", memberMinutes: 50);
+        // Enough for the first hour and not the second, so exactly one item overdraws.
+        var club = await SeedAsync(factory, "gmbulk", memberMinutes: 70);
         var admin = club.AdminClient(factory);
         var past = DateTimeOffset.UtcNow.AddHours(-3);
 
@@ -372,17 +375,17 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         var lines = quote.GetProperty("items").EnumerateArray().ToList();
         Assert.Equal(4, lines.Count);
         Assert.True(lines[0].GetProperty("bookable").GetBoolean());
-        Assert.Equal(GroupSliceMinutes * 4, lines[0].GetProperty("price_minutes").GetDecimal());
+        Assert.Equal(SliceMinutes * 4, lines[0].GetProperty("price_minutes").GetInt32());
         Assert.Equal(JsonValueKind.Null, lines[0].GetProperty("reason").ValueKind);
         Assert.False(lines[1].GetProperty("bookable").GetBoolean());
         Assert.Equal("slot_taken", lines[1].GetProperty("reason").GetString());
         Assert.True(lines[2].GetProperty("bookable").GetBoolean());
         Assert.Equal("past_time", lines[3].GetProperty("reason").GetString());
 
-        var total = quote.GetProperty("total_minutes").GetDecimal();
-        Assert.Equal(GroupSliceMinutes * 8, total);
-        Assert.Equal(50m, quote.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(50m - total, quote.GetProperty("balance_after_minutes").GetDecimal());
+        var total = quote.GetProperty("total_minutes").GetInt32();
+        Assert.Equal(SliceMinutes * 8, total);
+        Assert.Equal(70, quote.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(70 - total, quote.GetProperty("balance_after_minutes").GetInt32());
         Assert.True(quote.GetProperty("overdraws").GetBoolean());
 
         // The same items through the bulk BOOK body's own spelling, with the override.
@@ -401,11 +404,11 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         }));
 
         Assert.Equal(HttpStatusCode.OK, bookStatus);
-        Assert.Equal(total, booked.GetProperty("total_charged_minutes").GetDecimal());
+        Assert.Equal(total, booked.GetProperty("total_charged_minutes").GetInt32());
         var results = booked.GetProperty("results").EnumerateArray().ToList();
         for (var i = 0; i < 4; i++)
         {
-            Assert.Equal(lines[i].GetProperty("price_minutes").GetDecimal(), results[i].GetProperty("amount_minutes").GetDecimal());
+            Assert.Equal(lines[i].GetProperty("price_minutes").GetInt32(), results[i].GetProperty("amount_minutes").GetInt32());
             if (!lines[i].GetProperty("bookable").GetBoolean())
             {
                 Assert.Equal(lines[i].GetProperty("reason").GetString(), results[i].GetProperty("error").GetString());
@@ -448,8 +451,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
             items = new[] { new { courtId = club.CourtId, startsAt = Slot(15), sliceCount = 3 } },
         }));
 
-        Assert.Equal(GroupSliceMinutes * 3, snake.GetProperty("total_minutes").GetDecimal());
-        Assert.Equal(snake.GetProperty("total_minutes").GetDecimal(), camel.GetProperty("total_minutes").GetDecimal());
+        Assert.Equal(SliceMinutes * 3, snake.GetProperty("total_minutes").GetInt32());
+        Assert.Equal(snake.GetProperty("total_minutes").GetInt32(), camel.GetProperty("total_minutes").GetInt32());
         Assert.Equal(club.MemberUserId, camel.GetProperty("user_id").GetGuid());
 
         var (bad, badBody) = await ReadAsync(admin.PostAsJsonAsync(BulkQuotePath, new
@@ -485,7 +488,7 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
             idempotencyKey = "gm_self_2", allowNegativeBalance = true, items = Items(),
         }));
         Assert.Equal("booked", booked.GetProperty("results")[0].GetProperty("status").GetString());
-        Assert.Equal(-CourtSliceMinutes * 4, booked.GetProperty("payer").GetProperty("balance_after_minutes").GetDecimal());
+        Assert.Equal(-SliceMinutes * 4, booked.GetProperty("payer").GetProperty("balance_after_minutes").GetInt32());
 
         var overdraft = Assert.Single(await ChangesAsync(factory, club.TenantId),
             c => c.Action == AdminChangeActions.BookingOverdraftAuthorised);
@@ -561,8 +564,8 @@ public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(HttpStatusCode.OK, plain);
         Assert.Equal(HttpStatusCode.OK, camel);
         Assert.Equal(HttpStatusCode.OK, snake);
-        Assert.Equal(expected.GetProperty("price_minutes").GetDecimal(), viaSliceCount.GetProperty("price_minutes").GetDecimal());
-        Assert.Equal(expected.GetProperty("price_minutes").GetDecimal(), viaSnake.GetProperty("price_minutes").GetDecimal());
+        Assert.Equal(expected.GetProperty("price_minutes").GetInt32(), viaSliceCount.GetProperty("price_minutes").GetInt32());
+        Assert.Equal(expected.GetProperty("price_minutes").GetInt32(), viaSnake.GetProperty("price_minutes").GetInt32());
         Assert.Equal(club.MemberUserId, viaSnake.GetProperty("user_id").GetGuid());
 
         var (bad, refusal) = await ReadAsync(admin.GetAsync($"{QuotePath}?courtId=not-a-guid&startsAt={at}&slices=4"));

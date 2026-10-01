@@ -125,7 +125,7 @@ public abstract partial class DeviceEventHttpTests
             if (sold)
             {
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-                Assert.Equal(184, await BalanceAsync(factory, box.MemberId));
+                Assert.Equal(170, await BalanceAsync(factory, box.MemberId));
                 return;
             }
 

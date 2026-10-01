@@ -36,9 +36,12 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
     private static List<JsonElement> Results(JsonElement body)
         => body.GetProperty("results").EnumerateArray().ToList();
 
-    /// <summary>A booked slot belonging to this club's member, charged at the given price.</summary>
+    /// <summary>
+    /// A booked slot belonging to this club's member, <paramref name="charged"/> minutes long and
+    /// charged exactly that — a booking costs its length (§1.1). A whole number of slices.
+    /// </summary>
     private static async Task<Guid> SeedBookingAsync(
-        TestWebAppFactory factory, DoorClub club, DateTimeOffset startsAt, int charged = 32,
+        TestWebAppFactory factory, DoorClub club, DateTimeOffset startsAt, int charged = 60,
         Guid? userId = null)
     {
         using var scope = factory.Services.CreateScope();
@@ -53,9 +56,9 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
             PaidByUserId = payer,
             ActorUserId = payer,
             StartsAt = startsAt.ToUniversalTime(),
-            EndsAt = startsAt.AddMinutes(60).ToUniversalTime(),
+            EndsAt = startsAt.AddMinutes(charged).ToUniversalTime(),
             SliceMinutes = 15,
-            SliceCount = 4,
+            SliceCount = charged / 15,
             AmountChargedMinutes = charged,
             Status = BookingStatus.Booked,
             ChargedAt = DateTimeOffset.UtcNow,
@@ -243,7 +246,7 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "bulkidem");
-        var id = await SeedBookingAsync(factory, club, DateTimeOffset.UtcNow.AddDays(3), charged: 32);
+        var id = await SeedBookingAsync(factory, club, DateTimeOffset.UtcNow.AddDays(3), charged: 45);
         var client = club.AdminClient(factory);
 
         var payload = new
@@ -261,7 +264,7 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
             .ToList();
 
         Assert.Single(refunds);
-        Assert.Equal(32, refunds[0].AmountMinutes);
+        Assert.Equal(45, refunds[0].AmountMinutes);
         Assert.StartsWith("bulkcancel:", refunds[0].ExternalReference);
         Assert.EndsWith(":refund", refunds[0].ExternalReference);
     }
@@ -270,7 +273,7 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
     /// The totals on the envelope are the sum of the rows beneath them.
     ///
     /// <para>
-    /// A console prints the total in a sentence the admin reads first — "550.00 credits
+    /// A console prints the total in a sentence the admin reads first — "9 h 10 min
     /// refunded" — and then the list. If the two disagree, the sentence is the one that gets
     /// quoted.
     /// </para>
@@ -283,8 +286,8 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "bulktotal");
         var slot = DateTimeOffset.UtcNow.AddDays(4);
-        var a = await SeedBookingAsync(factory, club, slot, charged: 32);
-        var b = await SeedBookingAsync(factory, club, slot.AddHours(3), charged: 16);
+        var a = await SeedBookingAsync(factory, club, slot, charged: 60);
+        var b = await SeedBookingAsync(factory, club, slot.AddHours(3), charged: 45);
 
         var response = await club.AdminClient(factory).PostAsJsonAsync(CancelPath, new
         {
@@ -295,10 +298,10 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         var rows = Results(body);
-        var summed = rows.Sum(r => r.GetProperty("refund_minutes").GetDecimal());
+        var summed = rows.Sum(r => r.GetProperty("refund_minutes").GetInt32());
 
-        Assert.Equal(summed, body.GetProperty("total_refunded_minutes").GetDecimal());
-        Assert.Equal(48m, body.GetProperty("total_refunded_minutes").GetDecimal());
+        Assert.Equal(summed, body.GetProperty("total_refunded_minutes").GetInt32());
+        Assert.Equal(105, body.GetProperty("total_refunded_minutes").GetInt32());
     }
 
     /// <summary>
@@ -321,7 +324,7 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
         var clubA = await DoorClub.SeedAsync(factory, "bulkxta");
         var clubB = await DoorClub.SeedAsync(factory, "bulkxtb");
 
-        var theirs = await SeedBookingAsync(factory, clubB, DateTimeOffset.UtcNow.AddDays(3), charged: 40);
+        var theirs = await SeedBookingAsync(factory, clubB, DateTimeOffset.UtcNow.AddDays(3), charged: 30);
         var beforeCount = (await LedgerAsync(factory, clubB.TenantId)).Count;
 
         var response = await clubA.AdminClient(factory).PostAsJsonAsync(CancelPath, new
@@ -480,7 +483,7 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
         var row = Results(body).Single();
 
         Assert.Equal("blocked", row.GetProperty("status").GetString());
-        Assert.Equal(0m, row.GetProperty("amount_minutes").GetDecimal());
+        Assert.Equal(0, row.GetProperty("amount_minutes").GetInt32());
         Assert.Equal(JsonValueKind.Null, body.GetProperty("payer").ValueKind);
 
         using var scope = factory.Services.CreateScope();
@@ -552,8 +555,8 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "bulkhalt");
 
-        // Exactly two slots' worth: 4 slices × 8 credits = 32 each.
-        await CreditAsync(factory, club, club.MemberUserId, 64);
+        // Exactly two slots' worth: 4 slices of 15 minutes = 60 each.
+        await CreditAsync(factory, club, club.MemberUserId, 120);
         var day = DateTimeOffset.UtcNow.AddDays(2).Date;
         var client = club.AdminClient(factory);
 
@@ -629,7 +632,7 @@ public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
 
         var day = DateTimeOffset.UtcNow.AddDays(2).Date;
         var taken = new DateTimeOffset(day.AddHours(13), TimeSpan.Zero);
-        await SeedBookingAsync(factory, club, taken, charged: 32);
+        await SeedBookingAsync(factory, club, taken, charged: 60);
 
         var response = await club.AdminClient(factory).PostAsJsonAsync(BookPath, new
         {

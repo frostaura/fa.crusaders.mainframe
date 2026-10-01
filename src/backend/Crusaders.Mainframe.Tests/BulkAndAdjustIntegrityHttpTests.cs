@@ -79,13 +79,6 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         return user.Id;
     }
 
-    // P13-B1: courts carry no price (§2.2). A test that needs a price must be rewritten in minutes.
-    private static Task SetCourtPriceAsync(TestWebAppFactory factory, Guid courtId, int slicePrice)
-    {
-        Assert.Fail($"P13-B1: court prices are gone; rewrite this scenario in minutes ({courtId} {slicePrice})");
-        return Task.CompletedTask;
-    }
-
     private static async Task<List<LedgerEntry>> LedgerAsync(TestWebAppFactory factory, Guid tenantId, Guid userId)
     {
         using var scope = factory.Services.CreateScope();
@@ -143,7 +136,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "f1adjust");
         var admin = club.AdminClient(factory);
-        var path = $"/api/v1/admin/credit/{club.MemberUserId}/adjust";
+        var path = $"/api/v1/admin/minutes/{club.MemberUserId}/adjust";
         object Body() => new { amountMinutes = 25, reason = "Lights failed", reasonCode = "goodwill" };
 
         await using (await ChangeLogSabotage.InstallAsync(factory, club.TenantId, "credit."))
@@ -258,7 +251,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         var bBookings = await BookingsAsync(factory, club.TenantId, memberB);
         var booked = Assert.Single(bBookings);
         Assert.Equal(Morning(2, 14), booked.StartsAt);
-        Assert.Equal(-16, (await LedgerAsync(factory, club.TenantId, memberB))
+        Assert.Equal(-30, (await LedgerAsync(factory, club.TenantId, memberB))   // two slices, 30 minutes
             .Where(l => l.Type == LedgerEntryType.BookingCharge).Sum(l => l.AmountMinutes));
     }
 
@@ -356,24 +349,23 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         Assert.Equal("already_cancelled", row.GetProperty("error").GetString());
     }
 
-    // ---- F5: a free court bulk-booked writes no 0.00 row, and still replays ----------------------
+    // ---- F5 after P13: no court is free; each bulk route posts one charge of its minutes, once ----
 
     /// <summary>
-    /// <b>F5.</b> Settlement-model I10: a posting of zero credits is not written, the walk-up the
-    /// one exception. The single booking of a free court honoured it; the member and admin bulk
-    /// routes wrote a 0.00 <c>BookingCharge</c> — a phantom line on the member's statement —
-    /// because the skip keyed on "has no reference" and a bulk item always has one. The retry the
-    /// reference existed for still answers with the same booking rather than <c>slot_taken</c>
-    /// about the court the member already holds.
+    /// <b>F5</b>, as it stands since P13. The finding was a 0.00 <c>BookingCharge</c> written for
+    /// every free court a bulk route booked. Courts carry no price now (§2.2), so no bulk item can
+    /// cost zero; what F5 also pinned — the retry the reference exists for answers with the same
+    /// booking and posts nothing twice — is pinned here, on both routes, at two lengths so a
+    /// per-booking flat charge would show: one slice costs 15, three cost 45.
     /// </summary>
     [SkippableFact]
-    public async Task A_free_court_bulk_booked_posts_no_zero_row_and_still_replays()
+    public async Task Each_bulk_route_charges_its_minutes_once_and_replays_without_a_second_charge()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "f5free");
-        await SetCourtPriceAsync(factory, club.CourtId, 0);
+        var club = await DoorClub.SeedAsync(factory, "f5mins");
+        await CreditAsync(factory, club.TenantId, club.MemberUserId, 100);
         var member = club.MemberClient(factory);
         var admin = club.AdminClient(factory);
 
@@ -386,17 +378,21 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         {
             idempotencyKey = "f5-admin",
             onBehalf = new { userId = club.MemberUserId },
-            items = new object[] { new { courtId = club.CourtId, startsAt = Morning(2, 13), sliceCount = 1 } },
+            items = new object[] { new { courtId = club.CourtId, startsAt = Morning(2, 13), sliceCount = 3 } },
         };
 
         var memberFirst = Results(await (await member.PostAsJsonAsync(MemberBulkPath, memberBody)).Content.ReadFromJsonAsync<JsonElement>())[0];
         var adminFirst = Results(await (await admin.PostAsJsonAsync(AdminBulkPath, adminBody)).Content.ReadFromJsonAsync<JsonElement>())[0];
         Assert.Equal("booked", memberFirst.GetProperty("status").GetString());
         Assert.Equal("booked", adminFirst.GetProperty("status").GetString());
+        Assert.Equal(15, memberFirst.GetProperty("amount_minutes").GetInt32());
+        Assert.Equal(45, adminFirst.GetProperty("amount_minutes").GetInt32());
 
-        Assert.Empty(await LedgerAsync(factory, club.TenantId, club.MemberUserId));
+        async Task<List<int>> ChargesAsync() => (await LedgerAsync(factory, club.TenantId, club.MemberUserId))
+            .Where(l => l.Type == LedgerEntryType.BookingCharge).Select(l => l.AmountMinutes).OrderBy(a => a).ToList();
+        Assert.Equal([-45, -15], await ChargesAsync());
 
-        // The retries each answer with their own booking.
+        // The retries each answer with their own booking, and move nothing.
         var memberAgain = Results(await (await member.PostAsJsonAsync(MemberBulkPath, memberBody)).Content.ReadFromJsonAsync<JsonElement>())[0];
         Assert.Equal("booked", memberAgain.GetProperty("status").GetString());
         Assert.True(memberAgain.GetProperty("replayed").GetBoolean());
@@ -407,6 +403,7 @@ public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixt
         Assert.Equal(adminFirst.GetProperty("booking_id").GetGuid(), adminAgain.GetProperty("booking_id").GetGuid());
 
         Assert.Equal(2, (await BookingsAsync(factory, club.TenantId, club.MemberUserId)).Count);
-        Assert.Empty(await LedgerAsync(factory, club.TenantId, club.MemberUserId));
+        Assert.Equal([-45, -15], await ChargesAsync());
+        Assert.Equal(100 - 60, (await LedgerAsync(factory, club.TenantId, club.MemberUserId)).Sum(l => l.AmountMinutes));
     }
 }

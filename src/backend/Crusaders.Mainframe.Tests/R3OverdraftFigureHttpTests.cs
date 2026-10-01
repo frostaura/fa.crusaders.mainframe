@@ -65,8 +65,9 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
         var quote = await (await desk.GetAsync(
             $"/api/v1/admin/bookings/quote?userId={club.Organiser}&courtId={club.CourtId}&startsAt={Uri.EscapeDataString(startsAt.ToString("o"))}&slices=1"))
             .Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(10m, quote.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(-6m, quote.GetProperty("spendable_minutes").GetDecimal());
+        Assert.Equal(10, quote.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(-6, quote.GetProperty("spendable_minutes").GetInt32());
+        Assert.Equal(8, quote.GetProperty("price_minutes").GetInt32());   // PlayersClub's slice is 8 minutes, and costs 8
 
         var booked = await desk.PostAsJsonAsync("/api/v1/admin/bookings/", new
         {
@@ -80,7 +81,7 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
         var payload = JsonSerializer.Deserialize<OverdraftPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
         Assert.Equal(2, payload.BalanceAfterMinutes);
         Assert.Equal(16, payload.HeldMinutes);
-        var spendableAfter = quote.GetProperty("spendable_minutes").GetDecimal() - quote.GetProperty("price_minutes").GetDecimal();
+        var spendableAfter = quote.GetProperty("spendable_minutes").GetInt32() - quote.GetProperty("price_minutes").GetInt32();
         Assert.Equal(-14, spendableAfter);
 
         var mail = EmailTemplates.AdminOverdraftAuthorised(EmailCatalogue.Riverside, "x@test.local", new OverdraftNotice(
@@ -88,18 +89,18 @@ public sealed class R3OverdraftFigureHttpTests(PostgresFixture pg) : IClassFixtu
             payload.AmountMinutes, payload.BalanceAfterMinutes, "https://club.test/admin/changes") { HeldMinutes = payload.HeldMinutes });
         var text = MailText.Unwrap(mail.PlainBody);
         Assert.Contains("Can spend after", text, StringComparison.Ordinal);
-        Assert.Contains("−14.00 credits", text, StringComparison.Ordinal);
+        Assert.Contains(MoneyFormat.Minutes(-14), text, StringComparison.Ordinal);
         Assert.Contains("Held for partners", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("-14.00", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("-14", text, StringComparison.Ordinal);
 
         // The change record carries both figures, before and after.
         var row = await PlayersClub.ReadAsync(f, db => db.AdminChangeLogs.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(c => c.TenantId == club.TenantId && c.Action == AdminChangeActions.BookingOverdraftAuthorised));
         var before = JsonDocument.Parse(row.BeforeJson!).RootElement;
         var after = JsonDocument.Parse(row.AfterJson!).RootElement;
-        Assert.Equal(-6m, before.GetProperty("spendable_minutes").GetDecimal());
-        Assert.Equal(-14m, after.GetProperty("spendable_minutes").GetDecimal());
-        Assert.Equal(10m, before.GetProperty("balance_minutes").GetDecimal());
-        Assert.Equal(2m, after.GetProperty("balance_minutes").GetDecimal());
+        Assert.Equal(-6, before.GetProperty("spendable_minutes").GetInt32());
+        Assert.Equal(-14, after.GetProperty("spendable_minutes").GetInt32());
+        Assert.Equal(10, before.GetProperty("balance_minutes").GetInt32());
+        Assert.Equal(2, after.GetProperty("balance_minutes").GetInt32());
     }
 }
