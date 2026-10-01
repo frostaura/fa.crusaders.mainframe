@@ -1,4 +1,4 @@
-import { endpoints } from "../api";
+import { endpoints, type DailyMePoint, type WalletReport } from "../api";
 import { bookingsApi } from "../bookingsApi";
 import { clubDayOf } from "../gridClock";
 import { playEndpoints } from "../playApi";
@@ -28,7 +28,26 @@ export const memberReads = {
   inbox: { key: "inbox:first", load: () => playersEndpoints.notifications() },
   profile: { key: "me:profile", load: () => endpoints.meProfile() },
   myPlay: { key: "play:me", load: () => playEndpoints.myPlay() },
+  /** R5 M5-6 — the open invites (`/bookings/invites`, and the Inbox's invite pane). */
+  invites: { key: "invites:mine", load: () => playersEndpoints.myInvites() },
+  /**
+   * R5 M5-6 — Wallet activity for one range, by its club-day markers (`dayMarkers(range)`): the
+   * totals and the daily points, read together as the page draws them.
+   */
+  walletActivity: (markers: { from: string; to: string }) => ({
+    key: `wallet:activity:${markers.from}|${markers.to}`,
+    load: async (): Promise<WalletActivity> => {
+      const [wallet, days] = await Promise.all([
+        endpoints.reportWallet(markers.from, markers.to),
+        endpoints.reportDailyMe(markers.from, markers.to),
+      ]);
+      return { wallet, days };
+    },
+  }),
 } as const;
+
+/** What Wallet activity draws for a range. */
+export type WalletActivity = { wallet: WalletReport; days: DailyMePoint[] };
 
 /** The `?date=` a Bookings link names, or the club's today as this phone knows it. */
 function dayOf(search: string): string {
@@ -43,6 +62,7 @@ export function readsFor(pathname: string, search = ""): MemberRead<unknown>[] {
     // The desk booking FOR a member (`?as=`) shows no games lists.
     return new URLSearchParams(search).has("as") ? [day] : [day, memberReads.upcoming, memberReads.recent];
   }
+  // Its read starts at the press through `earlyInvites` (R5, lane B), not here: one request, not two.
   if (/^\/bookings\/invites\/?$/.test(pathname)) return [];
   const booking = /^\/bookings\/([^/]+)\/?$/.exec(pathname);
   if (booking) return [memberReads.booking(decodeURIComponent(booking[1]))];

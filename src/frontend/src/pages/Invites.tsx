@@ -11,7 +11,8 @@ import { ContextBar } from "@/components/ui/context-bar";
 import { SplitView } from "@/components/ui/split-view";
 import { usePickParam, useSplitLayout } from "@/components/ui/use-split-layout";
 import { InviteCard, InviteListSkeleton } from "@/components/players/invites/InviteCard";
-import { useMyInvites } from "@/components/players/invites/useMyInvites";
+import { useKeptInvites } from "@/lib/offline/useKeptInvites";
+import { StaleNotice } from "@/components/shell/StaleNotice";
 import { usePendingLinkInvite } from "@/components/players/invites/usePendingLinkInvite";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
@@ -25,7 +26,8 @@ import { useSheetHistory } from "@/lib/bookingSheetHistory";
  * accept sheet; the list is read again after every answer.
  */
 export default function InvitesPage() {
-  const invites = useMyInvites();
+  // R5 M5-6 — kept by `lib/offline`: drawn at once on a revisit and from the phone offline.
+  const invites = useKeptInvites();
   const sheet = useSheet(invites.items);
   // R1 F2.5 — a link the member opened and has not answered (an open seat is nobody's until it is
   // accepted, so the club's list cannot hold it): offered first, as a link back to it.
@@ -49,6 +51,7 @@ export default function InvitesPage() {
         actions={<RefreshButton label={INVITES_COPY.refresh} onRefresh={() => void refresh()} loading={invites.loading} />}
         freshness={<Freshness at={invites.readAt} />}
       />
+      <StaleNotice stale={invites.stale} readAt={invites.readAt} offline={invites.offline} />
       <StateBlock
         loading={invites.items === null && invites.loading}
         error={invites.items === null ? invites.error : null}

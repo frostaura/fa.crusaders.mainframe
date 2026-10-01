@@ -13,7 +13,7 @@ import { TextLink } from "@/components/ui/text-link";
 import { usePickParam, useSplitLayout } from "@/components/ui/use-split-layout";
 import { appPath } from "@/components/inbox/notificationKinds";
 import { InviteDetail } from "@/components/players/invites/InviteDetail";
-import { useMyInvites } from "@/components/players/invites/useMyInvites";
+import { useKeptInvites } from "@/lib/offline/useKeptInvites";
 import type { Invite, MemberNotification } from "@/lib/playersApi";
 import { BookingDetailPanel } from "./BookingDetail";
 import { StaleNotice } from "@/components/shell/StaleNotice";
@@ -105,7 +105,7 @@ function NoticeTarget({ notice }: { notice: MemberNotification }) {
 }
 
 function InviteTarget({ seat, notice }: { seat: string; notice: MemberNotification }) {
-  const invites = useMyInvites();
+  const invites = useKeptInvites();
   const { refresh } = invites;
   const reread = useCallback(() => refresh(), [refresh]);
   const fromList = invites.items?.find((i) => i.participant_id === seat) ?? null;
