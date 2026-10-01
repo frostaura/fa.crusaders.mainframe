@@ -17,6 +17,8 @@ import { Alert } from "../components/Alert";
 import { useAuth } from "../lib/auth";
 import { pendingInvitePath } from "../lib/playersPending";
 import { returnLabel, safeReturnTo, topUpReturnFor } from "../lib/topUpReturn";
+import type { TopUpSnapshot } from "../lib/topUpOpen";
+import { CancelPending } from "./TopUpOpenCheckouts";
 
 /**
  * What each failure code means, to a member.
@@ -111,7 +113,7 @@ export default function TopUpStatusPage() {
   const [search] = useSearchParams();
   const cancelledReturn = search.get("cancelled") === "1";
   const wayBack = useWayBack(topupId, search.get("returnTo"));
-  const [s, setS] = useState<TopUpStatus | null>(null);
+  const [s, setS] = useState<TopUpSnapshot | null>(null);
   /* Whether the LAST attempt to read the status failed. Not the sentence — the two places
      that report it say different things, because "we could not reach the club" means something
      different before a status is known than it does beside one that is already on screen. */
@@ -193,6 +195,17 @@ export default function TopUpStatusPage() {
     };
   }, [topupId, round, cancelledReturn]);
 
+  // M5-2 — the member cancelled from this page: the club's answer is the snapshot now, and a
+  // payment that went through after all refreshes the wallet as the poll would have.
+  const settled = (next: TopUpSnapshot) => {
+    setS(next);
+    setReadAt(Date.now());
+    if (next.status === "Completed" && !refreshedOnce.current) {
+      refreshedOnce.current = true;
+      void refreshBalanceRef.current({ expectSelf: true });
+    }
+  };
+
   const checkAgain = () => {
     setChecking(true);
     setGaveUp(false);
@@ -238,7 +251,7 @@ export default function TopUpStatusPage() {
         {loadFailed && (
           <Alert tone="danger">{UNREACHABLE_LATER}</Alert>
         )}
-        <StatusBody status={s} gaveUp={gaveUp} checking={checking} onCheck={checkAgain} wayBack={wayBack} />
+        <StatusBody status={s} gaveUp={gaveUp} checking={checking} onCheck={checkAgain} wayBack={wayBack} onSettled={settled} />
         {s.status === "Completed" || s.status === "Cancelled" ? <WayBack path={wayBack} /> : null}
       </Card>
     </StatusShell>
@@ -322,7 +335,10 @@ const GAVE_UP = "We've stopped checking on this page. PayFast can take a while �
 const CANCELLED = "You cancelled this payment, so nothing was charged and no credits were added.";
 const FAILED_FALLBACK = "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening.";
 
-type BodyProps = { status: TopUpStatus; gaveUp: boolean; checking: boolean; onCheck: () => void; wayBack: string | null };
+type BodyProps = {
+  status: TopUpSnapshot; gaveUp: boolean; checking: boolean; onCheck: () => void; wayBack: string | null;
+  onSettled: (next: TopUpSnapshot) => void;
+};
 
 /**
  * "Try again" keeps the way back (F4-12): a member sent to top up from an invite who cancelled at
@@ -341,7 +357,7 @@ function retryPath(wayBack: string | null): string {
  */
 function StatusBody(props: BodyProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { status, gaveUp, checking, onCheck, wayBack } = props;
+  const { status, gaveUp, checking, onCheck, wayBack, onSettled } = props;
   if (status.status === "Pending") {
     return (
       <>
@@ -354,6 +370,7 @@ function StatusBody(props: BodyProps) {
           </p>
         )}
         <StatusActions checking={checking} onCheck={onCheck} />
+        <CancelPending status={status} onSettled={onSettled} />
       </>
     );
   }

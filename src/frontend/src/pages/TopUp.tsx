@@ -19,6 +19,8 @@ import { ArrowDown, Coins } from "../components/ui/icons";
 import { Alert } from "../components/Alert";
 import { parseAmount } from "../lib/amount";
 import { rememberTopUpReturn, safeReturnTo } from "../lib/topUpReturn";
+import { TOP_UP_SPLIT, openCheckoutsOf, splitOf, type TopUpSplit } from "../lib/topUpOpen";
+import { OpenCheckouts } from "./TopUpOpenCheckouts";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -54,9 +56,10 @@ function randValue(text: string): number | null {
 
 /**
  * The options, with the member's running total (M4-2): `already_zar` put in so far and
- * `remaining_zar` of the club's per-member ceiling left. Absent from an older API.
+ * `remaining_zar` of the club's per-member ceiling left; since M5-2 also paid and waiting apart,
+ * and the checkouts still waiting on PayFast. Absent from an older API.
  */
-type Options = TopUpOptions & { already_zar?: number; remaining_zar?: number };
+type Options = TopUpOptions & { already_zar?: number; remaining_zar?: number } & TopUpSplit;
 
 /**
  * The most this member may put in now: the ceiling less what is already in (M4-2). An admin is
@@ -166,6 +169,12 @@ function firstAmount(o: Options): string {
   return left >= o.min_zar ? String(left) : "";
 }
 
+/** Whether a cap refusal says checkouts still waiting on PayFast hold part of the limit (M5-2). */
+function heldByWaiting(err: unknown): boolean {
+  const payload = err instanceof ApiError && isRecord(err.payload) ? err.payload : null;
+  return typeof payload?.waiting_zar === "number" && payload.waiting_zar > 0;
+}
+
 /** `refusalFor`'s answer when the refusal's figures went into the screen and the field says it. */
 const LIMIT_TAKEN = Symbol("limit-taken");
 
@@ -188,7 +197,10 @@ function refusalFor(
   if (code === "amount_exceeds_member_cap" && payload && typeof payload.remaining_zar === "number") {
     const remaining = payload.remaining_zar;
     const already = typeof payload.already_zar === "number" ? payload.already_zar : undefined;
-    setOptions((o) => (o ? { ...o, remaining_zar: remaining, ...(already === undefined ? {} : { already_zar: already }) } : o));
+    // M5-2: the refusal's paid-and-waiting split, so the field never calls unpaid money "used".
+    const split = typeof payload.paid_zar === "number" && typeof payload.waiting_zar === "number"
+      ? { paid_zar: payload.paid_zar, waiting_zar: payload.waiting_zar } : {};
+    setOptions((o) => (o ? { ...o, remaining_zar: remaining, ...(already === undefined ? {} : { already_zar: already }), ...split } : o));
     return LIMIT_TAKEN;
   }
   return START_ERRORS[code] ?? (err instanceof ApiError ? NOT_STARTED : UNREACHABLE);
@@ -248,6 +260,8 @@ export default function TopUpPage() {
         not an alert: it is a standing condition they arrived into, not an event.
       */}
       {emptyWallet && <Alert tone="danger" live="polite">{BALANCE_SENTENCE.zero}</Alert>}
+      {/* M5-2 — payments started at PayFast and not finished, each with its own Cancel. */}
+      {options && <OpenCheckouts open={openCheckoutsOf(options)} onChanged={loadOptions} />}
       <StateBlock
         loading={options === null && !loadError}
         error={options === null ? loadError : null}
@@ -255,7 +269,7 @@ export default function TopUpPage() {
         onRetry={loadOptions}
         skeleton={<TopUpSkeleton />}
       >
-        {options ? <TopUpForm options={options} setOptions={setOptions} amount={amount} setAmount={setAmount} /> : null}
+        {options ? <TopUpForm options={options} setOptions={setOptions} amount={amount} setAmount={setAmount} reload={loadOptions} /> : null}
       </StateBlock>
     </PageShell>
   );
@@ -281,6 +295,8 @@ type FormProps = {
   setOptions: React.Dispatch<React.SetStateAction<Options | null>>;
   amount: string;
   setAmount: (value: string) => void;
+  /** Re-reads the options — after a cap refusal, so the checkouts holding the limit are listed. */
+  reload: () => void;
 };
 
 function TopUpForm(props: FormProps) {
@@ -288,7 +304,7 @@ function TopUpForm(props: FormProps) {
   const [search] = useSearchParams();
   const returnTo = safeReturnTo(search.get("returnTo"));
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { options, setOptions, amount, setAmount } = props;
+  const { options, setOptions, amount, setAmount, reload } = props;
   const auth = useAuth();
   const limit = capOf(options, auth.status === "authenticated" && auth.isAdmin);
   const [error, setError] = useState<string | null>(null);
@@ -326,7 +342,8 @@ function TopUpForm(props: FormProps) {
       postToGateway(res.redirect_url, res.form_fields);
     } catch (err) {
       const said = refusalFor(err, setOptions, setRestated);
-      if (said === LIMIT_TAKEN) setTried(true);
+      // M5-2: money waiting on PayFast holds part of the limit — re-read, so its checkouts are listed.
+      if (said === LIMIT_TAKEN) { setTried(true); if (heldByWaiting(err)) reload(); }
       else if (said !== null) setError(said);
       setLoading(false);
     }
@@ -362,13 +379,22 @@ function TopUpForm(props: FormProps) {
   );
 }
 
-/** M4-2 — nothing left of the member's limit: no form to fill in, and the reason in its place. */
+/**
+ * M4-2 — nothing left of the member's limit: no form to fill in, and the reason in its place.
+ * M5-2 — when payments the member never finished hold part of it, it says so (paid and waiting
+ * apart) and the list above offers each one's Cancel; "You've topped up R1000" with R0 paid was
+ * the defect.
+ */
 function LimitReached({ options, back }: { options: Options; back: string }) {
+  const split = splitOf(options);
+  const held = split !== null && split.waiting > 0;
   return (
     <Card className="px-4 sm:px-6">
       <Alert tone="warning" live="standing">
-        <span className="block font-semibold">{TOP_UP_LIMIT.reachedTitle}</span>
-        {TOP_UP_LIMIT.reached(formatMoney(options.max_zar))}
+        <span className="block font-semibold">{held ? TOP_UP_SPLIT.heldTitle : TOP_UP_LIMIT.reachedTitle}</span>
+        {held
+          ? TOP_UP_SPLIT.held(formatMoney(split.paid), formatMoney(split.waiting), formatMoney(options.max_zar))
+          : TOP_UP_LIMIT.reached(formatMoney(options.max_zar))}
       </Alert>
       <Button asChild variant="outline" block>
         <Link to={back}>Back</Link>
@@ -383,6 +409,11 @@ type AmountProps = { options: Options; limit: Cap; amount: string; onChoose: (va
 function limitsLine(options: Options, limit: Cap): string {
   const block = formatMoney(options.block_zar);
   if (!limit.limited) return `Min ${formatMoney(options.min_zar)} · Max ${formatMoney(options.max_zar)} · Multiples of ${block} only`;
+  const split = splitOf(options);
+  if (split) {
+    const parts = { paid: formatMoney(split.paid), waiting: split.waiting > 0 ? formatMoney(split.waiting) : null };
+    return TOP_UP_SPLIT.limits(formatMoney(options.min_zar), formatMoney(limit.cap), parts, formatMoney(options.max_zar), block);
+  }
   const already = options.already_zar ?? options.max_zar - limit.cap;
   return TOP_UP_LIMIT.limits(formatMoney(options.min_zar), formatMoney(limit.cap), formatMoney(already), formatMoney(options.max_zar), block);
 }
