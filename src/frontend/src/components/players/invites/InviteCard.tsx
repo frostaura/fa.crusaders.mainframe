@@ -6,7 +6,7 @@ import { Interactable } from "@/components/ui/interactable";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY, invitedLine, payByLine, playersCount } from "@/lib/playersCopy";
-import { formatCredits } from "@/lib/utils";
+import { cn, formatCredits } from "@/lib/utils";
 import { inviteStatus, inviteWhen, organiserName } from "./inviteFacts";
 
 /**
@@ -26,18 +26,25 @@ type CardProps = {
   to?: string;
   /** A line above the rest — where the invite came from. */
   note?: string;
+  /** R4 form factor: the invite open in the split view's pane beside the list. */
+  current?: boolean;
 };
 
 const CARD_CLASS = "flex w-full min-h-touch items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left shadow-xs no-underline";
 
-export function InviteCard({ invite, onOpen, to, note }: CardProps) {
+export function InviteCard({ invite, onOpen, to, note, current }: CardProps) {
   const body = <CardBody invite={invite} note={note} />;
   return (
     <Interactable asChild surface="card" watermark>
       {to ? (
-        <Link to={to} data-invite={invite.participant_id} data-invite-pending="" className={CARD_CLASS}>{body}</Link>
+        <Link to={to} data-invite={invite.participant_id} data-invite-pending="" data-split-item="" className={CARD_CLASS}>{body}</Link>
       ) : (
-        <button type="button" onClick={() => onOpen?.(invite)} data-invite={invite.participant_id} className={CARD_CLASS}>{body}</button>
+        <button
+          type="button" onClick={() => onOpen?.(invite)} data-invite={invite.participant_id} data-split-item=""
+          aria-current={current ? "true" : undefined} className={cn(CARD_CLASS, current && "border-accent-strong ring-1 ring-accent-strong")}
+        >
+          {body}
+        </button>
       )}
     </Interactable>
   );

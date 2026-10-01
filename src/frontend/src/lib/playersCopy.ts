@@ -746,6 +746,12 @@ export const DETAIL_LINKS = {
 
 export const INVITES_COPY = {
   title: "Invites",
+  /** R4 form factor (SPEC 3.5) — the split view's detail pane and the phone's docked verb. */
+  detailLabel: "The invite",
+  pickTitle: "Pick an invite",
+  pickHint: "Its game, your share and when it must be paid open here, with Accept and Decline.",
+  actionsLabel: "Invite actions",
+  answer: "Answer this invite",
   pageTitle: "Invite",
   back: "Bookings",
   description: "Games friends have asked you into. Say yes and your share moves to whoever booked the court.",

@@ -44,6 +44,17 @@ async function json(route: Route, status: number, body: unknown) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
+/**
+ * Where an invite is answered (R4 form factor, SPEC 3.5): from lg, in the pane beside the list —
+ * the same flow, body and actions as the sheet, in a region named by the same title; on a phone,
+ * the sheet. Every assertion about the answer holds in both.
+ */
+async function answerSurface(page: Page) {
+  if ((page.viewportSize()?.width ?? 0) < 1024) return page.getByRole("dialog", { name: "Join this game?" });
+  await expect(page.getByRole("region", { name: "Join this game?" })).toBeVisible();
+  return page.locator("[data-invite-detail]");
+}
+
 const accepted = (share: number) => ({
   participant_id: SEAT, booking_id: BOOKING, status: "accepted", share_credits: share, consented_credits: share, paid_credits: share, balance_credits: 120 - share,
 });
@@ -58,7 +69,7 @@ test("the Bookings badge leads to Invites, and an accept ends in a calm confirma
   await expect(page.getByRole("heading", { level: 1, name: "Invites" })).toBeVisible();
 
   await page.getByRole("button", { name: /Sam invited you to play/ }).click();
-  const sheet = page.getByRole("dialog", { name: "Join this game?" });
+  const sheet = await answerSurface(page);
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("Balance after")).toBeVisible();
   await sheet.getByRole("button", { name: "Accept and pay 25.00 cr" }).click();
@@ -85,7 +96,7 @@ test("a share raised after the sheet opened is shown and asked again", async ({ 
   await page.goto("/bookings/invites");
 
   await page.getByRole("button", { name: /Sam invited you to play/ }).click();
-  const sheet = page.getByRole("dialog", { name: "Join this game?" });
+  const sheet = await answerSurface(page);
   await sheet.getByRole("button", { name: "Accept and pay 25.00 cr" }).click();
   await expect(sheet.getByText("Your share is now 30.00 cr. Check it and say yes again if you're happy.")).toBeVisible();
   const again = sheet.getByRole("button", { name: "Accept and pay 30.00 cr" });

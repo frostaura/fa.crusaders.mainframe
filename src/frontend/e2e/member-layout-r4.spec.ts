@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { MEMBER_CODE, SESSION_ANON, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { BOOKING, detailFixture, memberShellRoutes } from "./playersKit";
-import { DETAIL_ACTIONS, DETAIL_COPY } from "../src/lib/playersCopy";
+import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
+import { DETAIL_ACTIONS, DETAIL_COPY, INVITES_COPY } from "../src/lib/playersCopy";
 import { WALLET_LAYOUT } from "../src/lib/walletCopy";
 import { HEIGHT, WIDTHS, bigText, box, fontsReady, sideways, textOffScreen, widthUsed, type Width } from "./layoutKit";
 
@@ -358,6 +358,61 @@ test.describe("Wallet and Wallet activity (SPEC 3.4)", () => {
   test("390 at 200 % text: the wallet and its activity, nothing off screen", async ({ page }) => {
     await open(page, "/wallet", walletRoutes(), 390);
     await expect(page.getByRole("complementary", { name: WALLET_LAYOUT.railLabel })).toBeVisible();
+    await bigText(page);
+    await healthy(page);
+  });
+});
+
+test.describe("Invites (SPEC 3.5)", () => {
+  const second = () => inviteFixture({ participant_id: "p0000000-0000-0000-0000-000000000009", court_name: "Court 2" });
+  const routes = (invites: unknown[]) => memberShellRoutes({ invites });
+
+  for (const width of WIDTHS) {
+    test(`${width}px: the list beside the picked invite from lg; the sheet on a phone`, async ({ page }, info) => {
+      test.skip(info.project.name !== "desktop", "one project sweeps the widths");
+      await open(page, "/bookings/invites", routes([inviteFixture(), second()]), width);
+      const list = page.getByRole("list", { name: INVITES_COPY.listLabel });
+      await expect(list).toBeVisible();
+      await healthy(page);
+      const cards = list.locator("[data-invite]");
+      if (width >= 1024) {
+        await expect(page.getByText(INVITES_COPY.pickTitle)).toBeVisible();
+        await cards.nth(1).click();
+        await expect(page).toHaveURL(/seat=p0000000-0000-0000-0000-000000000009/);
+        const pane = (await box(page, "[data-invite-detail]"))!;
+        const l = (await list.boundingBox())!;
+        expect(pane.x).toBeGreaterThanOrEqual(l.x + l.width);
+        await expect(cards.nth(1)).toHaveAttribute("aria-current", "true");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        // Up/Down walk the list.
+        await cards.nth(1).focus();
+        await page.keyboard.press("ArrowUp");
+        await expect(cards.nth(0)).toBeFocused();
+      } else {
+        await cards.first().click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        expect(await box(page, "[data-invite-detail]")).toBeNull();
+      }
+    });
+  }
+
+  test("one invite: opened in the pane at 1280, docked in thumb reach at 390", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "two widths, one project");
+    await open(page, "/bookings/invites", routes([inviteFixture()]), 1280);
+    await expect(page.locator("[data-invite-detail]")).toBeVisible();
+    await expect(page.getByRole("region", { name: INVITES_COPY.actionsLabel })).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const docked = page.getByRole("region", { name: INVITES_COPY.actionsLabel }).getByRole("button", { name: INVITES_COPY.answer });
+    await expect(docked).toBeVisible();
+    const b = (await docked.boundingBox())!;
+    expect(b.y + b.height).toBeGreaterThan(844 * 0.75);
+    await docked.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  test("390 at 200 % text: nothing off screen", async ({ page }) => {
+    await open(page, "/bookings/invites", routes([inviteFixture(), second()]), 390);
+    await expect(page.getByRole("list", { name: INVITES_COPY.listLabel })).toBeVisible();
     await bigText(page);
     await healthy(page);
   });
