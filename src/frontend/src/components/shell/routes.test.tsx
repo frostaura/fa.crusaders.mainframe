@@ -30,7 +30,9 @@ vi.mock("../../pages/Schedule", () => page("bookings page"));
 vi.mock("../../pages/Wallet", () => page("wallet page"));
 vi.mock("../../pages/WalletActivity", () => page("wallet activity page"));
 vi.mock("../../pages/AdminLedger", () => page("transactions page"));
-vi.mock("../../pages/AdminMembers", () => page("members page"));
+// R4 form factor: a member's record is a child route of the list (drawn beside it), so the list's
+// stand-in carries an <Outlet /> the way the real page's SplitView does.
+vi.mock("../../pages/AdminMembers", () => ({ default: () => <div><h1>members page</h1><Outlet /></div> }));
 vi.mock("../../pages/admin/AdminHome", () => page("admin overview page"));
 vi.mock("../../pages/admin/AdminReports", () => page("club reports page"));
 vi.mock("../../pages/admin/AdminCourts", () => page("courts page"));
