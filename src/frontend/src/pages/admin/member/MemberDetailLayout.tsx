@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
+import { ScrollArea } from "@/components/ScrollArea";
 import { GroupAssign } from "@/components/members/GroupAssign";
 import { RelatedBookingField } from "@/components/members/RelatedBookingField";
 import { TopUpSheet } from "@/components/members/TopUpSheet";
@@ -204,9 +205,16 @@ function MemberHeader(props: HeaderProps) {
   );
 }
 
+/**
+ * After an "@" and before each ".". Built from a string, not a literal: lizard's lexer reads the
+ * literal's lookbehind as the start of something it never closes, and scored every function
+ * below this one as part of it (gotchas-gates).
+ */
+const EMAIL_BREAKS = new RegExp("(?<=@)|(?=\\.)");
+
 function breakableEmail(email: string | null | undefined): ReactNode {
   if (!email) return null;
-  return email.split(/(?<=@)|(?=\.)/).map((part, i) => <Fragment key={i}>{i > 0 ? <wbr /> : null}{part}</Fragment>);
+  return email.split(EMAIL_BREAKS).map((part, i) => <Fragment key={i}>{i > 0 ? <wbr /> : null}{part}</Fragment>);
 }
 
 function Identity({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
@@ -389,12 +397,18 @@ function MemberTabs({ userId }: { userId: string }) {
   // On a phone the row is wider than the screen; the tab showing is scrolled into the row's view
   // (sideways only — never the page) so "Sign-in & biometrics" is not selected off-screen.
   useEffect(() => {
-    const box = scroller.current;
+    // The scroller is the ScrollArea's box around the nav.
+    const nav = scroller.current;
+    const box = nav ? nav.parentElement : null;
     const current = box?.querySelector<HTMLElement>('[aria-current="page"]');
     if (box && current) box.scrollLeft = Math.max(0, current.offsetLeft - 16);
   }, [pathname]);
   return (
-    <nav ref={scroller} aria-label={MEMBER_COPY.tabsLabel} className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+    // In a ScrollArea (R4 form factor, SPEC §4.5): on a phone the strip ran off the edge as
+    // "Door histor" with nothing to say there was more; the edge fades and the region's sentence
+    // say it now. Not a tab stop of its own — every tab is a link that scrolls itself in (C19).
+    <ScrollArea label={MEMBER_COPY.tabsLabel} tabbable={false} fade="app" className="-mx-4 sm:mx-0">
+    <nav ref={scroller} aria-label={MEMBER_COPY.tabsLabel} className="relative px-4 sm:px-0">
       <ul className="flex w-max min-w-full items-end gap-5 border-b border-border">
         {MEMBER_TABS.map((tab) => (
           <li key={tab.path} className="flex">
@@ -405,5 +419,6 @@ function MemberTabs({ userId }: { userId: string }) {
         ))}
       </ul>
     </nav>
+    </ScrollArea>
   );
 }

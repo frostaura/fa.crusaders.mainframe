@@ -281,9 +281,13 @@ function tilesOf(totals: Totals | null): Array<{ label: string; value: string | 
 }
 
 /** From, To, Type and the name search — each writing the URL. */
-function LedgerFilterBar({ from, to, type, query, onChange, className }: {
+type FilterBarProps = {
   from: string; to: string; type: string; query: string; onChange: (key: string, value: string) => void; className?: string;
-}) {
+};
+
+function LedgerFilterBar(props: FilterBarProps) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { from, to, type, query, onChange, className } = props;
   return (
     // Inside the bar, not a card of its own: the bar is the surface.
     <FilterBar id="ledger-filters" className={cn("border-0 bg-transparent p-0 shadow-none", className)}>

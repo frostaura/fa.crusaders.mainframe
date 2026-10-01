@@ -1156,8 +1156,7 @@ export function AdminDevicesPage() {
           emptyHint="Flash one with the key above and power it on — it registers itself."
           skeleton={<CardListSkeleton rows={2} />}
         >
-          {/* By the box (R4 form factor, SPEC §3.16): a 26rem card at the least — three across at
-              1920 beside the rail, two at 1280, one on a phone. One column was 10,000px at 1920. */}
+          {/* By the box (R4 form factor): 3 across at 1920, 2 at 1280 — one column was 10,000px. */}
           <AutoGrid min="panel" max={3} gap="md" className="items-start">
             {boxes.map((device) => {
               // One coverage per row: the confirm, the notice and the toast all read it.
