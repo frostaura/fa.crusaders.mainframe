@@ -33,6 +33,7 @@ import { useMemberDoor, useShownDecision } from "../components/member-door/useMe
 import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
 import { GUIDE_FROM_CODE, GUIDE_PATH } from "../lib/onboardingCopy";
 import { SetupChecklist } from "../components/onboarding/SetupChecklist";
+import { WalletGlance } from "../components/member-code/WalletGlance";
 
 /**
  * My Code — the member's pass, with the ONE rotating code on it (D1, R9, R15: the landing page).
@@ -128,6 +129,26 @@ function useDoorFacts(resync: () => Promise<void>, signedIn: boolean) {
 
 type DoorFacts = ReturnType<typeof useDoorFacts>;
 
+/**
+ * The page's columns (R4 form factor, SPEC 3.2), decided by the PAGE's width (`@container/page`),
+ * so 200 % text keeps one column.
+ *
+ * <ul>
+ *   <li><b>Phone and tablet:</b> one column in reading order — the pass first (it is the point of
+ *   the screen at the court), then what it is for, what's next, the guide, the doors, setup and
+ *   the way to a human — unchanged; the wallet glance is drawn only beside the pass.</li>
+ *   <li><b>60rem:</b> `[pass 24rem] [the rest]`, the pass sticky so it stays in reach while the
+ *   door facts scroll.</li>
+ *   <li><b>72rem</b> (the `wide` frame from 2xl): the rest splits again —
+ *   `[today + doors] [wallet + setup 20rem]`.</li>
+ * </ul>
+ * The DOM order is the phone's order in every layout, so Tab order is reading order.
+ */
+const LAYOUT = "flex flex-col gap-8 @[60rem]/page:grid @[60rem]/page:grid-cols-[24rem_minmax(0,1fr)] @[60rem]/page:items-start";
+const PASS_COLUMN = "flex min-w-0 flex-col gap-6 @[60rem]/page:sticky @[60rem]/page:top-6";
+const REST = "flex min-w-0 flex-col gap-8 @[72rem]/page:grid @[72rem]/page:grid-cols-[minmax(0,1fr)_20rem] @[72rem]/page:items-start";
+const COLUMN = "flex min-w-0 flex-col gap-6";
+
 export default function MyCodePage() {
   const view = useMemberCode();
   const facts = useDoorFacts(view.resync, !view.signedOut);
@@ -142,7 +163,9 @@ export default function MyCodePage() {
   return (
     // R3-29: the pinned decision line is `position: fixed` at the foot of a phone, so the page
     // owes it room — otherwise the club's own number, the last thing on the page, sits under it.
-    <PageShell width="narrow" className={cn(facts.decision && "pb-24 sm:pb-10")}>
+    // R4 form factor (SPEC 3.2): `content`, and `wide` from 2xl — never `narrow` again; a 512px
+    // column left 60 % of a laptop and 73 % of a 1920 screen empty around the pass.
+    <PageShell width="content" className={cn("2xl:max-w-wide", facts.decision && "pb-24 sm:pb-10")}>
       {/*
         Visually hidden on a phone, and only there (D8: the code first). The pass's own band
         says whose pass it is, the tab bar says "My Code", and at 320x568 with the reader's text
@@ -151,29 +174,37 @@ export default function MyCodePage() {
       */}
       <PageHeader title={MY_CODE.title} className="sr-only sm:not-sr-only" />
 
-      {view.signedOut && view.phase !== "signed-out" ? <SignedOutNotice /> : null}
-      <CodeArea view={view} />
+      <div data-my-code-layout="" className={LAYOUT}>
+        <div data-my-code-pass="" className={PASS_COLUMN}>
+          {view.signedOut && view.phase !== "signed-out" ? <SignedOutNotice /> : null}
+          <CodeArea view={view} />
+          {facts.decision && (
+            <DecisionCard
+              decision={facts.decision}
+              door={facts.door}
+              contact={facts.contact}
+              code={code}
+              onRefreshCode={facts.refreshCode}
+              onDismiss={facts.dismiss}
+            />
+          )}
+        </div>
 
-      {facts.decision && (
-        <DecisionCard
-          decision={facts.decision}
-          door={facts.door}
-          contact={facts.contact}
-          code={code}
-          onRefreshCode={facts.refreshCode}
-          onDismiss={facts.dismiss}
-        />
-      )}
-
-      <p className="text-sm text-text-secondary">{codeUseLine(facts.doorsClub)}</p>
-
-      <WhatsNextCard booking={facts.door?.next_booking} timezone={facts.door?.timezone} doors={facts.doorsKnowledge} />
-      <Link to={GUIDE_PATH} className={MEMBER_DOOR_LINK_TAPPABLE}>{GUIDE_FROM_CODE}</Link>
-
-      {view.signedOut ? null : <SetupChecklist />}
-
-      <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
-      <DoorFooter doorsKnowledge={facts.doorsKnowledge} contact={facts.contact} />
+        <div data-my-code-rest="" className={REST}>
+          <div className={COLUMN}>
+            <p className="text-sm text-text-secondary">{codeUseLine(facts.doorsClub)}</p>
+            <WhatsNextCard booking={facts.door?.next_booking} timezone={facts.door?.timezone} doors={facts.doorsKnowledge} />
+            <Link to={GUIDE_PATH} className={MEMBER_DOOR_LINK_TAPPABLE}>{GUIDE_FROM_CODE}</Link>
+            <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
+          </div>
+          <div data-my-code-side="" className={COLUMN}>
+            {/* Beside the pass only: on a phone the chip in the bar already carries the balance. */}
+            {view.signedOut ? null : <div className="hidden @[60rem]/page:block"><WalletGlance /></div>}
+            {view.signedOut ? null : <SetupChecklist />}
+            <DoorFooter doorsKnowledge={facts.doorsKnowledge} contact={facts.contact} />
+          </div>
+        </div>
+      </div>
     </PageShell>
   );
 }

@@ -12,6 +12,15 @@
  */
 
 export const MY_CODE = {
+  /**
+   * R4 form factor — the wallet beside the pass on a wide screen (SPEC 3.2): the figure a member
+   * spends, and the way to add to it, without leaving the page they open at the court.
+   */
+  wallet: {
+    label: "Your wallet",
+    spendable: "You can spend",
+    open: "Open wallet",
+  },
   /** F4-13 — the page is called what the nav calls it; "Your code" beside a "My Code" tab was two names. */
   title: "My Code",
   /** The pass card's accessible name. */

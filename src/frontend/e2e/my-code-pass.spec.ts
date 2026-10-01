@@ -47,9 +47,10 @@ test("the pass carries the club's own token for now, centred, as QR and as reada
   // One code: no tabs.
   await expect(page.getByRole("tab")).toHaveCount(0);
 
-  // R9 — centred in the page column at every width.
+  // R9 — centred in its column at every width (R4 form factor: from a 60rem page the pass has a
+  // column of its own beside the rest, so "its column" is that one, not the page).
   const pass = (await page.getByRole("article", { name: "Your member pass" }).boundingBox())!;
-  const column = (await page.locator("[data-page-shell]").boundingBox())!;
+  const column = (await page.locator("[data-my-code-pass]").boundingBox())!;
   const passCentre = pass.x + pass.width / 2;
   const columnCentre = column.x + column.width / 2;
   expect(Math.abs(passCentre - columnCentre)).toBeLessThanOrEqual(1);
