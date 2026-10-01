@@ -47,8 +47,8 @@ function OpenRow({ checkout, onSaid }: { checkout: OpenCheckout; onSaid: (said: 
     failure: (error: unknown) => onSaid({ tone: "danger", text: cancelFailedSentence(error) }),
   });
   return (
-    <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
-      <div className="flex min-w-0 flex-col">
+    <li className="flex items-center justify-between gap-4 py-3">
+      <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-base font-semibold tabular-nums text-text-primary">{formatMoney(checkout.amount_zar)}</span>
         <span className="text-sm text-text-secondary">{OPEN_CHECKOUTS.line(checkout.created_at)}</span>
       </div>

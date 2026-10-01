@@ -260,8 +260,6 @@ export default function TopUpPage() {
         not an alert: it is a standing condition they arrived into, not an event.
       */}
       {emptyWallet && <Alert tone="danger" live="polite">{BALANCE_SENTENCE.zero}</Alert>}
-      {/* M5-2 — payments started at PayFast and not finished, each with its own Cancel. */}
-      {options && <OpenCheckouts open={openCheckoutsOf(options)} onChanged={loadOptions} />}
       <StateBlock
         loading={options === null && !loadError}
         error={options === null ? loadError : null}
@@ -271,6 +269,9 @@ export default function TopUpPage() {
       >
         {options ? <TopUpForm options={options} setOptions={setOptions} amount={amount} setAmount={setAmount} reload={loadOptions} /> : null}
       </StateBlock>
+      {/* M5-2 — payments started at PayFast and not finished, each with its own Cancel. Below the
+          form (or the "limit held" notice that replaces it), so the reason is read first. */}
+      {options && <OpenCheckouts open={openCheckoutsOf(options)} onChanged={loadOptions} />}
     </PageShell>
   );
 }

@@ -67,7 +67,7 @@ export const TOP_UP_SPLIT = {
       : `Min ${min} · Up to ${remaining} more (${split.paid} paid, ${split.waiting} waiting on PayFast, of your ${max}) · Multiples of ${block} only`,
   heldTitle: "Your limit is held by payments you haven't finished",
   held: (paid: string, waiting: string, max: string) =>
-    `${paid} paid and ${waiting} waiting on payments you started at PayFast — the most the club takes from one member by card is ${max}. Cancel a payment you didn't finish to top up again.`,
+    `${paid} paid and ${waiting} waiting on payments you started at PayFast — the most the club takes from one member by card is ${max}. Cancel a payment you didn't finish, below, to top up again.`,
 } as const;
 
 /** How a cancel ended: the row as the club now holds it, and whether that came from a read-back. */
