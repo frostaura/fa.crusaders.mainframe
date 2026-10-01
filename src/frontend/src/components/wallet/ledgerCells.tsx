@@ -3,8 +3,8 @@ import type { LedgerRow } from "@/lib/api";
 import { clubDayAndClock, clubInstant } from "@/lib/clubClock";
 import { cn, formatSignedCredits } from "@/lib/utils";
 import { TableCell } from "../ui/table";
-import { CELL_CLASS, amountInk, type Column } from "./ledgerColumns";
-import { PhoneTime, ToName } from "./LedgerCellParts";
+import { CELL_CLASS, UNTIL_PARTIES, amountInk, type Column } from "./ledgerColumns";
+import { PhoneTime, StackedAmount, ToName } from "./LedgerCellParts";
 import { ledgerCategory, ledgerDoneBy } from "@/lib/ledgerCopy";
 
 /**
@@ -31,12 +31,13 @@ export const CELL: Record<Column, (r: LedgerRow, note?: string) => ReactNode> = 
   ),
   from: (r) => <TableCell className={CELL_CLASS.from} title={r.from}>{r.from}</TableCell>,
   to: (r) => <TableCell className={CELL_CLASS.to}><ToName name={r.to} /></TableCell>,
-  // Wraps on a phone — it is the only column that says what a movement WAS, and for a top-up
-  // the only place the rand amount and the rate appear — and truncates with a tooltip from
-  // `sm`, where there is room for a column. Primary ink on a phone, where it leads the row.
+  // Wraps in the compact form — it is the only column that says what a movement WAS, and for a
+  // top-up the only place the rand amount and the rate appear — and truncates with a tooltip from
+  // a 36rem box, where there is room for a column. Primary ink where it leads the row.
   comment: (r, note) => (
     <TableCell className={CELL_CLASS.comment} title={note ?? r.comment}>
       {note ?? r.comment}
+      <StackedAmount signed={r.signedAmountCredits} ink={amountInk(r.signedAmountCredits)} under={r.signedAmountCredits >= 0 ? r.from : r.to} />
       <PhoneTime at={r.at} />
     </TableCell>
   ),
@@ -50,11 +51,11 @@ export const CELL: Record<Column, (r: LedgerRow, note?: string) => ReactNode> = 
     return (
       <TableCell className={cn(CELL_CLASS.amount, amountInk(r.signedAmountCredits))}>
         {formatSignedCredits(r.signedAmountCredits)}
-        {/* On a phone the From/To columns are hidden, so the counterparty rides under the
-            amount rather than being lost — picked by sign, because the member is the other end.
+        {/* Until the box draws From/To, the counterparty rides under the amount rather than being
+            lost — picked by sign, because the member is the other end.
             R4 form factor: it WRAPS (the amount's cell is nowrap, and a long name such as
             "Dispute Partner Organiser" held the column wide and squeezed the movement beside it). */}
-        <span className="block whitespace-normal break-words text-xs font-normal text-text-muted sm:hidden">{credit ? r.from : r.to}</span>
+        <span className={cn("block whitespace-normal break-words text-xs font-normal text-text-muted", UNTIL_PARTIES)}>{credit ? r.from : r.to}</span>
       </TableCell>
     );
   },

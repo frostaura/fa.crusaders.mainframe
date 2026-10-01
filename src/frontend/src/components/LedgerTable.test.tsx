@@ -16,7 +16,8 @@ import type { LedgerRow } from "../lib/api";
  * <p>
  * From and To are the pair that can go: on a member's own wallet one of them is always
  * the member, so the informative half rides under the amount instead — the counterparty,
- * chosen by the sign. They come back at <code>sm</code>.
+ * chosen by the sign. They come back once the TABLE'S box has room (R5 F5-1: every fold is a
+ * container query on `@container/ledger`, in rem, never the viewport's `sm`).
  * </p>
  *
  * <p>
@@ -58,24 +59,72 @@ describe("LedgerTable — what survives a 375px screen", () => {
   it("keeps Amount and Comment on a phone and folds From/To away", () => {
     render(<LedgerTable rows={rows} label="Ledger" />);
 
-    // The two columns a member opened the wallet to read. Neither may carry a
-    // hidden-below-sm class, because that is the state the finder photographed.
-    for (const label of ["Amount", "Comment"]) {
-      const header = screen.getByRole("columnheader", { name: new RegExp(label) });
-      expect(header.className).not.toContain("hidden");
-      for (const cell of cellsOf(label)) expect(cell.className).not.toContain("hidden");
-    }
+    // The two columns a member opened the wallet to read. The Comment is never folded; the
+    // Amount column only below a 16rem box, where the amount rides in the comment's cell.
+    const comment = screen.getByRole("columnheader", { name: /Comment/ });
+    expect(comment.className).not.toContain("hidden");
+    for (const cell of cellsOf("Comment")) expect(cell.className).not.toContain("hidden");
+    const amount = screen.getByRole("columnheader", { name: /Amount/ });
+    expect(amount.className).toContain("@[16rem]/ledger:table-cell");
+    for (const cell of cellsOf("Amount")) expect(cell.className).toContain("@[16rem]/ledger:table-cell");
 
-    // From and To fold away below `sm` and come back above it — hidden, not deleted.
+    // From and To fold away until the box is 60rem — hidden, not deleted. Never by the viewport.
     for (const label of ["From", "To"]) {
       const header = screen.getByRole("columnheader", { name: new RegExp(label) });
       expect(header.className).toContain("hidden");
-      expect(header.className).toContain("sm:table-cell");
+      expect(header.className).toContain("@[60rem]/ledger:table-cell");
+      expect(header.className).not.toMatch(/(^|\s)sm:/);
       for (const cell of cellsOf(label)) {
         expect(cell.className).toContain("hidden");
-        expect(cell.className).toContain("sm:table-cell");
+        expect(cell.className).toContain("@[60rem]/ledger:table-cell");
+        expect(cell.className).not.toMatch(/(^|\s)sm:/);
       }
     }
+  });
+
+  /**
+   * R5 F5-1 (HIGH): at 390 with 200 % text the box is 10.1rem and the two-column form needs
+   * 14.3–15.9rem, so a pinned Amount sat over half the words. Below 16rem the amount (and who it
+   * moved to or from) rides in the movement's own cell — and only there.
+   */
+  it("carries the amount inside the movement's cell for the one-column form only", () => {
+    render(<LedgerTable rows={rows} label="Ledger" />);
+    for (const cell of cellsOf("Comment")) {
+      const stacked = cell.querySelector("[data-stacked-amount]")!;
+      expect(stacked.className).toContain("@[16rem]/ledger:hidden");
+    }
+    // Newest first: the desk credit (2 Sep), then the court (1 Sep).
+    const [credit, debit] = cellsOf("Comment").map((c) => c.querySelector("[data-stacked-amount]")!);
+    expect(debit).toHaveTextContent("\u221224.00 crClub treasury");
+    expect(credit).toHaveTextContent("+2000.00 crClub treasury");
+    expect(credit.firstElementChild!.className).toContain("text-success-strong");
+    expect(credit.firstElementChild!.className).toContain("whitespace-nowrap");
+  });
+
+  /**
+   * R5 F5-1 (HIGH) — a book wider than its box scrolls inside its region with the Amount (and the
+   * Details beside it) PINNED to the right edge; the pins apply only while the region scrolls.
+   * R5 V5-6 — the heads stick to the PAGE under its top bar, and to the region's top while it scrolls.
+   */
+  it("pins the Amount and Details while the region scrolls, and sticks the heads to the page", () => {
+    render(<LedgerTable rows={rows} label="Club book" onOpen={() => undefined} />);
+    const amountHead = screen.getByRole("columnheader", { name: /Amount/ });
+    expect(amountHead.className.split(" ")).toEqual(expect.arrayContaining([
+      "sticky", "[[data-scrolls]_&]:!top-0", "[[data-scrolls]_&]:right-touch", "[[data-scrolls]_&]:z-sticky-corner",
+    ]));
+    expect(amountHead.style.top).toBe("var(--context-bar-top-height, 0px)");
+    for (const cell of cellsOf("Amount")) {
+      expect(cell.className.split(" ")).toEqual(expect.arrayContaining(["[[data-scrolls]_&]:sticky", "[[data-scrolls]_&]:right-touch", "[[data-scrolls]_&]:bg-bg-surface"]));
+    }
+    const details = document.querySelector('tr[data-ledger-row="r1"] td:last-child')!;
+    expect(details.className.split(" ")).toEqual(expect.arrayContaining(["w-touch", "px-0", "[[data-scrolls]_&]:sticky", "[[data-scrolls]_&]:right-0"]));
+    // The Details button scrolls clear of the sticky heads when focus brings it into view (X5-2).
+    expect(details.querySelector("button")!.className).toContain("scroll-mt-14");
+  });
+
+  it("pins the Amount at the very edge when no Details column is drawn", () => {
+    render(<LedgerTable rows={rows} label="Ledger" />);
+    for (const cell of cellsOf("Amount")) expect(cell.className).toContain("[[data-scrolls]_&]:right-0");
   });
 
   it("lets the Comment wrap on a phone instead of ellipsising it out of reach", () => {
@@ -89,18 +138,18 @@ describe("LedgerTable — what survives a 375px screen", () => {
     // more to see" was true of the table and false of this column. The only escape was a
     // `title` tooltip, which a touch device has no way to open.
     for (const cell of cellsOf("Comment")) {
-      // No unconditional truncate, and no phone-width cap: below `sm` the text wraps.
+      // No unconditional truncate, and no phone-width cap: in the compact form the text wraps.
       expect(cell.className).not.toMatch(/(^|\s)truncate(\s|$)/);
       expect(cell.className).not.toMatch(/(^|\s)max-w-\[\d+px\]/);
       expect(cell.className).toContain("break-words");
-      // From `sm` up there is room for a column, so it truncates with the tooltip again.
-      expect(cell.className).toContain("sm:truncate");
+      // From a 36rem box there is room for a column, so it truncates with the tooltip again.
+      expect(cell.className).toContain("@[36rem]/ledger:truncate");
       // P3 (theme-vocabulary ratchet): the cap is the named `max-w-xs` (320 px), not the
       // arbitrary `max-w-[280px]` it replaced — the assertion is on the rule, not the pixel.
-      expect(cell.className).toContain("sm:max-w-xs");
+      expect(cell.className).toContain("@[36rem]/ledger:max-w-xs");
       // The tooltip stays for a mouse, but it is no longer the only way to read the text.
-      // P3: on a phone the Time column folds and the time rides under the comment, so the
-      // cell's text is the comment plus its time — the tooltip is the comment alone.
+      // P3: on a phone the Time column folds and the time rides under the comment (and, in the
+      // one-column form, the amount) — the tooltip is the comment alone.
       expect(cell.textContent!.startsWith(cell.getAttribute("title")!)).toBe(true);
     }
   });
@@ -128,10 +177,10 @@ describe("LedgerTable — what survives a 375px screen", () => {
     render(<LedgerTable rows={rows} label="Ledger" />);
     const time = screen.getByRole("columnheader", { name: /Time/ });
     expect(time.className).toContain("hidden");
-    expect(time.className).toContain("sm:table-cell");
+    expect(time.className).toContain("@[36rem]/ledger:table-cell");
     for (const cell of cellsOf("Comment")) {
       const when = cell.querySelector("time")!;
-      expect(when.className).toContain("sm:hidden");
+      expect(when.className).toContain("@[36rem]/ledger:hidden");
     }
     // Money is the last column, where a ledger keeps it.
     const heads = screen.getAllByRole("columnheader").map((h) => h.textContent);
@@ -150,10 +199,10 @@ describe("LedgerTable — what survives a 375px screen", () => {
     expect(text).toContain("+2000.00 crClub treasury");
     for (const cell of amounts) expect(cell.className).toContain("tabular-nums");
 
-    // The counterparty line is itself mobile-only: above `sm` the From/To columns are
-    // back and repeating the name under the amount would be noise.
+    // The counterparty line goes once the box draws the From/To columns (60rem): repeating the
+    // name under the amount would be noise.
     for (const cell of amounts) {
-      expect(cell.querySelector("span")!.className).toContain("sm:hidden");
+      expect(cell.querySelector("span")!.className).toContain("@[60rem]/ledger:hidden");
       // R4 form factor: the amount cell is nowrap; the name under it wraps, or a long one held
       // the column wide and squeezed the movement beside it on a phone.
       expect(cell.querySelector("span")!.className.split(" ")).toEqual(expect.arrayContaining(["whitespace-normal", "break-words"]));
@@ -163,22 +212,34 @@ describe("LedgerTable — what survives a 375px screen", () => {
    * R4 form factor, SPEC §4.1 (MED): the club's book passes `wideOnly={["comment"]}`, and the
    * comment cell went `hidden` at EVERY width below the wide threshold — on a phone, where it is
    * the movement + time cell, Transactions read "+25.00 cr / Dispute Partner" with the left half
-   * of every row blank. Wide-only means "folded from `sm` until the BOX is wide", never on a phone.
+   * of every row blank. Wide-only means "folded out of the full form until the BOX is wide",
+   * never in the compact form.
    */
-  it("keeps a wide-only Comment on a phone and folds it only between sm and the wide box", () => {
+  it("keeps a wide-only Comment on a phone and folds it only between the compact form and the wide box", () => {
     render(<LedgerTable rows={rows} label="Club book" wideOnly={["comment"]} />);
     const header = screen.getByRole("columnheader", { name: /Comment/ });
     expect(header.classList.contains("hidden")).toBe(false);
-    expect(header.className).toContain("sm:hidden");
+    expect(header.className).toContain("@[36rem]/ledger:hidden");
     for (const cell of cellsOf("Comment")) {
       expect(cell.classList.contains("hidden")).toBe(false);
-      expect(cell.className).toContain("sm:hidden");
-      // Back once the TABLE'S box is 64rem — beside the admin rail a viewport breakpoint lies.
-      expect(cell.className).toContain("@[64rem]/ledger:!table-cell");
+      expect(cell.className).toContain("@[36rem]/ledger:hidden");
+      // Back once the TABLE'S box is 84rem (R5 F5-1: measured — at 64rem the Amount went off the edge).
+      expect(cell.className).toContain("@[84rem]/ledger:!table-cell");
       expect(cell.querySelector("time")).not.toBeNull();
     }
-    expect(header.className).toContain("@[64rem]/ledger:!table-cell");
+    expect(header.className).toContain("@[84rem]/ledger:!table-cell");
     expect(document.querySelector("[data-ledger-box]")!.className).toContain("@container/ledger");
+  });
+
+  /** R5 F5-1: a book that folds its comment out gives the comment's room to the others, earlier. */
+  it("draws From/To at 52rem and Done by at 60rem when the comment is folded out", () => {
+    render(<LedgerTable rows={rows} columns={["time", "from", "to", "category", "actor", "comment", "amount"]} label="Club book" wideOnly={["comment"]} />);
+    for (const label of ["From", "To"]) {
+      expect(screen.getByRole("columnheader", { name: new RegExp(`^${label}`) }).className).toContain("@[52rem]/ledger:table-cell");
+      for (const cell of cellsOf(`^${label}`)) expect(cell.className).toContain("@[52rem]/ledger:table-cell");
+    }
+    expect(screen.getByRole("columnheader", { name: /Done by/ }).className).toContain("@[60rem]/ledger:table-cell");
+    for (const cell of cellsOf("Amount")) expect(cell.className).toContain("@[52rem]/ledger:[&>span]:hidden");
   });
   /**
    * R4 form factor (SPEC §3.9): with a movement open BESIDE the book, ↑/↓ inside the table open

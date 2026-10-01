@@ -80,7 +80,10 @@ describe("the wallet ledger's share lines", () => {
     expect(toggle).not.toHaveTextContent("25.00");
     const line = document.querySelector("[data-share-group]") as HTMLElement;
     expect(within(line).getByText(SHARE_LEDGER_COPY.organiserNamed("Sam Petersen"))).toBeInTheDocument();
-    expect(within(line).getByText("−25.00 cr")).toBeInTheDocument();
+    // In its column — and, for the one-column form (a phone at 200 % text), under the words too:
+    // jsdom draws both; a real engine shows exactly one of them by the table's box (R5 F5-1).
+    expect(line.querySelector("td.text-right")).toHaveTextContent("−25.00 cr");
+    expect(line.querySelector("[data-stacked-amount]")).toHaveTextContent("−25.00 cr");
     fireEvent.click(toggle);
     expect(screen.getByText(/^25\.00 cr moved to Sam for your share of Court 1/)).toBeInTheDocument();
   });
@@ -114,8 +117,12 @@ describe("R1 F2.14 — a refunded share", () => {
     ]} label="Wallet ledger" groupShares shareBookings={known(summary(SAM_ORGANISES))} />);
     const toggle = await screen.findByRole("button", { name: /paid and returned/ });
     const line = toggle.closest("tr") as HTMLElement;
-    const amount = within(line).getByText("0.00 cr", { exact: false });
+    const amount = line.querySelector("td.text-right") as HTMLElement;
+    expect(amount).toHaveTextContent("0.00 cr");
     expect(amount.className).not.toMatch(/text-success/);
+    const stacked = line.querySelector("[data-stacked-amount] > span") as HTMLElement;
+    expect(stacked).toHaveTextContent("0.00 cr");
+    expect(stacked.className).not.toMatch(/text-success/);
     // The disclosure is stretched over its line (a phone shows only the words and the amount).
     expect(toggle.className).toMatch(/after:absolute/);
     expect(line.className).toMatch(/relative/);

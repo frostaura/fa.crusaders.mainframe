@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { CaretDown, CaretRight, CaretUp, CaretUpDown } from "./ui/icons";
 import { ScrollArea } from "./ScrollArea";
 import { CELL } from "./wallet/ledgerCells";
-import type { Column } from "./wallet/ledgerColumns";
+import { EARLY, HEAD_SHOW, PIN_AMOUNT, PIN_BESIDE_DETAILS, PIN_CELL, PIN_HEAD, PIN_RIGHT_EDGE, type Column } from "./wallet/ledgerColumns";
 import { groupShareRows } from "./wallet/shareGroups";
 import { ShareGroupRows } from "./wallet/ShareGroupRows";
 import type { ShareBookings } from "./wallet/useShareBookings";
@@ -48,27 +48,32 @@ type LedgerTableProps = {
    */
   selectedId?: string | null;
   /**
-   * Columns folded from `sm` until the TABLE'S box is 64rem (review round 2, F3-9; R4 form factor).
-   * The club's book has seven columns and a Details button; at 1280 beside the admin rail the
-   * Amount and Details were off the right edge. The comment is the column that can go — every
-   * row's Details sheet carries it whole. On a phone it stays: there it is the movement + time.
+   * Columns folded out of the full form until the TABLE'S box is 84rem (review round 2, F3-9; R4
+   * form factor; R5 F5-1). The club's book has seven columns and a Details button; beside the admin
+   * rail and the movement panel the Amount went off the right edge. The comment is the column
+   * that can go — every row's Details sheet carries it whole. In the compact form it stays: there
+   * it is the movement + time.
    */
   wideOnly?: Column[];
 };
 
 /**
- * Fold a cell from `sm` until the table's own box (`@container/ledger`) is 64rem — appended after
- * its own classes, and `!` on the way back, so a cell's `sm:table-cell` cannot win either way.
+ * Fold a cell out of the full form until the table's own box (`@container/ledger`) is 84rem —
+ * appended after its own classes, and `!` on the way back, so a cell's own fold cannot win either way.
  *
  * <p>
- * <b>Never `hidden` at the base</b> (R4 form factor, SPEC §4.1, MED): it was `hidden` +
+ * <b>Never `hidden` in the compact form</b> (R4 form factor, SPEC §4.1, MED): it was `hidden` +
  * `sm:hidden 2xl:table-cell`, which hid the comment on a PHONE too — where the comment cell is
- * the movement with its time under it, the one cell meant to stay. Admin Transactions at 390 read
- * "+25.00 cr / Dispute Partner" beside a blank half row. And a box, not the viewport: beside the
- * admin rail `2xl` lied about the room, and at 1920 a full-width book has the room for it.
+ * the movement with its time under it, the one cell meant to stay. And a box, not the viewport.
+ * </p>
+ *
+ * <p>
+ * <b>84rem, measured</b> (R5 F5-1): with the comment drawn, the club's seven columns and Details
+ * need about 80rem; at 64rem they were drawn into a 70rem box (1440 with the movement panel open)
+ * and the Amount went past the edge.
  * </p>
  */
-const WIDE_ONLY = "sm:hidden @[64rem]/ledger:!table-cell";
+const WIDE_ONLY = "@[36rem]/ledger:hidden @[84rem]/ledger:!table-cell";
 
 /**
  * Named rather than written inline as `isValidElement<{ className?: string }>`: lizard reads an
@@ -83,19 +88,48 @@ type ClassNamed = { className?: string };
  * sharing it measured 110px beside a 186px amount at 390, "Share of a / split booking" over
  * three lines beside empty space (R4 form factor).
  */
-const PHONE_LEAD = "w-full sm:w-auto";
+const PHONE_LEAD = "w-full @[36rem]/ledger:w-auto";
 /**
  * The counterparty under a phone's amount may wrap: the cell is `nowrap` for the figure, and the
  * longest name in a 1,700-row book set the whole column's width (186px of a 356px row).
  */
 const PHONE_MONEY = "[&>span]:whitespace-normal [&>span]:break-words";
 
-function narrowed(cell: ReactNode, column: Column, wide: boolean): ReactNode {
-  if (!isValidElement<ClassNamed>(cell)) return cell;
-  const lead = column === "comment" ? PHONE_LEAD : column === "amount" ? PHONE_MONEY : null;
-  if (!wide && !lead) return cell;
-  return cloneElement(cell, { className: cn(cell.props.className, lead, wide && WIDE_ONLY) });
+/** The Amount's pin while the table scrolls sideways: beside a pinned Details column, or at the edge. */
+function amountPin(details: boolean): string {
+  return cn(PIN_AMOUNT, details ? PIN_BESIDE_DETAILS : PIN_RIGHT_EDGE);
 }
+
+/** How a table lays its cells out: Details drawn after the Amount; the comment folded out (EARLY). */
+type Fold = { details: boolean; early: boolean };
+
+function narrowed(cell: ReactNode, column: Column, wide: boolean, fold: Fold): ReactNode {
+  if (!isValidElement<ClassNamed>(cell)) return cell;
+  const lead = column === "comment" ? PHONE_LEAD : column === "amount" ? cn(PHONE_MONEY, amountPin(fold.details), PIN_CELL) : null;
+  const early = fold.early ? EARLY[column] : undefined;
+  if (!wide && !lead && !early) return cell;
+  return cloneElement(cell, { className: cn(cell.props.className, lead, early, wide && WIDE_ONLY) });
+}
+
+/**
+ * The Details column: exactly one 44px button wide, with no padding, so the Amount can be pinned
+ * `right-touch` beside it — and pinned itself at the right edge while the table scrolls.
+ */
+const DETAILS_CELL = "w-touch px-0 [[data-scrolls]_&]:sticky [[data-scrolls]_&]:right-0";
+
+/**
+ * A row's controls scroll clear of the sticky column heads (R5 X5-2, WCAG 2.4.11): the heads are
+ * 2.75rem tall and stick under the page's top bar, whose own height the shell's scroll-padding
+ * covers. Without it, Tab and ↑/↓ brought a row to rest under the heads.
+ */
+const CLEAR_HEADS = "scroll-mt-14";
+
+/**
+ * The column heads stick to the PAGE's scroller (R5 V5-6), under its top bar (whose height the
+ * bar publishes); inside a sideways scroller they stick at its own top, which is its edge.
+ */
+const HEAD_TOP = { top: "var(--context-bar-top-height, 0px)" } as const;
+const STICKY_HEAD = "sticky z-sticky [[data-scrolls]_&]:!top-0";
 
 type Sort = { key: Column; dir: SortDir };
 
@@ -154,8 +188,9 @@ export function LedgerTable(props: LedgerTableProps) {
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
   const items = useMemo(() => (groupShares ? groupShareRows(sorted) : sorted.map((row) => ({ kind: "row" as const, row }))), [groupShares, sorted]);
   const bookings = props.shareBookings ?? NO_BOOKINGS;
+  const fold: Fold = { details: Boolean(onOpen), early: wideOnly.includes("comment") };
   const headerFor = (column: Column) => (
-    <SortHeader {...HEADER[column]} wideOnly={wideOnly.includes(column)} k={column} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+    <SortHeader {...HEADER[column]} wideOnly={wideOnly.includes(column)} fold={fold} k={column} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
   );
 
   if (rows.length === 0) {
@@ -172,19 +207,21 @@ export function LedgerTable(props: LedgerTableProps) {
       className={cn("@container/ledger min-w-0", fill && "flex min-h-0 flex-1 flex-col")}
       onKeyDown={onOpen && selectedId ? (event) => walkRows(event, items, selectedId, onOpen) : undefined}
     >
-      <ScrollArea label={label} className={cn(fill && "min-h-0 flex-1")}>
+      {/* A scroller only while the table is wider than its box (R5 V5-6): otherwise the heads
+          stick to the page. `fill` keeps its own scroller, which is what its heads stick to. */}
+      <ScrollArea label={label} onlyWhenWider={!fill} className={cn(fill && "min-h-0 flex-1")}>
         {/* Named as well as its scroller (A11Y F3.22): a table reached by a screen reader's table
             navigation announces its own name, not the region's. */}
         <table data-slot="table" aria-label={label} className="w-full border-collapse text-sm">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               {columns.map((column) => <Fragment key={column}>{headerFor(column)}</Fragment>)}
-              {onOpen ? <TableHead className="sticky top-0 z-sticky"><span className="sr-only">{LEDGER_COPY.detailsHeader}</span></TableHead> : null}
+              {onOpen ? <TableHead style={HEAD_TOP} className={cn(STICKY_HEAD, DETAILS_CELL, PIN_HEAD)}><span className="sr-only">{LEDGER_COPY.detailsHeader}</span></TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.map((item) => (item.kind === "row"
-              ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} selected={item.row.id === selectedId} />
+              ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} wideOnly={wideOnly} fold={fold} selected={item.row.id === selectedId} />
               : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId] ?? null} />))}
           </TableBody>
         </table>
@@ -214,9 +251,11 @@ function walkRows(event: KeyboardEvent<HTMLElement>, items: ReadonlyArray<{ kind
   });
 }
 
-function LedgerLine({ row, columns, onOpen, wideOnly, selected = false }: {
-  row: LedgerRow; columns: Column[]; onOpen?: (row: LedgerRow) => void; wideOnly: Column[]; selected?: boolean;
+function LedgerLine(props: {
+  row: LedgerRow; columns: Column[]; onOpen?: (row: LedgerRow) => void; wideOnly: Column[]; fold: Fold; selected?: boolean;
 }) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { row, columns, onOpen, wideOnly, fold, selected = false } = props;
   return (
     <TableRow
       data-ledger-row={row.id}
@@ -227,16 +266,16 @@ function LedgerLine({ row, columns, onOpen, wideOnly, selected = false }: {
       onClick={onOpen ? () => onOpen(row) : undefined}
       className={cn(onOpen && "cursor-pointer", selected && "bg-accent-soft hover:bg-accent-soft")}
     >
-      {columns.map((column) => <Fragment key={column}>{narrowed(CELL[column](row), column, wideOnly.includes(column))}</Fragment>)}
+      {columns.map((column) => <Fragment key={column}>{narrowed(CELL[column](row), column, wideOnly.includes(column), fold)}</Fragment>)}
       {onOpen ? (
-        <TableCell className="w-0 align-top">
+        <TableCell className={cn(DETAILS_CELL, PIN_CELL, "align-top")}>
           <Button
             variant="ghost"
             size="sm"
             // 44 × 44 at the least (A11Y F3-19: it measured 42 × 36 at 390), and an icon only: the
             // word cost 73px the row did not have beside the admin rail even at 1920 (F3-9,
             // measured) — the button's name is its aria-label either way.
-            className="min-h-touch min-w-touch"
+            className={cn("min-h-touch min-w-touch", CLEAR_HEADS)}
             // Named by kind and time, not by amount: the amount is its own cell's name, and
             // repeating it here made "+160.00 cr" match two cells in the row.
             aria-label={LEDGER_COPY.openRow(`${ledgerCategory(row)}, ${clubDayAndClock(row.at)}`)}
@@ -251,44 +290,48 @@ function LedgerLine({ row, columns, onOpen, wideOnly, selected = false }: {
   );
 }
 
-type HeaderLook = { label: string; align?: "left" | "right"; hideOnMobile?: boolean };
+type HeaderLook = { label: string; align?: "left" | "right" };
 
 const HEADER: Record<Column, HeaderLook> = {
-  time: { label: "Time", hideOnMobile: true },
-  from: { label: "From", hideOnMobile: true },
-  to: { label: "To", hideOnMobile: true },
+  time: { label: "Time" },
+  from: { label: "From" },
+  to: { label: "To" },
   comment: { label: "Comment" },
-  category: { label: LEDGER_COPY.categoryHeader, hideOnMobile: true },
-  actor: { label: LEDGER_COPY.actorHeader, hideOnMobile: true },
+  category: { label: LEDGER_COPY.categoryHeader },
+  actor: { label: LEDGER_COPY.actorHeader },
   amount: { label: "Amount", align: "right" },
 };
 
 type HeaderProps = {
   label: string;
   wideOnly?: boolean;
+  /** How the table folds: a Details column after the Amount (its pin sits beside it); the earlier folds. */
+  fold: Fold;
   k: Column;
   sort: Sort;
   onSort: (k: Column) => void;
   align?: "left" | "right";
-  hideOnMobile?: boolean;
 };
 
 /**
  * A sortable column head: the whole label is the button, `aria-sort` on the header says which
  * way the column runs (so it is not only the caret that says so), and the head is sticky
- * against the ScrollArea.
+ * against the page (or the ScrollArea, while it scrolls sideways).
  */
 function SortHeader(props: HeaderProps) {
-  const { label, k, sort, onSort, align = "left", hideOnMobile = false, wideOnly = false } = props;
+  const { label, k, sort, onSort, align = "left", wideOnly = false, fold } = props;
   const active = sort.key === k;
   const Icon = !active ? CaretUpDown : sort.dir === "asc" ? CaretUp : CaretDown;
   return (
     <TableHead
       aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+      style={HEAD_TOP}
       className={cn(
-        "sticky top-0 z-sticky",
+        STICKY_HEAD,
         align === "right" ? "text-right" : "text-left",
-        hideOnMobile && "hidden sm:table-cell",
+        HEAD_SHOW[k],
+        fold.early && k !== "amount" && EARLY[k],
+        k === "amount" && cn(amountPin(fold.details), PIN_HEAD),
         wideOnly && WIDE_ONLY,
       )}
     >

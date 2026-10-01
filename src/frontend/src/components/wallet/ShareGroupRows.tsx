@@ -7,9 +7,9 @@ import { TableCell, TableRow } from "../ui/table";
 import { TextLink } from "../ui/text-link";
 import { CaretDown, CaretRight } from "../ui/icons";
 import { CELL } from "./ledgerCells";
-import { CELL_CLASS, amountInk, type Column } from "./ledgerColumns";
+import { CELL_CLASS, COMPACT_ONLY, PIN_AMOUNT, PIN_CELL, PIN_RIGHT_EDGE, amountInk, type Column } from "./ledgerColumns";
 import { ledgerCategory } from "@/lib/ledgerCopy";
-import { PhoneTime, ToName } from "./LedgerCellParts";
+import { PhoneTime, StackedAmount, ToName } from "./LedgerCellParts";
 import { shareSide, type LedgerItem, type ShareSide } from "./shareGroups";
 import type { ShareBooking } from "./useShareBookings";
 
@@ -111,9 +111,9 @@ const GROUP_CELL: Record<Column, (h: Head) => ReactNode> = {
   actor: () => <TableCell className={CELL_CLASS.actor} />,
   amount: (h) => (
     // Netted to nothing is neither money in nor out: neutral ink, never the green of a credit (R1 F2.14).
-    <TableCell className={cn(CELL_CLASS.amount, h.group.net === 0 ? "text-text-secondary" : amountInk(h.group.net))}>
+    <TableCell className={cn(CELL_CLASS.amount, PIN_AMOUNT, PIN_CELL, PIN_RIGHT_EDGE, h.group.net === 0 ? "text-text-secondary" : amountInk(h.group.net))}>
       {formatSignedCredits(h.group.net)}
-      <span className="block text-xs font-normal text-text-muted sm:hidden">{COPY.movements(h.group.rows.length)}</span>
+      <span className={cn("block text-xs font-normal text-text-muted", COMPACT_ONLY)}>{COPY.movements(h.group.rows.length)}</span>
     </TableCell>
   ),
 };
@@ -128,7 +128,7 @@ function GroupComment({ head }: { head: Head }) {
   const Caret = head.open ? CaretDown : CaretRight;
   return (
     // Never truncated: it is the line's whole meaning, and the disclosure is its name.
-    <TableCell className="break-words align-top text-sm text-text-primary sm:max-w-sm">
+    <TableCell className="break-words align-top text-sm text-text-primary @[36rem]/ledger:max-w-sm">
       <button
         type="button"
         aria-expanded={head.open}
@@ -136,7 +136,8 @@ function GroupComment({ head }: { head: Head }) {
         onClick={head.onToggle}
         data-share-toggle=""
         className={cn(
-          "no-lift -mx-1 inline-flex items-start gap-2 rounded-md px-1 text-left font-semibold text-text-primary",
+          // scroll-mt-14: clear of the sticky column heads when Tab brings it into view (R5 X5-2).
+          "no-lift -mx-1 inline-flex scroll-mt-14 items-start gap-2 rounded-md px-1 text-left font-semibold text-text-primary",
           // Stretched over the line (its row is `relative`); the booking link sits above it.
           "after:absolute after:inset-0 after:content-['']",
           "transition-colors duration-fast ease-standard hover:text-accent-strong motion-reduce:transition-none",
@@ -148,9 +149,10 @@ function GroupComment({ head }: { head: Head }) {
       </button>
       {/* Under the sentence, not under the caret: the caret (16px) and its gap (8px) are pl-6. */}
       <div className="pl-6">
+        <StackedAmount signed={head.group.net} ink={head.group.net === 0 ? "text-text-secondary" : amountInk(head.group.net)} under={COPY.movements(head.group.rows.length)} />
         <PhoneTime at={newest(head.group.rows).at} />
-        {/* A 44px target on a phone, where it is tapped; a line of text on a desk, where it is clicked. */}
-        <TextLink to={`/bookings/${head.group.bookingId}`} className="relative z-10 inline-flex min-h-touch items-center text-sm sm:min-h-0 sm:pt-1">
+        {/* A 44px target in the compact form (a phone, where it is tapped); a line of text in a wide box. */}
+        <TextLink to={`/bookings/${head.group.bookingId}`} className="relative z-10 inline-flex min-h-touch scroll-mt-14 items-center text-sm @[36rem]/ledger:min-h-0 @[36rem]/ledger:pt-1">
           {COPY.viewBooking}
           <span className="sr-only">{`: ${head.sentence}`}</span>
         </TextLink>
