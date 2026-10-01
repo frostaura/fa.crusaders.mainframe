@@ -262,23 +262,21 @@ describe("the chip's three states, as pure functions", () => {
     expect(walletTone(0)).toBe("zero");
     expect(walletTone(-5)).toBe("zero");
     /*
-      0.004 prints as "0.00" and buys nothing, so it is ZERO — this line said "genuinely low"
-      and the wallet page's own rule said empty, which is how a member came to see a green
-      chip, a red card and no grid banner for one balance. The whole rule is `walletTone` now;
+      Under one whole minute buys nothing, so it is ZERO (P13). The whole rule is `walletTone`;
       the table of cases lives with it in `lib/wallet-tone.test.ts`, and what is left here is
       the chip's use of the answer.
     */
-    expect(walletTone(0.004)).toBe("zero");
-    expect(walletTone(49.99)).toBe("low");
-    expect(walletTone(50)).toBe("fine");
+    expect(walletTone(0.4)).toBe("zero");
+    expect(walletTone(59)).toBe("low");
+    expect(walletTone(60)).toBe("fine");
     expect(walletTone(null)).toBe("fine");
   });
 
-  it("sends an empty wallet to the top-up page, not to a ledger with nothing in it", () => {
+  it("sends an empty wallet to the buy page, not to a ledger with nothing in it", () => {
     // At zero `/wallet` is a dead end: the ledger is empty or one row and the only useful
     // control is one more tap away.
-    expect(walletHref(0)).toBe("/wallet/topup");
-    expect(walletHref(-5)).toBe("/wallet/topup");
+    expect(walletHref(0)).toBe("/wallet/buy");
+    expect(walletHref(-5)).toBe("/wallet/buy");
     expect(walletHref(50)).toBe("/wallet");
     expect(walletHref(null)).toBe("/wallet");
   });
@@ -290,8 +288,8 @@ describe("the count-up's duration", () => {
     expect(countDurationMs(5)).toBe(350);
   });
 
-  it("has a CEILING, or a big top-up feels slow", () => {
-    // 50 credits — one court — is already at the ceiling, and 400 is no slower.
+  it("has a CEILING, or a big purchase feels slow", () => {
+    // 50 minutes — one game — is already at the ceiling, and five hours is no slower.
     expect(countDurationMs(50)).toBe(900);
     expect(countDurationMs(400)).toBe(900);
   });

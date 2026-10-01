@@ -6,7 +6,7 @@ import { ledgerTypeLabel } from "./creditAdjustment";
  *
  * <p>
  * The Transactions page and a member's ledger said what moved and between whom, never who
- * moved it: a desk top-up and a member's own card top-up read the same. Round 1's contract
+ * moved it: a package sold at the desk and a member's own card purchase read the same. Round 1's contract
  * (§6) adds `actor_name` — the admin who made a desk movement or booked on behalf, null for the
  * member's own and the system's. Until a server sends it, the older `actorName` stands in, and
  * only where the actor is somebody other than the member.

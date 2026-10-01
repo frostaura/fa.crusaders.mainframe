@@ -59,7 +59,7 @@ export type BalanceDeltaSource = "self" | "club";
  * <b>`source` is what stops the product announcing one action twice.</b> A member who just
  * pressed <em>Book</em> already has a toast; raising a second one from the chip would be
  * `Toast.tsx:62-74`'s defect in a new costume. `"self"` is a movement this tab caused — a
- * booking, a cancel, a top-up returning — and `"club"` is one that arrived unbidden, which is
+ * booking, a cancel, a purchase returning — and `"club"` is one that arrived unbidden, which is
  * the case GOAL 8 is really about.
  * </p>
  */
@@ -84,11 +84,11 @@ export type BalanceFrame = {
   held_minutes?: number;
   spendable_minutes?: number;
   held_until?: string | null;
-  /** C4 — the held credit per share deadline, soonest first; sums to `held_minutes`. */
+  /** C4 — the held minutes per share deadline, soonest first; sums to `held_minutes`. */
   held_parts?: { minutes: number; until: string }[];
   /**
-   * P11 — credits the organiser OWES BACK to partners whose return is waiting because the
-   * organiser's balance could not cover it. No release date: incoming credit pays it first.
+   * P11 — minutes the organiser OWES BACK to partners whose return is waiting because the
+   * organiser's balance could not cover it. No release date: incoming minutes pay it first.
    * `spendable_minutes` is balance − held − owed back, so it can be negative. Absent before P11.
    */
   owed_back_minutes?: number;
@@ -103,8 +103,8 @@ export type BalanceFrame = {
 export type HeldFigures = {
   held: number; owedBack: number; spendable: number; until: string | null;
   /**
-   * C4 / F4-18 — the held credit per share deadline, soonest first. One release date for the whole
-   * amount was wrong whenever shares from two games were held: "60.00 held until Fri" when 35.00
+   * C4 / F4-18 — the held minutes per share deadline, soonest first. One release date for the whole
+   * amount was wrong whenever shares from two games were held: "60 min held until Fri" when 35
    * of it stays until Sunday. Empty (or absent) when the API predates C4 or nothing is held.
    */
   parts?: HeldPart[];
@@ -288,17 +288,17 @@ export type LiveBalance = {
    *
    * <p>
    * <b>`expectSelf` says whose doing the movement was, and it is not cosmetic.</b> A plain
-   * re-read is indistinguishable from an admin crediting the member at the desk, so the chip
+   * re-read is indistinguishable from an admin adding minutes at the desk, so the chip
    * announces it — which is right for the refresh on focus and on visibility, and wrong on
    * the path where the page has ALREADY told the member what happened. Cancelling a booking
    * is that path: its endpoint answers with `refunded_minutes` and `penalty_minutes` and no
    * balance, so there is no figure to `apply`, and the un-flagged re-read raised "The club
-   * added 50 credits" over the page's own "50.00 back".
+   * added 50 min" over the page's own "50 min back".
    * </p>
    */
   refresh: (options?: { expectSelf?: boolean }) => Promise<void>;
   /** Take a figure the server has just stated, without asking it again. */
-  apply: (credits: number) => void;
+  apply: (minutes: number) => void;
 };
 
 export function useLiveBalance({
@@ -313,7 +313,7 @@ export function useLiveBalance({
   /**
    * WHO the balance belongs to (D1/D2). A sign-in moves this without moving `enabled`
    * ("authenticated" to "authenticated"), and before it was a dependency the chip went on
-   * showing the previous identity's figure — a red "0.00 cr" for a stale token's deleted member
+   * showing the previous identity's figure — a red zero for a stale token's deleted member
    * — and its stream stayed on the previous member's ticket. A change starts over: no figure,
    * loading, a fresh read and a fresh stream.
    */
@@ -349,7 +349,7 @@ export function useLiveBalance({
    * The next movement is this tab's own doing.
    *
    * Set by `apply`, and by `refresh({ expectSelf: true })` — never by a bare `refresh`, which
-   * is what the focus and visibility reads use and is how a member learns about a top-up that
+   * is what the focus and visibility reads use and is how a member learns about a purchase that
    * happened while the phone was in a pocket. `record` clears it whatever it decides, so one
    * flagged read cannot silence the movement after it.
    */
@@ -370,13 +370,13 @@ export function useLiveBalance({
     return () => setMoneyRequestListener(null);
   }, []);
 
-  const record = useCallback((credits: number, frame?: BalanceFrame) => {
+  const record = useCallback((minutes: number, frame?: BalanceFrame) => {
     const before = previous.current;
-    previous.current = credits;
-    setBalance(credits);
+    previous.current = minutes;
+    setBalance(minutes);
     setLastConfirmedAt(Date.now());
-    const amount = frame?.delta_minutes ?? (before === null ? 0 : credits - before);
-    // A first read is not a movement: `null -> 400.00` is the first time the member has been
+    const amount = frame?.delta_minutes ?? (before === null ? 0 : minutes - before);
+    // A first read is not a movement: `null -> 400` is the first time the member has been
     // told, not money arriving. Neither is a re-read that confirms what we already had.
     if (before === null || Math.abs(amount) < 0.01) { expectSelf.current = false; return; }
     const own = expectSelf.current || selfInFlight.current > 0 || Date.now() < selfUntil.current;
@@ -413,13 +413,13 @@ export function useLiveBalance({
     }
   }, [enabled, record]);
 
-  const apply = useCallback((credits: number) => {
+  const apply = useCallback((minutes: number) => {
     expectSelf.current = true;
     // A figure a booking answer stated carries no held split; the held and owed-back parts
     // cannot have moved (a booking neither receives nor returns a share), so spendable moves
     // with the balance.
-    setHeldFigures((h) => (h ? { ...h, spendable: credits - h.held - h.owedBack } : h));
-    record(credits);
+    setHeldFigures((h) => (h ? { ...h, spendable: minutes - h.held - h.owedBack } : h));
+    record(minutes);
   }, [record]);
 
   const noteUnread = useCallback((count: number) => setUnreadCount(Math.max(0, count)), []);
@@ -447,7 +447,7 @@ export function useLiveBalance({
     if (enabled) void refresh();
   }, [enabled, identity, refresh]);
 
-  // Refresh when the tab comes back — a manual top-up in another tab, a phone waking up in a
+  // Refresh when the tab comes back — a desk sale in another tab, a phone waking up in a
   // squash club. `visibilitychange` as well as `focus`, because a backgrounded PWA that is
   // brought forward never fires `focus` and is exactly the session most likely to have missed
   // a push while it was asleep.

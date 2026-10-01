@@ -5,10 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *
  * <p>
  * <b>The rule: a finite, decaying courtesy — never a loop.</b> An animation that runs for ever
- * is not an invitation, it is a fault light, and a member who cannot afford to top up today
+ * is not an invitation, it is a fault light, and a member who cannot afford to buy minutes today
  * has to look at it every single time they open the app. Three bursts of three breaths, then
  * silence for the rest of the session. <b>12.6 seconds of motion, once, ever.</b> After that
- * the chip is simply red and says `0.00 cr`, which is itself the message.
+ * the chip is simply red and says `0 min`, which is itself the message.
  * </p>
  *
  * <pre>
@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * </pre>
  *
  * <p>
- * <b>The grace period is not padding.</b> A member who has just spent their last credits
+ * <b>The grace period is not padding.</b> A member who has just spent their last minutes
  * watches the count-down finish and reads the booking toast. Starting a pulse on top of that
  * turns a successful booking into an alarm. Four seconds is the toast's own life minus its
  * exit.
@@ -45,14 +45,14 @@ export const ZERO_ENTICE = {
 export type EnticeStop =
   | "funded"      // the balance rose above zero
   | "tapped"      // they pressed the chip
-  | "arrived"     // they reached /wallet or /wallet/topup by any route
+  | "arrived"     // they reached /wallet or /wallet/buy by any route
   | "dismissed"   // they asked it to stop
   | "spent";      // all three bursts ran
 
 export type ZeroEntice = {
   /** Whether the chip should be breathing at this instant. */
   breathing: boolean;
-  /** Whether the standing "· Top up" word should be shown instead (reduced motion). */
+  /** Whether the standing "· Buy minutes" word should be shown instead (reduced motion). */
   showWord: boolean;
   stop: (why: EnticeStop) => void;
   stopped: EnticeStop | null;
@@ -111,7 +111,7 @@ export function useZeroBalanceEntice({
     /**
      * <b>Under reduced motion there is no slow pulse — there is a different affordance.</b>
      *
-     * The chip grows the word "Top up" and keeps it for as long as the balance is zero. A
+     * The chip grows the words "Buy minutes" and keeps them for as long as the balance is zero. A
      * static thing that is always there is strictly better for this audience than motion they
      * have asked not to see, and it is the same information. A quieter animation would be
      * neither.

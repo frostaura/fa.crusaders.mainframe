@@ -25,7 +25,14 @@
 
 export const MEMBER_DATA_DB = "crusaders-member-data";
 const STORE = "reads";
-const VERSION = 1;
+/**
+ * 2 since P13 ("minutes, not credits"): every kept read before it is credit-shaped
+ * (`balance_credits`, two-decimal figures) and would paint a stale unit offline. The upgrade drops
+ * the version-1 store whole rather than translating it — a kept read is a convenience, never the
+ * record, and the next online read refills it in minutes.
+ */
+export const MEMBER_DATA_VERSION = 2;
+const VERSION = MEMBER_DATA_VERSION;
 
 /** A record this old is never shown (14 days). */
 export const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -49,8 +56,10 @@ function open(): Promise<IDBDatabase | null> {
   const attempt = new Promise<IDBDatabase | null>((resolve) => {
     let request: IDBOpenDBRequest;
     try { request = idb.open(MEMBER_DATA_DB, VERSION); } catch { resolve(null); return; }
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      // P13: a version-1 store holds credit-shaped reads; drop it, never show it.
+      if (event.oldVersion < 2 && db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "id" });
     };
     request.onsuccess = () => {

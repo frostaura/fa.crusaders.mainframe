@@ -1,11 +1,11 @@
 /**
- * The one way an amount a person typed becomes a number — admin top-up, member top-up, a split
- * share, a monthly goal.
+ * The one way an amount a person typed becomes a number — a desk sale's rand, a minutes
+ * adjustment, a split share, a monthly goal.
  *
  * <p>
  * <b>Review round 1, F3.18.</b> Four fields parsed money four ways: the admin top-up took
- * `Number()`, so "1e3" was a thousand credits and "1,5" was refused as "greater than zero"; the
- * member top-up had its own regex. A South African volunteer types a decimal comma, and a
+ * `Number()`, so "1e3" was a thousand and "1,5" was refused as "greater than zero"; the
+ * member's own payment screen had its own regex. A South African volunteer types a decimal comma, and a
  * member who meant 13 and typed "1e3" must be told, not quoted eighty times what they meant.
  * </p>
  *
@@ -36,11 +36,15 @@ export type AmountProblem =
 export type AmountResult = { ok: true; value: number } | { ok: false; problem: AmountProblem };
 
 export type AmountRules = {
-  /** Decimal places the unit carries — 2 for credits and rand. */
+  /**
+   * Decimal places the unit carries — 2 for rand, 0 for minutes (P13 §7.1: whole minutes only;
+   * "1,5" minutes is refused as too precise rather than rounded). Default 2; minutes fields pass
+   * {@link MINUTES_RULES}.
+   */
   decimals?: number;
   /** The largest amount the field accepts, inclusive. */
   max?: number;
-  /** A monthly goal of 0 is a real answer; a top-up of 0 is not. */
+  /** A monthly goal of 0 is a real answer; a payment of 0 is not. */
   allowZero?: boolean;
 };
 
@@ -74,4 +78,12 @@ export function parseAmount(text: string, rules: AmountRules = {}): AmountResult
   if (value === 0 && !rules.allowZero) return { ok: false, problem: { kind: "zero" } };
   if (rules.max !== undefined && value > rules.max) return { ok: false, problem: { kind: "too_large", max: rules.max } };
   return { ok: true, value };
+}
+
+/** The rules a field of whole minutes parses by (P13 §7.1): no decimals at all. */
+export const MINUTES_RULES: Readonly<AmountRules> = { decimals: 0 };
+
+/** A typed amount of minutes, through {@link parseAmount} with {@link MINUTES_RULES} plus any bound. */
+export function parseMinutesAmount(text: string, rules: Omit<AmountRules, "decimals"> = {}): AmountResult {
+  return parseAmount(text, { ...rules, ...MINUTES_RULES });
 }

@@ -80,7 +80,7 @@ describe("a refresh that fails keeps what is on screen", () => {
       dispatchEvent: () => false,
     }) as unknown as MediaQueryList);
     let refusing = false;
-    const wallet = { balance_minutes: 412.5, total_entries: 1, offset: 0, limit: 100, entries: [ledgerRowFixture()] };
+    const wallet = { balance_minutes: 412, total_entries: 1, offset: 0, limit: 100, entries: [ledgerRowFixture()] };
     stubFetch([
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       { path: "/api/v1/wallet", respond: () => (refusing ? refuse(429, { error: "rate_limited" }) : wallet) },
@@ -88,11 +88,11 @@ describe("a refresh that fails keeps what is on screen", () => {
       { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
     ]);
     renderPage(<WalletPage />, { initialEntries: ["/wallet"] });
-    expect(await screen.findByText("412.50", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("6 h 52 min", { exact: false })).toBeInTheDocument();
     refusing = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByText(OFFLINE_COPY.refreshFailedTitle)).toBeInTheDocument();
-    expect(screen.getByText("412.50", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("6 h 52 min", { exact: false })).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Wallet ledger" })).toBeInTheDocument();
   });
 });

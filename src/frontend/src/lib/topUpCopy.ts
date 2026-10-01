@@ -1,27 +1,32 @@
-import { formatCredits, formatMoney } from "./utils";
+import { formatMoney } from "./utils";
+import { minutesCompact } from "./minutes";
 import type { AdjustReasonCode } from "./adminApi";
-import { parseAmount } from "./amount";
+import { parseAmount, parseMinutesAmount } from "./amount";
 import { amountProblemSentence } from "./amountCopy";
 import { ApiError } from "./api";
 
 /**
- * The admin's hand movement of a member's credit, in words.
+ * The admin's hand movement of a member's minutes, in words (the desk; P13 §3.7).
  *
  * <p>
  * <b>The defect this module exists to close (D3-B08).</b> The form was ONE signed field —
- * "Amount (credits — positive adds, negative deducts)" — with a free-text box, whose only
- * guard was "non-zero", and with no statement anywhere of what the member's balance would be
- * afterwards. A volunteer typing <code>-100</code> where they meant <code>100</code> moves a
- * member two hundred credits the wrong way, and the new balance appears only in the toast
- * afterwards, four seconds long, over a row that has already changed.
+ * "positive adds, negative deducts" — with a free-text box, whose only guard was "non-zero",
+ * and with no statement anywhere of what the member's balance would be afterwards. A volunteer
+ * typing <code>-100</code> where they meant <code>100</code> moves a member the wrong way twice
+ * over, and the new balance appears only in a four-second toast over a row that has already
+ * changed.
  * </p>
  *
  * <p>
- * <b>The fix is not validation; it is two paths.</b> Adding credit and taking it back are
+ * <b>The fix is not validation; it is two paths.</b> Adding minutes and taking them back are
  * different decisions with different consequences and different audiences, so they are
  * different flows with different titles and different button tones. A sign is not a decision
- * a person makes — it is a character they type — and a comment telling them which way it goes
- * is how a member loses two hundred credits.
+ * a person makes — it is a character they type.
+ * </p>
+ *
+ * <p>
+ * P13: every amount is whole minutes, written through `lib/minutes` and parsed with no decimals
+ * (`parseMinutesAmount`). Rand stays rand, with the club's symbol.
  * </p>
  *
  * <p>
@@ -33,10 +38,10 @@ import { ApiError } from "./api";
  */
 
 /** Which direction this flow is going. Never inferred from the sign of a field. */
-export type CreditDirection = "add" | "take_back";
+export type MinutesDirection = "add" | "take_back";
 
-export function sheetTitle(direction: CreditDirection, name: string): string {
-  return direction === "add" ? `Top up ${name}` : `Take credit back from ${name}`;
+export function sheetTitle(direction: MinutesDirection, name: string): string {
+  return direction === "add" ? `Add minutes for ${name}` : `Take minutes back from ${name}`;
 }
 
 /**
@@ -56,7 +61,7 @@ export function sheetTitle(direction: CreditDirection, name: string): string {
  * THIS one, and month-end needs both.
  * </p>
  */
-export const REASON_CHOICES: ReadonlyArray<{ code: AdjustReasonCode; label: string; forDirection: CreditDirection | "both" }> = [
+export const REASON_CHOICES: ReadonlyArray<{ code: AdjustReasonCode; label: string; forDirection: MinutesDirection | "both" }> = [
   { code: "top_up_cash", label: "Cash paid at the desk", forDirection: "add" },
   { code: "top_up_eft", label: "EFT received", forDirection: "add" },
   { code: "top_up_card_offline", label: "Card paid at the desk", forDirection: "add" },
@@ -66,7 +71,7 @@ export const REASON_CHOICES: ReadonlyArray<{ code: AdjustReasonCode; label: stri
   { code: "other", label: "Something else", forDirection: "both" },
 ];
 
-export function reasonChoicesFor(direction: CreditDirection) {
+export function reasonChoicesFor(direction: MinutesDirection) {
   return REASON_CHOICES.filter((c) => c.forDirection === "both" || c.forDirection === direction);
 }
 
@@ -87,7 +92,7 @@ export function revenueNote(code: AdjustReasonCode, zarReceived?: number | null)
   if (!countsAsRevenue(code)) {
     return "This does not count as money the club took, so it stays out of the club's revenue.";
   }
-  // F3.4: the revenue figure is the rand the desk says it RECEIVED, never the credits — a
+  // F3.4: the revenue figure is the rand the desk says it RECEIVED, never the minutes — a
   // promise of revenue with no rand beside it was a sentence the reports could not keep.
   return typeof zarReceived === "number"
     ? `${formatMoney(zarReceived)} counts as money the club took, and appears in the club's revenue.`
@@ -99,7 +104,7 @@ export function revenueNote(code: AdjustReasonCode, zarReceived?: number | null)
 // ---------------------------------------------------------------------------------------
 
 /**
- * "Thandi has 370.00 cr. After +100.00 cr: 470.00 cr."
+ * "Thandi has 6 h 10 min. After +1 h 40 min: 7 h 50 min."
  *
  * <p>
  * Three arms, and the third is the one that matters: a balance the console could not read is
@@ -109,47 +114,47 @@ export function revenueNote(code: AdjustReasonCode, zarReceived?: number | null)
  * </p>
  */
 export function balanceSentence(
-  name: string, balance: number | null, amount: number | null, direction: CreditDirection,
+  name: string, balance: number | null, amount: number | null, direction: MinutesDirection,
 ): string {
   if (balance === null) {
-    return `Couldn't read ${name}'s balance. You can still ${direction === "add" ? "add credit" : "take credit back"}, `
+    return `Couldn't read ${name}'s balance. You can still ${direction === "add" ? "add minutes" : "take minutes back"}, `
       + "but the figure below is not available — the club's system works out the result.";
   }
-  if (amount === null || amount === 0) return `${name} has ${formatCredits(balance)}.`;
+  if (amount === null || amount === 0) return `${name} has ${minutesCompact(balance)}.`;
   const signed = direction === "add" ? amount : -amount;
   const after = balance + signed;
-  const movement = `${signed > 0 ? "+" : "−"}${formatCredits(Math.abs(amount))}`;
-  return `${name} has ${formatCredits(balance)}. After ${movement}: ${formatCredits(after)}.`;
+  const movement = `${signed > 0 ? "+" : "−"}${minutesCompact(Math.abs(amount))}`;
+  return `${name} has ${minutesCompact(balance)}. After ${movement}: ${minutesCompact(after)}.`;
 }
 
-/** The one thing a "take credit back" must say that a top-up need not: it can go negative. */
+/** The one thing a "take minutes back" must say that adding need not: it can go negative. */
 export function overdraftWarning(balance: number | null, amount: number | null): string | null {
   if (balance === null || amount === null || amount <= 0) return null;
   const after = balance - amount;
   if (after >= 0) return null;
-  return `That takes them to ${formatCredits(after)} — they would owe the club ${formatCredits(Math.abs(after))} `
+  return `That takes them to ${minutesCompact(after)} — they would owe the club ${minutesCompact(Math.abs(after))} `
     + "and cannot book until it is made up.";
 }
 
 /** The refusal when somebody types a minus into the amount on the ADD path. */
 export const MINUS_REFUSED
-  = "Use “Take credit back” at the bottom to remove credit. This field only adds.";
+  = "Use “Take minutes back” at the bottom to remove minutes. This field only adds.";
 
-export const TAKE_BACK_LINK = "Take credit back instead";
-export const ADD_LINK = "Add credit instead";
+export const TAKE_BACK_LINK = "Take minutes back instead";
+export const ADD_LINK = "Add minutes instead";
 
 export const TAKE_BACK_CONSEQUENCE
   = "This reduces what they can spend, and they are emailed about it.";
 
 /** The armed consequence on the confirm — the one sentence read last, before the press. */
 export function confirmConsequence(
-  name: string, balance: number | null, amount: number, direction: CreditDirection,
+  name: string, balance: number | null, amount: number, direction: MinutesDirection,
 ): string {
   const after = balance === null ? null : balance + (direction === "add" ? amount : -amount);
   const head = direction === "add"
-    ? `Add ${formatCredits(amount)} to ${name}?`
-    : `Take ${formatCredits(amount)} back from ${name}?`;
-  const result = after === null ? "" : ` They end on ${formatCredits(after)}.`;
+    ? `Add ${minutesCompact(amount)} to ${name}?`
+    : `Take ${minutesCompact(amount)} back from ${name}?`;
+  const result = after === null ? "" : ` They end on ${minutesCompact(after)}.`;
   return `${head}${result} This goes on the ledger and cannot be deleted.`;
 }
 
@@ -158,22 +163,22 @@ export function confirmConsequence(
  * The header over the receipt, frozen at the press (F3.5) — past tense, from the balance the
  * admin confirmed against, never re-derived from the balance the server has since sent back.
  */
-export function receiptHeader(name: string, before: number | null, amount: number, direction: CreditDirection): string {
-  const movement = `${direction === "add" ? "+" : "−"}${formatCredits(amount)}`;
+export function receiptHeader(name: string, before: number | null, amount: number, direction: MinutesDirection): string {
+  const movement = `${direction === "add" ? "+" : "−"}${minutesCompact(amount)}`;
   if (before === null) return `${movement} for ${name}.`;
   const after = before + (direction === "add" ? amount : -amount);
-  return `${name} had ${formatCredits(before)}. ${movement} → ${formatCredits(after)}.`;
+  return `${name} had ${minutesCompact(before)}. ${movement} → ${minutesCompact(after)}.`;
 }
 
 /** Null where the balance could not be re-read after a lost reply — never a made-up figure. */
 export function doneSentence(name: string, balanceAfter: number | null): string {
   if (balanceAfter === null) return `Done. It is on ${name}'s ledger.`;
-  return `Done. ${name} now has ${formatCredits(balanceAfter)}.`;
+  return `Done. ${name} now has ${minutesCompact(balanceAfter)}.`;
 }
 
 /**
  * A press whose reply never came back (review round 2, F3-2). The ledger is read to find out,
- * so each sentence says what the ledger showed — never "didn't go through" over a credit that
+ * so each sentence says what the ledger showed — never "didn't go through" over minutes that
  * landed.
  */
 export const LOST_REPLY = {
@@ -205,7 +210,7 @@ function keyReusedSentence(stored: unknown): string {
   const row = (typeof stored === "object" && stored !== null ? stored : {}) as Record<string, unknown>;
   const amount = typeof row.amount_minutes === "number" ? row.amount_minutes : null;
   const what = amount === null ? "An earlier press of this already went through"
-    : `An earlier press already went through: ${amount < 0 ? "−" : "+"}${formatCredits(Math.abs(amount))}`;
+    : `An earlier press already went through: ${amount < 0 ? "−" : "+"}${minutesCompact(Math.abs(amount))}`;
   const why = typeof row.reason === "string" && row.reason.trim() ? ` (“${row.reason.trim()}”)` : "";
   return `${what}${why}. Nothing more was added — check the ledger before adding anything else.`;
 }
@@ -227,23 +232,23 @@ export const LIVE_PUSH_NOTE
  * </p>
  */
 /**
- * The largest by-hand movement the server accepts — `WalletEndpoints.MaxAdjustmentCredits`.
- * Said at the field (F3.17): 99999999999 used to be accepted here and refused vaguely later.
+ * The largest by-hand movement the server accepts (P13 §3.7: `|amountMinutes| ≤ 999999`, else
+ * `amount_out_of_range {max_minutes}`). Said at the field (F3.17), not refused vaguely later.
  */
-export const ADJUST_MAX_CREDITS = 99_999_999.99;
+export const ADJUST_MAX_MINUTES = 999_999;
 
-/** The typed credits as a number, or null — through the one shared parser (F3.18). */
-export function parseCredits(text: string): number | null {
-  const parsed = parseAmount(text, { max: ADJUST_MAX_CREDITS });
+/** The typed minutes as a whole number, or null — through the one shared parser, no decimals. */
+export function parseMinutes(text: string): number | null {
+  const parsed = parseMinutesAmount(text, { max: ADJUST_MAX_MINUTES });
   return parsed.ok ? parsed.value : null;
 }
 
 export function validateAmount(text: string): string | null {
-  const parsed = parseAmount(text, { max: ADJUST_MAX_CREDITS });
+  const parsed = parseMinutesAmount(text, { max: ADJUST_MAX_MINUTES });
   if (parsed.ok) return null;
-  // The desk's own sentence for a minus: this flow has a way to take credit back.
+  // The desk's own sentence for a minus: this flow has a way to take minutes back.
   if (parsed.problem.kind === "negative") return MINUS_REFUSED;
-  return amountProblemSentence(parsed.problem, "credits");
+  return amountProblemSentence(parsed.problem, "minutes");
 }
 
 /** The rand the desk says it received, for a top-up that counts as revenue (F3.4). */
@@ -274,10 +279,10 @@ export function adjustRefusal(err: unknown): string | null {
   switch (payload.error) {
     case "amount_out_of_range": {
       const max = typeof payload.max_minutes === "number" ? payload.max_minutes
-        : typeof payload.max === "number" ? payload.max : ADJUST_MAX_CREDITS;
-      return `That is more than one movement can be — the most is ${formatCredits(max)}. Nothing was changed.`;
+        : typeof payload.max === "number" ? payload.max : ADJUST_MAX_MINUTES;
+      return `That is more than one movement can be — the most is ${minutesCompact(max)}. Nothing was changed.`;
     }
-    case "amount_not_whole_cents": return "Credits go to two decimal places. Nothing was changed.";
+    case "amount_zero": return "Enter an amount greater than zero. Nothing was changed.";
     case "idempotency_key_reused": return keyReusedSentence(payload.stored);
     case "zar_received_required": return "Say how much money was received — a top-up that counts as revenue needs it. Nothing was changed.";
     case "zar_received_out_of_range": {

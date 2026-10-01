@@ -3,32 +3,24 @@
  *
  * <p>
  * <b>The decision, stated here because the code is where it has to hold.</b> The owner asked
- * for the <code>cr</code> suffix to be replaced by a configurable symbol that precedes the
- * amount, defaulting to <code>R</code>. This product renders two different quantities and
- * only one of them is money:
+ * for a configurable symbol that precedes the amount, defaulting to <code>R</code>. This product
+ * renders two different quantities and only one of them is money:
  * </p>
  *
  * <ul>
- *   <li><b>Rand</b> — what a member hands PayFast. <code>topup_block_zar</code>,
- *       <code>topup_max_zar_per_member</code>, the revenue card's <code>net_zar</code>.
- *       This IS money, and this symbol is its symbol.</li>
- *   <li><b>Credits</b> — the wallet balance and what a slot costs. A member pays R100 and
- *       receives <code>credits_per_zar_regular</code> × 100 credits, which ships at
- *       <b>1.6</b>. Credits are the unit of account (<code>CLAUDE.md</code>), and a credit
- *       figure wearing a rand sign is a money-correctness defect, not a copy choice: at the
- *       shipped rate a 240-credit wallet rendered "R240.00" overstates the member's rand
- *       position by 60%, and at the League rate of 2.4 by 140%.</li>
+ *   <li><b>Rand</b> — what a member hands PayFast for a package (<code>price_zar</code>), what
+ *       the desk takes, the revenue card's <code>net_zar</code>. This IS money, and this symbol
+ *       is its symbol.</li>
+ *   <li><b>Minutes</b> — the wallet balance and what a booking costs (P13: the club's unit of
+ *       account, whole minutes). A minutes figure never wears a currency symbol: it is written
+ *       through <code>lib/minutes</code> ("1 h 30 min"), and a minutes figure wearing a rand
+ *       sign is a money-correctness defect, not a copy choice.</li>
  * </ul>
  *
  * <p>
- * That second bullet is not a hypothetical. It shipped, in six places at once, and is
- * recorded in the header of {@link ./utils.ts formatCredits}, in the header of
- * <code>EmailTemplates.Cr</code> on the backend, and in the existence of
- * <code>e2e/money.spec.ts</code>, whose entire job is to assert that a credit figure never
- * carries an R. <b>So this symbol reaches rand and stops there, and the credit unit keeps a
- * unit of its own.</b> The ask has been narrowed, deliberately and visibly; a club that
- * genuinely wants its credits shown as rand wants <code>credits_per_zar_* = 1</code> first,
- * and that is the founder's call to make, not this file's.
+ * That second bullet is not a hypothetical: a figure in the old unit once shipped with a rand
+ * sign in six places at once, and <code>e2e/money.spec.ts</code> exists to assert it never
+ * happens again. <b>So this symbol reaches rand and stops there.</b>
  * </p>
  *
  * <p>

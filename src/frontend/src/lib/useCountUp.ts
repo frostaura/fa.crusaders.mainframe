@@ -1,23 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * The number the credits chip actually paints while it catches up with the server's.
+ * The number the minutes chip actually paints while it catches up with the server's.
  *
  * <p>
- * A balance that jumps from 0.00 to 200.00 between two frames is a number nobody watched
- * change. Counting it is what turns a value in a header corner into an event — which is what
- * GOAL 8 asks for ("animate the credits badge… as funds get adjusted") and what an older
- * member looking at their own phone needs in order to notice at all.
+ * A balance that jumps from 0 min to 5 h between two frames is a number nobody watched change.
+ * Counting it is what turns a value in a header corner into an event — which is what GOAL 8 asks
+ * for ("animate the balance badge… as funds get adjusted") and what an older member looking at
+ * their own phone needs in order to notice at all.
+ * </p>
+ *
+ * <p>
+ * <b>P13: it counts in whole minutes.</b> Every painted frame is an integer, so the chip never
+ * flashes "1 h 12.37 min" on the way from 1 h to 2 h — the formatter would truncate it, but a
+ * caller printing the figure itself must not be handed a fraction either.
  * </p>
  */
 
 /**
- * How long a movement of `delta` credits should take to count.
+ * How long a movement of `delta` minutes should take to count.
  *
  * <p>
- * `clamp(350, 18 × |Δ|, 900)`. Five credits is 350 ms; fifty — one court — is 900; four
- * hundred is also 900. <b>The ceiling is the point:</b> a duration that scales without one
- * makes a big top-up, which is the happiest thing that happens on this screen, feel slow.
+ * `clamp(350, 18 × |Δ|, 900)`. Five minutes is 350 ms; fifty — one game — is 900; five hours is
+ * also 900. <b>The ceiling is the point:</b> a duration that scales without one
+ * makes a big purchase, which is the happiest thing that happens on this screen, feel slow.
  * </p>
  */
 export function countDurationMs(delta: number): number {
@@ -60,7 +66,7 @@ export function useCountUp(
 
     // The first non-null value is not a movement, and neither is a re-read that confirms what
     // is already on screen.
-    if (!started.current || instant || Math.abs(target - shown.current) < 0.005) {
+    if (!started.current || instant || Math.abs(target - shown.current) < 0.5) {
       started.current = true;
       shown.current = target;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- the point of the hook is to mirror a prop
@@ -78,7 +84,8 @@ export function useCountUp(
     const step = () => {
       const elapsed = clock() - startedAt;
       const t = Math.min(1, elapsed / duration);
-      const value = from + distance * easeOutCubic(t);
+      // Whole minutes on every frame (P13): the tween eases the value, the paint rounds it.
+      const value = Math.round(from + distance * easeOutCubic(t));
       shown.current = value;
       setDisplayed(value);
       if (t < 1) frame = window.requestAnimationFrame(step);
