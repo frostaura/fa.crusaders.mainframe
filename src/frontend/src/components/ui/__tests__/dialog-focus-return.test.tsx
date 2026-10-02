@@ -74,12 +74,10 @@ const INVITE = {
 const CLUB_CONTEXT: ClubContext = {
   club: { mon: [{ start: 360, end: 1320 }] },
   sliceMinutes: 15,
-  courtPrices: [8],
   clubCaps: { slotCap: null, minuteCap: null, advanceDays: 14 },
-  clubRate: undefined,
-  blockZar: undefined,
   peakHours: undefined,
   peakAdvanceHours: undefined,
+  packages: { status: "ready", items: [] },
 };
 
 const PARTNERS: StubRoute[] = [
