@@ -303,15 +303,16 @@ test.describe("X5-4 / M5-9: the activity tiles and the wallet rail", () => {
     expect(await sideways(page)).toBeLessThanOrEqual(0);
   });
 
-  test("1280: Top up is the primary action beside the balance, with the last 30 days under it", async ({ page }, info) => {
+  test("1280: Buy minutes is the primary action beside the balance, with the last 30 days under it", async ({ page }, info) => {
     test.skip(info.project.name !== "desktop", "a desktop width");
     await openWallet(page, 1280);
     const rail = page.getByRole("complementary", { name: "Your balance" });
-    const topUp = rail.getByRole("link", { name: /Top up/ });
+    const topUp = rail.getByRole("link", { name: /^Buy minutes/ });
     await expect(topUp).toHaveClass(/(^|\s)bg-primary(\s|$)/);
     const mini = rail.getByRole("region", { name: "Last 30 days" });
-    await expect(mini.getByText("+300.00 cr")).toBeVisible();
-    await expect(mini.getByText("−150.00 cr")).toBeVisible();
+    // Whole minutes said as time, and spoken in full (P13): +300 → "+5 h", −150 → "−2 h 30 min".
+    await expect(mini.getByRole("definition").filter({ hasText: "plus 5 hours" })).toBeVisible();
+    await expect(mini.getByRole("definition").filter({ hasText: "minus 2 hours 30 minutes" })).toBeVisible();
   });
 });
 

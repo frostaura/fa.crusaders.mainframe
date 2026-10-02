@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-session
 description: "Identity keys every per-person read; a 401 trades the refresh cookie once, single-flight; only a refresh 401 ends a session; a lapse keeps the member code's key (only sign-out wipes it); every chunk precached; the chip shows spendable."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-02
 ---
 
 # Live decisions — the PWA's session and balance feedback
@@ -16,7 +16,7 @@ unit tests; each was wrong in the running app.
   state, never "no profile". **Why:** a leftover token for a user that no longer existed made
   `/me/profile` 404 once; the provider never re-read after the real sign-in, so the avatar fell
   back to "YA" ("Your account") and the first-run wizard never fired.
-- **The credits chip never shows a zero while loading** (a skeleton). **Why:** a red "0.00 cr" says broke.
+- **The minutes chip never shows a zero while loading** (a skeleton). **Why:** a red "0 min" says broke.
 - **How the last session ended lives in `AuthProvider`, read once by `/login`, not in router
   state.** **Why:** "Sign out everywhere" navigated to `/login` with a notice in router state;
   `RequireAuth`'s own redirect won the race and the notice never showed — its unit test (a
@@ -25,9 +25,9 @@ unit tests; each was wrong in the running app.
   person's page. Tested through the real `AuthProvider` + `AppRoutes` in StrictMode.
 - **Money-moving requests mark themselves in the API client, and the live balance treats any
   movement during one (or within 3 s after) as the member's own.** Movements they did not
-  cause are worded by their ledger reason ("Sam paid you 20.00 cr for their share of Court
+  cause are worded by their ledger reason ("Sam paid you 20 min for their share of Court
   1"); "the club" is said only for the club's own movements. **Why:** booking or accepting an
-  invite produced "The club took 20.00 credits off your wallet" — wrong twice when the money
+  invite produced "The club took 20 credits off your wallet" (pre-P13 wording) — wrong twice when the money
   went to a partner.
 - **A 401 trades the refresh cookie once (R1 F4.1, contract §1; server half in
   [`decisions-sessions.md`](decisions-sessions.md)).** `lib/api` answers a 401 on a request that
@@ -54,7 +54,7 @@ unit tests; each was wrong in the running app.
   offline. A failed chunk: own boundary + Retry; online, one reload per 5 min (looped).
 - **The first-run wizard is offered only on a landing a sign-in delivered (F4.8)** — router state
   `{ signedIn: true }` from Login. `/my-code` is the app's start URL and the door. **No court-box
-  fingerprint step** (slot `enabled: false`): the box doesn't read fingerprints yet (Dean, 2026-10-01); passkeys are app sign-in only.
-- **The credits chip shows SPENDABLE (F1.11)**, naming the whole and the held/owed parts —
+  fingerprint step** (slot `enabled: false`): the box doesn't read fingerprints yet (Dean, 2026-10-01); passkeys are app sign-in only. The buy step is id `buy`; a stored `topup` resume point maps to it (`lib/onboarding.canonicalStep`).
+- **The minutes chip (`components/shell/MinutesChip.tsx`, `data-minutes-chip`) shows SPENDABLE (F1.11)**, naming the whole and the held/owed parts —
   supersedes D11 §3a's "the figure stays the whole balance" (550 shown, a 520 booking refused). Its flyout (R3 M-1) is the NET change of that figure over a burst of frames under 1 s apart — a split cancel's last frame read −33 while the chip rose 100.
 

@@ -76,8 +76,10 @@ export const EARLY: Partial<Record<Column, string>> = {
   from: "@[52rem]/ledger:table-cell",
   to: "@[52rem]/ledger:table-cell",
   actor: "@[60rem]/ledger:table-cell",
-  // The counterparty under the amount goes with the earlier From and To.
-  amount: "@[52rem]/ledger:[&>span]:hidden",
+  // The counterparty under the amount goes with the earlier From and To. Named by its own
+  // attribute, never `[&>span]`: since P13 the figure itself is two spans (shown + spoken), and
+  // a bare span selector blanked the Amount column on screen and for a screen reader.
+  amount: "@[52rem]/ledger:[&>[data-counterparty]]:hidden",
 };
 
 /**

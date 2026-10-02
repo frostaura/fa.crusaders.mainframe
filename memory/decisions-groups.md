@@ -1,22 +1,23 @@
 ---
 name: crusaders-mainframe-decisions-groups
-description: "D2 (2026-09-23): groups replaced the member class. The league system group carries the league rate and peak priority; min rate wins; peak is tri-state — granted if one group grants and none withholds."
+description: "D2: groups replaced the member class. P13: a group carries a package discount (lowest wins, rand only) and peak priority (tri-state); no group sets a price or a rate any more."
 type: decision
-last_verified: 2026-09-23
+last_verified: 2026-10-02
 ---
 
 # Live decisions — groups are the one configurable concept (D2)
 
 Founder, 2026-09-23: "Groups instead please. Class doesn't make sense." `Membership.MemberClass`
-is gone; a group carries windows, price, caps, horizon, **`CreditsPerZar`** (top-up rate, null =
-`credits_per_zar_regular`) and **`PeakPriority`** (`bool?`: true grants, false withholds, null =
+is gone; a group carries windows, caps, horizon, **`PackageDiscountBps`** (P13: its say on club
+package prices, null = no say, an explicit 0 is a say) and **`PeakPriority`** (`bool?`: true grants, false withholds, null =
 no say). `SystemKey = "league"` marks the group that replaced `LeagueOrSenior`; it cannot be
 deleted or archived (409 `group_is_system_default`). Resolution lives in `Services/MemberTariffs.cs`.
 
-- **Rate = the LOWEST `CreditsPerZar` among the member's active groups that set one; else the
-  regular rate.** *Why:* "most restrictive" (the plan's words), and safe under admin error — one more
-  group can never make a member's money worth more. A rate-less group has no opinion, so a
-  window-only group cannot drag a league member back to the regular rate.
+- **Package discount = the LOWEST `PackageDiscountBps` among the member's active groups that set
+  one** (P13 §3.8; rand only, never minutes; ties to the club's order; League starts at none).
+  *Why:* "most restrictive", and safe under admin error — one more group can never make a member's
+  money worth more. The discount and its group are locked on the purchase row (decisions-topups).
+  Groups set NO price: a booking costs its minutes (P13), so group and court prices are gone.
 - **Peak = at least one active group GRANTS and none WITHHOLDS; null has no say.** *Why:* the
   first cut was two-state ("every group grants"), so every pre-D2 group was born withholding and
   the migration silently took peak from every league member also in another group (review
@@ -24,20 +25,18 @@ deleted or archived (409 `group_is_system_default`). Resolution lives in `Servic
   and is named in `withheld_by_groups` (`peak_hours_league_only`, code kept stable); no grant at
   all is "no", so an unclassified member has no priority. A deviation from the plan's literal
   "peak only if all groups grant", made by the D2 fixer — Dean may overrule.
-- **`member_groups_enabled=false` does NOT switch the tariff off** — it governs windows, price
-  and caps only. *Why:* no switch ever turned the class off; flipping it must not re-price members.
-- **Rate lock preserved.** `pending_topups` locks `ConversionRate` AND `GroupId` at checkout; the
-  ITN settles at the locked rate (`TopUpFlowTests.A_group_rate_is_locked_at_checkout_*`).
+- **`member_groups_enabled=false` does NOT switch the discount off** — it governs windows and
+  caps only. *Why:* no switch ever turned the class off; flipping it must not re-price members.
 - **Migration `GroupsReplaceClass`** adopts an UNTOUCHED "League members"/"League" group in place;
   a customised one (any rule, window, description, archive, or a non-league member in it) is left
   alone and "League (migrated[ N])" is created. Every pre-existing group gets `PeakPriority` NULL.
-  League rate moved out of `tenant_settings`; the
-  settings PUT refuses `credits_per_zar_league` (`credits_per_zar_league_moved_to_groups`). Writes
+  The settings PUT now binds and IGNORES `credits_per_zar_league` like every retired money key
+  (P13 §12.9). Writes
   change-log rows as the system actor. Down rebuilds the class from ACTIVE league membership and
   restores `IsSystemDefault=false` on groups Up created or adopted from a non-system group (read
   off Up's own change-log rows); it leaves the group rows and cannot delete the change-log rows.
-- **Deprecated `member_class` for ONE release** on admin members list/spend, `/topup/options`,
-  the stale-quote 409, and `member.*` / `credit.topped_up` webhooks, derived from the league group.
+- **Deprecated `member_class` for ONE release** on admin members list/spend and `member.*`
+  webhooks, derived from the league group; `minutes.purchased` never carries it (P13 §12.10).
   Remove it in the release after the Groups page ships.
 - **`group.archived` still does not demand a reason** — enforcing it would break the production
   Groups page, which archives with a bare `{status}`; enforce it with the P6 Groups rebuild. The
@@ -47,7 +46,3 @@ deleted or archived (409 `group_is_system_default`). Resolution lives in `Servic
   move (PUT and the per-group add/remove) also writes a `member.groups_changed` audit row with the
   member as subject and the tariff before/after. *Why:* the class endpoint's `member.class_changed`
   was the member-side answer to "who moved me to the regular rate"; group rows are keyed by group.
-- **A group's price is shown on the club's REAL courts** (review round 1, F3, 2026-09-30): the
-  cheapest active court as the example, plus a min/max range and a per-court list (`CourtPrices`);
-  the retired club default is read only when no court is active. *Why:* "a slot costs 40 cr instead
-  of 8" — every court carries its own price since the default was retired for new courts only.

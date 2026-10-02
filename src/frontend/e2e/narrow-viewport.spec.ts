@@ -38,10 +38,10 @@ const row = (id: string, signed: number, comment: string) => ({
 });
 
 const LEDGER = [
-  row("1", 1600, "Top-up of R1000.00 at 1.60 credits per rand"),
-  row("2", -137.5, "Court 3, 18:00-19:00, peak rate"),
-  row("3", -1250.75, "Court 1, 06:00-08:00, off-peak block booking"),
-  row("4", 62.5, "Late-cancellation refund less penalty"),
+  row("1", 1600, "10 hours package bought — R1000.00"),
+  row("2", -60, "Court 3, 18:00-19:00"),
+  row("3", -1250, "Court 1, 06:00-08:00, block booking"),
+  row("4", 31, "Late-cancellation refund less penalty"),
 ];
 
 test.use({ viewport: { width: 375, height: 812 } });
@@ -52,7 +52,7 @@ test("every wallet ledger column a member needs is on screen at 375px", async ({
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     {
       path: "/api/v1/wallet",
-      body: { balance_minutes: 274.25, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
+      body: { balance_minutes: 321, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
     },
     {
       path: "/api/v1/me/profile",
@@ -89,12 +89,12 @@ test("every wallet ledger column a member needs is on screen at 375px", async ({
   expect(overflowing.offScreen, "amount cells rendered outside the 375px viewport").toEqual([]);
 
   // And the amounts are readable as text, not merely present in the DOM.
-  // U+2212 MINUS, not a hyphen — `formatSignedCredits` uses it so a debit lines up under a
-  // credit in the tabular-nums column.
+  // Whole minutes said as time (P13); U+2212 MINUS, not a hyphen, so a debit lines up in the
+  // tabular-nums column.
   // `.filter({ visible: true })`: since R5 the amount is also drawn inside the movement's cell for
   // the one-column form (a phone at 200 % text), hidden at this width — one of the two shows.
-  await expect(page.getByText("+1600.00 cr", { exact: false }).filter({ visible: true })).toHaveCount(1);
-  await expect(page.getByText("\u22121250.75 cr", { exact: false }).filter({ visible: true })).toHaveCount(1);
+  await expect(page.getByText("+1 d 2 h 40 min", { exact: true }).filter({ visible: true })).toHaveCount(1);
+  await expect(page.getByText("\u221220 h 50 min", { exact: true }).filter({ visible: true })).toHaveCount(1);
 });
 
 test("the page itself never scrolls sideways at 375px", async ({ page }) => {
@@ -106,7 +106,7 @@ test("the page itself never scrolls sideways at 375px", async ({ page }) => {
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     {
       path: "/api/v1/wallet",
-      body: { balance_minutes: 274.25, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
+      body: { balance_minutes: 321, entries: LEDGER, total_entries: LEDGER.length, offset: 0, limit: 50 },
     },
     {
       path: "/api/v1/me/profile",

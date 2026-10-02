@@ -56,7 +56,7 @@ export const CELL: Record<Column, (r: LedgerRow, note?: string) => ReactNode> = 
             lost — picked by sign, because the member is the other end.
             R4 form factor: it WRAPS (the amount's cell is nowrap, and a long name such as
             "Dispute Partner Organiser" held the column wide and squeezed the movement beside it). */}
-        <span className={cn("block whitespace-normal break-words text-xs font-normal text-text-muted", UNTIL_PARTIES)}>{incoming ? r.from : r.to}</span>
+        <span data-counterparty="" className={cn("block whitespace-normal break-words text-xs font-normal text-text-muted", UNTIL_PARTIES)}>{incoming ? r.from : r.to}</span>
       </TableCell>
     );
   },

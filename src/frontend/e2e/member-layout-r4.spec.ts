@@ -320,7 +320,7 @@ test.describe("Wallet and Wallet activity (SPEC 3.4)", () => {
   ];
 
   for (const width of WIDTHS) {
-    test(`${width}px: the balance rail beside the ledger from a 64rem page; Top up in thumb reach below lg`, async ({ page }, info) => {
+    test(`${width}px: the balance rail beside the ledger from a 64rem page; Buy minutes in thumb reach below lg`, async ({ page }, info) => {
       test.skip(info.project.name !== "desktop", "one project sweeps the widths");
       await open(page, "/wallet", walletRoutes(), width);
       const rail = page.getByRole("complementary", { name: WALLET_LAYOUT.railLabel });
@@ -330,15 +330,15 @@ test.describe("Wallet and Wallet activity (SPEC 3.4)", () => {
       const ledger = (await box(page, "[data-aside-main]"))!;
       if (width >= 1280) {
         expect(ledger.x, "the ledger beside the balance").toBeGreaterThanOrEqual(r.x + r.width);
-        await expect(rail.getByRole("link", { name: "Top up" })).toBeVisible();
+        await expect(rail.getByRole("link", { name: /^Buy minutes/ })).toBeVisible();
       } else {
         expect(ledger.y).toBeGreaterThanOrEqual(r.y + r.height);
       }
       const docked = page.getByRole("region", { name: WALLET_LAYOUT.actionsLabel });
       if (width < 1024) {
-        const b = (await docked.getByRole("link", { name: "Top up" }).boundingBox())!;
+        const b = (await docked.getByRole("link", { name: /^Buy minutes/ }).boundingBox())!;
         expect(b.y + b.height).toBeGreaterThan(HEIGHT[width] * 0.75);
-        await expect(rail.getByRole("link", { name: "Top up" })).toHaveCount(0);
+        await expect(rail.getByRole("link", { name: /^Buy minutes/ })).toHaveCount(0);
       } else {
         await expect(docked).toHaveCount(0);
       }

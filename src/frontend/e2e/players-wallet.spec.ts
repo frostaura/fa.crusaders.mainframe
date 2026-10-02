@@ -2,7 +2,7 @@ import { expect, serveApi, signIn, test, type ApiRoute } from "./fixtures";
 import { BOOKING, CLUB_ZONE, COURT, ME, PEOPLE, SAM, detailFixture, memberShellRoutes, tomorrowAt } from "./playersKit";
 import { HELD_EXPLAINER, heldLine } from "../src/lib/playersCopy";
 import { SHARE_LEDGER_COPY, spendableLine } from "../src/lib/walletCopy";
-import { LEDGER_TYPE_LABEL } from "../src/lib/creditAdjustment";
+import { LEDGER_TYPE_LABEL } from "../src/lib/deskLedger";
 
 /**
  * P11 — the wallet's half of players and splits (D11 §3a): the held line on the balance card,
@@ -150,6 +150,6 @@ test.describe("P11: the club's ledger, filtered to shares", () => {
     await expect(page.getByRole("table", { name: "Club ledger" }).getByText("Share of a split booking").filter({ visible: true }).first()).toBeVisible();
     // The club's book never groups: both legs are rows, and they net to zero.
     await expect(page.getByRole("button", { name: /Shares for|Your share/ })).toHaveCount(0);
-    await expect(page.locator("[data-ledger-total]").last()).toHaveText("0.00 cr");
+    await expect(page.locator("[data-ledger-total]").last()).toHaveText(/^0 min/);
   });
 });
