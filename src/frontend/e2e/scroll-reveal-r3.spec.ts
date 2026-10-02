@@ -38,7 +38,7 @@ test("a sort header reached by Tab is scrolled into its table's view", async ({ 
   expect(await scroller.evaluate((el) => el.scrollWidth > el.clientWidth), "the table is wider than the phone").toBe(true);
 
   await first.focus();
-  for (const name of [/^Top-ups/, /^Spent/, /^Refunds \(net\)/, /^Bookings/, /^Balance/]) {
+  for (const name of [/^Bought/, /^Spent/, /^Refunds \(net\)/, /^Bookings/, /^Balance/]) {
     await page.keyboard.press("Tab");
     const header = page.getByRole("button", { name });
     await expect(header).toBeFocused();

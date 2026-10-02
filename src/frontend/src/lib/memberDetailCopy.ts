@@ -31,7 +31,7 @@ export const MEMBER_COPY = {
   notFoundHint: "This club has no member with that link. They may have been removed, or the link belongs to another club.",
   notFoundAction: "Back to members",
   balance: "Balance",
-  balanceOverdrawn: "Overdrawn — the next package they buy pays this back first.",
+  balanceOverdrawn: "Overdrawn — their next package pays it back.",
   /** P13 §3.7: the desk takes money by selling a package off the member's own shelf. */
   sell: "Sell package",
   /** Goodwill and corrections, in whole minutes — no money changes hands. */

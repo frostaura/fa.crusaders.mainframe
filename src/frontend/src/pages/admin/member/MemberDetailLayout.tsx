@@ -308,7 +308,9 @@ function MemberGroups({ detail, name, state }: { detail: MemberDetail; name: str
 function GroupChips({ groups }: { groups: MemberGroupChip[] }) {
   if (groups.length === 0) return <p className="text-sm text-text-muted">{MEMBER_COPY.noGroups}</p>;
   return (
-    <ul aria-label={MEMBER_COPY.groupsLabel} className="flex flex-wrap gap-1.5">
+    // flex-1 basis-0: the list shrinks to the row and wraps its chips INSIDE itself, so the
+    // change-groups pencil after it keeps the row's end instead of taking a 44px line of its own.
+    <ul aria-label={MEMBER_COPY.groupsLabel} className="flex min-w-0 flex-1 basis-0 flex-wrap gap-1.5">
       {groups.map((g) => (
         <li key={g.id}>
           <Badge tone="info" icon={(g.system_key ? <Lock size={14} weight="bold" aria-hidden="true" /> : <UsersThree size={14} weight="bold" aria-hidden="true" />)}>{g.name}</Badge>
@@ -335,11 +337,11 @@ function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) 
 }
 
 /**
- * The two everyday actions: they share a row while it holds them, take a line each when it does
- * not, and their words wrap in a box that grows (R4 V4-9: "Book for member" ran out of a fixed
- * 44px box at 390 with 200% text).
+ * The two everyday actions: on a phone they SHARE the row in equal halves and their words wrap
+ * in a box that grows (R4 V4-9: "Book for member" ran out of a fixed 44px box at 390 with 200%
+ * text; P13: stacked, "Sell package" pushed the section tabs under the bottom tab bar).
  */
-const GROWS = "!h-auto min-h-touch min-w-0 flex-[1_1_auto] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
+const GROWS = "!h-auto min-h-touch min-w-0 flex-[1_1_0] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
 
 function BalancePanel({ detail, name, onSell }: { detail: MemberDetail; name: string; onSell: () => void }) {
   const overdrawn = detail.balance_minutes < 0;

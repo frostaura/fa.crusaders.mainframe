@@ -189,11 +189,13 @@ export function MinutesChip() {
   const showFlyout = !reduceMotion && flyout !== null;
 
   return (
-    // V5-4 (review round 5): folded away where the bar is under 17.5rem — a phone at large text,
-    // where crest, bell, chip and avatar cannot share one row (320 px at 200 %: the header took
-    // two rows). The account menu then shows the figure (`AccountMenu`), and the Wallet tab is one
-    // tap away. Still mounted, so its money toasts still speak.
-    <div data-minutes-chip-slot="" className="relative hidden shrink-0 @[17.5rem]/appbar:block">
+    // V5-4 (review round 5): folded away where the bar is under 20rem — a phone at large text, or
+    // a 320 px phone, where crest, bell, chip and avatar cannot share one row. P13: "8 h 20 min"
+    // plus the chip's status dot is 126 px, and at 17.5rem the 320 px bar wrapped to two rows the
+    // moment the dot appeared, moving the QR on My Code 44 px under a scanner. The account menu
+    // then shows the figure (`AccountMenu`), and the Wallet tab is one tap away. Still mounted,
+    // so its money toasts still speak.
+    <div data-minutes-chip-slot="" className="relative hidden shrink-0 @[20rem]/appbar:block">
       <Link
         to={walletHref(figures.shown)}
         onClick={() => entice.stop("tapped")}

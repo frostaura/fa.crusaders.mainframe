@@ -176,7 +176,7 @@ const LEDGER_ROW = {
   type: "TopUp", comment: "Top-up", subjectUserId: SESSION_MEMBER.user_id, subjectName: "Dean", actorUserId: SESSION_MEMBER.user_id,
   actorName: "Dean", relatedBookingId: null,
 };
-const WALLET = { balance_minutes: 412.5, entries: [LEDGER_ROW], total_entries: 1, offset: 0, limit: 100 };
+const WALLET = { balance_minutes: 412, entries: [LEDGER_ROW], total_entries: 1, offset: 0, limit: 100 };
 const PROFILE = {
   user_id: SESSION_MEMBER.user_id, email: "dean@example.test", is_admin: false, tenant_slug: "crusaders",
   full_name: "Dean Martin", membership_number: "C-0009", photo_url: null, status: "Active",
@@ -431,7 +431,7 @@ async function warmMemberPages(page: import("@playwright/test").Page, context: i
   await page.goto(`${origin}/bookings`);
   await expect(page.locator('[role="grid"]')).toBeVisible({ timeout: 15_000 });
   await page.goto(`${origin}/wallet`);
-  await expect(page.getByText("412.50", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("6 h 52 min", { exact: false }).first()).toBeVisible();
   await page.goto(`${origin}/inbox`);
   await expect(page.getByText(NOTICE_HEADLINE)).toBeVisible();
   await expect.poll(async () => (await storedReads(page))?.map((r) => r.key.split(":")[0]).sort().join(",") ?? "", { timeout: 15_000 })
@@ -446,7 +446,7 @@ test("offline: Bookings, Wallet and Inbox open from the phone, said as offline; 
 
   await page.goto(`${origin}/wallet`);
   await expect(page.getByRole("heading", { name: /Can't reach the club/i })).toHaveCount(0);
-  await expect(page.getByText("412.50", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("6 h 52 min", { exact: false }).first()).toBeVisible();
   await expect(page.locator("[data-stale-notice]")).toContainText(OFFLINE_COPY.staleTitle);
 
   await page.goto(`${origin}/inbox`);
@@ -468,7 +468,7 @@ test("offline: My Code keeps the tab bar, and it leads to the kept pages", async
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Bookings" })).toBeVisible();
   await nav.getByRole("link", { name: "Wallet" }).click();
-  await expect(page.getByText("412.50", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("6 h 52 min", { exact: false }).first()).toBeVisible();
 });
 
 test("the phone's copy is the member's alone: signing out deletes it", async ({ page, context }) => {
