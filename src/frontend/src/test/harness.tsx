@@ -285,7 +285,7 @@ export function signOut() { tokenStore.clear(); }
  *
  * <p>
  * <code>initialEntries</code> is for the pages that read a route param —
- * <code>/wallet/topup/:topupId</code> and friends. Without it the router starts at
+ * <code>/wallet/buy/:purchaseId</code> and friends. Without it the router starts at
  * <code>/</code>, <code>useParams</code> hands the page <code>undefined</code>, and the
  * page sits on its loading state forever: a test that reads as "the screen never
  * rendered" when in fact it was never given the id it needs.

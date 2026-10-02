@@ -139,7 +139,7 @@ What a member did on court, kept for them alone. **Match results** (squash PAR-1
 ## 7. Cancellations
 - A player can cancel any of their own bookings from the app.
 - The cancellation modal clearly displays:
-  - "Cancelling now is **free** — full refund to credit." (outside penalty window)
+  - "Cancelling now is **free** — full refund of your minutes." (outside penalty window)
   - **OR** "Cancelling within the penalty window — **30% ({X} cr) penalty** will be deducted, {Y} cr refunded." (inside)
   - **OR** "You have already checked in — the lights have been on, so **nothing is refunded**." (after check-in; `settlement-model.md` §2 S4)
 - **The figures come from the server, at the moment the modal opens** — `GET /api/v1/bookings/{id}/cancellation-quote`, computed through the same settlement the cancellation itself uses. They are not carried on the schedule payload and not re-derived in the client: the answer turns on the clock (the penalty window) and on attendance (a scan at the court), and both move after a schedule is loaded. The quote is a quote, not a reservation — the cancellation re-derives everything, and the confirmation states what actually moved.
@@ -255,11 +255,11 @@ See `webhooks.md` for delivery mechanics. Player- or admin-configurable per tena
 - `booking.displaced`
 - `booking.displacement_reversed`
 - `booking.cancelled_lights_charged`
-- `credit.topped_up`
-- `credit.topped_up_by_admin` — the club took money outside the payment gateway (cash at the desk, an EFT) and an admin recorded it against a member's wallet. Distinct from `credit.adjusted`, which is a goodwill gesture or a correction and is not money the club received; an integration reconciling takings needs the two apart. `LedgerEntryType.AdminTopUp`, `LedgerService`.
-- `credit.refunded`
-- `credit.penalty_applied`
-- `credit.adjusted`
+- `minutes.purchased` — a member's PayFast purchase of a minutes package completed (`MinutesEvents.Purchased`, the callback). Data per `minutes-and-packages.md` §5.
+- `minutes.sold_at_desk` — the club took money outside the payment gateway (cash at the desk, an EFT, a card on its own terminal) and an admin sold the member a package. Distinct from `minutes.adjusted`, which is a goodwill gesture or a correction and is not money the club received; an integration reconciling takings needs the two apart. `LedgerEntryType.AdminTopUp`, `LedgerService`.
+- `minutes.refunded`
+- `minutes.penalty_applied`
+- `minutes.adjusted`
 - `peripheral.unhealthy` — a court box has stopped heart-beating for longer than `offline_after_seconds` (`HeartbeatCadence`, derived from the club's own `heartbeat_seconds`). Fires **once per outage**, not once per sweep, and carries the box, its MAC, the courts it drives and how long it has been silent. `PeripheralHealthWorker`.
 - `peripheral.recovered` — the same box called in again. Carries the outage's length.
 

@@ -54,7 +54,7 @@ function day(slots: Partial<ScheduleDay["slots"][number]>[]): ScheduleDay {
   return {
     date: "2030-09-09", timezone: TZ, sliceMinutes: 15, dayStartMinute: 360, dayEndMinute: 1320,
     advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
-    courts: [{ id: "c1", courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    courts: [{ id: "c1", courtNumber: 1, name: "Court 1" }],
     slots: slots.map((s) => ({
       courtId: "c1", courtNumber: 1, startsAtUtc: C1.startsAt, endsAtUtc: "2030-09-09T16:15:00.000Z",
       status: "booked", ownerUserId: null, ownerFirstName: null, ownerPhotoUrl: null, isMine: false,

@@ -226,7 +226,7 @@ describe("the member's own pages, kept on the phone", () => {
       <MemoryRouter initialEntries={[path]}>
         <AuthProvider>
           <Routes>
-            {["/bookings", "/bookings/:id", "/bookings/invites", "/wallet", "/wallet/activity", "/wallet/topup", "/profile", "/inbox", "/admin/members"].map((p) => (
+            {["/bookings", "/bookings/:id", "/bookings/invites", "/wallet", "/wallet/activity", "/wallet/buy", "/profile", "/inbox", "/admin/members"].map((p) => (
               <Route key={p} path={p} element={<RequireAuth admin={p.startsWith("/admin")}><p>{`page ${p}`}</p></RequireAuth>} />
             ))}
             <Route path="/login" element={<p>the sign-in page</p>} />
@@ -249,7 +249,7 @@ describe("the member's own pages, kept on the phone", () => {
     });
   }
 
-  for (const path of ["/wallet/topup", "/admin/members"]) {
+  for (const path of ["/wallet/buy", "/admin/members"]) {
     it(`keeps the connection notice on ${path}`, async () => {
       tokenStore.set("member.jwt.value");
       localStorage.setItem(LAST_IDENTITY_KEY, ID);

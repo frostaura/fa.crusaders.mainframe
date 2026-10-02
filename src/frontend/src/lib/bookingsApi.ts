@@ -1,6 +1,5 @@
 import { api, type CancellationQuote, type ScheduleSlot } from "./api";
 import type { ClockWindow, ViewerRules } from "./gridRules";
-import { readPricesByCourt } from "./viewerPrice";
 
 /**
  * The Bookings screen's own reads beyond `/schedule` (review round 1): the member's upcoming
@@ -73,10 +72,6 @@ export type BookingForMember = {
   spendable: number;
   /** Held for or owed back to partners; 0 when nothing is. */
   reserved: number;
-  /** Their price for one slice, from their groups; null when the rules could not say. */
-  slicePrice: number | null;
-  /** What they pay on each open court, by court id (R5 I5-1); null when the server did not say. */
-  pricesByCourt: ReadonlyMap<string, number> | null;
   groups: string[];
   /**
    * Their group hours on the day being booked (R2 F1-3) — what the grid draws for the desk, so a
@@ -101,10 +96,6 @@ type DetailWire = {
 };
 
 type RulesWire = {
-  /** @deprecated P13-F1: dropped from the booking-rules read (contract §3.8). */
-  slice_price_credits?: number | null;
-  /** @deprecated P13-F1: dropped from the booking-rules read (contract §3.8). */
-  slice_prices_by_court?: Array<{ court_id?: string; credits?: number }> | null;
   groups?: Array<{ id?: string; name: string }>;
   day?: string;
   allowed_windows?: Array<{ start?: unknown; end?: unknown }> | null;
@@ -134,7 +125,7 @@ export async function readBookingFor(userId: string, day: string): Promise<Booki
   const base = `/api/v1/admin/members/${encodeURIComponent(userId)}`;
   const [detail, rules] = await Promise.all([
     api.get<DetailWire>(base),
-    // The price is a nicety: a member whose rules cannot be read is still bookable.
+    // The rules are a nicety: a member whose rules cannot be read is still bookable.
     api.get<RulesWire>(`${base}/booking-rules?day=${encodeURIComponent(day)}`).catch(() => null),
   ]);
   const reserved = positive(detail.held_minutes) + positive(detail.owed_back_minutes);
@@ -143,9 +134,6 @@ export async function readBookingFor(userId: string, day: string): Promise<Booki
     name: detail.full_name?.trim() || detail.email || "This member",
     spendable: detail.balance_minutes - reserved,
     reserved,
-    // P13-F1: the server sends no slice price any more (§3.8); a booking costs its minutes.
-    slicePrice: typeof rules?.slice_price_credits === "number" ? rules.slice_price_credits : null,
-    pricesByCourt: readPricesByCourt(rules?.slice_prices_by_court),
     groups: (rules?.groups ?? []).map((g) => g.name),
     windows: rules ? windowsOf(rules, day) : null,
   };
@@ -153,7 +141,7 @@ export async function readBookingFor(userId: string, day: string): Promise<Booki
 
 /**
  * The grid's rules while the desk books FOR a member (R2 F1-3): the member's group windows —
- * god mode lifts the credit and the daily cap, never a group's window — and nothing else. Null
+ * god mode lifts the balance check and the daily cap, never a group's window — and nothing else. Null
  * when their windows are unknown, and the grid stays the admin's (every cell offered).
  */
 export function memberGridRules(member: BookingForMember | null): ViewerRules | null {
@@ -161,7 +149,7 @@ export function memberGridRules(member: BookingForMember | null): ViewerRules | 
   if (!w || (w.allowed === null && w.emptyGroups === null)) return null;
   return {
     known: true, adminExempt: false, groups: w.groups, allowedWindows: w.allowed, clubHours: null,
-    slicePriceCredits: member?.slicePrice ?? null, maxSlotsPerDay: null, maxMinutesPerDay: null,
+    maxSlotsPerDay: null, maxMinutesPerDay: null,
     bookedSlotsToday: null, bookedMinutesToday: null, remainingToday: null,
     emptyWindow: w.emptyGroups ? { groups: w.emptyGroups, day: w.day } : null,
     clubDay: w.day,

@@ -56,8 +56,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/invites/:participantId", "Invite"],
   ["/inbox", "Notifications"],
   ["/wallet", "Wallet"],
-  ["/wallet/topup", "Top up"],
-  ["/wallet/topup/:topupId", "Top-up status"],
+  ["/wallet/buy", "Buy minutes"],
+  ["/wallet/buy/:purchaseId", "Buying minutes"],
   ["/wallet/activity", "Wallet activity"],
   ["/profile", "Profile"],
   // P12 — the member's own match history.
@@ -78,6 +78,7 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/members/:userId/night", "Member's night"],
   ["/admin/members/:userId/access", "Member sign-in & biometrics"],
   ["/admin/groups", "Groups"],
+  ["/admin/packages", "Packages"],
   // P12 — disputed results and removing a wrong one.
   ["/admin/results", "Match results"],
   ["/admin/transactions", "Transactions"],
@@ -108,6 +109,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
    * renders. Each is named for where it now leads.
    */
   ["/schedule", "Bookings"],
+  ["/wallet/topup", "Buy minutes"],
+  ["/wallet/topup/:topupId", "Buying minutes"],
   ["/schedule/:bookingId", "Booking"],
   ["/booking/:bookingId", "Booking"],
   ["/invites", "Invites"],

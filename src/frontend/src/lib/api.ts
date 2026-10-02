@@ -792,21 +792,6 @@ export type ScheduleSlot = {
 export type ScheduleCourt = {
   id: string; courtNumber: number; name: string;
   /**
-   * THIS VIEWER's price for one slice on this court.
-   *
-   * <p>
-   * D2 §4.2 makes the group price the most restrictive — i.e. the highest — of the groups the
-   * member is in, and D2 §4.4 computes it server-side. The shape does not change and the client
-   * needs no edit to be correct: it is already the only price the grid renders. Written down
-   * because "the court's price" and "your price" are now two different numbers and only one of
-   * them belongs on a member's screen.
-   * </p>
-   *
-   * @deprecated P13-F1: removed from `/schedule` (contract §3.3, §3.12) — a cell is "Free" and a
-   * booking costs `slices × slice_minutes`. The server no longer sends it.
-   */
-  slicePriceCredits: number;
-  /**
    * D2-B34. A court the club has retired still carries bookings, and dropping it from the grid
    * hid them from the members who had paid for them. It is rendered and inert instead. Absent
    * on an older API, which is why it is `!== false` that the grid tests, never `=== true`.
@@ -830,8 +815,6 @@ export type ScheduleRulesWire = {
   /** The intersection of the viewer's groups' windows with the club's hours, for this weekday. */
   allowedWindows?: { start: string; end: string }[];
   clubHours?: { start: string; end: string } | null;
-  /** @deprecated P13-F1: removed (contract §3.3). */
-  slicePriceCredits?: number | null;
   maxSlotsPerDay?: number | null;
   maxMinutesPerDay?: number | null;
   bookedSlotsToday?: number | null;
@@ -1003,8 +986,6 @@ export type CancellationQuote = {
 
 export type AdminSettings = {
   slice_minutes: number;
-  /** @deprecated P13-F3: dropped from the settings GET (contract §3.9); the PUT binds and ignores it. */
-  slice_price_credits: number;
   advance_booking_days: number;
   day_start_minute: number;
   day_end_minute: number;
@@ -1032,12 +1013,6 @@ export type AdminSettings = {
   // The nine keys the engine has always read and this API never showed. Until they
   // were surfaced the only way to change one was to hand-edit a JSON column on a
   // live money system.
-  /** @deprecated P13-F3: dropped from the settings GET (contract §3.9); bound and ignored on the PUT. */
-  credits_per_zar_regular: number;
-  /** @deprecated P13-F3: the cap is removed (contract §3.6); bound and ignored on the PUT. */
-  topup_block_zar: number;
-  /** @deprecated P13-F3: the cap is removed (contract §3.6); bound and ignored on the PUT. */
-  topup_max_zar_per_member: number;
   member_per_day_max_minutes: number;
   peak_hours: string;
   peak_advance_hours_for_regular: number;
@@ -1210,7 +1185,7 @@ export type GateAccessPolicy = (typeof GATE_ACCESS_POLICIES)[number];
  * </p>
  */
 export type AdminSettingsSave =
-  Pick<AdminSettings, "slice_minutes" | "slice_price_credits" | "advance_booking_days"
+  Pick<AdminSettings, "slice_minutes" | "advance_booking_days"
     | "day_start_minute" | "day_end_minute" | "penalty_pct" | "grace_window_minutes"
     | "penalty_window_minutes">
   & Partial<AdminSettings>;
@@ -1551,8 +1526,6 @@ export type AdminCourt = {
   court_number: number;
   name: string;
   court_type: string;
-  /** @deprecated P13-F3: courts carry no price (contract §3.9). */
-  slice_price_credits: number;
   is_active: boolean;
 };
 export type MyProfile = {
@@ -1567,8 +1540,6 @@ export type MyProfile = {
   must_change_password?: boolean;
   /** D2: the member's active groups. Absent from an API that predates it. */
   groups?: MemberRowGroup[];
-  /** @deprecated P13-F2: replaced by `package_discount_bps` (contract §3.8). */
-  top_up_credits_per_zar?: number;
   /**
    * P13 §3.8 — the discount the member's groups give on CLUB packages, in basis points: the
    * lowest set among their active groups. Null when no group sets one.
@@ -1642,15 +1613,10 @@ export type MemberRowGroup = {
   id: string;
   name: string;
   system_key?: string | null;
-  /** @deprecated P13-F3: replaced by `package_discount_bps` (contract §3.8). */
-  credits_per_zar?: number | null;
   /** P13 §3.8 — this group's say on club-package prices, 0–10 000 bps; null = no say. */
   package_discount_bps?: number | null;
   peak_priority?: boolean | null;
 };
-
-/** @deprecated P13-F2: the options route is removed (contract §3.1). The group a member's top-up rate comes from (D2). */
-export type RateGroup = { id: string; name: string; system_key?: string | null };
 
 export type AdminMember = {
   membership_id: string; user_id: string; email: string;
@@ -1828,31 +1794,6 @@ export type PurchaseStatus = {
 };
 
 /**
- * @deprecated P13-F2: the route `/credit/topup/options` is removed (contract §3.1); the shelf is
- * `MinutesShelf`. Delete with the top-up page.
- *
- * What the club will take for a top-up, and at what rate — read from `tenant_settings`
- * rather than hardcoded on the screen.
- *
- * The screen carried `MIN_ZAR = 100`, `MAX_ZAR = 1000`, `BLOCK_ZAR = 100` and two literal
- * conversion rates, so an admin who changed any of them left it quoting 60% more credits
- * than the member would get, offering amounts the club had stopped accepting and refusing
- * amounts it did accept — disagreeing with the server in both directions at once.
- */
-export type TopUpOptions = {
-  block_zar: number;
-  min_zar: number;
-  max_zar: number;
-  presets_zar: number[];
-  conversion_rate: number;
-  /**
-   * D2: the group the member's rate comes from, or null for the club's default rate — so the
-   * screen can say "League" in the club's own words. Absent from an API that predates it.
-   */
-  rate_group?: RateGroup | null;
-};
-
-/**
  * One court's row in the utilisation report.
  *
  * `kept_minutes` is what the club KEPT, summed off the ledger rows naming each booking
@@ -1875,34 +1816,6 @@ export type UtilisationRow = {
 
 /** One form field of the signed PayFast checkout, in the order the signature covers. */
 export type PayFastFormField = { name: string; value: string };
-
-/**
- * A registered top-up. `form_fields` **is** the payment: PayFast has no server-side
- * checkout registration, so the browser POSTs this signed form to `redirect_url`.
- * Following `redirect_url` as a GET — which is what the page used to do — reaches PayFast
- * with no merchant id, no amount and no signature.
- */
-/** @deprecated P13-F2: the route is removed (contract §3.1); use `PurchaseStart`. */
-export type TopUpStart = {
-  topup_id: string;
-  checkout_id: string;
-  redirect_url: string;
-  form_fields: PayFastFormField[];
-  quoted_credits: number;
-  conversion_rate: number;
-};
-
-/**
- * @deprecated P13-F2: the route is removed (contract §3.1); use `PurchaseStatus`.
- * A stable snake_case code, never an internal string — see `TOPUP_FAILURE_COPY`.
- */
-export type TopUpStatus = {
-  id: string;
-  status: "Pending" | "Completed" | "Failed" | "Cancelled";
-  amount_zar: number;
-  conversion_rate: number | null;
-  failure_code: string | null;
-};
 
 /**
  * A member's own period summary.
@@ -2559,42 +2472,6 @@ export const endpoints = {
   /** The cancel return (M4-1 semantics kept): own row only, idempotent, never overwrites a completion. */
   minutesPurchaseCancel: (purchaseId: string) => api.post<PurchaseStatus>(`/api/v1/minutes/purchase/${purchaseId}/cancel`),
 
-  // Top-up — P13-F2: every call below names a route the contract removes (§3.1). Delete them
-  // with the top-up pages; the replacements are the four `minutes*` calls above.
-  /**
-   * @deprecated P13-F2: use `minutesPackages`.
-   * What the club will take, and at what rate — every number the top-up screen used to
-   * hardcode. See `TopUpOptions`.
-   */
-  topupOptions: () => api.get<TopUpOptions>("/api/v1/credit/topup/options"),
-  /**
-   * Registers a top-up and returns the SIGNED FORM the browser must POST to PayFast.
-   *
-   * The argument is **rand**. This posted `amountCredits` against a server record of
-   * `AmountZar`, so the amount bound to 0, the positivity guard fired, and no member
-   * could top up at all — the screen told them their amount was a bad multiple of R100.
-   */
-  /**
-   * Registers a top-up. `quotedConversionRate` is the rate the member was looking at when
-   * they pressed Continue, and it is not optional: the server compares it with the live one
-   * and answers 409 `topup_rate_changed` rather than registering a top-up at a rate the
-   * member was never shown. Sending nothing would silently opt this screen back into the
-   * defect — a member offered 240 credits for R100 and given 160.
-   */
-  /** @deprecated P13-F2: use `minutesPurchase`. */
-  topupStart: (amountZar: number, quotedConversionRate: number) =>
-    api.post<TopUpStart>("/api/v1/credit/topup", { amountZar, quotedConversionRate }),
-  /** @deprecated P13-F2: use `minutesPurchaseStatus`. */
-  topupStatus: (topupId: string) => api.get<TopUpStatus>(`/api/v1/credit/topup/${topupId}`),
-  /**
-   * R4 M4-1 — the member came back through PayFast's cancel URL (`?cancelled=1`). PayFast sends
-   * no ITN for a cancel, so the row stayed Pending and counted against the member's limit for
-   * ever. Own row only (404 otherwise), idempotent, and it never overwrites a completion; the
-   * reply is the status read's shape (`failure_code: "cancelled_at_return"`).
-   */
-  /** @deprecated P13-F2: use `minutesPurchaseCancel`. */
-  topupCancel: (topupId: string) => api.post<TopUpStatus>(`/api/v1/credit/topup/${topupId}/cancel`),
-
   // Webhooks (admin)
   adminWebhooksList: () => api.get<WebhookEndpointDto[]>("/api/v1/admin/webhooks/"),
   adminWebhooksCreate: (req: { urlTemplate: string; eventFilter?: string; description?: string }) =>
@@ -2657,8 +2534,6 @@ export const endpoints = {
    */
   adminSettingsSave: (req: AdminSettingsSave) => api.put<{ saved: true }>("/api/v1/admin/settings/", {
     sliceMinutes: req.slice_minutes,
-    // P13-F3: the next five keys are bound and IGNORED by the server (contract §3.9).
-    slicePriceCredits: req.slice_price_credits,
     advanceBookingDays: req.advance_booking_days,
     dayStartMinute: req.day_start_minute,
     dayEndMinute: req.day_end_minute,
@@ -2670,9 +2545,6 @@ export const endpoints = {
     // omitted one: it is how a club puts every weekday back on the flat default.
     ...(req.operating_hours !== undefined ? { operatingHours: req.operating_hours } : {}),
     ...(req.button_map !== undefined ? { buttonMap: req.button_map } : {}),
-    ...(req.credits_per_zar_regular !== undefined ? { creditsPerZarRegular: req.credits_per_zar_regular } : {}),
-    ...(req.topup_block_zar !== undefined ? { topupBlockZar: req.topup_block_zar } : {}),
-    ...(req.topup_max_zar_per_member !== undefined ? { topupMaxZarPerMember: req.topup_max_zar_per_member } : {}),
     ...(req.member_per_day_max_minutes !== undefined ? { memberPerDayMaxMinutes: req.member_per_day_max_minutes } : {}),
     ...(req.peak_hours !== undefined ? { peakHours: req.peak_hours } : {}),
     ...(req.peak_advance_hours_for_regular !== undefined ? { peakAdvanceHoursForRegular: req.peak_advance_hours_for_regular } : {}),
@@ -2795,10 +2667,9 @@ export const endpoints = {
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),
-  // P13-F3: `slicePriceCredits` is removed from both court bodies (contract §3.3); an old value is ignored.
-  adminCourtsCreate: (req: { name: string; courtType?: string; slicePriceCredits: number }) =>
-    api.post<{ id: string; court_number: number }>("/api/v1/admin/courts/", { name: req.name, courtType: req.courtType ?? "Squash", slicePriceCredits: req.slicePriceCredits }),
-  adminCourtsUpdate: (id: string, req: { name?: string; slicePriceCredits?: number; isActive?: boolean }) =>
+  adminCourtsCreate: (req: { name: string; courtType?: string }) =>
+    api.post<{ id: string; court_number: number }>("/api/v1/admin/courts/", { name: req.name, courtType: req.courtType ?? "Squash" }),
+  adminCourtsUpdate: (id: string, req: { name?: string; isActive?: boolean }) =>
     api.patch<{ saved: true }>(`/api/v1/admin/courts/${id}`, req),
   adminCourtsDelete: (id: string) => api.del<{ deactivated: true }>(`/api/v1/admin/courts/${id}`),
 

@@ -89,8 +89,9 @@ const WelcomePage = lazy(() => import("./pages/Welcome"));
 const ChangePasswordPage = lazy(() => import("./pages/ChangePassword"));
 const SchedulePage = lazy(routeChunks.schedule);
 const WalletPage = lazy(routeChunks.wallet);
-const TopUpPage = lazy(() => import("./pages/TopUp"));
-const TopUpStatusPage = lazy(() => import("./pages/TopUpStatus"));
+const BuyMinutesPage = lazy(() => import("./pages/TopUp"));
+const BuyMinutesStatusPage = lazy(() => import("./pages/TopUpStatus"));
+const AdminPackagesPage = lazy(() => import("./pages/admin/AdminPackages"));
 const ProfilePage = lazy(routeChunks.profile);
 const ProfileResultsPage = lazy(() => import("./pages/ProfileResults"));
 const HowItWorksPage = lazy(() => import("./pages/HowItWorks"));
@@ -216,8 +217,11 @@ export function AppRoutes() {
         <Route path="/invites/:participantId" element={<RequireAuth allowAnonymous><Lazy><InviteDeepLinkPage /></Lazy></RequireAuth>} />
         <Route path="/inbox" element={<RequireAuth><Lazy><InboxPage /></Lazy></RequireAuth>} />
         <Route path="/wallet" element={<RequireAuth><Lazy><WalletPage /></Lazy></RequireAuth>} />
-        <Route path="/wallet/topup" element={<RequireAuth><Lazy><TopUpPage /></Lazy></RequireAuth>} />
-        <Route path="/wallet/topup/:topupId" element={<RequireAuth><Lazy><TopUpStatusPage /></Lazy></RequireAuth>} />
+        <Route path="/wallet/buy" element={<RequireAuth><Lazy><BuyMinutesPage /></Lazy></RequireAuth>} />
+        <Route path="/wallet/buy/:purchaseId" element={<RequireAuth><Lazy><BuyMinutesStatusPage /></Lazy></RequireAuth>} />
+        {/* P13 §12.14: a PayFast return in flight at deploy time lands on the old URL — id AND query kept. */}
+        <Route path="/wallet/topup" element={<RedirectKeepingQuery to="/wallet/buy" />} />
+        <Route path="/wallet/topup/:topupId" element={<RedirectTopUp />} />
         <Route path="/wallet/activity" element={<RequireAuth><Lazy><WalletActivityPage /></Lazy></RequireAuth>} />
         <Route path="/profile" element={<RequireAuth><Lazy><ProfilePage /></Lazy></RequireAuth>} />
         {/* P12 — the member's match history, from My game's "All results". */}
@@ -246,6 +250,7 @@ export function AppRoutes() {
             </Route>
           </Route>
           <Route path="/admin/groups" element={<Lazy><AdminGroupsPage /></Lazy>} />
+          <Route path="/admin/packages" element={<Lazy><AdminPackagesPage /></Lazy>} />
           {/* P12 — disputed results, and removing a wrong one. */}
           <Route path="/admin/results" element={<Lazy><AdminResultsPage /></Lazy>} />
           <Route path="/admin/transactions" element={<Lazy><AdminLedgerPage /></Lazy>} />
@@ -327,6 +332,12 @@ function RedirectDoor({ card = false }: { card?: boolean }) {
   const { id } = useParams();
   const base = `/admin/monitoring/doors/${id ?? ""}`;
   return <RedirectKeepingQuery to={card ? `${base}/card` : base} />;
+}
+
+/** An old top-up status URL (PayFast's return, pre-P13) to its purchase page, id and query kept. */
+function RedirectTopUp() {
+  const { topupId } = useParams();
+  return <RedirectKeepingQuery to={`/wallet/buy/${encodeURIComponent(topupId ?? "")}`} />;
 }
 
 /** A booking's page from a path it was never meant to have (P11) — the id carried across. */

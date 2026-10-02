@@ -50,8 +50,8 @@ const DAY = {
   dayEndMinute: 7 * 60,
   advanceBookingDays: 14,
   courts: [
-    { id: "court-1", name: "Court 1", courtNumber: 1, slicePriceCredits: 50 },
-    { id: "court-2", name: "Court 2", courtNumber: 2, slicePriceCredits: 50 },
+    { id: "court-1", name: "Court 1", courtNumber: 1 },
+    { id: "court-2", name: "Court 2", courtNumber: 2 },
   ],
   slots: [
     {

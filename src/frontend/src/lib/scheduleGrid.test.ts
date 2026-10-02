@@ -31,7 +31,7 @@ function day(overrides: Partial<ScheduleDay> = {}, slots: ScheduleSlot[] = []): 
     advanceBookingDays: 14,
     penaltyPct: 30,
     penaltyWindowMinutes: 15,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1" }],
     slots,
     ...overrides,
   };

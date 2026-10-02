@@ -246,19 +246,6 @@ export function memberGroupWire(): MemberGroup {
   };
 }
 
-/** @deprecated P13-F3: the group `pricing` block is gone from the wire (contract §3.8); delete with its pin. */
-export function memberGroupPricing(): NonNullable<MemberGroup["pricing"]> {
-  return {
-    mode: "inherit_court", multiplier_bps: 10_000, flat_slice_price_credits: null, effective_example_credits: 8,
-    effective_range_credits: { min: 8, max: 8 }, effective_by_court: [coursePrice()],
-  };
-}
-
-/** @deprecated P13-F3: per-court prices are gone from the wire (contract §3.2); delete with its pin. */
-export function coursePrice(): { court_id: string; court_name: string; credits: number } {
-  return { court_id: ID, court_name: "Court 1", credits: 8 };
-}
-
 export function memberGroupCaps(): NonNullable<MemberGroup["caps"]> {
   return { max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null };
 }
@@ -601,10 +588,7 @@ export function deviceApiKey(): DeviceApiKey {
 }
 
 export function adminCourt(): AdminCourt {
-  return { id: ID, court_number: 1, name: "Court 1", court_type: "Squash", is_active: true,
-    // P13-F3: courts carry no price (§3.9); only here because the deprecated type still requires it.
-    slice_price_credits: 8,
-  };
+  return { id: ID, court_number: 1, name: "Court 1", court_type: "Squash", is_active: true };
 }
 
 export function courtCreateAnswer(): Reply<typeof endpoints.adminCourtsCreate> {

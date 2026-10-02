@@ -35,7 +35,7 @@ const SURFACES = [
   "lib/nightCopy.ts",
   "lib/nightTimeline.ts",
   "lib/useControlBoard.ts",
-  "lib/topUpCopy.ts",
+  "lib/deskMinutesCopy.ts",
   "lib/ecoSettings.ts",
   "lib/adminApi.ts",
 ];

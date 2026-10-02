@@ -20,7 +20,7 @@ describe("the admin IA", () => {
     expect(ADMIN_NAV_ITEMS.map((i) => i.label)).toEqual([
       "Overview",
       "Members", "Groups", "Match results",
-      "Transactions", "Reports",
+      "Packages", "Transactions", "Reports",
       "Control board", "Doors", "Boards", "Faults", "Change record", "Repeating bookings", "Courts",
       "Settings", "Webhooks",
     ]);

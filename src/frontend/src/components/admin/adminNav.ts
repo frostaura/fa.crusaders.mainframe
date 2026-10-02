@@ -1,5 +1,5 @@
 import {
-  ChartBar, ClockCounterClockwise, Cpu, Door, Gauge, Gear, Racquet, Receipt, Repeat, SquaresFour, Trophy, Users,
+  ChartBar, ClockCounterClockwise, Cpu, Door, Gauge, Gear, HourglassMedium, Racquet, Receipt, Repeat, SquaresFour, Trophy, Users,
   UsersThree, Warning, WebhooksLogo, type Icon,
 } from "@/components/ui/icons";
 
@@ -75,7 +75,7 @@ export const ADMIN_NAV: readonly AdminNavGroup[] = [
       {
         id: "members", label: "Members", path: "/admin/members", icon: Users, badge: "pending",
         also: ["/admin/monitoring/night"],
-        description: "Approve applications, top up wallets and manage accounts.",
+        description: "Approve applications, sell packages at the desk and manage accounts.",
       },
       {
         id: "groups", label: "Groups", path: "/admin/groups", icon: UsersThree,
@@ -93,8 +93,12 @@ export const ADMIN_NAV: readonly AdminNavGroup[] = [
     label: "Money",
     items: [
       {
+        id: "packages", label: "Packages", path: "/admin/packages", icon: HourglassMedium,
+        description: "The minute packages members buy — the club's shelf and each group's.",
+      },
+      {
         id: "transactions", label: "Transactions", path: "/admin/transactions", icon: Receipt,
-        description: "Every credit movement in the club's ledger.",
+        description: "Every movement of members' minutes in the club's ledger.",
       },
       {
         id: "reports", label: "Reports", path: "/admin/reports", icon: ChartBar,

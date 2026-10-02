@@ -668,10 +668,6 @@ export type ScheduleOccurrence = {
 // Member groups — GOAL items 3 + 19 (D2 §4)
 // ---------------------------------------------------------------------------------------
 
-/** @deprecated P13-F3: group pricing is removed (contract §2.2, §3.8). */
-export const GROUP_PRICING_MODES = ["inherit_court", "multiplier", "flat_per_slice"] as const;
-export type GroupPricingMode = typeof GROUP_PRICING_MODES[number];
-
 export type GroupWindow = { day: Weekday; start: string; end: string };
 
 export type MemberGroup = {
@@ -682,17 +678,6 @@ export type MemberGroup = {
   sort_order?: number;
   /** The two seeded groups: renameable and editable, never deletable. */
   is_system_default?: boolean;
-  /** @deprecated P13-F3: the whole `pricing` object is removed from the group wire (contract §3.8). */
-  pricing?: {
-    mode?: GroupPricingMode;
-    multiplier_bps?: number | null;
-    flat_slice_price_credits?: number | null;
-    /** What one slice would actually cost on this club's courts, computed by the server. */
-    effective_example_credits?: number | null;
-    /** The cheapest and dearest slice across the club's courts, and each court's own price. */
-    effective_range_credits?: { min: number; max: number };
-    effective_by_court?: Array<{ court_id: string; court_name: string; credits: number }>;
-  };
   caps?: {
     max_slots_per_day?: number | null;
     max_minutes_per_day?: number | null;
@@ -706,12 +691,6 @@ export type MemberGroup = {
    * and never archived or deleted (409 `group_is_system_default`) — the screen hides both.
    */
   system_key?: string | null;
-  /**
-   * @deprecated P13-F3: removed from the group wire, replaced by `package_discount_bps` (§3.8).
-   * D2: the top-up rate this group carries, credits per one unit of the club's money — or null,
-   * which INHERITS the club's `credits_per_zar_regular` and has no say in a member's rate.
-   */
-  credits_per_zar?: number | null;
   /**
    * P13 §3.8 — this group's discount on CLUB packages, in basis points (0–10 000), or null for
    * no say. A member's discount is the LOWEST set among their active groups.
@@ -736,12 +715,8 @@ export type PeakSay = boolean | null;
 export type MemberGroupBody = {
   name: string;
   description?: string | null;
-  /** @deprecated P13-F3: removed (contract §3.3); an old console's value is ignored by the server. */
-  pricing: { mode: GroupPricingMode; multiplierBps?: number; flatSlicePriceCredits?: number };
   caps: { maxSlotsPerDay?: number | null; maxMinutesPerDay?: number | null; advanceBookingDays?: number | null };
   windows: GroupWindow[];
-  /** @deprecated P13-F3: removed (contract §3.3), replaced by `packageDiscountBps`. */
-  creditsPerZar?: number | null;
   /** P13 §3.8 — absent = unchanged; null clears it; else an integer 0–10 000 (400 `group_package_discount_invalid`). */
   packageDiscountBps?: number | null;
   /** Absent = unchanged; true grants, false withholds, null has no say. */
@@ -760,10 +735,6 @@ export type MemberTariff = {
   package_discount_bps: number | null;
   /** The group the discount comes from; null when there is no discount. */
   discount_group_id: string | null;
-  /** @deprecated P13-F3: removed from the tariff wire (contract §3.8); the server no longer sends it. */
-  top_up_credits_per_zar?: number;
-  /** @deprecated P13-F3: removed from the tariff wire, replaced by `discount_group_id` (§3.8). */
-  rate_group_id?: string | null;
   peak_priority: boolean;
   /** The groups explicitly withholding peak priority, by name. Empty when nothing withholds it. */
   peak_withheld_by: string[];
@@ -774,8 +745,6 @@ export type MemberGroupChip = {
   id: string;
   name: string;
   system_key?: string | null;
-  /** @deprecated P13-F3: replaced by `package_discount_bps` (contract §3.8). */
-  credits_per_zar?: number | null;
   package_discount_bps?: number | null;
   peak_priority?: boolean | null;
 };
@@ -811,13 +780,6 @@ export type MemberBookingRules = {
   groups?: Array<{ id: string; name: string; description?: string | null }>;
   allowed_windows?: Array<{ start: string; end: string }>;
   club_hours?: { start: string; end: string } | null;
-  /** @deprecated P13-F1/F3: dropped from the booking-rules read (contract §3.8). */
-  slice_price_credits?: number | null;
-  /** The slice price across the club's courts, and per court (`slice_price_credits` is the cheapest). */
-  /** @deprecated P13-F1/F3: dropped (contract §3.8). */
-  slice_price_range_credits?: { min: number; max: number };
-  /** @deprecated P13-F1/F3: dropped (contract §3.8). */
-  slice_prices_by_court?: Array<{ court_id: string; court_name: string; credits: number }>;
   max_slots_per_day?: number | null;
   max_minutes_per_day?: number | null;
   advance_booking_days?: number | null;
@@ -846,13 +808,6 @@ export type MemberBookingRules = {
  */
 export const TOP_UP_REASON_CODES = ["top_up_cash", "top_up_eft", "top_up_card_offline"] as const;
 export const ADJUSTMENT_REASON_CODES = ["goodwill", "correction", "refund_outside_system", "other"] as const;
-/**
- * @deprecated P13-F3: P13 §3.7 splits these — the three top-up codes go to `sellPackage` (`/sell`)
- * and `/adjust` answers 400 `reason_code_invalid` to them. Use the two lists above.
- */
-export const ADJUST_REASON_CODES = [...TOP_UP_REASON_CODES, ...ADJUSTMENT_REASON_CODES] as const;
-/** @deprecated P13-F3: see `ADJUST_REASON_CODES`. */
-export type AdjustReasonCode = typeof ADJUST_REASON_CODES[number];
 /** P13 §3.7 — how the desk took the money for a package it sold. */
 export type SellReasonCode = typeof TOP_UP_REASON_CODES[number];
 /** P13 §3.7 — the kinds of hand adjustment `/adjust` still takes. */
@@ -1103,18 +1058,16 @@ export const adminEndpoints = {
       `/api/v1/admin/members/${membershipId}/code/reset`, { revoke_passkeys: body.revokePasskeys, reason: body.reason }),
   /**
    * P13 §3.7 — goodwill and corrections. `amountMinutes` is a signed whole number, not 0,
-   * `|n| ≤ 999 999`. P13-F3: the three top-up codes are refused here now (`reason_code_invalid`);
-   * a desk sale is `sellPackage`. The type still admits them until the desk dialog is rebuilt.
+   * `|n| ≤ 999 999`. The three sale codes are refused here (`reason_code_invalid`); a desk sale
+   * is `sellPackage`.
    */
-  adjustCredit: (
+  adjustMinutes: (
     userId: string,
     body: {
       amountMinutes: number;
-      reasonCode: AdjustReasonCode;
+      reasonCode: AdjustmentReasonCode;
       reason: string;
       relatedBookingId?: string;
-      /** @deprecated P13-F3: a desk sale's rand goes on `sellPackage` (§3.7). */
-      zarReceived?: number;
       idempotencyKey?: string;
     },
   ) => api.post<AdminAdjustResult>(`/api/v1/admin/minutes/${userId}/adjust`, {
@@ -1122,7 +1075,6 @@ export const adminEndpoints = {
     reasonCode: body.reasonCode,
     reason: body.reason,
     ...(body.relatedBookingId ? { relatedBookingId: body.relatedBookingId } : {}),
-    ...(body.zarReceived !== undefined ? { zarReceived: body.zarReceived } : {}),
     // Names THIS movement, so every retry of one intended adjustment is the same movement.
     // A changed payload under a reused key is a 409, not a silent replay of the old figure:
     // the admin corrected the amount and pressed Apply, and discarding the correction is the

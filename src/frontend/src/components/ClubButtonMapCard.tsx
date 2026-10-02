@@ -118,11 +118,10 @@ export function ClubButtonMapCard({
       // narrow that window, not close it — the race moves into the gap between the two
       // calls — and it still writes twenty keys this screen does not own. Sending only
       // what this screen owns cannot revert anything, because the API reads an absent
-      // key as unchanged. The eight below are not optional on the API and are the
+      // key as unchanged. The seven below are not optional on the API and are the
       // booking form's, not this one's; they are the price of there being no PATCH.
       await endpoints.adminSettingsSave({
         slice_minutes: settings.slice_minutes,
-        slice_price_credits: settings.slice_price_credits,
         advance_booking_days: settings.advance_booking_days,
         day_start_minute: settings.day_start_minute,
         day_end_minute: settings.day_end_minute,

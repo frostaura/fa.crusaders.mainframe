@@ -107,7 +107,7 @@ describe("the admin rail", () => {
     const nav = within(rail()).getByRole("navigation", { name: "Admin" });
     const hrefs = within(nav).getAllByRole("link").map((a) => a.getAttribute("href"));
     expect(hrefs).toEqual([
-      "/admin", "/admin/members", "/admin/groups", "/admin/results", "/admin/transactions", "/admin/reports",
+      "/admin", "/admin/members", "/admin/groups", "/admin/results", "/admin/packages", "/admin/transactions", "/admin/reports",
       "/admin/monitoring", "/admin/monitoring/doors", "/admin/monitoring/devices", "/admin/monitoring/faults",
       "/admin/monitoring/changes", "/admin/schedules", "/admin/courts", "/admin/settings", "/admin/webhooks",
     ]);
@@ -187,7 +187,7 @@ describe("the section switcher (below xl)", () => {
     const current = within(sheet).getByRole("link", { current: "page" });
     expect(current).toHaveAccessibleName("Settings");
     // 14 since P6 gave Courts its own page; 15 since P12 gave Match results one.
-    expect(within(sheet).getAllByRole("link")).toHaveLength(15);
+    expect(within(sheet).getAllByRole("link")).toHaveLength(16);
 
     fireEvent.keyDown(sheet, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

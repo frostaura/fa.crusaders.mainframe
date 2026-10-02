@@ -131,7 +131,7 @@ export async function attemptAdjustment(
   keyRef.current = keyForPress(keyRef.current, input);
   const pressedAt = Date.now();
   try {
-    const r = await adminEndpoints.adjustCredit(input.userId, {
+    const r = await adminEndpoints.adjustMinutes(input.userId, {
       amountMinutes: input.amount,
       reasonCode: input.reasonCode,
       reason: input.reason,

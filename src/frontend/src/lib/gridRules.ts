@@ -48,12 +48,6 @@ export type ViewerRules = {
   /** `null` = the server did not say. `[]` = it said there are none, which is D2 §4.3's empty intersection. */
   allowedWindows: ClockWindow[] | null;
   clubHours: ClockWindow | null;
-  /**
-   * P13-F1 STAND-IN: nothing reads it — a booking costs its minutes, and the schedule sends no
-   * price (§3.12). It stays optional only because the integrator-owned `bookingsApi.memberGridRules`
-   * still sets it; it goes with that patch (`p13-ask-F1-to-integrator.md`).
-   */
-  slicePriceCredits?: number | null;
   maxSlotsPerDay: number | null;
   maxMinutesPerDay: number | null;
   bookedSlotsToday: number | null;

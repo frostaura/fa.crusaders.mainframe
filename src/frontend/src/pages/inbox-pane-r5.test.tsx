@@ -73,7 +73,7 @@ describe("the inbox pane beside the list (R5)", () => {
     fireEvent.click(within(pane).getByRole("button", { name: acceptLabel(25) }));
 
     expect(await within(pane).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
-    expect(pane).toHaveTextContent("25.00 cr paid to Sam");
+    expect(pane).toHaveTextContent("25 min paid to Sam");
     // The open invites are read again and no longer hold the seat — the confirmation stays.
     await waitFor(() => expect(stub.calls.filter((c) => c.path === "/api/v1/me/invites").length).toBeGreaterThan(1));
     await new Promise((r) => setTimeout(r, 50));

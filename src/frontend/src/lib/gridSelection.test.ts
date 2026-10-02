@@ -10,8 +10,8 @@ const DAY = {
   date: "2030-09-09", timezone: "Africa/Johannesburg", sliceMinutes: 15,
   dayStartMinute: 960, dayEndMinute: 1080, advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
   courts: [
-    { id: "a", courtNumber: 1, name: "Court 1", slicePriceCredits: 50 },
-    { id: "b", courtNumber: 2, name: "Court 2", slicePriceCredits: 40 },
+    { id: "a", courtNumber: 1, name: "Court 1" },
+    { id: "b", courtNumber: 2, name: "Court 2" },
   ],
   slots: [{
     courtId: "b", courtNumber: 2, startsAtUtc: at(17), endsAtUtc: at(17, 30), status: "booked",

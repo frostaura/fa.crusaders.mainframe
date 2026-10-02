@@ -38,7 +38,7 @@ function dayFixture(date: string, timezone: string) {
     date, timezone, sliceMinutes: 15,
     dayStartMinute: 6 * 60, dayEndMinute: 9 * 60,
     advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1" }],
     slots: [],
   };
 }
