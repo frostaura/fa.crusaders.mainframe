@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-players
 description: "D11–D13: single-payer booking; shares move as ShareTransfer pairs via one idempotent reconcile off Owed; consent caps collection; no debts, and shares received are held to the deadline; Dean's two 2026-09-28 rulings."
 type: decision
-last_verified: 2026-09-30
+last_verified: 2026-10-02
 ---
 
 # Live decisions — players and splits (D11–D13)
@@ -21,11 +21,10 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
   *Why:* one place a share is computed; `BookingService` was not edited — the hook sits at the
   endpoints / NoShowWorker / device-event loop. Reversal-displaced and release-reinstated
   bookings are reached by the worker's minute sweep, not the hook (their ids are not surfaced).
-- **Lock the DEBITED member only** (partner on collect, organiser on return). Credit never overspends.
+- **Lock the DEBITED member only** (partner on collect, organiser on return). Money arriving never overspends.
   The accept also takes a per-SEAT advisory lock after the member's: two members claiming one open
   link seat hold different member locks and deadlocked (40P01, ~1 in 5 runs of the racing test)
   until it did. Order is always member-then-seat.
-- **Every "who is on this booking" subquery goes through `BookingPlayerQueries`** (gate, box, cap, pay-for).
 - **Consent caps collection; lowering a share lowers consent; raising needs a new accept.** *Why:*
   otherwise a share lowered then raised back would be re-debited without asking.
 - **No debts.** A collection the partner cannot cover is simply not posted; after the deadline
@@ -38,12 +37,12 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
   late cancel on an amount split — debits the organiser; a spent share made that an overdraft, i.e.
   a debt by another name. Derived (`ShareHolds`), never extra ledger rows; a cancelled booking
   holds only returns still pending; every member spend check reads `GetSpendableAsync`; admin
-  overdraft looks past it. *Rejected:* refusing the return (traps the partner) and hold rows (a
-  second balance). *Cost:* an organiser cannot reuse shares until ~48 h after the game.
+  overdraft looks past it. *Rejected:* refusing the return, hold rows. *Cost:* ~48 h before reuse.
 - **Late-cancel penalty is the organiser's alone** (cancelled without check-in → partners 0);
   **no-show penalty is shared pro rata**. Rounding is toward zero per seat so partners never sum past Owed.
-- **Split rounding: partners floor, the organiser takes the remainder** — also after a remove, decline or
-  withdraw (no auto re-split): their seat is set to P − Σ live partners by ONE SQL update after the commit,
+- **Split rounding: shares are WHOLE MINUTES (P13); partners floor(P × w / W), the organiser takes the
+  remainder; an amount split refuses a non-whole figure as `split_amount_invalid` by code (the wire stays
+  decimal so 7.5 is that 400, not a binding failure)** — also after a remove, decline or withdraw (no auto re-split): their seat is set to P − Σ live partners by ONE SQL update after the commit,
   no version bump (R4 M4-6: the seat kept its old figure; a tracked write would 409 one of two declines at once).
 - **D12 cap: accepted seats count against the partner's own cap**, checked on the first accept of a
   future game under the partner's lock (the cap's unit). Peak/windows/price bind the organiser only.
@@ -57,4 +56,5 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
 - **Dean's rulings, 2026-09-28 — both intended, keep, no code change.** (1) Co-players see each
   other's paid, consented and unpaid figures on the booking detail. (2) An admin goodwill credit to
   the organiser naming the booking passes a pro-rata refund on to the partners (it lowers `Owed`).
-  Access, consent, invites, mail: `…-access.md`; deadline + coverage: `…-deadline.md`; waiting: `…-returns.md`.
+  Access, consent, invites, mail: `…-access.md`; deadline + coverage: `…-deadline.md`; waiting: `…-returns.md`;
+  every "who is on this booking" subquery goes through `BookingPlayerQueries` (gate, box, cap, pay-for).

@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-gates
 description: "Gates that report a red run as green or trip on a function nobody wrote: complexity exits 1 on stdout, lizard's C# and .tsx lexers mis-scope (one form of it no single member causes — split the file), ls-files misses untracked work."
 type: gotcha
-last_verified: 2026-10-01
+last_verified: 2026-10-02
 ---
 
 # Gotchas — the quality gates and their lint tooling
@@ -15,7 +15,7 @@ gate failures: [`gotchas-env.md`](gotchas-env.md).
 - **lizard's `.tsx` lexer desyncs** on: a bare `<` in an object literal, odd bare apostrophes in JSX
   text, an inline object type in a generic argument, a `//` or `data-x=""` after a braced JSX prop,
   a JSX spread prop, a component whose name recurs as a closing tag, and (R4) a quote, a `[…]` class or a
-  `(?<=` lookbehind in a REGEX literal, a `/` or apostrophe in a TEMPLATE literal, backticks in a JSX comment — scoring
+  `(?<=` lookbehind in a REGEX literal, a `/`, an apostrophe or a nested template in a TEMPLATE literal, backticks in a JSX comment — scoring
   a function nobody wrote (tell: one "grows" to the file's end). Cure the text: `new RegExp` from
   strings (`String.fromCharCode(34)`), a Set for a class, name the type; for the closing-tag form
   **move the component to its own file**. Round 2's five "grown" functions were four desyncs.
