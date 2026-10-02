@@ -123,9 +123,10 @@ const LEAD_MS = 15_000;
  * opposite ends so that, running at once, they do not both pick the same one.
  */
 async function courtNow(request: APIRequestContext, member: Member): Promise<{ court: Court; startsAt: string; sliceMs: number }> {
-  const today = new Date().toISOString().slice(0, 10);
+  // No `date`: the server answers for the CLUB's today. A UTC date read yesterday's grid after
+  // midnight SAST and never saw the courts this walk had just booked (the D2-B33 trap).
   const day = await ok<ScheduleWire>(
-    await request.get(`/api/v1/schedule?date=${today}`, { headers: bearer(member.session) }), "schedule");
+    await request.get("/api/v1/schedule", { headers: bearer(member.session) }), "schedule");
   const slice = (day.sliceMinutes ?? 15) * 60_000;
   const earliest = Date.now() + LEAD_MS;
   const live = day.slots.filter((s) => s.status !== "cancelled");
