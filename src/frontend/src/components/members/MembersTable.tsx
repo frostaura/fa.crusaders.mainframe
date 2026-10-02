@@ -271,7 +271,7 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
       ) : null}
       <DateCell row={row} dateColumn={dateColumn} now={now} />
       <td data-label={COLUMNS.balance} className={COL.balance}>
-        <span title={minutesCompact(row.balance_minutes)} className="block truncate font-semibold text-text-primary">
+        <span title={minutesCompact(row.balance_minutes)} className="block whitespace-normal font-semibold text-text-primary">
           <Minutes value={row.balance_minutes} />
         </span>
       </td>

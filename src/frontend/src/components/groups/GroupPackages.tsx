@@ -1,4 +1,5 @@
 import { Minutes } from "../Minutes";
+import { Warning } from "../ui/icons";
 import { Skeleton } from "../ui/skeleton";
 import { TextLink } from "../ui/text-link";
 import { GROUP_PACKAGES } from "../../lib/groupsCopy";
@@ -41,7 +42,16 @@ function PackagesBody({ groupId, packages }: { groupId: string; packages: Packag
       </div>
     );
   }
-  if (packages.status === "failed") return <p className="text-warning-strong">{GROUP_PACKAGES.failed}</p>;
+  // Primary ink beside a warning glyph, not warning ink: on an archived card's muted ground the
+  // warning colour fell below 4.5:1 (axe, light theme).
+  if (packages.status === "failed") {
+    return (
+      <p className="flex items-start gap-1.5 text-text-primary">
+        <Warning aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning-strong" />
+        {GROUP_PACKAGES.failed}
+      </p>
+    );
+  }
   const own = packages.items.filter((p) => p.group?.id === groupId && p.status === "active");
   if (own.length === 0) return <p>{GROUP_PACKAGES.none}</p>;
   return (

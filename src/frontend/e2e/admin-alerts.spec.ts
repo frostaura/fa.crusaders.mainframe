@@ -151,7 +151,7 @@ test("Settings → Admin alerts saves the club's thresholds snake_case, and the 
 
   // The club's threshold and a notifier cooldown ride the save bar, snake_case.
   await section.getByRole("spinbutton", { name: "Fault spike (faults)" }).fill("8");
-  await section.getByRole("spinbutton", { name: "Top-up failure emails — quiet time (minutes)" }).fill("45");
+  await section.getByRole("spinbutton", { name: "Failed purchase emails — quiet time (minutes)" }).fill("45");
   const bar = page.getByRole("region", { name: "Unsaved settings" });
   await expect(bar).toContainText("2 unsaved changes");
   await bar.getByRole("button", { name: "Save changes" }).click();

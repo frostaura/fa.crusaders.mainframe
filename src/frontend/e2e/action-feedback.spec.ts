@@ -249,21 +249,27 @@ test.describe("the money pages a member reaches alone", () => {
     expect(await restingMarks(page, /Submit application/)).toBe(0);
   });
 
-  test("top-up's continue and cancel wear no glyph at rest", async ({ page }) => {
+  test("buying minutes: continue and cancel wear no glyph at rest", async ({ page }) => {
     await onPhone(page);
     await signIn(page);
     await serveApi(page, [
       { path: "/api/v1/whoami", body: SESSION_MEMBER },
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/wallet", body: { balance_minutes: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
-      // The endpoint the page actually reads. This stubbed `/payments/topup-options`, which
-      // nothing calls: the old page drew its form anyway on a FAILED options read, and R12's
-      // top-up shows that failure (with a retry) instead of a form with no rules behind it.
-      { path: "/api/v1/credit/topup/options", body: { min_zar: 50, max_zar: 5000, block_zar: 50, presets_zar: [100, 500], conversion_rate: 2 } },
+      // The endpoint the page actually reads (P13: the package shelf).
+      {
+        path: "/api/v1/minutes/packages",
+        body: {
+          discount: null, open_checkouts: [],
+          packages: [{ id: "p-1", name: "1 hour", minutes: 60, list_price_zar: 120, discount_bps: 0, price_zar: 120, saving_zar: null, saving_pct: null, source: "club", group: null }],
+        },
+      },
     ]);
-    await page.goto("/wallet/topup");
+    await page.goto("/wallet/buy");
+    // Continue names the price once a package is picked.
+    await page.getByRole("radio").first().click();
 
-    await expect(page.getByRole("button", { name: "Continue to PayFast" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue to PayFast" }).first()).toBeVisible();
     expect(await restingMarks(page, "Continue to PayFast")).toBe(0);
     expect(await restingMarks(page, "Cancel")).toBe(0);
   });

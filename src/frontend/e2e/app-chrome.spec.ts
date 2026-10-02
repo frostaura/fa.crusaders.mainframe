@@ -21,8 +21,6 @@ const SETTINGS = {
   grace_window_minutes: 5, penalty_window_minutes: 15, timezone: "Africa/Johannesburg",
   button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
   operating_hours: { mon: "06:00-22:00" },
-  credits_per_zar_regular: 1.6,
-  topup_block_zar: 100, topup_max_zar_per_member: 1000,
   member_per_day_max_minutes: 60, peak_hours: "16:00-19:00",
   peak_advance_hours_for_regular: 1, retention_years: 2, no_show_lookback_days: 7,
   walk_up_max_minutes: 90, heartbeat_seconds: 60,
@@ -366,7 +364,7 @@ test.describe("B12 — the chrome at a large root font size", () => {
       clipped: el.scrollWidth > el.clientWidth + 1,
     }));
     expect(figure.text).not.toContain("…");
-    expect(figure.text).toBe("0.00 cr");
+    expect(figure.text).toBe("0 min");
     expect(figure.clipped, "the balance is cut off inside its own box").toBe(false);
 
     await page.setViewportSize({ width: 320, height: 568 });
@@ -378,7 +376,7 @@ test.describe("B12 — the chrome at a large root font size", () => {
       text: (el as HTMLElement).innerText,
       clipped: el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().right > window.innerWidth,
     }));
-    expect(inMenu.text).toBe("0.00 cr");
+    expect(inMenu.text).toBe("0 min");
     expect(inMenu.clipped, "the balance is cut off in the menu").toBe(false);
   });
 });
@@ -581,7 +579,7 @@ test.describe("V5-3 — the top bar at 200 % text from md", () => {
       expect(h.crestShares, "the crest is alone on its row").toBe(true);
       expect(h.smallestIcon, "a tab's icon was squeezed").toBeGreaterThanOrEqual(16);
       expect(h.spilled, "a count spilled out of its circle").toBe(0);
-      expect(h.onTop, "the credits chip covers the bell's count").toBe("badge");
+      expect(h.onTop, "the minutes chip covers the bell's count").toBe("badge");
       expect(h.docScroll).toBeLessThanOrEqual(1);
     });
   }
@@ -597,7 +595,7 @@ test.describe("V5-3 — the top bar at 200 % text from md", () => {
     expect(height, `the top bar is ${height}px tall`).toBeLessThanOrEqual(64);
 
     await page.getByRole("button", { name: "Account menu" }).click();
-    const wallet = page.getByRole("menuitem", { name: /Wallet.*500\.00 cr/ });
+    const wallet = page.getByRole("menuitem", { name: /Wallet.*(8 h 20 min|8 hours 20 minutes)/ });
     await expect(wallet).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
   });

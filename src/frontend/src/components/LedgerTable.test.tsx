@@ -240,7 +240,10 @@ describe("LedgerTable — what survives a 375px screen", () => {
       for (const cell of cellsOf(`^${label}`)) expect(cell.className).toContain("@[52rem]/ledger:table-cell");
     }
     expect(screen.getByRole("columnheader", { name: /Done by/ }).className).toContain("@[60rem]/ledger:table-cell");
-    for (const cell of cellsOf("Amount")) expect(cell.className).toContain("@[52rem]/ledger:[&>span]:hidden");
+    for (const cell of cellsOf("Amount")) expect(cell.className).toContain("@[52rem]/ledger:[&>[data-counterparty]]:hidden");
+    // P13 regression: the rule must name the counterparty, never every span — the figure is two
+    // spans (shown + spoken) and a bare `[&>span]` blanked the Amount column from 52rem.
+    for (const cell of cellsOf("Amount")) expect(cell.className).not.toContain("[&>span]:hidden");
   });
   /**
    * R4 form factor (SPEC §3.9): with a movement open BESIDE the book, ↑/↓ inside the table open

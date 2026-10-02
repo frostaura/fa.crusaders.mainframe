@@ -303,12 +303,12 @@ test.describe("The button map", () => {
     expect(body.buttonMap).toEqual(["court:D", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"]);
     // Review finding 23: this screen used to PUT the whole settings document it read at
     // mount, so saving a remapped button silently reverted whatever another tab had
-    // changed since. It now sends only the map plus the eight booking fields the API
+    // changed since. It now sends only the map plus the seven booking fields the API
     // requires on every PUT — an absent key is read as unchanged, so nothing else can be
     // clobbered. A key here that this screen does not own is that regression coming back.
     expect(Object.keys(body).sort()).toEqual([
       "advanceBookingDays", "buttonMap", "dayEndMinute", "dayStartMinute",
-      "graceWindowMinutes", "penaltyPct", "penaltyWindowMinutes", "sliceMinutes", "slicePriceCredits",
+      "graceWindowMinutes", "penaltyPct", "penaltyWindowMinutes", "sliceMinutes",
     ]);
   });
 
