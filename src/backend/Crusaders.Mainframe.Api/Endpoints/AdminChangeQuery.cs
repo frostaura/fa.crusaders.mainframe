@@ -174,7 +174,7 @@ public sealed record AdminChangeQuery(
         }
         else if (subjectId is not null
                  && (subjectKind is null || subjectKind == AdminChangeSubjects.User)
-                 && area is not AdminChangeAreas.Member and not AdminChangeAreas.Credit)
+                 && area is not AdminChangeAreas.Member and not AdminChangeAreas.Money)
         {
             // Asking this record about a person, without saying which kind of administrative
             // act you mean, is the night trace's question arriving at the wrong surface.

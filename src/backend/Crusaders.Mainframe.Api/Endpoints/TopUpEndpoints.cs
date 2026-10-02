@@ -486,14 +486,14 @@ public static partial class TopUpEndpoints
     {
         c.Db.ChangeTracker.Clear();
 
-        var credited = await c.Db.LedgerEntries.AsNoTracking()
+        var posted = await c.Db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
         var row = await c.Db.PendingTopups.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pending.Id, ct);
 
-        if (row?.Status == TopUpStatus.Completed && credited is not null && credited.UserId == pending.UserId)
+        if (row?.Status == TopUpStatus.Completed && posted is not null && posted.UserId == pending.UserId)
         {
             c.Logger.LogInformation(
-                "topup {Key}: PayFast payment {PaymentId} was already credited by a concurrent delivery",
+                "topup {Key}: PayFast payment {PaymentId} was already posted by a concurrent delivery",
                 pending.IdempotencyKey, interp.PaymentId);
             return Results.Ok(new { ok = true, idempotent = true });
         }

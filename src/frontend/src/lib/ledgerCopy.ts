@@ -1,5 +1,5 @@
 import type { LedgerRow } from "./api";
-import { ledgerTypeLabel } from "./creditAdjustment";
+import { ledgerTypeLabel } from "./deskLedger";
 
 /**
  * The club ledger's "done by" and category — review round 1, F3.8.

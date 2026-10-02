@@ -26,7 +26,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { StateBlock } from "../components/ui/state-block";
 import { CaretDown, CaretUp, Funnel, MagnifyingGlass } from "../components/ui/icons";
 import { FilterBar, FilterDate, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
-import { ADMIN_LEDGER_TYPES, ledgerTypeLabel } from "../lib/creditAdjustment";
+import { ADMIN_LEDGER_TYPES, ledgerTypeLabel } from "../lib/deskLedger";
 import { LedgerDetailPanel, LedgerDetailSheet } from "../components/admin/LedgerDetailSheet";
 import { useBoxAtLeast } from "../components/admin/useBoxAtLeast";
 import { LEDGER_COPY } from "../lib/ledgerCopy";

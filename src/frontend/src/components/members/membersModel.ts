@@ -11,7 +11,7 @@ export type GroupChip = {
   id: string;
   name: string;
   system_key?: string | null;
-  credits_per_zar?: number | null;
+  package_discount_bps?: number | null;
   peak_priority?: boolean | null;
 };
 

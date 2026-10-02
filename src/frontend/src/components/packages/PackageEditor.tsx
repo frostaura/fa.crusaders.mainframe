@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from "react";
+import { useRef, useState, type ReactNode, type RefObject } from "react";
 import { Alert } from "@/components/Alert";
 import { Minutes } from "@/components/Minutes";
 import { Button } from "@/components/ui/button";
@@ -77,7 +77,9 @@ async function asDrafted(pkg: AdminPackage | "new", draft: Draft): Promise<Admin
   return matches ? found : null;
 }
 
-async function write(pkg: AdminPackage | "new", draft: Draft): Promise<{ saved: AdminPackage; said: string }> {
+type Written = { saved: AdminPackage; said: string };
+
+async function write(pkg: AdminPackage | "new", draft: Draft): Promise<Written> {
   const name = draft.name.trim();
   const body = { name, minutes: parsePackageMinutes(draft.minutes)!, priceZar: parsePrice(draft.price)!, sortOrder: Number(draft.order) };
   const send = pkg === "new"
@@ -107,30 +109,20 @@ export function PackageEditor({ pkg, active, groups, onSaved, onCancel }: Packag
     void save.run();
   };
   const show = (k: keyof Complaints) => (tried || (k !== "name" && draft[k].trim() !== "") ? problems[k] : null);
-  const name = draft.name.trim();
 
   return (
     <form noValidate className="flex flex-col gap-5" onSubmit={(e) => { e.preventDefault(); submit(); }} data-package-editor="">
-      <Field>
-        <FieldLabel>{COPY.nameLabel}</FieldLabel>
+      <TextField label={COPY.nameLabel} description={COPY.nameDescription} complaint={tried ? problems.name : null}>
         <Input ref={nameRef} value={draft.name} maxLength={PACKAGE_LIMITS.nameMax} autoComplete="off" placeholder="5 hours" onChange={(e) => set({ name: e.target.value })} />
-        <FieldError>{tried ? problems.name : null}</FieldError>
-        <FieldDescription>{COPY.nameDescription}</FieldDescription>
-      </Field>
+      </TextField>
       <MinutesField draft={draft} set={set} inputRef={minutesRef} complaint={show("minutes")} />
-      <Field>
-        <FieldLabel>{COPY.priceLabel}</FieldLabel>
+      <TextField label={COPY.priceLabel} description={COPY.priceDescription} complaint={show("price")}>
         <Input ref={priceRef} inputMode="decimal" autoComplete="off" className="tabular-nums" placeholder="550.00" value={draft.price} onChange={(e) => set({ price: e.target.value })} />
-        <FieldError>{show("price")}</FieldError>
-        <FieldDescription>{COPY.priceDescription}</FieldDescription>
-      </Field>
+      </TextField>
       <ShelfField isNew={isNew} draft={draft} set={set} groups={groups} pkg={pkg} />
-      <Field>
-        <FieldLabel>{COPY.orderLabel}</FieldLabel>
+      <TextField label={COPY.orderLabel} description={COPY.orderDescription} complaint={show("order")}>
         <Input ref={orderRef} inputMode="numeric" autoComplete="off" className="w-28 tabular-nums" value={draft.order} onChange={(e) => set({ order: e.target.value })} />
-        <FieldError>{show("order")}</FieldError>
-        <FieldDescription>{COPY.orderDescription}</FieldDescription>
-      </Field>
+      </TextField>
       {isNew ? null : (
         <Field>
           <FieldLabel>{COPY.reasonLabel}</FieldLabel>
@@ -138,18 +130,38 @@ export function PackageEditor({ pkg, active, groups, onSaved, onCancel }: Packag
         </Field>
       )}
       <Preview pkg={pkg} draft={draft} active={active} />
-      {save.error ? (
-        <Alert tone="danger" live="assertive">
-          {unsureSentence(save.error, isNew ? PACKAGES_LOST.add(name) : PACKAGES_LOST.save(name))
-            ?? describeFailure(save.error, { action: isNew ? COPY.addAction : COPY.saveAction, codes: COPY.errorCodes })}
-        </Alert>
-      ) : null}
+      <SaveFailure error={save.error} isNew={isNew} name={draft.name.trim()} />
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" disabled={save.pending} onClick={onCancel}>{COPY.cancel}</Button>
         <Button type="submit" pending={save.pending}>{isNew ? COPY.saveNew : COPY.saveEdit}</Button>
       </div>
     </form>
   );
+}
+
+/** A labelled field: the control, its complaint, and the rule it follows. */
+type TextFieldProps = { label: string; description: string; complaint: string | null; children: ReactNode };
+
+function TextField({ label, description, complaint, children }: TextFieldProps) {
+  return (
+    <Field>
+      <FieldLabel>{label}</FieldLabel>
+      {children}
+      <FieldError>{complaint}</FieldError>
+      <FieldDescription>{description}</FieldDescription>
+    </Field>
+  );
+}
+
+/** Why the save did not land — or, for a lost reply, that it may have. */
+type SaveFailureProps = { error: unknown; isNew: boolean; name: string };
+
+function SaveFailure({ error, isNew, name }: SaveFailureProps) {
+  if (!error) return null;
+  const lost = isNew ? PACKAGES_LOST.add(name) : PACKAGES_LOST.save(name);
+  const action = isNew ? COPY.addAction : COPY.saveAction;
+  const sentence = unsureSentence(error, lost) ?? describeFailure(error, { action, codes: COPY.errorCodes });
+  return <Alert tone="danger" live="assertive">{sentence}</Alert>;
 }
 
 const HOURS = [1, 2, 5, 10] as const;
@@ -223,7 +235,8 @@ function Preview({ pkg, draft, active }: { pkg: AdminPackage | "new"; draft: Dra
   const hourly = perHour(price, minutes);
   let line: string = COPY.previewAlone;
   if (shelf.length > 1 && baseline) {
-    const base = `${baseline.name} (${formatMoney(baseline.price_zar)})`;
+    // Joined, not a nested template literal: lizard loses its place inside one and swallows the file.
+    const base = baseline.name + " (" + formatMoney(baseline.price_zar) + ")";
     line = baseline.id === item.id ? COPY.previewIsBaseline : saving ? COPY.previewSaves(saving.zar, saving.pct, base) : COPY.previewNoSaving(base);
   }
   return (

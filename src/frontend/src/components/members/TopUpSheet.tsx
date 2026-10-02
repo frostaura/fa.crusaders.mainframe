@@ -46,7 +46,7 @@ import { Minus, Plus } from "@/components/ui/icons";
  *
  * <p>
  * <b>Nothing here touches the idempotency machinery.</b> The key, the in-flight ref and the
- * double-click guard live with the caller (`useCreditAdjust`) and this component calls into them
+ * double-click guard live with the caller (`useMinutesAdjust`) and this component calls into them
  * rather than around them — a double-click once posted +7 twice, and four clicks on a slow
  * connection granted four times what was typed.
  * </p>

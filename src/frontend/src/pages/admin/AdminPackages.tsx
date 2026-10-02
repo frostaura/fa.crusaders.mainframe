@@ -99,28 +99,47 @@ export default function AdminPackagesPage() {
           at="64rem"
           asideWidth="28rem"
         >
-          <StaleNotice stale={Boolean(read.error) && read.packages !== null} readAt={read.readAt} />
-          <StateBlock
-            loading={read.loading && read.packages === null}
-            error={read.packages === null ? read.error : null}
-            action={COPY.readAction}
-            failedCaveat={COPY.readCaveat}
-            onRetry={() => void read.load()}
-            empty={read.packages !== null && read.packages.length === 0}
-            emptyTitle={view === "active" ? COPY.emptyTitle : COPY.archivedEmptyTitle}
-            emptyHint={view === "active" ? COPY.emptyHint : COPY.archivedEmptyHint}
-            emptyIcon={HourglassMedium}
-            emptyAction={view === "active" ? <Button onClick={add} icon={<Plus aria-hidden="true" />}>{COPY.add}</Button> : undefined}
-            skeleton={<ListSkeleton />}
-          >
-            {read.packages ? (
-              <Shelves packages={read.packages} groups={groups} wide={roomy} onEdit={setEditing} onRetired={(p) => { read.settle(p); void read.load(); }} />
-            ) : null}
-          </StateBlock>
+          <PackagesList view={view} read={read} groups={groups} wide={roomy} onAdd={add} onEdit={setEditing} />
         </WithAside>
       </div>
       <EditorSheet editing={roomy ? null : editing} onClose={() => setEditing(null)}>{roomy ? null : editor}</EditorSheet>
     </PageShell>
+  );
+}
+
+type PackagesListProps = {
+  view: PackageStatus;
+  read: ReturnType<typeof usePackages>;
+  groups: ReturnType<typeof useActiveGroups>;
+  wide: boolean;
+  onAdd: () => void;
+  onEdit: (pkg: AdminPackage) => void;
+};
+
+/** The shelves in their three states — loading, failed, empty — never collapsed into one. */
+function PackagesList({ view, read, groups, wide, onAdd, onEdit }: PackagesListProps) {
+  const active = view === "active";
+  return (
+    <>
+      <StaleNotice stale={Boolean(read.error) && read.packages !== null} readAt={read.readAt} />
+      <StateBlock
+        loading={read.loading && read.packages === null}
+        error={read.packages === null ? read.error : null}
+        action={COPY.readAction}
+        failedCaveat={COPY.readCaveat}
+        onRetry={() => void read.load()}
+        empty={read.packages !== null && read.packages.length === 0}
+        emptyTitle={active ? COPY.emptyTitle : COPY.archivedEmptyTitle}
+        emptyHint={active ? COPY.emptyHint : COPY.archivedEmptyHint}
+        emptyIcon={HourglassMedium}
+        emptyAction={active ? <Button onClick={onAdd} icon={<Plus aria-hidden="true" />}>{COPY.add}</Button> : undefined}
+        skeleton={<ListSkeleton />}
+      >
+        {read.packages ? (
+          <Shelves packages={read.packages} groups={groups} wide={wide} onEdit={onEdit} onRetired={(p) => { read.settle(p); void read.load(); }} />
+        ) : null}
+      </StateBlock>
+    </>
   );
 }
 

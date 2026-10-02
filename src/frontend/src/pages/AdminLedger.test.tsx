@@ -3,7 +3,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import AdminLedgerPage from "./AdminLedger";
 import { formatClubDayLabel } from "../components/ui/date-picker-day";
-import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
+import { LEDGER_TYPE_LABEL } from "../lib/deskLedger";
 import { LEDGER_COPY } from "../lib/ledgerCopy";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 import { forgetClubZone, rememberClubZone } from "../lib/clubZone";

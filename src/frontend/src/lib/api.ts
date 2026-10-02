@@ -2409,7 +2409,7 @@ export const endpoints = {
   /**
    * Suspend / reactivate (spec §8) — the status a club reaches for when dues lapse.
    *
-   * A suspension is not a rejection and not a deletion: the member's credit balance and
+   * A suspension is not a rejection and not a deletion: the member's minutes and
    * their existing bookings are untouched, and reactivating restores access exactly as it
    * was. A reason is required because the member is emailed it.
    */
@@ -2418,23 +2418,6 @@ export const endpoints = {
   adminReactivate: (memberId: string) =>
     api.post<{ reactivated: boolean; member_notified: boolean }>(`/api/v1/admin/members/${memberId}/reactivate`),
 
-  /**
-   * A manual credit movement. `relatedBookingId` is optional and OMITTED when not given:
-   * an adjustment that names a booking is what lets a late box upload recognise that the
-   * desk already compensated the member for a wrongly-swept no-show, and audit instead of
-   * refunding twice (`BookingService.ReverseNoShowAsync`). One without it is plain money.
-   */
-  adminAdjust: (userId: string, amountMinutes: number, reason: string, relatedBookingId?: string, idempotencyKey?: string) =>
-    api.post<{ entry_id: string; amount_minutes: number; balance_after_minutes: number }>(`/api/v1/admin/minutes/${userId}/adjust`, {
-      amountMinutes,
-      reason,
-      ...(relatedBookingId ? { relatedBookingId } : {}),
-      // Names THIS movement, so every retry of one intended adjustment is the same
-      // movement and a genuinely second one of the same amount is not. A double-click on
-      // Apply used to post twice and move the balance twice; a slow connection and four
-      // clicks granted 44 credits where 11 were typed.
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-    }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string | null; member_notified: boolean; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
   // D2 deleted `POST /admin/members/{id}/class` with the member class. A member's groups — which

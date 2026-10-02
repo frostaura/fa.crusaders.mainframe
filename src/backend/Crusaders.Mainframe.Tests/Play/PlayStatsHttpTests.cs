@@ -96,7 +96,8 @@ public sealed class PlayStatsHttpTests(PostgresFixture pg) : IClassFixture<Postg
         await club.GameAsync(f, start.AddYears(-1), club.Organiser, [club.Sam]);
 
         var stats = (await MyGameAsync(club.Client(f, club.Sam))).GetProperty("stats");
-        Assert.Equal(37 + 20 + 60, stats.GetProperty("minutes_on_court").GetInt32());
+        // An untouched game is PlayersClub's 4 slices of 8 minutes (P13: the fixture runs on 8-minute slices).
+        Assert.Equal(37 + 20 + 32, stats.GetProperty("minutes_on_court").GetInt32());
         Assert.Equal(37 + 20, stats.GetProperty("minutes_this_year").GetInt32());
         Assert.Equal(3, stats.GetProperty("sessions_attended").GetInt32());
     }

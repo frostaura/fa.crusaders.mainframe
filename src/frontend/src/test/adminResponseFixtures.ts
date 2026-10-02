@@ -326,10 +326,6 @@ export function adminPackages(): Reply<typeof adminEndpoints.packages> {
   return { packages: [adminPackage()] };
 }
 
-export function legacyAdjustResult(): Reply<typeof endpoints.adminAdjust> {
-  return { entry_id: ID, amount_minutes: 10, balance_after_minutes: 10 };
-}
-
 export function memberCodeReset(): MemberCodeResetResult {
   return { rotated: true, generation: 2, passkeys_revoked: true, passkeys_removed: 1, member_notified: true };
 }

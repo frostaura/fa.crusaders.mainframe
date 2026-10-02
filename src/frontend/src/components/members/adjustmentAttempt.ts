@@ -1,7 +1,7 @@
 import { ApiError, endpoints } from "@/lib/api";
 import { rateLimitedSentence } from "@/lib/errors";
 import { adminEndpoints, type AdjustmentReasonCode } from "@/lib/adminApi";
-import { newIdempotencyKey, relatedBookingRefusal } from "@/lib/creditAdjustment";
+import { newIdempotencyKey, relatedBookingRefusal } from "@/lib/deskLedger";
 import { memberDetailEndpoints } from "@/lib/memberDetailApi";
 import { LIVE_SAID, LOST_REPLY, adjustRefusal } from "@/lib/deskMinutesCopy";
 

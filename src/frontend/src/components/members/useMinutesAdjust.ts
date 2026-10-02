@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useToast } from "@/components/Toast";
 import { type AdjustmentReasonCode } from "@/lib/adminApi";
-import { isGuid } from "@/lib/creditAdjustment";
+import { isGuid } from "@/lib/deskLedger";
 import { RELATED_BOOKING } from "@/lib/membersCopy";
 import { doneSentence } from "@/lib/deskMinutesCopy";
 import { useLateLanding } from "@/components/bookings/useSendingGuard";

@@ -10,7 +10,7 @@ public static class AdminChangeAreas
 {
     public const string Schedule = "schedule";
     public const string Booking = "booking";
-    public const string Credit = "credit";
+    public const string Money = "credit"; // the stored area code stays (P13 §2.5); the name says what it holds
     public const string Group = "group";
     public const string Member = "member";
     public const string Setting = "setting";
@@ -19,7 +19,7 @@ public static class AdminChangeAreas
     /// <summary>D14: match results an admin voided or upheld.</summary>
     public const string Play = "play";
 
-    public static readonly string[] All = [Schedule, Booking, Credit, Group, Member, Setting, Device, Play];
+    public static readonly string[] All = [Schedule, Booking, Money, Group, Member, Setting, Device, Play];
 }
 
 /// <summary>

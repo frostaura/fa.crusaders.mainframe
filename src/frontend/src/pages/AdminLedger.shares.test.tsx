@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminLedgerPage from "./AdminLedger";
-import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
+import { LEDGER_TYPE_LABEL } from "../lib/deskLedger";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 /**

@@ -111,21 +111,22 @@ public sealed class PlayBadgesHttpTests(PostgresFixture pg) : IClassFixture<Post
         Assert.Equal(("goal_out_of_range", 30, 6000, 15), (tooSmall.GetProperty("error").GetString(), tooSmall.GetProperty("min").GetInt32(),
             tooSmall.GetProperty("max").GetInt32(), tooSmall.GetProperty("step").GetInt32()));
 
-        var set = await sam.PutAsJsonAsync("/api/v1/me/play/settings", new { monthlyGoalMinutes = 45 });
+        var set = await sam.PutAsJsonAsync("/api/v1/me/play/settings", new { monthlyGoalMinutes = 30 });
         Assert.Equal(HttpStatusCode.OK, set.StatusCode);
-        Assert.Equal(45, (await set.JsonAsync()).GetProperty("monthly_goal_minutes").GetInt32());
+        Assert.Equal(30, (await set.JsonAsync()).GetProperty("monthly_goal_minutes").GetInt32());
         var goal = Assert.Single(await CelebrationsAsync(f, club.Sam), c => c.Kind == CelebrationKind.GoalReached);
         Assert.NotNull(goal.SeenAt);
         Assert.DoesNotContain((await (await sam.GetAsync("/api/v1/me/play/celebrations")).JsonAsync()).GetProperty("items").EnumerateArray(),
             c => c.GetProperty("kind").GetString() == "goal_reached");
 
         var ring = (await MyGameAsync(sam)).GetProperty("ring");
-        Assert.Equal((45, 60, 1, true), (ring.GetProperty("goal_minutes").GetInt32(), ring.GetProperty("attended_minutes").GetInt32(),
+        // The game is PlayersClub's 4 slices of 8 minutes (P13), so 32 attended; the lowest goal (30) is at or below it.
+        Assert.Equal((30, 32, 1, true), (ring.GetProperty("goal_minutes").GetInt32(), ring.GetProperty("attended_minutes").GetInt32(),
             ring.GetProperty("sessions").GetInt32(), ring.GetProperty("reached").GetBoolean()));
 
         // Absent leaves it; null removes it and the ring goes.
         await sam.PutAsJsonAsync("/api/v1/me/play/settings", new { celebrationsEnabled = true });
-        Assert.Equal(45, (await MyGameAsync(sam)).GetProperty("settings").GetProperty("monthly_goal_minutes").GetInt32());
+        Assert.Equal(30, (await MyGameAsync(sam)).GetProperty("settings").GetProperty("monthly_goal_minutes").GetInt32());
         await sam.PutAsJsonAsync("/api/v1/me/play/settings", new { monthlyGoalMinutes = (int?)null });
         Assert.Equal(System.Text.Json.JsonValueKind.Null, (await MyGameAsync(sam)).GetProperty("ring").ValueKind);
     }

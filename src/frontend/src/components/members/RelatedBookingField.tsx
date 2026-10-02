@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { endpoints } from "@/lib/api";
-import { OTHER_BOOKING, recentBookingsFrom, type RecentBooking } from "@/lib/creditAdjustment";
+import { OTHER_BOOKING, recentBookingsFrom, type RecentBooking } from "@/lib/deskLedger";
 import { RELATED_BOOKING as COPY } from "@/lib/membersCopy";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { InfoPopover } from "@/components/ui/info-popover";

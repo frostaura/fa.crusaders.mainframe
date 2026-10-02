@@ -146,7 +146,8 @@ public sealed class PlayAdminHttpTests(PostgresFixture pg) : IClassFixture<Postg
         Assert.Equal(
             ["sessions_attended", "minutes_this_month", "minutes_all_time", "current_streak_weeks", "matches_played", "matches_won", "matches_lost", "open_disputes", "badges_earned"],
             summary.EnumerateObject().Select(p => p.Name));
-        Assert.Equal((2, 120, 1, 0, 1, 1), (summary.GetProperty("sessions_attended").GetInt32(), summary.GetProperty("minutes_all_time").GetInt32(),
+        // Two games of PlayersClub's 4 slices of 8 minutes (P13): 64 minutes.
+        Assert.Equal((2, 64, 1, 0, 1, 1), (summary.GetProperty("sessions_attended").GetInt32(), summary.GetProperty("minutes_all_time").GetInt32(),
             summary.GetProperty("matches_played").GetInt32(), summary.GetProperty("matches_won").GetInt32(), summary.GetProperty("matches_lost").GetInt32(),
             summary.GetProperty("open_disputes").GetInt32()));
         Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/v1/admin/members/{Guid.NewGuid()}/play")).StatusCode);

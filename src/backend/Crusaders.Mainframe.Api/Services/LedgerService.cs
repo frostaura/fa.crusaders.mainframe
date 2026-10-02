@@ -206,7 +206,7 @@ public sealed class LedgerService
             })));
 
             // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
-            if (retry is not null) await retry.AfterCreditAsync(tenantId, slug, [userId], token);
+            if (retry is not null) await retry.AfterMinutesArriveAsync(tenantId, slug, [userId], token);
         }, ct);
     }
 

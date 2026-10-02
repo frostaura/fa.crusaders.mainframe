@@ -88,8 +88,8 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         Assert.Equal(HttpStatusCode.OK, toppedUp.StatusCode);
 
         var rows = await ChangesAsync(factory, club.TenantId);
-        var adjust = Assert.Single(rows, r => r.Action == AdminChangeActions.CreditAdjusted);
-        var topUp = Assert.Single(rows, r => r.Action == AdminChangeActions.CreditToppedUp);
+        var adjust = Assert.Single(rows, r => r.Action == AdminChangeActions.MinutesAdjusted);
+        var topUp = Assert.Single(rows, r => r.Action == AdminChangeActions.PackageSold);
 
         Assert.Equal(club.AdminUserId, adjust.ActorUserId);
         Assert.Equal(club.MemberUserId, adjust.SubjectId);
@@ -104,7 +104,7 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         }
         // A desk sale: the adjust shape in whole minutes, plus the package it sold (P13 §3.7).
         Assert.Equal("Paid cash at the bar", topUp.Reason);
-        Assert.Equal(AdminChangeAreas.Credit, topUp.Area);
+        Assert.Equal(AdminChangeAreas.Money, topUp.Area);
         using (var before = JsonDocument.Parse(topUp.BeforeJson!))
         using (var after = JsonDocument.Parse(topUp.AfterJson!))
         {
@@ -123,7 +123,7 @@ public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixtu
         {
             amountMinutes = 10, reason = "Lights failed mid-session", reasonCode = "goodwill", idempotencyKey = "gm_adj",
         });
-        Assert.Single(await ChangesAsync(factory, club.TenantId), r => r.Action == AdminChangeActions.CreditAdjusted);
+        Assert.Single(await ChangesAsync(factory, club.TenantId), r => r.Action == AdminChangeActions.MinutesAdjusted);
 
         Assert.Empty(await ChangesAsync(factory, other.TenantId));
     }

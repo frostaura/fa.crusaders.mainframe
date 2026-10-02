@@ -450,8 +450,8 @@ public static partial class WalletEndpoints
         // require a reason, which both routes already demand. The codes keep "credit" (P13 §2.5).
         await services.Changes.StageAsync(new AdminChange(
             Action: m.Kind.Type == LedgerEntryType.AdminTopUp
-                ? AdminChangeActions.CreditToppedUp
-                : AdminChangeActions.CreditAdjusted,
+                ? AdminChangeActions.PackageSold
+                : AdminChangeActions.MinutesAdjusted,
             ActorUserId: actorId,
             SubjectKind: AdminChangeSubjects.User,
             SubjectId: m.UserId,

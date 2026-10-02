@@ -1,6 +1,6 @@
 import { ApiError, endpoints, type ShelfPackage } from "@/lib/api";
 import { adminEndpoints, type SellReasonCode } from "@/lib/adminApi";
-import { errorCodeOf, newIdempotencyKey } from "@/lib/creditAdjustment";
+import { errorCodeOf, newIdempotencyKey } from "@/lib/deskLedger";
 import { LIVE_SAID, LOST_REPLY, SELL_COPY, adjustRefusal } from "@/lib/deskMinutesCopy";
 import { balanceNow, rateLimited, refusedOutright, type AdjustmentKey } from "./adjustmentAttempt";
 

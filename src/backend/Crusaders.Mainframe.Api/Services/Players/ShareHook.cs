@@ -43,7 +43,7 @@ public sealed class ShareHook
     /// the partner is paid back the moment the organiser can cover it (review round 2, M1). One
     /// indexed read when nothing waits, which is almost always. Never throws.
     /// </summary>
-    public async Task AfterCreditAsync(Guid tenantId, string? tenantSlug, IReadOnlyCollection<Guid> userIds, CancellationToken requestAborted)
+    public async Task AfterMinutesArriveAsync(Guid tenantId, string? tenantSlug, IReadOnlyCollection<Guid> userIds, CancellationToken requestAborted)
     {
         var ct = FollowUp(requestAborted);
         List<Guid> waiting;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { serverEnumMembers } from "../test/serverContract";
 import { LEDGER_ENTRY_TYPES, type LedgerEntryType } from "./api";
-import { ADMIN_LEDGER_TYPES, LEDGER_TYPE_LABEL, ledgerTypeLabel } from "./creditAdjustment";
+import { ADMIN_LEDGER_TYPES, LEDGER_TYPE_LABEL, ledgerTypeLabel } from "./deskLedger";
 
 /**
  * Review round 2, F3-5: desk top-ups read "AdminTopUp" on the Transactions page and the Type

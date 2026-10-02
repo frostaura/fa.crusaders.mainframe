@@ -72,8 +72,7 @@ async function courtAsDrafted(court: AdminCourt | "new", draft: Draft): Promise<
 async function write(court: AdminCourt | "new", draft: Draft) {
   const name = draft.name.trim();
   const send = court === "new"
-    // until the integrator drops slicePriceCredits (P13 ask F3→integrator): the wire body is `{ name, courtType }`.
-    ? () => endpoints.adminCourtsCreate({ name } as Parameters<typeof endpoints.adminCourtsCreate>[0])
+    ? () => endpoints.adminCourtsCreate({ name })
     : () => endpoints.adminCourtsUpdate(court.id, {
       ...(name !== court.name ? { name } : {}),
       ...(draft.active !== court.is_active ? { isActive: draft.active } : {}),

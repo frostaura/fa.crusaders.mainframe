@@ -67,7 +67,7 @@ public sealed class PackageAdminHttpTests(PostgresFixture pg) : IClassFixture<Po
         var rows = await ChangesAsync(f, club.TenantId, id);
         Assert.Equal([AdminChangeActions.PackageCreated, AdminChangeActions.PackageUpdated, AdminChangeActions.PackageArchived],
             rows.Select(r => r.Action));
-        Assert.All(rows, r => Assert.Equal(AdminChangeAreas.Credit, r.Area));
+        Assert.All(rows, r => Assert.Equal(AdminChangeAreas.Money, r.Area));
         Assert.All(rows, r => Assert.Equal(AdminChangeSubjects.Package, r.SubjectKind));
         Assert.All(rows, r => Assert.Equal("Taster", r.SubjectLabel));
         Assert.All(rows, r => Assert.Equal(club.AdminUserId, r.ActorUserId));

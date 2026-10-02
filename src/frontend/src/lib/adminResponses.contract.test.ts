@@ -220,12 +220,11 @@ describe("member groups (the rest)", () => {
   });
 });
 
-describe("credit and the member's code", () => {
+describe("minutes and the member's code", () => {
   it("an adjustment answers the movement, both balances and who was moved", () => {
     const FILE = "Endpoints/WalletEndpoints.cs";
     exact(only(ok(FILE, "AdjustmentResult")), F.adminAdjustResult());
     exact(only(at(FILE, "AdjustmentResult", "member = ")), F.adminAdjustResult().member!);
-    reads(only(ok(FILE, "AdjustmentResult")), F.legacyAdjustResult());
   });
 
   it("a code reset", () => {

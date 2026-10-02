@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
-import { isGuid } from "@/lib/creditAdjustment";
+import { isGuid } from "@/lib/deskLedger";
 import { type AdjustmentReasonCode } from "@/lib/adminApi";
 import { TOP_UP_COPY } from "@/lib/memberDetailCopy";
 import { attemptAdjustment, type AdjustmentKey } from "@/components/members/adjustmentAttempt";
