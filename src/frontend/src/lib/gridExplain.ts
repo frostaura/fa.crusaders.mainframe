@@ -4,8 +4,9 @@ import type { GridReason, ViewerRules } from "./gridRules";
 import type { TimeSlice } from "./scheduleGrid";
 import { walletTone } from "./balance";
 import { adminWalletNote } from "./bookingsCopy";
+import { BUY_MINUTES_PATH } from "./minutes";
 import {
-  BUY_MINUTES_ACTION, BUY_MINUTES_PATH, closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence,
+  BUY_MINUTES_ACTION, closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence,
   memberEmptyWindowSentence, memberRestrictionSentence, notYetOpenSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
   shortWalletSentence,
 } from "./gridCopy";

@@ -5,7 +5,7 @@ import { useBalance } from "../lib/balance";
 import { formatMoney } from "../lib/utils";
 import { minutesCompact } from "../lib/minutes";
 import { discountPercent } from "../lib/topUpShelf";
-import { BUY_MINUTES_PATH } from "../lib/balance";
+import { BUY_MINUTES_PATH } from "../lib/minutes";
 import { Minutes } from "../components/Minutes";
 import { typography } from "../lib/typography";
 import { PageHeader, PageShell } from "../components/ui/page-shell";

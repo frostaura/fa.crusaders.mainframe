@@ -104,3 +104,6 @@ export function minutesSpoken(n: number, opts?: { signed?: boolean }): string {
   if (value > 0 && opts?.signed) return `plus ${body}`;
   return body;
 }
+
+/** Where a member buys minutes (P13 §3.1). The old `/wallet/topup` redirects here. */
+export const BUY_MINUTES_PATH = "/wallet/buy";

@@ -1,4 +1,4 @@
-import { minutesSpoken } from "./minutes";
+import { BUY_MINUTES_PATH, minutesSpoken } from "./minutes";
 
 /** R3 M-4 — how often the code changes is the club's setting; the sentence never names a period. */
 export const CODE_KEEPS_CHANGING = "The code changes by itself every so often. That is normal, and you never have to do anything about it.";
@@ -430,9 +430,6 @@ export const GET_STARTED = {
     },
   },
 } as const;
-
-/** Where a member buys minutes (contract §3.1; `/wallet/topup` redirects here). */
-export const BUY_MINUTES_PATH = "/wallet/buy";
 
 export const CHECKLIST = {
   title: "Finish setting up",

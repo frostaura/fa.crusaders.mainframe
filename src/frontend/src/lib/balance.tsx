@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import { useAuth } from "./auth";
-import { minutesSpoken } from "./minutes";
+import { BUY_MINUTES_PATH, minutesSpoken } from "./minutes";
 import {
   useLiveBalance, type BalanceDelta, type BalanceTransport, type HeldFigures, type LiveBalancePolicy, type LiveState,
 } from "./liveBalance";
@@ -10,9 +10,6 @@ import {
  * room for one short game at most, which is the moment "buy more" is worth a colour.
  */
 export const LOW_BALANCE_MINUTES = 60;
-
-/** Where a member buys minutes (P13 §3.1). The old `/wallet/topup` redirects here. */
-export const BUY_MINUTES_PATH = "/wallet/buy";
 
 /**
  * What a screen reader says for the wallet chip.

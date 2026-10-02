@@ -233,8 +233,6 @@ export function emptyWindowSentence(groups: readonly string[], day: string): str
 
 /* ─────────────────────────── The wallet, before the member picks ─────────────────────────── */
 
-/** Where every "not enough minutes" prompt points: the member's package shelf (P13 §3.1). */
-export const BUY_MINUTES_PATH = "/wallet/buy";
 /** The action on every empty- or short-wallet prompt. The verb is "buy" (P13 §6). */
 export const BUY_MINUTES_ACTION = "Buy minutes";
 

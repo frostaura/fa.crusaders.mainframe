@@ -10,7 +10,7 @@ import {
   shortByLine,
 } from "@/lib/playersCopy";
 import { useBalance } from "@/lib/balance";
-import { BUY_MINUTES_PATH } from "@/lib/gridCopy";
+import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { Minutes } from "@/components/Minutes";
 import { inviteCapSentence, inviteRefusal, inviteWhen, organiserName } from "./inviteFacts";
 import type { AcceptFlow } from "./useAcceptFlow";

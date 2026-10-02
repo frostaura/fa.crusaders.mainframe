@@ -3,7 +3,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { Interactable } from "@/components/ui/interactable";
 import { Wallet } from "@/components/ui/icons";
 import { useBalance } from "@/lib/balance";
-import { BUY_MINUTES_PATH, GET_STARTED } from "@/lib/onboardingCopy";
+import { GET_STARTED } from "@/lib/onboardingCopy";
+import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { StepFrame } from "./StepFrame";
 
 const COPY = GET_STARTED.steps.buy;

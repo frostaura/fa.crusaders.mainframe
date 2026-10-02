@@ -4,7 +4,7 @@ import { forgetClubZone } from "../lib/clubZone";
 import { signOut } from "../test/harness";
 import { dayFixture, openBookings } from "../test/bookingsKit";
 import { BOOK_SHEET, CELL_TEXT, bookCellLabel, sliceLengthLine } from "../lib/bookingsCopy";
-import { BUY_MINUTES_PATH } from "../lib/gridCopy";
+import { BUY_MINUTES_PATH } from "../lib/minutes";
 import { walletNotice } from "../lib/gridExplain";
 import { emptyWalletSentence } from "../lib/gridCopy";
 import type { ScheduleDay } from "../lib/api";

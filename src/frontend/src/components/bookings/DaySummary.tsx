@@ -5,7 +5,7 @@ import { Skeleton } from "../ui/skeleton";
 import { useBalance, walletTone } from "../../lib/balance";
 import { BOOKINGS_COPY } from "../../lib/bookingsCopy";
 import { firstNameOf } from "../../lib/bookingsApi";
-import { BUY_MINUTES_PATH } from "../../lib/gridCopy";
+import { BUY_MINUTES_PATH } from "../../lib/minutes";
 import { Minutes } from "../Minutes";
 import { typography } from "../../lib/typography";
 import { cn } from "../../lib/utils";

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
 import { BOOK_SHEET } from "@/lib/bookingsCopy";
-import { BUY_MINUTES_PATH } from "@/lib/gridCopy";
+import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { BOOK_PLAYERS } from "@/lib/playersCopy";
 import type { BookFlow } from "./useBookFlow";
 import { isAdminRun } from "./bookFlow";
