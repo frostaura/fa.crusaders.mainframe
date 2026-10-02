@@ -34,12 +34,13 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
 type Club = { label: string; longestName: string; longestNumber: string; topBalance: number };
 
 const CLUBS: Club[] = [
-  { label: "as seeded", longestName: "Bartholomew Fitzwilliam", longestNumber: "MEM-1006", topBalance: 123456.78 },
+  { label: "as seeded", longestName: "Bartholomew Fitzwilliam", longestNumber: "MEM-1006", topBalance: 123456 },
   {
     label: "with longer names and bigger numbers",
     longestName: "Wolfgang-Amadeus Buitendach-Oosthuizen",
     longestNumber: "MEM-CRUSADERS-2026-000000000000001",
-    topBalance: 98765432.19,
+    // P13: whole minutes; the widest a desk adjustment can reach (999 999 = "694 d 10 h 39 min").
+    topBalance: 999_999,
   },
 ];
 
@@ -49,13 +50,13 @@ function membersOf(club: Club) {
   return [
     { name: club.longestName, n: club.longestNumber, status: "PendingApproval", verified: false, bal: 0 },
     // Balances of different lengths, one long enough that its clipped prefix is a different
-    // plausible amount: `123456.78 cr` cut to `12345` is the exact misread the balance test exists for.
+    // plausible amount: `85 d 17 h 36 min` cut to `85 d 17` is the exact misread the balance test exists for.
     { name: "Mia van der Merwe", n: "MEM-1005", status: "Active", verified: true, bal: club.topBalance },
     { name: "Sipho Dlamini", n: "MEM-1004", status: "Active", verified: true, bal: 1500 },
     // The negative twin: a minus sign is a glyph like any other, and the widest string a money
     // column has to hold is the negative one.
-    { name: "Aisha Patel", n: "MEM-1003", status: "Active", verified: true, bal: club.topBalance === 123456.78 ? -1500 : -club.topBalance },
-    { name: "Liam O'Connor", n: "MEM-1002", status: "Suspended", verified: true, bal: 0.5 },
+    { name: "Aisha Patel", n: "MEM-1003", status: "Active", verified: true, bal: club.topBalance === 123456 ? -1500 : -club.topBalance },
+    { name: "Liam O'Connor", n: "MEM-1002", status: "Suspended", verified: true, bal: 30 },
     { name: "Naledi Khoza", n: "MEM-1001", status: "Active", verified: true, bal: 500 },
     { name: "Crusaders Admin", n: "ADMIN-0001", status: "Active", verified: true, bal: 0 },
   ].map((m, i) => ({
@@ -105,7 +106,7 @@ async function measure(page: import("@playwright/test").Page) {
     const region = document.querySelector('[role="region"][aria-label="Members table"]')!;
     region.scrollLeft = 0;
     const box = region.getBoundingClientRect();
-    // Drawn buttons only: below a 48rem card the Top up lives in the ⋯ (R5 §4.3) and is not drawn.
+    // Drawn buttons only: below a 48rem card the Sell package lives in the ⋯ (R5 §4.3) and is not drawn.
     const drawn = (b: HTMLElement) => b.getClientRects().length > 0;
     const controls = Array.from(document.querySelectorAll<HTMLElement>('tbody td[data-label="Actions"] button')).filter(drawn);
     const outsideAtRest = controls
@@ -188,7 +189,8 @@ async function partialBalances(page: import("@playwright/test").Page) {
         cell.scrollIntoView({ block: "center", inline: "nearest" });
         region.scrollLeft = s;
         const box = region.getBoundingClientRect();
-        const span = cell.querySelector("span")!;
+        // The figure the eye reads (`<Minutes>`'s aria-hidden half); the spoken half is sr-only.
+        const span = cell.querySelector<HTMLElement>("[aria-hidden='true']")!;
         const node = span.firstChild!;
         const full = node.textContent!;
         let seen = "";
@@ -219,9 +221,9 @@ for (const club of CLUBS) {
       test("keeps every row action on screen, on one line, before anything is scrolled", async ({ page }) => {
         await openMembers(page, club);
         const m = await measure(page);
-        // Seven rows: a pending row's Approve + Reject + ⋯, five active rows' Top up + ⋯, and a
+        // Seven rows: a pending row's Approve + Reject + ⋯, five active rows' Sell package + ⋯, and a
         // suspended row's ⋯ — fourteen buttons, every one of them inside the box. A card (below a
-        // 48rem box) draws its Top up in the ⋯ (R5 §4.3): nine.
+        // 48rem box) draws its Sell package in the ⋯ (R5 §4.3): nine.
         expect(m.controls).toBe(m.table ? 14 : 9);
         expect(m.outsideAtRest, "row actions outside the scroller's box on arrival").toEqual([]);
         expect(m.maxActionLines, "lines of controls in the widest action cell").toBe(1);
@@ -313,8 +315,8 @@ test.describe("opening a member from the list", () => {
   test("goes to the member from a click anywhere on the row, and stays put for the row's own buttons", async ({ page }) => {
     await openMembers(page);
     const row = page.locator("tbody tr", { hasText: "Sipho Dlamini" });
-    await row.getByRole("button", { name: "Top up" }).click();
-    await expect(page.getByRole("dialog", { name: "Top up Sipho Dlamini" })).toBeVisible();
+    await row.getByRole("button", { name: "Sell package" }).click();
+    await expect(page.getByRole("dialog", { name: "Sell Sipho Dlamini a package" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page).toHaveURL(/\/admin\/members$/);
 
@@ -329,14 +331,16 @@ test.describe("opening a member from the list", () => {
   test("chooses the quick amount the arrow keys move to", async ({ page }) => {
     await openMembers(page);
     const row = page.locator("tbody tr", { hasText: "Sipho Dlamini" });
-    await row.getByRole("button", { name: "Top up" }).click();
-    const sheet = page.getByRole("dialog", { name: "Top up Sipho Dlamini" });
+    // P13: the quick amounts are on "Adjust minutes", in the row's ⋯.
+    await row.locator("[data-member-menu]").click();
+    await page.getByRole("menuitem", { name: "Adjust minutes" }).click();
+    const sheet = page.getByRole("dialog", { name: "Add minutes for Sipho Dlamini" });
     // Reached by keyboard, nothing chosen yet — the reviewer's path.
-    await sheet.getByRole("radio", { name: "+50.00 cr" }).focus();
+    await sheet.getByRole("radio", { name: "+15 min" }).focus();
     await page.keyboard.press("ArrowRight");
-    await expect(sheet.getByRole("radio", { name: "+100.00 cr" })).toBeFocused();
-    await expect(sheet.getByRole("radio", { name: "+100.00 cr" })).toHaveAttribute("aria-checked", "true");
-    await expect(sheet.getByLabel("Another amount")).toHaveValue("100");
+    await expect(sheet.getByRole("radio", { name: "+30 min" })).toBeFocused();
+    await expect(sheet.getByRole("radio", { name: "+30 min" })).toHaveAttribute("aria-checked", "true");
+    await expect(sheet.getByLabel("Another amount, in minutes")).toHaveValue("30");
   });
 
   /** Review round 2, F3-15: the members table wraps an address and a reason instead of cutting them. */

@@ -40,7 +40,7 @@ test("keeps the Amount and the Details button inside the table at 1280 beside th
 
   const scroller = page.getByRole("region", { name: "Club ledger" });
   const box = (await scroller.boundingBox())!;
-  const amount = (await page.getByRole("cell", { name: "−48.00 cr" }).boundingBox())!;
+  const amount = (await page.getByRole("cell", { name: /minus 48 minutes|−48 min/ }).first().boundingBox())!;
   const details = (await page.getByRole("button", { name: /^Details — Booking charge/ }).boundingBox())!;
   expect(amount.x + amount.width, "the Amount is past the table's edge").toBeLessThanOrEqual(box.x + box.width + 1);
   expect(details.x + details.width, "Details is past the table's edge").toBeLessThanOrEqual(box.x + box.width + 1);

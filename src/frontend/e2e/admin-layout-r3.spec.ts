@@ -146,7 +146,7 @@ test.describe("the member page", () => {
     await expect(cancel).toBeVisible(ARRIVES);
     const [cardBox, cancelBox] = [await card.boundingBox(), await cancel.boundingBox()];
     expect(cancelBox!.x + cancelBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
-    const charge = card.getByText("100.00 cr");
+    const charge = card.getByText("1 h 40 min");
     const lineHeight = await charge.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     expect((await charge.boundingBox())!.height).toBeLessThanOrEqual(lineHeight + 1);
   });
@@ -154,7 +154,7 @@ test.describe("the member page", () => {
   test("V-6: at 768 the balance is one line", async ({ page }) => {
     await open(page, `/admin/members/${MEMBER_ID}`, memberRoutes(), { width: 768 });
     const figure = page.getByTestId("member-balance");
-    await expect(figure).toHaveText("433.00 cr", ARRIVES);
+    await expect(figure).toContainText("7 h 13 min", ARRIVES);
     const lineHeight = await figure.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     expect((await figure.boundingBox())!.height).toBeLessThanOrEqual(lineHeight + 1);
   });

@@ -11,7 +11,7 @@ import { Minutes } from "@/components/Minutes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CalendarBlank, HourglassMedium, Lock, PencilSimple, Plus, ShieldCheck, UserFocus, UsersThree } from "@/components/ui/icons";
+import { CalendarBlank, Lock, PencilSimple, Plus, ShieldCheck, UserFocus, UsersThree } from "@/components/ui/icons";
 import { PageHeader, PageShell } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,7 +37,7 @@ import { useMemberTopUp } from "./useMemberTopUp";
  * <p>
  * <b>Header, then tabs, then the tab.</b> The header is who they are and what they hold — photo,
  * name, status, admin, groups, balance — with the everyday actions beside the balance (Sell
- * package, Adjust minutes, Book for member) and everything consequential behind one ⋯. Each tab is its own ROUTE
+ * package, Book for member; Adjust minutes is in the ⋯) and everything consequential behind one ⋯. Each tab is its own ROUTE
  * (`/admin/members/:userId/wallet` …), so a tab is a link that can be shared, reloaded and
  * reached with Back, and the active one carries `aria-current="page"`.
  * </p>
@@ -192,7 +192,7 @@ function MemberHeader(props: HeaderProps) {
         actions={(
           <>
             <RefreshButton label={MEMBER_COPY.refresh} onRefresh={() => void state.reload()} loading={state.loading} />
-            <MemberActions detail={detail} name={name} onChanged={state.reload} onRole={(r) => roleChanged(state, r)} />
+            <MemberActions detail={detail} name={name} onChanged={state.reload} onRole={(r) => roleChanged(state, r)} onAdjust={onAdjust} />
           </>
         )}
         freshness={<Freshness at={state.readAt} />}
@@ -214,7 +214,7 @@ function MemberHeader(props: HeaderProps) {
         className="flex flex-col gap-4 rounded-xl border border-border bg-bg-surface p-4 shadow-xs [container-type:inline-size] sm:gap-5 sm:p-6 md:flex-row md:flex-wrap md:items-center md:justify-between"
       >
         <Identity detail={detail} name={name} state={state} />
-        <BalancePanel detail={detail} name={name} onSell={onSell} onAdjust={onAdjust} />
+        <BalancePanel detail={detail} name={name} onSell={onSell} />
       </section>
     </>
   );
@@ -341,9 +341,7 @@ function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) 
  */
 const GROWS = "!h-auto min-h-touch min-w-0 flex-[1_1_auto] whitespace-normal py-2 text-center sm:flex-[0_1_auto]";
 
-type BalancePanelProps = { detail: MemberDetail; name: string; onSell: () => void; onAdjust: () => void };
-
-function BalancePanel({ detail, name, onSell, onAdjust }: BalancePanelProps) {
+function BalancePanel({ detail, name, onSell }: { detail: MemberDetail; name: string; onSell: () => void }) {
   const overdrawn = detail.balance_minutes < 0;
   const canBook = detail.status === "Active";
   return (
@@ -365,14 +363,9 @@ function BalancePanel({ detail, name, onSell, onAdjust }: BalancePanelProps) {
         {/* Only an active member is sold to or adjusted (F3.10) — the members list offers neither
             to anybody else, and a turned-down applicant was once offered one here. */}
         {canBook ? (
-          <>
-            <Button onClick={onSell} icon={<Plus weight="bold" aria-hidden="true" />} className={GROWS}>
-              {MEMBER_COPY.sell}
-            </Button>
-            <Button variant="outline" onClick={onAdjust} icon={<HourglassMedium aria-hidden="true" />} className={GROWS}>
-              {MEMBER_COPY.adjust}
-            </Button>
-          </>
+          <Button onClick={onSell} icon={<Plus weight="bold" aria-hidden="true" />} className={GROWS}>
+            {MEMBER_COPY.sell}
+          </Button>
         ) : (
           <p className="max-w-xs text-sm text-text-muted">{MEMBER_COPY.noSell[detail.status ?? "none"] ?? MEMBER_COPY.noSell.none}</p>
         )}

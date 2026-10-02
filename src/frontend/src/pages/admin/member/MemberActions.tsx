@@ -5,7 +5,7 @@ import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMen
 import { useResetMemberCodeConfirm } from "@/components/member-code/useResetMemberCodeConfirm";
 import { useToast } from "@/components/Toast";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { ArrowCounterClockwise, Envelope, Key, Lock, Prohibit, ShieldCheck, ShieldWarning, UserMinus, UserPlus } from "@/components/ui/icons";
+import { ArrowCounterClockwise, Envelope, HourglassMedium, Key, Lock, Prohibit, ShieldCheck, ShieldWarning, UserMinus, UserPlus } from "@/components/ui/icons";
 import { Textarea } from "@/components/ui/textarea";
 import { endpoints } from "@/lib/api";
 import { ACTIONS_COPY as COPY, ADMIN_ROLE_COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
@@ -17,7 +17,7 @@ import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 
 /**
  * The member's secondary actions behind one ⋯ (the founder: the old row of worded buttons was
- * "atrocious"). The two everyday actions — Top up, Book for member — stay on the header; the
+ * "atrocious"). The two everyday actions — Sell package, Book for member — stay on the header; the
  * lifecycle transitions live here, each behind a confirm dialog that states its consequence.
  *
  * <p>
@@ -33,8 +33,12 @@ import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
  */
 type Props = { detail: MemberDetail; name: string; onChanged: () => void | Promise<void> };
 
-/** The header's ⋯ also takes the server's answer to a role change, so the badge redraws from it. */
-type ActionsProps = Props & { onRole: (result: AdminRoleResult) => void | Promise<void> };
+/**
+ * The header's ⋯ also takes the server's answer to a role change, so the badge redraws from it,
+ * and opens "Adjust minutes" (P13 §3.7) — goodwill and corrections, kept off the header beside the
+ * sale so a phone's header stays short, exactly as the members list keeps it in the row's ⋯.
+ */
+type ActionsProps = Props & { onRole: (result: AdminRoleResult) => void | Promise<void>; onAdjust?: () => void };
 
 function ReasonField({ id, value, onChange }: { id: string; value: string; onChange: (next: string) => void }) {
   return (
@@ -160,11 +164,14 @@ export function MemberActions(props: ActionsProps) {
     },
   };
   const resetCode = useResetCodeItem(props);
+  const adjust: ActionsMenuItem | null = props.onAdjust && detail.status === "Active"
+    ? { label: MEMBER_COPY.adjust, icon: <HourglassMedium aria-hidden="true" />, onSelect: props.onAdjust }
+    : null;
 
   return (
     // `contents`: the wrapper is only there to find the ⋯ again, for the role dialog's focus return.
     <span ref={anchor} className="contents">
-      <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[resend, role.item, resetCode, ...lifecycle]} />
+      <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[adjust, resend, role.item, resetCode, ...lifecycle]} />
       {role.attempt ? (
         <AdminRoleDialog
           key={role.attempt.n}

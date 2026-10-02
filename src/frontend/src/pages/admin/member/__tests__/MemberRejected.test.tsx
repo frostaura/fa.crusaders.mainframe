@@ -34,7 +34,9 @@ describe("member detail — a turned-down application", () => {
     serve(baseRoutes(detailFixture()));
     renderMember();
     expect(await screen.findByRole("button", { name: MEMBER_COPY.sell })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: MEMBER_COPY.adjust })).toBeInTheDocument();
+    // Adjust minutes is in the header's ⋯, beside the record's other acts (a phone's header stays short).
+    fireEvent.pointerDown(screen.getByRole("button", { name: MEMBER_COPY.moreActions("Thandi Mokoena") }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+    expect(await screen.findByRole("menuitem", { name: MEMBER_COPY.adjust })).toBeInTheDocument();
   });
 });
 

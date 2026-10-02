@@ -104,7 +104,9 @@ test.describe("member detail", () => {
       const box = await nav.getByRole("link", { name: tab.label }).boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     }
-    await expect(page.getByTestId("member-balance")).toHaveText("−16.00 cr");
+    // Whole minutes (P13): the eye reads "−16 min", a screen reader hears "minus 16 minutes".
+    await expect(page.getByTestId("member-balance")).toContainText("−16 min");
+    await expect(page.getByTestId("member-balance")).not.toContainText(/\.00|\bcr\b/);
   });
 
   test("a tab is a real navigation: a URL, aria-current, and Back", async ({ page }) => {

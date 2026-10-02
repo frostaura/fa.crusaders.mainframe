@@ -154,7 +154,7 @@ test.describe("R5 X5-9 — the member tabs at 390", () => {
 });
 
 test.describe("R5 §4.3 / X5-12 — the members list on a phone", () => {
-  test("an active member's card is about 72px, its name and ⋯ 44px targets, Top up in the ⋯", async ({ page }) => {
+  test("an active member's card is about 72px, its name and ⋯ 44px targets, Sell package in the ⋯", async ({ page }) => {
     await open(page, "/admin/members", 390, false);
     const card = page.locator("tr[data-member-row]").first();
     await expect(card).toBeVisible({ timeout: 30_000 });
@@ -165,9 +165,10 @@ test.describe("R5 §4.3 / X5-12 — the members list on a phone", () => {
     const more = card.locator("[data-member-menu]");
     const box = await more.boundingBox();
     expect(Math.min(box!.width, box!.height), "the ⋯ target").toBeGreaterThanOrEqual(44);
-    await expect(card.getByRole("button", { name: "Top up" })).toBeHidden();
+    await expect(card.getByRole("button", { name: "Sell package" })).toBeHidden();
     await more.click();
-    await expect(page.getByRole("menuitem", { name: "Top up" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Sell package" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Adjust minutes" })).toBeVisible();
     expect((await overflow(page)).scroll).toBeLessThanOrEqual(1);
   });
 });
