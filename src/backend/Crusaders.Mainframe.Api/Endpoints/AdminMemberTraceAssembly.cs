@@ -415,6 +415,7 @@ public static partial class AdminMemberTraceAssembly
                     SubjectName = PersonNames.Of(row.SubjectUserId, s.Names),
                     CourtWasDark = Flag(details, "peripheral_outage"),
                     CodeUsed = Text(details, "reason") == MemberCodeIdentity.CodeUsed,
+                    Attempt = Text(details, "attempt"),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -581,7 +582,9 @@ public static partial class AdminMemberTraceAssembly
             ("reason", Text(details, "reason") ?? Text(details, "outcome")),
             ("method", Text(details, "method")),
             ("booking_id", Text(details, "booking_id")),
-            ("court", Text(details, "court") ?? Text(details, "court_number")));
+            ("court", Text(details, "court") ?? Text(details, "court_number")),
+            // R11 E11-4: a court-box refusal's attempt (activate / walkup / pay_for), as stored.
+            ("attempt", Text(details, "attempt")));
 
         // Present on every door row and absent everywhere else: "the board decided this alone"
         // is a fact about the row, and false is a different answer from "not a door row".

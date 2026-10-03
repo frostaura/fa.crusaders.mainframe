@@ -82,6 +82,13 @@ public readonly record struct TraceFacts
     public bool CodeUsed { get; init; }
 
     /// <summary>
+    /// What a court-box refusal was asked to do, as its writer stored it — <c>activate</c>,
+    /// <c>walkup</c> or <c>pay_for</c> (review round 11, E11-4). A walk-up and a pay-for refused at
+    /// one court read as the same "Was turned away" row and the Night folded them into one.
+    /// </summary>
+    public string? Attempt { get; init; }
+
+    /// <summary>
     /// The club took no rand for this desk top-up — a free package (<c>package_free</c>) or a sale
     /// recorded at R0.00 — so it was given, not sold (review round 8, E8-5).
     /// </summary>
@@ -563,7 +570,7 @@ public static class TraceKinds
             WalkUpRefunded => $"Light time at {court} was given back",
 
             CourtCheckedIn => $"Checked in at {court}",
-            CourtRefused => facts.CodeUsed ? $"Was turned away at {court}{UsedCode(facts)}" : $"Was refused at {court}",
+            CourtRefused => facts.CodeUsed ? TurnedAway(facts, court) : $"Was refused at {court}",
 
             LightsOn => $"{court} lights came on",
             LightsOff => $"{court} lights went off",
@@ -579,6 +586,18 @@ public static class TraceKinds
 
             _ => AccountHeadline(kind, facts),
         };
+    }
+
+    /// <summary>R11 E11-4: a refusal of a used code, worded by what the member was trying to do.</summary>
+    private static string TurnedAway(TraceFacts facts, string court)
+    {
+        var doing = facts.Attempt switch
+        {
+            "walkup" => " buying light time",
+            "pay_for" => " paying for somebody's booking",
+            _ => "",
+        };
+        return $"Was turned away{doing} at {court}{UsedCode(facts)}";
     }
 
     /// <summary>The reason a refusal of an already-used code is given, in words (E9-6); empty otherwise.</summary>

@@ -94,7 +94,11 @@ public static class DeviceActivateEndpoint
         // reasoning CourtActivationService.CandidatesAsync records: the member was told why
         // by email, and a box that named the reason would be announcing it to whoever is
         // standing at the court.
-        var who = new Refusing(device, resolved.UserId, req.Method, match, display);
+        var who = new Refusing(device, resolved.UserId, req.Method, match, display)
+        {
+            // R11 E11-4: the court the box said it was asked at, when it is one of the box's.
+            ReportedCourt = req.Court is { } asked && device.CourtNumbers.Contains(asked) ? asked : null,
+        };
         if (await MembershipAccess.IsBarredFromCourtsAsync(services.Db, resolved.UserId, ct))
         {
             return await BookingRefusalAsync(new Found(null, null, "no_booking"), who, services, ct);
@@ -186,15 +190,21 @@ public static class DeviceActivateEndpoint
     }
 
     /// <summary>The member a refusal is about, once their code resolved — and how the box asked.</summary>
-    private sealed record Refusing(Device Device, Guid UserId, string? Method, MemberCodeMatch? Match, string? Display);
+    private sealed record Refusing(Device Device, Guid UserId, string? Method, MemberCodeMatch? Match, string? Display)
+    {
+        /// <summary>The court the box reported, kept for a refusal that found no booking to name one (R11 E11-4).</summary>
+        public int? ReportedCourt { get; init; }
+    }
 
     /// <summary>
     /// <c>code_used</c>, written on the member's record first (review round 9, E9-6) — the door's
-    /// refusal of the same code always was, and the Night showed nothing at either court.
+    /// refusal of the same code always was, and the Night showed nothing at either court. With no
+    /// booking found the court is the one the box reported (R11 E11-4): it sent court 2 and the
+    /// row said "a court".
     /// </summary>
     private static async Task<DeviceActivateResponse> CodeUsedAsync(Court? court, Refusing who, DeviceActivateServices services)
     {
-        await services.Faults.CodeUsedAtCourtAsync(who.Device, who.UserId, court?.CourtNumber, "activate", who.Method);
+        await services.Faults.CodeUsedAtCourtAsync(who.Device, who.UserId, court?.CourtNumber ?? who.ReportedCourt, "activate", who.Method);
         return Refused(MemberCodeIdentity.CodeUsed, court, who.Display);
     }
 

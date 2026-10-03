@@ -278,7 +278,8 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         Assert.Equal(3, refused.Count);
         Assert.Contains("Was turned away at Court 1 — code already used", refused);
         Assert.Contains("Was turned away at Court 4 — code already used", refused);
-        Assert.Contains("Was turned away at Court 3 — code already used", refused);
+        // R11 E11-4: the walk-up's refusal says what was being bought, not the lights' words.
+        Assert.Contains("Was turned away buying light time at Court 3 — code already used", refused);
     }
     /// <summary>
     /// Review round 10, D10-1 / E10-3: E9-6 put a court box's <c>code_used</c> on the member's
@@ -323,6 +324,49 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
             .Where(e => e.GetProperty("kind").GetString() == "court.refused")
             .Select(e => e.GetProperty("headline").GetString()).ToList();
         Assert.Equal(2, refused.Count);
-        Assert.All(refused, h => Assert.Equal("Was turned away at Court 2 — code already used", h));
+        Assert.All(refused, h => Assert.Equal("Was turned away paying for somebody's booking at Court 2 — code already used", h));
+    }
+
+    /// <summary>
+    /// Review round 11, E11-4: a used code refused at a box where the member has NO booking was
+    /// recorded with no court ("Was turned away at a court") though the box said court 2, and the
+    /// Night never showed what was attempted, so a walk-up and a lights refusal at one court read
+    /// as the same row. The reported court is recorded, and the trace carries the attempt.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_used_code_refused_with_no_booking_names_the_reported_court_and_the_attempt()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
+        var club = await MemberCodeClub.SeedAsync(app, "photo11");
+        await club.BookAsync(app, club.Olga, courtIndex: 0, startsInMinutes: -5);   // Olga: court 1 only
+        var device = app.CreateClient();
+
+        var photo = club.Code(club.Olga, at: clock.Now);
+        Assert.True((await SendAsync(device, club.Activate(photo))).Body.GetProperty("activated").GetBoolean());
+        var atTwo = club.Device("/api/v1/device/activate",
+            new JsonObject { ["mac"] = club.BoxMac, ["method"] = "qr", ["token"] = photo, ["court"] = 2 });
+        Assert.Equal("code_used", Reason((await SendAsync(device, atTwo)).Body));
+        Assert.Equal("code_used", Reason((await SendAsync(device, club.WalkUp(photo, court: 2, nonce: "1111222233334444"))).Body));
+
+        var row = await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == "court.activation_refused")
+            .OrderBy(a => a.CreatedAt).FirstAsync());
+        var details = JsonDocument.Parse(row.DetailsJson!).RootElement;
+        Assert.Equal(2, details.GetProperty("court_number").GetInt32());
+        Assert.Equal("activate", details.GetProperty("attempt").GetString());
+
+        var night = await club.Member(app, club.AdminId, "admin")
+            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={clock.Now:yyyy-MM-dd}");
+        var refused = night.GetProperty("events").EnumerateArray()
+            .Where(e => e.GetProperty("kind").GetString() == "court.refused").ToList();
+        Assert.Equal(2, refused.Count);
+        Assert.Contains(refused, e => e.GetProperty("headline").GetString() == "Was turned away at Court 2 — code already used"
+                                      && e.GetProperty("detail").GetProperty("attempt").GetString() == "activate"
+                                      && e.GetProperty("court").GetProperty("number").GetInt32() == 2);
+        Assert.Contains(refused, e => e.GetProperty("headline").GetString() == "Was turned away buying light time at Court 2 — code already used"
+                                      && e.GetProperty("detail").GetProperty("attempt").GetString() == "walkup");
     }
 }
