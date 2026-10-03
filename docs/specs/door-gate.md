@@ -606,6 +606,15 @@ a log — and this path wrote it in full under `subject`, for a `gate_open` and 
 `DetailsJson`, so those bytes stayed readable for as long as the row did, and they open every
 door in the club for the length of that booking's window.
 
+**An offline refusal of a genuine code is named (review round 11, D11-2).** A door offline refuses a
+v1 code it cannot accept from its own state — replayed, too early or late, a stale roster — and
+uploads it as a plain `unknown_scan`. The server re-checks that code at the scan's instant for
+identity only: no use is claimed, no forgery alert is raised, the code is never stored. A genuine
+one is logged with reason `refused_offline`, the member named (the CSV says "Refused offline";
+`?reason=not_recognised` no longer returns it); an unprovable one stays `not_recognised` with
+nobody named. A court box's offline refusal (`device.court_unknown_scan`) is named the same way
+and reaches the member's Night as `court.refused` with its court.
+
 What `subject` carries is the **first eight hex characters of SHA-256 over the normalised
 code**. Not reversible, not a lookup key, and it keeps the one property worth keeping: two
 scans of one code still produce the same value, so "the same badge tried the side door eleven

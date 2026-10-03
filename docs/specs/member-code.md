@@ -408,6 +408,15 @@ still receipted — evidence is never refused — but it is **not** attendance: 
 recorded in `member_code_uses`. Offline activation evidence resolves its booking by member, relay
 and time (`FindForEvidenceAsync`, never `EndsAt`), organiser or accepted partner alike.
 
+An offline **refusal** (`unknown_scan`, `court_unknown_scan`) of a v1-shaped code is re-checked for
+identity only (review round 11, D11-2): a genuine code names its member as `refused_offline`; no
+use is claimed and no forgery alert is raised, because the device opened nothing.
+
+`member_display`, on every device answer that greets a member (activate, walk-up), is printable
+ASCII 0x20–0x7E, at most 16 characters: accents are folded (Zoë → ZOE), anything else is dropped,
+and a name with nothing printable left reads `MEMBER` (review round 11, D11-1). The court box's
+HD44780 has no glyphs beyond ASCII, so the server, not the firmware, owns the fold.
+
 ---
 
 ## 8. Capability negotiation and rollout
