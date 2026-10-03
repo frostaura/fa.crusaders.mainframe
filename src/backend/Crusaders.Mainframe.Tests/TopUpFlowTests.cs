@@ -461,8 +461,14 @@ public sealed class TopUpFlowTests(PostgresFixture pg) : IClassFixture<PostgresF
         var group = Guid.NewGuid();
         var row = new PendingTopup
         {
-            IdempotencyKey = "tu_x", PackageId = Guid.NewGuid(), PackageName = "5 hours", Minutes = 300,
-            ListPriceZar = 550m, DiscountBps = 1000, GroupId = group, AmountZar = 495m,
+            IdempotencyKey = "tu_x",
+            PackageId = Guid.NewGuid(),
+            PackageName = "5 hours",
+            Minutes = 300,
+            ListPriceZar = 550m,
+            DiscountBps = 1000,
+            GroupId = group,
+            AmountZar = 495m,
         };
         var groups = new List<Dictionary<string, object?>> { new() { ["id"] = group, ["name"] = "League", ["system_key"] = "league" } };
 
