@@ -147,6 +147,8 @@ export type BookingDetail = {
   starts_at: string;
   ends_at: string;
   sold_ends_at: string;
+  /** R9 J9-5 — the desk made this booking for the member (absent on an older server: read as false). */
+  booked_by_club?: boolean;
   status: BookingStatusWord;
   split_mode: SplitMode;
   viewer: { role: ViewerRole; participant_id: string | null };

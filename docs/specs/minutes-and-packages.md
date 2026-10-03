@@ -477,11 +477,12 @@ Dean's answer 1 removes the cap entirely. This disappears:
 
 ```json
 { "packageId": "uuid", "reasonCode": "top_up_cash|top_up_eft|top_up_card_offline|package_free",
-  "zarReceived": 495.00, "reason": "Paid cash at the bar", "idempotencyKey": "…" }
+  "quotedPriceZar": 495.00, "zarReceived": 495.00, "reason": "Paid cash at the bar", "idempotencyKey": "…" }
 ```
 
 - The package must be on the member's shelf now. If not, 409 `package_unavailable`.
-- `zarReceived` is optional. **It defaults to the member's shelf `price_zar`.** When sent, it must be 0 to 1 000 000 in whole cents (B7: `zar_received_out_of_range`, `zar_received_not_whole_cents`). It may differ from the price.
+- **`quotedPriceZar` (review round 9, J9-1)** is the price the desk was SHOWN. It must equal the member's live shelf `price_zar`, else 409 `package_price_changed` `{package, discount}` (the member purchase path's shape) and nothing is posted — the sheet names the new price and asks for a fresh confirm. A free give whose price is no longer 0 is the same 409.
+- `zarReceived` is the rand taken; it defaults to `quotedPriceZar`, never to the write-time price. At least one of the two is required (400 `quoted_price_required`). When sent, it must be 0 to 1 000 000 in whole cents (B7: `zar_received_out_of_range`, `zar_received_not_whole_cents`). It may differ from the price.
 - `reasonCode` outside the four codes: 400 `reason_code_invalid`, with `valid` listing the four. A blank `reason`: 400 `reason_required`.
 - **`package_free` (review round 7, J7-10)** is valid ONLY when the member's shelf `price_zar` for that package is 0.00; on a priced package it is 400 `reason_code_invalid` with `valid` listing the three paid codes. With it, `zarReceived` is optional and, when sent, must be 0 (else 400 `zar_received_out_of_range`, `max: 0`); the row records `ZarPaid = 0`, the change record and audit carry `reason_code: package_free`, and the mail says the package was given at no charge (no "Amount received"). Revenue counts it as R0.00, as it already did. A R0.00 package may still be sold under a paid code — the desk may take money anyway.
 - On success it posts one `AdminTopUp` row: `AmountMinutes = package.Minutes`, `ZarPaid = zarReceived`, `Reason = "{reason} — {package name}"`, and `ExternalReference = adjust:{tenant:N}:{key}` when a key was sent. Idempotency works as today (`idempotency_key_reused` on a different replay).
@@ -974,7 +975,7 @@ Defaults kept from the plan: lowest discount wins; penalties and partner shares 
 5. **`ReceiptPdf` is a booking receipt** (`ForBooking`). The package, list price, discount and reference belong in `PurchaseConfirmation`, the completion email. The receipt only changes its figures to minutes.
 6. **A lit-time charge rounds the lit duration down** (the single payer-favour rule), where the plan said `min(minutes lit, …)` with "minutes lit" taken from `LitWindow.Minutes`. That value is computed with `Math.Ceiling` (`DeviceEventEndpoints.cs` 1285). It stays as it is for its non-money uses, and B1 derives the floor for the charge.
 7. **The admin ledger `totals` `credits`/`debits`/`net` are renamed** to `in_minutes`/`out_minutes`/`net_minutes`. The plan did not list them. "credits" there is the accounting word, but it would survive the scan and confuse the unit.
-8. **The adjust route has no `allowNegativeBalance`.** The plan said it is "kept", but the source has none: an adjustment already posts whatever it is told. The desk sale is a separate route (`/sell`) rather than a mode of `/adjust`, so the sale's `packageId` and the default `zarReceived` cannot be mixed with a signed goodwill amount.
+8. **The adjust route has no `allowNegativeBalance`.** The plan said it is "kept", but the source has none: an adjustment already posts whatever it is told. The desk sale is a separate route (`/sell`) rather than a mode of `/adjust`, so the sale's `packageId` and the quoted price cannot be mixed with a signed goodwill amount.
 9. **`creditsPerZarLeague` is now bound and ignored** instead of refused with `credits_per_zar_league_moved_to_groups`. There is no league rate left to point anyone to, and the hygiene rule covers retired keys.
 10. **`minutes.purchased` drops `member_class`.** The event is renamed, so no template that names `{member_class}` on `credit.topped_up` can receive it. The one-release deprecation therefore has nothing to protect here.
 11. **The open-checkout `counts_until` becomes `expires_at`.** With no cap, nothing "counts" until then. The row simply expires.

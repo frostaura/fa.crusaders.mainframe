@@ -1099,6 +1099,8 @@ export const adminEndpoints = {
       packageId: string;
       reasonCode: SellReasonCode;
       reason: string;
+      /** The price the desk was SHOWN (R9 J9-1): the server sells at it or answers 409 package_price_changed. */
+      quotedPriceZar: number;
       zarReceived?: number;
       idempotencyKey?: string;
     },
@@ -1106,6 +1108,7 @@ export const adminEndpoints = {
     packageId: body.packageId,
     reasonCode: body.reasonCode,
     reason: body.reason,
+    quotedPriceZar: body.quotedPriceZar,
     ...(body.zarReceived !== undefined ? { zarReceived: body.zarReceived } : {}),
     ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
   }),

@@ -338,7 +338,7 @@ export const CHANGE_RECORD_CATALOGUE: ChangeRecordFixture[] = [
     writer: "AdminPackageEndpoints.UpdateAsync", before: PACKAGE, after: { ...PACKAGE, price_zar: dec("500.00") },
   }),
   row({
-    action: "package.archived", area: "credit", headline: "Archived a minutes package — 5 hours",
+    action: "package.archived", area: "credit", headline: "Retired a minutes package — 5 hours",
     writer: "AdminPackageEndpoints.ArchiveAsync", before: PACKAGE, after: { ...PACKAGE, status: "archived" },
   }),
 

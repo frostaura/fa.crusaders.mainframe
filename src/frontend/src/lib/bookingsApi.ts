@@ -31,6 +31,8 @@ export type UpcomingGame = {
   role: "organiser" | "partner" | "payer";
   /** R7 E7-6 — the end it was sold to; `ends_at` is cut short by the no-show sweep. */
   sold_ends_at?: string;
+  /** R9 J9-5 — the desk made this booking for the member (absent on an older server: read as false). */
+  booked_by_club?: boolean;
   status: string;
   players: UpcomingPlayer[];
   /** The caller's share of the price — the whole price for an organiser with nobody else paying. */
