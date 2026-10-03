@@ -36,11 +36,11 @@ last_verified: 2026-10-03
 - **A `min-width` beats a `max-width`** (R4, X4-2): `min-w-48` is 384 px at 200 % text and ran
   the account menu off a 375 phone despite `max-w-[calc(100vw-1rem)]`. Floors on popovers are
   `min(12rem, 100vw-1rem)`; height caps are Radix's `--radix-*-content-available-height` + scroll.
-- **Heights are floors in `ui/`** (R4, V4-1): Input, SelectTrigger and Button are `min-h-*` +
-  padding (a fixed 44 px box around a 48 px line cut the text). Only a `block` Button wraps; others
-  stay `nowrap` (a `shrink-0` + wrap attempt broke callers that opt in with `whitespace-normal`).
+- **Heights are floors in `ui/`** (R4): Input, SelectTrigger, Button are `min-h-*` + padding. R11:
+  Button and Toggle WRAP (inherited white-space, max-w-full, text-balance, pixel gaps), figures
+  glued (`ui/figure-text`); DialogBody rows `shrink-0`; `e2e/overflow-200.spec.ts` walks every route.
   A `Field` is `grid-cols-1` — its implicit column let a password wrapper push the field 36 px out.
-- **Never let a chrome BOX grow with the text** (B12): a padded bell grew the bar 99 px; cap the badge.
+- **Never let a chrome BOX grow with the text** (B12): cap the badge. R11: `hyphens-auto` never splits a Capitalised word ("Cancellations") — step the type down in a rem @container.
 - **A negative margin that grows a target must use `lh`, not rem**: `-my-3` pulled the field
   24 px under "Forgot password?" at 200 %; `min(0px, calc((1lh - 44px) / 2))` is ~0 there.
 - **Measure "clipped label" on the `button-label` layer**, not scrollWidth: the hidden pending
