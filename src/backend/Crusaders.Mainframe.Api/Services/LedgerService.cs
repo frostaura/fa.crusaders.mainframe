@@ -141,7 +141,8 @@ public sealed class LedgerService
         // penalty animate the badge once, by their net.
         foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), PartsOf(group));
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), PartsOf(group),
+                group.Select(p => p.Share).FirstOrDefault(w => w is not null));
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
@@ -175,7 +176,8 @@ public sealed class LedgerService
     public const string SetAsideReason = "share_set_aside";
 
     private Task PublishBalanceAsync(
-        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<BalancePart>? parts = null)
+        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<BalancePart>? parts = null,
+        ShareWhy? share = null)
     {
         var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);
         var topic = RealtimeTopic.Wallet(tenantId, userId);
@@ -206,6 +208,10 @@ public sealed class LedgerService
                 held_parts = held.WireParts(),
                 // E10-1: the rows behind delta_minutes, each {reason (by type), delta_minutes}; [] when only what is set aside moved.
                 parts = (parts ?? []).Select(p => new { reason = p.Reason, delta_minutes = p.DeltaMinutes }).ToList(),
+                // R11 E11-1: WHY a share moved (WalletShareCauses), null unless a share row moved; and on a
+                // no-show return the partner's part of the penalty that stayed behind.
+                share_cause = share?.Cause,
+                share_kept_minutes = share?.KeptMinutes,
             })));
 
             // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
@@ -415,7 +421,7 @@ public sealed class LedgerService
         await _db.SaveChangesAsync(ct);
 
         // Queued for after the commit, not published here — D2-B07 and RealtimeOutbox.
-        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor([posting]), ct, MoneyIn([posting]), PartsOf([posting]));
+        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor([posting]), ct, MoneyIn([posting]), PartsOf([posting]), posting.Share);
         await MirrorAsync(entry, ct);
 
         return entry;
@@ -440,6 +446,50 @@ public sealed record LedgerPosting(
     /// <see cref="WalletStreamReasons"/>; null keeps the type's own reason. Never stored.
     /// </summary>
     public string? StreamReason { get; init; }
+
+    /// <summary>
+    /// Review round 11, E11-1: on a <see cref="LedgerEntryType.ShareTransfer"/> leg, why the share
+    /// moved — the frame's <c>share_cause</c>. "15 minutes … came back from Cleo" after an outage
+    /// refund told the partner the organiser had returned it. Null elsewhere. Never stored.
+    /// </summary>
+    public ShareWhy? Share { get; init; }
+}
+
+/// <summary>Why a share moved (one of <see cref="WalletShareCauses"/>), and on a no-show return the minutes kept as the partner's part of the penalty.</summary>
+public sealed record ShareWhy(string Cause, int? KeptMinutes = null);
+
+/// <summary>
+/// The closed set the live wallet frame's <c>share_cause</c> carries (review round 11, E11-1). The
+/// direction is the sign of <c>delta_minutes</c>; this is the reason.
+/// </summary>
+public static class WalletShareCauses
+{
+    /// <summary>The partner paid their share to the organiser.</summary>
+    public const string SharePaid = "share_paid";
+
+    /// <summary>The club collected the partner's share by hand.</summary>
+    public const string ClubCollected = "club_collected";
+
+    /// <summary>Taken again: a late check-in reversed the club's refund — the session was attended.</summary>
+    public const string Attended = "attended";
+
+    /// <summary>The organiser's own act sent it back (a removal, a split change, a partner who left).</summary>
+    public const string ShareReturned = "share_returned";
+
+    /// <summary>The booking was cancelled, so the share went back.</summary>
+    public const string BookingCancelled = "booking_cancelled";
+
+    /// <summary>The club took the partner off the game.</summary>
+    public const string ClubRemoved = "club_removed";
+
+    /// <summary>The club refunded the session: the court's box was offline.</summary>
+    public const string OutageRefund = "outage_refund";
+
+    /// <summary>The sweep settled a no-show: the share came back less the partner's part of the penalty.</summary>
+    public const string NoShow = "no_show";
+
+    /// <summary>The court was already in use by an earlier booking: refunded in full.</summary>
+    public const string Displaced = "displaced";
 }
 
 /// <summary>

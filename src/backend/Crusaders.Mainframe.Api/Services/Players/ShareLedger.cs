@@ -346,8 +346,8 @@ public sealed class ShareLedger
 
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
-        await StageReceiptsAsync(now.Booking, move, options, ct, RemovalReceipt(options, move));
-        await _ledger.PostManyAsync(Pair(now.Booking, move, options.ActorUserId), ct);
+        var why = await StageReceiptsAsync(now.Booking, move, options, ct, RemovalReceipt(options, move));
+        await _ledger.PostManyAsync(Pair(now.Booking, move, options.ActorUserId, why), ct);
         await payerLock.CommitAsync(ct);
         return move;
     }
@@ -433,8 +433,8 @@ public sealed class ShareLedger
     {
         var partner = seat.UserId ?? throw new InvalidOperationException("a seat with no member pays nothing");
         var move = new ShareMove(seat.Id, partner, PayerOf(booking), delta, await NextSeqAsync(seat.Id, partner, ct));
-        await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct);
-        return Pair(booking, move, actorUserId);
+        var why = await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct);
+        return Pair(booking, move, actorUserId, why);
     }
 
     /// <summary>What an admin's collect actually moved, and the partner's balance either side of it.</summary>
@@ -474,10 +474,10 @@ public sealed class ShareLedger
         var before = await _ledger.GetBalanceAsync(partnerId, ct);
         var move = new ShareMove(seatId, partnerId, PayerOf(booking), delta, await NextSeqAsync(seatId, partnerId, ct));
         await record(seat, delta, before);
-        await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct, new ClubReceipt(true, before - delta, reason));
+        var why = await StageReceiptsAsync(booking, move, new ReconcileOptions(actorUserId), ct, new ClubReceipt(true, before - delta, reason));
         try
         {
-            await _ledger.PostManyAsync(Pair(booking, move, actorUserId), ct);
+            await _ledger.PostManyAsync(Pair(booking, move, actorUserId, why), ct);
         }
         catch (DbUpdateException)
         {
@@ -504,7 +504,8 @@ public sealed class ShareLedger
     /// (<c>in</c>); a return debits the organiser and pays the partner. Same type, opposite
     /// signs, both naming the booking — so every per-booking sum and every club total is unmoved.
     /// </summary>
-    public static IReadOnlyList<LedgerPosting> Pair(Booking booking, ShareMove move, Guid actorUserId)
+    /// <param name="why">Why it moved, for the live wallet frame (E11-1); never stored.</param>
+    public static IReadOnlyList<LedgerPosting> Pair(Booking booking, ShareMove move, Guid actorUserId, ShareWhy? why = null)
     {
         var amount = Math.Abs(move.Delta);
         var (debited, received) = move.Delta > 0
@@ -514,9 +515,9 @@ public sealed class ShareLedger
         return
         [
             new LedgerPosting(debited, LedgerEntryType.ShareTransfer, -amount, actorUserId, booking.Id, reason,
-                Reference(move.ParticipantId, move.Seq, "out")),
+                Reference(move.ParticipantId, move.Seq, "out")) { Share = why },
             new LedgerPosting(received, LedgerEntryType.ShareTransfer, amount, actorUserId, booking.Id, reason,
-                Reference(move.ParticipantId, move.Seq, "in")),
+                Reference(move.ParticipantId, move.Seq, "in")) { Share = why },
         ];
     }
 
@@ -530,7 +531,8 @@ public sealed class ShareLedger
     /// way with the admin's reason (review round 2, B-8).
     /// </param>
     /// <param name="who">Who moved it (<see cref="ReconcileOptions.ActorUserId"/>) and whose own action it was (<see cref="ReconcileOptions.OwnActionBy"/>).</param>
-    private async Task StageReceiptsAsync(Booking booking, ShareMove move, ReconcileOptions who, CancellationToken ct, ClubReceipt? club = null)
+    /// <returns>Why it moved, for the live wallet frame (E11-1).</returns>
+    private async Task<ShareWhy> StageReceiptsAsync(Booking booking, ShareMove move, ReconcileOptions who, CancellationToken ct, ClubReceipt? club = null)
     {
         bool Own(Guid reader) => who.ActorUserId == reader || who.OwnActionBy == reader;
         var settings = await _settings.GetAsync(ct);
@@ -556,17 +558,53 @@ public sealed class ShareLedger
         // taken AGAIN because the session was attended — both receipts say so.
         var attended = club is null && move.Delta > 0 && booking.NoShowReversedAt is not null;
         var refund = RefundCauseOf(booking, move, club);
+        // R11 E11-2: a no-show return is the share LESS the partner's part of the penalty — say that part.
+        var kept = refund == ShareRefundCauses.NoShow ? await KeptOfNoShowAsync(move, amount, ct) : null;
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason,
-                AfterAttendance: attended, ClubRefund: refund),
-            move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, (byClub, attended, refund)), settings,
+                AfterAttendance: attended, ClubRefund: refund, KeptMinutes: kept),
+            move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, new HeadlineWhy(byClub, attended, refund, kept)), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
-                ClubRefund: refund),
-            move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, (byClub, attended, refund)), settings,
+                ClubRefund: refund, KeptMinutes: kept),
+            move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, new HeadlineWhy(byClub, attended, refund, kept)), settings,
             Own(move.OrganiserUserId));
+        return new ShareWhy(CauseOf(booking, move, club, attended, refund), kept);
+    }
+
+    /// <summary>
+    /// R11 E11-2: what a no-show return leaves behind — the partner's paid share before this return,
+    /// less what returns. Null when nothing is kept (a zero penalty), so the words stay the plain refund's.
+    /// </summary>
+    private async Task<int?> KeptOfNoShowAsync(ShareMove move, int returned, CancellationToken ct)
+    {
+        var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == move.ParticipantId, ct);
+        if (seat is null) return null;
+        var kept = await PaidAsync(seat, ct) - returned;
+        return kept > 0 ? kept : null;
+    }
+
+    /// <summary>
+    /// R11 E11-1: the frame's <c>share_cause</c> — one of <see cref="WalletShareCauses"/>, decided from
+    /// the same facts the receipts are worded from, so the toast and the inbox say the same thing.
+    /// </summary>
+    internal static string CauseOf(Booking booking, ShareMove move, ClubReceipt? club, bool attended, string? refund)
+    {
+        if (move.Delta > 0)
+        {
+            if (club?.Collected == true) return WalletShareCauses.ClubCollected;
+            return attended ? WalletShareCauses.Attended : WalletShareCauses.SharePaid;
+        }
+        if (club is { Collected: false }) return WalletShareCauses.ClubRemoved;
+        return refund switch
+        {
+            ShareRefundCauses.Outage => WalletShareCauses.OutageRefund,
+            ShareRefundCauses.NoShow => WalletShareCauses.NoShow,
+            ShareRefundCauses.Displaced => WalletShareCauses.Displaced,
+            _ => booking.Status == BookingStatus.Cancelled ? WalletShareCauses.BookingCancelled : WalletShareCauses.ShareReturned,
+        };
     }
 
     /// <param name="ownAction">
@@ -601,8 +639,25 @@ public sealed class ShareLedger
         club is null && move.Delta < 0 ? ClubRefundOf(booking) : null;
 
     /// <summary>The receipt's headline: a club refund's words when there is one (E10-7), else <see cref="ShareHeadline"/>.</summary>
-    private static string HeadlineFor(ShareDirection d, string other, int amount, (bool ByClub, bool Attended, string? Refund) why) =>
-        RefundHeadline(d, other, amount, why.Refund) ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
+    private static string HeadlineFor(ShareDirection d, string other, int amount, HeadlineWhy why) =>
+        NoShowHeadline(d, other, amount, why) ?? RefundHeadline(d, other, amount, why.Refund) ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
+
+    /// <summary>The facts a receipt's headline is worded from.</summary>
+    private sealed record HeadlineWhy(bool ByClub, bool Attended, string? Refund, int? Kept);
+
+    /// <summary>
+    /// R11 E11-2: a no-show return names the penalty and the partner's part of it. "The club refunded
+    /// the session" alone left a partner who paid 15 and got 11 back with 4 minutes unexplained.
+    /// </summary>
+    private static string? NoShowHeadline(ShareDirection d, string other, int amount, HeadlineWhy why)
+    {
+        if (why.Refund != ShareRefundCauses.NoShow || why.Kept is not { } kept) return null;
+        var minutes = MoneyFormat.Minutes(amount);
+        var part = $"{MoneyFormat.Minutes(kept)} {(kept == 1 ? "is" : "are")}";
+        return d == ShareDirection.Refunded
+            ? $"{minutes} of your share came back — nobody checked in, and {part} your part of the no-show penalty"
+            : $"{minutes} went back to {other} — nobody checked in, and {part} {other}'s part of the no-show penalty";
+    }
 
     /// <summary>E10-7: the headline for a share the club's refund sent back, or null to use <see cref="ShareHeadline"/>.</summary>
     private static string? RefundHeadline(ShareDirection d, string other, int amount, string? cause)

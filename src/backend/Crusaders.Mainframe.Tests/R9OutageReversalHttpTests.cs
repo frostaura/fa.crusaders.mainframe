@@ -277,4 +277,106 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         var plain = EmailTemplates.ShareMoved(EmailCatalogue.Riverside, "s@x.test", Move(ShareDirection.Refunded, null));
         Assert.Contains("16 minutes of your share came back from Olive Organiser.", Flat(plain.PlainBody), StringComparison.Ordinal);
     }
+
+    // ---- Review round 11: the share's cause on the live wallet, and the no-show's kept part ----
+
+    /// <summary>The organiser's share frame — the one whose reason is <c>share_transfer</c>.</summary>
+    private static JsonElement ShareFrame(IEnumerable<JsonElement> frames) =>
+        Assert.Single(frames, f => f.GetProperty("reason").GetString() == "share_transfer");
+
+    /// <summary>
+    /// R11 E11-1: the frame for a share the club's outage refund sent back said only
+    /// <c>share_transfer</c>, so the phone toasted "came back from Cleo". It carries the cause; the
+    /// share taken again after the late check-in says <c>attended</c>.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_live_wallet_says_why_a_share_moved_after_an_outage_and_its_reversal()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await SweptAsync("r11outcause", dark: true);
+        await using var owned = r.App;
+
+        var returned = ShareFrame(r.BalanceFrames());
+        Assert.Equal(WalletShareCauses.OutageRefund, returned.GetProperty("share_cause").GetString());
+        Assert.Equal(JsonValueKind.Null, returned.GetProperty("share_kept_minutes").ValueKind);
+        Assert.Equal(-16, returned.GetProperty("delta_minutes").GetInt32());
+
+        await ReverseAsync(r);
+        var again = ShareFrame(r.BalanceFrames());
+        Assert.Equal(WalletShareCauses.Attended, again.GetProperty("share_cause").GetString());
+        Assert.Equal(16, again.GetProperty("delta_minutes").GetInt32());
+    }
+
+    /// <summary>
+    /// R11 E11-1 / E11-2: a no-show's share return is the share LESS the partner's part of the
+    /// penalty. The frame says <c>no_show</c> with the kept minutes; the receipts name the penalty and
+    /// that part — "the club refunded the session" alone left 4 of Sam's 16 minutes unexplained.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_no_show_share_return_names_the_penalty_and_the_partners_part_of_it()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await SweptAsync("r11nsshare", dark: false);
+        await using var owned = r.App;
+
+        var frame = ShareFrame(r.BalanceFrames());
+        Assert.Equal(WalletShareCauses.NoShow, frame.GetProperty("share_cause").GetString());
+        var returned = -frame.GetProperty("delta_minutes").GetInt32();
+        var kept = frame.GetProperty("share_kept_minutes").GetInt32();
+        Assert.True(kept > 0, "a no-show penalty leaves part of the share behind");
+        Assert.Equal(16, returned + kept);
+        Assert.Equal(50 - 16 + returned, await PlayersClub.BalanceAsync(r.App, r.Club.Sam));
+
+        var sam = await PlayersClub.ReadAsync(r.App, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.RecipientUserId == r.Club.Sam && n.Kind == MemberEventCatalogue.ShareMoved)
+            .OrderByDescending(n => n.CreatedAt).FirstAsync());
+        Assert.Equal(
+            $"{returned} minutes of your share came back — nobody checked in, and {kept} minutes are your part of the no-show penalty",
+            sam.Headline);
+        Assert.DoesNotContain("refunded the session", sam.Headline, StringComparison.Ordinal);
+        Assert.Equal(kept, JsonDocument.Parse(sam.PayloadJson).RootElement.GetProperty("kept_minutes").GetInt32());
+
+        var olive = await PlayersClub.ReadAsync(r.App, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.RecipientUserId == r.Club.Organiser && n.Kind == MemberEventCatalogue.ShareMoved)
+            .OrderByDescending(n => n.CreatedAt).FirstAsync());
+        Assert.Contains($"{kept} minutes are", olive.Headline, StringComparison.Ordinal);
+        Assert.Contains("part of the no-show penalty", olive.Headline, StringComparison.Ordinal);
+    }
+
+    /// <summary>R11 E11-2, the mails: the no-show penalty, the partner's part of it, and what came back of what they paid.</summary>
+    [Fact]
+    public void A_no_show_share_mail_names_the_penalty_part()
+    {
+        static string Flat(string? text) => System.Text.RegularExpressions.Regex.Replace(text ?? "", @"\s+", " ");
+        ShareMovement Move(ShareDirection d) =>
+            new(d, "Ava Organiser", "Court 4", "Sat 3 Oct, 10:00", 11, "https://x.test/b") { ClubRefund = ShareRefundCauses.NoShow, KeptMinutes = 4 };
+
+        var partner = EmailTemplates.ShareMoved(EmailCatalogue.Riverside, "s@x.test", Move(ShareDirection.Refunded));
+        Assert.Equal("No-show: part of your share came back — Court 4", partner.Subject);
+        Assert.Contains("Your part of that penalty is 4 minutes, so 11 minutes of the 15 minutes you paid came back to your balance.", Flat(partner.PlainBody), StringComparison.Ordinal);
+        Assert.DoesNotContain("refunded the session", Flat(partner.PlainBody), StringComparison.Ordinal);
+
+        var organiser = EmailTemplates.ShareMoved(EmailCatalogue.Riverside, "o@x.test", Move(ShareDirection.Returned));
+        Assert.Contains("Ava Organiser's part of that penalty is 4 minutes", Flat(organiser.PlainBody), StringComparison.Ordinal);
+    }
+
+    /// <summary>R11 E11-1: every cause the frame can carry, decided from the same facts the receipts use.</summary>
+    [Theory]
+    [InlineData(5, null, false, null, BookingStatus.Booked, WalletShareCauses.SharePaid)]
+    [InlineData(5, true, false, null, BookingStatus.Booked, WalletShareCauses.ClubCollected)]
+    [InlineData(5, null, true, null, BookingStatus.Booked, WalletShareCauses.Attended)]
+    [InlineData(-5, false, false, null, BookingStatus.Booked, WalletShareCauses.ClubRemoved)]
+    [InlineData(-5, null, false, ShareRefundCauses.Outage, BookingStatus.NoShow, WalletShareCauses.OutageRefund)]
+    [InlineData(-5, null, false, ShareRefundCauses.NoShow, BookingStatus.NoShow, WalletShareCauses.NoShow)]
+    [InlineData(-5, null, false, ShareRefundCauses.Displaced, BookingStatus.Cancelled, WalletShareCauses.Displaced)]
+    [InlineData(-5, null, false, null, BookingStatus.Cancelled, WalletShareCauses.BookingCancelled)]
+    [InlineData(-5, null, false, null, BookingStatus.Booked, WalletShareCauses.ShareReturned)]
+    public void Every_share_cause_is_decided_from_the_receipts_facts(
+        int delta, bool? clubCollected, bool attended, string? refund, BookingStatus status, string expected)
+    {
+        var club = clubCollected is { } c ? new ClubReceipt(c, null, null) : null;
+        var move = new ShareMove(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), delta, 1);
+        Assert.Equal(expected, ShareLedger.CauseOf(new Booking { Status = status }, move, club, attended, refund));
+    }
 }
+

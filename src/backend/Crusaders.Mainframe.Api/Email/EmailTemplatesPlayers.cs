@@ -49,6 +49,16 @@ public sealed record ShareMovement(
     /// <see cref="ShareRefundCauses"/> — not because the organiser returned it. Null otherwise.
     /// </summary>
     public string? ClubRefund { get; init; }
+
+    /// <summary>
+    /// Review round 11, E11-2: on a no-show return, the partner's part of the no-show penalty — the
+    /// minutes of their share that did NOT come back. Null when nothing was kept. "The club refunded
+    /// the session" alone left a partner who paid 15 and got 11 back with 4 unexplained.
+    /// </summary>
+    public int? KeptMinutes { get; init; }
+
+    /// <summary>A no-show return that kept part of the share (E11-2).</summary>
+    public bool KeptForNoShow => ClubRefund == ShareRefundCauses.NoShow && KeptMinutes is > 0;
 }
 
 /// <summary>Why the club refunded a split session, so a returned share can say so (E10-7).</summary>
@@ -328,6 +338,12 @@ public static partial class EmailTemplates
     {
         if (m.AfterAttendance && m.Direction == ShareDirection.Paid) return $"Share taken again — {m.CourtName}";
         if (m.AfterAttendance && m.Direction == ShareDirection.Received) return $"{m.OtherName}'s share came back to you — {m.CourtName}";
+        if (m.KeptForNoShow)
+        {
+            return m.Direction == ShareDirection.Refunded
+                ? $"No-show: part of your share came back — {m.CourtName}"
+                : $"No-show: part of {m.OtherName}'s share went back — {m.CourtName}";
+        }
         if (ShareRefundCauses.Because(m.ClubRefund) is not null)
         {
             return m.Direction == ShareDirection.Refunded
@@ -365,6 +381,7 @@ public static partial class EmailTemplates
         if (m.ByClub) return ClubShareSentence(m);
         if (m.AfterAttendance) return AttendedSentence(m);
         if (m.ClubRemoved) return ClubRemovedSentence(m);
+        if (m.KeptForNoShow) return NoShowSentence(m);
         if (ShareRefundCauses.Because(m.ClubRefund) is { } because) return ClubRefundSentence(m, because);
         switch (m.Direction)
         {
@@ -396,6 +413,19 @@ public static partial class EmailTemplates
         return m.Direction == ShareDirection.Refunded
             ? $"The club refunded the session because {because}, so {Min(m.AmountMinutes)} of your share came back to your balance."
             : $"The club refunded the session because {because}, so {Min(m.AmountMinutes)} of {m.OtherName}'s share went back to them from your balance.";
+    }
+
+    /// <summary>
+    /// Review round 11, E11-2: a no-show settlement keeps a penalty, and a split session's partner
+    /// carries their part of it — the mail names that part and what came back.
+    /// </summary>
+    private static string NoShowSentence(ShareMovement m)
+    {
+        var kept = Min(m.KeptMinutes ?? 0);
+        var paid = Min(m.AmountMinutes + (m.KeptMinutes ?? 0));
+        return m.Direction == ShareDirection.Refunded
+            ? $"Nobody checked in, so the club settled the session as a no-show: it refunded the court less its no-show penalty. Your part of that penalty is {kept}, so {Min(m.AmountMinutes)} of the {paid} you paid came back to your balance."
+            : $"Nobody checked in, so the club settled the session as a no-show: it refunded the court less its no-show penalty. {m.OtherName}'s part of that penalty is {kept}, so {Min(m.AmountMinutes)} of the {paid} they paid went back to them from your balance.";
     }
 
     /// <summary>Review round 9, E9-2: the refund was reversed because the session was attended, so the share follows the court again.</summary>
