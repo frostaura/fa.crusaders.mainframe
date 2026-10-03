@@ -19,9 +19,10 @@ import { cn } from "@/lib/utils";
 export function Stepper({ names, current }: { names: readonly string[]; current: number }) {
   if (names.length < 2) return null;
   return (
-    // The header keeps a 56px right gutter for the close ×; the stepper sits under the title, clear
-    // of it, so it reaches back out to the body's own right edge rather than stopping short.
-    <ol aria-label="Progress" className="-mr-10 mt-2 grid auto-cols-fr grid-flow-col gap-2 sm:-mr-8">
+    // Only the header's FIRST row clears the close × (R8 L8-5), so the stepper already runs the
+    // header's full width. R9 L9-2: the old negative right margin, from when every header row kept
+    // a 56px gutter for the ×, ran the bar 40px past the dialog's gutter.
+    <ol aria-label="Progress" className="mt-2 grid auto-cols-fr grid-flow-col gap-2">
       {names.map((name, i) => (
         <li key={name} aria-current={i === current ? "step" : undefined} className="grid gap-1.5">
           <span
