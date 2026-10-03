@@ -93,9 +93,14 @@ export function CancelPending({ status, onSettled }: { status: PurchaseStatus; o
   });
   return (
     <>
-      <p className="text-sm text-text-secondary">{OPEN_CHECKOUTS.line(status.created_at)}</p>
+      <p className="flex flex-col text-sm text-text-secondary">
+        <span>{OPEN_CHECKOUTS.line(status.created_at)}</span>
+        {/* R6 L6-3 — when a purchase left waiting closes itself, said where its Cancel is. */}
+        <span data-status-expires="">{OPEN_CHECKOUTS.expires(status.expires_at)}</span>
+      </p>
       <div>
-        <Button variant="outline" pending={cancel.pending} onClick={() => void cancel.run()}>{OPEN_CHECKOUTS.statusCancel}</Button>
+        {/* R6 L6-2 — wraps inside the card at 320 px and 200 % text. */}
+        <Button variant="outline" className="max-w-full whitespace-normal" pending={cancel.pending} onClick={() => void cancel.run()}>{OPEN_CHECKOUTS.statusCancel}</Button>
       </div>
       {said && <Alert tone={said.tone} live="polite">{said.text}</Alert>}
     </>

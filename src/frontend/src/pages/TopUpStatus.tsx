@@ -10,9 +10,10 @@ import { Minutes } from "../components/Minutes";
 import { typography } from "../lib/typography";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Freshness } from "../components/ui/refresh-button";
+import { WithAside } from "../components/ui/with-aside";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
+import { Card, Panel } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import { Spinner } from "../components/ui/spinner";
 import { TextLink } from "../components/ui/text-link";
@@ -22,6 +23,7 @@ import { useAuth } from "../lib/auth";
 import { pendingInvitePath } from "../lib/playersPending";
 import { returnLabel, safeReturnTo, topUpReturnFor } from "../lib/topUpReturn";
 import { CancelPending } from "./TopUpOpenCheckouts";
+import { clubClock, clubDayAndClock } from "../lib/clubClock";
 
 /**
  * What each failure code means, to a member.
@@ -236,7 +238,7 @@ export default function BuyMinutesStatusPage() {
   if (loadFailed && !s) {
     return (
       <StatusShell header={header}>
-        <Card className="px-4 sm:px-6">
+        <Card className="px-4 sm:px-6" data-status-card="">
           {/*
             "we'll email you either way" is TRUE: the server mails a member whose payment ends
             Failed, Cancelled or amount-mismatched (`PurchaseNotCompleted`), alongside the
@@ -252,8 +254,8 @@ export default function BuyMinutesStatusPage() {
   if (!s) return <StatusShell header={header}><StatusSkeleton /></StatusShell>;
 
   return (
-    <StatusShell header={header}>
-      <Card className="px-4 sm:px-6">
+    <StatusShell header={header} aside={<AboutPurchase status={s} />}>
+      <Card className="px-4 sm:px-6" data-status-card="">
         <StatusHead status={s} />
         {/* The status above was read before the club stopped answering, so it is kept and
             labelled rather than replaced by the failure. */}
@@ -281,19 +283,36 @@ function WayBack({ path }: { path: string | null }) {
   if (!path) return null;
   return (
     <div>
-      <Button asChild variant="primary"><Link to={path}>{returnLabel(path)}</Link></Button>
+      <Button asChild variant="primary" className={WRAPS}><Link to={path}>{returnLabel(path)}</Link></Button>
     </div>
   );
 }
 
-function StatusShell({ header, children }: { header: ReactNode; children: ReactNode }) {
-  return <PageShell width="narrow">{header}{children}</PageShell>;
+/**
+ * R6 L6-3 — the page USES a desktop: the status card with the purchase's details beside it (a
+ * 36rem column left 60 % of a 1280 screen empty). Stacked on a phone, details after the status.
+ */
+function StatusShell({ header, aside, children }: { header: ReactNode; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <PageShell width="content">
+      {header}
+      {aside ? (
+        <WithAside at="56rem" asideWidth="22rem" sticky={false} asideLabel={STATUS_COPY.aboutTitle} aside={aside}>{children}</WithAside>
+      ) : children}
+    </PageShell>
+  );
 }
+
+/**
+ * R6 L6-2 — a button in these rows wraps its label inside the card at large text: nowrap at
+ * 320 px and 200 % ran "Check again" and "Cancel this purchase" 92 px past the card's edge.
+ */
+const WRAPS = "max-w-full whitespace-normal";
 
 /** The card's shape while the first status is read: the minutes, the badge, a line, two controls. */
 function StatusSkeleton() {
   return (
-    <Card className="px-4 sm:px-6" aria-busy="true">
+    <Card className="px-4 sm:px-6" aria-busy="true" data-status-card="">
       <p role="status" className="sr-only">Checking this payment…</p>
       <div className="flex items-center justify-between gap-4">
         <Skeleton className="h-10 w-32" />
@@ -344,8 +363,8 @@ function packageLine(status: PurchaseStatus): string {
 function StatusActions({ checking, onCheck }: { checking: boolean; onCheck: () => void }) {
   return (
     <div className="flex flex-wrap gap-2">
-      <Button variant="outline" onClick={onCheck} pending={checking} icon={<ArrowsClockwise aria-hidden="true" />}>Check again</Button>
-      <Button asChild variant="ghost"><Link to="/wallet">View wallet</Link></Button>
+      <Button variant="outline" className={WRAPS} onClick={onCheck} pending={checking} icon={<ArrowsClockwise aria-hidden="true" />}>Check again</Button>
+      <Button asChild variant="ghost" className={WRAPS}><Link to="/wallet">View wallet</Link></Button>
     </div>
   );
 }
@@ -361,6 +380,16 @@ export const STATUS_COPY = {
   failedFallback: "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening.",
   tryAgain: "Try again",
   buy: "Buy minutes",
+  /** R6 L6-3 — the details beside the status. */
+  aboutTitle: "About this purchase",
+  aboutPackage: "Package",
+  aboutGet: "You get",
+  aboutPay: "You pay",
+  aboutStarted: "Started",
+  aboutCloses: "Closes by itself",
+  aboutClosesHelp: "If PayFast never confirms it, the club closes it then and nothing is charged.",
+  aboutReference: "Reference",
+  aboutReferenceHelp: "Quote it to the club if anything about this payment looks wrong.",
 } as const;
 
 const UNREACHABLE_FIRST = STATUS_COPY.unreachableFirst;
@@ -424,7 +453,7 @@ function StatusBody(props: BodyProps) {
     <>
       <p className={failed ? "text-sm font-medium text-danger-strong" : "text-sm text-text-secondary"}>{sentence}</p>
       <div>
-        <Button asChild variant="outline"><Link to={retryPath(wayBack)}>{STATUS_COPY.tryAgain}</Link></Button>
+        <Button asChild variant="outline" className={WRAPS}><Link to={retryPath(wayBack)}>{STATUS_COPY.tryAgain}</Link></Button>
       </div>
     </>
   );
@@ -454,9 +483,47 @@ function NoSuchPurchase() {
     <Card className="px-4 sm:px-6">
       <Alert tone="danger">{NOT_FOUND}</Alert>
       <div className="flex flex-wrap gap-2">
-        <Button asChild variant="outline"><Link to="/wallet">View wallet</Link></Button>
-        <Button asChild variant="ghost"><Link to={BUY_MINUTES_PATH}>{STATUS_COPY.buy}</Link></Button>
+        <Button asChild variant="outline" className={WRAPS}><Link to="/wallet">View wallet</Link></Button>
+        <Button asChild variant="ghost" className={WRAPS}><Link to={BUY_MINUTES_PATH}>{STATUS_COPY.buy}</Link></Button>
       </div>
     </Card>
+  );
+}
+
+/**
+ * R6 L6-3 — what this purchase is, beside its status: the package, what it buys and costs, when it
+ * started, when a waiting one closes by itself, and the reference the club can look it up by.
+ */
+function AboutPurchase({ status }: { status: PurchaseStatus }) {
+  const off = status.discount_bps > 0 && status.list_price_zar > status.amount_zar;
+  return (
+    <Panel className="flex flex-col gap-4" data-about-purchase="">
+      <h2 className="text-base font-semibold text-text-primary">{STATUS_COPY.aboutTitle}</h2>
+      <dl className="flex flex-col gap-3 text-sm">
+        <AboutRow term={STATUS_COPY.aboutPackage}>{status.package_name}</AboutRow>
+        <AboutRow term={STATUS_COPY.aboutGet}><Minutes value={status.minutes} /></AboutRow>
+        <AboutRow term={STATUS_COPY.aboutPay}>
+          {formatMoney(status.amount_zar)}
+          {off ? <span className="block text-xs font-normal text-text-secondary">{`${discountPercent(status.discount_bps)} off ${formatMoney(status.list_price_zar)}`}</span> : null}
+        </AboutRow>
+        <AboutRow term={STATUS_COPY.aboutStarted}>{clubDayAndClock(status.created_at)}</AboutRow>
+        {status.status === "Pending" ? (
+          <AboutRow term={STATUS_COPY.aboutCloses} help={STATUS_COPY.aboutClosesHelp}>{clubClock(status.expires_at)}</AboutRow>
+        ) : null}
+        <AboutRow term={STATUS_COPY.aboutReference} help={STATUS_COPY.aboutReferenceHelp}>
+          <span className="font-mono text-xs [overflow-wrap:anywhere]">{status.id}</span>
+        </AboutRow>
+      </dl>
+    </Panel>
+  );
+}
+
+function AboutRow({ term, help, children }: { term: string; help?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-text-secondary">{term}</dt>
+      <dd className="min-w-0 font-semibold tabular-nums text-text-primary [overflow-wrap:anywhere]">{children}</dd>
+      {help ? <dd className="text-xs text-text-secondary">{help}</dd> : null}
+    </div>
   );
 }

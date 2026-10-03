@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import TopUpStatusPage from "./TopUpStatus";
 import { BalanceProvider } from "../lib/balance";
@@ -589,7 +589,9 @@ describe("Purchase status — what was bought", () => {
     expect(await screen.findByText("Done")).toBeInTheDocument();
     expect(screen.getByText("5 hours for R495.00 (10% off R550.00)")).toBeInTheDocument();
     expect(screen.getByText("5 h added to your wallet.")).toBeInTheDocument();
-    expect(screen.getByText("5 hours", { selector: ".sr-only" })).toBeInTheDocument();
+    // The status card's big figure is heard as words (R6: the details beside it say "5 hours" too).
+    const card = document.querySelector<HTMLElement>("[data-status-card]")!;
+    expect(within(card).getByText("5 hours", { selector: ".sr-only" })).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/credit|\bcr\b/i);
   });
 
