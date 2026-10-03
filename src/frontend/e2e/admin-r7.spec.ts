@@ -247,3 +247,46 @@ test.describe("L7-17 — the daily table's sort carets", () => {
     });
   }
 });
+
+/* ───────────────────────── L7-8 — the Overview at 320 / 200 % ───────────────────────── */
+
+const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+const ALERTS = {
+  items: [
+    {
+      id: "n1", kind: "member.registered", title: "New membership applications", headline: "Sevenadmin Adminwell applied for membership",
+      link: "/admin/members", subject_user_id: null, created_at: ago(5),
+      delivery: { state: "sent", sent_at: ago(4), finished_at: ago(4), recipients: 3 },
+    },
+    {
+      id: "n2", kind: "device.offline", title: "Court box or door stopped reporting", headline: "Door gate-598a9a stopped reporting to the administrator",
+      link: "/admin/monitoring/devices", subject_user_id: null, created_at: ago(180),
+      delivery: { state: "failed", sent_at: null, finished_at: ago(170), recipients: 0 },
+    },
+  ],
+  next_cursor: null,
+};
+
+test.describe("L7-8 — the Overview at 320 / 200 %", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "mobile", "a phone"); });
+
+  test("the Faults card's words and the alert headlines are whole and inside their boxes", async ({ page }) => {
+    await open(page, "/admin", [
+      { path: "/api/v1/admin/notifications", body: ALERTS },
+      // 34 faults: a two-digit count takes the room "attention" needed beside it.
+      { path: "/api/v1/admin/monitoring/summary", body: { open: { critical: 13, error: 12, warning: 9 } } },
+    ], 320, 800);
+    await expect(page.locator("[data-alert]").first()).toBeVisible(ARRIVES);
+    await bigText(page);
+    await fontsReady(page);
+    if (process.env.FC_SHOTS) {
+      await page.locator("[data-attention-card='faults']").screenshot({ path: `${process.env.FC_SHOTS}/overview-faults-320.png` }).catch(() => null);
+      await page.locator("[data-alert]").first().screenshot({ path: `${process.env.FC_SHOTS}/overview-alert-320.png` });
+    }
+    expect(await textOutsideBox(page, "[data-attention-card]", "[data-attention-card]"), "a card's words past its edge").toEqual([]);
+    expect(await brokenWords(page, "[data-attention-card]"), "a card's words broken").toEqual([]);
+    expect(await brokenWords(page, "[data-alert]"), "an alert headline broken mid-word").toEqual([]);
+    expect(await textOutsideBox(page, "[data-alert]", "[data-alert]"), "an alert past its row").toEqual([]);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});

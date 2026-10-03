@@ -151,10 +151,14 @@ function AlertRow({ notice, now, rowRef }: { notice: AdminNotice; now: number; r
         </span>
         <span aria-hidden="true" className="flex"><Badge tone={badge.tone} data-delivery={notice.delivery.state}>{badge.label}</Badge></span>
       </span>
-      {to ? <CaretRight size={16} weight="bold" aria-hidden="true" className="mt-3 shrink-0 text-text-muted" /> : null}
+      {/* R7 L7-8: the caret goes with the tile under a 16rem row — the whole row is the link, and
+          at 320 / 200 % its 40px left the headline 150px ("members / hip"). */}
+      {to ? <CaretRight size={16} weight="bold" aria-hidden="true" className="mt-3 shrink-0 text-text-muted [@container(max-width:16rem)]:hidden" /> : null}
     </>
   );
-  const row = "flex min-h-touch w-full items-start gap-3 px-4 py-3 text-left";
+  // R7 L7-8: under a 16rem row (a large-text query) the insets halve, so the headline keeps its
+  // words whole: 32px of padding a side was a fifth of a 320 phone's row at 200 % text.
+  const row = "flex min-h-touch w-full items-start gap-3 px-4 py-3 text-left [@container(max-width:16rem)]:px-2";
   return (
     <li ref={rowRef} data-alert={notice.kind} className="[container-type:inline-size]">
       {to ? (

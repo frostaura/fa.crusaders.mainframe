@@ -157,12 +157,14 @@ function WaitingCard(props: AttentionCardProps) {
         <CardEyebrow item={item} tone={tone} />
         {/* The big figure and the words after it are ONE name — "2 doors need attention" — so the
             sentence is not printed a second time beside its own number. */}
-        <span id={titleId} className="flex items-baseline gap-2">
+        {/* R7 L7-8: the words WRAP under a wide count rather than squeeze beside it — at 320 / 200 %
+            "34" left "attention" 118px and it ran out of the card. */}
+        <span id={titleId} className="flex flex-wrap items-baseline gap-x-2">
           <span className={cn(typography({ variant: "display" }), "leading-none")}>{count}</span>
           {/* A real space BETWEEN the two, not inside the second: name computation trims a
               child's own leading space, and the name became "2doors need attention". */}
           {" "}
-          <span className="text-sm font-semibold text-text-primary">{withoutCount(copy.title)}</span>
+          <span className="min-w-0 text-sm font-semibold text-text-primary">{withoutCount(copy.title)}</span>
         </span>
         {copy.detail ? <span id={detailId} className="text-sm text-text-secondary">{copy.detail}</span> : null}
         <span aria-hidden="true" className="mt-auto inline-flex items-center gap-1 text-sm font-semibold text-accent-strong">
