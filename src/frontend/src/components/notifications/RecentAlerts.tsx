@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DotSeparated } from "@/components/ui/dot-separated";
 import {
   Bell, CaretRight, Clock, Coins, Door, Receipt, Repeat, ShieldCheck, ShieldWarning, UserPlus, Warning,
   WebhooksLogo, WifiHigh, WifiSlash, type Icon,
@@ -138,16 +139,18 @@ function AlertRow({ notice, now, rowRef }: { notice: AdminNotice; now: number; r
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span id={headlineId} className="break-words font-semibold text-text-primary">{notice.headline}</span>
-        <span id={metaId} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
-          <span className="break-words">{notice.title}</span>
-          {/* The dot travels with the time, so a wrap never strands it at a line's start. */}
-          <span className="inline-flex items-center gap-2 whitespace-nowrap">
-            <span aria-hidden="true">·</span>
-            {/* The comma for a screen reader, and a REAL space after it: name computation trims a
-                child's own trailing space. */}
-            <span className="sr-only">,</span>{" "}
-            <time dateTime={notice.created_at} title={clubInstant(notice.created_at)}>{noticeAge(notice.created_at, now)}</time>
-          </span>
+        <span id={metaId} className="block text-sm text-text-secondary">
+          {/* R8 L8-11: the dot never starts a line — when the time wraps under a long kind, it goes
+              without one (it used to travel with the time: "· 5 min ago" alone at 200 % text). */}
+          <DotSeparated>
+            <span className="min-w-0 break-words">{notice.title}</span>
+            <span className="whitespace-nowrap">
+              {/* The comma for a screen reader, and a REAL space after it: name computation trims a
+                  child's own trailing space. */}
+              <span className="sr-only">,</span>{" "}
+              <time dateTime={notice.created_at} title={clubInstant(notice.created_at)}>{noticeAge(notice.created_at, now)}</time>
+            </span>
+          </DotSeparated>
           <span className="sr-only">{`. ${badge.label}.`}</span>
         </span>
         <span aria-hidden="true" className="flex"><Badge tone={badge.tone} data-delivery={notice.delivery.state}>{badge.label}</Badge></span>

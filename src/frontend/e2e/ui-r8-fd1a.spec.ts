@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { PASSWORD_TOGGLE } from "../src/lib/authCopy";
+import { LOGIN, PASSWORD_TOGGLE } from "../src/lib/authCopy";
 import { bigText, fontsReady } from "./layoutKit";
 import { inviteFixture, memberShellRoutes } from "./playersKit";
 
@@ -296,5 +296,151 @@ test.describe("L8-9 — the admin bar's crest: the club's name whole or not at a
     const admin = await crest(page, "/admin", 1280, 800, false);
     expect(admin.shown).toBe(true);
     expect(admin.cut).toBeLessThanOrEqual(0);
+  });
+});
+
+/* ───────────────────────── L8-11 / L6-16 — callouts at large text ───────────────────────── */
+
+async function refusedSignIn(page: Page, width: number, big: boolean) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width, height: 800 });
+  await serveApi(page, [
+    { path: "/api/v1/session", body: SESSION_ANON },
+    { path: "/api/v1/whoami", body: SESSION_ANON },
+    { method: "POST", path: "/api/v1/auth/login", status: 403, body: { error: "email_not_verified" } },
+  ]);
+  await page.goto("/login");
+  await page.getByLabel(LOGIN.email, { exact: true }).fill("someone@example.com");
+  await page.getByLabel(LOGIN.password, { exact: true }).fill("not-it");
+  await page.getByRole("button", { name: LOGIN.submit, exact: true }).click();
+  const alert = page.getByRole("alert").filter({ hasText: /./ }).first();
+  await expect(alert).toBeVisible({ timeout: 20_000 });
+  if (big) await bigText(page);
+  await fontsReady(page);
+  return alert.evaluate((p) => {
+    const box = p.getBoundingClientRect();
+    const icon = p.querySelector("svg")!.getBoundingClientRect();
+    const lines: { left: number; top: number }[] = [];
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of Array.from(range.getClientRects())) if (r.width > 0) lines.push({ left: r.left - box.left, top: r.top });
+    }
+    lines.sort((a, b) => a.top - b.top);
+    const textLeft = Math.min(...lines.slice(1).map((l) => l.left));
+    return { icon: icon.width, gutter: lines.length > 1 ? textLeft : null, lines: lines.length, iconRight: icon.right - box.left, firstLine: lines[0].left };
+  });
+}
+
+test.describe("L8-11 / L6-16 — a callout's icon grows with its words, and its gutter steps down at large text", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("320 / 200 %: the icon is drawn at twice its size, and the lines under the first take the callout's width", async ({ page }) => {
+    const m = await refusedSignIn(page, 320, true);
+    test.info().annotations.push({ type: "callout", description: JSON.stringify(m) });
+    expect(m.icon, "the icon stayed 16px").toBeGreaterThanOrEqual(28);
+    expect(m.lines, "precondition: the refusal wraps").toBeGreaterThan(1);
+    // Was a 72px gutter (pl-9) down every line for a 16px icon.
+    expect(m.gutter!, "the lines under the first keep the icon's gutter").toBeLessThanOrEqual(32);
+    expect(m.firstLine, "the first line clears the icon").toBeGreaterThanOrEqual(m.iconRight);
+  });
+
+  test("320 at 100 %: the words still hang clear of the icon on every line", async ({ page }) => {
+    const m = await refusedSignIn(page, 320, false);
+    test.info().annotations.push({ type: "callout", description: JSON.stringify(m) });
+    expect(m.icon).toBe(16);
+    expect(m.lines, "precondition: the refusal wraps at 320").toBeGreaterThan(1);
+    expect(m.firstLine).toBeGreaterThanOrEqual(m.iconRight);
+    expect(m.gutter ?? m.firstLine).toBeGreaterThanOrEqual(m.iconRight);
+  });
+});
+
+/* ───────────────────────── L8-11 — no orphan separators in the Overview's alerts ───────────────────────── */
+
+const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+const ALERTS = {
+  items: [
+    {
+      id: "n1", kind: "device.offline", title: "Court box or door stopped reporting", headline: "Court 2 box stopped reporting",
+      link: "/admin/monitoring/devices", subject_user_id: null, created_at: ago(5),
+      delivery: { state: "sent", sent_at: ago(4), finished_at: ago(4), recipients: 3 },
+    },
+    {
+      id: "n2", kind: "member.registered", title: "New membership applications", headline: "Thandi Mokoena applied to join",
+      link: "/admin/members", subject_user_id: null, created_at: ago(180),
+      delivery: { state: "sent", sent_at: ago(170), finished_at: ago(170), recipients: 3 },
+    },
+  ],
+  next_cursor: null,
+};
+
+/** Painted "·" separators in the alerts' meta lines, and those that start a line (nothing painted left of them on it). */
+async function orphanDots(page: Page): Promise<{ orphans: number; shown: number }> {
+  return page.locator("[data-recent-alerts]").evaluate((list) => {
+    const rectOf = (node: Node) => { const range = document.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect(); };
+    const clipped = (el: Element, r: DOMRect) => {
+      for (let at: Element | null = el; at && at !== list; at = at.parentElement) {
+        if (getComputedStyle(at).overflowX !== "visible") {
+          const box = at.getBoundingClientRect();
+          if (r.right <= box.left + 1 || r.left >= box.right - 1) return true;
+        }
+      }
+      return false;
+    };
+    let orphans = 0;
+    let shown = 0;
+    const walker = document.createTreeWalker(list, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.textContent?.trim() !== "·") continue;
+      const dot = rectOf(node);
+      if (dot.width === 0 || clipped(node.parentElement!, dot)) continue;
+      shown += 1;
+      const meta = node.parentElement!.closest("[id]")!;
+      const inner = document.createTreeWalker(meta, NodeFilter.SHOW_TEXT);
+      let before = false;
+      for (let t = inner.nextNode(); t; t = inner.nextNode()) {
+        if (t === node || !t.textContent?.trim() || t.parentElement!.closest(".sr-only")) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        for (const r of Array.from(range.getClientRects())) {
+          if (r.width > 0 && Math.abs(r.top - dot.top) < dot.height && r.right <= dot.left + 1) before = true;
+        }
+      }
+      if (!before) orphans += 1;
+    }
+    return { orphans, shown };
+  });
+}
+
+async function openOverview(page: Page, width: number, height: number, big: boolean) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width, height });
+  await signIn(page);
+  await serveApi(page, [...memberShellRoutes({ admin: true }), { path: "/api/v1/admin/notifications", body: ALERTS }]);
+  await page.goto("/admin");
+  await expect(page.locator("[data-recent-alerts]")).toBeVisible({ timeout: 20_000 });
+  if (big) await bigText(page);
+  await fontsReady(page);
+  await page.waitForTimeout(200);
+}
+
+test.describe("L8-11 — an alert's kind and its time: a dot between them, never a dot starting a line", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  for (const width of [320, 390]) {
+    test(`${width} / 200 %: the time wraps under the kind without a leading "·"`, async ({ page }) => {
+      await openOverview(page, width, 800, true);
+      const m = await orphanDots(page);
+      expect(m.orphans).toBe(0);
+    });
+  }
+
+  test("1280 at 100 %: the dot still stands between the kind and the time", async ({ page }) => {
+    await openOverview(page, 1280, 800, false);
+    const m = await orphanDots(page);
+    expect(m.shown).toBeGreaterThanOrEqual(2);
+    expect(m.orphans).toBe(0);
   });
 });

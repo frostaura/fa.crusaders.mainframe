@@ -18,7 +18,7 @@ import { CheckCircle, Info, Warning, WarningCircle, type Icon } from "./ui/icons
  * The left rule is not decoration. A refusal set as plain red body copy is one a member skims
  * past and then presses the button again, having changed nothing. Nor is the icon: colour is
  * never the only signal (design-system.md, Accessibility floor), so each tone carries its own
- * Phosphor mark — 16px bold beside sm text, `aria-hidden`, because the words are the message.
+ * Phosphor mark — 1rem bold beside sm text, `aria-hidden`, because the words are the message.
  * </p>
  */
 export type AlertTone = "danger" | "success" | "info" | "warning";
@@ -34,6 +34,16 @@ const TONES: Record<AlertTone, string> = {
   info: "border-info-strong bg-info-soft text-info-strong",
   warning: "border-warning-strong bg-warning-soft text-warning-strong",
 };
+
+/**
+ * The mark hangs in the left gutter, level with the first line; under a 14rem container (large
+ * text, a narrow box) it floats at the start of the first line instead and the lines under it take
+ * the whole width (R8 L8-11: a 72px gutter down every line of a 256px callout at 320 / 200 %).
+ */
+const ICON_PLACE = [
+  "absolute left-3 top-3",
+  "[@container(max-width:14rem)]:static [@container(max-width:14rem)]:float-left [@container(max-width:14rem)]:mr-2 [@container(max-width:14rem)]:mt-0.5",
+].join(" ");
 
 /** Tone → mark. The shape differs as well as the colour, so the tone survives forced colours. */
 const ICONS: Record<AlertTone, Icon> = {
@@ -132,14 +142,19 @@ export function Alert({ tone = "danger", live, className, announceKey, children,
         // The words stay DIRECT children of the <p> — call sites and tests find the notice by
         // its text — so the mark hangs in the left padding rather than sitting in a flex row
         // (a flex row would also make the text an anonymous item that cannot shrink).
-        "relative break-words rounded-lg border-l-4 py-2.5 pl-9 pr-3 text-sm",
+        // R8 L8-11: the hanging gutter (icon + insets, in rem so it grows with the icon) steps
+        // down to the plain inset when the text is large for the box around it — a rem query on
+        // the nearest container (every page is one) — and the icon then floats in the first line.
+        "relative break-words rounded-lg border-l-4 py-2.5 pl-9 pr-3 text-sm [@container(max-width:14rem)]:pl-3",
+        "[@container(max-width:14rem)]:flow-root",
         TONES[tone],
         className,
       )}
       {...props}
       role={ROLE_BY_LIVE[live ?? defaultLive(tone)]}
     >
-      <Mark size={16} weight="bold" aria-hidden="true" className="absolute left-3 top-3" />
+      {/* R8 L6-16: 1rem, so it grows with the words (it stayed 16px beside 28px text at 200 %). */}
+      <Mark size="1rem" weight="bold" aria-hidden="true" className={ICON_PLACE} />
       {children}
     </p>
   );
