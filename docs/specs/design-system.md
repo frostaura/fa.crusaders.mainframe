@@ -195,8 +195,12 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
 - **button** — variants `primary`, `secondary` (tonal), `outline`, `ghost`, `danger`, `danger-soft`;
   **no link variant**. Sizes `sm` (36 visual, 44 hit), `md` 44, `lg` 52, `icon-sm`, `icon` 44,
   `icon-lg` 52. `block`, `icon`, `pending` (spinner replaces the icon, label stays, width locked,
-  `aria-busy` + `aria-disabled` so focus stays), `asChild`. It is a fixed-height, no-wrap control: a
-  label that must wrap at a large root font adds `h-auto min-h-touch whitespace-normal py-2`.
+  `aria-busy` + `aria-disabled` so focus stays), `asChild`. Heights are floors (`min-h-*`) and the
+  label WRAPS rather than overflow: no forced nowrap (`white-space` is inherited, so a nowrap row such
+  as a table head keeps its buttons on one line), `max-w-full`, balanced and centred, a word kept
+  whole (`overflow-wrap: break-word`), a figure glued to its unit (`keepFiguresWhole`,
+  `ui/figure-text.ts`; the plain label stays the accessible name). Icon gap and side padding are
+  pixels. Toggles follow the same rules (review round 11).
 - **icon-button** — `label` required → aria-label + tooltip.
 - **field / input / textarea** — Label, Description, Error wired via `aria-describedby`/`aria-invalid`.
 - **select** (Radix; `SelectValue` clamps the value to one line — never the trigger's other children) ·
@@ -205,11 +209,11 @@ vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
   below; trigger reads "Tue 23 Sep" via `date-picker-day`; the react-day-picker **calendar** is a lazy
   chunk fetched on pointer/focus intent) · **checkbox** · **radio-group** + **RadioCard** · **switch**.
 - **dialog** — bottom sheet below 640px, centred `max-w-md` above; **always a close ×** (44px),
-  named "Close" + the dialog's title; h2 title + description; body scrolls; footer
+  named "Close" + the dialog's title; h2 title + description; body scrolls and its rows never shrink (`[&>*]:shrink-0`); footer
   `flex-col gap-2 sm:flex-row sm:justify-end` — never reversed, so Tab order is paint order.
   An outside click after typing keeps it open. **sheet** = Radix Dialog from bottom/right.
 - **popover · tooltip** (names icon buttons only; none on touch) · **info-popover** · **accordion** ·
-  **tabs** (`segmented`, `underline`) · **toggle / toggle-group** · **dropdown-menu** · **command** ·
+  **tabs** (`segmented`, `underline` — an underline list of fewer than four tabs wraps instead of scrolling) · **toggle / toggle-group** · **dropdown-menu** · **command** ·
   **skeleton** · **badge** (tones neutral/success/info/warning/danger/brand; inner `min-w-0 break-words`
   span) · **card** (Header/Title/Description/Action/Content/Footer) and **Panel** (the card surface
   with `p-4 sm:p-6` on the box, for free text, notices and action rows) · **table** · **avatar**
