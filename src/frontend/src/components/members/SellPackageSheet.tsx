@@ -133,8 +133,7 @@ function isFree(pkg: ShelfPackage): boolean {
  * gift never sits on the ledger as "Cash paid at the desk".
  */
 function saleCode(flow: Flow): SellReasonCode | null {
-  // The API module's union does not carry package_free yet (ask r7-ask-FC1-to-integrator.md).
-  if (flow.free) return "package_free" as SellReasonCode;
+  if (flow.free) return "package_free";
   return flow.code;
 }
 
