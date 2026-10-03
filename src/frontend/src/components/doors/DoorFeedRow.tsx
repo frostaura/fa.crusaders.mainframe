@@ -137,17 +137,17 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
         <span className="min-w-0 break-words text-sm text-text-secondary">
           {who ? <><span className="sr-only">Whose code: </span>{who}</> : ""}
         </span>
-        {/* A7: the clock face first and visibly; the relative age beneath it, quieter. The
-            accessible name carries the long form so the fact still arrives once and
-            completely — `aria-live="off"` because the age ticks and a row that rewrites
-            itself every second interrupts the page somebody is reading. */}
+        {/* A7: the clock face first and visibly; the relative age beneath it, quieter. The long
+            form is an sr-only span, so the fact still arrives once and completely. Not an
+            aria-label (R7 X7-7): `time` has no role that may be named, and axe reported
+            aria-prohibited-attr on every row. The face and the ticking age are aria-hidden, so
+            nothing that rewrites itself every second is read. */}
         <time
           dateTime={entry.at}
           title={title}
-          aria-label={`When: ${title}`}
-          aria-live="off"
           className="ml-auto shrink-0 text-right text-xs text-text-muted"
         >
+          <span className="sr-only">{`When: ${title}`}</span>
           {/* R3-17: the approximation is marked ON the face, not only in a sentence below
               it — a reader scanning a column of times takes the column at face value, and
               the one row whose time is a guess has to look different in that column. */}
