@@ -49,3 +49,12 @@ Spec: round 4 `SPEC.md` §3/§4. `components/ui` primitives decide by their own 
   drop the rows, R12), Courts, Webhooks, Settings (and its draft), Schedules (same list only).
 - **Not built:** Overview occupancy strip, board live-event rail, Groups/Schedules/Boards split views, Settings' help column.
 - **R10 FD10 (200 % text, box in rem, never `sm:`):** ChangeDiff stacks <24rem; door-log filters 3-up ≥34rem; button map `@container/bmap` 20/28rem (model `lib/buttonMap.ts`); GroupCard ⋯ own row <14rem; Night lights name `code_holder`. `e2e/admin-r10-fd`.
+- **R5 (lane E2) — phones and large text.** Overview: 5 alerts, then "See all N" opens the rest IN
+  PLACE (there is no alerts page), focus on the first revealed; the Console folds under a 48rem box
+  (*why:* it repeats the section switcher; 5,790 → ~2,000px at 390). Faults: text takes the row,
+  "Mark resolved" under it; resolving REQUIRES "What did you do?" (`note`, the record's reason).
+  Boards: the activity toggle joins the action strip (234 → 186px). Groups `fill="fit"`; archived
+  cards muted by surface, never `opacity` (badge fell to 3.24:1). The switcher WRAPS rather than
+  break a word; its total wears the header tab's danger fill. Schedules state the rule IN FORCE and
+  "From <date> it holds …, instead." per later rule; End counts each date's own weekday; "from this
+  date on" can change the days. Tests: `e2e/admin-r5.spec.ts`.
