@@ -240,7 +240,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
   <div class="eyebrow">FrostAura Technologies · Crusaders Mainframe</div>
   <h1>Every path from a booking to a lit court</h1>
   <p class="lead">One box, four courts, no moving parts you have to babysit. Every flow the system runs, drawn lane by lane; what happens when the network is down; and how to put the whole thing in service with the Arduino IDE and one Docker command.</p>
-  <div class="stamp"><i></i> Bridge 2.2.1 · Mega 2.0.0 · one code per member · one API key · box polls, backend answers · wiring unchanged from Carl's schematic</div>
+  <div class="stamp"><i></i> Bridge 2.2.2 · Mega 2.0.0 · one code per member · one API key · box polls, backend answers · wiring unchanged from Carl's schematic</div>
 </div>
 
 <section id="how">
@@ -346,7 +346,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
         <li>Within a few seconds the glass shows <span class="lcd">CONNECTED
 SCAN TO START</span>.</li>
         <li>Within a minute the box is on the <b>Devices</b> page as <code>box-xxxxxx</code>. Rename it; check that court 1 is on relay A and so on; save.</li>
-        <li>Book a court a few minutes ahead on a phone, scan <b>My Code</b> at the box, watch the light. Press OFF. Check the wallet. The Devices page shows the bridge as <b>2.2.1</b>; the Mega is never reflashed and stays 2.0.0.</li>
+        <li>Book a court a few minutes ahead on a phone, scan <b>My Code</b> at the box, watch the light. Press OFF. Check the wallet. The Devices page shows the bridge as <b>2.2.2</b>; the Mega is never reflashed and stays 2.0.0.</li>
       </ol>
     </li>
   </ol>
@@ -434,7 +434,7 @@ WAIT 7 MIN</span></td><td>Valid booking, but more than 10 minutes before its sta
       <tr><td><span class="lcd">NOT RECOGNISED
 SEE THE DESK</span></td><td>The code does not check out: older than about 90 seconds, or (offline) a member this box holds no key for.</td><td>Scan the code on My Code as it is now; it changes every 30 seconds.</td></tr>
       <tr><td><span class="lcd">CODE USED
-WAIT 30 SECONDS</span></td><td>This exact code already lit a court or bought something. A photo of somebody's screen reads the same, so it arms nothing.</td><td>Wait for the next code on My Code. If you lit your own court with it and it is still on, the box shows <span class="lcd">COURT B IS ON</span> instead.</td></tr>
+WAIT 30 SECONDS</span></td><td>This exact code already lit a court or bought something. A photo of somebody's screen reads the same, so it arms nothing.</td><td>Wait for the next code on My Code. If you lit your own court with it — your booking, or time you just bought or paid for at the buttons — and it is still on, the box shows <span class="lcd">COURT B IS ON</span> instead.</td></tr>
       <tr><td><span class="lcd">TOO MANY TRIES
 TRY IN A MINUTE</span></td><td>Offline, five wrong codes inside a minute: the box stops checking codes for a while so nobody can guess one.</td><td>Wait a minute; it unlocks on the first good code after that.</td></tr>
       <tr><td><span class="lcd">NO BOOKING
@@ -457,7 +457,9 @@ BUY &amp; RETRY</span> / <span class="lcd">COURT NOT FREE
 SCAN TO START</span> / <span class="lcd">NO TIME BEFORE
 NEXT BOOKING</span></td><td>Walk-up refused by the backend: balance, the court is lit, or a booking starts too soon.</td><td>Buy minutes in the app, pick another court, or a shorter time.</td></tr>
       <tr><td><span class="lcd">NOT YOUR COURT
-SCAN TO START</span></td><td>OFF pressed for a court by someone other than the person who lit it.</td><td>Nothing; the timer will end it.</td></tr>
+Not your booking
+Another member's
+NOTHING CHANGED</span></td><td>OFF pressed for a court by someone other than the person who lit it.</td><td>Nothing; the timer will end it.</td></tr>
       <tr><td><span class="lcd">TRY AGAIN
 SCAN TO START</span></td><td>The ESP sent the light-on command but the Mega never confirmed it, even after a retry.</td><td>Scan again. If it repeats, power cycle the box.</td></tr>
       <tr><td><span class="lcd">CHECKING YOUR CODE
@@ -470,7 +472,7 @@ Please wait</span> then back to the landing screen</td><td>The Mega painted this
 <div class="sig">
   <div class="mark" aria-hidden="true"></div>
   <div><div class="who">FrostAura Technologies</div><div class="line">We build the future of human capability.</div></div>
-  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>BRIDGE 2.2.1 · MEGA 2.0.0 · OCTOBER 2026</div>
+  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>BRIDGE 2.2.2 · MEGA 2.0.0 · OCTOBER 2026</div>
 </div>
 
 </div>
@@ -484,7 +486,7 @@ var LANES={
   you:{n:'You',c:'#8aa3c4'}, server:{n:'Server',c:PC.BACKEND.c}, ide:{n:'Arduino IDE',c:'#8aa3c4'}, web:{n:'Web app',c:PC.FRONTEND.c}
 };
 var PROJ={phone:'FRONTEND',desk:'FRONTEND',web:'FRONTEND',api:'BACKEND',server:'BACKEND',box:'ESP',mega:'MEGA',gate:'GATE',pay:'PAYFAST',you:'',ide:''};
-var L=function(a,b){return '<span class="lcd">'+a+(b?'\n'+b:'')+'</span>';};
+var L=function(){return '<span class="lcd">'+Array.prototype.filter.call(arguments,Boolean).join('\n')+'</span>';};
 
 var FLOWS=[
 {id:'pair',t:'A new box pairs itself',tags:['admin','hardware'],tg:['setup'],
@@ -535,7 +537,7 @@ var FLOWS=[
   {l:'mega',t:'Scanner → frame',d:'Same as online: the Mega forwards the code to the ESP.',lcd:L('CHECKING YOUR CODE','Please wait')},
   {l:'box',t:'Activate fails',d:'The call times out, returns 5xx, or the breaker is open. Only transport failures fall back; a real answer never does.'},
   {l:'box',t:'Check the code, find the member',d:'Checks the half of the code it holds today\'s key for, at its own clock\'s 30-second step or one either side, then looks for a booking in the roster that names that member, as organiser or accepted partner.<small>The box never holds what the other half is made from, so it cannot make a code — and when its record of this scan uploads, the backend checks that other half. Nothing offline ever buys anything: a walk-up or a pay-for needs the backend whatever code is shown.</small>',
-   o:[{t:'their booking, open',d:'Light the relay for what is left of the booking (a late arrival gets what\'s left) and queue an activation event carrying the scanned code.',lcd:L('COURT B  38 MIN')},{t:'their booking, not yet',d:'The booking exists but its window hasn\'t opened.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'code does not check out',d:'Not a member this box holds a key for, or the wrong digits.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'same code again',d:'This box already lit a court on it. If that court is the member\'s own and still on, they read the ON screen below and their OFF works; otherwise the code is spent.',lcd:L('CODE USED','WAIT 30 SECONDS')},{t:'many wrong codes',d:'Five wrong codes inside a minute lock offline checks for a minute, longer each time, so nobody can guess their way onto a court.',lcd:L('TOO MANY TRIES','TRY IN A MINUTE')},{t:'court already lit',d:'Refused, and the button window is bound to that court so the member\'s own OFF still works — whether they show a fresh code or the one that lit it.',lcd:L('COURT B IS ON','ALREADY LIT')}]},
+   o:[{t:'their booking, open',d:'Light the relay for what is left of the booking (a late arrival gets what\'s left) and queue an activation event carrying the scanned code.',lcd:L('COURT B  38 MIN')},{t:'their booking, not yet',d:'The booking exists but its window hasn\'t opened.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'code does not check out',d:'Not a member this box holds a key for, or the wrong digits.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'same code again',d:'This box already lit a court on it. If that court is the member\'s own (their booking, or one they bought or paid for here) and still on, they read the ON screen below and their OFF works; otherwise the code is spent.',lcd:L('CODE USED','WAIT 30 SECONDS')},{t:'many wrong codes',d:'Five wrong codes inside a minute lock offline checks for a minute, longer each time, so nobody can guess their way onto a court.',lcd:L('TOO MANY TRIES','TRY IN A MINUTE')},{t:'court already lit',d:'Refused, and the button window is bound to that court so the member\'s own OFF still works — whether they show a fresh code or the one that lit it.',lcd:L('COURT B IS ON','ALREADY LIT')}]},
   {l:'mega',t:'Lights',d:'Relay closes; the Mega\'s own timer runs the court.'},
   {l:'box',t:'Queue the event',d:'The scanned code, relay and uptime go into the RAM ring (64 slots) until the link returns, and the code is marked used on this box.<small>A power cut before upload loses queued events; attendance for them is then whatever the desk records.</small>'}
  ]},
@@ -571,7 +573,7 @@ var FLOWS=[
  s:'Three ways a court goes dark, and the one way a two-hour booking stays lit past the 90-minute relay cap.',
  steps:[
   {l:'mega',t:'Timer expires',d:'The Mega\'s own timer opens the relay and reports <code>AUTOOFF</code> with how long the court ran.',
-   o:[{t:'OFF button',d:'Honoured only inside the window of whoever scanned, and only for their court.',lcd:L('NOT YOUR COURT','SCAN TO START')}]},
+   o:[{t:'OFF button',d:'Honoured only inside the window of whoever scanned, and only for their court.',lcd:L('NOT YOUR COURT','Not your booking','Another member\'s','NOTHING CHANGED')}]},
   {l:'box',t:'!EXT for long bookings',d:'A booking longer than the cap is re-lit about a minute before the 90-minute mark. The ESP checks the Mega\'s <code>!STATE</code> to confirm the extension took and retries if it was lost.'},
   {l:'box',t:'Release event',d:'Every lights-off queues a release with the held time. It uploads like any other event.'},
   {l:'api',t:'The real lit window',d:'The release is the truth about how long a court really ran: it narrows what a cancelled-then-lit booking is charged, corrects a reversal\'s window, and reinstates a resold slot the court never reached.'}

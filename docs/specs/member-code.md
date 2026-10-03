@@ -358,7 +358,7 @@ server still sees both uploads.
 | ok + allow | the grant, as for any roster grant | `ok`, released for `unlock_seconds` | `activation` / `gate_open`, **subject = the scanned token** |
 | ok + too early / late / wrong court / stale | the roster's own screens | `too_early` / `too_late` / `roster_stale` | `unknown_scan` |
 | ok on a court already lit | `COURT B IS ON / ALREADY LIT` — the re-scan guard | — | nothing |
-| replayed, on the member's own court already lit (bridge 2.2.1) | `COURT B IS ON / ALREADY LIT`, the OFF bound to that court; the scan is spent, so it buys nothing | — | nothing |
+| replayed, on the member's own court already lit — a roster booking naming them (bridge 2.2.1), or a court this box lit online for their REF by activation, walk-up or pay-for (bridge 2.2.2) | `COURT B IS ON / ALREADY LIT`, the OFF bound to that court; the scan is spent, so it buys nothing | — | nothing |
 | replayed | `CODE USED` / `WAIT 30 SECONDS` (arms nothing) | `replayed` | `unknown_scan` |
 | throttled | `TOO MANY TRIES` / `TRY IN A MINUTE` (arms nothing) | `too_fast` | `unknown_scan` |
 | no_clock | the stale roster's screen | `roster_stale` | `unknown_scan` |
@@ -398,9 +398,10 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    `code_step` to `codes:m1` devices. Phones still show legacy codes. Dean can pilot v1 on his own
    phone: v1 tokens are accepted online everywhere, even from un-flashed boards, because a board
    passes scanned bytes through unchanged.
-2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.1 —
-   2.2.0 shows pay-for amounts in minutes, §9.3, and 2.2.1 shows the member who rescans the code
-   that just lit their own court its ON screen rather than `CODE USED`) and each ESP32 door (1.1.0) — the physical USB
+2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.2 —
+   2.2.0 shows pay-for amounts in minutes, §9.3, 2.2.1 shows the member who rescans the code
+   that just lit their own court its ON screen rather than `CODE USED`, and 2.2.2 does the same
+   on a court the box lit online for them, §6.5) and each ESP32 door (1.1.0) — the physical USB
    step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
    `codes:m1` on its latest heartbeat (and at least one does), the phase becomes `v1` and
@@ -425,8 +426,8 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
   **1 ON 2 ON 3 ON 4 ON 5–8 OFF**. (`make flash-bridge` is the PlatformIO equivalent.)
 - **Each door (ESP32)**: Arduino IDE, sketch `src/iot/door-gate/arduino/door_gate/`, board
   `esp32:esp32:esp32` (core 2.0.17), its own `secrets.h`; USB, upload.
-- **Proof it landed**: the Devices page shows firmware **2.2.1** for the box (a box still on
-  2.1.0 or 2.2.0 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
+- **Proof it landed**: the Devices page shows firmware **2.2.2** for the box (a box still on
+  2.1.0, 2.2.0 or 2.2.1 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
   `codes:m1`. The Mega stays **2.0.0**: the bridge is the only half of the box that is flashed.
 
 ---
@@ -733,7 +734,10 @@ Each is a server behaviour; none changes a byte the corpus holds.
   shown a photo of the code before the open was uploaded (refuted 2026-09-28). **The devices
   close that path too**: before asking the server about a v1 code, a door or a court box that can
   already see it is a replay of a code it acted on (`memcode::knownReplay` against its ring)
-  refuses it locally, as the offline path would — `replayed` / CODE USED, no call.
+  answers it locally, with no call, exactly as the offline path would (§6.5): the door says
+  `replayed`; the court box says CODE USED unless the replay's REF holds a lit court here (its own
+  game, by roster or by this box's online grant), which is that court's ON screen with the OFF
+  bound and the scan spent.
 - **A clamped event time.** When the server had to clamp an event's time (a future or >30-day
   claim), the step a v1 code was shown at is unknown: the event is never attendance or money, and
   what the step decides is recorded `unverifiable` (audited `device.activation_unverifiable` /
