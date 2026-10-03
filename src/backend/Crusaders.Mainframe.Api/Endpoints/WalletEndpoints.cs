@@ -387,8 +387,14 @@ public static partial class WalletEndpoints
                 NoCharge = movement.Kind.Code == AdminCreditReasons.PackageFree,
             });
         }
+        // J10-3: a take-back that leaves less than the club's shortest court says so.
+        (int, int)? shortOf = null;
+        if (posted.Entry.AmountMinutes < 0)
+        {
+            shortOf = (await services.Ledger.GetSpendableAsync(movement.UserId, ct), (await services.Settings.GetAsync(ct)).SliceMinutes);
+        }
         return Crusaders.Mainframe.Api.Email.EmailTemplates.MinutesAdjusted(
-            club, to, posted.Entry.AmountMinutes, posted.BalanceAfter, movement.GivenReason);
+            club, to, posted.Entry.AmountMinutes, posted.BalanceAfter, movement.GivenReason, shortOf);
     }
 
     /// <summary>

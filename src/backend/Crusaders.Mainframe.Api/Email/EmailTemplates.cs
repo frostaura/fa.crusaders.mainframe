@@ -871,11 +871,22 @@ public static partial class EmailTemplates
     /// "−45 minutes" — the same convention every screen uses. A package sold at the desk is
     /// <see cref="PackageSoldAtDesk"/>, not this: that member handed over money.
     /// </remarks>
+    /// <param name="shortOfCourt">
+    /// Review round 10, J10-3: on a take-back, the member's spendable minutes after it and the
+    /// club's shortest court, when the first is below the second — the mail then says plainly that
+    /// they cannot book. Null when it leaves enough, or on a grant.
+    /// </param>
     public static EmailMessage MinutesAdjusted(
-        ClubIdentity club, string to, int amountMinutes, int balanceAfterMinutes, string reason)
+        ClubIdentity club, string to, int amountMinutes, int balanceAfterMinutes, string reason,
+        (int Spendable, int Slot)? shortOfCourt = null)
     {
         var added = amountMinutes >= 0;
         var size = Min(Math.Abs(amountMinutes));
+        var shortLine = !added && shortOfCourt is { } s && s.Spendable < s.Slot
+            ? (s.Spendable > 0
+                ? $"That leaves {Min(s.Spendable)} to spend — less than the {Min(s.Slot)} a court needs."
+                : $"That leaves nothing to spend — a court needs at least {Min(s.Slot)}.")
+            : null;
         return EmailChrome.Compose(club, to, new EmailContent(
             Subject: added ? $"Minutes added — {size}" : $"Minutes taken off — {size}",
             Preheader: $"Your balance is now {Min(balanceAfterMinutes)}.",
@@ -889,6 +900,7 @@ public static partial class EmailTemplates
                     new FactRow("Balance after", Min(balanceAfterMinutes)),
                     new FactRow("Reason given", reason),
                 ]),
+                .. (shortLine is null ? Array.Empty<EmailBlock>() : [new Paragraph(shortLine)]),
                 new Paragraph("If that doesn't look right, reply to this email or speak to the desk. The movement stays on your wallet either way — a correction is a second line, never a deleted one."),
             ],
             WhyThis: WhyMoney));

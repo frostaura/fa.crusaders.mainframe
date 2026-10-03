@@ -169,6 +169,41 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
     }
 
     /// <summary>
+    /// Review round 10, J10-3: an admin take-back that left the member 10 spendable minutes in a club
+    /// whose shortest court is 15 mailed only "Balance after 10 minutes" — the member learned they
+    /// could not book by trying. The mail says so plainly; a take-back that leaves enough, and any
+    /// grant, says nothing of the kind.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_take_back_that_leaves_less_than_a_court_says_so_in_the_mail()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkj3");
+        var mail = new StubEmailService();
+        await using var app = WithMail(f, mail);
+        var admin = Admin(app, club);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 120m })).StatusCode);
+        Assert.NotNull(await mail.WaitFor(m => m.Subject.StartsWith("Minutes bought", StringComparison.Ordinal)));
+        mail.Clear();
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/minutes/{club.MemberUserId}/adjust",
+            new { amountMinutes = -20, reasonCode = "correction", reason = "Double entry" })).StatusCode);
+        var enough = await mail.WaitFor(m => m.Subject.StartsWith("Minutes taken off", StringComparison.Ordinal));
+        Assert.NotNull(enough);
+        Assert.DoesNotContain("a court needs", enough!.PlainBody, StringComparison.Ordinal);
+        mail.Clear();
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/minutes/{club.MemberUserId}/adjust",
+            new { amountMinutes = -30, reasonCode = "correction", reason = "Double entry" })).StatusCode);
+        var shortOf = await mail.WaitFor(m => m.Subject.StartsWith("Minutes taken off", StringComparison.Ordinal));
+        Assert.NotNull(shortOf);
+        var flat = System.Text.RegularExpressions.Regex.Replace(shortOf!.PlainBody, @"\s+", " ");
+        Assert.Contains("That leaves 10 minutes to spend — less than the 15 minutes a court needs.", flat, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// <b>Cross-tenant injection on the desk shelf and sale</b> (§10.3). Club B's admin reads no
     /// shelf of club A's member and sells them nothing; club B's admin cannot sell club A's package
     /// to club B's own member either. Nothing is posted anywhere.
