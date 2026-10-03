@@ -16,18 +16,19 @@ Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admi
   frame from 3xl by default** (`fullFrom3xl={false}` opts out; `content` pages opt IN — booking
   detail, How it works, R7 L7-12) and the member app bar is 120rem at 3xl on EVERY page (R6 L6-10)
   — *why:* the bar jumped 320px at 1920, and an 80rem column left a third of the window empty.
-- **Large text steps DOWN by rem container queries** (R7/R8): the PageHeader h1 below 16/12/9rem
-  (L7-13), auth band + title and How it works' badge, the injury pause (L7-5), Alert's gutter under
-  a 14rem container (icon floats, L8-11). Inline glyphs are rem-sized (`size="1rem"`, L6-16).
-- **Dialogs (R8 L8-5/L8-12):** below `sm` gutters stop at px (`min(1rem,16px)`); only the header's
-  FIRST row clears the ×; the header cap is 25dvh (33 from sm) but never under its title
-  (`--dialog-title-room`); its "more" hint is an opaque in-flow strip, never a fade over words.
-  Top-anchored (D12) dialogs open centred and hold that top (`--dialog-top`). *Why:* a 164px body.
+- **Large text steps DOWN by rem container queries** (R7–R9): PageHeader h1 below 16/12/9rem (L7-13), auth band,
+  title, How it works' badge, injury pause (L7-5), Alert's gutter under 14rem (L8-11); R9 the auth SPLIT (`@container/authshell`,
+  56rem — `lg:` overlapped the card at 1024/1280 200 %, L9-1) and the pass band's grid areas under 14rem (avatar row + names
+  whole, crest not drawn — the QR must stay one screen at 320×568/32px, L9-4). Glyphs rem/em-sized (select carets `1rem`, badge
+  icons `1.1667em`, L6-16); a Badge floors at its longest word — the caller's row wraps, never the word (L9-6).
+- **Dialogs (R8/R9):** below `sm` gutters stop at px; only the header's FIRST row clears the × (so nothing else needs a negative
+  margin — the stepper's leftover `-mr-10` ran 40px past the gutter, L9-2); header cap 25dvh/33 never under its title, "more" hint an
+  opaque strip; D12 dialogs open centred (`--dialog-top`). R9 X9-3: focus moved WITHIN the surface (Tab's preventScroll wrap) is
+  scrolled into view; the open's autofocus is not, so a sheet still opens at its top.
 - **One control, one place:** docked on a phone (ContextBar: Top up, Invite a player, the one invite's
   Decline · Accept, R6 L6-13) or inline on a desktop by `useMediaQuery(lg)`, never drawn twice and hidden
   by CSS — *why:* jsdom and a screen reader see both. Bookings quota pill: beside the week strip only.
-- **A docked bar reserves its own room:** it publishes `--context-bar-height`; `<main>`'s padding,
-  the toasts and the grid's height budget subtract it (the page's own 64px padding double-counted).
+- **A docked bar reserves its own room:** it publishes `--context-bar-height`; `<main>`'s padding, the toasts and the grid's height budget subtract it (the page's own 64px padding double-counted).
 - **Bookings rail is WithAside `first`:** DOM-first so a phone gets the games strip above the week,
   drawn in the right column from a 72rem page. Game lists step by the RAIL's box (strip → 2 → 3 →
   vertical list); a viewport `md:` lost to the container variants in the cascade.
@@ -53,8 +54,7 @@ Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admi
   (`[grid-area:x]`): use `[@container_name_(min-width:56rem)]:[grid-area:x]`. Standard utilities work.
 - **`<main>` is the scroller under the app bar:** sticky `top` is from main's edge (`top-0`/`top-6`);
   full-height panes subtract `--app-chrome-height`. A query container does not trap `fixed` children.
-- **A rem-width skeleton beside a switch** (`w-48` = 384px at 200 %) pushed a phone sideways: `max-w-full`.
+- **A rem-width skeleton beside a switch** (`w-48` = 384px at 200 %) pushed a phone sideways: `max-w-full`. **Under load (≥40) lazy-route e2e tests time out on "Opening the page…"**: rerun alone first.
 - **lizard's .tsx lexer runs a function to EOF on a generic it reads as a tag**: `<Columns min=…>`
   (put an attribute before `min`), and `type X = React.ComponentProps<typeof …> & {` after a
   function (dialog.tsx R7: types above every function). Check `python3 -m lizard <file>`'s list.
-- **Under load (≥40) lazy-route e2e tests time out on "Opening the page…"**: rerun alone first.
