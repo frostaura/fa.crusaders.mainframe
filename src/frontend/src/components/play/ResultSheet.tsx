@@ -9,7 +9,7 @@ import { ArrowsClockwise, Minus, Plus } from "@/components/ui/icons";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { errorCode } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import {
   MATCH_FORMATS, playEndpoints, type BookingResultView, type MatchFormat, type MatchResult, type ResultPlayer, type Side,
 } from "@/lib/playApi";

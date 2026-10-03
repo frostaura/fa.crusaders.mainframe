@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { LANDING_PATH } from "@/components/shell/nav";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { arrivedFromSignIn, markOffered, shouldOfferWizard, wasOffered } from "@/lib/onboarding";
 import { GET_STARTED_PATH } from "@/lib/onboardingCopy";
 import { useOnboarding, useProfileOrNull } from "./useOnboarding";

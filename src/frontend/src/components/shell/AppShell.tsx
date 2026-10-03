@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ADMIN_RAIL_OFFSET_XL, ADMIN_RAIL_WIDTH_XL, CREST_BOX_OVER_RAIL } from "@/components/ui/layout";
 import { tokenStore } from "@/lib/api";
 import { useAdminAttention } from "@/lib/adminAttention";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { useDataOwner } from "@/lib/offline/useCachedRead";
 import { useNavigationPending } from "@/routeChunks";
 import { cn } from "@/lib/utils";

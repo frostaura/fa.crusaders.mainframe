@@ -12,7 +12,7 @@ import { describeFailure } from "@/lib/errors";
 import { worthRetrying } from "@/lib/bookingErrors";
 import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine, heldPartsLine } from "@/lib/bookingsCopy";
 import { firstNameOf, heldPartsOf, type HeldPart } from "@/lib/bookingsApi";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";

@@ -8,7 +8,7 @@ import { StateBlock } from "@/components/ui/state-block";
 import { TextLink } from "@/components/ui/text-link";
 import { SignOut } from "@/components/ui/icons";
 import { useProfileOrNull } from "@/components/onboarding/useOnboarding";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY, signedInAsLine } from "@/lib/playersCopy";
 import { AcceptActions } from "./AcceptActions";

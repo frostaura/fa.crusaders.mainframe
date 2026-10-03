@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { UnsureOutcome, outcomeUnknown } from "@/lib/bookingOutcome";
 import { inviteMoney, playersEndpoints, type AcceptAnswer, type Invite, type SeatAnswer } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";

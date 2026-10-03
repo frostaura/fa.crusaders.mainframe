@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "../lib/useAuth";
 import { AUTH_SUBLINE, WELCOME } from "../lib/authCopy";
 import { AuthMark, AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";

@@ -12,7 +12,7 @@ import { Alert } from "@/components/Alert";
 import { RecentToRecord } from "@/components/play/RecentToRecord";
 import { ResultScore } from "@/components/play/ResultScore";
 import { outcomeLine, STATUS_TONE } from "@/components/play/resultFacts";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { playEndpoints, type MyResultRow } from "@/lib/playApi";
 import { PLAY_REFUSAL, playRefusal, playWhen, RESULTS_PAGE, STATUS_WORD } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";

@@ -4,7 +4,7 @@ import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { SignOut } from "@/components/ui/icons";
 import { endpoints } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { SIGN_OUT_EVERYWHERE_COPY as COPY } from "@/lib/profileCopy";
 import { RevokePasskeysSwitch } from "./RevokePasskeysSwitch";
 

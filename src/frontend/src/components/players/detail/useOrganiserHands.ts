@@ -3,7 +3,7 @@ import { useLateLanding } from "@/components/bookings/useSendingGuard";
 import type { PickedPlayer } from "@/components/players/PlayerPicker";
 import { useToast } from "@/components/toastContext";
 import { useSheetHistory } from "@/lib/bookingSheetHistory";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import {
   playersEndpoints, type AddPlayersAnswer, type BookingDetail, type DetailPlayer, type PlayerSpec,
 } from "@/lib/playersApi";

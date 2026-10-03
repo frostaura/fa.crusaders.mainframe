@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { AuthProvider, useAuth } from "./auth";
-import { ProfileProvider, useProfile } from "./profile";
+import { AuthProvider } from "./auth";
+import { useAuth } from "./useAuth";
+import { ProfileProvider } from "./profile";
+import { useProfile } from "./useProfile";
 import { signIn, signOut, stubFetch } from "../test/harness";
 
 /**

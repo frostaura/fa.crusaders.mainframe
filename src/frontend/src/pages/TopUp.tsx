@@ -5,7 +5,7 @@ import { isConnectionFailure } from "../lib/offline/useCachedRead";
 import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
 import { StillTrying } from "../lib/offline/StillTrying";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
-import { useBalance } from "../lib/balance";
+import { useBalance } from "../lib/useBalance";
 import { walletTone } from "../lib/walletTone";
 import { BALANCE_SENTENCE } from "../lib/walletCopy";
 import { formatMoney } from "../lib/utils";

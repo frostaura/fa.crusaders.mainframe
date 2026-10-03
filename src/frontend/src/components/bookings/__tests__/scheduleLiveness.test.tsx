@@ -8,7 +8,7 @@ import { OWN_WRITE_MS, STALE_MS, useScheduleLiveness } from "../useScheduleLiven
  * view with an old read — and not on the echo of its own write.
  */
 const wallet = vi.hoisted(() => ({ balance: null as number | null, unreadCount: null as number | null }));
-vi.mock("@/lib/balance", () => ({ useBalance: () => wallet }));
+vi.mock("@/lib/useBalance", () => ({ useBalance: () => wallet }));
 
 let visibility: DocumentVisibilityState = "visible";
 Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });

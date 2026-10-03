@@ -1,10 +1,10 @@
 import type { WalletResponse } from "@/lib/api";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { heldFrom, type HeldFigures } from "@/lib/liveBalance";
 import { memberReads } from "@/lib/offline/memberReads";
 import { useCachedRead, useDataOwner } from "@/lib/offline/useCachedRead";
 import { heldPartsLine } from "@/lib/walletCopy";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 
 /**
  * F1.11 — what the chip SHOWS: what the member can spend. It showed the whole balance (550) while

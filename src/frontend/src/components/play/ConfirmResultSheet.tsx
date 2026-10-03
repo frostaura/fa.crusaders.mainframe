@@ -7,7 +7,7 @@ import {
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { errorCode } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { playEndpoints, type MatchResult } from "@/lib/playApi";
 import { UnsureOutcome } from "@/lib/lostReply";
 import { CONFIRM_SHEET, FORMAT_LABEL, NOTE_MAX, playRefusal, playWhen, RESULT_CARD, RESULT_UNSURE } from "@/lib/playCopy";

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { tokenStore } from "@/lib/api";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "../lib/useAuth";
 import { CrestMark } from "../components/shell/Crest";
 import { LANDING_PATH } from "../components/shell/nav";
 

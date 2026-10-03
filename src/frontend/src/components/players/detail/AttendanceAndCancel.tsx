@@ -4,7 +4,7 @@ import { CancelSheet, type CancelledOutcome } from "@/components/bookings/Cancel
 import { Button } from "@/components/ui/button";
 import { CheckCircle, Clock } from "@/components/ui/icons";
 import { Section } from "@/components/ui/page-shell";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { clubClock } from "@/lib/clubClock";
 import type { BookingDetail } from "@/lib/playersApi";
 import { DETAIL_ATTENDANCE, DETAIL_CANCEL, DETAIL_NO_SHOW } from "@/lib/playersCopy";

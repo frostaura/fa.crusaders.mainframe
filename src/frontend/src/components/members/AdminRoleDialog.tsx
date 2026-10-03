@@ -7,7 +7,7 @@ import { Textarea } from "../ui/textarea";
 import { REQUIRED_MARK } from "../../lib/confirmDialogCopy";
 import { unsureSentence, writeOrReadBack } from "../../lib/lostReply";
 import { LOST_REPLY, unsureWords } from "../../lib/lostReplyCopy";
-import { useAuth } from "../../lib/auth";
+import { useAuth } from "../../lib/useAuth";
 import { memberDetailEndpoints, type AdminRoleResult } from "../../lib/memberDetailApi";
 import { ADMIN_ROLE_CODES, ADMIN_ROLE_COPY as COPY } from "../../lib/memberDetailCopy";
 

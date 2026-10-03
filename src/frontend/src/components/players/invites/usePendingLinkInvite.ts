@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { playersEndpoints, type Invite } from "@/lib/playersApi";
 import { clearPendingInvite, invitePathOf, pendingInvite } from "@/lib/playersPending";
 

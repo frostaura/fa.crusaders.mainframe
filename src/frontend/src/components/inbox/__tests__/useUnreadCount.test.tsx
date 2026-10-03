@@ -16,8 +16,8 @@ const balance = vi.hoisted(() => ({
 }));
 const auth = vi.hoisted(() => ({ status: "authenticated", mustChangePassword: false, userId: "member-a" }));
 
-vi.mock("@/lib/balance", () => ({ useBalance: () => balance }));
-vi.mock("@/lib/auth", () => ({ useAuth: () => auth }));
+vi.mock("@/lib/useBalance", () => ({ useBalance: () => balance }));
+vi.mock("@/lib/useAuth", () => ({ useAuth: () => auth }));
 
 function Probe({ drive = true }: { drive?: boolean }) {
   return drive ? <Driven /> : <Reader />;

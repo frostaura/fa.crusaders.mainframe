@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { playersEndpoints, type BookingDetail, type SplitMode } from "@/lib/playersApi";
 import { UnsureOutcome } from "@/lib/lostReply";
 import { CHANGE_SPLIT, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal } from "@/lib/playersCopy";

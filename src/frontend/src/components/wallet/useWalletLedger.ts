@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { endpoints, type LedgerEntryType, type LedgerRow, type WalletResponse } from "@/lib/api";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { heldFrom, type HeldFigures } from "@/lib/liveBalance";
 import { memberReads, WALLET_PAGE_SIZE } from "@/lib/offline/memberReads";
 import { fetchQuery, peekQuery, subscribeQuery } from "@/lib/offline/queryCache";

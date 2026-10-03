@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "../lib/useAuth";
 
 /**
  * `/reports`, after the reports split (R16).

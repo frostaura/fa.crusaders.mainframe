@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, endpoints, type PurchaseStatus } from "../lib/api";
-import { useBalance } from "../lib/balance";
+import { useBalance } from "../lib/useBalance";
 import { formatMoney } from "../lib/utils";
 import { minutesSpoken } from "../lib/minutes";
 import { discountPercent } from "../lib/topUpShelf";
@@ -19,7 +19,7 @@ import { Spinner } from "../components/ui/spinner";
 import { TextLink } from "../components/ui/text-link";
 import { ArrowsClockwise, CheckCircle, Clock, Prohibit, WarningCircle } from "../components/ui/icons";
 import { Alert } from "../components/Alert";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "../lib/useAuth";
 import { pendingInvitePath } from "../lib/playersPending";
 import { returnLabel, safeReturnTo, topUpReturnFor } from "../lib/topUpReturn";
 import { CancelPending } from "./TopUpOpenCheckouts";

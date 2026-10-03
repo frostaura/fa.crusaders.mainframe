@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth, type SessionEnding } from "../lib/auth";
+import { useAuth, type SessionEnding } from "../lib/useAuth";
 import { ApiError, endpoints, errorCode } from "../lib/api";
 import { isPasskeySupported } from "../lib/webauthn";
 import { useAsyncAction } from "../lib/useAsyncAction";

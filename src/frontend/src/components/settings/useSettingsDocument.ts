@@ -3,7 +3,7 @@ import { ApiError, api, endpoints, type AdminSettings } from "@/lib/api";
 import { readCurrencySymbol } from "@/lib/currency";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import {
   forgetSettingsDraft, keepSettingsDraft, keptSettingsDraft, noteSettingsDraftSessionEnded,
 } from "@/lib/settingsDraftStore";

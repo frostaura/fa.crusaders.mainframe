@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
-import { whenSessionCheckSent } from "./auth";
+import { whenSessionCheckSent } from "./sessionCheck";
 
 /**
  * Perf lane (2026-09-30) — the opened page's code waits for the session check to be SENT, never

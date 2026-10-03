@@ -7,7 +7,7 @@ import { useInviteSnapshot } from "@/components/players/invites/useInviteSnapsho
 import { useClosedGame, type ClosedGame } from "@/components/players/invites/useInviteFate";
 import type { AcceptPort } from "@/components/players/invites/useAcceptFlow";
 import { ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { playersEndpoints } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 import { minutesSpoken } from "@/lib/minutes";

@@ -5,7 +5,7 @@ import { InviteGone, InvitePanel, InvitePanelSkeleton } from "@/components/playe
 import { InviteSignedOut } from "@/components/players/invites/InviteSignedOut";
 import { useInviteFate, type InviteFate } from "@/components/players/invites/useInviteFate";
 import { useInviteSnapshot } from "@/components/players/invites/useInviteSnapshot";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { playersEndpoints } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 

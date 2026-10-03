@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ApiError, NetworkError, REQUEST_TIMEOUT_MS, api, tokenStore } from "./api";
-import { AuthProvider, useAuth } from "./auth";
+import { AuthProvider } from "./auth";
+import { useAuth } from "./useAuth";
 
 /**
  * Resilience of the session and of a single request, which are two halves of the same

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import WalletPage from "@/pages/Wallet";
-import { walletLabel } from "@/lib/balance";
+import { walletLabel } from "@/lib/walletLabel";
 import { HELD_EXPLAINER, OWED_BACK_EXPLAINER, heldLine, owedBackLine } from "@/lib/playersCopy";
 import { chipHeldTitle, minutesArrivedSentence, minutesLeftSentence, heldPartsLine, spendableLine } from "@/lib/walletCopy";
 import { renderPage, signIn, signOut, stubFetch } from "@/test/harness";

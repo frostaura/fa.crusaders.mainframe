@@ -3,7 +3,7 @@ import { Button } from "../ui/button";
 import { Panel } from "../ui/card";
 import { Skeleton } from "../ui/skeleton";
 import { TextLink } from "../ui/text-link";
-import { useBalance } from "../../lib/balance";
+import { useBalance } from "../../lib/useBalance";
 import { walletTone } from "../../lib/walletTone";
 import { BUY_MINUTES_PATH } from "../../lib/minutes";
 import { Minutes } from "../Minutes";

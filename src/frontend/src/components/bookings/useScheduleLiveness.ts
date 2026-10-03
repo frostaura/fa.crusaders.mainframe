@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 
 /**
  * R4 M4-3 — the Bookings page keeps up with what other people do to this member's games.

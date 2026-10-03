@@ -1,5 +1,5 @@
 import { readCurrencySymbol, setClubCurrencySymbol } from "./currency";
-import { useProfile } from "./profile";
+import { useProfile } from "./useProfile";
 
 /**
  * Feeds the club's money symbol from the payload that already reaches every signed-in screen.

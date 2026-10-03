@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { tokenStore } from "../../lib/api";
-import { readLastIdentity, useAuth } from "../../lib/auth";
+import { readLastIdentity } from "../../lib/lastIdentity";
+import { useAuth } from "../../lib/useAuth";
 import { BootSplash, ConnectionLost } from "./SessionScreens";
 import { LANDING_PATH } from "./nav";
 

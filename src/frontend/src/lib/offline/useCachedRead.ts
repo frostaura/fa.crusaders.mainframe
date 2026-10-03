@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { NetworkError, OfflineError, tokenStore } from "../api";
-import { useOptionalAuth } from "../auth";
+import { useOptionalAuth } from "../useAuth";
 import { onForeground } from "./foreground";
 import { fetchQuery, getDataOwner, peekQuery, subscribeDataOwner, subscribeQuery, updateQuery } from "./queryCache";
 

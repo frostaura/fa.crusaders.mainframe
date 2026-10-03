@@ -1,8 +1,8 @@
 /**
  * The wallet's three tones, with no imports, so copy modules and Playwright specs (which load
  * `lib/walletCopy.ts` in Node, where the auth module's `localStorage` read at load would throw)
- * can ask the question without pulling in the live-balance and auth chain. `balance.tsx`
- * re-exports all three names.
+ * can ask the question without pulling in the live-balance and auth chain. Nothing re-exports
+ * them: import from here.
  */
 
 /**

@@ -3,7 +3,8 @@ import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError, NetworkError } from "./api";
 import { AuthProvider } from "./auth";
-import { BalanceProvider, useBalance } from "./balance";
+import { BalanceProvider } from "./balance";
+import { useBalance } from "./useBalance";
 import { heldFrom, LIVE_BALANCE_POLICY, type BalanceFrame, type BalanceTransport } from "./liveBalance";
 import { inviteMoney } from "./playersApi";
 import {

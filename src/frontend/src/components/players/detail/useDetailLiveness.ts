@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useBoundaryRefresh } from "@/components/member-door/useBoundaryRefresh";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import type { BookingDetail } from "@/lib/playersApi";
 
 /**

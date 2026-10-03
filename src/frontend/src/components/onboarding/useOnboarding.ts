@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { useAuth } from "@/lib/auth";
-import { useProfile } from "@/lib/profile";
+import { useAuth } from "@/lib/useAuth";
+import { useProfile } from "@/lib/useProfile";
 import {
   adminTourDue, memberTourDue, normalisePrefs, onboardingEndpoints, readLocalOnboarding, writeLocalOnboarding,
   type LocalOnboarding, type MemberStepId, type OnboardingPrefs, type ProfileWithPreferences,

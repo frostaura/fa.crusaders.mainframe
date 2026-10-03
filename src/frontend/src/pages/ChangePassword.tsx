@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type Ref, type RefObject } from "react";
 import { useNavigate } from "react-router-dom";
 import { endpoints, errorCode } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "../lib/useAuth";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { describeFailure } from "../lib/errors";
 import { CHANGE_PASSWORD, CHANGE_PASSWORD_MESSAGES, checkFields } from "../lib/authCopy";

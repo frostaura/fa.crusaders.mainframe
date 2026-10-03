@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useBalance } from "../../lib/balance";
+import { useBalance } from "../../lib/useBalance";
 
 /**
  * GOAL item 8, on the wallet's own screen — and a local stand-in for the UI lane's

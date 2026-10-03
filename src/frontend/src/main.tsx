@@ -6,7 +6,7 @@ import { registerServiceWorker } from "./lib/pwa";
 import { installChunkReload } from "./lib/chunkLoad";
 import { ThemeProvider } from "./lib/theme";
 import { tokenStore } from "./lib/api";
-import { whenSessionCheckSent } from "./lib/auth";
+import { whenSessionCheckSent } from "./lib/sessionCheck";
 import { preloadAtSessionCheck } from "./routeChunks";
 import "./index.css";
 

@@ -5,7 +5,7 @@ import { RequireAuth } from "@/components/shell/RequireAuth";
 import { resetUnread } from "@/components/inbox/useUnreadCount";
 import type { MemberNotification } from "@/lib/playersApi";
 import { INBOX_COPY } from "@/lib/playersCopy";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { ledgerRowFixture, refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "@/test/harness";
 import InboxPage from "@/pages/Inbox";
 import WalletPage from "@/pages/Wallet";

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { endpoints } from "./api";
 import { adminEndpoints, type DeviceErrorCounts } from "./adminApi";
-import { useAuth } from "./auth";
+import { useAuth } from "./useAuth";
 import { pendingApplicationsKnown, pendingApplicationsVersion, subscribePendingApplications } from "./pendingApplications";
 import { playEndpoints } from "./playApi";
 import { refreshDoorsView, useDoorsStore } from "../components/doors/useDoorsChrome";

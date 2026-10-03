@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/lib/auth";
+import { AuthProvider } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { BalanceProvider } from "@/lib/balance";
 import type { BalanceTransport } from "@/lib/liveBalance";
 import { ToastProvider } from "../Toast";

@@ -36,8 +36,8 @@ import { LazyCancelSheet, loadCancelSheet, usePrefetchWhen } from "../components
 import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
-import { useAuth } from "../lib/auth";
-import { useBalance } from "../lib/balance";
+import { useAuth } from "../lib/useAuth";
+import { useBalance } from "../lib/useBalance";
 import { BOOKINGS_COPY, cancelSelectionLabel, selectionCapSentence, selectionCapShort, selectionHeadline } from "../lib/bookingsCopy";
 import { firstNameOf, memberGridRules } from "../lib/bookingsApi";
 import { describePlaces, type Place } from "../lib/bookingSpan";

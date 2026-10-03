@@ -4,7 +4,7 @@ import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKep
 import { StillTrying } from "@/lib/offline/StillTrying";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { endpoints, NetworkError, type WebAuthnCredentialRow, type MyProfile } from "../lib/api";
-import { useProfile } from "../lib/profile";
+import { useProfile } from "../lib/useProfile";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { useToast } from "../components/toastContext";
 import { ConfirmButton } from "../components/ConfirmButton";

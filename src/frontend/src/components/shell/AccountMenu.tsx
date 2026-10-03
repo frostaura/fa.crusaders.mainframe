@@ -7,15 +7,15 @@ import {
   DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ArrowCounterClockwise, Compass, Desktop, Moon, Question, SignOut, Sun, UserCircle, Wallet, type Icon } from "@/components/ui/icons";
-import { walletHref } from "@/lib/balance";
+import { walletHref } from "@/lib/walletLabel";
 import { Minutes } from "@/components/Minutes";
 import { NO_FIGURE_SPOKEN } from "@/lib/minutes";
 import { useChipBalance } from "./chipBalance";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import {
   ADMIN_TOUR_PATH, GET_STARTED_PATH, GUIDE_LINK_LABEL, GUIDE_PATH, REPLAY_ADMIN_TOUR, REPLAY_WELCOME,
 } from "@/lib/onboardingCopy";
-import { useProfile } from "@/lib/profile";
+import { useProfile } from "@/lib/useProfile";
 import { focusHeading } from "@/lib/routeAnnouncer";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
 

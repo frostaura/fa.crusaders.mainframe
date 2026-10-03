@@ -5,8 +5,8 @@ import { MY_CODE } from "../../../lib/myCodeCopy";
 import { TOP_UP_LABEL } from "../../../lib/walletCopy";
 
 const state = vi.hoisted(() => ({ balance: null as number | null, loading: true, held: null as null | { spendable: number } }));
-vi.mock("../../../lib/balance", async (actual) => ({
-  ...(await actual<typeof import("../../../lib/balance")>()),
+vi.mock("../../../lib/useBalance", async (actual) => ({
+  ...(await actual<typeof import("../../../lib/useBalance")>()),
   useBalance: () => state,
 }));
 

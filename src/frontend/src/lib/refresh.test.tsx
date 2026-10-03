@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, ApiError, endpoints, NetworkError, REFRESH_PATH, REFRESH_TIMEOUT_MS, resetRefreshBackoff, setUnauthorizedHandler, tokenStore } from "./api";
-import { AuthProvider, useAuth } from "./auth";
+import { AuthProvider } from "./auth";
+import { useAuth } from "./useAuth";
 import { describeFailure } from "./errors";
 
 /**

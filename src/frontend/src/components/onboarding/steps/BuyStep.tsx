@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Interactable } from "@/components/ui/interactable";
 import { Wallet } from "@/components/ui/icons";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { GET_STARTED } from "@/lib/onboardingCopy";
 import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { StepFrame } from "./StepFrame";

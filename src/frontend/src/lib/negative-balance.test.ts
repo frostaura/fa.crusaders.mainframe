@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { walletLabel } from "./balance";
+import { walletLabel } from "./walletLabel";
 import { walletTone } from "./walletTone";
 import { emptyWalletSentence } from "./gridCopy";
 import { walletNotice } from "./gridExplain";

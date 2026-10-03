@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { useAuth } from "@/lib/auth";
-import { useBalance } from "@/lib/balance";
+import { useAuth } from "@/lib/useAuth";
+import { useBalance } from "@/lib/useBalance";
 import { playEndpoints, type Celebration } from "@/lib/playApi";
 
 /**

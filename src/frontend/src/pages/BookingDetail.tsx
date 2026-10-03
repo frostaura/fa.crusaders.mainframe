@@ -32,7 +32,7 @@ import { StaleNotice } from "@/components/shell/StaleNotice";
 import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKeptRetry";
 import { StillTrying } from "@/lib/offline/StillTrying";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { memberReads } from "@/lib/offline/memberReads";
 import { fetchQuery, peekQuery } from "@/lib/offline/queryCache";
 import { useDataOwner } from "@/lib/offline/useCachedRead";

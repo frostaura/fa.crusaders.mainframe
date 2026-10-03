@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Button } from "../ui/button";
 import { Panel } from "../ui/card";
 import { Skeleton } from "../ui/skeleton";
-import { useBalance } from "../../lib/balance";
+import { useBalance } from "../../lib/useBalance";
 import { walletTone } from "../../lib/walletTone";
 import { BOOKINGS_COPY } from "../../lib/bookingsCopy";
 import { firstNameOf } from "../../lib/bookingsApi";

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import WalletPage from "./Wallet";
-import { BalanceProvider, useBalance } from "../lib/balance";
+import { BalanceProvider } from "../lib/balance";
+import { useBalance } from "../lib/useBalance";
 import type { BalanceFrame, BalanceTransport } from "../lib/liveBalance";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 

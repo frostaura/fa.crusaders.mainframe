@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readLastIdentity, useAuth } from "../auth";
+import { readLastIdentity } from "../lastIdentity";
+import { useAuth } from "../useAuth";
 import { STEP_MS } from "./clubDay";
 import { DayKeyCache, memberCodeAt, stepAt, type MemberCodeAt } from "./derive";
 import type { MemberCodeRecord } from "./keyStore";

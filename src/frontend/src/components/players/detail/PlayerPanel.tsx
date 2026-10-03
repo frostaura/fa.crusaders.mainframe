@@ -9,7 +9,7 @@ import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Section } from "@/components/ui/page-shell";
-import { useBalance } from "@/lib/balance";
+import { useBalance } from "@/lib/useBalance";
 import { Minutes } from "@/components/Minutes";
 import { minutesSpoken } from "@/lib/minutes";
 import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";

@@ -22,8 +22,8 @@ const PARTS = [
   { minutes: 25, until: "2030-10-02T04:45:00Z" },
 ];
 
-vi.mock("@/lib/balance", async (original) => ({
-  ...(await original<typeof import("@/lib/balance")>()),
+vi.mock("@/lib/useBalance", async (original) => ({
+  ...(await original<typeof import("@/lib/useBalance")>()),
   useBalance: () => ({
     balance: 100, held: { held: 60, owedBack: 0, spendable: 40, until: "2030-10-02T04:45:00Z", parts: PARTS },
     refresh: vi.fn(), apply: vi.fn(),

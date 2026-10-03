@@ -8,7 +8,7 @@ import { Section } from "@/components/ui/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateBlock } from "@/components/ui/state-block";
 import { ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { playEndpoints, type BookingResultView, type MatchResult } from "@/lib/playApi";
 import {
   CONFIRM_SHEET, FORMAT_LABEL, notRecordableLine, PLAY_REFUSAL, playRefusal, playWhen, RESULT_CARD, RESULT_LOST, RESULT_SHEET,
