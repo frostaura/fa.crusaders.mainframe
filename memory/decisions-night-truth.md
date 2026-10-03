@@ -50,3 +50,11 @@ Tests: `R7ChainHttpTests`, `R7WordsTests`, `DeviceEventHttpTests+R7Night`, `Desk
   The admin Night's `minutes_on_court` stays box-measured, not shown to members.
 - **The grid's daily limit is the POST's** (J8-1): `BookingRules.HeldOnDayAsync` counts accepted
   partner seats for both.
+- **R9 (lane BE9):** an OUTAGE refund reversed by a late check-in (`OutageRefundedAt` set) is never a
+  no-show: wallet "Outage refund reversed — you were checked in after all", reversal audit carries
+  `peripheral_outage` (Night: "The club took back an outage refund…"), mail `OutageRefundReversed` (no
+  penalty row); a share re-taken on a reversed booking is `AfterAttendance` ("the session was attended").
+  The reversal's `court.activated` row sets `ScanAt` = the scan (E9-2/E9-4). A court-box `code_used`
+  writes `court.activation_refused` about the member (`DeviceFaultSink.CodeUsedAtCourtAsync`, never the
+  code): "Was turned away at Court N — code already used", door rows likewise (E9-6). Admin "Last 30
+  days": bookings = the list's `PlayedBy`, sessions = `AttendanceQuery`, no-shows = booker (E9-1). Tests: `R9Outage…`.
