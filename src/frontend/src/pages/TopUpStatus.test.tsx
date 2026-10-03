@@ -107,6 +107,14 @@ describe("Top-up status — failure copy", () => {
     expect(await screen.findByText(/Waiting for confirmation from PayFast/)).toBeInTheDocument();
     expect(screen.getByText(/for R500\.00/)).toBeInTheDocument();
   });
+
+  it("R7 J7-1: says when a waiting purchase closes by itself once, beside its Cancel — not again in the details", async () => {
+    show(snapshot({ status: "Pending" }));
+
+    expect(await screen.findByText(/Waiting for confirmation from PayFast/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Closes by itself/)).toHaveLength(1);
+    expect(screen.getByRole("complementary", { name: "About this purchase" })).not.toHaveTextContent(/Closes by itself/);
+  });
 });
 
 /**

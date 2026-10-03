@@ -23,7 +23,7 @@ import { useAuth } from "../lib/auth";
 import { pendingInvitePath } from "../lib/playersPending";
 import { returnLabel, safeReturnTo, topUpReturnFor } from "../lib/topUpReturn";
 import { CancelPending } from "./TopUpOpenCheckouts";
-import { clubClock, clubDayAndClock } from "../lib/clubClock";
+import { clubDayAndClock } from "../lib/clubClock";
 
 /**
  * What each failure code means, to a member.
@@ -291,10 +291,12 @@ function WayBack({ path }: { path: string | null }) {
 /**
  * R6 L6-3 — the page USES a desktop: the status card with the purchase's details beside it (a
  * 36rem column left 60 % of a 1280 screen empty). Stacked on a phone, details after the status.
+ * R7 J7-1 / L7-12 — and the 120rem frame from 3xl, as every member page now stands on: at 1920 a
+ * 64rem column was 48 % of the window and the title sat 496 px in, apart from the app bar.
  */
 function StatusShell({ header, aside, children }: { header: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
-    <PageShell width="content">
+    <PageShell width="content" fullFrom3xl>
       {header}
       {aside ? (
         <WithAside at="56rem" asideWidth="22rem" sticky={false} asideLabel={STATUS_COPY.aboutTitle} aside={aside}>{children}</WithAside>
@@ -386,8 +388,6 @@ export const STATUS_COPY = {
   aboutGet: "You get",
   aboutPay: "You pay",
   aboutStarted: "Started",
-  aboutCloses: "Closes by itself",
-  aboutClosesHelp: "If PayFast never confirms it, the club closes it then and nothing is charged.",
   aboutReference: "Reference",
   aboutReferenceHelp: "Quote it to the club if anything about this payment looks wrong.",
 } as const;
@@ -492,7 +492,7 @@ function NoSuchPurchase() {
 
 /**
  * R6 L6-3 — what this purchase is, beside its status: the package, what it buys and costs, when it
- * started, when a waiting one closes by itself, and the reference the club can look it up by.
+ * started, and the reference the club can look it up by.
  */
 function AboutPurchase({ status }: { status: PurchaseStatus }) {
   const off = status.discount_bps > 0 && status.list_price_zar > status.amount_zar;
@@ -507,9 +507,8 @@ function AboutPurchase({ status }: { status: PurchaseStatus }) {
           {off ? <span className="block text-xs font-normal text-text-secondary">{`${discountPercent(status.discount_bps)} off ${formatMoney(status.list_price_zar)}`}</span> : null}
         </AboutRow>
         <AboutRow term={STATUS_COPY.aboutStarted}>{clubDayAndClock(status.created_at)}</AboutRow>
-        {status.status === "Pending" ? (
-          <AboutRow term={STATUS_COPY.aboutCloses} help={STATUS_COPY.aboutClosesHelp}>{clubClock(status.expires_at)}</AboutRow>
-        ) : null}
+        {/* R7 J7-1 — when a waiting purchase closes by itself is said ONCE, under the status beside
+            its Cancel (`CancelPending`); repeating it here said it twice on one screen. */}
         <AboutRow term={STATUS_COPY.aboutReference} help={STATUS_COPY.aboutReferenceHelp}>
           <span className="font-mono text-xs [overflow-wrap:anywhere]">{status.id}</span>
         </AboutRow>
