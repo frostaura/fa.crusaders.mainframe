@@ -84,7 +84,9 @@ const BODY = "grid grid-cols-1 gap-3 [@container(min-width:36rem)]:grid-cols-2 [
  * show; the search still finds a member by address.
  */
 const ROW = cn(
-  "no-lift group grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-bg-surface p-3 shadow-xs",
+  // L6-9: the who column keeps at least half the card; the badges and the balance beside it WRAP
+  // in what is left (min 0) instead of taking their one-line width and cutting the name to nothing.
+  "no-lift group grid grid-cols-[minmax(50%,1fr)_minmax(0,auto)_auto] items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-bg-surface p-3 shadow-xs",
   "hover:border-control",
   "[@container(min-width:48rem)]:table-row [@container(min-width:48rem)]:rounded-none",
   "[@container(min-width:48rem)]:border-0 [@container(min-width:48rem)]:p-0 [@container(min-width:48rem)]:shadow-none",
@@ -304,7 +306,13 @@ function Identity({ row }: { row: MemberRow }) {
             title={row.full_name}
             // A 44px target on a 20px line (R5 X5-12): the padding grows the hit area, the margin
             // gives the line its height back.
-            className="no-lift -my-3 min-w-0 truncate py-3 font-semibold text-text-primary underline-offset-2 hover:underline"
+            // L6-9: on a phone's card the name WRAPS, never cut — the badges beside it took the
+            // width and cut "Thandiwe Mokoena-Dlamini" to nothing; the table, whose Member column
+            // is sized for it, keeps one line.
+            className={cn(
+              "no-lift -my-3 min-w-0 py-3 font-semibold text-text-primary underline-offset-2 hover:underline",
+              "break-words hyphens-auto [@container(min-width:48rem)]:truncate",
+            )}
           >
             {row.full_name}
           </Link>

@@ -160,3 +160,28 @@ test.describe("L6-8 — the package editor's sheet docks its footer", () => {
     expect(await body.evaluate((el) => el.scrollHeight > el.clientHeight), "the form is long enough to scroll").toBe(true);
   });
 });
+
+test.describe("L6-9 — a member's name on a phone card", () => {
+  test("at 390 is never cut by the badges beside it", async ({ page }) => {
+    const names = ["Thandiwe Mokoena-Dlamini", "Bea Nkosi", "Alexandra Featherstonehaugh"];
+    const club = names.map((full_name, i) => member({
+      user_id: `00000000-0000-4000-8000-00000000070${i}`, membership_id: `00000000-0000-4000-8000-00000000071${i}`,
+      full_name, is_admin: i !== 1, admin_source: i === 0 ? "config" : "granted", email_verified: i !== 2,
+      balance_minutes: 150,
+    }));
+    await open(page, "/admin/members", adminRoutes([{ path: "/api/v1/admin/members/", body: club }]), 390);
+    await expect(page.locator("[data-member-row]").first()).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(() => document.fonts.ready);
+    const cut = await page.locator("[data-member-row] a[title]").evaluateAll((links) =>
+      links.filter((a) => a.scrollWidth > a.clientWidth + 1 || a.scrollHeight > a.clientHeight + 1)
+        .map((a) => `${a.textContent} ${a.clientWidth}/${a.scrollWidth}x${a.clientHeight}/${a.scrollHeight} ${getComputedStyle(a).display}`));
+    expect(cut, "names cut short").toEqual([]);
+    if (process.env.FC_SHOTS) await page.screenshot({ path: `${process.env.FC_SHOTS}/members-390.png` });
+    const tall = await page.locator("[data-member-row]").evaluateAll((rows) => rows.map((r) => Math.round(r.getBoundingClientRect().height)));
+    // Still compact (R5 §4.3, ~72 px): a two-badge card stays near it; three badges stack beside the name.
+    expect(tall[0], `card heights ${tall.join(", ")}`).toBeLessThanOrEqual(110);
+    expect(tall[1], `card heights ${tall.join(", ")}`).toBeLessThanOrEqual(80);
+    expect(tall[2], `card heights ${tall.join(", ")}`).toBeLessThanOrEqual(136);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});
