@@ -551,7 +551,9 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
     // The text now has the row's whole width; the action sits under it; the terms stack over their
     // values until the ROW (not the viewport — 200 % text) has room for two columns.
     <li className="border-t border-border pt-4 [container-type:inline-size] first:border-t-0 first:pt-0">
-      <div className="flex min-w-0 items-start gap-2">
+      {/* R7 L7-10: under an 18rem row (576px at 200 % text) the checkbox goes ABOVE the text, not
+          beside it — its 44px box and gap left the title 132px at 320 / 200 % ("reportin / g"). */}
+      <div className="flex min-w-0 items-start gap-2 [@container(max-width:18rem)]:flex-col">
         {!resolved && (
           // The whole 44px box is the target (A11Y F3-19: the box itself measured 20 × 20; its
           // `after:` extension is invisible to a pointer-size audit and to a reader of the page).
@@ -564,14 +566,16 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
             />
           </label>
         )}
-        <div data-fault-text="" className="min-w-0 flex-1 space-y-1">
+        <div data-fault-text="" className="min-w-0 flex-1 space-y-1 [@container(max-width:18rem)]:w-full">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Badge tone={tone}>{SEVERITY_WORD[row.severity]}</Badge>
             <p className="min-w-0 break-words font-medium text-text-primary">{said.title}</p>
             {/* The raw code stays reachable for whoever has to report it upstream. Losing it
                 would make a humanised unknown unsearchable. */}
             {said.unrecognised && (
-              <code className="rounded-sm bg-bg-muted px-1.5 py-0.5 font-mono text-xs text-text-muted">{row.code}</code>
+              // `break-words max-w-full` (R7 L7-10): an identifier has no space to wrap at, and at
+              // 320 / 200 % "heartbeat_missing" ran past the screen.
+              <code className="max-w-full break-words rounded-sm bg-bg-muted px-1.5 py-0.5 font-mono text-xs text-text-muted">{row.code}</code>
             )}
           </div>
           <p className="text-xs text-text-muted">

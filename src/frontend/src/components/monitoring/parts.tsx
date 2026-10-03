@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
+import { FILTER_BAR_INSET, FILTER_TRIGGER_INSET } from "../ui/layout";
 import { Button } from "../ui/button";
 import { DatePicker } from "../ui/date-picker";
 import { IconButton } from "../ui/icon-button";
@@ -55,7 +56,8 @@ export function FilterBar({ label = "Filters", children, className, id }: {
       role="group"
       aria-label={label}
       className={cn(
-        "flex flex-wrap items-end gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs",
+        "flex flex-wrap items-end gap-3 rounded-xl border border-border bg-bg-surface shadow-xs",
+        FILTER_BAR_INSET,
         className,
       )}
     >
@@ -91,7 +93,9 @@ export function FilterSelect({ id, label, value, options, onChange, className }:
     <Field controlId={id} className={cn("flex-[1_1_10rem] sm:flex-none", className)} style={FILTER_FLOOR}>
       <FieldLabel>{label}</FieldLabel>
       <Select value={value === "" ? ANY : value} onValueChange={(next) => onChange(next === ANY ? "" : next)}>
-        <SelectTrigger className="w-full sm:w-auto sm:min-w-44">
+        {/* R7 L7-10: the value WRAPS at its spaces rather than clamp to one line — at 320 / 200 %
+            a filter's box held 108px and showed "Every b…", "Still op…". A word stays whole. */}
+        <SelectTrigger className={cn("w-full whitespace-normal sm:w-auto sm:min-w-44 [&_[data-slot=select-value]]:line-clamp-none", FILTER_TRIGGER_INSET)}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

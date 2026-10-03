@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { bigText, fontsReady, sideways } from "./layoutKit";
+import { bigText, fontsReady, sideways, textOffScreen } from "./layoutKit";
 import { memberShellRoutes } from "./playersKit";
+import { deviceErrorFixture, deviceErrorPageFixture } from "../src/test/monitoringFixtures";
 
 /**
  * Review round 7, lane FC2 (admin rail, overview, monitoring, reports, webhooks, doors, ledger
@@ -350,4 +351,32 @@ test.describe("L7-9 — the device-key card at a desk, at 100 % text", () => {
       expect(shape).toEqual({ pad: width >= 640 ? "24px" : "16px", border: "1px", notePad: "16px" });
     });
   }
+});
+
+/* ───────────────────────── L7-10 — Faults at 320 / 200 % ───────────────────────── */
+
+test.describe("L7-10 — Faults at 320 / 200 %", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "mobile", "a phone"); });
+
+  test("the filters show their whole values and a fault's title keeps its words", async ({ page }) => {
+    const rows = [
+      deviceErrorFixture({ id: "e1", device_name: "box-af1737", code: "heartbeat_missing", severity: "critical", headline: "The box stopped reporting" }),
+      deviceErrorFixture({ id: "e2", device_name: "box-3a3703", code: "scanner_timeout", headline: "The scanner stopped answering" }),
+    ];
+    await open(page, "/admin/monitoring/faults", [
+      { path: "/api/v1/admin/monitoring/errors", body: deviceErrorPageFixture(rows) },
+      { path: "/api/v1/admin/devices/", body: [] },
+    ], 320, 800);
+    await expect(page.locator("[data-fault-text]").first()).toBeVisible(ARRIVES);
+    await bigText(page);
+    await fontsReady(page);
+    if (process.env.FC_SHOTS) await page.screenshot({ path: `${process.env.FC_SHOTS}/faults-320.png` });
+    const clipped = await page.locator("[data-slot='select-value']").evaluateAll((values) => values
+      .filter((v) => v.scrollWidth > v.clientWidth + 1 || v.scrollHeight > v.clientHeight + 1)
+      .map((v) => `${v.textContent} ${v.clientWidth}/${v.scrollWidth}`));
+    expect(clipped, "a filter's value cut short").toEqual([]);
+    expect(await brokenWords(page, "[data-fault-text] p"), "a fault's words broken mid-word").toEqual([]);
+    expect(await textOffScreen(page), "text past the screen").toEqual([]);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
 });

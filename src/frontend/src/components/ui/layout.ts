@@ -105,6 +105,14 @@ export const ADMIN_RAIL_INSET = "px-[min(0.75rem,12px)]";
 export const ADMIN_RAIL_ROW = "gap-[min(0.75rem,12px)] px-[min(0.75rem,12px)]";
 
 /**
+ * R7 L7-10 — a filter bar's inset and its selects' side padding stop growing at 16px / 12px. At
+ * 320 / 200 % the bar's 32px and the trigger's 24px a side left a value 108px, and "Anything"
+ * (130px) was cut. The words grow; the gutters need not.
+ */
+export const FILTER_BAR_INSET = "p-[min(1rem,16px)]";
+export const FILTER_TRIGGER_INSET = "px-[min(0.75rem,12px)]";
+
+/**
  * R6 L6-16 — an icon button's glyph: 20px at 100 % text, growing with it (1.25rem), in a target
  * that is 44px at least and grows too (2rem — 64px at 200 %, so a header row does not double). At 200 % text the refresh and the dialog's ×
  * stayed 20px beside 32px words. The refresh button and the dialog's close share it.
