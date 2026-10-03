@@ -117,6 +117,18 @@ export default function AdminPackagesPage() {
   );
 }
 
+/** The package whose Retire question is up, and whether it is still open (it stays mounted while it closes). */
+type Retiring = { pkg: AdminPackage; open: boolean };
+
+function asking(pkg: AdminPackage): Retiring {
+  return { pkg, open: true };
+}
+
+function dismissed(now: Retiring | null): Retiring | null {
+  if (!now) return now;
+  return { pkg: now.pkg, open: false };
+}
+
 type PackagesListProps = {
   view: PackageStatus;
   read: ReturnType<typeof usePackages>;
@@ -131,13 +143,15 @@ function PackagesList({ view, read, groups, wide, onAdd, onEdit }: PackagesListP
   const active = view === "active";
   // Which package, and whether its question is open, are separate (R9 X9-1): the dialog stays
   // mounted while it closes, so Radix's close-time focus runs and Esc or Cancel lands on the ⋯.
-  const [retiring, setRetiring] = useState<{ pkg: AdminPackage; open: boolean } | null>(null);
+  const [retiring, setRetiring] = useState<Retiring | null>(null);
+  const ask = (pkg: AdminPackage) => setRetiring(asking(pkg));
+  const dismiss = () => setRetiring(dismissed);
   return (
     <>
       <RetireDialog
         pkg={retiring?.pkg ?? null}
         open={retiring?.open ?? false}
-        onClose={() => setRetiring((now) => (now ? { ...now, open: false } : now))}
+        onClose={dismiss}
         onRetired={(p) => { read.settle(p); void read.load(); }}
       />
       <StaleNotice stale={Boolean(read.error) && read.packages !== null} readAt={read.readAt} />
@@ -155,7 +169,7 @@ function PackagesList({ view, read, groups, wide, onAdd, onEdit }: PackagesListP
         skeleton={<ListSkeleton />}
       >
         {read.packages ? (
-          <Shelves packages={read.packages} groups={groups} wide={wide} onEdit={onEdit} onRetire={(pkg) => setRetiring({ pkg, open: true })} />
+          <Shelves packages={read.packages} groups={groups} wide={wide} onEdit={onEdit} onRetire={ask} />
         ) : null}
       </StateBlock>
     </>
