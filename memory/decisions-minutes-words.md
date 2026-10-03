@@ -45,4 +45,5 @@ last_verified: 2026-10-03
   console preview; the console table cell drops the verb under its "Saves" header). L6-11.
 - **A figure that may wrap keeps number and unit together** (R7 L7-1/J7-5): `components/members/keepUnits`
   binds "4 h" and "33 min" with U+00A0, so it breaks between groups, never "4 h 33 | min"
-  (`KeptMinutes` on the member card and header). Not yet folded into `<Minutes>` (integrator ask).
+  (`KeptMinutes` on the member card and header; R8 L7-4: the Book sheet's money rows, slot price and
+  length, and the Profile ring's centre). Not yet folded into `<Minutes>` (integrator ask).

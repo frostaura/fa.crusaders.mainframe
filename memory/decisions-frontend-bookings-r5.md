@@ -39,9 +39,14 @@ Earlier rounds: `decisions-frontend-bookings.md`, `-r4.md`. Tests: `pages/bookin
   scrolled so the day picker sits under the app bar; first Book cell 555 → 315 at 390x844.
   *Why this, not removal:* nothing is dropped (games strip, invites, notices one swipe up). Once
   per visit, only from scrollTop 0, never on a re-read; phone width only; any date. e2e/member-r7.
+  **R8 (X8-1, J8-3):** focus a person put in `<main>` cancels it; the announcer's H1 focus (left at
+  y −153, first Tab scrolled back up) is handed to the chosen day for 6 s; `?as=` opens at the
+  "Booking for" bar, and the target is re-pinned for 2 s (header/bar settle; scroll anchoring slid it
+  19px under the bar) until a touch/wheel/key. e2e/bookings-r8-fd1b.
 - **A 402 `insufficient_balance` is adopted** (R7 X7-2): its `current_minutes` (the club's
   SPENDABLE) replaces the sheet's figure while the wallet still says the stale one, and the
-  wallet is re-read so the chip follows. Games lists read `sold_ends_at ?? ends_at` (E7-6).
+  wallet is re-read so the chip follows; an invite Accept's 402 re-reads it too (R8 X8-5). A slot-cap
+  409 is said with its figures, joined games counted (R8 J8-1). Games read `sold_ends_at ?? ends_at`.
 - **The desk's "book as" picker is lazy** (`BookAsChoice` via `lazyParts`, lane B's perf lead):
   a member's Schedule chunk no longer pulls the member combobox / cmdk; `lazyParts.test` guards it.
 - **Split late cancel toast** subtracts the penalty from a `net_credits` equal to gross − partners
