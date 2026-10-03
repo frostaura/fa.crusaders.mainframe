@@ -137,6 +137,23 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
   // day looked at. A day the member picked, or linked to, is that day or nothing.
   const autoDay = useRef(validClubDay(initialDate) ? null : date);
 
+  /**
+   * R6-CI-1 — the day the page opened on by itself was the READER's today when the club's zone was
+   * not known yet (a cold start: `lib/clubZone` is memory only). Its answer carries the club's
+   * zone, so once it lands — fresh, or the phone's copy offline — a page the member has not moved
+   * goes on to the club's today. A New York browser at 23:50 opened a UTC club's yesterday, every
+   * cell past. True when it moved (the answer in hand is then not the day to draw).
+   */
+  const toClubToday = useCallback((which: string, answered: ScheduleDay): boolean => {
+    if (which !== autoDay.current || !answered.timezone) return false;
+    const clubToday = clubDayOf(Date.now(), answered.timezone);
+    if (clubToday === which) return false;
+    autoDay.current = clubToday;
+    wanted.current = clubToday;
+    setDate(clubToday);
+    return true;
+  }, []);
+
   /** `join`: a read of this day that landed a moment ago (a Bookings link press, P4-5) answers it. */
   const load = useCallback(async (which: string, join = false) => {
     const read = ++latestRead.current;
@@ -146,6 +163,7 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
       const day = memberReads.schedule(which);
       const fresh = await fetchQuery(whoRef.current, day.key, day.load, { reuseWithinMs: join ? JOIN_MS : 0 });
       if (read !== latestRead.current || wanted.current !== which) return;
+      if (fresh.date === which && toClubToday(which, fresh)) return;
       loadedDate.current = fresh.date;
       setDay(fresh);
       setReadAt(Date.now());
@@ -165,6 +183,7 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
       const held = await heldDay(which, which === autoDay.current);
       if (read !== latestRead.current || !held) return;
       const kept = held.value as ScheduleDay;
+      if (toClubToday(which, kept)) return;
       loadedDate.current = kept.date;
       wanted.current = kept.date;
       setDay(kept);
@@ -173,7 +192,7 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
       if (kept.date !== which) setDate(kept.date);
     }
     finally { if (read === latestRead.current) setLoading(false); }
-  }, [heldDay, keepDay]);
+  }, [heldDay, keepDay, toClubToday]);
 
   useEffect(() => {
     wanted.current = date;

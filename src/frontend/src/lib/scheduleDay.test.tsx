@@ -2,6 +2,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { endpoints, type ScheduleDay } from "./api";
 import { useScheduleDay } from "./scheduleDay";
+import { clubDayOf } from "./gridClock";
+import { forgetClubZone } from "./clubZone";
 
 /**
  * R2 F1-2 — a late schedule reply for a day the member has already left blanked the grid: the
@@ -98,5 +100,40 @@ describe("useScheduleDay — replies for a day the member has left (F1-2)", () =
     expect(result.current.date).toBe("2030-09-10");
     expect(result.current.day?.date).toBe("2030-09-10");
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("R6-CI-1 — a page opened with no day goes to the CLUB's today, not the browser's", () => {
+  // 25 hours apart, so at any instant one of them is on another calendar day than this machine.
+  const ZONES = ["Pacific/Kiritimati", "Pacific/Pago_Pago"];
+
+  it("a cold start (no zone known) that read the reader's day moves on to the club's", async () => {
+    forgetClubZone();
+    const readers = clubDayOf(Date.now());
+    const zone = ZONES.find((z) => clubDayOf(Date.now(), z) !== readers)!;
+    forgetClubZone();
+    const clubToday = clubDayOf(Date.now(), zone);
+    forgetClubZone();
+    const server = deferredSchedule();
+    const { result } = renderHook(() => useScheduleDay(false, null));
+    expect(result.current.date, "the reader's guess, before the club has said").toBe(readers);
+    await act(async () => { server.answer(readers, { ...day(readers), timezone: zone } as ScheduleDay); });
+    expect(result.current.date, "every cell of the reader's day was past").toBe(clubToday);
+    await act(async () => { server.answer(clubToday, { ...day(clubToday), timezone: zone } as ScheduleDay); });
+    expect(result.current.day?.date).toBe(clubToday);
+    expect(result.current.today).toBe(clubToday);
+    forgetClubZone();
+  });
+
+  it("a day the member asked for stays that day", async () => {
+    forgetClubZone();
+    const readers = clubDayOf(Date.now());
+    const zone = ZONES.find((z) => clubDayOf(Date.now(), z) !== readers)!;
+    forgetClubZone();
+    const server = deferredSchedule();
+    const { result } = renderHook(() => useScheduleDay(false, readers));
+    await act(async () => { server.answer(readers, { ...day(readers), timezone: zone } as ScheduleDay); });
+    expect(result.current.date).toBe(readers);
+    forgetClubZone();
   });
 });
