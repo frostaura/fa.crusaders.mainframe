@@ -43,7 +43,7 @@ Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admi
   shares, cost (optional `money.refunded_credits`/`penalty_credits`, else refund = price and
   penalty = owed when nobody checked in). A no-show's title ends at `sold_ends_at`. Figures never
   wrap mid-value (`dd` nowrap, `keepAmounts` NBSP). A 404 with `?seat=` says "You were taken off".
-- **Offline with nothing kept says offline** (R7 X7-3, `shell/nothingKept`): Invites, booking detail, My game — only when the phone reports no network; a dropped connection keeps its retry.
+- **Offline with nothing kept says offline** (R7 X7-3; R8): Invites, booking detail, My game, Bookings — judged from the read (owner unreachable / NetworkError), never `onLine` (Wi-Fi without internet stayed red), with the retry beside it (`bookings/OfflineNothingKeptRetry`).
 - **Not built:** rail dock; docked Record result; bell preselects unread. A "·" between items is `ui/dot-separated` (R8).
 
 ## Traps found
