@@ -7,9 +7,8 @@ last_verified: 2026-10-03
 
 # Live decisions — the single rotating member code, in firmware and contract
 
-Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membercode/`, generated
-by `src/iot/tools/membercode_vectors.py` and checked by `make corpus-check`. Landed on branch
-`fw/p7-code` (P7 firmware + contract lane); backend and PWA lanes implement §4–§10 against it.
+Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membercode/` (from
+`src/iot/tools/membercode_vectors.py`, checked by `make corpus-check`).
 
 - **Token = `1` + REF(4 Crockford) + ON(8) + OFF(6) = 19 characters.** *Why:* it fits every limit
   the Mega's firmware already enforces (scan line and `!SCAN` 24, roster/door cap 20), so the
@@ -51,8 +50,9 @@ by `src/iot/tools/membercode_vectors.py` and checked by `make corpus-check`. Lan
   first use and acted again (refute round 2, 2026-09-28). The server now also flags that order.
   **Except on the member's own lit court** (bridge 2.2.1, D6-3): a replay whose proved REF holds a
   lit court here is `COURT B IS ON` with OFF bound and the scan SPENT. *Why:* `CODE USED` disarmed
-  the owner's OFF; spending keeps a photo from buying a walk-up or pay-for.
-- **Versions: bridge 2.2.1, Mega stays 2.0.0, door 1.1.0.** The bridge unflags `[common]`'s MINOR
+  the owner's OFF; spending keeps a photo from buying a walk-up or pay-for. 2.2.2 (D7-1): or a court
+  this box lit ONLINE for that REF (`OnlineGrants`) — a walk-up/pay-for buyer is on no roster yet.
+- **Versions: bridge 2.2.2, Mega stays 2.0.0, door 1.1.0.** The bridge unflags `[common]`'s MINOR
   and PATCH by `[common]`'s own tokens and sets its own; `[common]` stays byte-identical and the
   Mega sketch does not move. The Devices page showing these numbers is how a flash is confirmed.
 - **Owed, and nobody but Dean can do the first:** flash the ESP8266 bridge and each door ESP32

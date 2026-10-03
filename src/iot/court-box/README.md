@@ -142,7 +142,9 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.1 and Mega 2.0.0**: 2.2.1
+`platformio.ini`. The current images are **bridge 2.2.2 and Mega 2.0.0**: 2.2.2
+gives the same screen on a court the box lit online for that member (a walk-up,
+a pay-for, or an activation the roster does not name yet); 2.2.1
 shows the member who rescans the code that just lit their own court `COURT B IS
 ON` with its OFF bound, rather than `CODE USED`; 2.2.0 is the glass in minutes rather than credits (`PAY 45 MIN?`, `TOO FEW MINUTES`;
 [`docs/specs/minutes-and-packages.md`](../../../docs/specs/minutes-and-packages.md) §8),

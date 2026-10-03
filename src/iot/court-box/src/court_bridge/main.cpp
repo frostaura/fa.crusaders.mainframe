@@ -299,6 +299,11 @@ void noteOnlineUse(const char* token) {
   memcode::recordOnlineUse(token, gStepClock, gKeyRing, gReplay, gClock.nowMs());
 }
 
+/// Which member each court was lit for by this box's own online call, until it
+/// goes dark: a replay of that member's code on that court is their own game
+/// (bridgelogic::OnlineGrants, D7-1), which the roster may not name yet.
+bridgelogic::OnlineGrants gOnlineGrants;
+
 /// Bytes for walk-up purchase nonces, from the ESP8266's hardware RNG register.
 ///
 /// Injected behind devapi::IEntropySource rather than called directly because a
@@ -767,6 +772,17 @@ void applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   // exactly ONE registration point and this is deliberately not a second one.
 }
 
+/// An ONLINE decision just lit a court for whoever scanned `token`: remember
+/// whose game it is, so their own rescan of the same code reads its ON screen
+/// (D7-1). Only once the `!ON` actually left — a court that stayed dark holds
+/// nobody's game. Must run before spendScan(), which forgets the token.
+void noteOnlineLit(const court::Outcome& outcome, const char* token) {
+  if (outcome.action == court::Action::TurnOn && outcome.court < bridgelogic::kStateCourts &&
+      gHeld[outcome.court].held) {
+    gOnlineGrants.lit(outcome.court, token);
+  }
+}
+
 /// A scan has been decided, by whichever path: paint it, light it, spend the
 /// scan if it lit, arm or close the button window, and remember a booking
 /// longer than the relay cap for its `!EXT`. ONE function for the online and
@@ -843,7 +859,7 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
     const memcode::OfflineCodes<memcode::KeyRing<bridgelogic::kCourtKeyRingSlots>,
                                 memcode::ReplayRing<bridgelogic::kCourtReplaySlots>>
         codes = {gStepClock, gKeyRing, gReplay, gGuessGuard};
-    const bridgelogic::BoxCourts box = {gHeld, gCourtCount};
+    const bridgelogic::BoxCourts box = {gHeld, gCourtCount, &gOnlineGrants};
     const bridgelogic::MemberScanResult member =
         bridgelogic::decideOfflineMemberCode(frame.arg(0), codes, gRoster, gSession, box, now);
     if (member.alreadyOn) {
@@ -896,6 +912,7 @@ void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
   applyOutcome(gSession.onRelease(court, heldMs, nowMs), nowMs);
   gHeld[court] = bridgelogic::HeldState{nowMs, false};
   gRelight.onRelease(court);
+  gOnlineGrants.released(court);
   // Only THIS court's retry. Clearing unconditionally meant court A's timer
   // expiring inside the 1.5 s window threw away the retry court B's grant was
   // waiting on — and A's coil switching is a plausible cause of B's CRC failure
@@ -1309,6 +1326,7 @@ bool activateOnline(const char* token) {
     noteOnlineUse(token);
   }
   settleScan(decision.outcome, gClock.nowMs());
+  noteOnlineLit(decision.outcome, token);
   return true;
 }
 
@@ -1371,6 +1389,7 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
     noteOnlineUse(gLastScan);
   }
   applyOutcome(answer.outcome, nowMs);
+  noteOnlineLit(answer.outcome, gLastScan);
   if (bridgelogic::spendsScan(answer.outcome)) {
     // The identity is spent on the purchase: the next member's presses must not
     // buy on this one's token. The window stays, bound to the court just
@@ -1463,6 +1482,7 @@ void confirmPayFor() {
     court::detail::setLine(grant.line1, paid.rows[0]);
     court::detail::setLine(grant.line2, paid.rows[1]);
     applyOutcome(grant, nowMs);
+    noteOnlineLit(grant, gLastScan);
     spendScan();
     gRelight.onGrant(grant, nowMs);
     applyAuth(gAuth.afterWalkUp(grant, nowMs));

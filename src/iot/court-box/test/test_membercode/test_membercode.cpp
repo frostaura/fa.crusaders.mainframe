@@ -494,7 +494,7 @@ struct Offline {
     return {clock, keys, uses, guard};
   }
 
-  bridgelogic::BoxCourts box() const { return {held, 4U}; }
+  bridgelogic::BoxCourts box() const { return {held, 4U, &online}; }
 
   /// This member's token at `step`, with an ON the box never checks.
   void token(uint32_t step, char* out) {
@@ -512,6 +512,7 @@ struct Offline {
   memcode::GuessGuard guard;
   memcode::DayKey key;
   bridgelogic::HeldState held[bridgelogic::kStateCourts];
+  bridgelogic::OnlineGrants online;
 };
 
 } // namespace
@@ -671,6 +672,84 @@ void test_offline_v1_replay_on_the_members_own_lit_court_is_the_already_on_scree
   TEST_ASSERT_FALSE(dark.outcome.recognised);
 }
 
+/// Round 7 (D7-1): the member BOUGHT court C at the buttons — a walk-up, or a
+/// pay-for — so the box lit it online for their REF, and the roster has no
+/// entry naming them there (a walk-up booking reaches it only with the next
+/// heartbeat). They scan the same code again inside its thirty seconds to
+/// switch off. That is the D6-3 case, not a stranger's photo: COURT C IS ON with
+/// the OFF bound and the scan spent — never CODE USED with the buttons disarmed
+/// under the game they just paid for.
+void test_offline_v1_replay_on_a_court_this_box_lit_online_for_the_member_is_the_already_on_screen(void) {
+  Offline f;
+  // Nothing on the roster names this member: the booking was bought here.
+  f.cache.beginReplace(0U);
+  f.cache.commitReplace();
+  char token[memcode::kTokenLen + 1U] = {};
+  f.token(1000U, token);
+  // What the bridge does on an online grant: the use, the REF, the held court.
+  memcode::recordOnlineUse(token, f.clock, f.keys, f.uses, 10000U);
+  f.online.lit(2U, token);
+  f.held[2] = bridgelogic::HeldState{10000U, true};
+
+  const uint32_t before = f.queue.size();
+  const bridgelogic::MemberScanResult r =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 12000U);
+  TEST_ASSERT_EQUAL(memcode::Status::Replayed, r.verdict.status);
+  TEST_ASSERT_TRUE(r.alreadyOn);
+  TEST_ASSERT_TRUE(r.scanSpent);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court);
+  TEST_ASSERT_EQUAL_STRING("COURT C IS ON", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("ALREADY LIT", r.outcome.line2);
+  TEST_ASSERT_EQUAL_UINT32(before, f.queue.size());
+
+  // Somebody ELSE's online grant on court C proves nothing about this code: a
+  // replay of it is CODE USED, not recognised, buttons disarmed.
+  char other[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0B111U, 12345678U, 123456U, other, sizeof(other)));
+  f.online.lit(2U, other);
+  const bridgelogic::MemberScanResult stranger =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 12500U);
+  TEST_ASSERT_FALSE(stranger.alreadyOn);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kCodeUsedLine1, stranger.outcome.line1);
+  TEST_ASSERT_FALSE(stranger.outcome.recognised);
+
+  // The court went dark: forgotten, and the replay is CODE USED again.
+  f.online.lit(2U, token);
+  f.online.released(2U);
+  const bridgelogic::MemberScanResult dark =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 13000U);
+  TEST_ASSERT_FALSE(dark.alreadyOn);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kCodeUsedLine1, dark.outcome.line1);
+  TEST_ASSERT_FALSE(dark.outcome.recognised);
+
+  // Remembered but no longer held (the release not yet seen): CODE USED too —
+  // the held state is what says a game is on, never the memory alone.
+  f.online.lit(2U, token);
+  f.held[2] = bridgelogic::HeldState{13000U, false};
+  const bridgelogic::MemberScanResult unheld =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 13500U);
+  TEST_ASSERT_FALSE(unheld.alreadyOn);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kCodeUsedLine1, unheld.outcome.line1);
+
+  // The member's NEXT code (not a replay) on that court is the same ON screen —
+  // the plain re-scan guard — and, being fresh, is not spent.
+  f.held[2] = bridgelogic::HeldState{13500U, true};
+  char fresh[memcode::kTokenLen + 1U] = {};
+  f.token(1002U, fresh);
+  const bridgelogic::MemberScanResult next =
+      bridgelogic::decideOfflineMemberCode(fresh, f.codes(), f.cache, f.session, f.box(), 70000U);
+  TEST_ASSERT_EQUAL(memcode::Status::Ok, next.verdict.status);
+  TEST_ASSERT_TRUE(next.alreadyOn);
+  TEST_ASSERT_FALSE(next.scanSpent);
+  TEST_ASSERT_EQUAL_STRING("COURT C IS ON", next.outcome.line1);
+
+  // A legacy code remembers nothing, and overwrites what the court held.
+  f.online.lit(2U, "7Q3F9KM2XZ8B");
+  uint8_t court = 0U;
+  TEST_ASSERT_FALSE(f.online.courtFor(0x0A3C9U, court));
+  TEST_ASSERT_FALSE(f.online.courtFor(0U, court));
+}
+
 void test_offline_v1_code_with_no_clock_reads_as_the_stale_roster(void) {
   Offline f;
   char token[memcode::kTokenLen + 1U] = {};
@@ -827,6 +906,7 @@ int main(int, char**) {
   RUN_TEST(test_offline_v1_guessing_is_throttled_and_says_so);
   RUN_TEST(test_offline_v1_rescan_on_a_lit_court_is_the_already_on_screen_and_records_nothing);
   RUN_TEST(test_offline_v1_replay_on_the_members_own_lit_court_is_the_already_on_screen);
+  RUN_TEST(test_offline_v1_replay_on_a_court_this_box_lit_online_for_the_member_is_the_already_on_screen);
   RUN_TEST(test_offline_v1_code_with_no_clock_reads_as_the_stale_roster);
   RUN_TEST(test_a_wrong_off_is_refused_as_not_recognised_and_arms_nothing);
   RUN_TEST(test_pay_for_quote_answers_that_are_not_decisions_are_the_old_walk_up_choice);

@@ -51,12 +51,6 @@ enum class AuthCommand : uint8_t {
   Disarm = 2U,
 };
 
-/// The lines shown when an OFF press names a court the current window does
-/// not own. Specific on purpose: "SEE THE DESK" would send a paying member
-/// away from a court they are entitled to switch off.
-inline constexpr char kNotYourCourtLine1[] = "NOT YOUR COURT";
-inline constexpr char kNotYourCourtLine2[] = "SCAN TO START";
-
 class AuthPolicy {
 public:
   /// `ttlMs` is the window a recognised scan buys — the same number the scan

@@ -160,7 +160,9 @@ enum class ScreenId : uint8_t {
   SeeTheDesk,
   /// The `!ON` never left the bridge.
   OnNotSent,
-  /// An OFF press on a court this member's window is not bound to.
+  /// An OFF press on a court this member's window is not bound to. Specific
+  /// on purpose: "SEE THE DESK" would send a paying member away from a court
+  /// they are entitled to switch off.
   NotYourCourt,
   /// A duration press with no scan behind it.
   ScanFirst,

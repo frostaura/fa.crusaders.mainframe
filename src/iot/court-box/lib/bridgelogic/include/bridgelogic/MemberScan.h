@@ -27,7 +27,8 @@
 // same bridgelogic::regrantsHeldCourt rule the legacy path uses, asked of the
 // REF path's decision, BEFORE the session records anything. That includes the
 // SAME code scanned again inside its window: a replay whose REF holds a lit
-// court here is that court's ON screen with its OFF bound, and the scan spent.
+// court here is that court's ON screen with its OFF bound, and the scan spent
+// — "holds" by the roster, or by this box's own online grant (OnlineGrants).
 //
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
@@ -91,12 +92,75 @@ MemberScanResult refusedAs(const char* token, roster::CourtCount courts, Session
   return result;
 }
 
+/// The member each court was lit for by THIS box's own online call — an
+/// activation, a walk-up or a pay-for — by REF, until the court goes dark.
+///
+/// The roster cannot answer that question for every lighting: it lists a
+/// booking's organiser and its accepted partners, and a walk-up booking (or a
+/// booking the server created a moment ago) reaches it only with the next
+/// heartbeat. So a member who bought court C at the buttons and scanned the
+/// same code again inside its thirty seconds was a replay with no game of
+/// theirs on the roster, and read CODE USED with the OFF disarmed under their
+/// own game (round 7, D7-1). This remembers what the box itself did, which is
+/// the one thing it can know without being told. A legacy code remembers
+/// nothing: it has no REF to prove.
+class OnlineGrants {
+public:
+  /// `court` was just lit online for whoever scanned `token`.
+  void lit(uint8_t court, const char* token) {
+    if (court >= kStateCourts) {
+      return;
+    }
+    memcode::Token parsed;
+    refs_[court] = token != nullptr && memcode::parse(token, parsed) ? parsed.ref : 0U;
+  }
+
+  /// `court` went dark: nobody's game is on it any more.
+  void released(uint8_t court) {
+    if (court < kStateCourts) {
+      refs_[court] = 0U;
+    }
+  }
+
+  /// The court this box lit online for `ref`, when it still remembers one.
+  /// REF zero is reserved (memcode/Token.h), so it is the empty slot.
+  bool courtFor(uint32_t ref, uint8_t& court) const {
+    for (uint8_t i = 0U; ref != 0U && i < kStateCourts; ++i) {
+      if (refs_[i] == ref) {
+        court = i;
+        return true;
+      }
+    }
+    return false;
+  }
+
+private:
+  uint32_t refs_[kStateCourts] = {};
+};
+
 /// The courts this box drives and what it believes about each: the held
-/// state the re-scan guard reads, and how many relays the scanner serves.
+/// state the re-scan guard reads, how many relays the scanner serves, and
+/// which of them this box lit online for whom (null: none remembered).
 struct BoxCourts {
   const HeldState* held;
   uint8_t count;
+  const OnlineGrants* online;
 };
+
+/// The re-scan guard for a court this box lit ONLINE for `ref`: the same
+/// decision regrantsHeldCourt reads from the roster, built from the box's own
+/// memory instead — so the ON screen, its lines and the held-state check are
+/// one rule, whichever of the two knew whose game it is.
+inline bool regrantsOnlineGrant(uint32_t ref, const BoxCourts& box, court::Outcome& out) {
+  uint8_t court = 0U;
+  if (box.online == nullptr || !box.online->courtFor(ref, court) || court >= box.count) {
+    return false;
+  }
+  roster::Decision decision;
+  decision.verdict = roster::Verdict::Allow;
+  decision.entry.court = court;
+  return regrantsHeldCourt(decision, box.held, out);
+}
 
 /// The offline decision for a scan that looks like a v1 member code.
 template <class SessionT, class RosterT, class KeyRingT, class ReplayT>
@@ -110,7 +174,8 @@ decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeyRingT,
   switch (result.verdict.status) {
   case memcode::Status::Ok: {
     const char* ref = result.verdict.token.refText;
-    if (regrantsHeldCourt(cache.decideMember(ref, courts, nowMs), box.held, result.outcome)) {
+    if (regrantsHeldCourt(cache.decideMember(ref, courts, nowMs), box.held, result.outcome) ||
+        regrantsOnlineGrant(result.verdict.token.ref, box, result.outcome)) {
       result.alreadyOn = true;
       return result;
     }
@@ -126,8 +191,12 @@ decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeyRingT,
     // buttons disarmed under their own game (round 6, D6-3). The scan is spent:
     // a used code may be a photo of somebody else's screen, so it binds that
     // court's OFF and buys nothing. Nothing is recorded, as for any rescan.
+    // "Their court" is the roster's booking naming them, or a court this box
+    // lit online for them — a walk-up or a pay-for is on no roster until the
+    // next heartbeat (round 7, D7-1).
     if (regrantsHeldCourt(cache.decideMember(result.verdict.token.refText, courts, nowMs), box.held,
-                          result.outcome)) {
+                          result.outcome) ||
+        regrantsOnlineGrant(result.verdict.token.ref, box, result.outcome)) {
       result.alreadyOn = true;
       result.scanSpent = true;
       return result;
