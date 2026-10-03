@@ -90,6 +90,17 @@ async function textOutsideBox(page: Page, selector: string, boxSelector: string)
   }, [selector, boxSelector] as const);
 }
 
+const SETTINGS = {
+  slice_minutes: 15, advance_booking_days: 14, day_start_minute: 360, day_end_minute: 1320,
+  penalty_pct: 30, grace_window_minutes: 5, penalty_window_minutes: 15, timezone: "Africa/Johannesburg",
+  button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
+  operating_hours: { mon: "06:00-22:00", sat: "07:00-20:00" }, topup_block_zar: 100, topup_max_zar_per_member: 1000,
+  member_per_day_max_minutes: 60, peak_hours: "16:00-19:00", peak_advance_hours_for_regular: 1,
+  retention_years: 2, no_show_lookback_days: 7, walk_up_max_minutes: 90, heartbeat_seconds: 60,
+  activation_forward_window_minutes: 120, activation_cue_window_minutes: 10, qr_lifetime_seconds: 60,
+  roster_window_minutes: 120, device_alert_cooldown_minutes: 60, currency_symbol: "R",
+};
+
 /* ───────────────────────── L7-6 / J7-5 — the admin rail at 1280 / 200 % ───────────────────────── */
 
 test.describe("L7-6 / J7-5 — the admin rail keeps every section's name whole", () => {
@@ -289,4 +300,54 @@ test.describe("L7-8 — the Overview at 320 / 200 %", () => {
     expect(await textOutsideBox(page, "[data-alert]", "[data-alert]"), "an alert past its row").toEqual([]);
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
+});
+
+/* ───────────────────────── L7-9 — the Boards page's device-key card at 320 / 200 % ───────────────────────── */
+
+test.describe("L7-9 — the device-key card at 320 / 200 %", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "mobile", "a phone"); });
+
+  test("its boxes give the words a reading width and break no word mid-word", async ({ page }) => {
+    await open(page, "/admin/monitoring/devices", [
+      { path: "/api/v1/admin/devices/api-key", body: { api_key: "cmk_9F2Kq7Xd4bTn6Ls0", regenerated_at: "2026-09-01T08:30:00Z" } },
+      { path: "/api/v1/admin/devices/", body: [] },
+      { path: "/api/v1/admin/settings/", body: SETTINGS },
+      { path: "/api/v1/admin/courts/", body: [] },
+    ], 320, 800);
+    const card = page.locator("[data-device-key-card]");
+    await expect(card.getByText("How to pair a board")).toBeVisible(ARRIVES);
+    await bigText(page);
+    await fontsReady(page);
+    if (process.env.FC_SHOTS) await card.screenshot({ path: `${process.env.FC_SHOTS}/device-key-320.png` });
+    // The key itself breaks anywhere by design (it is one token); every sentence keeps its words.
+    const broken = (await brokenWords(page, "[data-device-key-card] :is(p, li, h3, span, button)")).filter((w) => !w.startsWith("cmk_") && !w.startsWith("•"));
+    expect(broken, "words broken mid-word").toEqual([]);
+    const steps = await card.locator("ol").evaluate((ol) => Math.round(ol.getBoundingClientRect().width));
+    expect(steps, "the pairing steps' column").toBeGreaterThanOrEqual(200);
+    expect(await textOutsideBox(page, "[data-device-key-card]", "[data-device-key-card]")).toEqual([]);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("L7-9 — the device-key card at a desk, at 100 % text", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "a desk"); });
+
+  for (const width of [390, 1280]) {
+    test(`at ${width} it keeps its insets and the pairing note its box`, async ({ page }) => {
+      await open(page, "/admin/monitoring/devices", [
+        { path: "/api/v1/admin/devices/api-key", body: { api_key: "cmk_9F2Kq7Xd4bTn6Ls0", regenerated_at: "2026-09-01T08:30:00Z" } },
+        { path: "/api/v1/admin/devices/", body: [] },
+        { path: "/api/v1/admin/settings/", body: SETTINGS },
+        { path: "/api/v1/admin/courts/", body: [] },
+      ], width);
+      const card = page.locator("[data-device-key-card]");
+      await expect(card.getByText("How to pair a board")).toBeVisible(ARRIVES);
+      const shape = await card.evaluate((c) => {
+        const content = c.querySelector("[data-slot='card-content']")!;
+        const note = c.querySelector("ol")!.parentElement!;
+        return { pad: getComputedStyle(content).paddingLeft, border: getComputedStyle(note).borderTopWidth, notePad: getComputedStyle(note).paddingLeft };
+      });
+      expect(shape).toEqual({ pad: width >= 640 ? "24px" : "16px", border: "1px", notePad: "16px" });
+    });
+  }
 });

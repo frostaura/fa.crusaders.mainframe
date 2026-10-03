@@ -132,13 +132,13 @@ function KeyLine({ apiKey }: { apiKey: string }) {
  */
 function PairingNote() {
   return (
-    <div className="rounded-lg border border-border bg-bg-muted p-4 text-sm text-text-secondary">
+    <div className="text-sm text-text-secondary @[16rem]/keycard:rounded-lg @[16rem]/keycard:border @[16rem]/keycard:border-border @[16rem]/keycard:bg-bg-muted @[16rem]/keycard:p-4">
       <h3 className="mb-2 font-semibold text-text-primary">How to pair a board</h3>
       {/* `break-words`: the steps name files and make targets — `secrets.h`, `door_gate`,
           `box-xxxxxx` — and an identifier has no space to wrap at. At a 32 px root font the
           list's own `pl-5` leaves about 86 px here, and a 130 px unbreakable token pushed the
           card, the page and the viewport sideways rather than going to a second line. */}
-      <ol className="list-decimal space-y-1 break-words pl-5">
+      <ol className="list-inside list-decimal space-y-1 break-words @[16rem]/keycard:list-outside @[16rem]/keycard:pl-5">
         <li>Copy this key, and the club WiFi name and password, into that firmware’s <code className="font-mono text-xs">secrets.h</code> — a court box and a door gate each have their own.</li>
         <li>Flash it. A court box: <code className="font-mono text-xs">make flash-bridge</code>, or its sketch in the Arduino IDE. A door gate: the <code className="font-mono text-xs">door_gate</code> sketch in the Arduino IDE, board “ESP32 Dev Module”.</li>
         <li>Power it on. It appears under Connected boards by itself on its first heartbeat, named <code className="font-mono text-xs">box-xxxxxx</code> or <code className="font-mono text-xs">gate-xxxxxx</code> — then give a box its name and courts, or a door its name.</li>
@@ -191,7 +191,10 @@ export function DeviceApiKeyPanel() {
   }
 
   return (
-    <Card>
+    // R7 L7-9: a size container. Under a 16rem card — 512px at 200 % text, so only large text —
+    // the nested insets fold away: card, note box and list indent left the pairing steps an 88px
+    // column at 320 / 200 %, a word a line with most words broken.
+    <Card data-device-key-card="" className="@container/keycard">
       <CardHeader>
         <CardTitle asChild>
           <h2 className="flex items-center gap-2">
@@ -205,7 +208,7 @@ export function DeviceApiKeyPanel() {
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4">
+      <CardContent className="flex flex-col gap-4 px-2 @[16rem]/keycard:px-4">
         {failed !== null && (
           <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">{keyReadFailure(failed)}</p>
         )}
@@ -217,9 +220,10 @@ export function DeviceApiKeyPanel() {
               <p className="text-xs text-text-muted">Last regenerated {describeRegenerated(key.regenerated_at)}.</p>
             </div>
 
-            {/* overflow-wrap:anywhere — at a 32px root on a 320px phone "Regenerate" alone is
-                wider than the card, and a word that cannot break pushes the page sideways. */}
-            <div className="flex flex-col gap-2 rounded-lg border border-danger-soft p-3 [overflow-wrap:anywhere] sm:flex-row sm:items-center sm:gap-4">
+            {/* `break-words`, not `anywhere` (R7 L7-9): anywhere broke every word that met the edge
+                ("Regener / ate", "immedia / tely"); break-words breaks only a word wider than the
+                box, which, with the insets folded at large text, none is. */}
+            <div className="flex flex-col gap-2 break-words rounded-lg border border-danger-soft p-2 @[16rem]/keycard:p-3 sm:flex-row sm:items-center sm:gap-4">
               {/* `sm:shrink-0` (R3 V-5): beside the sentence, the anywhere-wrap let the sentence
                   squeeze the button until "Regenerate" broke mid-word at 768 and 1280. */}
               <ConfirmDialog
