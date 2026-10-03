@@ -35,6 +35,14 @@ import { useStickyTop } from "./use-sticky-top";
  */
 type Breakpoint = "sm" | "md" | "lg" | "xl";
 
+/**
+ * A docked bar whose parts all rendered nothing is not drawn (R11): `primary={<InviteButton/>}` is
+ * an element even when the component returns null (a full booking has no seat to invite to), and
+ * the dock painted an empty white pill over the page. No control and no summary → `display: none`,
+ * which also publishes a zero height, so `<main>` stops reserving room for it.
+ */
+const EMPTY_HIDDEN = "[&:not(:has(button)):not(:has(a)):not(:has(input)):not(:has([data-context-summary]))]:hidden";
+
 /** Written whole, so Tailwind's scanner sees every class. */
 const HIDE_FROM: Record<Breakpoint, string> = { sm: "sm:hidden", md: "md:hidden", lg: "lg:hidden", xl: "xl:hidden" };
 const SHOW_FROM: Record<Breakpoint, string> = { sm: "hidden sm:flex", md: "hidden md:flex", lg: "hidden lg:flex", xl: "hidden xl:flex" };
@@ -96,7 +104,7 @@ export function ContextBar(props: ContextBarProps) {
         role="region"
         aria-label={label}
         data-context-bar="bottom"
-        className={cn("pointer-events-none fixed inset-x-0 z-actionbar px-4 print:hidden", DOCK_BOTTOM, until && HIDE_FROM[until], className)}
+        className={cn("pointer-events-none fixed inset-x-0 z-actionbar px-4 print:hidden", DOCK_BOTTOM, EMPTY_HIDDEN, until && HIDE_FROM[until], className)}
       >
         <div className={cn(DOCK_PANEL, "animate-sheet-up motion-reduce:animate-none")}>{parts}</div>
       </div>
