@@ -35,6 +35,10 @@ const OFFLINE_CAPABLE: readonly RegExp[] = [
   /^\/bookings\/[^/]+\/?$/,
   /^\/wallet\/?$/,
   /^\/wallet\/activity\/?$/,
+  // R6 X6-4: /wallet/buy keeps its heading offline and says buying needs a connection (nothing is
+  // kept from the shelf, and nothing is sent). Never /wallet/buy/:id — only the club can say how a
+  // purchase stands.
+  /^\/wallet\/buy\/?$/,
   /^\/profile\/?$/,
   /^\/inbox\/?$/,
 ];

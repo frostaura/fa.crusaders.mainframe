@@ -226,7 +226,7 @@ describe("the member's own pages, kept on the phone", () => {
       <MemoryRouter initialEntries={[path]}>
         <AuthProvider>
           <Routes>
-            {["/bookings", "/bookings/:id", "/bookings/invites", "/wallet", "/wallet/activity", "/wallet/buy", "/profile", "/inbox", "/admin/members"].map((p) => (
+            {["/bookings", "/bookings/:id", "/bookings/invites", "/wallet", "/wallet/activity", "/wallet/buy", "/wallet/buy/:id", "/profile", "/inbox", "/admin/members"].map((p) => (
               <Route key={p} path={p} element={<RequireAuth admin={p.startsWith("/admin")}><p>{`page ${p}`}</p></RequireAuth>} />
             ))}
             <Route path="/login" element={<p>the sign-in page</p>} />
@@ -237,7 +237,7 @@ describe("the member's own pages, kept on the phone", () => {
   }
 
   for (const [path, page] of [
-    ["/bookings", "/bookings"], ["/bookings/b1", "/bookings/:id"], ["/bookings/invites", "/bookings/invites"], ["/wallet", "/wallet"], ["/wallet/activity", "/wallet/activity"], ["/profile", "/profile"], ["/inbox", "/inbox"],
+    ["/bookings", "/bookings"], ["/bookings/b1", "/bookings/:id"], ["/bookings/invites", "/bookings/invites"], ["/wallet", "/wallet"], ["/wallet/activity", "/wallet/activity"], ["/wallet/buy", "/wallet/buy"], ["/profile", "/profile"], ["/inbox", "/inbox"],
   ]) {
     it(`opens ${path} with no signal for the member this device confirmed`, async () => {
       tokenStore.set("member.jwt.value");
@@ -249,7 +249,8 @@ describe("the member's own pages, kept on the phone", () => {
     });
   }
 
-  for (const path of ["/wallet/buy", "/admin/members"]) {
+  // R6 X6-4: /wallet/buy now opens (the page says buying needs a connection); a purchase's status does not.
+  for (const path of ["/wallet/buy/p1", "/admin/members"]) {
     it(`keeps the connection notice on ${path}`, async () => {
       tokenStore.set("member.jwt.value");
       localStorage.setItem(LAST_IDENTITY_KEY, ID);

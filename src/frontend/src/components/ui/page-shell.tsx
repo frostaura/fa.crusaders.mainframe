@@ -11,8 +11,8 @@ import { CaretLeft } from "./icons";
  * of those on nearly every screen, and it read as eight apps in one.
  *
  * <ul>
- *   <li><b>narrow</b> 36rem — ONLY single-task, linear pages: auth forms, change password, top up
- *   and its status, not found. Never a screen with more than one thing on it (R4 form factor:
+ *   <li><b>narrow</b> 36rem — ONLY single-task, linear pages: auth forms, change password, not
+ *   found. Never a screen with more than one thing on it (R4 form factor:
  *   My Code, Inbox, Invites and Profile sat in a 512px column with 73 % of a 1920 screen empty).</li>
  *   <li><b>content</b> 64rem — the default.</li>
  *   <li><b>wide</b> 80rem — member screens with an aside or a split view, the booking grid —

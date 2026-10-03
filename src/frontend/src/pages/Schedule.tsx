@@ -90,7 +90,10 @@ export default function BookingsPage() {
   const otherDay = date === today ? null : formatClubDayLabel(date) ?? null;
   // R2 F1-3 — booking FOR a member, the grid draws that member's group hours: a cell their
   // groups would refuse is locked before Continue, not refused after it.
-  const bookingFor = useBookingFor(bookAsUserId, date);
+  // Bumped by every booking and cancellation, so the upcoming list re-reads (F1.12) — and the
+  // member booked FOR is read again, so their "can spend" is never stale (R6 J6-2, FD2's ask).
+  const [changes, setChanges] = useState(0);
+  const bookingFor = useBookingFor(bookAsUserId, date, changes);
   const forMember = useForMember(bookingFor);
   const gridRules = forMember?.rules ?? rules;
   const explainer = useGridExplainer(day, rules, otherDay, forMember);
@@ -114,8 +117,6 @@ export default function BookingsPage() {
   const [earlierShownFor, setEarlierShownFor] = useState<string | null>(null);
   const showEarlier = earlierShownFor === date;
 
-  // Bumped by every booking and cancellation, so the upcoming list re-reads (F1.12).
-  const [changes, setChanges] = useState(0);
   // R4 M4-3 — what OTHER people do to this member's games (an organiser cancelling, a partner
   // answering) reaches the page too: on a wallet-stream move and on coming back into view.
   const rereadAll = useCallback(() => { startTransition(() => setChanges((n) => n + 1)); void reconcile(); }, [reconcile]);
