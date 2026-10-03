@@ -218,3 +218,16 @@ test.describe("L6-14 — Reports at a desk's width", () => {
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
 });
+
+test.describe("X5-12 — a group's Manage packages link", () => {
+  test("is a 44 px target", async ({ page }) => {
+    await open(page, "/admin/groups", adminRoutes([
+      { path: "/api/v1/admin/packages", body: { packages: PACKAGES } },
+      { path: "/api/v1/admin/member-groups", body: { groups: [SOCIAL] } },
+    ]), 390);
+    const link = page.getByRole("link", { name: "Manage packages" }).first();
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    const box = (await link.boundingBox())!;
+    expect(box.height, `${box.width}×${box.height}`).toBeGreaterThanOrEqual(44);
+  });
+});

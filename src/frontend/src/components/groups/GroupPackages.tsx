@@ -28,7 +28,8 @@ export function GroupPackages({ groupId, packages }: { groupId: string; packages
   return (
     <div className="flex flex-col gap-1.5" data-group-packages={groupId}>
       <PackagesBody groupId={groupId} packages={packages} />
-      <TextLink to={PACKAGES_ROUTE} className="self-start">{GROUP_PACKAGES.manage}</TextLink>
+      {/* A 44px target (R5 X5-12, still 113 × 20 in R6): the line keeps its text, the box grows. */}
+      <TextLink to={PACKAGES_ROUTE} className="inline-flex min-h-touch items-center self-start">{GROUP_PACKAGES.manage}</TextLink>
     </div>
   );
 }
