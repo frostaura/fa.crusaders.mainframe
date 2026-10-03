@@ -34,7 +34,8 @@ function rootFontPx(): number {
   return Number.isFinite(size) && size > 0 ? size : 16;
 }
 
-export function useSplitLayout(splitAt: SplitAt): SplitLayout {
+/** `96rem` is not a SplitView width: My Code's three full columns at 1920 read the same measure (R6). */
+export function useSplitLayout(splitAt: SplitAt | "96rem"): SplitLayout {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [split, setSplit] = useState(false);
   const attach = useCallback((next: HTMLElement | null) => setEl(next), []);

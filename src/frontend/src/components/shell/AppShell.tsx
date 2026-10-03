@@ -74,9 +74,11 @@ const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-
  * the content share one edge instead of reading as two grids.
  *
  * <ul>
- *   <li>Member pages: `wide` (80rem), widening to the `full` frame (120rem) from 3xl when the page
- *   is a `full` PageShell — read by `:has()` from the shell root, so no page has to tell the shell
- *   anything and the first paint is right.</li>
+ *   <li>Member pages: `wide` (80rem), and the `full` frame (120rem) from 3xl on EVERY member page
+ *   (R6 L6-10; SPEC 2.1 "on member pages at 3xl, 120rem"). It used to follow the page by `:has()`,
+ *   and so jumped 320px at 1920 between Bookings (full from 3xl) and an 80rem screen. A `wide`
+ *   PageShell now takes the full frame from 3xl too, so the crest and the content still share
+ *   one edge there; a narrower screen sits centred under a bar that holds still.</li>
  *   <li>`/admin` from xl, where the rail stands: full-bleed. The crest sits in a box as wide as the
  *   rail (16rem), over it, and the nav starts at the content's edge (16rem + the frame's 2rem
  *   gutter) — at 1920 the bar was centred at 80rem with its crest at x≈320 while the rail sat flush
@@ -93,7 +95,7 @@ const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-
  */
 const HEADER_FRAME = [
   "@container/appbar mx-auto flex min-h-appbar w-full max-w-wide flex-wrap items-center justify-end gap-x-3 gap-y-1 px-4 py-1 sm:px-6 lg:gap-x-6 lg:px-8",
-  "3xl:px-12 3xl:group-has-[[data-page-frame=full]]/shell:max-w-page",
+  "3xl:max-w-page 3xl:px-12",
 ].join(" ");
 /** 3xl: the frame's gutter is 3rem, so the gap from the crest box is too (3xl:px-12 would put the pl back). */
 const HEADER_OVER_RAIL = "xl:max-w-none xl:gap-x-8 xl:pl-0 3xl:gap-x-12 3xl:pl-0";

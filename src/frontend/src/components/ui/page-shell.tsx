@@ -15,7 +15,9 @@ import { CaretLeft } from "./icons";
  *   and its status, not found. Never a screen with more than one thing on it (R4 form factor:
  *   My Code, Inbox, Invites and Profile sat in a 512px column with 73 % of a 1920 screen empty).</li>
  *   <li><b>content</b> 64rem — the default.</li>
- *   <li><b>wide</b> 80rem — member screens with an aside or a split view, the booking grid.</li>
+ *   <li><b>wide</b> 80rem — member screens with an aside or a split view, the booking grid —
+ *   and the `full` frame from 3xl (R6 L6-10: at 1920 an 80rem member screen left a third of the
+ *   window empty, and the app bar jumped 320px between it and Bookings, which already widened).</li>
  *   <li><b>full</b> 120rem (`max-w-page`) — admin and data screens; never unbounded.</li>
  * </ul>
  * <p>
@@ -40,11 +42,15 @@ const WIDTH: Record<PageWidth, string> = {
 
 export type PageShellProps = ComponentProps<"div"> & {
   width?: PageWidth;
-  /** Widen to the `full` frame (120rem) from 3xl — a member screen with a rail to give the room to. */
+  /**
+   * Widen to the `full` frame (120rem) from 3xl. On by default for `wide` (R6 L6-10); a `content`
+   * screen may ask for it, and a `wide` one may decline it with `false`.
+   */
   fullFrom3xl?: boolean;
 };
 
-export function PageShell({ width = "content", fullFrom3xl, className, children, ...rest }: PageShellProps) {
+export function PageShell({ width = "content", fullFrom3xl: asked, className, children, ...rest }: PageShellProps) {
+  const fullFrom3xl = asked ?? width === "wide";
   return (
     <div
       data-page-shell={width}

@@ -6,6 +6,7 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { WarningCircle } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateBlock } from "@/components/ui/state-block";
+import { useSplitLayout } from "@/components/ui/use-split-layout";
 import { Switch } from "@/components/ui/switch";
 import { playEndpoints, type MyPlay } from "@/lib/playApi";
 import {
@@ -100,28 +101,25 @@ function MyGameSkeleton() {
 /** One part of the section, headed — an `h3` under the card's `h2`. */
 /**
  * R4 form factor (SPEC 3.7): from a 56rem card My game is two columns, by the CARD's width —
- * the ring, the streak and the people you play with on the left; the stats, the badges and the
- * celebrations switch on the right. Grid areas, so the DOM keeps the phone's order (ring, streak,
- * stats, people, badges) and Tab order is reading order; the rules between parts give way to the
- * grid's gap there. (The areas are an arbitrary variant: the container-queries plugin emits
- * nothing for `@[56rem]/game:` in front of an arbitrary PROPERTY — measured.)
+ * the ring, the streak, the people you play with and the celebrations switch on the left; the
+ * stats and the badges on the right.
+ *
+ * <p>
+ * <b>Two independent columns, not shared grid rows</b> (R6 L6-18). The parts used to be placed
+ * in grid areas ('ring stats' / 'streak stats' / 'people badges' / 'cel badges'), so each side
+ * was stretched to the other's row heights: at 1920 a 160px blank band sat under the stats and
+ * another above the celebrations. Each column now stacks its own parts. The DOM follows the
+ * columns (measured by `useSplitLayout`, the container query's own measure), so Tab order is
+ * still reading order; on a phone it is the phone's order — ring, streak, stats, people, badges.
+ * </p>
  */
-const BODY = "flex flex-col gap-6 @[56rem]/game:grid @[56rem]/game:grid-cols-2 @[56rem]/game:items-start @[56rem]/game:gap-x-10 @[56rem]/game:gap-y-8";
-/** With and without the refresh-failed line: an empty area row would still take a row gap. */
-const AREAS = "[@container_game_(min-width:56rem)]:[grid-template-areas:'ring_stats'_'streak_stats'_'people_badges'_'cel_badges']";
-const AREAS_ALERT = "[@container_game_(min-width:56rem)]:[grid-template-areas:'alert_alert'_'ring_stats'_'streak_stats'_'people_badges'_'cel_badges']";
-const AREA: Record<string, string> = {
-  ring: "[@container_game_(min-width:56rem)]:[grid-area:ring]",
-  streak: "[@container_game_(min-width:56rem)]:[grid-area:streak]",
-  stats: "[@container_game_(min-width:56rem)]:[grid-area:stats]",
-  people: "[@container_game_(min-width:56rem)]:[grid-area:people]",
-  badges: "[@container_game_(min-width:56rem)]:[grid-area:badges]",
-  celebrations: "[@container_game_(min-width:56rem)]:[grid-area:cel]",
-};
+const BODY = "flex flex-col gap-6";
+const BODY_SPLIT = "grid grid-cols-2 items-start gap-x-10 gap-y-8";
+const COLUMN = "flex min-w-0 flex-col gap-8";
 
 function Part({ title, children, part }: { title?: string; children: ReactNode; part: string }) {
   return (
-    <div data-my-game-part={part} className={cn("flex min-w-0 flex-col gap-3 border-t border-border pt-5 first:border-0 first:pt-0 @[56rem]/game:border-0 @[56rem]/game:pt-0", AREA[part])}>
+    <div data-my-game-part={part} className="flex min-w-0 flex-col gap-3 border-t border-border pt-5 first:border-0 first:pt-0 @[56rem]/game:border-0 @[56rem]/game:pt-0">
       {title ? <h3 className="text-base font-semibold text-text-primary">{title}</h3> : null}
       {children}
     </div>
@@ -132,32 +130,33 @@ function MyGameBody({ game, read }: { game: MyPlay; read: MyGameRead }) {
   const [goalOpen, setGoalOpen] = useState(false);
   const toast = useToast();
   const year = clubYear(game.as_of, game.timezone);
+  const { attach, split } = useSplitLayout("56rem");
+  const ring = <Part part="ring"><CourtTimeRing ring={game.ring} onEditGoal={() => setGoalOpen(true)} /></Part>;
+  const streak = (
+    <Part part="streak" title={STREAK_COPY.title}>
+      <StreakCard
+        streak={game.streak}
+        pause={game.pause}
+        year={year}
+        onPause={(pause) => { read.patch((g) => ({ ...g, pause })); read.reload(); }}
+      />
+    </Part>
+  );
+  const stats = <Part part="stats" title={STATS_COPY.title}><StatsGrid stats={game.stats} /></Part>;
+  const people = <Part part="people"><FormAndPeople form={game.form} partners={game.partners} opponents={game.opponents} /></Part>;
+  const badges = <Part part="badges" title={BADGES_COPY.title}><BadgeGrid badges={game.badges} timezone={game.timezone} /></Part>;
+  const celebrations = <Part part="celebrations"><CelebrationsSwitch game={game} read={read} /></Part>;
   return (
-    <div data-my-game-body="" className={cn(BODY, read.error ? AREAS_ALERT : AREAS)}>
-      {read.error ? <div className="[@container_game_(min-width:56rem)]:[grid-area:alert]"><Alert tone="warning" live="polite">{MY_GAME.refreshFailed}</Alert></div> : null}
-      <Part part="ring">
-        <CourtTimeRing ring={game.ring} onEditGoal={() => setGoalOpen(true)} />
-      </Part>
-      <Part part="streak" title={STREAK_COPY.title}>
-        <StreakCard
-          streak={game.streak}
-          pause={game.pause}
-          year={year}
-          onPause={(pause) => { read.patch((g) => ({ ...g, pause })); read.reload(); }}
-        />
-      </Part>
-      <Part part="stats" title={STATS_COPY.title}>
-        <StatsGrid stats={game.stats} />
-      </Part>
-      <Part part="people">
-        <FormAndPeople form={game.form} partners={game.partners} opponents={game.opponents} />
-      </Part>
-      <Part part="badges" title={BADGES_COPY.title}>
-        <BadgeGrid badges={game.badges} timezone={game.timezone} />
-      </Part>
-      <Part part="celebrations">
-        <CelebrationsSwitch game={game} read={read} />
-      </Part>
+    <div ref={attach} data-my-game-body="" className={split ? BODY_SPLIT : BODY}>
+      {read.error ? <div className={split ? "col-span-2" : undefined}><Alert tone="warning" live="polite">{MY_GAME.refreshFailed}</Alert></div> : null}
+      {split ? (
+        <>
+          <div className={COLUMN}>{ring}{streak}{people}{celebrations}</div>
+          <div className={COLUMN}>{stats}{badges}</div>
+        </>
+      ) : (
+        <>{ring}{streak}{stats}{people}{badges}{celebrations}</>
+      )}
       <GoalSheet
         open={goalOpen}
         onOpenChange={setGoalOpen}

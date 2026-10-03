@@ -22,13 +22,21 @@ afterEach(() => {
 
 describe("PageShell full", () => {
   it("widens to the full frame from 3xl when asked, and tells the app bar so", () => {
-    const { container } = render(<PageShell width="wide" fullFrom3xl><p>body</p></PageShell>);
+    const { container } = render(<PageShell width="content" fullFrom3xl><p>body</p></PageShell>);
     const shell = container.firstElementChild as HTMLElement;
-    expect(shell).toHaveAttribute("data-page-shell", "wide");
+    expect(shell).toHaveAttribute("data-page-shell", "content");
     expect(shell).toHaveAttribute("data-page-frame", "full");
-    expect(shell.className.split(" ")).toEqual(expect.arrayContaining(["max-w-wide", "3xl:max-w-page"]));
-    const plain = render(<PageShell width="wide"><p>body</p></PageShell>).container.firstElementChild!;
+    expect(shell.className.split(" ")).toEqual(expect.arrayContaining(["max-w-content", "3xl:max-w-page"]));
+    const plain = render(<PageShell width="content"><p>body</p></PageShell>).container.firstElementChild!;
     expect(plain).not.toHaveAttribute("data-page-frame");
+  });
+
+  it("R6 L6-10 — a wide screen takes the full frame from 3xl unless it declines", () => {
+    const wide = render(<PageShell width="wide"><p>body</p></PageShell>).container.firstElementChild as HTMLElement;
+    expect(wide).toHaveAttribute("data-page-frame", "full");
+    expect(wide.className.split(" ")).toEqual(expect.arrayContaining(["max-w-wide", "3xl:max-w-page"]));
+    const declined = render(<PageShell width="wide" fullFrom3xl={false}><p>body</p></PageShell>).container.firstElementChild!;
+    expect(declined).not.toHaveAttribute("data-page-frame");
   });
 
   it("is the 120rem frame, a named container, with the 3xl gutter", () => {

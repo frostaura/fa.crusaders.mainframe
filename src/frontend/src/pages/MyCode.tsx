@@ -18,6 +18,7 @@ import { useMemberCode, type MemberCodeView } from "../lib/memberCode/useMemberC
 import { barredReason, codeUseLine, MY_CODE, newCodeIn } from "../lib/myCodeCopy";
 import { useProfileOrNull } from "../components/onboarding/useOnboarding";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { useSplitLayout } from "../components/ui/use-split-layout";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { StateBlock } from "../components/ui/state-block";
@@ -141,17 +142,26 @@ type DoorFacts = ReturnType<typeof useDoorFacts>;
  *   door facts scroll.</li>
  *   <li><b>72rem</b> (the `wide` frame from 2xl): the rest splits again —
  *   `[setup + today + doors] [wallet + the way to a human 20rem]`.</li>
+ *   <li><b>96rem</b> (the `full` frame from 3xl — Dean, R6: at 1920 the page was an 80rem column,
+ *   61 % of the window, its third column holding only "You can spend"): the two columns of the
+ *   rest share its width, and "what happens next" moves beside the setup, under the wallet —
+ *   `[pass] [setup + doors] [wallet + what happens next + the way to a human]`.</li>
  * </ul>
  * The DOM order is the phone's order in every layout, so Tab order is reading order.
  */
 const LAYOUT = "flex flex-col gap-8 @[60rem]/page:grid @[60rem]/page:grid-cols-[24rem_minmax(0,1fr)] @[60rem]/page:items-start";
 const PASS_COLUMN = "flex min-w-0 flex-col gap-6 @[60rem]/page:sticky @[60rem]/page:top-6";
-const REST = "flex min-w-0 flex-col gap-8 @[72rem]/page:grid @[72rem]/page:grid-cols-[minmax(0,1fr)_20rem] @[72rem]/page:items-start";
+const REST = "flex min-w-0 flex-col gap-8 @[72rem]/page:grid @[72rem]/page:items-start";
+const REST_COLUMNS = "@[72rem]/page:grid-cols-[minmax(0,1fr)_20rem]";
+/** Measured by `useSplitLayout("96rem")`, so the columns and where "what happens next" sits agree. */
+const REST_COLUMNS_FULL = "@[72rem]/page:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]";
 const COLUMN = "flex min-w-0 flex-col gap-6";
 
 export default function MyCodePage() {
   const view = useMemberCode();
   const facts = useDoorFacts(view.resync, !view.signedOut);
+  // The DOM order follows the layout: "what happens next" is in the column it is drawn in.
+  const { attach: attachLayout, split: threeColumns } = useSplitLayout("96rem");
 
   if (view.phase === "barred") {
     return <BarredPage reason={barredReason(view.barredCode ?? "")} checking={view.checking} onCheckAgain={() => void view.resync()} />;
@@ -159,13 +169,14 @@ export default function MyCodePage() {
 
   const code = view.code ? ONE_CODE : null;
   const codeSecondsLeft = view.code ? Math.ceil(view.remainingMs / 1000) : 0;
+  const whatsNext = <WhatsNextCard booking={facts.door?.next_booking} timezone={facts.door?.timezone} doors={facts.doorsKnowledge} />;
 
   return (
     // R3-29: the pinned decision line is `position: fixed` at the foot of a phone, so the page
     // owes it room — otherwise the club's own number, the last thing on the page, sits under it.
     // R4 form factor (SPEC 3.2): `content`, and `wide` from 2xl — never `narrow` again; a 512px
     // column left 60 % of a laptop and 73 % of a 1920 screen empty around the pass.
-    <PageShell width="content" className={cn("2xl:max-w-wide", facts.decision && "pb-24 sm:pb-10")}>
+    <PageShell width="content" fullFrom3xl className={cn("2xl:max-w-wide", facts.decision && "pb-24 sm:pb-10")}>
       {/*
         Visually hidden on a phone, and only there (D8: the code first). The pass's own band
         says whose pass it is, the tab bar says "My Code", and at 320x568 with the reader's text
@@ -174,7 +185,7 @@ export default function MyCodePage() {
       */}
       <PageHeader title={MY_CODE.title} className="sr-only sm:not-sr-only" />
 
-      <div data-my-code-layout="" className={LAYOUT}>
+      <div ref={attachLayout} data-my-code-layout="" className={LAYOUT}>
         <div data-my-code-pass="" className={PASS_COLUMN}>
           {view.signedOut && view.phase !== "signed-out" ? <SignedOutNotice /> : null}
           <CodeArea view={view} />
@@ -190,19 +201,20 @@ export default function MyCodePage() {
           )}
         </div>
 
-        <div data-my-code-rest="" className={REST}>
+        <div data-my-code-rest="" className={cn(REST, threeColumns ? REST_COLUMNS_FULL : REST_COLUMNS)}>
           <div className={COLUMN}>
             {/* Setup leads the rest (Dean, R5): a to-do list is read first or not at all, and it
                 is dismissable (its ×), so it costs a finished member nothing. */}
             {view.signedOut ? null : <SetupChecklist />}
             <p className="text-sm text-text-secondary">{codeUseLine(facts.doorsClub)}</p>
-            <WhatsNextCard booking={facts.door?.next_booking} timezone={facts.door?.timezone} doors={facts.doorsKnowledge} />
+            {threeColumns ? null : whatsNext}
             <Link to={GUIDE_PATH} className={MEMBER_DOOR_LINK_TAPPABLE}>{GUIDE_FROM_CODE}</Link>
             <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
           </div>
           <div data-my-code-side="" className={COLUMN}>
             {/* Beside the pass only: on a phone the chip in the bar already carries the balance. */}
             {view.signedOut ? null : <div className="hidden @[60rem]/page:block"><WalletGlance /></div>}
+            {threeColumns ? whatsNext : null}
             <DoorFooter doorsKnowledge={facts.doorsKnowledge} contact={facts.contact} />
           </div>
         </div>

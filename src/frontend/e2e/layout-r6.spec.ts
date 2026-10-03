@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
-import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { MEMBER_CODE, SESSION_ADMIN, memberCodeSecretB64, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { bigText, fontsReady, sideways } from "./layoutKit";
 import { inviteFixture, memberShellRoutes } from "./playersKit";
+import { myPlayFixture, resultFixture } from "./playKit";
 
 /**
  * Review round 6 (lane FD1, shell and member layout) — what only a browser can measure: page
@@ -180,4 +181,126 @@ test.describe("L6-4 / L6-13 — invite cards", () => {
     expect(primaries).toBe(1);
     await expect(page.locator("[data-invite-actions]")).toHaveCount(0);
   });
+});
+
+/* ───────────────────────────── the member frame at 1920 ───────────────────────────── */
+
+test.describe("L6-10 — the app bar holds still between member pages at 1920", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("Bookings and Invites: the crest and the account button do not move, and Invites uses the width", async ({ page }) => {
+    await openBookings(page, 1920, 1080, { invites: 2 });
+    const crest = async () => (await page.locator("[data-app-crest]").boundingBox())!;
+    const onBookings = await crest();
+    await page.getByRole("link", { name: /invite/i }).first().click();
+    await expect(page.locator("[data-invite]").first()).toBeVisible(ARRIVES);
+    const onInvites = await crest();
+    expect(Math.abs(onInvites.x - onBookings.x), "jumped 320px").toBeLessThanOrEqual(1);
+    const shell = (await page.locator("[data-page-shell]").first().boundingBox())!;
+    expect(shell.width / 1920, "an 80rem column in a 1920 window").toBeGreaterThanOrEqual(0.9);
+  });
+});
+
+test.describe("Dean / L6 — My Code at 1920 uses the window", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("three filled columns: the pass, setting up, and the wallet with what happens next", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await signIn(page);
+    const start = new Date(Date.now() + 3 * 3_600_000);
+    const end = new Date(start.getTime() + 3_600_000);
+    await serveApi(page, [
+      { method: "POST", path: "/api/v1/me/code/enrol", respond: () => ({ v: 1, ref: MEMBER_CODE.ref, generation: 1, secret: memberCodeSecretB64(), tz: MEMBER_CODE.tz, step_seconds: 30, server_time_ms: Date.now() }) },
+      { path: "/api/v1/me/code", respond: () => ({ v: 1, ref: MEMBER_CODE.ref, generation: 1, tz: MEMBER_CODE.tz, server_time_ms: Date.now() }) },
+      {
+        path: "/api/v1/me/door", body: {
+          doors: false, doors_shut: "none", timezone: "Africa/Johannesburg", policy: "active_member", membership: "active", membership_detail: "active",
+          is_club_admin: false, early_entry_minutes: null, roster_max_entries: 48, contact: { phone: "021 555 0134", email: null }, door_log_retention_days: 90, last_decision: null,
+          next_booking: { starts_at: start.toISOString(), ends_at: end.toISOString(), court_number: 1, door_opens_at: start.toISOString(), door_closes_at: end.toISOString() },
+        },
+      },
+      // After the door above: of two routes with one path, the first declared answers.
+      ...memberShellRoutes(),
+    ]);
+    await page.goto("/my-code");
+    await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible(ARRIVES);
+    const next = page.getByRole("heading", { name: /what happens next/i });
+    await expect(next).toBeVisible();
+    await fontsReady(page);
+    const shell = (await page.locator("[data-page-shell]").first().boundingBox())!;
+    expect(shell.width / 1920, "an 80rem column: 61 % of the window").toBeGreaterThanOrEqual(0.9);
+    const side = (await page.locator("[data-my-code-side]").boundingBox())!;
+    const rest = (await page.locator("[data-my-code-rest]").boundingBox())!;
+    // Was a 20rem column holding only "You can spend", beside a 1fr column holding everything else.
+    expect(side.width / rest.width, "the side column is a real column").toBeGreaterThanOrEqual(0.45);
+    expect(await next.evaluate((el) => Boolean(el.closest("[data-my-code-side]"))), "what happens next stands beside the setup").toBe(true);
+  });
+});
+
+/* ───────────────────────────── Profile, My results, How it works ───────────────────────────── */
+
+async function openMember(page: Page, path: string, routes: ApiRoute[], width: number, height: number) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width, height });
+  await signIn(page);
+  await serveApi(page, [...routes, ...memberShellRoutes()]);
+  await page.goto(path);
+}
+
+test.describe("L6-18 / F5 / L6-17 — the member's own pages use the width without holes", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("Profile at 1920: each My game column stacks its own parts — no blank band", async ({ page }) => {
+    await openMember(page, "/profile", [{ path: "/api/v1/me/play", body: myPlayFixture() }], 1920, 1080);
+    await expect(page.locator('[data-my-game-part="badges"]')).toBeVisible(ARRIVES);
+    await fontsReady(page);
+    const gap = (above: string, below: string) => page.evaluate(([a, b]) => {
+      const top = document.querySelector(`[data-my-game-part="${b}"]`)!.getBoundingClientRect().top;
+      const bottom = document.querySelector(`[data-my-game-part="${a}"]`)!.getBoundingClientRect().bottom;
+      return Math.round(top - bottom);
+    }, [above, below]);
+    // Was ~165px under the stats and ~110px above the celebrations, each column padded to the other's rows.
+    expect(await gap("stats", "badges"), "under the stats").toBeLessThanOrEqual(40);
+    expect(await gap("people", "celebrations"), "above the celebrations").toBeLessThanOrEqual(40);
+    const shell = (await page.locator("[data-page-shell]").first().boundingBox())!;
+    expect(shell.width / 1920).toBeGreaterThanOrEqual(0.9);
+  });
+
+  test("My results at 1280: the results use the page, not a 36rem column", async ({ page }) => {
+    const rows = Array.from({ length: 6 }, (_, i) => ({ ...resultFixture({ result_id: `r${i}`, status: "confirmed" }), court_name: "Court 1", starts_at: new Date(Date.now() - (i + 1) * 86_400_000).toISOString() }));
+    await openMember(page, "/profile/results", [
+      { path: "/api/v1/me/play/results", body: { timezone: "Africa/Johannesburg", items: rows, next_cursor: null } },
+      { path: "/api/v1/me/bookings/recent", body: { timezone: "UTC", items: [] } },
+    ], 1280, 800);
+    await expect(page.locator("[data-results] > li").first()).toBeVisible(ARRIVES);
+    const shell = (await page.locator("[data-page-shell]").first().boundingBox())!;
+    expect(shell.width / 1280, "was 40 % of the window").toBeGreaterThanOrEqual(0.9);
+    const xs = await page.locator("[data-results] > li").evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().x))).size);
+    expect(xs, "the results in columns").toBeGreaterThanOrEqual(2);
+  });
+
+  for (const width of [1024, 1280, 1920] as const) {
+    test(`How it works at ${width}: every row of steps is full and even`, async ({ page }) => {
+      await openMember(page, "/how-it-works", [], width, 900);
+      const steps = page.locator("main ol > li");
+      await expect(steps.first()).toBeVisible(ARRIVES);
+      await fontsReady(page);
+      const shape = await page.locator("main ol").evaluate((ol) => {
+        const box = ol.getBoundingClientRect();
+        const items = Array.from(ol.children).map((li) => li.getBoundingClientRect());
+        const rows = new Map<number, DOMRect[]>();
+        for (const r of items) rows.set(Math.round(r.top), [...(rows.get(Math.round(r.top)) ?? []), r]);
+        return Array.from(rows.values()).map((row) => ({
+          right: Math.max(...row.map((r) => r.right)) - box.right,
+          heights: row.map((r) => Math.round(r.height)),
+        }));
+      });
+      // Was card 7 alone on its row at 1024, beside two empty tracks.
+      for (const row of shape) {
+        expect(Math.abs(row.right), "the row reaches the grid's right edge").toBeLessThanOrEqual(2);
+        expect(Math.max(...row.heights) - Math.min(...row.heights), "cards in a row are one height").toBeLessThanOrEqual(1);
+      }
+    });
+  }
 });
