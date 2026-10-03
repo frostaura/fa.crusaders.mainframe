@@ -338,18 +338,7 @@ public static partial class EmailTemplates
     {
         if (m.AfterAttendance && m.Direction == ShareDirection.Paid) return $"Share taken again — {m.CourtName}";
         if (m.AfterAttendance && m.Direction == ShareDirection.Received) return $"{m.OtherName}'s share came back to you — {m.CourtName}";
-        if (m.KeptForNoShow)
-        {
-            return m.Direction == ShareDirection.Refunded
-                ? $"No-show: part of your share came back — {m.CourtName}"
-                : $"No-show: part of {m.OtherName}'s share went back — {m.CourtName}";
-        }
-        if (ShareRefundCauses.Because(m.ClubRefund) is not null)
-        {
-            return m.Direction == ShareDirection.Refunded
-                ? $"The club refunded your share — {m.CourtName}"
-                : $"The club refunded {m.OtherName}'s share — {m.CourtName}";
-        }
+        if (RefundSubject(m) is { } refund) return refund;
         if (m.ByClub && m.Direction == ShareDirection.Paid) return $"The club collected your share — {m.CourtName}";
         if (m.ClubRemoved && m.Direction == ShareDirection.Refunded) return $"The club took you off the game — {m.CourtName}";
         if (m.ClubRemoved) return $"The club took {m.OtherName} off your game — {m.CourtName}";
@@ -360,6 +349,22 @@ public static partial class EmailTemplates
             case ShareDirection.Refunded: return $"Share refunded — {m.CourtName}";
             default: return $"Share returned to {m.OtherName} — {m.CourtName}";
         }
+    }
+
+    /// <summary>A club refund's subject (E10-7), or a no-show's that kept part of the share (E11-2); null otherwise.</summary>
+    private static string? RefundSubject(ShareMovement m)
+    {
+        var mine = m.Direction == ShareDirection.Refunded;
+        if (m.KeptForNoShow)
+        {
+            return mine
+                ? $"No-show: part of your share came back — {m.CourtName}"
+                : $"No-show: part of {m.OtherName}'s share went back — {m.CourtName}";
+        }
+        if (ShareRefundCauses.Because(m.ClubRefund) is null) return null;
+        return mine
+            ? $"The club refunded your share — {m.CourtName}"
+            : $"The club refunded {m.OtherName}'s share — {m.CourtName}";
     }
 
     private static string ShareHeading(ShareMovement m)

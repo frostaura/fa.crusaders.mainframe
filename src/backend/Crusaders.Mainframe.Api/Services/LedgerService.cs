@@ -141,8 +141,7 @@ public sealed class LedgerService
         // penalty animate the badge once, by their net.
         foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), PartsOf(group),
-                group.Select(p => p.Share).FirstOrDefault(w => w is not null));
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), [.. group]);
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
@@ -176,9 +175,11 @@ public sealed class LedgerService
     public const string SetAsideReason = "share_set_aside";
 
     private Task PublishBalanceAsync(
-        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<BalancePart>? parts = null,
-        ShareWhy? share = null)
+        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<LedgerPosting>? rows = null)
     {
+        // E10-1: each row's {reason, minutes}; R11 E11-1: why a share among them moved.
+        var parts = rows is null ? [] : PartsOf(rows);
+        var share = rows?.Select(p => p.Share).FirstOrDefault(w => w is not null);
         var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);
         var topic = RealtimeTopic.Wallet(tenantId, userId);
         // Optional only for the unit suites' hand-built containers; the app always registers it.
@@ -207,7 +208,7 @@ public sealed class LedgerService
                 // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
                 held_parts = held.WireParts(),
                 // E10-1: the rows behind delta_minutes, each {reason (by type), delta_minutes}; [] when only what is set aside moved.
-                parts = (parts ?? []).Select(p => new { reason = p.Reason, delta_minutes = p.DeltaMinutes }).ToList(),
+                parts = parts.Select(p => new { reason = p.Reason, delta_minutes = p.DeltaMinutes }).ToList(),
                 // R11 E11-1: WHY a share moved (WalletShareCauses), null unless a share row moved; and on a
                 // no-show return the partner's part of the penalty that stayed behind.
                 share_cause = share?.Cause,
@@ -421,7 +422,7 @@ public sealed class LedgerService
         await _db.SaveChangesAsync(ct);
 
         // Queued for after the commit, not published here — D2-B07 and RealtimeOutbox.
-        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor([posting]), ct, MoneyIn([posting]), PartsOf([posting]), posting.Share);
+        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor([posting]), ct, MoneyIn([posting]), [posting]);
         await MirrorAsync(entry, ct);
 
         return entry;

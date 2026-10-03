@@ -995,6 +995,38 @@ public static class DeviceEventEndpoints
         return new ActivationOutcome(DoorTrail.RefusedOffline, null, time.Kind, SubjectUserId: genuine.Match.UserId) { CourtNumber = court };
     }
 
+    /// <summary>
+    /// The audit rows one receipted event writes: the event itself, a second row naming a
+    /// non-<c>ok</c> verdict, and a clamp row when the box's clock could not be believed. Lifted
+    /// out of <see cref="RecordAsync"/> for the complexity gate.
+    /// </summary>
+    private static List<AuditLog> AuditRowsOf(Guid tenantId, EventFacts time, ActivationOutcome? outcome, Guid? subject, string detailsJson)
+    {
+        AuditLog Row(string action) => new() { TenantId = tenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = action, DetailsJson = detailsJson };
+
+        var rows = new List<AuditLog>(3) { Row($"device.{time.Kind}") };
+        // A board's own refusal named by the server (D11-2) is the event row itself, not a second verdict on it.
+        if (outcome is not null && outcome.Code != ActivationOutcome.Ok && outcome.Code != DoorTrail.RefusedOffline)
+        {
+            rows.Add(Row($"device.{AuditKind(outcome.Kind)}_{outcome.Code}"));
+        }
+        // The box's uptime counter cannot be believed; the desk needs to know before the next event from it, not after.
+        if (time.ClampedFrom is not null) rows.Add(Row("device.event_time_clamped"));
+        return rows;
+    }
+
+    /// <summary>
+    /// R11 D11-2: a court box's identified refusal names its court for the Night — the event's
+    /// <c>court</c> is the relay index, the board's wiring, not a court. Unchanged when there is none.
+    /// </summary>
+    private static string WithCourtNumber(string detailsJson, int? courtNumber)
+    {
+        if (courtNumber is not { } number) return detailsJson;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(detailsJson)!.AsObject();
+        node["court_number"] = number;
+        return node.ToJsonString();
+    }
+
     /// <summary>What a v1 subject on an uploaded event proved: its member, or the outcome that refuses it.</summary>
     private sealed record V1Evidence(Guid UserId, ActivationOutcome? Refusal);
 
@@ -1434,15 +1466,7 @@ public static class DeviceEventEndpoints
             booking_id = outcome?.BookingId,
             related_booking_id = outcome?.RelatedBookingId,
         };
-        var detailsJson = System.Text.Json.JsonSerializer.Serialize(details);
-        if (outcome?.CourtNumber is { } courtNumber)
-        {
-            // R11 D11-2: a court box's identified refusal names its court for the Night; the
-            // relay index above is the board's wiring, not a court.
-            var node = System.Text.Json.Nodes.JsonNode.Parse(detailsJson)!.AsObject();
-            node["court_number"] = courtNumber;
-            detailsJson = node.ToJsonString();
-        }
+        var detailsJson = WithCourtNumber(System.Text.Json.JsonSerializer.Serialize(details), outcome?.CourtNumber);
 
         // Named when the handler could name them. Only the gate-open path sets this today:
         // an activation names its member through the booking on the receipt, while a door
@@ -1450,21 +1474,7 @@ public static class DeviceEventEndpoints
         // identity can live at all.
         var subject = outcome?.SubjectUserId;
 
-        var rows = new List<AuditLog>(3)
-        {
-            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{time.Kind}", DetailsJson = detailsJson },
-        };
-        // A board's own refusal named by the server (D11-2) is the event row itself, not a second verdict on it.
-        if (outcome is not null && outcome.Code != ActivationOutcome.Ok && outcome.Code != DoorTrail.RefusedOffline)
-        {
-            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{AuditKind(outcome.Kind)}_{outcome.Code}", DetailsJson = detailsJson });
-        }
-        if (time.ClampedFrom is not null)
-        {
-            // The box's uptime counter cannot be believed; the desk needs to know before
-            // the next event from it, not after.
-            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = "device.event_time_clamped", DetailsJson = detailsJson });
-        }
+        var rows = AuditRowsOf(tenant.TenantId, time, outcome, subject, detailsJson);
         db.AuditLogs.AddRange(rows);
 
         // A forgery's notice rides the receipt's own save, so a duplicate upload that loses the
