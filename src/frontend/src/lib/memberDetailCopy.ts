@@ -203,6 +203,19 @@ export const OVERVIEW_COPY = {
   manageAccess: "Manage sign-in",
 } as const;
 
+/**
+ * R7 L7-16 — the ACCOUNT's own switch (`users.status`: "active" | "suspended"), said as a word on
+ * the Overview's Account card; the raw code "active" sat there beside worded facts.
+ */
+const ACCOUNT_STATUS_WORD: Record<string, string> = { active: "Active", suspended: "Suspended" };
+
+export function accountStatusWord(status: string): string {
+  const known = ACCOUNT_STATUS_WORD[status];
+  if (known) return known;
+  const spaced = status.replace(/_/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export function countOf(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
