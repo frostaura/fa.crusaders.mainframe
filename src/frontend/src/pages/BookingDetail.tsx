@@ -280,7 +280,7 @@ function DetailView({ detail, readAt, reload, say, earlyResult }: ViewProps) {
           {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} freshAt={readAt} firstRead={earlyResult} /> : null}
         </div>
         <div data-detail-cancel="" className={CANCEL}>
-          <CancelPanel detail={detail} reload={reload} say={say} />
+          <CancelPanel detail={detail} reload={reload} />
         </div>
         {isAdmin ? <div className={ADMIN}><AdminSection hands={admin} /></div> : null}
       </div>

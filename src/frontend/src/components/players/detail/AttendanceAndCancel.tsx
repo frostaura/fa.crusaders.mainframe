@@ -6,11 +6,11 @@ import { CheckCircle, Clock } from "@/components/ui/icons";
 import { Section } from "@/components/ui/page-shell";
 import { useBalance } from "@/lib/useBalance";
 import { clubClock } from "@/lib/clubClock";
+import { focusAfterAction } from "@/lib/focusAfterAction";
 import type { BookingDetail } from "@/lib/playersApi";
 import { DETAIL_ATTENDANCE, DETAIL_CANCEL, DETAIL_NO_SHOW } from "@/lib/playersCopy";
 import { isNoShow, lightsOffAt, liveCount } from "./detailModel";
 import { gridBookingOf, rereadAsDay } from "./gridBooking";
-import type { Notice } from "./useOrganiserHands";
 
 /** Checked in or not, and how many of the players have scanned. */
 export function Attendance({ detail }: { detail: BookingDetail }) {
@@ -32,21 +32,24 @@ export function Attendance({ detail }: { detail: BookingDetail }) {
   );
 }
 
-type Props = { detail: BookingDetail; reload: () => void; say: (notice: Notice) => void };
+type Props = { detail: BookingDetail; reload: () => void };
 
 /**
  * The organiser cancelling: the partners' side said first — their shares come back, and a late
  * penalty is the organiser's alone — then the grid's own sheet with the server's quote.
  */
-export function CancelPanel({ detail, reload, say }: Props) {
+export function CancelPanel({ detail, reload }: Props) {
   const [open, setOpen] = useState(false);
   const { refresh } = useBalance();
   if (!detail.permissions.can_cancel) return null;
   const done = (outcome: CancelledOutcome) => {
     if (outcome.cancelledIds.length === 0) return;
-    say({ tone: "info", text: DETAIL_CANCEL.cancelled });
+    // R11 X11-2: the sheet's toast (with the figures) is the one announcement — a page notice as
+    // well was the outcome said twice. This panel unmounts with its trigger once the re-read says
+    // cancelled, so the keyboard goes to the page's cancelled banner, never `<main>`.
     void refresh({ expectSelf: true });
     reload();
+    focusAfterAction(() => document.querySelector<HTMLElement>("[data-cancelled]"));
   };
   return (
     <Section title={DETAIL_CANCEL.title}>
