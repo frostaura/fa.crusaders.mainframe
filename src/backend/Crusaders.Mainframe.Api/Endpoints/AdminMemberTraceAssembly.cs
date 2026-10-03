@@ -416,6 +416,7 @@ public static partial class AdminMemberTraceAssembly
                     CourtWasDark = Flag(details, "peripheral_outage"),
                     CodeUsed = Text(details, "reason") == MemberCodeIdentity.CodeUsed,
                     Attempt = Text(details, "attempt"),
+                    RefusedOffline = Text(details, "outcome") == DoorTrail.RefusedOffline,
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,

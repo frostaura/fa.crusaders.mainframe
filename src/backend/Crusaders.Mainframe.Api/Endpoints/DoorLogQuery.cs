@@ -459,7 +459,10 @@ public sealed record DoorLogQuery(
         // here because a jsonb containment cannot call it.
         if (reason == GateAccess.NotRecognised)
         {
-            return a => a.Action == DoorTrail.OfflineUnknownScanAction
+            // R11 D11-2: an offline refusal the server identified says `refused_offline`, not this.
+            var identified = System.Text.Json.JsonSerializer.Serialize(new { outcome = DoorTrail.RefusedOffline });
+            return a => (a.Action == DoorTrail.OfflineUnknownScanAction
+                         && (a.DetailsJson == null || !EF.Functions.JsonContains(a.DetailsJson, identified)))
                         || (a.DetailsJson != null
                             && (EF.Functions.JsonContains(a.DetailsJson, asReason)
                                 || EF.Functions.JsonContains(a.DetailsJson, asOutcome)));

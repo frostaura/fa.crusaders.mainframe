@@ -87,7 +87,18 @@ public static class DoorTrail
     /// </para>
     /// </summary>
     public static readonly string[] Reasons =
-        [.. GateAccess.Reasons, MalformedOutcome, GateAccess.NotACourtBox, GateAccess.CodeUsed];
+        [.. GateAccess.Reasons, MalformedOutcome, GateAccess.NotACourtBox, GateAccess.CodeUsed, RefusedOffline];
+
+    /// <summary>
+    /// Review round 11, D11-2: a board refused a GENUINE member code while it was offline — a
+    /// replay, a code outside its window, a roster it could not trust — and uploaded the refusal
+    /// as a plain <c>unknown_scan</c>. The server re-checks the code at the scan's instant (never
+    /// claiming a use, never recording the code) and, when it is genuine, names its member and
+    /// writes this as the row's <c>outcome</c>. Neutral on purpose: the board's own reason is not
+    /// on the wire. A code the server cannot prove keeps the old row — <c>not_recognised</c>,
+    /// nobody named.
+    /// </summary>
+    public const string RefusedOffline = "refused_offline";
 
     /// <summary>
     /// The same four actions as a predicate the database can run.

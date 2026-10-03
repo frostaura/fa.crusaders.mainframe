@@ -53,6 +53,13 @@ public static class DoorWords
     /// </summary>
     public const string NotOnTheSavedList = "Code not on the door's saved list";
 
+    /// <summary>
+    /// R11 D11-2: a member's genuine code the door turned away while it was offline. Neutral —
+    /// the board's own reason is not uploaded — and in the "Code already used" family of short
+    /// sentences.
+    /// </summary>
+    public const string RefusedOffline = "Refused offline";
+
     /// <summary>The outcome of one action, in the product's words.</summary>
     public static string? OutcomeOf(string action)
     {
@@ -81,6 +88,7 @@ public static class DoorWords
         // explains why some offline rows name a member and this one cannot: the board was
         // deciding from a saved list. Checked before the reason rather than after, so the
         // sentence cannot drift when the code changes.
+        if (reason == DoorTrail.RefusedOffline) return RefusedOffline;
         if (action == DoorTrail.OfflineUnknownScanAction) return NotOnTheSavedList;
 
         if (string.IsNullOrWhiteSpace(reason)) return NoReason;

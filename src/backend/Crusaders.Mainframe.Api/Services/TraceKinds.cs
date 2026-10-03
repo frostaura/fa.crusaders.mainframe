@@ -89,6 +89,12 @@ public readonly record struct TraceFacts
     public string? Attempt { get; init; }
 
     /// <summary>
+    /// A board refused the member's genuine code while it was offline (review round 11, D11-2) —
+    /// said neutrally, because the board's own reason is not uploaded.
+    /// </summary>
+    public bool RefusedOffline { get; init; }
+
+    /// <summary>
     /// The club took no rand for this desk top-up — a free package (<c>package_free</c>) or a sale
     /// recorded at R0.00 — so it was given, not sold (review round 8, E8-5).
     /// </summary>
@@ -448,6 +454,9 @@ public static class TraceKinds
     /// <summary>D2 §6.4's refusal row — today every refusal branch writes nothing at all (§1.6).</summary>
     public const string ActivationRefusedAction = "court.activation_refused";
 
+    /// <summary>A court box's offline refusal, as stored (<c>DeviceEventEndpoints.CourtUnknownScanKind</c>; R11 D11-2).</summary>
+    public const string CourtOfflineRefusalAction = "device.court_unknown_scan";
+
     /// <summary>
     /// The word for one <c>device.*</c> row.
     ///
@@ -467,6 +476,8 @@ public static class TraceKinds
             ? DoorOpenedOffline
             : DoorRefused;
         if (Matches(action, DoorTrail.OfflineUnknownScanAction)) return DoorRefused;
+        // R11 D11-2: a court box's offline refusal reaches a member's night only once the server named them.
+        if (action == CourtOfflineRefusalAction) return CourtRefused;
         if (Matches(action, ActivationAction)) return action == ActivationAction ? CourtCheckedIn : CourtRefused;
         if (Matches(action, ReleaseAction)) return LightsOff;
         return null;
@@ -548,7 +559,7 @@ public static class TraceKinds
         {
             DoorOpened => $"Came in through {door}",
             DoorOpenedOffline => $"Came in through {door} while it was offline",
-            DoorRefused => $"Was turned away at {door}{UsedCode(facts)}",
+            DoorRefused => $"Was turned away at {door}{UsedCode(facts)}{Offline(facts)}",
 
             BookingMade => $"Booked {court}",
             BookingMadeForThem => BookedForThem(court, facts),
@@ -570,7 +581,7 @@ public static class TraceKinds
             WalkUpRefunded => $"Light time at {court} was given back",
 
             CourtCheckedIn => $"Checked in at {court}",
-            CourtRefused => facts.CodeUsed ? TurnedAway(facts, court) : $"Was refused at {court}",
+            CourtRefused => facts.CodeUsed ? TurnedAway(facts, court) : $"Was refused at {court}{Offline(facts)}",
 
             LightsOn => $"{court} lights came on",
             LightsOff => $"{court} lights went off",
@@ -587,6 +598,9 @@ public static class TraceKinds
             _ => AccountHeadline(kind, facts),
         };
     }
+
+    /// <summary>R11 D11-2: an offline refusal of a genuine code, said neutrally; empty otherwise.</summary>
+    private static string Offline(TraceFacts facts) => facts.RefusedOffline ? " — refused offline" : "";
 
     /// <summary>R11 E11-4: a refusal of a used code, worded by what the member was trying to do.</summary>
     private static string TurnedAway(TraceFacts facts, string court)

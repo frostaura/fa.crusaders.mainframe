@@ -403,6 +403,9 @@ public static class DeviceEventEndpoints
                     ReleaseKind => await ReleaseOutcomeAsync(device!, e, time.OccurredAt, services, ct),
                     GateOpenKind => await GateOpenOutcomeAsync(device!, e, time, services, ct),
 
+                    // R11 D11-2: a board's offline refusal of a genuine member code names the member.
+                    UnknownScanKind or CourtUnknownScanKind => await RefusedOfflineOutcomeAsync(device!, e, time, services, ct),
+
                     // Both of these used to fall through to `_ => null` and land as an audit
                     // row with a null outcome that nothing read. They keep that row — the
                     // trail is where "the box restarted" belongs — and now also reach the
@@ -564,6 +567,9 @@ public static class DeviceEventEndpoints
         string Code, Guid? BookingId, string Kind = ActivationKind, Guid? RelatedBookingId = null,
         Guid? SubjectUserId = null, AdminNotice? Notice = null)
     {
+        /// <summary>The court a court box's refusal happened at, from its relay (R11 D11-2); null elsewhere.</summary>
+        public int? CourtNumber { get; init; }
+
         /// <summary>
         /// A v1 code the board accepted offline that the server cannot reproduce, or one used
         /// twice (member-code §7). Receipted — evidence is never refused — and NOT attendance.
@@ -836,7 +842,7 @@ public static class DeviceEventEndpoints
         }
 
         var code = outcome?.Code;
-        if (code is null or ActivationOutcome.Ok or ActivationOutcome.ReversedNoShow) return;
+        if (code is null or ActivationOutcome.Ok or ActivationOutcome.ReversedNoShow or DoorTrail.RefusedOffline) return;
 
         // A relay the box lit that is not wired to the booking's court is its own fault: the
         // member is standing on the wrong court, which no other refusal means.
@@ -961,6 +967,32 @@ public static class DeviceEventEndpoints
             : null;
         return new ActivationOutcome(
             ActivationOutcome.Ok, BookingId: null, Kind: GateOpenKind, SubjectUserId: resolved?.UserId);
+    }
+
+    /// <summary>
+    /// Review round 11, D11-2: a board's offline refusal (<c>unknown_scan</c>) of a v1 code. The door
+    /// turned away a valid code it could not accept alone — replayed, outside its window, a stale
+    /// roster — and the upload said "not recognised" with nobody named and nothing on the Night.
+    /// The code is re-checked at the scan's instant as <c>gate_open</c>'s is, but a refusal is no
+    /// act: no use is claimed, no forgery is raised, and the code is never recorded. A genuine one
+    /// names its member with the neutral <see cref="DoorTrail.RefusedOffline"/>; anything else, or
+    /// a clamped clock that makes the step unknowable, keeps the old row (null).
+    /// </summary>
+    private static async Task<ActivationOutcome?> RefusedOfflineOutcomeAsync(
+        Device device, DeviceEventDto e, EventFacts time, DeviceEventServices services, CancellationToken ct)
+    {
+        var subject = e.Subject?.Trim();
+        if (!MemberCodeMath.IsV1Shaped(subject) || time.ClampedFrom is not null) return null;
+
+        var settings = await services.Settings.GetAsync(ct);
+        if (await services.MemberCodes.CheckEvidenceAsync(subject, time.OccurredAt, settings, ct) is not MemberCodeEvidence.Genuine genuine)
+        {
+            return null;
+        }
+        var court = time.Kind == CourtUnknownScanKind && e.Court is { } relay && relay >= 0 && relay < device.CourtNumbers.Count
+            ? device.CourtNumbers[relay]
+            : (int?)null;
+        return new ActivationOutcome(DoorTrail.RefusedOffline, null, time.Kind, SubjectUserId: genuine.Match.UserId) { CourtNumber = court };
     }
 
     /// <summary>What a v1 subject on an uploaded event proved: its member, or the outcome that refuses it.</summary>
@@ -1403,6 +1435,14 @@ public static class DeviceEventEndpoints
             related_booking_id = outcome?.RelatedBookingId,
         };
         var detailsJson = System.Text.Json.JsonSerializer.Serialize(details);
+        if (outcome?.CourtNumber is { } courtNumber)
+        {
+            // R11 D11-2: a court box's identified refusal names its court for the Night; the
+            // relay index above is the board's wiring, not a court.
+            var node = System.Text.Json.Nodes.JsonNode.Parse(detailsJson)!.AsObject();
+            node["court_number"] = courtNumber;
+            detailsJson = node.ToJsonString();
+        }
 
         // Named when the handler could name them. Only the gate-open path sets this today:
         // an activation names its member through the booking on the receipt, while a door
@@ -1414,7 +1454,8 @@ public static class DeviceEventEndpoints
         {
             new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{time.Kind}", DetailsJson = detailsJson },
         };
-        if (outcome is not null && outcome.Code != ActivationOutcome.Ok)
+        // A board's own refusal named by the server (D11-2) is the event row itself, not a second verdict on it.
+        if (outcome is not null && outcome.Code != ActivationOutcome.Ok && outcome.Code != DoorTrail.RefusedOffline)
         {
             rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{AuditKind(outcome.Kind)}_{outcome.Code}", DetailsJson = detailsJson });
         }
