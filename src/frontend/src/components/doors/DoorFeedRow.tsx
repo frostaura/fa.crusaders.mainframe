@@ -114,7 +114,7 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
     <li
       ref={innerRef}
       tabIndex={innerRef ? -1 : undefined}
-      className={`border-t border-border py-2 first:border-t-0 ${entry.offline ? "border-l-2 border-l-warning-strong pl-2" : ""}`}
+      className={`@container border-t border-border py-2 first:border-t-0 ${entry.offline ? "border-l-2 border-l-warning-strong pl-2" : ""}`}
     >
       {/*
         B17. The club log is a bare list whose columns are conveyed by VISUAL POSITION —
@@ -125,7 +125,10 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
         is P3 broken by a component default. So the field names are carried as
         visually-hidden text on the list this surface already has.
       */}
-      <div className="flex flex-wrap items-baseline gap-2 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3">
+      {/* Three columns only where the ROW has room for them (R9 L9-3): by the viewport (`sm:`), at
+          1024/1280 with 200 % text beside the rail the name column was squeezed to a letter a line.
+          A rem container steps the row down to the wrapping flow, where the name keeps a line. */}
+      <div className="flex flex-wrap items-baseline gap-2 @[30rem]:grid @[30rem]:grid-cols-[auto_minmax(0,1fr)_auto] @[30rem]:gap-3">
         <span className="flex flex-wrap items-center gap-1.5">
           {render.chip && (
             <Badge tone={chipTone(render.tone)}>
