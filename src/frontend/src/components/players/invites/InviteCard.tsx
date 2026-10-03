@@ -37,7 +37,12 @@ type CardProps = {
   actions?: ReactNode;
 };
 
-const CARD_CLASS = "flex w-full min-h-touch items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left shadow-xs no-underline";
+/**
+ * R6 L6-4 — the avatar and the words WRAP: the words' basis is 12rem, so at 320 with 200 % text
+ * they drop under the avatar at the card's full width instead of an ~80px column beside it
+ * ("Wai / ting / for / you / r" in the badge). At 100 % text a phone keeps them side by side.
+ */
+const CARD_CLASS = "flex flex-wrap w-full min-h-touch items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 text-left shadow-xs no-underline";
 
 export function InviteCard({ invite, onOpen, to, note, current, actions }: CardProps) {
   const body = <CardBody invite={invite} note={note} />;
@@ -59,7 +64,7 @@ export function InviteCard({ invite, onOpen, to, note, current, actions }: CardP
 }
 
 /** The body opens the invite over the whole card (`after:` inset); the answers sit above that layer. */
-const OPEN_CLASS = "flex w-full min-h-touch items-start gap-3 text-left no-underline after:absolute after:inset-0 after:rounded-xl after:content-['']";
+const OPEN_CLASS = "flex flex-wrap w-full min-h-touch items-start gap-3 text-left no-underline after:absolute after:inset-0 after:rounded-xl after:content-['']";
 
 type WithActionsProps = Pick<CardProps, "invite" | "onOpen" | "to" | "current"> & { body: ReactNode; actions: ReactNode };
 
@@ -92,7 +97,7 @@ function CardBody({ invite, note }: { invite: Invite; note?: string }): ReactNod
         {invite.organiser?.photo_url ? <AvatarImage src={invite.organiser.photo_url} alt="" /> : null}
         <AvatarFallback name={name} />
       </Avatar>
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="flex min-w-0 flex-[1_1_12rem] flex-col gap-1">
         {note ? <span className="text-xs font-semibold uppercase tracking-overline text-text-muted">{note}</span> : null}
         <span className="break-words text-base font-semibold text-text-primary">{invitedLine(name, invite.open_link)}</span>
         <span className="break-words text-sm text-text-secondary">

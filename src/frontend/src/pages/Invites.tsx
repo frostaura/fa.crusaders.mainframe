@@ -5,6 +5,7 @@ import { PageHeader, PageShell } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
 import { Link } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import { AcceptSheet } from "@/components/players/invites/AcceptSheet";
 import { InviteDetail } from "@/components/players/invites/InviteDetail";
 import { ContextBar } from "@/components/ui/context-bar";
@@ -75,15 +76,19 @@ export default function InvitesPage() {
           back={{ label: SPLIT_PANE_COPY.backToInvites, onBack: picked.unpick }}
           pickedKey={picked.shown?.participant_id ?? null}
           announce={announceOf(picked.shown)}
-          list={<InviteList items={items} pending={pending} wide={wide} picked={picked} openSheet={sheet.openFor} />}
+          list={<InviteList items={items} pending={pending} wide={wide} picked={picked} openSheet={sheet.openFor} docked={Boolean(only) && !wide} />}
           detail={picked.shown ? <InviteDetail key={picked.shown.participant_id} invite={picked.shown} onReread={reread} /> : null}
           placeholder={<StateBlock empty emptyIcon={Envelope} emptyTitle={INVITES_COPY.pickTitle} emptyHint={INVITES_COPY.pickHint} />}
         />
       </StateBlock>
-      {/* §4 wrong tap reach: with exactly one invite, its answer is docked in thumb reach. */}
+      {/*
+        §4 wrong tap reach: with exactly one invite, its answers are docked in thumb reach — and
+        only there (R6 L6-13: the card's own Accept beside a docked "Answer this invite" was two
+        primaries for one question). The card drops its answers while the dock carries them.
+      */}
       {only && !wide ? (
         <ContextBar position="bottom" until="lg" label={INVITES_COPY.actionsLabel}>
-          <Button block onClick={() => sheet.openFor(only)}>{INVITES_COPY.answer}</Button>
+          <CardAnswers invite={only} onAnswer={sheet.openFor} docked />
         </ContextBar>
       ) : null}
       <AcceptSheet
@@ -101,14 +106,17 @@ const SPLIT_AT = "56rem";
  * where the share, the balance after and the cap are stated before anything is sent; Decline opens
  * it on "Decline for good?", focus on the safe answer. Decline only where the seat can be declined.
  */
-function CardAnswers({ invite, onAnswer }: { invite: Invite; onAnswer: (invite: Invite, startWith?: "decline") => void }) {
+function CardAnswers(props: { invite: Invite; onAnswer: (invite: Invite, startWith?: "decline") => void; docked?: boolean }) {
+  const { invite, onAnswer, docked = false } = props;
   const declinable = invite.status === "invited" && !invite.open_link;
+  // Docked, the two answers share the bar's width (Accept the wider), as a thumb reaches them.
+  const grow = docked ? "flex-1" : undefined;
   return (
-    <div role="group" aria-label={SPLIT_PANE_COPY.cardActionsLabel(organiserName(invite))} className="flex flex-wrap justify-end gap-2">
+    <div role="group" aria-label={SPLIT_PANE_COPY.cardActionsLabel(organiserName(invite))} className={cn("flex flex-wrap justify-end gap-2", docked && "w-full")}>
       {declinable ? (
-        <Button variant="outline" onClick={() => onAnswer(invite, "decline")} data-card-decline="">{SPLIT_PANE_COPY.cardDecline}</Button>
+        <Button variant="outline" className={grow} onClick={() => onAnswer(invite, "decline")} data-card-decline="">{SPLIT_PANE_COPY.cardDecline}</Button>
       ) : null}
-      <Button onClick={() => onAnswer(invite)} data-card-accept="">{SPLIT_PANE_COPY.cardAccept}</Button>
+      <Button className={cn(grow, docked && "grow-[2]")} onClick={() => onAnswer(invite)} data-card-accept="">{SPLIT_PANE_COPY.cardAccept}</Button>
     </div>
   );
 }
@@ -155,11 +163,13 @@ type ListProps = {
   wide: boolean;
   picked: Picked;
   openSheet: (invite: Invite, startWith?: "decline") => void;
+  /** R6 L6-13 — the one invite's answers are in the dock, so its card carries none. */
+  docked: boolean;
 };
 
 /** The cards: beside a pane a card opens there; stacked it opens the sheet and carries its answers. */
 function InviteList(props: ListProps) {
-  const { items, pending, wide, picked, openSheet } = props;
+  const { items, pending, wide, picked, openSheet, docked } = props;
   return (
     <ul aria-label={INVITES_COPY.listLabel} className="flex flex-col gap-3">
       {pending ? (
@@ -172,7 +182,7 @@ function InviteList(props: ListProps) {
           <InviteCard
             invite={invite} onOpen={wide ? picked.pick : openSheet}
             current={wide && picked.invite?.participant_id === invite.participant_id}
-            actions={wide ? undefined : <CardAnswers invite={invite} onAnswer={openSheet} />}
+            actions={wide || docked ? undefined : <CardAnswers invite={invite} onAnswer={openSheet} />}
           />
         </li>
       ))}

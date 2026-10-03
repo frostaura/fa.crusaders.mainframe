@@ -4,6 +4,7 @@ import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./play
 import { myPlayFixture } from "./playKit";
 import { DETAIL_ACTIONS, DETAIL_COPY, INVITES_COPY } from "../src/lib/playersCopy";
 import { WALLET_LAYOUT } from "../src/lib/walletCopy";
+import { SPLIT_PANE_COPY } from "../src/lib/inboxCopy";
 import { HEIGHT, WIDTHS, bigText, box, fontsReady, sideways, textOffScreen, widthUsed, type Width } from "./layoutKit";
 
 /**
@@ -412,7 +413,8 @@ test.describe("Invites (SPEC 3.5)", () => {
     await expect(page.locator("[data-invite-detail]")).toBeVisible();
     await expect(page.getByRole("region", { name: INVITES_COPY.actionsLabel })).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
-    const docked = page.getByRole("region", { name: INVITES_COPY.actionsLabel }).getByRole("button", { name: INVITES_COPY.answer });
+    // R6 L6-13 — the dock carries the invite's own answers (the card then carries none).
+    const docked = page.getByRole("region", { name: INVITES_COPY.actionsLabel }).getByRole("button", { name: SPLIT_PANE_COPY.cardAccept });
     await expect(docked).toBeVisible();
     const b = (await docked.boundingBox())!;
     expect(b.y + b.height).toBeGreaterThan(844 * 0.75);
