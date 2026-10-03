@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SheetBody, SheetFooter } from "@/components/ui/sheet";
 import { adminEndpoints, type AdminPackage, type MemberGroup } from "@/lib/adminApi";
+import { errorCode } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
 import { unsureSentence, writeOrReadBack } from "@/lib/lostReply";
 import { LOST_REPLY } from "@/lib/lostReplyCopy";
@@ -63,6 +64,23 @@ function initialDraft(pkg: AdminPackage | "new"): Draft {
 
 type Complaints = { name: string | null; minutes: string | null; price: string | null; order: string | null };
 
+/**
+ * R7 J7-4 — the server's refusals that belong to ONE field are said AT that field, which takes
+ * focus and is marked invalid; a banner at the foot of the form was 900px down a phone, under the
+ * fold, with focus left on Save. Editing that field lets the refusal go: it was about what was there.
+ */
+const FIELD_OF: Record<string, keyof Complaints> = {
+  package_name_taken: "name",
+  package_name_invalid: "name",
+  package_minutes_invalid: "minutes",
+  package_price_invalid: "price",
+  package_sort_order_invalid: "order",
+};
+
+function refusedField(error: unknown): keyof Complaints | null {
+  return FIELD_OF[errorCode(error) ?? ""] ?? null;
+}
+
 function complaintsOf(draft: Draft): Complaints {
   const name = draft.name.trim();
   return {
@@ -106,20 +124,29 @@ export function PackageEditor(props: PackageEditorProps) {
   const [tried, setTried] = useState(false);
   const isNew = pkg === "new";
   const problems = complaintsOf(draft);
-  const save = useAsyncAction(() => write(pkg, draft), { success: (r) => onSaved(r.saved, r.said) });
   const nameRef = useRef<HTMLInputElement>(null);
   const minutesRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
   const orderRef = useRef<HTMLInputElement>(null);
-  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  const refs = { name: nameRef, minutes: minutesRef, price: priceRef, order: orderRef };
+  const save = useAsyncAction(() => write(pkg, draft), {
+    success: (r) => onSaved(r.saved, r.said),
+    failure: (error) => { const field = refusedField(error); if (field) requestAnimationFrame(() => refs[field].current?.focus()); },
+  });
+  const serverField = refusedField(save.error);
+  const set = (patch: Partial<Draft>) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    if (serverField && serverField in patch) save.reset();
+  };
   const submit = () => {
     setTried(true);
     // Refused at the form, focus on the first field to fix — never a toast that fades.
     const first = (["name", "minutes", "price", "order"] as const).find((k) => problems[k]);
-    if (first) { ({ name: nameRef, minutes: minutesRef, price: priceRef, order: orderRef })[first].current?.focus(); return; }
+    if (first) { refs[first].current?.focus(); return; }
     void save.run();
   };
-  const show = (k: keyof Complaints) => (tried || (k !== "name" && draft[k].trim() !== "") ? problems[k] : null);
+  const typed = (k: keyof Complaints) => (tried || (k !== "name" && draft[k].trim() !== "") ? problems[k] : null);
+  const show = (k: keyof Complaints) => typed(k) ?? (serverField === k ? COPY.errorCodes[errorCode(save.error) ?? ""] ?? null : null);
 
   const actions = (
     <>
@@ -129,7 +156,7 @@ export function PackageEditor(props: PackageEditorProps) {
   );
   const form = (
     <form id={formId} noValidate className="flex flex-col gap-5" onSubmit={(e) => { e.preventDefault(); submit(); }} data-package-editor="">
-      <TextField label={COPY.nameLabel} description={COPY.nameDescription} complaint={tried ? problems.name : null}>
+      <TextField label={COPY.nameLabel} description={COPY.nameDescription} complaint={show("name")}>
         <Input ref={nameRef} value={draft.name} maxLength={PACKAGE_LIMITS.nameMax} autoComplete="off" placeholder="5 hours" onChange={(e) => set({ name: e.target.value })} />
       </TextField>
       <MinutesField draft={draft} set={set} inputRef={minutesRef} complaint={show("minutes")} />
@@ -147,7 +174,7 @@ export function PackageEditor(props: PackageEditorProps) {
         </Field>
       )}
       <Preview pkg={pkg} draft={draft} active={active} groups={groups} />
-      <SaveFailure error={save.error} isNew={isNew} name={draft.name.trim()} />
+      {serverField ? null : <SaveFailure error={save.error} isNew={isNew} name={draft.name.trim()} />}
       {inSheet ? null : <div className="flex flex-wrap justify-end gap-2">{actions}</div>}
     </form>
   );
