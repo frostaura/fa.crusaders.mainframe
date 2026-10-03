@@ -23,7 +23,7 @@ import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
 import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes, readableEvents } from "../../lib/nightTimeline";
 import {
   APPROXIMATE_EXPLANATION, NIGHT_BALANCE_AFTER, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
-  NIGHT_PRIVACY_NOTICE, type CodeHolder, actorClause, burstSummary, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
+  NIGHT_PRIVACY_NOTICE, actorClause, burstSummary, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
   retentionCaveat,
 } from "../../lib/nightCopy";
 import { useAsyncAction } from "../../lib/useAsyncAction";
@@ -426,9 +426,8 @@ function TraceCard({ event, subjectName, timezone }: {
   subjectName: string;
   timezone: string | undefined;
 }) {
-  // `code_holder` (R10 E10-2) is read through a local widening until the shared trace type carries
-  // it (integrator ask r10-ask-BE10-to-integrator.md); an older server simply omits it.
-  const { code_holder: codeHolder } = event as typeof event & { code_holder?: CodeHolder | null };
+  // `code_holder` (R10 E10-2): whose code the board read; an older server simply omits it.
+  const codeHolder = event.code_holder;
   const clause = actorClause(event.actor, subjectName, event.subject, codeHolder);
   const onBehalf = isOnBehalf(event.actor);
   return (
