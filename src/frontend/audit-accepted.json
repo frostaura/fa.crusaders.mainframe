@@ -1,0 +1,6 @@
+{
+  "GHSA-vfj7-8cjw-p6xm": {
+    "until": "2026-12-31",
+    "why": "braces (every version) via tailwindcss 3.4's chokidar/micromatch. Build-time only, never shipped to a browser, and only our own config globs reach it. The only fix is Tailwind 4, a major deliberately deferred (iOS 16.4 floor). Accepted 2026-10-03; re-decide by the date."
+  }
+}

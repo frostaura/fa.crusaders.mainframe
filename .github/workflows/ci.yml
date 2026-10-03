@@ -834,9 +834,11 @@ jobs:
         working-directory: ./src/frontend
         run: npm ci
 
-      - name: npm audit (high severity)
+      # High and critical fail, except advisories in audit-accepted.json — each with its reason and
+      # an expiry, after which it fails again (tools/audit-gate.mjs).
+      - name: npm audit (high severity, accepted list)
         working-directory: ./src/frontend
-        run: npm audit --audit-level=high
+        run: node tools/audit-gate.mjs
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
