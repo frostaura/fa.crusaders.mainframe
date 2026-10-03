@@ -1,5 +1,6 @@
 import type { LedgerRow } from "./api";
 import { ledgerTypeLabel } from "./deskLedger";
+import { formatMoney } from "./utils";
 
 /**
  * The club ledger's "done by" and category — review round 1, F3.8.
@@ -91,10 +92,58 @@ export function ledgerCategory(row: LedgerRow): string {
   if (row.type === "ShareTransfer" && owner) {
     return `${label}, ${row.signedAmountMinutes < 0 ? "out of" : "into"} ${owner}'s wallet`;
   }
-  const desk = row as LedgerRowWithActor;
-  if (row.type === "AdminTopUp" && (desk.reason_code === "package_free" || desk.zar_paid === 0)) return DESK_GIFT;
+  if (row.type === "AdminTopUp") return deskCategory(row as LedgerRowWithActor, label);
+  if (row.type === "CancellationRefund") return refundCategory(row, label);
   return label;
 }
 
 /** R9 J9-3: an `AdminTopUp` for which the club took no rand (`package_free`, or a R0 sale). */
 const DESK_GIFT = "Package given at the desk, at no charge";
+
+/**
+ * R10 J10-5: a desk sale says the rand the club took (`zar_paid`) — the book had it nowhere, so a
+ * sale at a regular's round R100 and one at the shelf's R96 read alike. An older server sends none.
+ */
+function deskCategory(row: LedgerRowWithActor, label: string): string {
+  if (row.reason_code === "package_free" || row.zar_paid === 0) return DESK_GIFT;
+  return typeof row.zar_paid === "number" ? `${label}, ${formatMoney(row.zar_paid)} received` : label;
+}
+
+/**
+ * R10 E10-5: one ledger type carries every refund the club makes — a cancellation's, an outage's,
+ * a no-show's, a pay-for's — and the reversals of them (negative). Transactions called them all
+ * "Cancellation refund", so an outage reversal of −15 read as a refund. The row's stored reason
+ * (the server's own words) and its sign say which it was.
+ */
+export const LEDGER_CATEGORY = {
+  outageRefund: "Outage refund — the court's box was offline",
+  outageRefundReversed: "Outage refund reversed — checked in after all",
+  payForRefund: "Pay-for refund — another member paid at the court",
+  noShowRefund: "No-show refund",
+  noShowRefundReversed: "No-show refund reversed — attendance arrived late",
+  displacedRefund: "Refund — the court was already in use",
+  reinstated: "Refund taken back — booking reinstated",
+  refundReversed: "Refund reversed",
+} as const;
+
+/**
+ * The server's stored reasons, by what they begin with or say: `NoShowWorker.RefundReason`,
+ * `BookingService.RefundReversalReason`, the pay-for reassignment's refund, the displaced tail's
+ * refund and its reinstatement. First match wins; the sign is checked by the caller.
+ */
+const REFUND_REASONS: ReadonlyArray<{ test: RegExp; positive: string; negative: string }> = [
+  { test: /^Outage refund reversed/, positive: LEDGER_CATEGORY.outageRefund, negative: LEDGER_CATEGORY.outageRefundReversed },
+  { test: /was offline — booking refunded/, positive: LEDGER_CATEGORY.outageRefund, negative: LEDGER_CATEGORY.outageRefundReversed },
+  { test: /^Payer changed at court/, positive: LEDGER_CATEGORY.payForRefund, negative: LEDGER_CATEGORY.refundReversed },
+  { test: /^No-show refund reversed/, positive: LEDGER_CATEGORY.noShowRefund, negative: LEDGER_CATEGORY.noShowRefundReversed },
+  { test: /^No-show — booking refunded/, positive: LEDGER_CATEGORY.noShowRefund, negative: LEDGER_CATEGORY.noShowRefundReversed },
+  { test: /^Booking reinstated/, positive: LEDGER_CATEGORY.displacedRefund, negative: LEDGER_CATEGORY.reinstated },
+  { test: /the court was already in use/, positive: LEDGER_CATEGORY.displacedRefund, negative: LEDGER_CATEGORY.reinstated },
+];
+
+function refundCategory(row: LedgerRow, label: string): string {
+  const back = row.signedAmountMinutes < 0;
+  const known = REFUND_REASONS.find((r) => r.test.test(row.comment?.trim() ?? ""));
+  if (known) return back ? known.negative : known.positive;
+  return back ? LEDGER_CATEGORY.refundReversed : label;
+}

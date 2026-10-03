@@ -32,7 +32,7 @@ describe("J9-7 — a share's two legs say whose wallet each is", () => {
 describe("J9-3 — a desk package given at no charge is not \"sold\"", () => {
   it("names a R0 desk package as given, and a paid one as sold", () => {
     expect(ledgerCategory(row({ type: "AdminTopUp", signedAmountMinutes: 60, zar_paid: 0 }))).toBe("Package given at the desk, at no charge");
-    expect(ledgerCategory(row({ type: "AdminTopUp", signedAmountMinutes: 60, zar_paid: 108 }))).toBe("Package sold at the desk");
+    expect(ledgerCategory(row({ type: "AdminTopUp", signedAmountMinutes: 60, zar_paid: 108 }))).toBe("Package sold at the desk, R108.00 received");
     // The server's code says it outright (933efada), whatever the rand.
     expect(ledgerCategory(row({ type: "AdminTopUp", signedAmountMinutes: 60, zar_paid: null, reason_code: "package_free" }))).toBe("Package given at the desk, at no charge");
   });
