@@ -70,8 +70,12 @@ export function BookingLine({ row, zone, action, people }: {
           <div className="flex flex-wrap items-center gap-x-2 text-sm text-text-secondary">
             {/* A real, shrinkable item (R5 F5-4): a bare span floored at its longest word ran
                 "Playing as <long name>'s partner" off a 390 phone at 200% text. */}
-            <span className="min-w-0 break-words">{bookedByLine(row)}</span>
-            {people ? <div data-booking-people="">{people}</div> : null}
+            {/* One text run with the people line (R7 L7-16): two flex items with a gap read and
+                copied as "Booked by the member  with Lena". */}
+            <span className="min-w-0 break-words">
+              {bookedByLine(row)}
+              {people ? <>{" "}<span data-booking-people="">{people}</span></> : null}
+            </span>
             {row.checked_in_at ? (
               <span className="inline-flex items-center gap-1 text-success-strong">
                 <CheckCircle size={14} weight="bold" aria-hidden="true" />

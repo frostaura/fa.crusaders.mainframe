@@ -8,7 +8,7 @@ import { StateBlock } from "@/components/ui/state-block";
 import { TextLink } from "@/components/ui/text-link";
 import { clubDate, clubInstant } from "@/lib/clubClock";
 import type { MemberDetail } from "@/lib/memberDetailApi";
-import { MEMBER_COPY, OVERVIEW_COPY as COPY, countOf, withPlayersLine } from "@/lib/memberDetailCopy";
+import { MEMBER_COPY, OVERVIEW_COPY as COPY, accountStatusWord, countOf, withPlayersLine } from "@/lib/memberDetailCopy";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { BookingLine, StatTile } from "./parts";
@@ -115,7 +115,7 @@ function AccountFacts({ detail }: { detail: MemberDetail }) {
       ) : applicant ? null : (
         // Not on a pending page (F3-12): "Account: active" beside "Awaiting approval" read as
         // two answers to one question. The header's status is the one that counts.
-        <Fact term={COPY.accountStatus}>{detail.account_status}</Fact>
+        <Fact term={COPY.accountStatus}>{accountStatusWord(detail.account_status)}</Fact>
       )}
       <Fact term={COPY.passkeys}>{countOf(detail.passkey_count, "passkey", "passkeys")}</Fact>
       {/* P13 §9: no court-box fingerprints while enrolment is switched off. */}
