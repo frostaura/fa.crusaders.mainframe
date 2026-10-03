@@ -51,6 +51,7 @@ import { useHoldLift } from "../lib/scheduleEnd";
 import { useSheetHistory } from "../lib/bookingSheetHistory";
 import { focusAfterAction } from "../lib/focusAfterAction";
 import { gridTabStop } from "../lib/useGridInteractions";
+import { StillTrying } from "../lib/offline/StillTrying";
 
 /**
  * Bookings — the week strip, the grid and the two sheets it opens (R1–R6, D8).
@@ -226,6 +227,8 @@ export default function BookingsPage() {
           />
           <BookingGridHeading />
           {/* R8 X8-2 — a cold start that cannot reach the club, with no day kept: said as offline, once. */}
+          {/* R9 X9-6 — nothing kept and no answer yet: after a few seconds, say it is still trying. */}
+          {!shown && schedule.loading ? <StillTrying /> : null}
           {!shown && !schedule.loading && isConnectionFailure(schedule.error) ? <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.schedule} onRetry={schedule.refresh} /> : (
             <StateBlock
               loading={!shown && schedule.loading}

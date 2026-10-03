@@ -10,6 +10,7 @@ import { ApiError } from "@/lib/api";
 import { INBOX_COPY as COPY } from "@/lib/playersCopy";
 import type { MemberNotification } from "@/lib/playersApi";
 import { useTicker } from "@/lib/useTicker";
+import { StillTrying } from "@/lib/offline/StillTrying";
 import { InboxRow } from "./InboxRow";
 import type { InboxFeed } from "./useInbox";
 
@@ -35,36 +36,40 @@ export function InboxList({ feed, listRef, pick }: { feed: InboxFeed; listRef?: 
   // R6 X6-4 — offline with no list kept on this phone: said as offline, not as a failure.
   if (feed.error !== null && feed.offline) return <OfflineNothingKept line={OFFLINE_COPY.nothingKept.inbox} />;
   return (
-    <StateBlock
-      loading={feed.loading}
-      error={feed.error}
-      action={COPY.readAction}
-      failedCaveat={COPY.readCaveat}
-      onRetry={feed.retry}
-      empty={feed.answered && feed.items.length === 0}
-      emptyIcon={Bell}
-      emptyTitle={COPY.empty}
-      skeleton={<InboxSkeleton />}
-    >
-      <ol
-        ref={listRef}
-        // R4 X4-5 — where focus goes when "Mark all read" takes its own bar away.
-        tabIndex={-1}
-        aria-label={COPY.listLabel}
-        data-inbox-list=""
-        className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none"
+    <>
+      {/* R9 X9-6 — outside the aria-busy region, so the slow line is announced. */}
+      {feed.loading ? <StillTrying /> : null}
+      <StateBlock
+        loading={feed.loading}
+        error={feed.error}
+        action={COPY.readAction}
+        failedCaveat={COPY.readCaveat}
+        onRetry={feed.retry}
+        empty={feed.answered && feed.items.length === 0}
+        emptyIcon={Bell}
+        emptyTitle={COPY.empty}
+        skeleton={<InboxSkeleton />}
       >
-        {feed.items.map((n) => <InboxRow key={n.id} notice={n} now={now} feed={feed} pick={pick} />)}
-      </ol>
-      {feed.more.error ? (
-        <Alert tone="danger">{isCursorExpired(feed.more.error) ? COPY.cursorExpired : COPY.showMoreFailed}</Alert>
-      ) : null}
-      {feed.cursor ? (
-        <div className="flex justify-center">
-          <Button variant="outline" pending={feed.more.pending} onClick={() => void feed.more.run()}>{COPY.showMore}</Button>
-        </div>
-      ) : null}
-    </StateBlock>
+        <ol
+          ref={listRef}
+          // R4 X4-5 — where focus goes when "Mark all read" takes its own bar away.
+          tabIndex={-1}
+          aria-label={COPY.listLabel}
+          data-inbox-list=""
+          className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none"
+        >
+          {feed.items.map((n) => <InboxRow key={n.id} notice={n} now={now} feed={feed} pick={pick} />)}
+        </ol>
+        {feed.more.error ? (
+          <Alert tone="danger">{isCursorExpired(feed.more.error) ? COPY.cursorExpired : COPY.showMoreFailed}</Alert>
+        ) : null}
+        {feed.cursor ? (
+          <div className="flex justify-center">
+            <Button variant="outline" pending={feed.more.pending} onClick={() => void feed.more.run()}>{COPY.showMore}</Button>
+          </div>
+        ) : null}
+      </StateBlock>
+    </>
   );
 }
 

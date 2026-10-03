@@ -14,6 +14,7 @@ import type { ShareBookings } from "../components/wallet/useShareBookings";
 import { useWalletLedger } from "../components/wallet/useWalletLedger";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
+import { StillTrying } from "../lib/offline/StillTrying";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { walletTone } from "../lib/balance";
 import { BUY_MINUTES_PATH } from "../lib/minutes";
@@ -178,6 +179,8 @@ export default function WalletPage() {
       <StaleNotice stale={stale} readAt={readAt} offline={offline} />
       {/* A failed read is never "no movements yet" — that tells a member their history is gone.
           R8 X8-2 — and with no signal and nothing kept it is said as offline, not as red failure. */}
+      {/* R9 X9-6 — a first read that has not answered says, after a few seconds, it is still trying. */}
+      {!loaded && error === null ? <StillTrying /> : null}
       {!loaded && error !== null && offline ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.wallet} /> : (
         <StateBlock
           loading={!loaded}

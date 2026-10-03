@@ -42,6 +42,12 @@ export const OFFLINE_COPY = {
     /** R8 X8-2 — the Wallet on a cold start with no signal. */
     wallet: "Your wallet hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
   },
+  /**
+   * R9 X9-6 — a first read with nothing kept that has not answered after a few seconds (a stalled
+   * connection: accepted, never answered). Said like the session splash's second line, beside the
+   * skeleton, until the read lands or fails into the offline notice.
+   */
+  stillTrying: "Still trying — the connection is slow. This page fills in as soon as the club answers.",
   /** R6 X6-4 — `/wallet/buy` offline: nothing to show from the phone, and nothing to buy without the club. */
   buyNeedsConnection: "Buying minutes needs a connection: the packages and their prices come from the club, and you pay at PayFast. Nothing was sent. This page loads by itself once you're back online.",
 } as const;
