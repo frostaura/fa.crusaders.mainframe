@@ -111,12 +111,13 @@ function Band({ subline }: { subline: string }) {
         Wholly inside the band, never bled off the edge (bleeding it clipped away the short line
         and the service boxes, the only marks that make a rectangle read as a court). A fixed
         height rather than a percentage of the band, so a subline that wraps cannot grow the
-        motif out of its column. Hidden on phones, where the club's name wants the width.
+        motif out of its column. Drawn only when the band itself has the room (R9: by its own rem
+        box, not the viewport) — hidden on phones, at large text and beside the brand panel.
       */}
-      <CourtPlan className="pointer-events-none absolute right-6 top-1/2 hidden h-16 w-auto -translate-y-1/2 opacity-60 sm:block lg:hidden" />
+      <CourtPlan className="pointer-events-none absolute right-6 top-1/2 hidden h-16 w-auto -translate-y-1/2 opacity-60 @[30rem]/band:block" />
       {/* R4 (V4-1): the name wraps under the crest when there is no room beside it (200 % text on
           a phone), rather than being cut by the band's edge. */}
-      <div className="relative flex flex-wrap items-center gap-3 sm:pr-32 lg:pr-0">
+      <div className="relative flex flex-wrap items-center gap-3 @[30rem]/band:pr-32">
         {/* The crest's own navy vanishes into the band, leaving its white keyline and red
             cross — the mark as it would be embroidered on a navy shirt. */}
         <CrestMark />
@@ -137,28 +138,48 @@ function Band({ subline }: { subline: string }) {
 const CARD_GUTTER = { paddingInline: "min(var(--auth-gutter), var(--auth-gutter-px))" } as const;
 
 /**
- * One column (the card, 36rem) below `lg`; from `lg` the brand panel beside the card, the pair at
- * the `wide` frame, stretched to the same height. The gutters are the page shell's own — R8 L8-8:
- * capped at their normal-text pixels, so 200 % text on a 320 phone gives the card the width.
+ * One column (the card, 36rem) until the SHELL is 56rem wide; from there the brand panel beside
+ * the card, the pair at the `wide` frame, stretched to the same height. The gutters are the page
+ * shell's own — R8 L8-8: capped at their normal-text pixels, so 200 % text on a 320 phone gives
+ * the card the width.
+ *
+ * R9 L9-1 — the split is the shell's OWN rem measure (`@container/authshell`), never `lg:`. At
+ * 1024 or 1280 with 200 % text the viewport said "split" while a 28rem card (896px) and its 3rem
+ * gap left the panel nothing: it ran under the card and broke "Crus / Squ / Club". In rem, large
+ * text simply falls back to the one column; normal text at 1024 (60rem) still splits.
  */
-const SPLIT = [
-  "mx-auto grid w-full max-w-narrow grid-cols-1 gap-8 pb-10 pt-6 lg:max-w-wide lg:items-stretch lg:gap-12 lg:py-10",
+const SHELL = [
+  "@container/authshell w-full",
   "[--split-gutter-px:16px] [--split-gutter:1rem] sm:[--split-gutter-px:24px] sm:[--split-gutter:1.5rem]",
   "lg:[--split-gutter-px:32px] lg:[--split-gutter:2rem] 3xl:[--split-gutter-px:48px] 3xl:[--split-gutter:3rem]",
 ].join(" ");
+const SPLIT =
+  "mx-auto grid w-full max-w-narrow grid-cols-1 gap-8 pb-10 pt-6 @[56rem]/authshell:max-w-wide @[56rem]/authshell:items-stretch @[56rem]/authshell:gap-12 @[56rem]/authshell:py-10";
 const SPLIT_GUTTER = { paddingInline: "min(var(--split-gutter), var(--split-gutter-px))" } as const;
-const SPLIT_FORM = "lg:grid-cols-[minmax(0,1fr)_28rem]";
-const SPLIT_WIDE = "lg:grid-cols-[minmax(0,1fr)_28rem] xl:grid-cols-[minmax(0,1fr)_40rem]";
+const SPLIT_FORM = "@[56rem]/authshell:grid-cols-[minmax(0,1fr)_28rem]";
+const SPLIT_WIDE = "@[56rem]/authshell:grid-cols-[minmax(0,1fr)_28rem] @[72rem]/authshell:grid-cols-[minmax(0,1fr)_40rem]";
 
 // Props destructured in the body: lizard counts each destructured name as a parameter (limit 6).
 export function AuthShell(props: AuthShellProps) {
   const { subline, title, lead, mark, footer, size = "form", children, className } = props;
   return (
     // `data-full-bleed`: the headerless frame stands down and this owns its width and gutters —
-    // the card's 36rem on a phone, the split screen at 80rem from `lg`.
-    <div data-full-bleed="" data-auth-shell="" className={cn(SPLIT, size === "wide" ? SPLIT_WIDE : SPLIT_FORM, className)} style={SPLIT_GUTTER}>
+    // the card's 36rem on a phone, the split screen at 80rem once the shell is 56rem wide.
+    <div data-full-bleed="" className={SHELL} style={SPLIT_GUTTER}>
+      <div data-auth-shell="" className={cn(SPLIT, size === "wide" ? SPLIT_WIDE : SPLIT_FORM, className)}>
+        <AuthColumns subline={subline} title={title} lead={lead} mark={mark} footer={footer}>{children}</AuthColumns>
+      </div>
+    </div>
+  );
+}
+
+/** The panel and the card's column — the shell's grid items. */
+function AuthColumns(props: Omit<AuthShellProps, "size" | "className">) {
+  const { subline, title, lead, mark, footer, children } = props;
+  return (
+    <>
       <BrandPanel />
-      <div className="flex min-w-0 flex-col gap-5 lg:self-center">
+      <div className="flex min-w-0 flex-col gap-5 @[56rem]/authshell:self-center">
         <div className="overflow-hidden rounded-2xl border border-border bg-bg-surface shadow-md">
           <Band subline={subline} />
           {/*
@@ -183,23 +204,23 @@ export function AuthShell(props: AuthShellProps) {
         </div>
         {footer ? <div className="text-center text-sm text-text-secondary">{footer}</div> : null}
       </div>
-    </div>
+    </>
   );
 }
 
 /**
- * The club beside the card (R4 form factor, SPEC 3.17): from `lg` a sign-in screen is a split
- * screen — the brand on the left, the form on the right — instead of one 512px card floating in
- * a 1920 canvas. Decoration and three sourced facts; nothing here is needed to sign in, so it is
- * not drawn at all below `lg` (the card keeps its own band with the club's name), and the
- * crest and court are aria-hidden.
+ * The club beside the card (R4 form factor, SPEC 3.17): once the shell is 56rem wide a sign-in
+ * screen is a split screen — the brand on the left, the form on the right — instead of one 512px
+ * card floating in a 1920 canvas. Decoration and three sourced facts; nothing here is needed to
+ * sign in, so it is not drawn at all in the one-column layout (the card keeps its own band with
+ * the club's name), and the crest and court are aria-hidden.
  */
 function BrandPanel() {
   return (
     <section
       aria-label={AUTH_BRAND.club}
       data-auth-brand=""
-      className="relative hidden min-h-96 flex-col justify-between gap-10 overflow-hidden rounded-2xl bg-brand-strong p-10 text-brand-ink shadow-md lg:flex xl:p-12"
+      className="relative hidden min-h-96 flex-col justify-between gap-10 overflow-hidden rounded-2xl bg-brand-strong p-10 text-brand-ink shadow-md @[56rem]/authshell:flex @[72rem]/authshell:p-12"
     >
       <div className="relative flex flex-col gap-4">
         <CrestMark className="h-20 w-auto self-start" />

@@ -56,15 +56,25 @@ describe("AuthShell", () => {
     expect(screen.getByText("Apply for a member account. It takes a minute.")).toBeInTheDocument();
   });
 
-  /** R4 form factor (SPEC 3.17): from lg the club stands beside the card, as a named section. */
-  it("draws the brand panel beside the card from lg, never below it", () => {
+  /**
+   * R4 form factor (SPEC 3.17): on a wide shell the club stands beside the card, as a named
+   * section. R9 L9-1: "wide" is the shell's own rem box, never a viewport `lg:` — at 1024/1280 with
+   * 200 % text the viewport split the screen and the panel ran under the card.
+   */
+  it("draws the brand panel beside the card when the SHELL is 56rem wide, never by the viewport", () => {
     const { container } = render(<AuthShell subline="Court bookings."><p>form</p></AuthShell>);
     const brand = screen.getByRole("region", { name: AUTH_BRAND.club });
-    expect(brand.className.split(" ")).toEqual(expect.arrayContaining(["hidden", "lg:flex"]));
+    expect(brand.className.split(" ")).toEqual(expect.arrayContaining(["hidden", "@[56rem]/authshell:flex"]));
     for (const fact of AUTH_BRAND.facts) expect(within(brand).getByText(fact)).toBeInTheDocument();
     const shell = container.querySelector("[data-auth-shell]")!;
-    expect(shell).toHaveAttribute("data-full-bleed");
-    expect(shell.className).toContain("lg:grid-cols-[minmax(0,1fr)_28rem]");
+    const frame = shell.parentElement!;
+    expect(frame).toHaveAttribute("data-full-bleed");
+    expect(frame.className).toContain("@container/authshell");
+    expect(shell.className).toContain("@[56rem]/authshell:grid-cols-[minmax(0,1fr)_28rem]");
+    // No viewport breakpoint decides the layout anywhere in the frame.
+    for (const el of [frame, ...Array.from(frame.querySelectorAll("*"))]) {
+      expect(String(el.getAttribute("class") ?? ""), el.tagName).not.toMatch(/(^|\s)(lg|xl):(grid-cols|flex|hidden|block|self-center|max-w|pr-)/);
+    }
   });
 
   /**
