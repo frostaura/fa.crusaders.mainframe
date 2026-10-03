@@ -141,7 +141,7 @@ public sealed class LedgerService
         // penalty animate the badge once, by their net.
         foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group));
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountMinutes), ReasonFor(group), ct, MoneyIn(group), PartsOf(group));
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
@@ -174,7 +174,8 @@ public sealed class LedgerService
     /// <summary>The balance frame's reason when only what is set aside moved (see <see cref="PublishSetAsideAsync"/>).</summary>
     public const string SetAsideReason = "share_set_aside";
 
-    private Task PublishBalanceAsync(Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false)
+    private Task PublishBalanceAsync(
+        Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<BalancePart>? parts = null)
     {
         var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);
         var topic = RealtimeTopic.Wallet(tenantId, userId);
@@ -203,6 +204,8 @@ public sealed class LedgerService
                 held_until = held.ReleasesAt,
                 // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
                 held_parts = held.WireParts(),
+                // E10-1: the rows behind delta_minutes, each {reason (by type), delta_minutes}; [] when only what is set aside moved.
+                parts = (parts ?? []).Select(p => new { reason = p.Reason, delta_minutes = p.DeltaMinutes }).ToList(),
             })));
 
             // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
@@ -227,9 +230,17 @@ public sealed class LedgerService
     /// </summary>
     internal static string ReasonFor(IEnumerable<LedgerPosting> postings)
     {
-        var kinds = postings.Select(p => ReasonFor(p.Type)).Distinct().ToList();
+        // E10-1: a unit of work that names its own stream reason says it; otherwise by type.
+        var kinds = postings.Select(p => p.StreamReason ?? ReasonFor(p.Type)).Distinct().ToList();
         return kinds.Count == 1 ? kinds[0] : "mixed";
     }
+
+    /// <summary>
+    /// E10-1: each row of the movement for the frame's <c>parts</c> — its type reason and its
+    /// signed minutes — so a refund-and-penalty pair can be said as both, not as their net.
+    /// </summary>
+    internal static IReadOnlyList<BalancePart> PartsOf(IEnumerable<LedgerPosting> postings) =>
+        [.. postings.Select(p => new BalancePart(ReasonFor(p.Type), p.AmountMinutes))];
 
     // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
     // object initialiser as the END of the function and dumps the rest of the file into a
@@ -404,7 +415,7 @@ public sealed class LedgerService
         await _db.SaveChangesAsync(ct);
 
         // Queued for after the commit, not published here — D2-B07 and RealtimeOutbox.
-        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor(posting.Type), ct, MoneyIn([posting]));
+        await PublishBalanceAsync(posting.UserId, posting.AmountMinutes, ReasonFor([posting]), ct, MoneyIn([posting]), PartsOf([posting]));
         await MirrorAsync(entry, ct);
 
         return entry;
@@ -419,4 +430,50 @@ public sealed record LedgerPosting(
     Guid? RelatedBookingId = null,
     string? Reason = null,
     string? ExternalReference = null,
-    decimal? ZarPaid = null);           // the rand that moved, on TopUp / AdminTopUp / PaymentReversal rows
+    decimal? ZarPaid = null)            // the rand that moved, on TopUp / AdminTopUp / PaymentReversal rows
+{
+    /// <summary>
+    /// Review round 10, E10-1: the live wallet frame's <c>reason</c> when the ledger type alone
+    /// would misstate WHY the minutes moved — an outage refund, its reversal, a pay-for refund and
+    /// a displacement are all <see cref="LedgerEntryType.CancellationRefund"/> rows, and a no-show
+    /// settlement is a refund and a penalty that read as <c>mixed</c>. One of
+    /// <see cref="WalletStreamReasons"/>; null keeps the type's own reason. Never stored.
+    /// </summary>
+    public string? StreamReason { get; init; }
+}
+
+/// <summary>
+/// The precise reasons the live wallet frame carries beside the per-type ones
+/// (<see cref="LedgerService.ReasonFor(LedgerEntryType)"/>), so the phone can word a movement
+/// truthfully (review round 10, E10-1). A real cancellation keeps <c>cancellation_refund</c> /
+/// <c>mixed</c>; the frame's <c>parts</c> carry each row's own type reason and minutes.
+/// </summary>
+public static class WalletStreamReasons
+{
+    /// <summary>The sweep refunded a booking in full because its court's box was offline. Positive.</summary>
+    public const string OutageRefund = "outage_refund";
+
+    /// <summary>An outage refund taken back: the box's queued check-in arrived. Negative.</summary>
+    public const string OutageRefundReversed = "outage_refund_reversed";
+
+    /// <summary>The sweep settled a no-show: refund and penalty (parts), net delta.</summary>
+    public const string NoShowSettled = "no_show_settled";
+
+    /// <summary>A no-show settlement undone by a late check-in: refund taken back, penalty returned (parts).</summary>
+    public const string NoShowReversed = "no_show_reversed";
+
+    /// <summary>Somebody else paid for this member's booking at the court: their charge came back. Positive.</summary>
+    public const string PayForRefund = "pay_for_refund";
+
+    /// <summary>This member paid for somebody else's booking at the court. Negative.</summary>
+    public const string PayForCharge = "pay_for_charge";
+
+    /// <summary>The booking was displaced by an earlier one whose attendance arrived late: refunded in full (or its penalty returned). Positive.</summary>
+    public const string DisplacedRefund = "displaced_refund";
+
+    /// <summary>A displaced booking reinstated: its refund taken back. Negative.</summary>
+    public const string DisplacedReinstated = "displaced_reinstated";
+}
+
+/// <summary>One ledger row of a live wallet movement: its type reason and its signed minutes (E10-1).</summary>
+public sealed record BalancePart(string Reason, int DeltaMinutes);

@@ -226,7 +226,8 @@ public sealed class NoShowWorker : BackgroundService
         {
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountMinutes: b.AmountChargedMinutes,
-                ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: RefundReason(courtWasDark, court)));
+                ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: RefundReason(courtWasDark, court))
+            { StreamReason = SweepStreamReason(courtWasDark) });
         }
 
         // A penalty is only collectable against money that moved. Charging one for a
@@ -237,7 +238,8 @@ public sealed class NoShowWorker : BackgroundService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountMinutes: -penalty,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
-                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Min(b.AmountChargedMinutes)})"));
+                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Min(b.AmountChargedMinutes)})")
+            { StreamReason = SweepStreamReason(courtWasDark) });
         }
 
         // Status FIRST, then one save carrying it and both movements together.
@@ -362,6 +364,10 @@ public sealed class NoShowWorker : BackgroundService
     /// it", and the wallet, the club's ledger and the <c>minutes.refunded</c> webhook all read
     /// this one string — "No-show — booking refunded" said the opposite on every one of them.
     /// </summary>
+    /// <summary>E10-1: the live wallet frame's reason for the sweep's movement — an outage refund, or a no-show settled.</summary>
+    internal static string SweepStreamReason(bool courtWasDark) =>
+        courtWasDark ? WalletStreamReasons.OutageRefund : WalletStreamReasons.NoShowSettled;
+
     internal static string RefundReason(bool courtWasDark, Court? court)
     {
         if (!courtWasDark) return "No-show — booking refunded";

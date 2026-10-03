@@ -4,6 +4,7 @@ using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Crusaders.Mainframe.Api.Services.Realtime;
 using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -24,7 +25,22 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
 {
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private sealed record Rig(PlayersClub Club, WebApplicationFactory<Program> App, CapturingMail Mail, Guid BookingId, DateTimeOffset Start);
+    private sealed record Rig(PlayersClub Club, WebApplicationFactory<Program> App, CapturingMail Mail, Guid BookingId, DateTimeOffset Start)
+    {
+        /// <summary>The organiser's live wallet, subscribed before the sweep (R10 E10-1).</summary>
+        public System.Threading.Channels.Channel<RealtimeMessage>? Wallet { get; init; }
+
+        /// <summary>The named <c>balance</c> frames the organiser's wallet has received since the last call.</summary>
+        public List<JsonElement> BalanceFrames()
+        {
+            var frames = new List<JsonElement>();
+            while (Wallet!.Reader.TryRead(out var frame))
+            {
+                if (frame.Event == "balance") frames.Add(JsonDocument.Parse(frame.JsonPayload).RootElement.Clone());
+            }
+            return frames;
+        }
+    }
 
     /// <summary>
     /// Olive's 32-minute court, started ten minutes ago, split with Sam (16 each); when
@@ -58,12 +74,13 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         (await club.Client(app, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept",
             new { expectedShareMinutes = shown })).EnsureSuccessStatusCode();
 
+        var wallet = app.Services.GetRequiredService<IRealtimeBus>().Subscribe(RealtimeTopic.Wallet(club.TenantId, club.Organiser));
         await new NoShowWorker(app.Services, app.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance)
             .TickAsync(DateTimeOffset.UtcNow, default);
         var swept = await PlayersClub.ReadAsync(app, db => db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == bookingId));
         Assert.Equal(BookingStatus.NoShow, swept.Status);
         Assert.Equal(dark, swept.OutageRefundedAt is not null);
-        return new Rig(club, app, mail, bookingId, start);
+        return new Rig(club, app, mail, bookingId, start) { Wallet = wallet };
     }
 
     /// <summary>The box's queued scan arrives: Olive checked in two minutes into the slot.</summary>
@@ -109,7 +126,8 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         // Wallet / ledger: the reversal names the outage refund, never a no-show.
         var reversal = Assert.Single(await ReversalRowsAsync(r));
         Assert.DoesNotContain("no-show", reversal.Reason, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("Outage refund reversed — you were checked in after all", reversal.Reason);
+        // R10 E10-6: the stored line is the club's (the admin ledger shows it); the wallet says "you".
+        Assert.Equal("Outage refund reversed — the member was checked in after all", reversal.Reason);
 
         // The organiser's mail: its own words, no no-show, no zero-minute penalty line.
         var olive = Assert.Single(r.Mail.Sent, m => m.Subject.Contains("Court 1", StringComparison.Ordinal) && m.Subject.Contains("refund", StringComparison.OrdinalIgnoreCase));
@@ -164,5 +182,53 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         Assert.Equal("Share taken again — Court 2", sam.Subject);
         Assert.Contains("the session was attended", sam.PlainBody, StringComparison.Ordinal);
         Assert.Contains("16 minutes was taken from your balance again", sam.PlainBody, StringComparison.Ordinal);
+    }
+    /// <summary>
+    /// Review round 10, E10-1: the live wallet frame for an outage refund and its reversal said
+    /// <c>cancellation_refund</c> both ways ("A cancelled booking put 32 minutes back", even for the
+    /// −32). They now say <c>outage_refund</c> and <c>outage_refund_reversed</c>, with the rows in <c>parts</c>.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_live_wallet_says_outage_refund_and_its_reversal_not_a_cancellation()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await SweptAsync("r10outstream", dark: true);
+        await using var owned = r.App;
+
+        // The share then returned to Sam is its own frame (share_transfer) and is not this one.
+        var refund = Assert.Single(r.BalanceFrames(), f => f.GetProperty("reason").GetString() != "share_transfer");
+        Assert.Equal(WalletStreamReasons.OutageRefund, refund.GetProperty("reason").GetString());
+        Assert.Equal(32, refund.GetProperty("delta_minutes").GetInt32());
+        Assert.Equal(32, Assert.Single(refund.GetProperty("parts").EnumerateArray()).GetProperty("delta_minutes").GetInt32());
+
+        await ReverseAsync(r);
+        var reversed = Assert.Single(r.BalanceFrames(), f => f.GetProperty("reason").GetString() == WalletStreamReasons.OutageRefundReversed);
+        Assert.Equal(-32, reversed.GetProperty("delta_minutes").GetInt32());
+    }
+
+    /// <summary>
+    /// E10-1, the genuine no-show: the sweep's refund-and-penalty pair was <c>mixed</c>, which the
+    /// phone said as "The club added N minutes", hiding the penalty. It is <c>no_show_settled</c>
+    /// with both rows in <c>parts</c>; the late check-in's undo is <c>no_show_reversed</c>.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_live_wallet_says_a_no_show_was_settled_with_its_refund_and_penalty()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await SweptAsync("r10nsstream", dark: false);
+        await using var owned = r.App;
+
+        var settled = Assert.Single(r.BalanceFrames(), f => f.GetProperty("reason").GetString() != "share_transfer");
+        Assert.Equal(WalletStreamReasons.NoShowSettled, settled.GetProperty("reason").GetString());
+        var parts = settled.GetProperty("parts").EnumerateArray().ToList();
+        Assert.Equal(2, parts.Count);
+        Assert.Equal("cancellation_refund", parts[0].GetProperty("reason").GetString());
+        Assert.Equal(32, parts[0].GetProperty("delta_minutes").GetInt32());
+        Assert.Equal("penalty", parts[1].GetProperty("reason").GetString());
+        Assert.True(parts[1].GetProperty("delta_minutes").GetInt32() < 0);
+        Assert.Equal(parts.Sum(p => p.GetProperty("delta_minutes").GetInt32()), settled.GetProperty("delta_minutes").GetInt32());
+
+        await ReverseAsync(r);
+        Assert.Contains(r.BalanceFrames(), f => f.GetProperty("reason").GetString() == WalletStreamReasons.NoShowReversed);
     }
 }

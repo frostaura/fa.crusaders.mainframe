@@ -1718,7 +1718,8 @@ public sealed class BookingService
                 ActorUserId: actorUserId,
                 RelatedBookingId: booking.Id,
                 Reason: RefundReversalReason(booking, takenBack > 0),
-                ExternalReference: NoShowReversalReference(booking.Id, "refund")));
+                ExternalReference: NoShowReversalReference(booking.Id, "refund"))
+            { StreamReason = ReversalStreamReason(booking) });
         }
         if (penaltyBack > 0)
         {
@@ -1731,15 +1732,22 @@ public sealed class BookingService
                 Reason: givenBack > 0
                     ? "No-show penalty reversed — attendance recorded after the sweep, net of the desk's own adjustment"
                     : "No-show penalty reversed — attendance recorded after the sweep",
-                ExternalReference: NoShowReversalReference(booking.Id, "penalty")));
+                ExternalReference: NoShowReversalReference(booking.Id, "penalty"))
+            { StreamReason = ReversalStreamReason(booking) });
         }
         return new SettledLegs(
             refunded, penalised, refundBack, penaltyBack,
             compensation.Select(c => c.Id).ToList(), givenBack - takenBack, postings);
     }
 
+    /// <summary>E10-1: the live wallet frame's reason for a reversal — of an outage refund, or of a no-show.</summary>
+    private static string ReversalStreamReason(Booking booking) => booking.OutageRefundedAt is not null
+        ? WalletStreamReasons.OutageRefundReversed
+        : WalletStreamReasons.NoShowReversed;
+
     /// <summary>
-    /// The refund leg's wallet line. A sweep that refunded in full because the court's box was
+    /// The refund leg's ledger line. Review round 10, E10-6: in the CLUB's voice ("the member"),
+    /// because the admin ledger shows it as stored; the member's wallet words it to them. A sweep that refunded in full because the court's box was
     /// offline (<see cref="Booking.OutageRefundedAt"/>) never called the booking a no-show, so
     /// its reversal does not either (review round 9, E9-2): "No-show refund reversed" told a
     /// member who was never marked absent that they had been.
@@ -1747,7 +1755,7 @@ public sealed class BookingService
     private static string RefundReversalReason(Booking booking, bool netOfDesk)
     {
         var line = booking.OutageRefundedAt is not null
-            ? "Outage refund reversed — you were checked in after all"
+            ? "Outage refund reversed — the member was checked in after all"
             : "No-show refund reversed — attendance recorded after the sweep";
         return netOfDesk ? line + ", net of the desk's own adjustment" : line;
     }
@@ -1991,7 +1999,8 @@ public sealed class BookingService
                 ActorUserId: actorUserId,
                 RelatedBookingId: other.Id,
                 Reason: $"{ResoldTailRefunded} — no-show penalty returned: the court was already in use by an earlier booking whose attendance arrived late",
-                ExternalReference: reference);
+                ExternalReference: reference)
+            { StreamReason = WalletStreamReasons.DisplacedRefund };
         }
 
         return new LedgerPosting(
@@ -2001,7 +2010,8 @@ public sealed class BookingService
             ActorUserId: actorUserId,
             RelatedBookingId: other.Id,
             Reason: $"{ResoldTailRefunded} — refunded in full: the court was already in use by an earlier booking whose attendance arrived late",
-            ExternalReference: reference);
+            ExternalReference: reference)
+        { StreamReason = WalletStreamReasons.DisplacedRefund };
     }
 
     private async Task NotifyDisplacedAsync(Booking other, Booking reversed, CancellationToken ct)
@@ -2403,8 +2413,9 @@ public sealed class BookingService
                 AmountMinutes: -refund.AmountMinutes,
                 ActorUserId: actorUserId,
                 RelatedBookingId: other.Id,
-                Reason: "Booking reinstated — the earlier court went dark before your slot",
-                ExternalReference: reference + ":reinstated")];
+                Reason: "Booking reinstated — the earlier court went dark before this slot",
+                ExternalReference: reference + ":reinstated")
+            { StreamReason = WalletStreamReasons.DisplacedReinstated }];
 
         try
         {
@@ -2609,14 +2620,16 @@ public sealed class BookingService
                         AmountMinutes: booking.AmountChargedMinutes,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
-                        Reason: $"Payer changed at court — refunded, {court.Name} · {slotLabel}"),
+                        Reason: $"Payer changed at court — refunded, {court.Name} · {slotLabel}")
+                    { StreamReason = WalletStreamReasons.PayForRefund },
                     new LedgerPosting(
                         UserId: reassignTo.Value,
                         Type: LedgerEntryType.BookingCharge,
                         AmountMinutes: -booking.AmountChargedMinutes,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
-                        Reason: $"Paid at court on behalf of another member — {court.Name} · {slotLabel}"),
+                        Reason: $"Paid at court on behalf of another member — {court.Name} · {slotLabel}")
+                    { StreamReason = WalletStreamReasons.PayForCharge },
                 ], ct);
             }
             catch (DbUpdateConcurrencyException)
