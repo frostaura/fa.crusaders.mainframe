@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Bell } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateBlock } from "@/components/ui/state-block";
+import { OfflineNothingKept } from "@/lib/offline/OfflineNothingKept";
+import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { ApiError } from "@/lib/api";
 import { INBOX_COPY as COPY } from "@/lib/playersCopy";
 import type { MemberNotification } from "@/lib/playersApi";
@@ -30,6 +32,8 @@ export type InboxPick = { id: string | null; onPick: (notice: MemberNotification
 export function InboxList({ feed, listRef, pick }: { feed: InboxFeed; listRef?: Ref<HTMLOListElement>; pick?: InboxPick }) {
   // The "Today, 18:05" face turns into a date at midnight; a minute is fine enough.
   const now = useTicker(true, 60_000);
+  // R6 X6-4 — offline with no list kept on this phone: said as offline, not as a failure.
+  if (feed.error !== null && feed.offline) return <OfflineNothingKept line={OFFLINE_COPY.nothingKept.inbox} />;
   return (
     <StateBlock
       loading={feed.loading}

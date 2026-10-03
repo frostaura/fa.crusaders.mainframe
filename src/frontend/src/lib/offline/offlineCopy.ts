@@ -26,4 +26,14 @@ export const OFFLINE_COPY = {
   gridStale: "Booking needs a connection. This is the grid as it was — a slot shown free may have gone since.",
   /** A Book press on a remembered grid. */
   bookNeedsConnection: "Booking needs a connection — this grid is from earlier and may have changed. Try again once you have signal.",
+  /**
+   * R6 X6-4 — offline, and this page was never drawn on this phone, so nothing is kept to show.
+   * After {@link OFFLINE_COPY.staleTitle}: what is missing, and that it loads by itself.
+   */
+  nothingKept: {
+    inbox: "Your notifications haven't been opened on this phone yet, so there's nothing kept to show. They load by themselves once you're back online.",
+    activity: "This period hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online — or pick a period you've looked at before.",
+  },
+  /** R6 X6-4 — `/wallet/buy` offline: nothing to show from the phone, and nothing to buy without the club. */
+  buyNeedsConnection: "Buying minutes needs a connection: the packages and their prices come from the club, and you pay at PayFast. Nothing was sent. This page loads by itself once you're back online.",
 } as const;

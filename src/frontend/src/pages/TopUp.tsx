@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { endpoints, type MinutesShelf, type PayFastFormField, type ShelfPackage } from "../lib/api";
+import { endpoints, phoneIsOffline, type MinutesShelf, type PayFastFormField, type ShelfPackage } from "../lib/api";
+import { isConnectionFailure } from "../lib/offline/useCachedRead";
+import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
+import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { useBalance, walletTone } from "../lib/balance";
 import { BALANCE_SENTENCE } from "../lib/walletCopy";
 import { formatMoney } from "../lib/utils";
@@ -62,26 +65,31 @@ export default function BuyMinutesPage() {
       <PageHeader back={{ to: returnTo ?? "/wallet", label: returnTo ? BUY_COPY.back : "Wallet" }} title={BUY_COPY.title} description={BUY_COPY.description} />
       {/* Why they are here, when the answer is "you cannot book anything": a standing condition. */}
       {emptyWallet && <Alert tone="danger" live="polite">{BALANCE_SENTENCE.zero}</Alert>}
-      <StateBlock
-        loading={shelf === null && !loadError}
-        error={shelf === null ? loadError : null}
-        action={BUY_COPY.readAction}
-        onRetry={reload}
-        empty={shelf !== null && shelf.packages.length === 0}
-        emptyIcon={Coins}
-        emptyTitle={BUY_COPY.emptyTitle}
-        emptyHint={BUY_COPY.emptyHint}
-        emptyAction={<Button asChild variant="outline"><Link to="/wallet">Wallet</Link></Button>}
-        skeleton={<ShelfSkeleton />}
-      >
-        {shelf ? (
-          <WithAside placement="after" at="56rem" asideLabel={BUY_COPY.summaryLabel} aside={wide ? summary : null}>
-            <ShelfCards shelf={shelf} selected={selected} onSelect={choose} />
-            {/* M5-2 — payments started at PayFast and not finished, each with its own Cancel. */}
-            <OpenCheckouts open={shelf.open_checkouts} onChanged={reload} />
-          </WithAside>
-        ) : null}
-      </StateBlock>
+      {/* R6 X6-4 — offline there is nothing to show and nothing to buy: said, under the page's own heading. */}
+      {shelf === null && loadError !== null && (isConnectionFailure(loadError) || phoneIsOffline()) ? (
+        <OfflineNothingKept line={OFFLINE_COPY.buyNeedsConnection} />
+      ) : (
+        <StateBlock
+          loading={shelf === null && !loadError}
+          error={shelf === null ? loadError : null}
+          action={BUY_COPY.readAction}
+          onRetry={reload}
+          empty={shelf !== null && shelf.packages.length === 0}
+          emptyIcon={Coins}
+          emptyTitle={BUY_COPY.emptyTitle}
+          emptyHint={BUY_COPY.emptyHint}
+          emptyAction={<Button asChild variant="outline"><Link to="/wallet">Wallet</Link></Button>}
+          skeleton={<ShelfSkeleton />}
+        >
+          {shelf ? (
+            <WithAside placement="after" at="56rem" asideLabel={BUY_COPY.summaryLabel} aside={wide ? summary : null}>
+              <ShelfCards shelf={shelf} selected={selected} onSelect={choose} />
+              {/* M5-2 — payments started at PayFast and not finished, each with its own Cancel. */}
+              <OpenCheckouts open={shelf.open_checkouts} onChanged={reload} />
+            </WithAside>
+          ) : null}
+        </StateBlock>
+      )}
       {shelf && shelf.packages.length > 0 && !wide ? (
         <ContextBar position="bottom" until="lg" label={BUY_COPY.summaryLabel}>
           <div className="flex w-full flex-col gap-2">{summaryDocked(pkg, buy, notice)}</div>
@@ -117,9 +125,14 @@ function useShelf() {
   useEffect(() => { reload(); }, [reload]);
   // A tab left open across a price edit quotes a price the club will not honour; re-reading on
   // focus narrows the window, and `package_price_changed` at Continue closes it.
+  // R6 X6-4 — and when the phone finds a network again: an offline visit loads by itself.
   useEffect(() => {
     window.addEventListener("focus", reload);
-    return () => window.removeEventListener("focus", reload);
+    window.addEventListener("online", reload);
+    return () => {
+      window.removeEventListener("focus", reload);
+      window.removeEventListener("online", reload);
+    };
   }, [reload]);
   return { shelf, setShelf, loadError, reload };
 }

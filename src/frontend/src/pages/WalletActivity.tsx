@@ -3,6 +3,8 @@ import { endpoints, type DailyMePoint, type WalletReport } from "../lib/api";
 import { memberReads, type WalletActivity } from "../lib/offline/memberReads";
 import { useKeptReport } from "../lib/offline/useKeptReport";
 import { StaleNotice } from "../components/shell/StaleNotice";
+import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
+import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { cn, formatMinutes } from "../lib/utils";
 import { MinutesFigure } from "../components/wallet/MinutesFigure";
 import { useAsyncAction } from "../lib/useAsyncAction";
@@ -105,18 +107,21 @@ export default function WalletActivityPage() {
       </div>
       {/* A refresh that failed keeps the figures it had, and says so — and when — above them. */}
       <StaleNotice stale={report.stale} readAt={report.readAt} offline={report.offline} />
-      <StateBlock
-        loading={report.loading && data === null}
-        error={data === null ? report.error : null}
-        // One prop, two grammars: the failure reads "Couldn't load your activity", the busy status
-        // "Reading your activity…".
-        action="load your activity"
-        onRetry={report.refresh}
-        skeleton={<ReportSkeleton />}
-        className="gap-8"
-      >
-        {data ? <ActivityBody data={data} /> : null}
-      </StateBlock>
+      {/* R6 X6-4 — offline, and this period was never drawn on this phone: said as offline. */}
+      {data === null && report.error !== null && report.offline ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.activity} /> : (
+        <StateBlock
+          loading={report.loading && data === null}
+          error={data === null ? report.error : null}
+          // One prop, two grammars: the failure reads "Couldn't load your activity", the busy status
+          // "Reading your activity…".
+          action="load your activity"
+          onRetry={report.refresh}
+          skeleton={<ReportSkeleton />}
+          className="gap-8"
+        >
+          {data ? <ActivityBody data={data} /> : null}
+        </StateBlock>
+      )}
     </PageShell>
   );
 }

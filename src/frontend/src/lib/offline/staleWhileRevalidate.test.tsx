@@ -193,7 +193,7 @@ describe("with no signal", () => {
     expect(document.querySelectorAll("li[data-unread]").length).toBe(1);
   });
 
-  it("with nothing on the phone it says it cannot reach the club — never an empty inbox", async () => {
+  it("with nothing on the phone it says it is offline and nothing is kept — never an empty inbox (R6 X6-4)", async () => {
     signIn({ isAdmin: false });
     localStorage.setItem(LAST_IDENTITY_KEY, ANA);
     setDataOwner(ANA);
@@ -201,7 +201,7 @@ describe("with no signal", () => {
 
     renderOffline("/inbox");
 
-    expect(await screen.findByText(/couldn't be reached/i)).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.nothingKept.inbox, { exact: false })).toBeInTheDocument();
     expect(screen.queryByText(INBOX_COPY.empty)).toBeNull();
   });
 });
