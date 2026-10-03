@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Racquet } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Minutes } from "@/components/Minutes";
+import { KeptMinutes } from "@/components/members/KeptMinutes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -68,7 +68,7 @@ function SlotPrice({ line }: { line: SlotLine }) {
   if (line.price === null) return null;
   return (
     <span className={cn("text-sm font-semibold tabular-nums", line.refusal ? "text-text-muted line-through" : "text-text-primary")}>
-      <Minutes value={line.price} />
+      <KeptMinutes value={line.price} />
     </span>
   );
 }
@@ -94,7 +94,7 @@ function SlotItem({ line, refusedWord }: { line: SlotLine; refusedWord: string }
         </span>
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
           <span>{`${line.day} · ${line.time}`}</span>
-          <Badge tone="neutral"><Minutes value={line.minutes} /></Badge>
+          <Badge tone="neutral"><KeptMinutes value={line.minutes} /></Badge>
         </span>
         {line.detailLoading ? <Skeleton className="mt-1 h-4 w-40 rounded-sm" /> : null}
         {!line.detailLoading && line.detail ? <span className="text-sm text-text-secondary">{line.detail}</span> : null}
@@ -167,7 +167,8 @@ function MoneyValue({ row }: { row: MoneyRow }) {
   if (row.value === null) return <Skeleton className="ml-auto h-4 w-20 rounded-sm" />;
   const shown = row.debit ? -Math.abs(row.value) : row.value;
   // A debit is a debit by its row, not a debt: it keeps the row's ink (the dd's), not the red.
-  return <Minutes value={shown} className={row.debit ? "text-inherit" : undefined} />;
+  // R8 L7-4 — each number bound to its unit: at 200 % text "Balance after" broke "8 h 45 | min".
+  return <KeptMinutes value={shown} className={row.debit ? "text-inherit" : undefined} />;
 }
 
 /** The figures, right-aligned and tabular so they line up down the column. */
@@ -179,12 +180,13 @@ export function MoneyRows({ rows, label }: { rows: readonly MoneyRow[]; label: s
         return (
           <div
             key={row.term}
-            className={cn("flex items-baseline justify-between gap-4", row.total && index > 0 && "border-t border-border pt-2")}
+            // R8 L7-4 — the figure drops under its term, right-aligned, when the two do not fit one line.
+            className={cn("flex flex-wrap items-baseline justify-between gap-x-4", row.total && index > 0 && "border-t border-border pt-2")}
           >
-            <dt className={row.total ? "font-semibold text-text-primary" : "text-text-secondary"}>{row.term}</dt>
+            <dt className={cn("min-w-0 break-words", row.total ? "font-semibold text-text-primary" : "text-text-secondary")}>{row.term}</dt>
             <dd
               className={cn(
-                "text-right tabular-nums",
+                "ml-auto min-w-0 text-right tabular-nums",
                 row.total ? "text-base font-semibold" : "font-medium",
                 negative ? "text-danger-strong" : "text-text-primary",
               )}
