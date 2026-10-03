@@ -745,6 +745,17 @@ describe("memberDoorCopy", () => {
     expect(JSON.stringify(card)).not.toContain("code_used");
   });
 
+  /** R11 D11-2: the member's own history words an offline refusal of their genuine code. */
+  it("R11 words a refused_offline row as refused offline, with a line and a way on", () => {
+    const row = { reason: "refused_offline", released: false, offline: true };
+    expect(historyChip(row)).toEqual({ label: "Refused offline", tone: "warning" });
+    // The server sends these with offline: true, so the line is the offline row's own.
+    expect(historyLine(row)).toMatch(/couldn't reach the club/);
+    const card = describeDecision(row, DECIDED);
+    expect(card.headline).toMatch(/offline/);
+    expect(JSON.stringify(card)).not.toContain("refused_offline");
+  });
+
   it("gives every reason a chip and a tone", () => {
     for (const reason of Object.keys(DOOR_REFUSAL_REASONS)) {
       const chip = historyChip({ reason, released: reason === "ok", offline: false });

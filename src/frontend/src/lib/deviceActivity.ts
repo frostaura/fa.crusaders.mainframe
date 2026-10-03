@@ -72,6 +72,9 @@ export const DOOR_REFUSAL_REASONS: Record<string, string> = {
   /** R10 E10-4: a member code that had already acted (member-code §5, `member_code_uses`) — a
    *  second scan of one code, or a photo of it. The Night's "code already used", in this voice. */
   code_used: "The code had already been used",
+  /** R11 D11-2: an offline door refused a code the server later proved genuine (replayed, too
+   *  early or late, a stale saved list) — the member is named; nothing was opened. */
+  refused_offline: "The door refused the code while it was offline",
 };
 
 /**
@@ -107,6 +110,8 @@ export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
   no_membership: "No membership",
   // R10 E10-4: the member's history, the Night and the server's door words say it this way.
   code_used: "Code already used",
+  // R11 D11-2: the server's DoorWords and the Night say it this way.
+  refused_offline: "Refused offline",
 };
 
 /**

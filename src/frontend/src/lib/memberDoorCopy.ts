@@ -180,6 +180,9 @@ export const MEMBER_DOOR_REASON_LINES: Record<string, string> = {
   // a door; the next one on My Code, half a minute on, works. Never the raw token, never only
   // "Turned away".
   code_used: "Your code had already been used, and a code opens a door once. The next code on My Code works.",
+  // R11 D11-2: the door was offline and could only check your code against what it had kept —
+  // a code it had seen, or one outside its saved window. The club knows it was you.
+  refused_offline: "The door was offline and couldn't accept your code. A fresh code from My Code usually works once it's back.",
 };
 
 // --- club contact ------------------------------------------------------------------
@@ -613,6 +616,17 @@ function armCodeUsed(): Arm {
   };
 }
 
+function armRefusedOffline(): Arm {
+  return {
+    tone: "warning",
+    headline: "The door was offline and turned that code away.",
+    body: "Without the club's network the door can only check a code against what it last saved, so a code it"
+      + " had already seen, or one outside its saved times, is refused. The next code below usually works;"
+      + " if the door stays offline, the club can help.",
+    wants: ["refresh_the_code", "call_the_club"],
+  };
+}
+
 function armBoardFault(): Arm {
   return {
     tone: "danger",
@@ -665,6 +679,7 @@ const ARMS: Record<string, (ctx: DecisionContext) => Arm> = {
   no_membership: armNoMembership,
   not_recognised: armNotRecognised,
   code_used: armCodeUsed,
+  refused_offline: armRefusedOffline,
   method_not_supported: armBoardFault,
   not_a_gate: armBoardFault,
 };
@@ -2103,6 +2118,7 @@ const CHIP_LABELS: Record<string, string> = {
   not_a_gate: "Door misconfigured",
   no_membership: "No membership on file",
   code_used: "Code already used",
+  refused_offline: "Refused offline",
 };
 
 const CHIP_TONES: Record<string, ChipTone> = {
@@ -2114,6 +2130,7 @@ const CHIP_TONES: Record<string, ChipTone> = {
   not_a_gate: "danger",
   no_membership: "danger",
   code_used: "warning",
+  refused_offline: "warning",
 };
 
 /**

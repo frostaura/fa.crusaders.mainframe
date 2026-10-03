@@ -108,7 +108,7 @@ describe("describeActivityReason", () => {
     // `member_not_active` — a different fact, and a different fix.
     expect(Object.keys(DOOR_REFUSAL_REASONS).sort()).toEqual([
       "code_used", "member_not_active", "method_not_supported", "no_booking", "no_membership",
-      "not_a_gate", "not_recognised", "ok", "too_early",
+      "not_a_gate", "not_recognised", "ok", "refused_offline", "too_early",
     ]);
   });
 
@@ -122,6 +122,17 @@ describe("describeActivityReason", () => {
     const row = entry({ action: "gate.denied_code_used", reason: "code_used" });
     expect(describeActivityReason(row)).toBe("The code had already been used");
     expect(DOOR_OUTCOME_CHIPS.code_used).toBe("Code already used");
+  });
+
+  /**
+   * R11 D11-2: an offline door's refusal of a GENUINE code (replayed, too early, a stale list…)
+   * used to arrive as a nameless `not_recognised` — "Code not on the door's saved list". The
+   * server now proves the code at its scan time and names the member with `refused_offline`.
+   */
+  it("says an offline refusal of a genuine code as refused offline, never not recognised", () => {
+    const row = entry({ action: "device.gate_unknown_scan", reason: "refused_offline" });
+    expect(describeActivityReason(row)).toBe("The door refused the code while it was offline");
+    expect(DOOR_OUTCOME_CHIPS.refused_offline).toBe("Refused offline");
   });
 
   /**
