@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { LOW_BALANCE_MINUTES, walletHref, walletLabel, walletTone } from "./balance";
+import { walletHref, walletLabel } from "./balance";
+import { LOW_BALANCE_MINUTES, walletTone } from "./walletTone";
 import { BALANCE_SENTENCE, BALANCE_TONE, TOP_UP_LABEL } from "./walletCopy";
 import { walletNotice } from "./gridExplain";
 

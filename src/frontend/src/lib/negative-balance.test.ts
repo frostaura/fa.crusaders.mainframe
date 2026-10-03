@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { walletLabel, walletTone } from "./balance";
+import { walletLabel } from "./balance";
+import { walletTone } from "./walletTone";
 import { emptyWalletSentence } from "./gridCopy";
 import { walletNotice } from "./gridExplain";
 import { resetClubCurrencySymbol, setClubCurrencySymbol } from "./currency";

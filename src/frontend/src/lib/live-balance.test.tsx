@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "./auth";
-import { BalanceProvider, useBalance, walletHref, walletTone } from "./balance";
+import { BalanceProvider, useBalance, walletHref } from "./balance";
+import { walletTone } from "./walletTone";
 import {
   LIVE_BALANCE_POLICY, TransportRefused, jittered, nextBackoff,
   type BalanceFrame, type BalanceTransport, type LiveBalancePolicy,

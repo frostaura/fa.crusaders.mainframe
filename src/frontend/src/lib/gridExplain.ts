@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { ScheduleDay, ScheduleSlot } from "./api";
 import type { GridReason, ViewerRules } from "./gridRules";
 import type { TimeSlice } from "./scheduleGrid";
-import { walletTone } from "./balance";
+import { walletTone } from "./walletTone";
 import { adminWalletNote } from "./bookingsCopy";
 import { BUY_MINUTES_PATH } from "./minutes";
 import {

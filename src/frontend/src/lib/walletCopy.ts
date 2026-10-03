@@ -1,5 +1,5 @@
 import type { LedgerEntryType } from "./api";
-import { walletTone, type WalletTone } from "./balance";
+import { walletTone, type WalletTone } from "./walletTone";
 import { firstName, playersWhen } from "./playersNames";
 import { minutesSpoken } from "./minutes";
 

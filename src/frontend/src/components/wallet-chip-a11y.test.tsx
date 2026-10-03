@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { LOW_BALANCE_MINUTES, walletLabel } from "../lib/balance";
+import { walletLabel } from "../lib/balance";
+import { LOW_BALANCE_MINUTES } from "../lib/walletTone";
 import { MinutesChip } from "./shell/MinutesChip";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 import { resetClubCurrencySymbol, setClubCurrencySymbol } from "../lib/currency";
