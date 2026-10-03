@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { Alert } from "../../components/Alert";
 import { Button } from "../../components/ui/button";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
@@ -110,8 +111,14 @@ export function AdminChangeRecordPage() {
     if (!cursor) return;
     try {
       const next = await adminEndpoints.adminChanges({ ...(area ? { area } : {}), period, cursor });
-      setPage((prev) => ({ ...next, rows: [...(prev?.rows ?? []), ...next.rows] }));
-      setMoreError(null);
+      const before = document.querySelectorAll("[data-change-row]").length;
+      // R9 X9-2: the last page takes "Load more" away and focus fell to <body>; the reader carries
+      // on from the first row this page brought, as the Night and Members' Show more do (X8-4).
+      flushSync(() => {
+        setPage((prev) => ({ ...next, rows: [...(prev?.rows ?? []), ...next.rows] }));
+        setMoreError(null);
+      });
+      if (next.rows.length > 0) document.querySelectorAll<HTMLElement>("[data-change-row]")[before]?.focus();
     } catch (err) {
       setMoreError(err);
     }
@@ -218,7 +225,8 @@ const PERIOD_OPTIONS: FilterOption[] = [
  */
 function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | undefined }) {
   return (
-    <li className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
+    // tabIndex -1: focusable by script only, so "Load more" can hand focus to the first row it brought.
+    <li data-change-row="" tabIndex={-1} className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
         <time dateTime={row.occurred_at} className="shrink-0 text-sm tabular-nums text-text-muted">
           {clubDayAndClock(row.occurred_at, timezone)}

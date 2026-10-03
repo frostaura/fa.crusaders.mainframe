@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { endpoints, type LedgerRow } from "../lib/api";
 import { describeFailure } from "../lib/errors";
@@ -395,9 +396,12 @@ function useLedgerRead({ from, to, type, userId }: { from: string; to: string; t
     try {
       const page = await ledgerPage(filters.current, next);
       if (seq !== loadSeq.current) return;
-      setRows((now) => [...(now ?? []), ...page.items]);
-      setNext(page.next_cursor);
-      setMore({ pending: false, error: null });
+      flushSync(() => {
+        setRows((now) => [...(now ?? []), ...page.items]);
+        setNext(page.next_cursor);
+        setMore({ pending: false, error: null });
+      });
+      focusFirstRevealed(page.items.map((item) => item.id));
     } catch (e) {
       if (seq === loadSeq.current) setMore({ pending: false, error: e });
     }
@@ -460,6 +464,22 @@ const LEDGER_TOO_MANY =
 /** A name search over rows not all read yet: its totals would be over part of the range. */
 const LEDGER_SEARCH_PARTIAL =
   "The name search covers the movements shown so far. Show them all to see its totals.";
+
+/**
+ * R9 X9-2: the last page takes "Show more movements" away and focus fell to <body>; the next Tab
+ * started at the skip link. Focus goes to the first row this page brought, by its details button
+ * (the row's keyboard way in), in the order the table draws them — it may be sorted. A page whose
+ * rows a name search hides leaves focus where it is while that is still on the page.
+ */
+function focusFirstRevealed(ids: string[]) {
+  const fresh = new Set(ids);
+  const rows = [...document.querySelectorAll<HTMLElement>("[data-ledger-row]")];
+  const first = rows.find((row) => fresh.has(row.getAttribute("data-ledger-row") ?? ""));
+  const target = first?.querySelector<HTMLElement>("button") ?? null;
+  const active = document.activeElement;
+  if (target) target.focus();
+  else if (!active || active === document.body || !active.isConnected) rows.at(-1)?.querySelector<HTMLElement>("button")?.focus();
+}
 
 /** "Show more", under the table, while the range has rows not yet on the page. */
 function ShowMore({ read }: { read: ReturnType<typeof useLedgerRead> }) {

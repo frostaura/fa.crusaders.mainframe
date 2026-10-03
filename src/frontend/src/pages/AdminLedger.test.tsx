@@ -395,6 +395,28 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
     expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger"))[1].path).toContain("cursor=c1");
   });
 
+  /** R9 X9-2: the last page takes the button away and focus fell to <body>. */
+  it("hands focus to the first row the last page brought, never to <body>", async () => {
+    rememberClubZone("Africa/Johannesburg");
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      {
+        path: "/api/v1/admin/ledger",
+        respond: (req) => (req.path.includes("cursor=c1")
+          ? { items: [row(3), row(4)], next_cursor: null, totals: null }
+          : { items: [row(1), row(2)], next_cursor: "c1", totals: { count: 4, in_minutes: 0, out_minutes: 40, net_minutes: -40 } }),
+      },
+    ]);
+    renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
+    await screen.findByText("Charge 2");
+    const more = screen.getByRole("button", { name: "Show more movements" });
+    more.focus();
+    fireEvent.click(more);
+    expect(await screen.findByText("Charge 3")).toBeInTheDocument();
+    await vi.waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement?.closest("[data-ledger-row]")?.getAttribute("data-ledger-row")).toBe("r3");
+  });
+
   it("reads an API that sends no totals to the end, and totals all of it", async () => {
     rememberClubZone("Africa/Johannesburg");
     const pages = [
