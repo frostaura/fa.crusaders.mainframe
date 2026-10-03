@@ -3,6 +3,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { renderPage, signIn, signOut, stubFetch } from "../../test/harness";
 import { WALLET_MINI_COPY as COPY } from "../../lib/walletCopy";
 import { WalletMiniTotals } from "./WalletMiniTotals";
+import { BUCKET_LABELS } from "./walletBuckets";
 
 /**
  * R5 M5-9 (SPEC 3.4): the wallet's desktop rail carries the last 30 days under the balance —
@@ -27,6 +28,35 @@ describe("WalletMiniTotals", () => {
     expect(within(box).getByText("+2 h 30 min")).toBeInTheDocument();
     expect(within(box).getByRole("link", { name: COPY.more })).toHaveAttribute("href", "/wallet/activity");
     expect(fetch.calls.filter((c) => c.path.startsWith("/api/v1/reports/me/wallet"))).toHaveLength(1);
+  });
+
+  it("adds up: every bucket that moved has a row, and the rows sum to the net (R6 L6-6 / J6-3)", async () => {
+    // Review round 6: Bought +5 h, Spent −2 h 30 min, Net +4 h 37 min — the adjustment, the
+    // refund, the penalty and the share had no row, so the card did not add up.
+    signIn({ isAdmin: false });
+    stubFetch([{ path: "/api/v1/reports/me/wallet", body: {
+      ...REPORT, refunds_minutes: 45, penalties_minutes: 13, adjustments_minutes: 120, reversals_minutes: 0,
+      share_transfers_minutes: -25, net_movement_minutes: 277,
+    } }]);
+    renderPage(<WalletMiniTotals />);
+    const box = screen.getByRole("region", { name: COPY.title });
+    expect(await within(box).findByText("+4 h 37 min")).toBeInTheDocument();
+    for (const [label, figure] of [[BUCKET_LABELS.refunds, "+45 min"], [BUCKET_LABELS.penalties, "−13 min"], [BUCKET_LABELS.adjustments, "+2 h"], [BUCKET_LABELS.shares, "−25 min"]]) {
+      const row = within(box).getByText(label).closest("div")!;
+      expect(row, label).toHaveTextContent(figure);
+    }
+    // A bucket that did not move is not a row (no "0 min" noise), and no catch-all is needed.
+    expect(within(box).queryByText(BUCKET_LABELS.reversals)).toBeNull();
+    expect(within(box).queryByText(BUCKET_LABELS.other)).toBeNull();
+  });
+
+  it("names whatever the buckets do not explain, so the card still adds up", async () => {
+    signIn({ isAdmin: false });
+    stubFetch([{ path: "/api/v1/reports/me/wallet", body: { ...REPORT, net_movement_minutes: 160 } }]);
+    renderPage(<WalletMiniTotals />);
+    const box = screen.getByRole("region", { name: COPY.title });
+    const row = (await within(box).findByText(BUCKET_LABELS.other)).closest("div")!;
+    expect(row).toHaveTextContent("+10 min");
   });
 
   it("says a failed read failed — never three zeros — and reads again on Try again", async () => {

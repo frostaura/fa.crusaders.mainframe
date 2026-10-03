@@ -1,6 +1,7 @@
 import { endpoints, type WalletReport } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { MinutesFigure } from "./MinutesFigure";
+import { bucketRows } from "./walletBuckets";
 import { typography } from "@/lib/typography";
 import { WALLET_MINI_COPY as COPY } from "@/lib/walletCopy";
 import { Button } from "../ui/button";
@@ -42,17 +43,21 @@ export function WalletMiniTotals({ offline = false }: { offline?: boolean }) {
   );
 }
 
+/** R6 L6-6 — every bucket that moved, then the net they add up to (`walletBuckets`). */
 function Figures({ data }: { data: WalletReport }) {
   const rows = [
-    { label: COPY.topUps, value: data.top_ups_minutes, tone: data.top_ups_minutes > 0 ? "text-success-strong" : "text-text-primary" },
-    { label: COPY.spent, value: -data.spent_minutes, tone: "text-text-primary" },
+    ...bucketRows(data).map((b) => ({
+      label: b.key === "bought" ? COPY.topUps : b.key === "spent" ? COPY.spent : b.label,
+      value: b.minutes,
+      tone: b.key === "bought" && b.minutes > 0 ? "text-success-strong" : "text-text-primary",
+    })),
     { label: COPY.net, value: data.net_movement_minutes, tone: "text-text-primary" },
   ];
   return (
     <dl className="flex flex-col gap-1.5 text-sm">
       {rows.map((row) => (
         // A figure beside its label wraps UNDER it at large text, never squeezes it (gotchas-frontend-layout).
-        <div key={row.label} className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <div key={row.label} className={cn("flex flex-wrap items-baseline justify-between gap-x-3", row.label === COPY.net && "border-t border-border pt-1.5")}>
           <dt className="text-text-secondary">{row.label}</dt>
           <dd className={cn("ml-auto whitespace-nowrap font-semibold tabular-nums", row.tone)}><MinutesFigure value={row.value} signed /></dd>
         </div>
