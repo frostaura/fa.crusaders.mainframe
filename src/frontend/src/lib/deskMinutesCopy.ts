@@ -318,6 +318,8 @@ const SELL_NO_REVENUE = "No money changes hands, so the club's revenue does not 
 
 export const SELL_COPY = {
   title: (name: string) => `Sell ${name} a package`,
+  /** R9 J9-3: a package that costs the member nothing is given, never "sold". */
+  titleFor: (name: string, free: boolean) => (free ? `Give ${name} a package` : `Sell ${name} a package`),
   steps: ["Package", "Payment", "Check"] as const,
   shelfLabel: (name: string) => `${name}'s packages`,
   shelfHint: "What the app would sell them: their groups' packages, and the club's at their discount.",
@@ -353,12 +355,25 @@ export const SELL_COPY = {
   balanceAfter: "Balance after",
   zarRow: "Money received",
   idle: (minutes: number) => `Sell ${minutesSpoken(minutes)}`,
+  idleFor: (minutes: number, free: boolean) => `${free ? "Give" : "Sell"} ${minutesSpoken(minutes)}`,
   confirm: (name: string, pkg: string, zar: string) => `Sell ${pkg} to ${name} for ${zar}? This goes on the ledger and cannot be deleted.`,
   /** R7 J7-10 — the confirm by amount: a free package is given, not sold for R0.00. */
   confirmFor: (name: string, pkg: string, zar: number) => (zar > 0
     ? `Sell ${pkg} to ${name} for ${formatMoney(zar)}? ${ON_THE_LEDGER}`
     : `Give ${pkg} to ${name} at no charge? ${ON_THE_LEDGER}`),
   receipt: (name: string, pkg: string, minutes: number) => `${pkg} sold — ${minutesSpoken(minutes)} added for ${name}.`,
+  receiptFor: (name: string, pkg: string, minutes: number, free: boolean) => (free
+    ? `${pkg} given — ${minutesSpoken(minutes)} added for ${name} at no charge.`
+    : `${pkg} sold — ${minutesSpoken(minutes)} added for ${name}.`),
+  /**
+   * R9 J9-1 — 409 `package_price_changed`: the member's price moved between Check and Sell (a
+   * discount changed, the package was repriced). Nothing was recorded; the sheet shows the new price
+   * and the admin confirms again. Said in place of "That didn't go through", which named nothing.
+   */
+  priceChanged: (now: string, was: string) =>
+    `Their price is now ${now} — it was ${was} when you checked. Nothing was recorded. Check the money received and confirm again.`,
+  noLongerFree: (name: string, now: string) =>
+    `This package is no longer free for ${name}: it now costs ${now}. Nothing was recorded. Say how it was paid, then confirm again.`,
   unavailable: "That package isn't on this member's shelf any more — it was changed or retired. Their packages were read again; choose again.",
   sending: (name: string) => `Waiting for the club to answer about ${name}'s package. This stays open until it does.`,
   next: "Next",

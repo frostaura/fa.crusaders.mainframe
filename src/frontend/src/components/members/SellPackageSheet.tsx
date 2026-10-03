@@ -5,6 +5,7 @@ import { Minutes } from "@/components/Minutes";
 import { SendingNote, Stepper } from "@/components/bookings/SheetParts";
 import { useSendingGuard, type SendingGuard } from "@/components/bookings/useSendingGuard";
 import { useToast } from "@/components/Toast";
+import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
@@ -65,7 +66,7 @@ export type SellPackageSheetProps = {
 
 type ShelfState = { status: "loading" } | { status: "failed"; error: unknown } | { status: "ready"; shelf: MemberShelf };
 type Complaints = { pkg?: string; code?: string; detail?: string; zar?: string };
-type Receipt = { pkg: ShelfPackage; balanceAfter: number | null; recovered: boolean };
+type Receipt = { pkg: ShelfPackage; balanceAfter: number | null; recovered: boolean; free: boolean };
 
 function useShelf(userId: string) {
   const [state, setState] = useState<ShelfState>({ status: "loading" });
@@ -79,7 +80,13 @@ function useShelf(userId: string) {
   }, [userId]);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { void read(); }, [read]);
-  return { state, read };
+  /** R9 J9-1: one package at the price the server says it has now (a 409 `package_price_changed`). */
+  const patch = useCallback((pkg: ShelfPackage) => {
+    setState((now) => (now.status === "ready"
+      ? { status: "ready", shelf: { ...now.shelf, packages: now.shelf.packages.map((p) => (p.id === pkg.id ? pkg : p)) } }
+      : now));
+  }, []);
+  return { state, read, patch };
 }
 
 function useSaleFlow(shelf: ShelfState) {
@@ -90,6 +97,8 @@ function useSaleFlow(shelf: ShelfState) {
   const [zarText, setZarText] = useState("");
   const [complaints, setComplaints] = useState<Complaints>({});
   const [done, setDone] = useState<Receipt | null>(null);
+  /** R9 J9-1: the price moved under the desk — said in the sheet until the admin chooses again. */
+  const [notice, setNotice] = useState<string | null>(null);
   const pkg = shelf.status === "ready" ? shelf.shelf.packages.find((p) => p.id === pkgId) ?? null : null;
 
   /** Choosing a package starts the money received at its price for THIS member. */
@@ -98,6 +107,7 @@ function useSaleFlow(shelf: ShelfState) {
     const chosen = shelf.status === "ready" ? shelf.shelf.packages.find((p) => p.id === id) : undefined;
     if (chosen) setZarText(zarField(chosen.price_zar));
     setComplaints({});
+    setNotice(null);
   };
   const settle = (found: Complaints, next: 2 | 3) => {
     setComplaints(found);
@@ -113,10 +123,20 @@ function useSaleFlow(shelf: ShelfState) {
     zar: free ? undefined : validateZar(zarText) ?? undefined,
   }, 3);
   /** Back to the shelf after a refusal said it changed: nothing chosen survives a re-read. */
-  const restart = () => { setPkgId(null); setStep(1); setComplaints({}); };
+  const restart = () => { setPkgId(null); setStep(1); setComplaints({}); setNotice(null); };
+  /**
+   * R9 J9-1: the price is not what was confirmed. The money received follows it when it was still
+   * the old price (the default); a figure the admin typed is theirs. A gift that now costs money
+   * goes back to the payment questions it never asked; otherwise the check is shown again.
+   */
+  const reprice = (was: ShelfPackage, now: ShelfPackage, said: string) => {
+    if (parseZar(zarText) === was.price_zar || isFree(was)) setZarText(zarField(now.price_zar));
+    setNotice(said);
+    setStep(isFree(was) && !isFree(now) ? 2 : 3);
+  };
   return {
     step, setStep, pkg, choose, code, setCode, detail, setDetail, zarText, setZarText, complaints, setComplaints,
-    done, setDone, toPayment, toCheck, restart, free, zar: free ? 0 : parseZar(zarText),
+    done, setDone, toPayment, toCheck, restart, free, zar: free ? 0 : parseZar(zarText), notice, reprice,
   };
 }
 
@@ -138,7 +158,7 @@ function saleCode(flow: Flow): SellReasonCode | null {
 }
 
 /** The press: one in flight at a time, under a key that names this sale. */
-function useSalePress(props: SellPackageSheetProps, flow: Flow, rereadShelf: () => Promise<void>) {
+function useSalePress(props: SellPackageSheetProps, flow: Flow, shelf: ReturnType<typeof useShelf>) {
   const toast = useToast();
   const key = useRef<AdjustmentKey>(null);
   const inFlight = useRef(false);
@@ -150,12 +170,13 @@ function useSalePress(props: SellPackageSheetProps, flow: Flow, rereadShelf: () 
     inFlight.current = true;
     setBusy(true);
     try {
-      // The price as the shelf said it is the server's default: send rand only when it differs.
-      const zarReceived = !flow.free && zar !== null && zar !== pkg.price_zar ? zar : undefined;
+      // R9 J9-1: always the price the check showed AND the rand taken — the server never prices a
+      // sale, so a discount that moves after Check is refused, not recorded at a figure nobody saw.
+      const zarReceived = flow.free ? 0 : zar ?? pkg.price_zar;
       const outcome = await attemptSale({
-        userId: props.userId, pkg, reasonCode: code, reason: flow.detail, zarReceived, name: props.name,
+        userId: props.userId, pkg, reasonCode: code, reason: flow.detail, quotedPriceZar: pkg.price_zar, zarReceived, name: props.name,
       }, key);
-      return settleOutcome(outcome, { props, flow, toast, rereadShelf });
+      return settleOutcome(outcome, { props, flow, toast, shelf });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -165,25 +186,47 @@ function useSalePress(props: SellPackageSheetProps, flow: Flow, rereadShelf: () 
 }
 
 type Settle = {
-  props: SellPackageSheetProps; flow: Flow; toast: ReturnType<typeof useToast>; rereadShelf: () => Promise<void>;
+  props: SellPackageSheetProps; flow: Flow; toast: ReturnType<typeof useToast>; shelf: ReturnType<typeof useShelf>;
 };
 
 function settleOutcome(outcome: Awaited<ReturnType<typeof attemptSale>>, ctx: Settle): string {
-  const { props, flow, toast, rereadShelf } = ctx;
+  const { props, flow, toast, shelf } = ctx;
   if (outcome.kind === "unavailable") {
     toast.push({ tone: "danger", text: outcome.message, unchanged: true, durationMs: 8000 });
     flow.restart();
-    void rereadShelf();
+    void shelf.read();
     return outcome.message;
   }
+  if (outcome.kind === "repriced") return repriced(outcome.pkg, ctx);
   if (outcome.kind === "failed") {
     toast.push({ tone: "danger", text: outcome.message, unchanged: outcome.unchanged, durationMs: 8000 });
     if (outcome.balanceNow !== undefined) props.onSold(outcome.balanceNow);
     return outcome.said;
   }
   props.onSold(outcome.balanceAfterMinutes);
-  flow.setDone({ pkg: flow.pkg!, balanceAfter: outcome.balanceAfterMinutes, recovered: outcome.recovered });
+  flow.setDone({ pkg: flow.pkg!, balanceAfter: outcome.balanceAfterMinutes, recovered: outcome.recovered, free: flow.free });
   return doneSentence(props.name, outcome.balanceAfterMinutes);
+}
+
+/**
+ * R9 J9-1: 409 `package_price_changed` — nothing recorded. The package takes the price the server
+ * sent (or the shelf is read again when the body had none) and the sheet says what changed; the
+ * admin confirms again at the new price. Never a danger toast: nothing failed, the price moved.
+ */
+function repriced(fresh: ShelfPackage | null, ctx: Settle): string {
+  const { flow, shelf } = ctx;
+  const was = flow.pkg!;
+  if (!fresh) {
+    flow.restart();
+    void shelf.read();
+    return COPY.unavailable;
+  }
+  const said = isFree(was) && !isFree(fresh)
+    ? COPY.noLongerFree(ctx.props.name, formatMoney(fresh.price_zar))
+    : COPY.priceChanged(formatMoney(fresh.price_zar), formatMoney(was.price_zar));
+  shelf.patch(fresh);
+  flow.reprice(was, fresh, said);
+  return said;
 }
 
 export function SellPackageSheet(props: SellPackageSheetProps) {
@@ -191,7 +234,7 @@ export function SellPackageSheet(props: SellPackageSheetProps) {
   const wide = useIsSmUp();
   const shelf = useShelf(props.userId);
   const flow = useSaleFlow(shelf.state);
-  const sale = useSalePress(props, flow, shelf.read);
+  const sale = useSalePress(props, flow, shelf);
   const guard = useSendingGuard((open) => { if (!open) onClose(); });
   const backToMenu = useMenuReturnFocus(props.returnFocus);
   const [stepRef, stepLabel] = useStepFocus(flow.step, COPY.steps, flow.done !== null);
@@ -199,11 +242,13 @@ export function SellPackageSheet(props: SellPackageSheetProps) {
     <Sheet open onOpenChange={guard.onOpenChange}>
       <SheetContent side={wide ? "right" : "bottom"} data-sheet="sell-package" onCloseAutoFocus={backToMenu}>
         <SheetHeader>
-          <SheetTitle>{COPY.title(name)}</SheetTitle>
+          <SheetTitle>{COPY.titleFor(name, flow.free)}</SheetTitle>
           <SheetDescription>{shelfLine(shelf.state)}</SheetDescription>
           {flow.done ? null : <Stepper names={COPY.steps} current={flow.step - 1} />}
         </SheetHeader>
         <SheetBody ref={stepRef} tabIndex={-1} role="group" aria-label={stepLabel} className="flex flex-col gap-4 pb-4 outline-none">
+          {/* Standing: the confirm button already says it the moment the answer comes (its live region). */}
+          {flow.notice && !flow.done ? <div data-sale-notice=""><Alert tone="warning" live="standing" announceKey={flow.notice}>{flow.notice}</Alert></div> : null}
           <SaleBody flow={flow} shelf={shelf} balance={props.balance} name={name} />
         </SheetBody>
         <SheetFooter className="sm:items-end">
@@ -377,7 +422,7 @@ function SaleReceipt({ name, done }: { name: string; done: Receipt }) {
     <div className="flex flex-col items-center gap-3 py-4 text-center">
       <AnimatedCheck size={48} className="text-success-strong" />
       <p className="text-lg font-semibold text-success-strong" role="status">{doneSentence(name, done.balanceAfter)}</p>
-      <p className="max-w-prose text-sm text-text-secondary">{COPY.receipt(name, done.pkg.name, done.pkg.minutes)}</p>
+      <p className="max-w-prose text-sm text-text-secondary">{COPY.receiptFor(name, done.pkg.name, done.pkg.minutes, done.free)}</p>
       {done.recovered ? <p className="max-w-prose text-sm text-text-secondary">{LOST_REPLY.landed}</p> : null}
       <p className="max-w-prose text-sm text-text-secondary">{LIVE_PUSH_NOTE}</p>
     </div>
@@ -414,7 +459,7 @@ function SaleFooter({ flow, guard, sale, shelf, name }: FooterProps) {
       <Button variant="outline" disabled={sale.busy} onClick={() => flow.setStep(2)}>{COPY.back}</Button>
       <div className="min-w-0">
         <ConfirmButton
-          idleLabel={COPY.idle(pkg.minutes)}
+          idleLabel={COPY.idleFor(pkg.minutes, flow.free)}
           cancelLabel={COPY.cancel}
           confirmLabel={COPY.confirmFor(name, pkg.name, flow.zar ?? pkg.price_zar)}
           ariaLabel={name}

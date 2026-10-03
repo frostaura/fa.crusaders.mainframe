@@ -58,13 +58,14 @@ describe("J7-10 — a R0.00 package is given, not sold for cash", () => {
     expect(await screen.findByText(COPY.revenueFor(0))).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(PAYMENT_CHOICES[0].label);
     expect(screen.queryByText(COPY.zarRow)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /^Sell / }), { detail: 1 });
+    // R9 J9-3: given, never "Sell".
+    fireEvent.click(screen.getByRole("button", { name: /^Give / }), { detail: 1 });
     expect(await screen.findByText(COPY.confirmFor("Thandi", FREE.name, 0))).toBeInTheDocument();
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!, { detail: 1 });
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path === SELL)).toBe(true));
     const sent = stub.calls.find((c) => c.method === "POST" && c.path === SELL)!.body as Record<string, unknown>;
     expect(sent.reasonCode).toBe("package_free");
-    expect(sent.zarReceived).toBeUndefined();
+    expect(sent.zarReceived).toBe(0);
   });
 
   it("a priced package still asks how it was paid and counts as revenue", async () => {

@@ -26,8 +26,13 @@ export type SellInput = {
   pkg: ShelfPackage;
   reasonCode: SellReasonCode;
   reason: string;
-  /** Undefined = the member's shelf price, which the server defaults to. */
-  zarReceived?: number;
+  /**
+   * R9 J9-1: the member's price the admin was shown and confirmed. The server refuses a moved
+   * shelf with 409 `package_price_changed` rather than recording a price nobody saw.
+   */
+  quotedPriceZar: number;
+  /** The rand taken — always stated (0 for a package given free); the server never prices a sale. */
+  zarReceived: number;
   /** Whose ledger to point at when the outcome cannot be found out. */
   name: string;
 };
@@ -36,13 +41,15 @@ export type SellOutcome =
   | { kind: "sold"; balanceAfterMinutes: number | null; recovered: boolean }
   /** 409 `package_unavailable`: the shelf changed under the desk; the caller re-reads it. */
   | { kind: "unavailable"; message: string }
+  /** 409 `package_price_changed` (R9 J9-1): nothing recorded; the package at its price now, when the body carried it. */
+  | { kind: "repriced"; pkg: ShelfPackage | null }
   | { kind: "failed"; message: string; unchanged: boolean; said: string; balanceNow?: number | null };
 
 /** How far before the press a row may be dated and still be this press's — client/server skew. */
 const SKEW_MS = 2 * 60_000;
 
 function fingerprintOf(input: SellInput): string {
-  return JSON.stringify([input.pkg.id, input.reasonCode, input.reason.trim(), input.zarReceived ?? null]);
+  return JSON.stringify([input.pkg.id, input.reasonCode, input.reason.trim(), input.zarReceived, input.quotedPriceZar]);
 }
 
 /** The key this press travels under, per the rule in the header. */
@@ -84,6 +91,10 @@ async function afterLostReply(input: SellInput, pressedAt: number, keyRef: { cur
 async function refused(err: unknown, input: SellInput, keyRef: { current: AdjustmentKey }): Promise<SellOutcome> {
   const busy = rateLimited(err);
   if (busy) return { kind: "failed", message: busy, unchanged: true, said: busy };
+  if (errorCodeOf(err) === "package_price_changed") {
+    keyRef.current = null;
+    return { kind: "repriced", pkg: repricedPackage(err) };
+  }
   if (errorCodeOf(err) === "package_unavailable") {
     keyRef.current = null;
     return { kind: "unavailable", message: SELL_COPY.unavailable };
@@ -97,17 +108,30 @@ async function refused(err: unknown, input: SellInput, keyRef: { current: Adjust
   return { kind: "failed", message, unchanged: true, said: LIVE_SAID.refused };
 }
 
+/** The fresh shelf item a `package_price_changed` carries, or null when the body has none. */
+function repricedPackage(err: unknown): ShelfPackage | null {
+  const payload = err instanceof ApiError ? err.payload : null;
+  const pkg = payload && typeof payload === "object" ? (payload as { package?: unknown }).package : null;
+  if (!pkg || typeof pkg !== "object") return null;
+  const item = pkg as Partial<ShelfPackage>;
+  return typeof item.id === "string" && typeof item.price_zar === "number" ? (item as ShelfPackage) : null;
+}
+
 export async function attemptSale(input: SellInput, keyRef: { current: AdjustmentKey }): Promise<SellOutcome> {
   keyRef.current = saleKey(keyRef.current, input);
   const pressedAt = Date.now();
   try {
-    const r = await adminEndpoints.sellPackage(input.userId, {
+    // `quotedPriceZar` rides on a variable, not a literal: lib/adminApi's body type gains it with
+    // the integrator's R9 change (scratchpad ask), and until then the field is simply not forwarded.
+    const body: Parameters<typeof adminEndpoints.sellPackage>[1] & { quotedPriceZar: number } = {
       packageId: input.pkg.id,
       reasonCode: input.reasonCode,
       reason: input.reason.trim(),
-      ...(input.zarReceived !== undefined ? { zarReceived: input.zarReceived } : {}),
+      quotedPriceZar: input.quotedPriceZar,
+      zarReceived: input.zarReceived,
       idempotencyKey: keyRef.current!.key,
-    });
+    };
+    const r = await adminEndpoints.sellPackage(input.userId, body);
     keyRef.current = null;
     return { kind: "sold", balanceAfterMinutes: r.balance_after_minutes, recovered: false };
   } catch (err) {

@@ -100,7 +100,8 @@ describe("selling", () => {
       packageId: PACKAGE_IDS.five, reasonCode: "top_up_cash", reason: "Receipt 0412",
     })));
     const body = stub.calls.find((c) => c.method === "POST")!.body as Record<string, unknown>;
-    expect(body).not.toHaveProperty("zarReceived");
+    // R9 J9-1: the rand is always stated — the server no longer prices a sale itself.
+    expect(body.zarReceived).toBe(495);
     expect(typeof body.idempotencyKey).toBe("string");
     expect(await screen.findByText("Done. Thandi now has 7 hours.", { selector: "[role='status']" })).toBeInTheDocument();
     expect(screen.getByText(COPY.receipt("Thandi", "5 hours", 300))).toBeInTheDocument();
