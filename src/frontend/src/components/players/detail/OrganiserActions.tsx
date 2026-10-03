@@ -123,7 +123,12 @@ function RemoveDialog({ hands, player }: { hands: OrganiserHands; player: Detail
       <DialogContent data-dialog="remove-player">
         <DialogHeader>
           <DialogTitle>{open ? DETAIL_ACTIONS.removeOpenTitle : DETAIL_ACTIONS.removeTitle(name)}</DialogTitle>
-          <DialogDescription>{open ? DETAIL_ACTIONS.removeOpenBody : DETAIL_ACTIONS.removeBody(name)}</DialogDescription>
+          {/* R7 J7-9 — what the remove does to money: what goes back to them (paid, net of any
+              share already returned), and that the organiser now carries their share — a remove
+              never re-splits. */}
+          <DialogDescription>
+            {open ? DETAIL_ACTIONS.removeOpenBody : DETAIL_ACTIONS.removeBodyFor(name, { paid: player.paid_minutes ?? 0, share: player.share_minutes ?? 0 })}
+          </DialogDescription>
         </DialogHeader>
         {error ? (
           <DialogBody>

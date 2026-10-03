@@ -128,7 +128,8 @@ describe("remove", () => {
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.removeFor("Sam") }));
     const dialog = screen.getByRole("dialog", { name: DETAIL_ACTIONS.removeTitle("Sam") });
-    expect(dialog).toHaveTextContent(DETAIL_ACTIONS.removeBody("Sam"));
+    // R7 J7-9 — the confirm names the money: what goes back to Sam, and that the organiser's cost rises.
+    expect(dialog).toHaveTextContent(DETAIL_ACTIONS.removeBodyFor("Sam", { paid: SAM_SEAT.paid_minutes, share: SAM_SEAT.share_minutes }));
     expect(stub.calls.some((c) => c.method === "DELETE")).toBe(false);
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ACTIONS.removeConfirm }));
     await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_ACTIONS.removed("Sam")));
