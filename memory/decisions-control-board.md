@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-control-board
 description: "Which court box a control-board tile reports when several claim one court, and how the duplicate is surfaced to the console rather than silently resolved (review round 3, A-11)."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Live decisions — the control board's box per court
@@ -32,3 +32,6 @@ Code: `Services/ControlBoardReader.cs`. Tests: `ControlBoardHttpTests`, `R3Contr
   Review") that opens the followed box, the others as a list and the advice — 30 lines at 18 boxes
   buried the court state on a phone. It reads no `door` (always null). The standing notice stays
   unfolded despite SPEC §3.11 — it is the sentence that keeps the board honest (`monitoringCopy`).
+- **R7 L7-2 (console, 320 / 200 %):** the tile is `@container/tile`; the state word and countdown
+  are capped by their band's width (`min(…, 18cqi / 22cqi)` — only a narrow band shrinks them),
+  and Booked by / Next stack under their terms below a 14rem tile. `e2e/admin-r7.spec.ts`.

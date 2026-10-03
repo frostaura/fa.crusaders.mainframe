@@ -33,7 +33,9 @@ last_verified: 2026-10-03
   `hoursAndMinutesSpoken` in every sentence and the ring's label; profile/admin tiles pair the
   compact value with an sr-only twin.
 - **No-break.** `detailModel.keepAmounts` binds the long units too ("1 hour 30 minutes" never
-  breaks between number and unit, R5 V5-7).
+  breaks between number and unit, R5 V5-7). A figure that may WRAP (a report tile or totals card)
+  is `MinutesGroups` (`components/reports/ReportParts`): a no-break space inside each group, an
+  ordinary one between, so "10 d 20 h / 30 min" — never "10 / d" (R7 X5-4).
 - **A saving is said one way**: `packagesCopy.savesWords` → "Saves R50.00 (8%)" (desk Sell badge,
   console preview; the console table cell drops the verb under its "Saves" header). L6-11.
 - **A figure that may wrap keeps number and unit together** (R7 L7-1/J7-5): `components/members/keepUnits`

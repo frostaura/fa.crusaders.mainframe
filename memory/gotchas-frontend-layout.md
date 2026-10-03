@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-frontend-layout
 description: "Layout traps measured in Chromium (R3-R4): text overflow is invisible to element rects, a zero flex basis never wraps, implicit grid columns and min-widths beat max-widths at 200 %, ui heights are floors."
 type: gotcha
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Gotchas — layout, measured in a real browser (review round 3, lane F3)
@@ -28,7 +28,7 @@ last_verified: 2026-10-01
   the text size, where `sm:` (640 CSS px) never does. Inbox rows, Profile stats and badges use it.
   Give each width range ONE rule (`_and_(max-width:…)`): two container variants that set the same
   property compete by stylesheet order. Write every class whole — `${WIDE}:col-span-1` built
-  from parts is never seen by Tailwind's scanner and emits nothing.
+  from parts is never seen by Tailwind's scanner and emits nothing. R7: `@[16rem]/x:` (plugin) is emitted BEFORE `sm:`, so it never beats a viewport rule — write base-small + `@[…]:` grow and leave `sm:` alone; gutters that must not grow with text are `min(rem,px)` constants in `ui/layout.ts`.
 - **A rem-sized badge dot on a px glyph hides it at 200 %** (a 24px dot over a 20px icon).
 - **A figure beside a name wraps UNDER it, not squeezes it**: `flex flex-wrap justify-between`
   with `ml-auto` on the figure; a `shrink-0` figure broke names mid-word ("Bon/gani").
