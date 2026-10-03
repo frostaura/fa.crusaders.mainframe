@@ -188,10 +188,7 @@ async function refusalNotice(
   reload: () => void,
 ): Promise<Notice> {
   const refusal = buyRefusal(error);
-  if (refusal.kind === "price_changed") {
-    setShelf((s) => (s ? withRestated(s, refusal.restated) : s));
-    return { tone: "warning", text: BUY_SAID.priceChanged(refusal.restated) };
-  }
+  if (refusal.kind === "price_changed") return priceChangedNotice(refusal.restated, setShelf);
   if (refusal.kind === "unavailable") { reload(); return { tone: "warning", text: BUY_SAID.unavailable }; }
   if (refusal.kind === "sentence") return { tone: "danger", text: refusal.text };
   try {
@@ -202,6 +199,26 @@ async function refusalNotice(
   } catch {
     return { tone: "danger", text: BUY_SAID.lostUnknown };
   }
+}
+
+/**
+ * R8 J8-2 — a moved price is rarely one package's: a group discount gained or lost moves every club
+ * price and the banner above them. So the WHOLE shelf is read again and the sentence names the
+ * price the fresh shelf holds; a package the re-read no longer has is said as gone. Only when that
+ * read fails is the refused package restated alone, from the refusal's own copy.
+ */
+async function priceChangedNotice(
+  restated: ShelfPackage,
+  setShelf: Dispatch<SetStateAction<MinutesShelf | null>>,
+): Promise<Notice> {
+  const now = await endpoints.minutesPackages().catch(() => null);
+  if (!now) {
+    setShelf((s) => (s ? withRestated(s, restated) : s));
+    return { tone: "warning", text: BUY_SAID.priceChanged(restated) };
+  }
+  setShelf(now);
+  const fresh = now.packages.find((p) => p.id === restated.id);
+  return { tone: "warning", text: fresh ? BUY_SAID.priceChanged(fresh) : BUY_SAID.unavailable };
 }
 
 /**

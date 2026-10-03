@@ -180,8 +180,9 @@ describe("Buy minutes — the checkout", () => {
   it("stops on a moved price, shows the new one, and the next press pays exactly that", async () => {
     const now = shelfPackage({ price_zar: 600, list_price_zar: 600 });
     let calls = 0;
+    const moved = minutesShelf({ packages: minutesShelf().packages.map((p) => (p.id === now.id ? now : p)) });
     const stub = show([
-      { path: SHELF, body: minutesShelf() },
+      { path: SHELF, respond: () => (calls === 0 ? minutesShelf() : moved) },
       { method: "POST", path: PURCHASE, respond: () => (++calls === 1 ? refuse(409, { error: "package_price_changed", package: now }) : purchaseStart({ amount_zar: 600 })) },
     ]);
     fireEvent.click(await card("5 hours"));
@@ -193,6 +194,54 @@ describe("Buy minutes — the checkout", () => {
     await waitFor(() => expect(submitted).toHaveLength(1));
     const posts = stub.calls.filter((c) => c.method === "POST" && c.path === PURCHASE);
     expect(posts.map((p) => (p.body as { quotedPriceZar: number }).quotedPriceZar)).toEqual([550, 600]);
+  });
+
+  it("J8-2 — after a moved price, re-reads the WHOLE shelf: the old discount and every other stale price go", async () => {
+    // The member left League while the page was open: the club drops the 10% on every club package.
+    const now = shelfPackage();
+    let refused = false;
+    const stub = show([
+      { path: SHELF, respond: () => (refused ? minutesShelf() : discountedShelf()) },
+      { method: "POST", path: PURCHASE, respond: () => { refused = true; return refuse(409, { error: "package_price_changed", package: now }); } },
+    ]);
+    fireEvent.click(await card("5 hours"));
+    expect(screen.getByText(BUY_COPY.discountNote("10%", "League"))).toBeInTheDocument();
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.priceChanged(now))).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(BUY_COPY.discountNote("10%", "League"))).toBeNull());
+    expect(within(await card("10 hours")).getByText(formatMoney(1000))).toBeInTheDocument();
+    expect(within(await card("1 hour")).getByText(formatMoney(120))).toBeInTheDocument();
+    expect(within(await card("5 hours")).getByText(formatMoney(550))).toBeInTheDocument();
+    expect(within(await card("10 hours")).queryByText(BUY_COPY.wasPrice(1000))).toBeNull();
+    expect(stub.calls.filter((c) => c.path === SHELF).length).toBeGreaterThanOrEqual(2);
+    // Still nothing sent to PayFast, and the 5 hours stays chosen at its new price.
+    expect(submitted).toHaveLength(0);
+    expect(continueButton()).toHaveTextContent(formatMoney(550));
+  });
+
+  it("J8-2 — a moved price whose re-read finds the package gone says it has gone", async () => {
+    let refused = false;
+    show([
+      { path: SHELF, respond: () => (refused ? minutesShelf({ packages: minutesShelf().packages.filter((p) => p.id !== PACKAGE_IDS.five) }) : minutesShelf()) },
+      { method: "POST", path: PURCHASE, respond: () => { refused = true; return refuse(409, { error: "package_price_changed", package: shelfPackage({ price_zar: 600 }) }); } },
+    ]);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.unavailable)).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "5 hours" })).toBeNull();
+  });
+
+  it("J8-2 — when the re-read fails, the refused package is still restated from the refusal", async () => {
+    let refused = false;
+    const now = shelfPackage({ price_zar: 600, list_price_zar: 600 });
+    show([
+      { path: SHELF, respond: () => (refused ? refuse(503, {}) : minutesShelf()) },
+      { method: "POST", path: PURCHASE, respond: () => { refused = true; return refuse(409, { error: "package_price_changed", package: now }); } },
+    ]);
+    fireEvent.click(await card("5 hours"));
+    fireEvent.click(continueButton());
+    expect(await screen.findByText(BUY_SAID.priceChanged(now))).toBeInTheDocument();
+    expect(within(await card("5 hours")).getByText(formatMoney(600))).toBeInTheDocument();
   });
 
   it("re-reads the shelf when a package has gone, and says nothing was sent", async () => {
