@@ -29,6 +29,9 @@ import { TextLink } from "@/components/ui/text-link";
 import { typography } from "@/lib/typography";
 import { cn } from "@/lib/utils";
 import { StaleNotice } from "@/components/shell/StaleNotice";
+import { nothingKeptOffline } from "@/components/shell/nothingKept";
+import { OfflineNothingKept } from "@/lib/offline/OfflineNothingKept";
+import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { useAuth } from "@/lib/auth";
 import { memberReads } from "@/lib/offline/memberReads";
 import { fetchQuery, peekQuery } from "@/lib/offline/queryCache";
@@ -166,6 +169,8 @@ type BodyProps = {
 
 function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
   if (read.notFound) return <NotOnGame bookingId={bookingId} seatId={seatId} />;
+  // R7 X7-3 — offline with nothing kept on this phone: said as offline, never "couldn't be reached".
+  if (nothingKeptOffline({ hasData: read.data !== null, error: read.error, offline: read.offline })) return <OfflineNothingKept line={OFFLINE_COPY.nothingKept.booking} />;
   if (!read.data) {
     return (
       <StateBlock

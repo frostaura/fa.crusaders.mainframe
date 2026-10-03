@@ -16,6 +16,8 @@ export type MyGameRead = {
   data: MyPlay | null;
   error: unknown;
   loading: boolean;
+  /** The club could not be reached at all (R7 X7-3: said as offline when nothing is kept). */
+  offline: boolean;
   reload: () => void;
   /** Apply a write's answer at once (the goal, the pause, the switch); a re-read follows. */
   patch: (update: (current: MyPlay) => MyPlay) => void;
@@ -26,5 +28,5 @@ export function useMyGame(): MyGameRead {
   // draws at once, offline draws the phone's copy. Nobody signed in reads nothing.
   const { who } = useDataOwner();
   const cached = useCachedRead(who ? memberReads.myPlay.key : null, memberReads.myPlay.load);
-  return { data: cached.data, error: cached.error, loading: cached.loading, reload: cached.reload, patch: cached.patch };
+  return { data: cached.data, error: cached.error, loading: cached.loading, offline: cached.offline, reload: cached.reload, patch: cached.patch };
 }

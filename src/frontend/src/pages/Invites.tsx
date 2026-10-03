@@ -14,6 +14,9 @@ import { usePickParam, useSplitLayout } from "@/components/ui/use-split-layout";
 import { InviteCard, InviteListSkeleton } from "@/components/players/invites/InviteCard";
 import { useKeptInvites } from "@/lib/offline/useKeptInvites";
 import { StaleNotice } from "@/components/shell/StaleNotice";
+import { nothingKeptOffline } from "@/components/shell/nothingKept";
+import { OfflineNothingKept } from "@/lib/offline/OfflineNothingKept";
+import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { usePendingLinkInvite } from "@/components/players/invites/usePendingLinkInvite";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
@@ -53,6 +56,8 @@ export default function InvitesPage() {
         freshness={<Freshness at={invites.readAt} />}
       />
       <StaleNotice stale={invites.stale} readAt={invites.readAt} offline={invites.offline} />
+      {/* R7 X7-3 — offline with nothing kept on this phone: said as offline, never "couldn't be reached". */}
+      {nothingKeptOffline({ hasData: invites.items !== null, error: invites.error, offline: invites.offline }) ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.invites} /> : (
       <StateBlock
         loading={invites.items === null && invites.loading}
         error={invites.items === null ? invites.error : null}
@@ -81,6 +86,7 @@ export default function InvitesPage() {
           placeholder={<StateBlock empty emptyIcon={Envelope} emptyTitle={INVITES_COPY.pickTitle} emptyHint={INVITES_COPY.pickHint} />}
         />
       </StateBlock>
+      )}
       {/*
         §4 wrong tap reach: with exactly one invite, its answers are docked in thumb reach — and
         only there (R6 L6-13: the card's own Accept beside a docked "Answer this invite" was two
