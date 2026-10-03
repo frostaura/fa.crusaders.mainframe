@@ -57,4 +57,4 @@ Tests: `R7ChainHttpTests`, `R7WordsTests`, `DeviceEventHttpTests+R7Night`, `Desk
   The reversal's `court.activated` row sets `ScanAt` = the scan (E9-2/E9-4). A court-box `code_used`
   writes `court.activation_refused` about the member (`DeviceFaultSink.CodeUsedAtCourtAsync`, never the
   code): "Was turned away at Court N — code already used", door rows likewise (E9-6). Admin "Last 30
-  days": bookings = the list's `PlayedBy`, sessions = `AttendanceQuery`, no-shows = booker (E9-1). Tests: `R9Outage…`.
+  days": bookings = the list's `PlayedBy`, sessions = `AttendanceQuery`, no-shows = booker (E9-1). Tests: `R9Outage…`. **R11 E11-4:** the Night's burst key carries `detail.attempt`, so different court-box refusal attempts never fold; the wording is the server headline's, never added client-side.

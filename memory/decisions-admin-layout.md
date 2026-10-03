@@ -48,7 +48,7 @@ Spec: round 4 `SPEC.md` §3/§4. `components/ui` primitives decide by their own 
   re-read publishes only a WHOLE club), Transactions (same filters only — new filters that fail
   drop the rows, R12), Courts, Webhooks, Settings (and its draft), Schedules (same list only).
 - **Not built:** Overview occupancy strip, board live-event rail, Groups/Schedules/Boards split views, Settings' help column.
-- **R10 FD10 (200 % text, box in rem, never `sm:`):** ChangeDiff stacks <24rem; door-log filters 3-up ≥34rem; button map `@container/bmap` 20/28rem (model `lib/buttonMap.ts`); GroupCard ⋯ own row <14rem; Night lights name `code_holder`. `e2e/admin-r10-fd`.
+- **R10 FD10 (200 % text, box in rem, never `sm:`):** ChangeDiff stacks <24rem; door-log filters 3-up ≥34rem; button map `@container/bmap` 20/28rem (model `lib/buttonMap.ts`); GroupCard ⋯ own row <14rem; Night lights name `code_holder`. `e2e/admin-r10-fd`. **R11 FD11:** a board card's and its map panel's insets step down by `@container/boardslot` (<16rem); the map's frame/row inset only from 12rem `bmap`; minutes input `w-16 shrink-0`; door-log bar/triggers use `FILTER_*_INSET`, type steps down <20rem. `e2e/admin-r11-fd` (caret/broken-word probe).
 - **R5 (lane E2) — phones and large text.** Overview: 5 alerts, then "See all N" opens the rest IN
   PLACE (there is no alerts page), focus on the first revealed; the Console folds under a 48rem box
   (*why:* it repeats the section switcher; 5,790 → ~2,000px at 390). Faults: text takes the row,
