@@ -4,6 +4,26 @@ import { CaretDown, X } from "@/components/ui/icons";
 import { SCALING_ICON, SCALING_ICON_TARGET } from "@/components/ui/layout";
 import { cn } from "@/lib/utils";
 
+// Up here, above every function: lizard's .tsx lexer reads this generic as a tag, and below
+// `rescueFromBody` it ran that function on to the end of the file (R7) — every dialog part
+// after it went unmeasured. The surface's props (`DialogSurface`).
+type ContentProps = React.ComponentProps<typeof DialogPrimitive.Content>;
+type SurfaceProps = ContentProps & {
+  /** Refuse outside clicks once something inside has been typed into. Default `true`. */
+  guardTyped?: boolean;
+  /**
+   * What to focus on open. Defaults to Radix's choice (the first tabbable control). Return
+   * `null` and the default applies, so a call site that cannot find its target never lands on
+   * `<body>`.
+   */
+  initialFocus?: () => HTMLElement | null | undefined;
+  /**
+   * @deprecated Ignored (F4-9): the × is always "Close" + the dialog's title, so it can never
+   * share a name with a footer button. Kept only so call sites compile until they drop it.
+   */
+  closeLabel?: string;
+};
+
 /**
  * The product's dialog — Radix Dialog, restyled to our vocabulary (design-system.md, Components).
  *
@@ -210,25 +230,12 @@ function rescueFromBody(): void {
     if (typeof document === "undefined") return; // the page (or a test environment) is gone
     const active = document.activeElement;
     if (active && active !== document.body) return;
-    (document.getElementById("main-content") ?? document.querySelector<HTMLElement>("main"))?.focus({ preventScroll: true });
+    // `as`, not `querySelector<HTMLElement>`: lizard's .tsx lexer reads the generic as a tag and ran
+    // this function on through the rest of the file (R7: 227 "lines").
+    (document.getElementById("main-content") ?? (document.querySelector("main") as HTMLElement | null))?.focus({ preventScroll: true });
   }, 0);
 }
 
-type SurfaceProps = React.ComponentProps<typeof DialogPrimitive.Content> & {
-  /** Refuse outside clicks once something inside has been typed into. Default `true`. */
-  guardTyped?: boolean;
-  /**
-   * What to focus on open. Defaults to Radix's choice (the first tabbable control). Return
-   * `null` and the default applies, so a call site that cannot find its target never lands on
-   * `<body>`.
-   */
-  initialFocus?: () => HTMLElement | null | undefined;
-  /**
-   * @deprecated Ignored (F4-9): the × is always "Close" + the dialog's title, so it can never
-   * share a name with a footer button. Kept only so call sites compile until they drop it.
-   */
-  closeLabel?: string;
-};
 
 /**
  * The raised panel with its guard, live region and close × — everything a dialog and a sheet
