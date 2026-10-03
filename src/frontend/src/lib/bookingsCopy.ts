@@ -498,7 +498,9 @@ export function cancelRowOutcome(refund: number, penalty: number): string {
 export const BOOKING_FOR = {
   label: "Booking for",
   region: (name: string) => `Booking for ${name}`,
-  canSpend: (minutes: number) => `can spend ${signedMinutes(minutes)}`,
+  /** R12 J12-4 — never "can spend minus 12 minutes": 0, and how far under (`walletCopy.spendableLine`). */
+  canSpend: (minutes: number) =>
+    minutes < 0 ? `can spend 0 minutes — ${minutesSpoken(-minutes)} below zero` : `can spend ${minutesSpoken(minutes)}`,
   held: (minutes: number) => `${minutesSpoken(minutes)} held for or owed to partners`,
   gridNote: "The grid shows their group's hours; the sheet charges their minutes.",
   reading: "Reading this member's details…",
