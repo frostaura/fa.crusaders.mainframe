@@ -1658,13 +1658,18 @@ public static class DeviceEventEndpoints
         MemberCodeClaim? claim = null;
         if (match is not null)
         {
-            if (await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.Court, ct))
+            var used = await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.Court, ct);
+            if (!used)
             {
+                claim = await services.MemberCodes.TryClaimAsync(
+                    match, MemberCodeUseClass.Money, device.Id, "walkup", ct, claimKey: "walkup:" + req.Nonce);
+            }
+            if (claim is null)
+            {
+                // R9 E9-6: on the member's record, as the door's refusal of the same code is.
+                await services.Faults.CodeUsedAtCourtAsync(device, userId.Value, court.CourtNumber, "walkup", req.Method);
                 return Results.Conflict(new { error = MemberCodeIdentity.CodeUsed });
             }
-            claim = await services.MemberCodes.TryClaimAsync(
-                match, MemberCodeUseClass.Money, device.Id, "walkup", ct, claimKey: "walkup:" + req.Nonce);
-            if (claim is null) return Results.Conflict(new { error = MemberCodeIdentity.CodeUsed });
         }
 
         return await SellAsync(new WalkUpSale(device, req, court, userId.Value, reference, claim), services, ct);

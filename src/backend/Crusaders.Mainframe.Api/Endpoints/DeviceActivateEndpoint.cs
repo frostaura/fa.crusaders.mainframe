@@ -94,27 +94,28 @@ public static class DeviceActivateEndpoint
         // reasoning CourtActivationService.CandidatesAsync records: the member was told why
         // by email, and a box that named the reason would be announcing it to whoever is
         // standing at the court.
+        var who = new Refusing(device, resolved.UserId, req.Method, match, display);
         if (await MembershipAccess.IsBarredFromCourtsAsync(services.Db, resolved.UserId, ct))
         {
-            return await BookingRefusalAsync(new Found(null, null, "no_booking"), match, display, services, ct);
+            return await BookingRefusalAsync(new Found(null, null, "no_booking"), who, services, ct);
         }
 
         // A court named in the request narrows the search, and must be one of this box's.
         if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed))
         {
-            return await BookingRefusalAsync(new Found(null, null, "wrong_court"), match, display, services, ct);
+            return await BookingRefusalAsync(new Found(null, null, "wrong_court"), who, services, ct);
         }
 
         var found = resolved.Purpose == AccessCodePurpose.BookingActivation
             ? await ForBookingCodeAsync(device, req, resolved, services, now, ct)
             : await ForIdentCodeAsync(device, req, resolved, services, now, ct);
 
-        if (found.Reason is not null) return await BookingRefusalAsync(found, match, display, services, ct);
+        if (found.Reason is not null) return await BookingRefusalAsync(found, who, services, ct);
 
         // One acting use per code per class (§4.4): claimed before the court is lit, given back
         // below if it is not. A used code is a DECISION — `code_used` — never a second opinion.
         var (used, claim) = await ClaimCourtUseAsync(match, device, services, ct);
-        if (used) return Refused(MemberCodeIdentity.CodeUsed, found.Court, display);
+        if (used) return await CodeUsedAsync(found.Court, who, services);
 
         // Given back if the activation THROWS, too: a claim stranded by a 500 refused the member's
         // own code as `code_used` for the rest of its window, at a court that never lit.
@@ -174,14 +175,27 @@ public static class DeviceActivateEndpoint
     /// that window's only use was buying on the victim's minutes. <c>code_used</c> arms nothing.
     /// </summary>
     private static async Task<DeviceActivateResponse> BookingRefusalAsync(
-        Found found, MemberCodeMatch? match, string? display, DeviceActivateServices services, CancellationToken ct)
+        Found found, Refusing who, DeviceActivateServices services, CancellationToken ct)
     {
-        if (match is not null
-            && await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.CourtOrMoney, ct))
+        if (who.Match is not null
+            && await services.MemberCodes.IsUsedAsync(who.Match, MemberCodeUseClass.CourtOrMoney, ct))
         {
-            return Refused(MemberCodeIdentity.CodeUsed, found.Court, display);
+            return await CodeUsedAsync(found.Court, who, services);
         }
-        return Refused(found.Reason!, found.Court, display);
+        return Refused(found.Reason!, found.Court, who.Display);
+    }
+
+    /// <summary>The member a refusal is about, once their code resolved — and how the box asked.</summary>
+    private sealed record Refusing(Device Device, Guid UserId, string? Method, MemberCodeMatch? Match, string? Display);
+
+    /// <summary>
+    /// <c>code_used</c>, written on the member's record first (review round 9, E9-6) — the door's
+    /// refusal of the same code always was, and the Night showed nothing at either court.
+    /// </summary>
+    private static async Task<DeviceActivateResponse> CodeUsedAsync(Court? court, Refusing who, DeviceActivateServices services)
+    {
+        await services.Faults.CodeUsedAtCourtAsync(who.Device, who.UserId, court?.CourtNumber, "activate", who.Method);
+        return Refused(MemberCodeIdentity.CodeUsed, court, who.Display);
     }
 
     /// <summary>

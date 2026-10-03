@@ -404,6 +404,7 @@ public static partial class AdminMemberTraceAssembly
                     RawAction = row.Action,
                     SubjectName = PersonNames.Of(row.SubjectUserId, s.Names),
                     CourtWasDark = Flag(details, "peripheral_outage"),
+                    CodeUsed = Text(details, "reason") == MemberCodeIdentity.CodeUsed,
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,

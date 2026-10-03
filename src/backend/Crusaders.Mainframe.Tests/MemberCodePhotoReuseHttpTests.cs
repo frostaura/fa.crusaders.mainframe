@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Crusaders.Mainframe.Api.Domain;
@@ -125,7 +126,7 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         Assert.Equal("no_booking", Reason((await SendAsync(device, ActivateAt(club, boxTwo, door))).Body));
     }
 
-    /// <summary>What a refused activation must have left untouched: the booking dark, the purse whole, no court use, no audit row.</summary>
+    /// <summary>What a refused activation must have left untouched: the booking dark, the purse whole, no court use, no audit row but the refusal's own.</summary>
     private static async Task AssertNothingLitAsync(
         MemberCodeClub club, WebApplicationFactory<Program> app, Booking booking, Guid member, int balance, int courtUses, int audits)
     {
@@ -136,8 +137,10 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         Assert.Equal(audits, await AuditsAsync(club, app));
     }
 
+    /// <summary>Rows that would say something HAPPENED — the refusal's own record (E9-6) is expected, and not counted.</summary>
     private static Task<int> AuditsAsync(MemberCodeClub club, WebApplicationFactory<Program> app) =>
-        club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters().CountAsync(a => a.TenantId == club.TenantId));
+        club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
+            .CountAsync(a => a.TenantId == club.TenantId && a.Action != "court.activation_refused"));
 
     /// <summary>
     /// Review round 8, D8-1 — the other direction. The use table is per class, so a photo of the
@@ -229,5 +232,52 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         var code = club.Code(club.Olga, at: clock.Now);
         Assert.True((await SendAsync(device, club.Gate(code))).Body.GetProperty("opened").GetBoolean());
         Assert.True((await SendAsync(device, club.Activate(code))).Body.GetProperty("activated").GetBoolean());
+    }
+
+    /// <summary>
+    /// Review round 9, E9-6: the door wrote a reused code's refusal against the member, the court
+    /// boxes wrote nothing — the Night of a member whose code was photographed showed the door
+    /// turning the photo away and nothing at either court. Every court-box <c>code_used</c> (a
+    /// repeat at the same box, another box, a walk-up) is now on the member's record, by reason,
+    /// and the code itself is never written down.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_reused_code_turned_away_at_a_court_box_is_on_the_members_record()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
+        var club = await MemberCodeClub.SeedAsync(app, "photo9");
+        await club.BookAsync(app, club.Olga, courtIndex: 0, startsInMinutes: -5);
+        var boxTwo = await SecondBoxAsync(club, app, 4);
+        var device = app.CreateClient();
+
+        var photo = club.Code(club.Olga, at: clock.Now);
+        Assert.True((await SendAsync(device, club.Activate(photo))).Body.GetProperty("activated").GetBoolean());
+        Assert.Equal("code_used", Reason((await SendAsync(device, club.Activate(photo))).Body));           // same box
+        Assert.Equal("code_used", Reason((await SendAsync(device, ActivateAt(club, boxTwo, photo))).Body)); // another box
+        Assert.Equal("code_used", Reason((await SendAsync(device, club.WalkUp(photo, court: 3, nonce: "9999888877776666"))).Body));
+
+        var rows = await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == "court.activation_refused").OrderBy(a => a.CreatedAt).ToListAsync());
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, a =>
+        {
+            Assert.Equal(club.Olga, a.SubjectUserId);
+            Assert.Equal(Guid.Empty, a.ActorUserId);
+            Assert.Equal("code_used", JsonDocument.Parse(a.DetailsJson!).RootElement.GetProperty("reason").GetString());
+            Assert.DoesNotContain(photo, a.DetailsJson, StringComparison.Ordinal);
+        });
+
+        var night = await club.Member(app, club.AdminId, "admin")
+            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.Olga}/trace?day={clock.Now:yyyy-MM-dd}");
+        var refused = night.GetProperty("events").EnumerateArray()
+            .Where(e => e.GetProperty("kind").GetString() == "court.refused")
+            .Select(e => e.GetProperty("headline").GetString()).ToList();
+        Assert.Equal(3, refused.Count);
+        Assert.Contains("Was turned away at Court 1 — code already used", refused);
+        Assert.Contains("Was turned away at Court 4 — code already used", refused);
+        Assert.Contains("Was turned away at Court 3 — code already used", refused);
     }
 }

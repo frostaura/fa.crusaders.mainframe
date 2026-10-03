@@ -76,6 +76,12 @@ public readonly record struct TraceFacts
     public bool CourtWasDark { get; init; }
 
     /// <summary>
+    /// The refusal was <c>code_used</c> — a code already acted on, as a photo of one is. Said in
+    /// the headline at a door and at a court box alike (review round 9, E9-6), never the code.
+    /// </summary>
+    public bool CodeUsed { get; init; }
+
+    /// <summary>
     /// The club took no rand for this desk top-up — a free package (<c>package_free</c>) or a sale
     /// recorded at R0.00 — so it was given, not sold (review round 8, E8-5).
     /// </summary>
@@ -535,7 +541,7 @@ public static class TraceKinds
         {
             DoorOpened => $"Came in through {door}",
             DoorOpenedOffline => $"Came in through {door} while it was offline",
-            DoorRefused => $"Was turned away at {door}",
+            DoorRefused => $"Was turned away at {door}{UsedCode(facts)}",
 
             BookingMade => $"Booked {court}",
             BookingMadeForThem => BookedForThem(court, facts),
@@ -557,7 +563,7 @@ public static class TraceKinds
             WalkUpRefunded => $"Light time at {court} was given back",
 
             CourtCheckedIn => $"Checked in at {court}",
-            CourtRefused => $"Was refused at {court}",
+            CourtRefused => facts.CodeUsed ? $"Was turned away at {court}{UsedCode(facts)}" : $"Was refused at {court}",
 
             LightsOn => $"{court} lights came on",
             LightsOff => $"{court} lights went off",
@@ -574,6 +580,9 @@ public static class TraceKinds
             _ => AccountHeadline(kind, facts),
         };
     }
+
+    /// <summary>The reason a refusal of an already-used code is given, in words (E9-6); empty otherwise.</summary>
+    private static string UsedCode(TraceFacts facts) => facts.CodeUsed ? " — code already used" : "";
 
     /// <summary>
     /// A movement of SOMEBODY ELSE's minutes that the person whose night this is performed — an

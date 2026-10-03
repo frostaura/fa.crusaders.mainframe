@@ -96,6 +96,56 @@ public sealed class DeviceFaultSink
     }
 
     /// <summary>
+    /// A member's code refused at a court box as already used (<c>code_used</c>) — on the
+    /// MEMBER's record, as the door's refusal of the same code already is (review round 9, E9-6).
+    ///
+    /// <para>
+    /// The Night of a member whose code was photographed showed the door turning the photo away
+    /// and nothing at either court box. This writes the <see cref="TraceKinds.ActivationRefusedAction"/>
+    /// row the trace has had a word for since D2, about the member the code resolved to, with the
+    /// board as the actor (<c>Guid.Empty</c>, like every device row). <b>The code itself is never
+    /// written</b>: a live access code in a trail an admin reads is a credential in a log.
+    /// </para>
+    ///
+    /// <para>
+    /// Awaited, in its own scope, and it never throws: the refusal the box is waiting on has
+    /// already been decided, the request's own context may hold a use claim that is not this
+    /// row's business, and a trail write that fails is a log line, never a failed scan.
+    /// </para>
+    /// </summary>
+    public async Task CodeUsedAtCourtAsync(Device device, Guid userId, int? court, string attempt, string? method)
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(_tenant.TenantId, _tenant.TenantSlug);
+            var db = scope.ServiceProvider.GetRequiredService<Persistence.MainframeDbContext>();
+            db.AuditLogs.Add(new AuditLog
+            {
+                TenantId = _tenant.TenantId,
+                ActorUserId = Guid.Empty,
+                SubjectUserId = userId,
+                Action = TraceKinds.ActivationRefusedAction,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    device_id = device.Id,
+                    device_code = device.DeviceCode,
+                    // The box's one court when it drives one, so the row names where it happened.
+                    court_number = court ?? (device.CourtNumbers.Count == 1 ? device.CourtNumbers[0] : (int?)null),
+                    reason = MemberCodeIdentity.CodeUsed,
+                    attempt,
+                    method,
+                }),
+            });
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logs.CreateLogger(typeof(DeviceFaultSink)).LogWarning(ex, "Could not record a code_used refusal at {Device}", device.DeviceCode);
+        }
+    }
+
+    /// <summary>
     /// A board whose event sequence numbers went BACKWARDS inside one boot.
     ///
     /// <para>
