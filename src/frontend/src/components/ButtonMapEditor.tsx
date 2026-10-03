@@ -2,15 +2,26 @@ import { useMemo } from "react";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { cn } from "@/lib/utils";
+import { FILTER_TRIGGER_INSET } from "./ui/layout";
 import { normaliseButtonMap, parseAction, RELAYS, toWire, withinCap, type ActionKind, MAX_GRANT_MINUTES } from "@/lib/buttonMap";
 
 /** A select that takes its row and wraps its value at spaces (R10 L10-5) until the box is wide enough to share one. */
 const WRAPS = cn(
   "w-full min-w-0 whitespace-normal [&_[data-slot=select-value]]:line-clamp-none",
   // A phone at 200 % text: "minutes" is wider than a 1rem-inset box leaves, so under 12rem the
-  // inset, the gap and the type step down (a button takes no focus zoom; `sm:text-sm` is unchanged).
-  "gap-1 px-2 text-sm @[12rem]/bmap:gap-2 @[12rem]/bmap:px-3 @[12rem]/bmap:text-base",
+  // gap and the type step down (a button takes no focus zoom; `sm:text-sm` is unchanged) and the
+  // side inset stops growing with the text (R11 L11-3: at 320 the value had 16px, "Unused" ran
+  // under the caret).
+  "gap-1 text-sm @[12rem]/bmap:gap-2 @[12rem]/bmap:text-base",
+  FILTER_TRIGGER_INSET,
 );
+
+/**
+ * R11 L11-3 — the list's own frame (border, surface, row inset) only from a 12rem box. Narrower,
+ * the panel around it is the frame: at 320 / 200 % four nested insets left a select 90px wide.
+ */
+const FRAME = "flex flex-col divide-y divide-border @[12rem]/bmap:rounded-lg @[12rem]/bmap:border @[12rem]/bmap:border-border @[12rem]/bmap:bg-bg-surface";
+const ROW = "flex flex-wrap items-center gap-x-3 gap-y-2 py-2 @[12rem]/bmap:px-3";
 
 /**
  * The eight-slot button-map editor.
@@ -52,7 +63,8 @@ export function ButtonMapEditor({
     // 200 % text the two selects shared a row and showed "Select c", "Grant m". Under 20rem each
     // control takes its own row; 20–28rem the label sits above the two selects side by side; from
     // 28rem the row is label · action · court on one line. A value wraps at its spaces, never cut.
-    <div className="@container/bmap flex flex-col divide-y divide-border rounded-lg border border-border bg-bg-surface">
+    <div className="@container/bmap">
+      <div className={FRAME}>
       {rows.map((wire, index) => {
         const { kind, value: detail } = parseAction(wire);
         return (
@@ -60,7 +72,7 @@ export function ButtonMapEditor({
           // two intrinsically-sized controls had a min-content of 362 px, which is what made
           // the whole Devices page 410 px wide inside a 375 px phone. A row that can wrap costs
           // a desktop nothing.
-          <div key={index} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2 py-2 @[12rem]/bmap:px-3">
+          <div key={index} className={ROW}>
             <span className="w-full shrink-0 text-sm font-medium text-text-secondary @[28rem]/bmap:w-20">Button {index + 1}</span>
 
             <Select value={kind} disabled={disabled} onValueChange={(next) => update(index, next as ActionKind, "")}>
@@ -88,14 +100,16 @@ export function ButtonMapEditor({
 
             {kind === "minutes" && (
               <>
-                <span className="inline-flex min-w-0 items-center gap-2">
+                <span className="inline-flex flex-wrap items-center gap-2">
                   <Input
                     aria-label={name(index, "minutes")}
                     type="number"
                     inputMode="numeric"
                     min={1}
                     max={MAX_GRANT_MINUTES}
-                    className="w-24 min-w-0 tabular-nums"
+                    // R11 L11-3: sized for its two digits in rem and never shrunk (w-24 min-w-0 was squeezed
+                    // to 50px at 320 / 200 % and cut "15" to "1"); the side inset stops growing at 12px.
+                    className={cn("w-16 shrink-0 tabular-nums", FILTER_TRIGGER_INSET)}
                     value={detail || "15"}
                     disabled={disabled}
                     aria-invalid={!withinCap(detail) || undefined}
@@ -116,6 +130,7 @@ export function ButtonMapEditor({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

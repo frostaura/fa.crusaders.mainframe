@@ -249,7 +249,9 @@ function DeviceButtonMapPanel({
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-4">
+    // R11 L11-3: the panel's inset steps down with the board's box (`@container/boardslot`), never
+    // the viewport — at 320 / 200 % a 2rem card inset plus this 2rem one left the map 90px.
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-2 @[16rem]/boardslot:p-4">
       <RadioGroup
         value={own ? "own" : "club"}
         onValueChange={(next) => setOwn(next === "own")}
@@ -673,7 +675,10 @@ function DeviceRow({
   const activity = useDeviceActivity(device);
 
   return (
-    <div ref={card} data-board-card="" className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
+    // R11 L11-3: the grid cell is the query container so the card's own inset can step down by its
+    // box in rem (a phone at 200 % text) — a card cannot query itself.
+    <div className="@container/boardslot min-w-0">
+    <div ref={card} data-board-card="" className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-2 shadow-xs @[16rem]/boardslot:p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1"><DeviceRowHeader device={device} online={online} now={now} /></div>
         {/* Deleting is not a revocation and locks nothing out — the box still holds the
@@ -764,6 +769,7 @@ function DeviceRow({
       </div>
 
       <ActivityPanel device={device} activity={activity} now={now} />
+    </div>
     </div>
   );
 }

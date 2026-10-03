@@ -11,6 +11,8 @@ import {
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { RefreshButton } from "../components/ui/refresh-button";
 import { TextLink } from "../components/ui/text-link";
+import { FILTER_BAR_INSET, FILTER_TRIGGER_INSET } from "../components/ui/layout";
+import { cn } from "../lib/utils";
 import { DownloadSimple } from "../components/ui/icons";
 import { useToast } from "../components/toastContext";
 import { DoorFeedRow } from "../components/doors/DoorFeedRow";
@@ -221,8 +223,17 @@ function doorOptions(view: DoorsView | null, rows: DoorLogEntry[] | null): Picke
 /** "Every door" / "every outcome" inside a Radix Select, which has no empty value. Never on the wire. */
 const ALL = "__all__";
 
-/** R10 L10-4: a value wraps at its spaces rather than clamp to one line — a word stays whole (Faults, L7-10). */
-const WRAPPING_TRIGGER = "w-full whitespace-normal [&_[data-slot=select-value]]:line-clamp-none";
+/**
+ * R10 L10-4: a value wraps at its spaces rather than clamp to one line — a word stays whole (Faults, L7-10).
+ * R11 (L10-4 residue): at 320 / 200 % the bar's 2rem inset and the trigger's 1.5rem sides left the value
+ * 92px — "Last / 24 / hours" a word a line and "outcomes" under the caret. The insets stop growing with
+ * the text (`FILTER_*_INSET`), and under a 20rem filter box the type and the caret gap step down.
+ */
+const WRAPPING_TRIGGER = cn(
+  "w-full whitespace-normal [&_[data-slot=select-value]]:line-clamp-none",
+  "gap-1 text-sm @[20rem]/doorfilters:gap-2 @[20rem]/doorfilters:text-base",
+  FILTER_TRIGGER_INSET,
+);
 
 function keepFocus() {
   const active = document.activeElement as HTMLElement | null;
@@ -595,7 +606,7 @@ function AdminDoorsLogPageBody() {
               help panel at 200 % text a viewport rule gave each select ~140px ("Al", "La"). Under
               34rem the three stack, full width, and a value wraps at its spaces (as Faults, L7-10). */}
           <div className="@container/doorfilters">
-            <fieldset className="grid gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs @[34rem]/doorfilters:grid-cols-3">
+            <fieldset className={cn("grid gap-3 rounded-xl border border-border bg-bg-surface shadow-xs @[34rem]/doorfilters:grid-cols-3", FILTER_BAR_INSET)}>
               <legend className="sr-only">Filter these scans</legend>
               <Field controlId={`${base}-door`}>
                 <FieldLabel>Door</FieldLabel>
