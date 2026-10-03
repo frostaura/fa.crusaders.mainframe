@@ -7,7 +7,11 @@ import { cva, type VariantProps } from "class-variance-authority";
  */
 export const toggleVariants = cva(
   [
-    "no-lift inline-flex min-h-touch items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-transparent",
+    // R11, as the Button: no forced nowrap (inherited, so a nowrap strip keeps one line), capped at its
+    // container, a wrapped label balanced and centred with each word whole; gap and side padding in
+    // pixels so 200 % text goes to the words.
+    "no-lift inline-flex min-h-touch max-w-full items-center justify-center gap-[min(0.5rem,8px)] rounded-lg border border-transparent",
+    "text-balance text-center [overflow-wrap:break-word]",
     "text-sm font-semibold text-text-secondary",
     "transition-colors duration-fast ease-standard motion-reduce:transition-none",
     "hover:bg-bg-muted hover:text-text-primary",
@@ -26,9 +30,9 @@ export const toggleVariants = cva(
         outline: "border-control bg-bg-surface data-[state=on]:border-accent-strong",
       },
       size: {
-        sm: "min-w-touch px-2.5",
-        md: "min-w-touch px-3",
-        lg: "min-h-[52px] min-w-[52px] px-4",
+        sm: "min-w-touch px-[min(0.625rem,10px)]",
+        md: "min-w-touch px-[min(0.75rem,12px)]",
+        lg: "min-h-[52px] min-w-[52px] px-[min(1rem,16px)]",
       },
     },
     defaultVariants: { variant: "default", size: "md" },

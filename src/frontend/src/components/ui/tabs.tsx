@@ -34,7 +34,13 @@ export function Tabs({
 
 const LIST: Record<TabsVariant, string> = {
   segmented: "inline-flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-lg bg-bg-muted p-1",
-  underline: "flex w-full items-end gap-4 overflow-x-auto border-b border-border",
+  // R11 L11-7: a short list WRAPS rather than scroll — at 320 / 200 % "Account" was clipped to
+  // "Accou" with no cue that the strip scrolled. Four or more tabs keep the one scrolling row.
+  // The gap is pixels so large text goes to the labels.
+  underline: cn(
+    "flex w-full flex-wrap items-end gap-x-[min(1rem,16px)] overflow-x-auto border-b border-border",
+    "[&:has(>:nth-child(4))]:flex-nowrap",
+  ),
 };
 
 export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrimitive.List>) {
@@ -43,7 +49,7 @@ export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrim
 }
 
 const TRIGGER_BASE = [
-  "no-lift relative inline-flex min-h-touch shrink-0 items-center justify-center gap-2 whitespace-nowrap",
+  "no-lift relative inline-flex min-h-touch shrink-0 items-center justify-center gap-[min(0.5rem,8px)] whitespace-nowrap",
   "border border-transparent text-sm font-semibold text-text-secondary",
   "transition-colors duration-fast ease-standard motion-reduce:transition-none",
   "hover:text-text-primary disabled:pointer-events-none disabled:opacity-50",
@@ -68,12 +74,12 @@ const FORCED_ACTIVE = cn(
 
 const TRIGGER: Record<TabsVariant, string> = {
   segmented: cn(
-    "rounded-md px-3",
+    "rounded-md px-[min(0.75rem,12px)]",
     "data-[state=active]:border-border data-[state=active]:bg-bg-surface data-[state=active]:text-accent-strong",
     FORCED_ACTIVE,
   ),
   underline: cn(
-    "px-1",
+    "px-[min(0.25rem,4px)]",
     "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-transparent",
     "data-[state=active]:text-text-primary data-[state=active]:after:bg-accent-strong",
     FORCED_ACTIVE,

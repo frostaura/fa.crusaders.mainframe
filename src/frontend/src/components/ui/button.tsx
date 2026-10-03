@@ -4,6 +4,7 @@ import type { VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { Spinner } from "./spinner";
 import { buttonVariants } from "./button-variants";
+import { keepFiguresWhole } from "./figure-text";
 
 /**
  * Button (design-system.md, Components → button).
@@ -55,7 +56,8 @@ export type ButtonProps = ComponentProps<"button"> &
  * text, so `getByText("Save")` still finds exactly one element; only a non-text label (markup) is
  * cloned, still `aria-hidden`.
  */
-const LAYER = "col-start-1 row-start-1 inline-flex items-center justify-center gap-2";
+// The icon-to-label gap is pixels, like the side padding: at 200 % text the room goes to the words.
+const LAYER = "col-start-1 row-start-1 inline-flex items-center justify-center gap-[min(0.5rem,8px)]";
 
 /**
  * A label's figure glued to the word after it with a no-break space (R11): a button now wraps, and
@@ -65,7 +67,7 @@ const LAYER = "col-start-1 row-start-1 inline-flex items-center justify-center g
  */
 function glueFigures(children: ReactNode, props: ComponentProps<"button">): { label: ReactNode; name?: string } {
   if (typeof children !== "string") return { label: children };
-  const label = children.replace(/(\d) (?=\p{L})/gu, "$1\u00a0");
+  const label = keepFiguresWhole(children);
   const named = props["aria-label"] !== undefined || props["aria-labelledby"] !== undefined;
   return { label, name: label === children || named ? undefined : children };
 }

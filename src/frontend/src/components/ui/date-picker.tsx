@@ -2,6 +2,7 @@ import * as React from "react";
 import { CalendarBlank } from "@/components/ui/icons";
 import { fieldSurface } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { keepFiguresWhole } from "@/components/ui/figure-text";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useIsSmUp } from "@/components/ui/use-media-query";
 import { clubZone } from "@/lib/clubZone";
@@ -56,14 +57,16 @@ function DateTrigger({ text, placeholder, label, className, ...props }: TriggerP
       aria-label={text ? `${label}: ${text}` : label}
       className={cn(
         fieldSurface,
-        "inline-flex min-h-touch w-auto items-center gap-2 px-3 font-medium tabular-nums hover:bg-bg-muted",
+        "inline-flex min-h-touch w-auto max-w-full items-center gap-[min(0.5rem,8px)] px-[min(0.75rem,12px)] font-medium tabular-nums hover:bg-bg-muted",
         className,
       )}
       {...props}
     >
       {/* R7 L6-16 — 16px at 100 % text, growing with it. */}
       <CalendarBlank size="1rem" aria-hidden="true" className="shrink-0 text-text-secondary" />
-      <span className={cn(!text && "text-text-muted")}>{text ?? placeholder}</span>
+      {/* R11: "Sat 3 / Oct" split the day from its month at 200 % text; "Sat / 3 Oct" may wrap.
+          The trigger's aria-label carries the plain spelling. */}
+      <span className={cn(!text && "text-text-muted")}>{text ? keepFiguresWhole(text) : placeholder}</span>
     </button>
   );
 }
