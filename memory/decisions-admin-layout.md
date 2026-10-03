@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-admin-layout
 description: "R4-R5 form factor: full frame; Members beside the record; admin role in row, header and Access tab (one dialog); Transactions totals in view; rails; R5 phone density for Overview, Faults, Boards, schedules."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Live decisions — how the admin console uses the screen (review round 4, form factor, lane L2)
@@ -41,8 +41,8 @@ Spec: round 4 `SPEC.md` §3/§4. `components/ui` primitives decide by their own 
   the filters fold behind one "Filters · range · type" button. From a 72rem box an opened row
   fills a side panel (`WithAside` sheet; `useBoxAtLeast` decides modal sheet vs panel, in rem) and
   ↑/↓ walk the rows in the table's order. LedgerTable's folds and pins: `decisions-ledger-layout`.
-- **Rails, from a 64rem box:** Overview's recent alerts, Settings' section index (scroll-spy,
-  unsaved dot), Webhooks' variable catalogue (folded below it). Grids by the box: control-board
+- **Rails, from a 64rem box:** Overview's alerts, Settings' index, Webhooks' catalogue; Packages'
+  editor from 56rem/20rem (R6 L6-7: 64 was ~1440 px; a 960 box is 1024-1280). Grids by the box: control-board
   tiles 1/2/4 for four courts, never 3 + 1; groups, schedules, boards, doors, courts as AutoGrid.
 - **A failed refresh keeps what is on screen** (integrator ask, D's `StaleNotice`): Members (a
   re-read publishes only a WHOLE club), Transactions (same filters only — new filters that fail
