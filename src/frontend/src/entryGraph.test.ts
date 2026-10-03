@@ -57,4 +57,10 @@ describe("the first load's source graph", () => {
   it("does not carry the play copy for the admin badge's one sentence", () => {
     expect(closure.has("lib/playCopy.ts"), "lib/playCopy.ts is statically reachable from main.tsx").toBe(false);
   });
+
+  // R7 P5-7 — the wallet's names and the invite-link note came out of playersCopy, so the whole
+  // players copy (with its PLAYERS_COPY object) is no longer in every member's first load.
+  it("does not carry the players copy for the wallet's names or the invite note", () => {
+    expect(closure.has("lib/playersCopy.ts"), "lib/playersCopy.ts is statically reachable from main.tsx").toBe(false);
+  });
 });
