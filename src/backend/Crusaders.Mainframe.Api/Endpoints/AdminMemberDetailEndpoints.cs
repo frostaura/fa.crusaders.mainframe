@@ -185,26 +185,36 @@ public static class AdminMemberDetailEndpoints
     /// booking's START.
     ///
     /// <para>
-    /// <c>bookings</c> counts every booking that was not cancelled; <c>no_shows</c> counts the
-    /// sweep's verdicts held against the member — not one refunded in full because its box was
-    /// dark (<see cref="NoShows"/>, E6-6); <c>sessions_played</c> counts bookings with a <c>CheckedInAt</c> —
+    /// <c>bookings</c> counts every booking the member is ON and that was not cancelled — the
+    /// bookings list's own rule (<see cref="PlayedBy"/>: booker, accepted partner, or payer at the
+    /// box); <c>sessions_played</c> counts their sessions by the Play card's rule
+    /// (<see cref="AttendanceQuery"/>, play.md §1: booker or accepted partner, with box evidence) —
     /// <b>attendance means <c>CheckedInAt</c>, never the clock and never <c>ChargedAt</c></b>,
     /// which under charge-at-booking is set on every row. A no-show later reversed by late box
     /// evidence carries a <c>CheckedInAt</c> and is counted as played, which is the truth.
+    /// <c>no_shows</c> counts the sweep's verdicts held against the member as BOOKER — the sweep
+    /// settles with the organiser — and not one refunded in full because its box was dark
+    /// (<see cref="NoShows"/>, E6-6).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why (R9 E9-1):</b> the counts read the member's own bookings only, so a member who plays
+    /// as somebody's partner read "Bookings 0 · Sessions 0" beside a Play card and rows that showed
+    /// the games.
     /// </para>
     /// </summary>
     private static async Task<ActivityCounts> CountsAsync(
         MainframeDbContext db, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
         var from = now.AddDays(-CountWindowDays);
-        var window = db.Bookings.AsNoTracking()
-            .Where(b => b.UserId == userId && b.StartsAt >= from && b.StartsAt < now);
+        var window = PlayedBy(db, userId).Where(b => b.StartsAt >= from && b.StartsAt < now);
+        var sessions = await AttendanceQuery.SessionsAsync(db, userId, ct);
 
         return new ActivityCounts(
             Bookings: await window.CountAsync(
                 b => b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.AdminBlock, ct),
-            NoShows: await window.CountAsync(NoShows.Counted, ct),
-            SessionsPlayed: await window.CountAsync(b => b.CheckedInAt != null, ct));
+            NoShows: await window.Where(b => b.UserId == userId).CountAsync(NoShows.Counted, ct),
+            SessionsPlayed: sessions.Count(s => s.StartsAt >= from && s.StartsAt < now));
     }
 
     // ------------------------------------------------------------------ bookings

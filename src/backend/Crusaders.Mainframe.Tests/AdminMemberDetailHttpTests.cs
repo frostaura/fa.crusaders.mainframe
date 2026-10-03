@@ -175,6 +175,55 @@ public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
+    /// R9 E9-1: "Last 30 days" counts the courts a member is ON, by the rule the bookings list
+    /// and the Play card read — a partner who played every week read "Bookings 0 · Sessions 0"
+    /// beside rows that showed the games. An accepted seat on someone else's checked-in court is a
+    /// booking and a session; a declined seat is neither; a no-show stays the booker's alone.
+    /// </summary>
+    [SkippableFact]
+    public async Task Last_30_days_counts_the_games_a_member_played_as_a_partner()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "mdetpartner");
+        var member = club.MemberUserId;
+        var organiser = club.AdminUserId;
+        var now = DateTimeOffset.UtcNow;
+
+        await SeedAsync(factory, db =>
+        {
+            var played = BookingFor(club, organiser, now.AddDays(-2), BookingStatus.Completed, checkedInAt: now.AddDays(-2));
+            var declined = BookingFor(club, organiser, now.AddDays(-3), BookingStatus.Completed, checkedInAt: now.AddDays(-3));
+            var missed = BookingFor(club, organiser, now.AddDays(-5), BookingStatus.NoShow);
+            db.Bookings.AddRange(played, declined, missed);
+            foreach (var (booking, status) in new[]
+            {
+                (played, ParticipantStatus.Accepted), (declined, ParticipantStatus.Declined), (missed, ParticipantStatus.Accepted),
+            })
+            {
+                db.BookingParticipants.Add(new BookingParticipant
+                {
+                    TenantId = club.TenantId, BookingId = booking.Id, Seat = 2, UserId = member, Status = status,
+                    InvitedAt = now.AddDays(-7), CreatedAt = now.AddDays(-7), UpdatedAt = now.AddDays(-7),
+                });
+            }
+        });
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(DetailPath(member));
+        var counts = body.GetProperty("counts_30d");
+        Assert.Equal(2, counts.GetProperty("bookings").GetInt32());        // played + missed, not declined
+        Assert.Equal(1, counts.GetProperty("sessions_played").GetInt32()); // the checked-in one
+        Assert.Equal(0, counts.GetProperty("no_shows").GetInt32());        // the organiser's verdict, not theirs
+
+        var organiserCounts = (await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(DetailPath(organiser)))
+            .GetProperty("counts_30d");
+        Assert.Equal(3, organiserCounts.GetProperty("bookings").GetInt32());
+        Assert.Equal(2, organiserCounts.GetProperty("sessions_played").GetInt32());
+        Assert.Equal(1, organiserCounts.GetProperty("no_shows").GetInt32());
+    }
+
+    /// <summary>
     /// The club's bootstrap administrator has an account and no membership row. The detail
     /// answers for them rather than 404ing one of the people who runs the club.
     /// </summary>
