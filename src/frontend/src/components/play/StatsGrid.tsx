@@ -58,7 +58,7 @@ export function StatsGrid({ stats }: { stats: PlayStatsFigures }) {
             data-stat={tile.key}
             className={cn("flex min-w-0 flex-col gap-0.5 break-words rounded-xl border border-border bg-bg-surface p-3", statSpan(index, tiles.length))}
           >
-            <dt className="text-xs text-text-secondary">{tile.label}</dt>
+            <dt className="text-xs text-text-secondary"><LastWordWhole text={tile.label} /></dt>
             <dd className="text-xl font-semibold tabular-nums text-text-primary">
               {"spoken" in tile && tile.spoken
                 ? <><span aria-hidden="true">{tile.value}</span><span className="sr-only">{tile.spoken}</span></>
@@ -70,4 +70,14 @@ export function StatsGrid({ stats }: { stats: PlayStatsFigures }) {
       </dl>
     </div>
   );
+}
+
+/**
+ * R8 L8-7 — a label's last word never breaks inside itself: at 320 / 200 % "Matches W–L" broke at
+ * the dash, "Matches W– / L". The label may still wrap between words.
+ */
+function LastWordWhole({ text }: { text: string }) {
+  const cut = text.lastIndexOf(" ");
+  if (cut < 0) return <span className="whitespace-nowrap">{text}</span>;
+  return <>{text.slice(0, cut + 1)}<span className="whitespace-nowrap">{text.slice(cut + 1)}</span></>;
 }

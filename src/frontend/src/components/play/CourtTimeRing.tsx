@@ -4,6 +4,13 @@ import { CheckCircle, Target } from "@/components/ui/icons";
 import type { Ring } from "@/lib/playApi";
 import { RING_COPY } from "@/lib/playCopy";
 import { cn } from "@/lib/utils";
+import { keepUnits } from "@/components/members/keepUnits";
+
+/**
+ * R8 — the ring never pushes a 320 phone sideways at 200 % text (7rem + the gap + the edit button
+ * outgrew the card: 1px), and its centre figure keeps each number with its unit ("6 h" / "45 min").
+ */
+const RING_BOX = "relative size-[min(7rem,36vw)] shrink-0";
 
 /**
  * The monthly court-time ring (§9.1.1, §5.5): minutes on court this club month against the
@@ -50,7 +57,7 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
       data-ring={ring.reached ? "reached" : "open"}
       className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
     >
-      <div role="img" aria-label={RING_COPY.aria(ring.attended_minutes, ring.goal_minutes)} className="relative size-28 shrink-0">
+      <div role="img" aria-label={RING_COPY.aria(ring.attended_minutes, ring.goal_minutes)} className={RING_BOX}>
         <svg viewBox="0 0 100 100" className="size-full -rotate-90" aria-hidden="true">
           <circle cx="50" cy="50" r={R} fill="none" strokeWidth="8" className="stroke-current text-bg-muted" />
           <circle
@@ -65,7 +72,7 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
           />
         </svg>
         <span aria-hidden="true" className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="text-sm font-semibold tabular-nums leading-tight text-text-primary">{RING_COPY.centre(ring.attended_minutes)}</span>
+          <span className="text-sm font-semibold tabular-nums leading-tight text-text-primary">{keepUnits(RING_COPY.centre(ring.attended_minutes))}</span>
         </span>
       </div>
       <div data-ring-words="" className="col-span-2 row-start-2 flex min-w-0 flex-col gap-1 sm:col-span-1 sm:col-start-2 sm:row-start-1">

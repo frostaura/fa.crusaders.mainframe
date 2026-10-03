@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { bigText, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes, seat } from "./playersKit";
+import { myPlayFixture } from "./playKit";
 
 /**
  * Review round 8 (lane FD1b — Bookings, booking detail, invites) — what only a browser can
@@ -219,5 +220,48 @@ test.describe("L8-3 — member booking detail at 320 / 200 %", () => {
     await bigText(page);
     await page.waitForTimeout(300);
     expect(await sideways(page)).toBeLessThanOrEqual(0);
+  });
+});
+
+/* ───────────────────────── L8-7 (Profile part) — "Matches W–L" never breaks at its dash ───────────────────────── */
+
+test.describe("L8-7 — Profile's stat labels at 320 / 200 %", () => {
+  test('"Matches W–L" and "Games W–L" keep "W–L" on one line', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 320, height: 640 });
+    await signIn(page);
+    await serveApi(page, [
+      { path: "/api/v1/me/play", body: myPlayFixture() },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+      { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
+      { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null } },
+      ...memberShellRoutes(),
+    ]);
+    await page.goto("/profile");
+    await expect(page.locator("[data-stat=matches]")).toBeVisible();
+    await bigText(page);
+    await page.waitForTimeout(300);
+    const split = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>("[data-stat] dt")).flatMap((dt) => {
+      // "W–" and "L" painted on different lines is the defect ("Matches W– / L").
+      const walker = document.createTreeWalker(dt, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = (node.textContent ?? "").indexOf("W–L");
+        if (at < 0) continue;
+        const top = (from: number, to: number) => { const r = document.createRange(); r.setStart(node!, from); r.setEnd(node!, to); return Math.round(r.getBoundingClientRect().top); };
+        return top(at, at + 2) === top(at + 2, at + 3) ? [] : [dt.textContent ?? ""];
+      }
+      return [];
+    }));
+    expect(split).toEqual([]);
+    expect(await sideways(page), "the page scrolls sideways").toBeLessThanOrEqual(0);
+    // The ring's centre ("6 h 45 min") breaks between groups, never "45 | min".
+    const centre = await page.locator("[data-ring] [aria-hidden=true] span").first().evaluate((el) => {
+      const node = el.firstChild!;
+      const text = node.textContent ?? "";
+      const at = text.lastIndexOf("min");
+      const top = (from: number, to: number) => { const r = document.createRange(); r.setStart(node, from); r.setEnd(node, to); return Math.round(r.getBoundingClientRect().top); };
+      return { text, same: top(at - 3, at - 1) === top(at, at + 3) };
+    });
+    expect(centre.same, `"${centre.text}" broke between a number and its unit`).toBe(true);
   });
 });
