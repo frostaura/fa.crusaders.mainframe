@@ -412,6 +412,8 @@ export const DETAIL_COPY = {
   notFoundTitle: "Booking not found",
   refreshFailed: "Couldn't refresh this booking — this is what we last read.",
   organisedByYou: "You organised this game",
+  /** R9 J9-5 — the desk booked it on the member's behalf: not something they did. */
+  bookedForYou: "The club booked this for you",
   organisedBy: (name: string) => `Organised by ${name}`,
   statusLine: { booked: "", cancelled: "Cancelled", no_show: "Nobody checked in", completed: "Played", blocked: "Club hold" } as Record<string, string>,
   when: (court: string, when: string, end: string) => `${court} · ${when}–${end}`,

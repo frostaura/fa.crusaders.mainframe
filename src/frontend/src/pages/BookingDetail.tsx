@@ -39,6 +39,7 @@ import type { EarlyResult } from "@/components/play/useResult";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_CANCEL, DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
 import { vouchesForResult } from "@/lib/bookingLink";
+import { bookedByClub } from "@/components/bookings/bookedByClub";
 
 /**
  * `/bookings/:bookingId` — the booking's own page (P11, D11–D13): the four seats and who is on
@@ -157,7 +158,8 @@ function headerLine(d: BookingDetail): string {
   // R7 E7-5 — the member who paid for this court at the box: what they did, not whose game it is.
   if (d.viewer.role === "payer") return DETAIL_COPY.payerLine;
   const who = organiserName(d);
-  const by = who ? DETAIL_COPY.organisedBy(who) : DETAIL_COPY.organisedByYou;
+  // R9 J9-5 — the desk booked it on the member's behalf: said as the club's doing, not theirs.
+  const by = who ? DETAIL_COPY.organisedBy(who) : bookedByClub(d) ? DETAIL_COPY.bookedForYou : DETAIL_COPY.organisedByYou;
   const status = DETAIL_COPY.statusLine[d.status] ?? "";
   return status ? `${by} · ${status}` : by;
 }

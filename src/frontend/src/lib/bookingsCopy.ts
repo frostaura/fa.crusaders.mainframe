@@ -533,6 +533,8 @@ export const UPCOMING = {
   failed: "Couldn't load your upcoming games.",
   retry: "Try again",
   organiser: "You booked",
+  /** R9 J9-5 — the club booked it for the member (the desk's "Book for member"). */
+  bookedForYou: "Booked for you",
   partner: "You're playing",
   /** R7 E7-5 — a court the member paid for at the box: someone else's booking. */
   payerBadge: "Paid for",

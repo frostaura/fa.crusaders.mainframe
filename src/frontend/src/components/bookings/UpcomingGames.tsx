@@ -12,6 +12,7 @@ import { firstName } from "@/lib/playersCopy";
 import { memberReads } from "@/lib/offline/memberReads";
 import { useGamesRead } from "./useGamesRead";
 import { GAMES_ITEM, GAMES_LIST, SHOWN, when } from "./gameWhen";
+import { bookedByClub } from "./bookedByClub";
 import { RESULT_READABLE } from "@/lib/bookingLink";
 
 /**
@@ -79,7 +80,7 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
         <span className="grid min-w-0 flex-1 gap-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="break-words text-sm font-semibold text-text-primary">{game.court_name}</span>
-            <RoleBadge role={game.role} />
+            <RoleBadge role={game.role} byClub={bookedByClub(game)} />
             {badges ?? (game.needs_action ? <Badge tone="warning">{UPCOMING.needsAction}</Badge> : null)}
           </span>
           <span className="text-sm tabular-nums text-text-secondary">{time}</span>
@@ -151,7 +152,9 @@ const ROLE_BADGE = {
   payer: { tone: "neutral", text: UPCOMING.payerBadge },
 } as const;
 
-function RoleBadge({ role }: { role: UpcomingGame["role"] }) {
+function RoleBadge({ role, byClub = false }: { role: UpcomingGame["role"]; byClub?: boolean }) {
+  // R9 J9-5 — the club booked it for them: not "You booked".
+  if (byClub && role === "organiser") return <Badge tone="brand">{UPCOMING.bookedForYou}</Badge>;
   const badge = ROLE_BADGE[role] ?? ROLE_BADGE.organiser;
   return <Badge tone={badge.tone}>{badge.text}</Badge>;
 }
