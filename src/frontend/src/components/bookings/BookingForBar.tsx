@@ -21,7 +21,7 @@ export function BookingForBar({ booking }: { booking: BookingFor }) {
   const { state, retry } = booking;
   if (state.status === "error") {
     return (
-      <div data-booking-for="" className="grid justify-items-start gap-2">
+      <div data-booking-for="" tabIndex={-1} className="grid justify-items-start gap-2">
         <Alert tone="warning" className="w-full">{BOOKING_FOR.failed}</Alert>
         <Button variant="outline" size="sm" onClick={retry}>{BOOKING_FOR.retry}</Button>
       </div>
@@ -31,6 +31,9 @@ export function BookingForBar({ booking }: { booking: BookingFor }) {
   return (
     <section
       data-booking-for=""
+      // R9 X8-1 rest — where a phone's opening puts the route announcer's focus when the page opens
+      // at this bar (the heading is then above the screen). Never a tab stop.
+      tabIndex={-1}
       aria-label={member ? BOOKING_FOR.region(member.name) : BOOKING_FOR.label}
       aria-busy={member ? undefined : true}
       className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-accent-strong/40 bg-accent-soft p-3 sm:p-4"
