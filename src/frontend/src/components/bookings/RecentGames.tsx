@@ -27,7 +27,9 @@ export function RecentGames({ refreshKey, fallbackZone }: { refreshKey: unknown;
   const { state, retry } = useGamesRead<RecentGame>(bookingsApi.recent, refreshKey, memberReads.recent.key);
   const [all, setAll] = useState(false);
   const headingId = useId();
-  if (state.status === "loading") return null;
+  // R8 X8-2 — offline with nothing kept is said once, by the page (Bookings' OfflineNothingKept), not
+  // as a red line here: nothing would come of its Try again until the signal is back.
+  if (state.status === "loading" || (state.status === "error" && state.offline)) return null;
   if (state.status === "error") {
     return (
       <div data-recent="" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-secondary">

@@ -15,6 +15,7 @@ import { useToast } from "../components/Toast";
 import { ScheduleNotices } from "../components/ScheduleNotices";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
+import { OfflineNothingKeptRetry } from "../components/bookings/OfflineNothingKeptRetry";
 import { isConnectionFailure } from "../lib/offline/useCachedRead";
 import { phoneIsOffline } from "../lib/api";
 import type { BoardContext } from "../components/ScheduleCells";
@@ -224,26 +225,29 @@ export default function BookingsPage() {
             onDismiss={explainer.dismiss} onNextDay={schedule.nextDay}
           />
           <BookingGridHeading />
-          <StateBlock
-            loading={!shown && schedule.loading}
-            error={shown ? null : schedule.error}
-            action={BOOKINGS_COPY.loadAction}
-            onRetry={schedule.refresh}
-            empty={Boolean(shown && shown.courts.length === 0)}
-            emptyTitle={BOOKINGS_COPY.noCourts}
-            emptyHint={BOOKINGS_COPY.noCourtsHint}
-            emptyIcon={SquaresFour}
-            skeleton={<BookingGridSkeleton courts={day?.courts.length || 3} />}
-          >
-            {ctx ? (
-              <BookingBoard
-                ctx={ctx} slotsByCourt={schedule.slotsByCourt} timeSlices={schedule.timeSlices}
-                pastThresholdMs={schedule.pastThresholdMs} peakNowMs={schedule.peakNowMs}
-                collapsedRows={collapsed.rows} earlierLabel={collapsed.label} onExpandEarlier={() => setEarlierShownFor(date)}
-                showNow={date === today} underSheet={sheets.underSheet} holding={holding}
-              />
-            ) : null}
-          </StateBlock>
+          {/* R8 X8-2 — a cold start that cannot reach the club, with no day kept: said as offline, once. */}
+          {!shown && !schedule.loading && isConnectionFailure(schedule.error) ? <OfflineNothingKeptRetry line={SCHEDULE_NOTHING_KEPT} onRetry={schedule.refresh} /> : (
+            <StateBlock
+              loading={!shown && schedule.loading}
+              error={shown ? null : schedule.error}
+              action={BOOKINGS_COPY.loadAction}
+              onRetry={schedule.refresh}
+              empty={Boolean(shown && shown.courts.length === 0)}
+              emptyTitle={BOOKINGS_COPY.noCourts}
+              emptyHint={BOOKINGS_COPY.noCourtsHint}
+              emptyIcon={SquaresFour}
+              skeleton={<BookingGridSkeleton courts={day?.courts.length || 3} />}
+            >
+              {ctx ? (
+                <BookingBoard
+                  ctx={ctx} slotsByCourt={schedule.slotsByCourt} timeSlices={schedule.timeSlices}
+                  pastThresholdMs={schedule.pastThresholdMs} peakNowMs={schedule.peakNowMs}
+                  collapsedRows={collapsed.rows} earlierLabel={collapsed.label} onExpandEarlier={() => setEarlierShownFor(date)}
+                  showNow={date === today} underSheet={sheets.underSheet} holding={holding}
+                />
+              ) : null}
+            </StateBlock>
+          )}
         </WithAside>
       </div>
       <SelectionBar selection={selection} day={shown} onBook={openBook} onCancel={openCancel} />
@@ -331,6 +335,13 @@ function SelectToggle({ selection }: { selection: Selection }) {
 /* ─────────────────────────────── the day picker ─────────────────────────────── */
 
 type ScheduleState = ReturnType<typeof useScheduleDay>;
+
+/**
+ * R8 X8-2 — Bookings offline with nothing kept. FD2's `OFFLINE_COPY.nothingKept.schedule` once it
+ * lands (r8-ask-FD1b-to-FD2); this same sentence until then — drop the fallback when it has.
+ */
+const SCHEDULE_NOTHING_KEPT = (OFFLINE_COPY.nothingKept as Partial<Record<string, string>>).schedule
+  ?? "This day hasn't been opened on this phone yet, so there's no schedule or games kept to show. They load by themselves once you're back online.";
 
 /** `BookingForBar`'s own mark — the bar a phone's opening scroll keeps in view (J8-3). */
 const BOOKING_FOR_BAR = "[data-booking-for]";

@@ -14,8 +14,7 @@ import { usePickParam, useSplitLayout } from "@/components/ui/use-split-layout";
 import { InviteCard, InviteListSkeleton } from "@/components/players/invites/InviteCard";
 import { useKeptInvites } from "@/lib/offline/useKeptInvites";
 import { StaleNotice } from "@/components/shell/StaleNotice";
-import { nothingKeptOffline } from "@/components/shell/nothingKept";
-import { OfflineNothingKept } from "@/lib/offline/OfflineNothingKept";
+import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKeptRetry";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { usePendingLinkInvite } from "@/components/players/invites/usePendingLinkInvite";
 import type { Invite } from "@/lib/playersApi";
@@ -56,8 +55,8 @@ export default function InvitesPage() {
         freshness={<Freshness at={invites.readAt} />}
       />
       <StaleNotice stale={invites.stale} readAt={invites.readAt} offline={invites.offline} />
-      {/* R7 X7-3 — offline with nothing kept on this phone: said as offline, never "couldn't be reached". */}
-      {nothingKeptOffline({ hasData: invites.items !== null, error: invites.error, offline: invites.offline }) ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.invites} /> : (
+      {/* R7 X7-3, R8 — offline with nothing kept on this phone: said as offline, never "couldn't be reached". Offline is the read's own (the club unreachable, a NetworkError), never navigator.onLine, which Wi-Fi without internet leaves true. */}
+      {offlineWithNothingKept(invites) ? <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.invites} onRetry={() => void refresh()} /> : (
       <StateBlock
         loading={invites.items === null && invites.loading}
         error={invites.items === null ? invites.error : null}
@@ -225,4 +224,9 @@ function useSheet(items: Invite[] | null) {
   useSheetHistory(open, close, "accept");
   const latest = opened ? items?.find((i) => i.participant_id === opened.participant_id) ?? opened : null;
   return { invite: latest, open, setOpen, openFor, session, onBusyChange, startWith };
+}
+
+/** R8 X7-3 — the read failed for want of the club and nothing of it is kept (never `navigator.onLine`). */
+function offlineWithNothingKept(read: { items: unknown; error: unknown; offline?: boolean }): boolean {
+  return read.items === null && read.error != null && read.offline === true;
 }

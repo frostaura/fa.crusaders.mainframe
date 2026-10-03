@@ -17,13 +17,14 @@ import { useCachedRead } from "@/lib/offline/useCachedRead";
 export type GamesState<T> =
   | { status: "loading" }
   | { status: "ready"; items: T[]; timezone: string | undefined }
-  | { status: "error" };
+  /** `offline`: the club could not be reached and nothing is kept — the page says so once (R8 X8-2). */
+  | { status: "error"; offline: boolean };
 
 export function useGamesRead<T>(read: () => Promise<{ timezone?: string; items?: T[] }>, refreshKey: unknown, key: string) {
   const cached = useCachedRead(key, read, { foreground: false, refresh: refreshKey });
-  const { data, error } = cached;
+  const { data, error, offline } = cached;
   const state: GamesState<T> = data
     ? { status: "ready", items: data.items ?? [], timezone: data.timezone }
-    : error ? { status: "error" } : { status: "loading" };
+    : error ? { status: "error", offline } : { status: "loading" };
   return { state, retry: cached.reload };
 }

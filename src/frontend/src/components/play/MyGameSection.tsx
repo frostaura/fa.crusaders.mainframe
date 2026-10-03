@@ -5,8 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { WarningCircle } from "@/components/ui/icons";
 import { Skeleton } from "@/components/ui/skeleton";
-import { OfflineNothingKept } from "@/lib/offline/OfflineNothingKept";
-import { nothingKeptOffline } from "@/components/shell/nothingKept";
+import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKeptRetry";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { StateBlock } from "@/components/ui/state-block";
 import { useSplitLayout } from "@/components/ui/use-split-layout";
@@ -56,8 +55,8 @@ export function MyGameSection() {
         <CardDescription>{MY_GAME.description}</CardDescription>
       </CardHeader>
       <CardContent className="@container/game flex flex-col gap-6">
-        {/* R7 X7-3 — offline with nothing kept on this phone: said as offline, never "couldn't be reached". */}
-        {nothingKeptOffline({ hasData: read.data !== null, error: read.error, offline: read.offline }) ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.myGame} /> : (
+        {/* R7 X7-3, R8 — offline with nothing kept on this phone: said as offline, never "couldn't be reached". Offline is the read's own (the club unreachable, a NetworkError), never navigator.onLine, which Wi-Fi without internet leaves true. */}
+        {read.data === null && read.error != null && read.offline ? <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.myGame} onRetry={read.reload} /> : (
         <StateBlock
           loading={!read.data && read.loading}
           error={read.data ? null : read.error}

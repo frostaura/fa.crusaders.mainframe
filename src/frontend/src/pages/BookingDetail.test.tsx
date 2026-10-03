@@ -177,10 +177,13 @@ describe("booking detail — not there, or not yours", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
-  it("says a failed read as a failure, with a retry that reads again", async () => {
+  // R8 X7-3 — a read that cannot reach the club, with nothing kept, is said as offline (not red
+  // "couldn't be reached"), whatever navigator.onLine says — and keeps its retry.
+  it("says a read that cannot reach the club as offline, with a retry that reads again", async () => {
     const stub = serve({ detail: unreachable(DETAIL_PATH) });
     renderDetail();
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Couldn't read this booking/);
+    await waitFor(() => expect(document.querySelector("[data-offline-nothing-kept]")).not.toBeNull());
+    expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
     const before = stub.calls.filter((c) => c.path === DETAIL_PATH).length;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(stub.calls.filter((c) => c.path === DETAIL_PATH).length).toBeGreaterThan(before));
