@@ -75,8 +75,10 @@ export function InboxRow(props: { notice: MemberNotification; now: number; feed:
  * Only the picked row carries a border class: in forced colours `index.css` frames every link whose
  * class names a border, so an always-present `aria-[current=true]:border-…` framed EVERY row.
  */
-const PICKED = "border-l-4 border-accent-strong bg-accent-soft pl-3";
-const ROW = "grid min-h-touch w-full items-start gap-x-3 gap-y-1 px-4 py-3 text-left";
+const PICKED = "border-l-4 border-accent-strong bg-accent-soft pl-[min(0.75rem,12px)]";
+// R8 L8-11 — the row's gutters are px constants (`min(rem, px)`), so they do not double with the
+// text and take the words' room at 200 % (gotchas-frontend-layout).
+const ROW = "grid min-h-touch w-full items-start gap-x-[min(0.75rem,12px)] gap-y-1 px-[min(1rem,16px)] py-3 text-left";
 // Whole class names, never built from parts: Tailwind finds classes by reading the source text.
 const ICON = "relative col-start-1 row-start-1 inline-flex shrink-0 items-center justify-center gap-1.5 self-center rounded-full text-text-secondary [@container(min-width:17rem)]:row-span-3 [@container(min-width:17rem)]:size-10 [@container(min-width:17rem)]:self-start [@container(min-width:17rem)]:bg-bg-muted";
 // Beside the bare glyph, not over it: a rem dot on a 20 px glyph hid it at large text.
@@ -85,7 +87,11 @@ const HEAD = "col-span-full row-start-2 flex min-w-0 flex-col gap-1 pt-1 [@conta
 const META = "row-start-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 self-center text-sm text-text-secondary [grid-column:2/-1] [@container(min-width:17rem)]:row-start-2 [@container(min-width:17rem)]:self-start [@container(min-width:17rem)]:[grid-column:2/3]";
 const ACTION = "col-span-full row-start-3 flex pt-1 [@container(min-width:17rem)]:col-span-1 [@container(min-width:17rem)]:col-start-2";
 const CARET = "col-start-3 row-start-1 mt-3 hidden shrink-0 justify-self-end text-text-muted [@container(min-width:17rem)]:block";
-const WHEN = "[@container(min-width:17rem)]:whitespace-nowrap";
+// R8 L8-11 — under 17rem (a phone at 200 %) the time takes a line of its own beside the glyph and
+// the "·" goes: squeezed beside the kind, the time broke after its comma and the separator was
+// left dangling at the end of "Reply ·". From 17rem: "Reply · Today, 08:44" on one line.
+const WHEN = "basis-full [@container(min-width:17rem)]:basis-auto [@container(min-width:17rem)]:whitespace-nowrap";
+const SEPARATOR = "hidden [@container(min-width:17rem)]:inline";
 
 type BodyProps = {
   notice: MemberNotification;
@@ -118,7 +124,7 @@ function RowBody(props: BodyProps) {
       <span id={ids.metaId} className={META}>
         {unread ? <span className="sr-only">{`${COPY.unread}. `}</span> : null}
         {word ? <Meta>{word}</Meta> : null}
-        {word ? <span aria-hidden="true">·</span> : null}
+        {word ? <span aria-hidden="true" className={SEPARATOR}>·</span> : null}
         <time dateTime={notice.created_at} title={clubInstant(notice.created_at)} className={WHEN}>
           {inboxWhen(notice.created_at, now)}
         </time>
