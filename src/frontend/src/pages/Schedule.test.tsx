@@ -77,7 +77,7 @@ describe("the page shell — R3, R11", () => {
     const refresh = within(header as HTMLElement).getByRole("button", { name: BOOKINGS_COPY.refresh });
     // An icon button: no visible word, a 44px square, never a text link in the body.
     expect(refresh.textContent).toBe("");
-    expect(refresh.className).toContain("size-[max(44px,2.25rem)]");
+    expect(refresh.className).toContain("size-[max(44px,2rem)]");
     expect(document.querySelector("[data-page-header] time")).toHaveTextContent(/Updated/);
 
     const before = scheduleCalls(stub).length;

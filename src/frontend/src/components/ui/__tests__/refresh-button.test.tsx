@@ -11,7 +11,7 @@ describe("RefreshButton", () => {
     render(<RefreshButton onRefresh={() => {}} />, strict);
     const button = screen.getByRole("button", { name: "Refresh" });
     // R6 L6-16 — at least 44px, and growing with the text.
-    expect(button.className).toContain("size-[max(44px,2.25rem)]");
+    expect(button.className).toContain("size-[max(44px,2rem)]");
     expect(button).not.toHaveAttribute("aria-busy");
     expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });

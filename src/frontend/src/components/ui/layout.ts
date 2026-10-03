@@ -98,8 +98,8 @@ export const ADMIN_RAIL_OFFSET_XL = "xl:ml-[max(256px,min(16rem,24vw))]";
 
 /**
  * R6 L6-16 — an icon button's glyph: 20px at 100 % text, growing with it (1.25rem), in a target
- * that is 44px at least and grows too (2.25rem). At 200 % text the refresh and the dialog's ×
+ * that is 44px at least and grows too (2rem — 64px at 200 %, so a header row does not double). At 200 % text the refresh and the dialog's ×
  * stayed 20px beside 32px words. The refresh button and the dialog's close share it.
  */
 export const SCALING_ICON = "1.25rem";
-export const SCALING_ICON_TARGET = "size-[max(44px,2.25rem)]";
+export const SCALING_ICON_TARGET = "size-[max(44px,2rem)]";
