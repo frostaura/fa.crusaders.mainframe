@@ -2,7 +2,7 @@
 
 ## What this is
 
-A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a credit-based booking model**. Players top up in ZAR via **PayFast**, the top-up converts to **credits** at the rate the member's groups set (groups replaced member classes — D2), and they reserve court time slices. At the court a physical peripheral — biometric, PIN or QR — identifies the player, and the box decides locally: it switches the lights on through its own relay bank — via online activation or its cached roster — and the attendance event posts to the API.
+A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a minutes-based booking model** (P13). Players buy admin-defined **minute packages** in ZAR via **PayFast** — the club's packages at their lowest group discount, plus their own groups' packages (groups replaced member classes — D2) — and a booking costs exactly its playing minutes. At the court a physical peripheral — biometric, PIN or QR — identifies the player, and the box decides locally: it switches the lights on through its own relay bank — via online activation or its cached roster — and the attendance event posts to the API.
 
 First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is structural from day one, not a later port.
 
@@ -46,7 +46,8 @@ State these honestly rather than repeating the aspiration:
 ## Invariants — violating any of these is a defect, not a style choice
 
 - **Money is ledger-only.** Balance is the sum of immutable ledger entries and is never a stored field. Every movement carries actor, subject, reason and external reference. Disputes are resolved by replaying the ledger.
-- **Credits are the unit of account, not rand.** ZAR is captured on the `PendingTopup` row for reconciliation; the ledger entry and all court pricing are credit-denominated. A field that mixes the two units is a money-correctness bug.
+- **Whole minutes are the unit of account, not rand** (P13, `docs/specs/minutes-and-packages.md` — the contract). Every ledger amount, charge, refund, penalty, share and hold is an `int` of minutes; nothing holds a fraction of one, and every remainder is rounded down in favour of whoever pays. Rand lives only where money changed hands (package prices, the `PendingTopup` lock, `ZarPaid`, reports). A field that mixes the two units is a money-correctness bug, and so is a decimal minute.
+- **No "credit" in the product.** No copy a member, admin, mail, LCD or webhook consumer sees says "credit" or "cr", and no minute figure shows decimals. Two source scans enforce it (`src/frontend/src/credit-scan.test.ts`, `MinutesSourceScanTests`) against an allow-list of external contracts (contract §2.5) that only ever shrinks.
 - **Charge at booking, refund on cancellation, nothing back once the lights have been on.** `CreateAsync` reserves the slot and posts the `BookingCharge` debit in the same unit of work — the booking row and the ledger row flush together, so a lost slot race cannot leave a member paying for a court they did not get. Cancelling refunds in full, less the late-cancellation penalty inside the penalty window; both movements are posted as separate rows rather than netted, because a single net row cannot answer "how much penalty did I pay?". Once someone has checked in there is no refund at all — and **attendance means `CheckedInAt`, never the clock and never `ChargedAt`**, which under this model is set on every row. This **contradicts client blueprint A.9**, which debits on lights-on; the deviation is the founder's decision, is recorded in `docs/specs/client-blueprint-deltas.md`, and **needs committee sign-off before go-live**.
 - **Tenant isolation is structural.** Every persisted entity carries `tenant_id`; every endpoint resolves tenant first. Cross-tenant leakage is a **P0 security incident**, not polish.
 - **The at-court identification event is the source of truth for attendance.** A no-show is the *absence* of a successful match within the grace window — never inferred from booking metadata.
@@ -84,7 +85,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 
 ## Where docs live
 
-- `docs/specs/` — `feature-spec.md` · `settlement-model.md` (the authority on how the ledger settles) · `players-and-splits.md` (D11–D13 — partners, shares, invites, the member inbox) · `multi-tenancy.md` · `biometric-abstraction.md` · `device-serial-protocol.md` · `door-gate.md` (the door controller's behaviour oracle, with its sentence→test table) · `member-code.md` (the single rotating member code and D10 pay-for at the box — the `membercode/` corpus's authority) · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
+- `docs/specs/` — `feature-spec.md` · `minutes-and-packages.md` (P13 — the unit, packages, discounts and the wire; the authority on money units) · `settlement-model.md` (the authority on how the ledger settles) · `players-and-splits.md` (D11–D13 — partners, shares, invites, the member inbox) · `multi-tenancy.md` · `biometric-abstraction.md` · `device-serial-protocol.md` · `door-gate.md` (the door controller's behaviour oracle, with its sentence→test table) · `member-code.md` (the single rotating member code and D10 pay-for at the box — the `membercode/` corpus's authority) · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
 - `docs/specs/client-blueprints/` — the verbatim client artifact plus its `.md` transcription. **The blueprint is the customer's word and outranks internal specs on economics.**
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.
@@ -100,7 +101,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 - **Never introduce a stored balance field**, however tempting for query performance.
 - **Never merge a change touching a tenant-scoped table without a cross-tenant injection test.**
 - **Never commit `.env`, and never paste a value out of it into a context file, a report or a commit message.** It holds live credentials of several kinds; the inventory — variable names only — is on `MEMORY.md`'s watch list.
-- **Never add a ledger field whose name implies one unit while the column holds another.** That bug has been shipped here once and cost a rename across the schema, every wire key and the UI. A field mixing credits and rand is a money-correctness defect, not a naming preference.
+- **Never add a ledger field whose name implies one unit while the column holds another.** That bug has been shipped here once and cost a rename across the schema, every wire key and the UI. A field mixing minutes and rand is a money-correctness defect, not a naming preference.
 
 ## Dependencies on other FrostAura projects
 
