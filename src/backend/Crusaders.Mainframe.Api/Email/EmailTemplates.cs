@@ -958,7 +958,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Box", alert.DeviceCode),
                     new FactRow("Courts", Courts(alert.CourtNumbers)),
-                    new FactRow("Silent for", $"{alert.Minutes} min"),
+                    new FactRow("Silent for", Min(alert.Minutes)),
                 ]),
                 new Callout(CalloutTone.Danger,
                     "Check its WiFi and its network first — do not power-cycle it yet. A box that has lost only its uplink "
@@ -1022,7 +1022,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Board", alert.DeviceCode),
                     new FactRow("Door", Door(alert.GateKey)),
-                    new FactRow("Silent for", $"{alert.Minutes} min"),
+                    new FactRow("Silent for", Min(alert.Minutes)),
                 ]),
                 new Callout(CalloutTone.Warning,
                     "The door has not stopped working, yet. While it cannot reach the club it falls back to the list it "

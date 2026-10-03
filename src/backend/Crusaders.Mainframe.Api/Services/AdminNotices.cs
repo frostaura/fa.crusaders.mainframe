@@ -118,8 +118,8 @@ public static class AdminNotices
     public static AdminNotice ApplicationsPending(DateOnly clubDate, int count, string oldestName, int oldestHours)
     {
         var headline = count == 1
-            ? $"1 application has waited more than {oldestHours} hours"
-            : $"{count} applications are waiting — the oldest for {oldestHours} hours";
+            ? $"1 application has waited more than {Hours(oldestHours)}"
+            : $"{count} applications are waiting — the oldest for {Hours(oldestHours)}";
         return new AdminNotice(
             AdminEventCatalogue.ApplicationsPending,
             $"{AdminEventCatalogue.ApplicationsPending}:{Iso(clubDate)}",
@@ -128,6 +128,8 @@ public static class AdminNotices
             "/admin/members");
     }
 
+    private static string Hours(int n) => n == 1 ? "1 hour" : $"{n} hours";
+
     /// <summary>An outage opening or closing. Keyed on the outage row, so each row announces each edge once.</summary>
     public static AdminNotice DeviceOutage(Guid outageId, Device device, int minutes, bool recovered)
     {
@@ -135,7 +137,8 @@ public static class AdminNotices
         var gate = device.Kind == DeviceKind.Gate;
         var what = gate ? "Door gate" : "Court box";
         var headline = recovered
-            ? $"{what} back online — {device.DeviceCode}, after {minutes} min"
+            // R9 X9-4: spoken long form — the Recent alerts list is read aloud ("after 6 minutes").
+            ? $"{what} back online — {device.DeviceCode}, after {MoneyFormat.Minutes(minutes)}"
             : $"{what} not reporting — {device.DeviceCode}";
 
         return new AdminNotice(

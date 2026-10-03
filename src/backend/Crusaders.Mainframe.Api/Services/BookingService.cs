@@ -2140,7 +2140,7 @@ public sealed class BookingService
                 AmountMinutes: -amount,
                 ActorUserId: Guid.Empty,
                 RelatedBookingId: booking.Id,
-                Reason: $"Lights ran {minutes} min on cancelled booking {court.Name} · {await SlotLabelAsync(booking, ct)} — charged pro rata",
+                Reason: $"Lights ran {MoneyFormat.Minutes(minutes)} on cancelled booking {court.Name} · {await SlotLabelAsync(booking, ct)} — charged pro rata",
                 ExternalReference: CancelledLightsReference(booking.Id)), ct);
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -2290,7 +2290,7 @@ public sealed class BookingService
                 ActorUserId: Guid.Empty,
                 RelatedBookingId: booking.Id,
                 // MoneyFormat rather than an interpolation: one rendering of minutes in prose.
-                Reason: $"Lights ran {litMinutes} min, not the granted window — {MoneyFormat.Minutes(back)} returned",
+                Reason: $"Lights ran {MoneyFormat.Minutes(litMinutes)}, not the granted window — {MoneyFormat.Minutes(back)} returned",
                 ExternalReference: CancelledLightsReleaseReference(booking.Id)), ct);
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))

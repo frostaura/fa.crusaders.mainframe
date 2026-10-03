@@ -107,7 +107,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Door", Door(r.GateKey)),
                     new FactRow("Board", r.DeviceCode),
-                    new FactRow("Refused", $"{r.Refusals} in {r.Minutes} min"),
+                    new FactRow("Refused", $"{r.Refusals} in {Min(r.Minutes)}"),
                 ]),
                 new Paragraph("It is usually one of three things: members without a booking trying the door, a board working from a stale list, or a code that has stopped matching. The door's own page shows which."),
                 new CallToAction("Open the Doors page", r.ConsoleUrl),

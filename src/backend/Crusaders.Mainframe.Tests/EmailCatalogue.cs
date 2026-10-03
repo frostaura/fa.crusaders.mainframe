@@ -70,7 +70,7 @@ internal static class EmailCatalogue
     {
         var to = "member@riverside.review.test";
         var booking = new BookingConfirmationDetails(
-            CourtName: "Court 3", StartsAtLocal: "Tue 29 Sep, 18:00", Duration: "45 min",
+            CourtName: "Court 3", StartsAtLocal: "Tue 29 Sep, 18:00", Duration: "45 minutes",
             AmountMinutes: 24, BalanceAfterMinutes: 136,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m);
         var peripheral = new PeripheralAlert("Court box 1-4", "box-2ad001", [1, 2], 12, ConsoleUrl);
