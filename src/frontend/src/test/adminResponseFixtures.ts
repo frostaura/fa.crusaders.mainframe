@@ -190,7 +190,7 @@ export function traceEvent(): TraceEvent {
   return {
     at: AT, strand: "door", kind: "door.released", headline: "…", detail: null, actor: traceActor(), subject: null,
     court: null, amount_minutes: null, balance_after_minutes: null, approximate: false, device_code: "gate-1",
-    outage_id: null, source: "audit", source_id: ID,
+    outage_id: null, source: "audit", source_id: ID, code_holder: null,
   };
 }
 
