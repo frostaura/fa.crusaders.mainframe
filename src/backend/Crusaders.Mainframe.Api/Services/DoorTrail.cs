@@ -80,9 +80,14 @@ public static class DoorTrail
     /// <see cref="MalformedOutcome"/> for a kind it could not read and
     /// <c>not_a_court_box</c> for a door reporting a court event.
     /// </para>
+    /// <para>
+    /// Review round 10, E10-4: <c>code_used</c> — a door turning away a code already acted on — is
+    /// a reason the log filters on, so the console can offer it. It is added HERE and not to
+    /// <see cref="GateAccess.Reasons"/>, which the gate corpus pins.
+    /// </para>
     /// </summary>
     public static readonly string[] Reasons =
-        [.. GateAccess.Reasons, MalformedOutcome, GateAccess.NotACourtBox];
+        [.. GateAccess.Reasons, MalformedOutcome, GateAccess.NotACourtBox, GateAccess.CodeUsed];
 
     /// <summary>
     /// The same four actions as a predicate the database can run.

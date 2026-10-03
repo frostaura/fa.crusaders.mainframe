@@ -94,6 +94,8 @@ public static class DoorWords
             GateAccess.TooEarly => "Too early for the booking",
             GateAccess.MethodNotSupported => "Scan method not supported at a door",
             GateAccess.NotAGate => "Not a door controller",
+            // E10-4: the Night's "code already used" family, not the raw token.
+            GateAccess.CodeUsed => "Code already used",
             _ => reason,
         };
     }

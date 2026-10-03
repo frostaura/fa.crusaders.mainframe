@@ -286,6 +286,29 @@ public sealed class DoorLogRangeHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
+    /// Review round 10, E10-4: a door that turns a reused code away writes <c>code_used</c>, and the
+    /// Doors log's outcome filter refused that very word (400 reason_invalid) — the console could not
+    /// offer it. It is a door reason the log filters on (not a gate-corpus reason), on both routes;
+    /// its words are "Code already used", the Night's wording family.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_code_used_door_refusal_can_be_filtered_and_is_said_in_words()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "logcodeused", JohannesburgSettings);
+        foreach (var path in new[] { LogPath, CsvPath })
+        {
+            var response = await club.AdminClient(factory).GetAsync($"{path}?reason={GateAccess.CodeUsed}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        Assert.Contains(GateAccess.CodeUsed, DoorTrail.Reasons);
+        Assert.DoesNotContain(GateAccess.CodeUsed, GateAccess.Reasons);
+        Assert.Equal("Code already used", DoorWords.ReasonOf(DoorTrail.DeniedPrefix + GateAccess.CodeUsed, GateAccess.CodeUsed));
+    }
+
+    /// <summary>
     /// A zone this platform has never heard of falls back to UTC and the wire SAYS UTC, never
     /// the club's own stored label beside times that are not in it. Reachable from a hand-edited
     /// settings row, because the PUT is not the only way a value gets into that column.
