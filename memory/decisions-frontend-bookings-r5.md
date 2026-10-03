@@ -38,7 +38,7 @@ Earlier rounds: `decisions-frontend-bookings.md`, `-r4.md`. Tests: `pages/bookin
 - **A phone OPENS Bookings at the week** (§4.2, Dean's call R7, `useOpenAtWeek`): `<main>` is
   scrolled so the day picker sits under the app bar; first Book cell 555 → 315 at 390x844.
   *Why this, not removal:* nothing is dropped (games strip, invites, notices one swipe up). Once
-  per visit, only from scrollTop 0, never on a re-read; phone width only; any date. e2e/member-r7.
+  per visit, never on a re-read; phone width only; any date. e2e/member-r7. R9: see `-member-r9`.
   **R8 (X8-1, J8-3):** focus a person put in `<main>` cancels it; the announcer's H1 focus (left at
   y −153, first Tab scrolled back up) is handed to the chosen day for 6 s; `?as=` opens at the
   "Booking for" bar, and the target is re-pinned for 2 s (header/bar settle; scroll anchoring slid it
