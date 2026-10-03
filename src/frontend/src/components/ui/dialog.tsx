@@ -279,6 +279,20 @@ function useOpenCentred() {
 }
 
 /**
+ * R9 X9-3 — focus that moves WITHIN the surface is scrolled into view. Radix's focus trap wraps Tab
+ * from the last control (the close ×) to the first with `preventScroll`, so in a long sheet at
+ * 200 % text ("Buy minutes" 1152px down an invite sheet scrolled to 0) the keyboard user's focus
+ * sat off-screen. A native Tab already scrolls, so this is a no-op there. Focus arriving from
+ * OUTSIDE — the open's autofocus — is left where Radix put it, so a sheet still opens at its top.
+ */
+function revealMovedFocus(event: React.FocusEvent<HTMLDivElement>) {
+  const from = event.relatedTarget;
+  const target = event.target;
+  if (!(from instanceof Node) || !event.currentTarget.contains(from) || target === event.currentTarget) return;
+  if (target instanceof HTMLElement && typeof target.scrollIntoView === "function") target.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/**
  * The raised panel with its guard, live region and close × — everything a dialog and a sheet
  * share except their shape. Exported for `sheet.tsx`; call sites use `DialogContent`/`SheetContent`.
  */
@@ -295,6 +309,7 @@ function DialogSurface(props: SurfaceProps) {
     onInteractOutside,
     onInputCapture,
     onChangeCapture,
+    onFocusCapture,
     ...rest
   } = props;
   const guard = useTypedGuard(guardTyped);
@@ -322,6 +337,7 @@ function DialogSurface(props: SurfaceProps) {
       onInteractOutside={composed(onInteractOutside, (e: Event) => guard.refuse(e, false))}
       onInputCapture={composed(onInputCapture, guard.markTyped)}
       onChangeCapture={composed(onChangeCapture, guard.markTyped)}
+      onFocusCapture={composed(onFocusCapture, revealMovedFocus)}
       {...rest}
     >
       {children}

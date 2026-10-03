@@ -238,3 +238,30 @@ describe("Sheet", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
+
+describe("R9 X9-3 — focus moved within a dialog is scrolled into view", () => {
+  it("scrolls the control focus moves to from inside (Tab's wrap), never the open's own autofocus", async () => {
+    const seen: string[] = [];
+    const spy = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+      seen.push(this.textContent ?? "");
+    });
+    try {
+      render(<Suspend />, strict);
+      fireEvent.click(screen.getByRole("button", { name: "Suspend Sam" }));
+      const dialog = await screen.findByRole("dialog");
+      await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+      // Opening put focus inside from outside: left where Radix put it, the sheet opens at its top.
+      expect(seen).toEqual([]);
+      const close = within(dialog).getByRole("button", { name: /^Close/ });
+      act(() => close.focus());
+      const first = within(dialog).getByRole("textbox", { name: "Reason" });
+      // Radix's wrap focuses with preventScroll; the surface reveals it.
+      act(() => first.focus({ preventScroll: true }));
+      expect(spy).toHaveBeenCalled();
+      expect(spy.mock.contexts.at(-1)).toBe(first);
+      expect(spy.mock.calls.at(-1)?.[0]).toEqual({ block: "nearest", inline: "nearest" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
