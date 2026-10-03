@@ -17,6 +17,7 @@ import { ChartBar, DownloadSimple } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { Skeleton } from "../components/ui/skeleton";
 import { WalletNav } from "../components/wallet/WalletNav";
+import { BUCKET_LABELS, givenMinutes } from "../components/wallet/walletBuckets";
 import { AutoGrid } from "../components/ui/auto-grid";
 import { Card } from "../components/ui/card";
 import { useMediaQuery } from "../components/ui/use-media-query";
@@ -135,7 +136,7 @@ function ActivityBody({ data }: { data: WalletActivity }) {
   const tiles: Tile[] = [
     // R7 E7-7 — signed as the Totals card signs the same figures: the Spent tile read "1 h" above
     // a Totals row reading "−1 h" for the one amount.
-    { label: ACTIVITY_COPY.bought, value: <MinutesFigure value={wallet.top_ups_minutes} signed />, tone: "success" },
+    { label: ACTIVITY_COPY.bought, value: <MinutesFigure value={wallet.top_ups_minutes - givenMinutes(wallet)} signed />, tone: "success" },
     { label: ACTIVITY_COPY.spent, value: <MinutesFigure value={-wallet.spent_minutes} signed />, tone: "accent" },
     { label: ACTIVITY_COPY.refunds, value: <MinutesFigure value={wallet.refunds_minutes} signed />, tone: "neutral" },
     // Attendance, which nothing in the product showed anywhere — `reporting.md` has promised
@@ -190,7 +191,7 @@ export const ACTIVITY_COPY = {
   spent: "Spent",
   refunds: "Refunds (net)",
   totalsHelp: "Every way minutes moved in or out of your wallet in this period.",
-  netSum: "bought − spent + refunds − penalties + adjustments",
+  netSum: "bought (and given) − spent + refunds − penalties + adjustments",
 } as const;
 
 /**
@@ -218,7 +219,9 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
           </>
         )}
       >
-        <Stat label={ACTIVITY_COPY.bought} value={<MinutesFigure value={wallet.top_ups_minutes} signed />} />
+        <Stat label={ACTIVITY_COPY.bought} value={<MinutesFigure value={wallet.top_ups_minutes - givenMinutes(wallet)} signed />} />
+        {/* R11 J11-4 — a package the club gave at no charge is not "Bought". */}
+        {givenMinutes(wallet) > 0 ? <Stat label={BUCKET_LABELS.given} value={<MinutesFigure value={givenMinutes(wallet)} signed />} /> : null}
         <Stat label={ACTIVITY_COPY.spent} value={<MinutesFigure value={-wallet.spent_minutes} signed />} />
         <Stat label={ACTIVITY_COPY.refunds} value={<MinutesFigure value={wallet.refunds_minutes} signed />} />
         <Stat label="Penalties" value={<MinutesFigure value={-wallet.penalties_minutes} signed />} />
@@ -247,6 +250,8 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
 type DayPoint = DailyMePoint & {
   penalties_minutes?: number; adjustments_minutes?: number; reversals_minutes?: number;
   share_transfers_minutes?: number; net_movement_minutes?: number;
+  /** R11 J11-4 — the part of `top_ups_minutes` the club gave at no charge. */
+  given_minutes?: number;
 };
 
 /** The daily table's headers beyond the totals' own words. */
@@ -281,13 +286,25 @@ const OPTIONAL_DAY_COLUMNS: { key: DayKey; column: DataColumn<DayPoint> }[] = [
   { key: "share_transfers_minutes", column: movement("share_transfers_minutes", DAY_COPY.shares) },
 ];
 
+/** R11 J11-4 — Bought is what was paid for; a package given at no charge is its own column. */
+const boughtColumn: DataColumn<DayPoint> = {
+  key: "top_ups_minutes", header: ACTIVITY_COPY.bought, align: "right",
+  cell: (r) => <Cell><MinutesFigure value={r.top_ups_minutes - givenMinutes(r)} signed /></Cell>,
+  sortValue: (r) => r.top_ups_minutes - givenMinutes(r),
+};
+const givenColumn: DataColumn<DayPoint> = {
+  key: "given_minutes", header: BUCKET_LABELS.given, align: "right",
+  cell: (r) => <Cell><MinutesFigure value={givenMinutes(r)} signed /></Cell>, sortValue: (r) => givenMinutes(r),
+};
+
 /** The period's columns: the fixed ones, every optional bucket that moved, then Net when the API sends it. */
 function dayColumns(days: DayPoint[]): DataColumn<DayPoint>[] {
   const moved = (key: DayKey) => days.some((d) => typeof d[key] === "number" && d[key] !== 0);
   const hasNet = days.some((d) => typeof d.net_movement_minutes === "number");
   return [
     { key: "date", header: "Date", cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
-    movement("top_ups_minutes", ACTIVITY_COPY.bought),
+    boughtColumn,
+    ...(days.some((d) => givenMinutes(d) > 0) ? [givenColumn] : []),
     movement("spent_minutes", ACTIVITY_COPY.spent, -1),
     movement("refunds_minutes", ACTIVITY_COPY.refunds),
     ...OPTIONAL_DAY_COLUMNS.filter((c) => moved(c.key)).map((c) => c.column),

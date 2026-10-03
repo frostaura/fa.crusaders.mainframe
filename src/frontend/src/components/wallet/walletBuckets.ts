@@ -9,6 +9,8 @@ import { REPORT_SHARES_COPY } from "@/lib/playersCopy";
  */
 export const BUCKET_LABELS = {
   bought: "Bought",
+  /** R11 J11-4 — a package the club gave at no charge: added, never bought. */
+  given: "Given by the club",
   spent: "Spent",
   refunds: "Refunds (net)",
   penalties: "Penalties",
@@ -25,9 +27,20 @@ export type BucketRow = { key: keyof typeof BUCKET_LABELS; label: string; minute
  * Bought and Spent always (they are the card's question); every other bucket only when it moved,
  * and a residual "Other" only when the buckets do not reach the net. Signed: in is +, out is −.
  */
+/**
+ * R11 J11-4 — the part of `top_ups_minutes` that cost the member nothing (a package the club gave,
+ * R 0.00), from the report's `given_minutes`. Absent before the server sent it: then everything
+ * funded reads as bought, as it always did. Clamped, so a figure can never make Bought negative.
+ */
+export function givenMinutes(report: { top_ups_minutes: number; given_minutes?: number }): number {
+  return Math.max(0, Math.min(report.top_ups_minutes, report.given_minutes ?? 0));
+}
+
 export function bucketRows(report: WalletReport): BucketRow[] {
+  const given = givenMinutes(report as WalletReport & { given_minutes?: number });
   const all: BucketRow[] = [
-    { key: "bought", label: BUCKET_LABELS.bought, minutes: report.top_ups_minutes },
+    { key: "bought", label: BUCKET_LABELS.bought, minutes: report.top_ups_minutes - given },
+    { key: "given", label: BUCKET_LABELS.given, minutes: given },
     { key: "spent", label: BUCKET_LABELS.spent, minutes: -report.spent_minutes },
     { key: "refunds", label: BUCKET_LABELS.refunds, minutes: report.refunds_minutes ?? 0 },
     { key: "penalties", label: BUCKET_LABELS.penalties, minutes: -(report.penalties_minutes ?? 0) },
