@@ -29,6 +29,12 @@ function bookedByLine(row: MemberBookingRow): string {
  * end on a no-show — and `cost_minutes` what THIS member is out on it (a partner's share on a
  * partner row). An older API sends neither and the row reads as it did.
  */
+/** The hours' end and the figure a line shows (E6-10) — split out for lizard's CCN gate. */
+function soldAndCost(row: MemberBookingRow, partner: boolean): { ends: string; cost: number | null } {
+  const cost = typeof row.cost_minutes === "number" ? row.cost_minutes : partner ? null : row.charged_minutes;
+  return { ends: row.sold_ends_at ?? row.ends_at, cost };
+}
+
 export function BookingLine({ row, zone, action, people }: {
   row: MemberBookingRow; zone: string; action?: ReactNode;
   /** D9 — who else is on the court ("with Sam"), when it has been read. */
@@ -39,8 +45,7 @@ export function BookingLine({ row, zone, action, people }: {
   const court = row.court_name ?? COPY.unknownCourt;
   const cancelled = row.status === "cancelled";
   const partner = row.role === "partner";
-  const ends = row.sold_ends_at ?? row.ends_at;
-  const cost = typeof row.cost_minutes === "number" ? row.cost_minutes : partner ? null : row.charged_minutes;
+  const { ends, cost } = soldAndCost(row, partner);
   return (
     <li
       data-booking-id={row.booking_id}
