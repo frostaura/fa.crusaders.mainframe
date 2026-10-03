@@ -6,6 +6,7 @@ import {
 import { Medal, Target } from "@/components/ui/icons";
 import { CELEBRATION_COPY, MY_GAME, playWhen } from "@/lib/playCopy";
 import { typography } from "@/lib/typography";
+import { SCALING_ICON_TARGET } from "@/components/ui/layout";
 import { cn } from "@/lib/utils";
 import { BadgeMark } from "./BadgeGrid";
 import type { Moment } from "./celebrationRules";
@@ -36,20 +37,23 @@ export function CelebrationMoment({ moment, acknowledge }: { moment: Moment; ack
   );
 }
 
-/** The title row's left padding mirrors `ui/dialog`'s CLEAR_OF_CLOSE right padding (the × target less the gutter). */
-const CENTRED_HEADER = "items-center pl-4 pr-4 text-center sm:pl-6 sm:pr-6 [&>:first-child]:pl-[calc(0.5rem+max(44px,2rem)-min(1rem,16px)+4px)]";
+const CENTRED_HEADER = "items-center pl-4 pr-4 text-center sm:pl-6 sm:pr-6";
 
 function MomentWords({ moment }: { moment: Moment }) {
   const { overline, name, body } = wordsFor(moment);
   const earned = moment.kind === "one" && moment.celebration.kind === "badge" ? CELEBRATION_COPY.earned(playWhen(moment.celebration.created_at)) : null;
   return (
     // R8 (FD1a's ask) — the header's first row clears the close × on its right; a centred title gets
-    // the same room on its left, so it stays on the sheet's centre (it sat 20px left of it).
+    // the ×'s own target as room on its left (ui/layout's token, no new value), so it stays on the
+    // sheet's centre (it sat 20px left of it).
     <DialogHeader className={CENTRED_HEADER}>
-      <DialogTitle className="flex flex-col items-center gap-1">
-        <span className={typography({ variant: "overline" })}>{overline}</span>
-        {name ? <span className="sr-only">: </span> : null}
-        {name ? <span className="text-xl font-semibold text-text-primary">{name}</span> : null}
+      <DialogTitle className="flex items-center">
+        <span aria-hidden="true" className={cn(SCALING_ICON_TARGET, "shrink-0")} />
+        <span className="flex min-w-0 flex-1 flex-col items-center gap-1">
+          <span className={typography({ variant: "overline" })}>{overline}</span>
+          {name ? <span className="sr-only">: </span> : null}
+          {name ? <span className="text-xl font-semibold text-text-primary">{name}</span> : null}
+        </span>
       </DialogTitle>
       <DialogDescription>{body}</DialogDescription>
       {earned ? <p data-celebration-earned="" className="text-xs text-text-secondary">{earned}</p> : null}

@@ -9,8 +9,9 @@ import { keepUnits } from "@/components/members/keepUnits";
 /**
  * R8 — the ring never pushes a 320 phone sideways at 200 % text (7rem + the gap + the edit button
  * outgrew the card: 1px), and its centre figure keeps each number with its unit ("6 h" / "45 min").
+ * It steps down by My game's own box in rem (`@container/game`), so only LARGE text shrinks it.
  */
-const RING_BOX = "relative size-[min(7rem,36vw)] shrink-0";
+const RING_BOX = "relative size-20 shrink-0 @[18rem]/game:size-28";
 
 /**
  * The monthly court-time ring (§9.1.1, §5.5): minutes on court this club month against the

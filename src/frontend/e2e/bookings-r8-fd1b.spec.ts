@@ -269,6 +269,24 @@ test.describe("L8-7 — Profile's stat labels at 320 / 200 %", () => {
   });
 });
 
+test.describe("the monthly ring keeps its size at normal text", () => {
+  test("390 at 100 %: the ring is 7rem (112px); it steps down only for large text", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page);
+    await serveApi(page, [
+      { path: "/api/v1/me/play", body: myPlayFixture() },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+      { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
+      { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null } },
+      ...memberShellRoutes(),
+    ]);
+    await page.goto("/profile");
+    const ring = page.locator("[data-ring] [role=img]").first();
+    await expect(ring).toBeVisible();
+    expect(Math.round((await ring.boundingBox())!.width)).toBe(112);
+  });
+});
+
 /* ───────────────────────── FD1a's ask — the celebration's centred title stays centred ───────────────────────── */
 
 test.describe("the celebration moment's title", () => {
@@ -291,7 +309,7 @@ test.describe("the celebration moment's title", () => {
       const m = await dialog.evaluate((d) => {
         const box = d.getBoundingClientRect();
         const title = d.querySelector<HTMLElement>("h2, [data-slot=dialog-title]")!;
-        const words = Array.from(title.querySelectorAll("span")).filter((s) => !s.classList.contains("sr-only")).map((s) => s.getBoundingClientRect());
+        const words = Array.from(title.querySelectorAll("span")).filter((s) => !s.classList.contains("sr-only") && s.children.length === 0 && (s.textContent ?? "").trim() !== "").map((s) => s.getBoundingClientRect());
         const close = Array.from(d.querySelectorAll("button")).find((b) => /close/i.test(b.getAttribute("aria-label") ?? b.textContent ?? ""))!.getBoundingClientRect();
         const left = Math.min(...words.map((r) => r.left));
         const right = Math.max(...words.map((r) => r.right));
