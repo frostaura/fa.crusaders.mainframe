@@ -34,7 +34,7 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
       // button at 375/390. Now the button drops under the text there, full width. F4-7: its label
       // wraps at 200 % text rather than overflowing (design-system rule for labels that must wrap).
       <div data-ring="none" className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border p-4">
-        <Target size={20} aria-hidden="true" className="shrink-0 text-text-muted" />
+        <Target size="1.25rem" aria-hidden="true" className="shrink-0 text-text-muted" />
         <p className="min-w-0 grow basis-48 text-sm text-text-secondary">{RING_COPY.setGoalHint}</p>
         <Button
           variant="outline"
@@ -81,7 +81,7 @@ export function CourtTimeRing({ ring, onEditGoal }: { ring: Ring | null; onEditG
         <p className="text-xs text-text-secondary">{RING_COPY.sessions(ring.sessions)}</p>
         {ring.reached ? (
           <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-success-strong">
-            <CheckCircle size={16} weight="bold" aria-hidden="true" />
+            <CheckCircle size="1rem" weight="bold" aria-hidden="true" />
             {RING_COPY.reached}
           </p>
         ) : null}

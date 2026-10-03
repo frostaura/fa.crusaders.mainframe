@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { bigText, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes, seat } from "./playersKit";
-import { myPlayFixture } from "./playKit";
+import { celebrationFixture, myPlayFixture } from "./playKit";
 
 /**
  * Review round 8 (lane FD1b — Bookings, booking detail, invites) — what only a browser can
@@ -263,5 +263,42 @@ test.describe("L8-7 — Profile's stat labels at 320 / 200 %", () => {
       return { text, same: top(at - 3, at - 1) === top(at, at + 3) };
     });
     expect(centre.same, `"${centre.text}" broke between a number and its unit`).toBe(true);
+    // L6-16 (FD1a's ask) — the streak's flame grows with its words (was 20px at 200 %).
+    const flame = await page.locator("[data-streak] svg").first().evaluate((el) => ({ w: el.getBoundingClientRect().width, html: el.outerHTML.slice(0, 160) }));
+    expect(flame.w, `the flame stayed small: ${flame.html}`).toBeGreaterThanOrEqual(36);
   });
+});
+
+/* ───────────────────────── FD1a's ask — the celebration's centred title stays centred ───────────────────────── */
+
+test.describe("the celebration moment's title", () => {
+  for (const width of [390, 1280] as const) {
+    test(`${width}: centred on the sheet, clear of the close ×`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.setViewportSize({ width, height: 844 });
+      await signIn(page);
+      await serveApi(page, [
+        { path: "/api/v1/me/play/celebrations", body: { timezone: "Africa/Johannesburg", items: [celebrationFixture()] } },
+        { path: "/api/v1/me/play", body: myPlayFixture() },
+        { path: "/api/v1/me/webauthn/credentials", body: [] },
+        { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
+        { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null } },
+        ...memberShellRoutes(),
+      ]);
+      await page.goto("/profile");
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const m = await dialog.evaluate((d) => {
+        const box = d.getBoundingClientRect();
+        const title = d.querySelector<HTMLElement>("h2, [data-slot=dialog-title]")!;
+        const words = Array.from(title.querySelectorAll("span")).filter((s) => !s.classList.contains("sr-only")).map((s) => s.getBoundingClientRect());
+        const close = Array.from(d.querySelectorAll("button")).find((b) => /close/i.test(b.getAttribute("aria-label") ?? b.textContent ?? ""))!.getBoundingClientRect();
+        const left = Math.min(...words.map((r) => r.left));
+        const right = Math.max(...words.map((r) => r.right));
+        return { off: Math.round((left + right) / 2 - (box.left + box.right) / 2), overlap: words.some((r) => r.right > close.left && r.top < close.bottom) };
+      });
+      expect(Math.abs(m.off), `the title sits ${m.off}px off the sheet's centre`).toBeLessThanOrEqual(3);
+      expect(m.overlap, "a title word under the close ×").toBe(false);
+    });
+  }
 });

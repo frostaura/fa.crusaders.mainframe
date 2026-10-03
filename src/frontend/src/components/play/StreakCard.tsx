@@ -20,7 +20,7 @@ export function StreakCard({ streak, pause, year, onPause }: {
     <div data-streak="" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <p className="inline-flex items-center gap-2 text-lg font-semibold text-text-primary">
-          <Fire size={20} weight={streak.current_weeks > 0 ? "fill" : "regular"} aria-hidden="true" className="text-accent-strong" />
+          <Fire size="1.25rem" weight={streak.current_weeks > 0 ? "fill" : "regular"} aria-hidden="true" className="shrink-0 text-accent-strong" />
           {streak.current_weeks > 0 ? STREAK_COPY.current(streak.current_weeks) : STREAK_COPY.none}
         </p>
         <p className="text-sm tabular-nums text-text-secondary">{STREAK_COPY.longest(streak.longest_weeks)}</p>
