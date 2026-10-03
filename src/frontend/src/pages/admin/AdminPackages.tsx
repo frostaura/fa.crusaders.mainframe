@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ConfirmButton } from "../../components/ConfirmButton";
+import { ConfirmDialog } from "../../components/admin/ConfirmDialog";
 import { Minutes } from "../../components/Minutes";
 import { useToast } from "../../components/Toast";
 import { useBoxAtLeast } from "../../components/admin/useBoxAtLeast";
@@ -23,7 +23,6 @@ import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import { useIsSmUp } from "../../components/ui/use-media-query";
 import { WithAside } from "../../components/ui/with-aside";
 import { adminEndpoints, type AdminPackage, type MemberGroup, type PackageStatus } from "../../lib/adminApi";
-import { describeFailure } from "../../lib/errors";
 import {
   PACKAGES_COPY as COPY, PACKAGE_LIMITS, baselineOf, perHour, savingOf, shelfOrder, type ShelfItem,
 } from "../../lib/packagesCopy";
@@ -339,23 +338,21 @@ function RowActions({ pkg, onEdit, onRetired }: { pkg: AdminPackage; onEdit: (p:
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button size="sm" variant="outline" aria-label={COPY.editLabel(pkg.name)} data-opens-editor={pkg.id} onClick={() => onEdit(pkg)}>{COPY.edit}</Button>
-      <ConfirmButton
-        idleLabel={COPY.retire}
-        ariaLabel={COPY.retireLabel(pkg.name)}
-        subject={pkg.name}
+      {/* R8 J8-5: a dialog, not the inline armed confirm — in the ~100px Actions column at 1280
+          its sentence ran eight lines of two words. The retired row leaves the shelf, so focus
+          goes to the page heading after (ConfirmDialog's floor). */}
+      <ConfirmDialog
+        trigger={<Button size="sm" variant="danger-soft" aria-label={COPY.retireLabel(pkg.name)}>{COPY.retire}</Button>}
+        title={COPY.retireLabel(pkg.name)}
+        description={COPY.retireConfirm(pkg.name)}
+        confirmLabel={COPY.retire}
         cancelLabel={COPY.cancel}
-        confirmLabel={COPY.retireConfirm(pkg.name)}
-        tone="danger"
+        action={COPY.retireAction}
+        codes={COPY.errorCodes}
         onConfirm={async () => {
-          try {
-            const retired = await adminEndpoints.packageArchive(pkg.id);
-            onRetired(retired);
-            return COPY.retired(pkg.name);
-          } catch (err) {
-            const said = describeFailure(err, { action: COPY.retireAction, codes: COPY.errorCodes });
-            toast.push({ tone: "danger", text: said, durationMs: 8000 });
-            throw err;
-          }
+          const retired = await adminEndpoints.packageArchive(pkg.id);
+          onRetired(retired);
+          toast.push({ tone: "success", text: COPY.retired(pkg.name) });
         }}
       />
     </div>

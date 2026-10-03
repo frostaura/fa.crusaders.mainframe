@@ -385,3 +385,26 @@ test("X8-3 — the Repeating bookings editor's Cancel gives focus back to Create
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect.poll(() => focused(page)).toBe("Create a repeating booking");
 });
+
+/* ───────────────────────────── J8-5 retiring a package has room to say so ───────────────────────────── */
+
+test.describe("J8-5 — the Retire confirmation is not squeezed into the Actions column", () => {
+  for (const width of [1280, 390]) {
+    test(`at ${width}`, async ({ page }) => {
+      const archived: string[] = [];
+      await open(page, "/admin/packages", adminRoutes([
+        { path: "/api/v1/admin/packages", body: { packages: PACKAGES } },
+        { method: "POST", path: "/api/v1/admin/packages/p-5/archive", respond: () => { archived.push("p-5"); return { ...PACKAGES[1], status: "archived" }; } },
+      ]), width);
+      await page.getByRole("button", { name: "Retire 5 hours" }).click({ timeout: 30_000 });
+      const sentence = page.getByText(/^Retire 5 hours\? It leaves every shelf now\./).filter({ visible: true }).first();
+      await expect(sentence).toBeVisible();
+      const box = (await sentence.boundingBox())!;
+      // The armed confirm sat in a ~100px cell, a few words a line (eight lines for one sentence).
+      expect(box.width, "the sentence's width").toBeGreaterThanOrEqual(Math.min(280, width - 80));
+      await page.getByRole("dialog").getByRole("button", { name: "Retire", exact: true }).click();
+      await expect.poll(() => archived.length).toBe(1);
+      await expect.poll(() => focused(page)).not.toBe("<body>");
+    });
+  }
+});

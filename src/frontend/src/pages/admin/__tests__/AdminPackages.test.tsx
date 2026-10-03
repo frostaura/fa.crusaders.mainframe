@@ -242,8 +242,12 @@ describe("retiring a package", () => {
     const stub = stubFetch(routes([{ method: "POST", path: "/api/v1/admin/packages/p10/archive", body: { ...PACKAGES[2], status: "archived" } }]));
     renderPage(<AdminPackagesPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: COPY.retireLabel("10 hours") }), { detail: 1 });
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!, { detail: 1 });
+    fireEvent.click(await screen.findByRole("button", { name: COPY.retireLabel("10 hours") }));
+    // R8 J8-5: a dialog, which says the consequence before anything is sent.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(COPY.retireConfirm("10 hours"))).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: COPY.retire }));
 
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path === "/api/v1/admin/packages/p10/archive")).toBe(true));
     expect(stub.calls.some((c) => c.method === "DELETE")).toBe(false);
