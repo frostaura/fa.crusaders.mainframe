@@ -86,9 +86,14 @@ export function statusTone(p: DetailPlayer, cancelled = false): ChipTone {
   return TONE[statusKey(p, cancelled)] ?? "neutral";
 }
 
-/** Only the game's own players are ever shown its result (§3.4) — and a cancelled game has none to record. */
+/**
+ * Only the game's own players are ever shown its result (§3.4) — and a cancelled game has none to
+ * record. Not an admin, and not the member who paid for the court at the box (R7 E7-5: a payer
+ * reads the booking, it is not their game).
+ */
 export function showsResult(d: BookingDetail): boolean {
-  return d.viewer.role !== "admin" && d.status !== "cancelled" && d.status !== "blocked";
+  const own = d.viewer.role === "organiser" || d.viewer.role === "player";
+  return own && d.status !== "cancelled" && d.status !== "blocked";
 }
 
 /** Whether another member on the booking has the same first name (R1 F2.13). */

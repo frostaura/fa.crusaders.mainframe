@@ -77,7 +77,7 @@ export function GameCard({ game, zone, badges }: { game: UpcomingGame; zone: str
         <span className="grid min-w-0 flex-1 gap-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="break-words text-sm font-semibold text-text-primary">{game.court_name}</span>
-            <Badge tone={game.role === "partner" ? "info" : "brand"}>{game.role === "partner" ? UPCOMING.partner : UPCOMING.organiser}</Badge>
+            <RoleBadge role={game.role} />
             {badges ?? (game.needs_action ? <Badge tone="warning">{UPCOMING.needsAction}</Badge> : null)}
           </span>
           <span className="text-sm tabular-nums text-text-secondary">{time}</span>
@@ -140,4 +140,16 @@ function GamePeople({ players }: { players: readonly UpcomingPlayer[] }) {
       <span className="min-w-0 break-words">{UPCOMING.people(faces.map((p) => firstName(p.name)), waiting)}</span>
     </span>
   );
+}
+
+/** Organiser, Partner — or R7 E7-5's "Paid for": a court the member paid for at the box. */
+const ROLE_BADGE = {
+  organiser: { tone: "brand", text: UPCOMING.organiser },
+  partner: { tone: "info", text: UPCOMING.partner },
+  payer: { tone: "neutral", text: UPCOMING.payerBadge },
+} as const;
+
+function RoleBadge({ role }: { role: UpcomingGame["role"] }) {
+  const badge = ROLE_BADGE[role] ?? ROLE_BADGE.organiser;
+  return <Badge tone={badge.tone}>{badge.text}</Badge>;
 }

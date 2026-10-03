@@ -155,6 +155,8 @@ function useEarlyResult(bookingId: string): EarlyResult | null {
 }
 
 function headerLine(d: BookingDetail): string {
+  // R7 E7-5 — the member who paid for this court at the box: what they did, not whose game it is.
+  if (d.viewer.role === "payer") return DETAIL_COPY.payerLine;
   const who = organiserName(d);
   const by = who ? DETAIL_COPY.organisedBy(who) : DETAIL_COPY.organisedByYou;
   const status = DETAIL_COPY.statusLine[d.status] ?? "";
