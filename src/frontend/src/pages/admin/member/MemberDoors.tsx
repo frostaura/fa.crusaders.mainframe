@@ -140,7 +140,10 @@ function DoorPagesView({ pages }: { pages: Pages }) {
  */
 function doorName(row: MemberDoorRow): string {
   const { name: given, gate_key: key } = row.door;
-  const name = given === null && key === null ? COPY.unknownDoor : doorDisplayName({ name: given, device_code: key });
+  // R8 (E7-4 rest): the board's own code is what the Doors page and the Night name an unnamed
+  // gate by; `gate_key` only for a row older than `device_code` on the wire.
+  const code = row.door.device_code ?? key;
+  const name = given === null && code === null ? COPY.unknownDoor : doorDisplayName({ name: given, device_code: code });
   return row.door.removed ? `${name} ${COPY.removedDoor}` : name;
 }
 
@@ -224,10 +227,14 @@ function useDoorPages(userId: string, filters: MemberDoorFilters) {
  */
 function useDoorOptions(): FilterOption[] {
   const [read] = useRead("doors", doorEndpoints.doors);
-  const doors = read.data?.doors ?? [];
+  return doorOptions(read.data?.doors ?? []);
+}
+
+/** The options themselves, each door by the one name every door surface uses (R8, E7-4 rest: not "Door gate"). */
+export function doorOptions(doors: ReadonlyArray<{ device: { id: string; name: string; device_code: string } }>): FilterOption[] {
   return [
     { value: "", label: COPY.anyDoor },
-    ...doors.map((d) => ({ value: d.device.id, label: d.device.name })),
+    ...doors.map((d) => ({ value: d.device.id, label: doorDisplayName(d.device) })),
   ];
 }
 

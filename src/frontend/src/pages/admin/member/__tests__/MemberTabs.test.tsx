@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ledgerRowFixture, signOut, unreachable } from "@/test/harness";
 import { ACCESS_COPY, BOOKINGS_TAB_COPY, DOORS_TAB_COPY, LEDGER_LIMIT, WALLET_TAB_COPY } from "@/lib/memberDetailCopy";
 import { DETAIL_LINKS } from "@/lib/playersCopy";
+import { doorOptions } from "../MemberDoors";
 import { BASE, MEMBER_ID, baseRoutes, bookingRow, detailFixture, doorRow, doorsPage, renderMember, serve } from "./memberKit";
 
 const at = (path: string) => `/admin/members/${MEMBER_ID}/${path}`;
@@ -162,6 +163,22 @@ describe("member detail — door history (D9)", () => {
     renderMember(at("doors"));
     expect(await screen.findByText("Unnamed scanner (gate-44c103)")).toBeInTheDocument();
     expect(screen.queryByText("Door gate")).not.toBeInTheDocument();
+  });
+
+  /** Review round 8 (E7-4 rest): the server names an unnamed gate by its board code, `device_code`. */
+  it("names an unnamed gate by the board code the row carries, as the Doors page does", async () => {
+    serve(doorRoutes(doorsPage([doorRow({ door: { id: "d2", name: null, gate_key: null, device_code: "gate-44c103", removed: false } })])));
+    renderMember(at("doors"));
+    expect(await screen.findByText("Unnamed scanner (gate-44c103)")).toBeInTheDocument();
+    expect(screen.queryByText(DOORS_TAB_COPY.unknownDoor)).not.toBeInTheDocument();
+  });
+
+  it("offers each door in the filter by that same name, never the \"Door gate\" placeholder", () => {
+    const options = doorOptions([
+      { device: { id: "d1", name: "Front door", device_code: "gate-aaaaaa" } },
+      { device: { id: "d2", name: "Door gate", device_code: "gate-44c103" } },
+    ]);
+    expect(options.map((o) => o.label)).toEqual([DOORS_TAB_COPY.anyDoor, "Front door", "Unnamed scanner (gate-44c103)"]);
   });
 
   it("says nothing was recorded about the look-up when the read failed", async () => {
