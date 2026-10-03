@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Alert } from "@/components/Alert";
 import { pendingInvite } from "@/lib/playersPending";
-import { INVITES_COPY } from "@/lib/playersCopy";
+// R7 P5-7 — shell copy (`bellCopy`), not `playersCopy`: this note is in every member's first load.
+import { PENDING_INVITE_NOTE } from "@/lib/bellCopy";
 
 /**
  * R1 F2.3 — on the way into the club (register, the "check your inbox" screen, the confirmed
@@ -15,7 +16,7 @@ export function PendingInviteNote({ stage }: { stage: "join" | "verified" }) {
   if (!waiting) return null;
   return (
     <Alert tone="info" live="off" data-pending-invite="">
-      {stage === "join" ? INVITES_COPY.pendingNote : INVITES_COPY.pendingNoteVerified}
+      {stage === "join" ? PENDING_INVITE_NOTE.join : PENDING_INVITE_NOTE.verified}
     </Alert>
   );
 }
