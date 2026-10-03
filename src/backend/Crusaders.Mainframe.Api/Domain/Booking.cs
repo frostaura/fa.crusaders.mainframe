@@ -1,3 +1,5 @@
+using System.Linq.Expressions;
+
 namespace Crusaders.Mainframe.Api.Domain;
 
 public enum BookingStatus
@@ -155,6 +157,22 @@ public sealed class Booking : ITenantScoped
     public DateTimeOffset? NoShowReversedAt { get; set; }
 
     /// <summary>
+    /// When the no-show sweep refunded this booking IN FULL, with no penalty, because no box on
+    /// its court was reachable at the grace deadline (<c>feature-spec.md</c> §6a,
+    /// <c>settlement-model.md</c> S5a). Null on every other row.
+    ///
+    /// <para>
+    /// The settlement is unchanged — the row is still <see cref="BookingStatus.NoShow"/>, so the
+    /// late-evidence reversal and every money path read it as before. What this stamp changes is
+    /// what an admin is TOLD: the member was mailed "you have not been marked down for missing
+    /// it", and the admin's counts, lists and booking detail said "No-show" about the same row
+    /// (review round 6, E6-6). A counted no-show is <see cref="BookingStatus.NoShow"/> with this
+    /// null — see <see cref="NoShows"/>.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? OutageRefundedAt { get; set; }
+
+    /// <summary>
     /// The booking whose late attendance evidence displaced this one, when
     /// <see cref="CancellationReason"/> is <c>ResoldTailRefunded</c>.
     ///
@@ -205,4 +223,23 @@ public sealed class Booking : ITenantScoped
     public DateTimeOffset? PlayRecomputeDueAt { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Which swept bookings an admin is told were no-shows (review round 6, E6-6). The settlement's
+/// own rule is <see cref="BookingStatus.NoShow"/>, and it stays the rule for the money; the count,
+/// the list's status word and the booking detail ask this one, so a booking refunded in full
+/// because its box was dark — the member mailed "not marked down" — is never one of them.
+/// </summary>
+public static class NoShows
+{
+    /// <summary>A no-show the club holds against the member: swept, and not refunded for an outage.</summary>
+    public static readonly Expression<Func<Booking, bool>> Counted =
+        b => b.Status == BookingStatus.NoShow && b.OutageRefundedAt == null;
+
+    /// <summary>The same rule for a row already in memory.</summary>
+    public static bool IsCounted(Booking b) => b.Status == BookingStatus.NoShow && b.OutageRefundedAt is null;
+
+    /// <summary>A no-show the sweep refunded in full because no box on its court was reachable.</summary>
+    public static bool IsRefundedForOutage(Booking b) => b.Status == BookingStatus.NoShow && b.OutageRefundedAt is not null;
 }

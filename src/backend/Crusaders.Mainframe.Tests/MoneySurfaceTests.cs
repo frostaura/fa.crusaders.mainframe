@@ -57,6 +57,22 @@ public class MoneySurfaceTests
         }
     }
 
+    /// <summary>
+    /// J6-6: a late cancel's preview line said "15 minutes back on your balance." while the
+    /// member was 11 better off — the gross leg with the penalty beside it unmentioned, in the
+    /// one line an inbox shows. The preview names both legs, as the no-show mail's does.
+    /// </summary>
+    [Fact]
+    public void A_late_cancellations_preview_names_the_penalty_beside_the_refund()
+    {
+        var late = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 15, 4);
+        var free = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 15, null);
+
+        Assert.DoesNotContain("15 minutes back on your balance", late.HtmlBody);
+        Assert.Contains("Refunded 15 minutes, less a late-cancellation penalty of 4 minutes.", late.HtmlBody);
+        Assert.Contains("15 minutes back on your balance.", free.HtmlBody);
+    }
+
     [Fact]
     public void The_cancellation_email_states_minutes_and_never_rand()
     {

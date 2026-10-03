@@ -579,7 +579,11 @@ public static partial class EmailTemplates
 
         return EmailChrome.Compose(club, to, new EmailContent(
             Subject: byClub is null ? $"Booking cancelled — {slot.Label}" : $"The club cancelled your booking — {slot.Label}",
-            Preheader: $"{Min(refundedMinutes)} back on your balance.",
+            // Both legs when there is a penalty (review round 6, J6-6): the preview alone said
+            // "15 minutes back" to a member 11 better off. Still the two ledger figures, never a net.
+            Preheader: penaltyMinutes is > 0
+                ? $"Refunded {Min(refundedMinutes)}, less a late-cancellation penalty of {Min(penaltyMinutes.Value)}."
+                : $"{Min(refundedMinutes)} back on your balance.",
             Heading: byClub is null ? "Cancelled" : "Cancelled by the club",
             Blocks: blocks,
             WhyThis: WhyBooking));

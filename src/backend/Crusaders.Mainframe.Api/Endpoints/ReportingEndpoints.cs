@@ -160,7 +160,8 @@ public static class ReportingEndpoints
                          && b.StartsAt <= now)
                 .ToListAsync(ct);
             var total = bookings.Count;
-            var noShow = bookings.Count(b => b.Status == BookingStatus.NoShow);
+            // E6-6: a booking refunded in full because its box was dark is not a no-show.
+            var noShow = bookings.Count(NoShows.IsCounted);
             return Results.Ok(new { from = f, to = t, total, no_show = noShow, no_show_pct = total == 0 ? 0 : Math.Round(100.0 * noShow / total, 2) });
         });
 
@@ -266,7 +267,7 @@ public static class ReportingEndpoints
                     // changed by this: it is pre-filtered by UserId, and a block has none.
                     bookings = bk.Count(b => b.Status is not BookingStatus.Cancelled and not BookingStatus.AdminBlock),
                     blocked = bk.Count(b => b.Status == BookingStatus.AdminBlock),
-                    no_shows = bk.Count(b => b.Status == BookingStatus.NoShow),
+                    no_shows = bk.Count(NoShows.IsCounted),
                 };
             }).ToList();
             return Results.Ok(rows);

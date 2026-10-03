@@ -435,6 +435,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("NoShowReversedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("OutageRefundedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("PaidByUserId")
                         .HasColumnType("uuid");
 

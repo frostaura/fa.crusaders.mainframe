@@ -260,6 +260,7 @@ public sealed class NoShowWorker : BackgroundService
         // Now the activation's write moves Version, this save matches nothing, and the
         // catch below leaves the booking alone.
         b.Status = BookingStatus.NoShow;
+        if (courtWasDark) b.OutageRefundedAt = now;   // E6-6: what an admin is told — Booking.OutageRefundedAt
 
         // Settling a no-show releases the court (decision 2026-08-24, review H5). The
         // row keeps only its elapsed portion — EndsAt truncated to the sweep's own

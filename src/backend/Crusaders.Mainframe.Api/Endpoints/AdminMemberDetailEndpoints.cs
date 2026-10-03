@@ -186,7 +186,8 @@ public static class AdminMemberDetailEndpoints
     ///
     /// <para>
     /// <c>bookings</c> counts every booking that was not cancelled; <c>no_shows</c> counts the
-    /// sweep's verdicts; <c>sessions_played</c> counts bookings with a <c>CheckedInAt</c> —
+    /// sweep's verdicts held against the member — not one refunded in full because its box was
+    /// dark (<see cref="NoShows"/>, E6-6); <c>sessions_played</c> counts bookings with a <c>CheckedInAt</c> —
     /// <b>attendance means <c>CheckedInAt</c>, never the clock and never <c>ChargedAt</c></b>,
     /// which under charge-at-booking is set on every row. A no-show later reversed by late box
     /// evidence carries a <c>CheckedInAt</c> and is counted as played, which is the truth.
@@ -202,7 +203,7 @@ public static class AdminMemberDetailEndpoints
         return new ActivityCounts(
             Bookings: await window.CountAsync(
                 b => b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.AdminBlock, ct),
-            NoShows: await window.CountAsync(b => b.Status == BookingStatus.NoShow, ct),
+            NoShows: await window.CountAsync(NoShows.Counted, ct),
             SessionsPlayed: await window.CountAsync(b => b.CheckedInAt != null, ct));
     }
 
@@ -379,6 +380,22 @@ public sealed record MemberBookingRow(
     public MemberBookingActor? Organiser { get; init; }
 
     /// <summary>
+    /// The end the booking was SOLD to. <c>ends_at</c> is the row's live end, which the no-show
+    /// sweep cuts to its own clock — the list read "01:55–02:00" where the member's own page read
+    /// "01:55–02:40" (review round 6, E6-10).
+    /// </summary>
+    [JsonPropertyName("sold_ends_at")]
+    public DateTimeOffset SoldEndsAt { get; init; }
+
+    /// <summary>
+    /// What THIS member is out on the booking: their own rows on it, netted — the charge, any
+    /// refund, any penalty, the shares they paid or were paid. <c>charged_minutes</c> is the gross
+    /// charge, and a swept no-show read "45 min" beside a member page saying "cost 13" (E6-10).
+    /// </summary>
+    [JsonPropertyName("cost_minutes")]
+    public int CostMinutes { get; init; }
+
+    /// <summary>
     /// The rows, with their court names and the names of whoever booked them, in two reads
     /// rather than 2n.
     ///
@@ -401,6 +418,7 @@ public sealed record MemberBookingRow(
             .Where(c => courtIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         var names = await PersonNames.ForAsync(db, rows.Select(r => (Guid?)r.ActorUserId).Concat(rows.Select(r => r.UserId)), ct);
+        var costs = await CostsAsync(db, userId, rows, ct);
 
         return rows.Select(b => new MemberBookingRow(
             BookingId: b.Id,
@@ -408,7 +426,7 @@ public sealed record MemberBookingRow(
             CourtName: courts.TryGetValue(b.CourtId, out var court) ? court : null,
             StartsAt: b.StartsAt,
             EndsAt: b.EndsAt,
-            Status: b.Status.ToString().ToLowerInvariant(),
+            Status: StatusWord(b),
             ChargedMinutes: b.AmountChargedMinutes,
             CheckedInAt: b.CheckedInAt,
             CancelledAt: b.CancelledAt,
@@ -419,7 +437,33 @@ public sealed record MemberBookingRow(
         {
             Role = b.UserId == userId ? "organiser" : "partner",
             Organiser = new MemberBookingActor(b.UserId, PersonNames.Of(b.UserId, names), b.UserId == userId),
+            SoldEndsAt = BookingService.OriginalEndsAt(b),
+            CostMinutes = Math.Max(0, -costs.GetValueOrDefault(b.Id)),
         }).ToList();
+    }
+
+    /// <summary>The status as the admin console's chip reads it — see <see cref="RefundedOutage"/>.</summary>
+    private static string StatusWord(Booking b)
+    {
+        return NoShows.IsRefundedForOutage(b) ? RefundedOutage : b.Status.ToString().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// The status word of a no-show refunded in full because no box on its court was reachable —
+    /// never <c>noshow</c>, which is what the member was told they were not marked down as (E6-6).
+    /// </summary>
+    public const string RefundedOutage = "refunded_outage";
+
+    /// <summary>This member's net movement on each of these bookings, in one read.</summary>
+    private static async Task<Dictionary<Guid, int>> CostsAsync(
+        MainframeDbContext db, Guid userId, IReadOnlyList<Booking> rows, CancellationToken ct)
+    {
+        var ids = rows.Select(r => (Guid?)r.Id).ToList();
+        return await db.LedgerEntries.AsNoTracking()
+            .Where(l => l.UserId == userId && ids.Contains(l.RelatedBookingId))
+            .GroupBy(l => l.RelatedBookingId!.Value)
+            .Select(g => new { g.Key, Net = g.Sum(l => l.AmountMinutes) })
+            .ToDictionaryAsync(x => x.Key, x => x.Net, ct);
     }
 }
 

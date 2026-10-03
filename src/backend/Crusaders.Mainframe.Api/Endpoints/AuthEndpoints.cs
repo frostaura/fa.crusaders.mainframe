@@ -51,6 +51,10 @@ public static class AuthEndpoints
         g.MapPost("/login", async (
             LoginRequest req, HttpContext ctx, AuthService auth, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
+            // A body missing either field is a malformed request, not a wrong password: it
+            // answered 500 internal_error from deep inside the sign-in (review round 6, J6-10).
+            // Shape only — it says nothing about whether any account exists.
+            if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrEmpty(req.Password)) return MissingFields();
             if (AccountLimited(ctx, "login", req.Email) is { } limited) return limited;
             var result = await auth.LoginAsync(req.Email, req.Password, ct);
             return result switch
@@ -90,6 +94,7 @@ public static class AuthEndpoints
 
         g.MapPost("/forgot-password", async (ForgotPasswordRequest req, HttpContext ctx, AuthService auth, CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(req.Email)) return MissingFields();
             if (AccountLimited(ctx, "reset", req.Email) is { } limited) return limited;
             await auth.RequestPasswordResetAsync(req.Email, ct);
             // Always return ok — don't leak whether the email exists.
@@ -98,6 +103,7 @@ public static class AuthEndpoints
 
         g.MapPost("/reset-password", async (ResetPasswordRequest req, AuthService auth, CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(req.Token) || req.NewPassword is null) return MissingFields();
             if (req.NewPassword.Length < 8) return Results.BadRequest(new { error = "password_too_short" });
             var ok = await auth.ResetPasswordAsync(req.Token, req.NewPassword, ct);
             return ok ? Results.Ok(new { reset = true }) : Results.BadRequest(new { error = "invalid_or_expired" });
@@ -186,6 +192,12 @@ public static class AuthEndpoints
     /// The per-account sign-in limit (B14): null to go ahead, else the 429. The per-address
     /// ceiling is the <see cref="RateLimitPolicies.SignIn"/> policy on the route.
     /// </summary>
+    /// <summary>The 400 a body missing a required field gets — the resend route's existing answer.</summary>
+    private static IResult MissingFields()
+    {
+        return Results.BadRequest(new { error = "missing_fields" });
+    }
+
     private static IResult? AccountLimited(HttpContext ctx, string purpose, string? email)
     {
         var tenant = ctx.RequestServices.GetRequiredService<Multitenancy.ITenantContext>();

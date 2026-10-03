@@ -147,6 +147,10 @@ public static class AdminMemberEndpoints
                     refunds_minutes = g2.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountMinutes),
                     penalties_minutes = -g2.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountMinutes),
                     adjustments_minutes = g2.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    // R6 (E6-12): the two buckets the club's daily report and the member's own report
+                    // carry and this one did not, so its columns did not sum to its own net.
+                    reversals_minutes = g2.Where(e => LedgerEntryTypes.Reversal.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    share_transfers_minutes = g2.Where(e => LedgerEntryTypes.Transfer.Contains(e.Type)).Sum(e => e.AmountMinutes),
                     net_minutes = g2.Sum(e => e.AmountMinutes),
                     movement_count = g2.Count(),
                 })
@@ -162,9 +166,10 @@ public static class AdminMemberEndpoints
                     user_id = membership.UserId,
                     full_name = membership.FullName,
                     membership_number = membership.MembershipNumber,
+                    // `member_class` is gone from this report (review round 6, E6-12): nothing reads
+                    // it here, and the one release it was kept for has shipped. The members list and
+                    // the member.* webhooks keep theirs until their own removal (webhooks.md).
                     groups = GroupsWire(spendGroups),
-                    // Deprecated for one release — derived from the league group (D2).
-                    member_class = MemberTariff.LegacyClassOf(spendGroups),
                 },
                 totals = new
                 {
@@ -178,6 +183,8 @@ public static class AdminMemberEndpoints
                     // the columns did not sum to the total. A pre-existing inconsistency,
                     // not one introduced by the LightsPurchase sweep.
                     adjustments_minutes = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    reversals_minutes = entries.Where(e => LedgerEntryTypes.Reversal.Contains(e.Type)).Sum(e => e.AmountMinutes),
+                    share_transfers_minutes = entries.Where(e => LedgerEntryTypes.Transfer.Contains(e.Type)).Sum(e => e.AmountMinutes),
                     net_minutes = entries.Sum(e => e.AmountMinutes),
                     movement_count = entries.Count,
                 },
