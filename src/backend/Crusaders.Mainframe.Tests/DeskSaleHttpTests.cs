@@ -95,6 +95,29 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         Assert.Equal("reason_required", (await JsonOf(blank)).GetProperty("error").GetString());
     }
 
+    /// <summary>
+    /// Review round 11, J11-1: the same key sent to ANOTHER member's sell URL answered 200 with the
+    /// first member's sale — entry id, package, "270 → 300" — while nothing was sold to the second.
+    /// It is refused as a reused key, and nothing moves.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_sale_key_reused_for_another_member_is_refused_not_replayed()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkx");
+        var admin = Admin(f, club);
+
+        var body = new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Cash", idempotencyKey = "sale-x", quotedPriceZar = 120m };
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId), body)).StatusCode);
+
+        var crossed = await admin.PostAsJsonAsync(SellPath(club.OtherUserId), body);
+        Assert.Equal(HttpStatusCode.Conflict, crossed.StatusCode);
+        Assert.Equal("idempotency_key_reused", (await JsonOf(crossed)).GetProperty("error").GetString());
+        Assert.Empty(await LedgerAsync(f, club, club.OtherUserId));
+        Assert.Single(await LedgerAsync(f, club, club.MemberUserId));
+    }
+
     /// <summary>A retried sale moves the money once; the same key with another package is refused, not replayed.</summary>
     [SkippableFact]
     public async Task A_sale_is_idempotent_on_the_desks_key()

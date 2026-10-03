@@ -603,6 +603,32 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(11, await BalanceAsync(factory, seeded));
     }
 
+    /// <summary>
+    /// Review round 11, J11-1. The replay compared amount, type, booking and rand but not WHOSE
+    /// money: key K posted for Ann, then K posted to Ben's URL, answered 200 with Ann's entry id,
+    /// <c>member</c> = Ben and fabricated balances — and moved nothing. The desk read "applied".
+    /// A key is one member's movement; another member's URL is a different movement.
+    /// </summary>
+    [SkippableFact]
+    public async Task Reusing_a_key_for_another_member_is_refused_not_replayed()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+        var other = seeded with { MemberUserId = seeded.AdminUserId };
+
+        Assert.Equal(HttpStatusCode.OK, (await AdjustAsync(client, seeded, 30, "lights", "kx")).StatusCode);
+
+        var crossed = await AdjustAsync(client, other, 30, "lights", "kx");
+        Assert.Equal(HttpStatusCode.Conflict, crossed.StatusCode);
+        Assert.Equal("idempotency_key_reused", (await crossed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        Assert.Equal(30, await BalanceAsync(factory, seeded));
+        Assert.Equal(0, await BalanceAsync(factory, other));
+    }
+
     /// <summary>The same key with the same payload is still a retry, and still replays.</summary>
     [SkippableFact]
     public async Task Reusing_a_key_with_the_same_payload_replays()

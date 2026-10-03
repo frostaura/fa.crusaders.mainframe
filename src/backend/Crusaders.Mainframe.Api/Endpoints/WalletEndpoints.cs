@@ -565,10 +565,18 @@ public static partial class WalletEndpoints
     /// applied. A matching payload replays; a changed one is <c>409 idempotency_key_reused</c>
     /// carrying what is actually stored.
     /// </para>
+    ///
+    /// <para>
+    /// <b>R11 J11-1: and for the same MEMBER.</b> Key K posted for one member, then K posted to
+    /// another member's URL, answered 200 with the first member's entry, <c>member</c> = the second
+    /// and balances computed from the second's — nothing moved, and the desk was told it had. A key
+    /// names one member's movement; any other member's is a different one, and is refused.
+    /// </para>
     /// </summary>
     private static IResult Replay(LedgerEntry stored, DeskMovement m, int balanceBefore, Domain.User user)
     {
-        var same = stored.AmountMinutes == m.AmountMinutes
+        var same = stored.UserId == m.UserId
+                && stored.AmountMinutes == m.AmountMinutes
                 && stored.Type == m.Kind.Type
                 && stored.RelatedBookingId == m.RelatedBookingId
                 && stored.ZarPaid == m.ZarPaid;
