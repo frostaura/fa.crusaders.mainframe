@@ -22,6 +22,8 @@ export type LedgerRowWithActor = LedgerRow & {
    * `ZarPaid`). 0 on a package given at no charge. Absent from older servers.
    */
   zar_paid?: number | null;
+  /** R9 J9-3: the desk's code on a by-hand row (`package_free`, `top_up_cash`, `goodwill`, …); null otherwise. */
+  reason_code?: string | null;
 };
 
 export const LEDGER_COPY = {
@@ -89,7 +91,8 @@ export function ledgerCategory(row: LedgerRow): string {
   if (row.type === "ShareTransfer" && owner) {
     return `${label}, ${row.signedAmountMinutes < 0 ? "out of" : "into"} ${owner}'s wallet`;
   }
-  if (row.type === "AdminTopUp" && (row as LedgerRowWithActor).zar_paid === 0) return DESK_GIFT;
+  const desk = row as LedgerRowWithActor;
+  if (row.type === "AdminTopUp" && (desk.reason_code === "package_free" || desk.zar_paid === 0)) return DESK_GIFT;
   return label;
 }
 
