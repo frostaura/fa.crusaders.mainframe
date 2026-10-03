@@ -62,7 +62,7 @@ export type { BookedOutcome } from "./useBookFlow";
  * </p>
  */
 type HeldNow = { held: number; owedBack: number; until: string | null; parts?: HeldPart[] };
-type Spendable = { spendable: number | null; held: HeldNow | null };
+type Spendable = { spendable: number | null; held: HeldNow | null; refresh: () => Promise<void> };
 
 type StepViewProps = {
   flow: BookFlow; isAdmin: boolean; reasonId: string; actorUserId: string | null; terms: BookSheetProps["cancelTerms"];
@@ -97,17 +97,19 @@ export function BookSheet(props: BookSheetProps) {
 
 /** The member's SPENDABLE figure when the wallet has one, else the balance the page passed. */
 function useSpendable(given: number | null): Spendable {
-  const { held } = useBalance();
+  const { held, refresh } = useBalance();
   // Hoisted out of the literal: lizard's .tsx lexer reads a bare comparison inside one as a tag.
   const holding = Boolean(held && (held.held > 0 || held.owedBack > 0));
   const shown = held && holding ? { held: held.held, owedBack: held.owedBack, until: held.until, parts: heldPartsOf(held) } : null;
-  return { spendable: held ? held.spendable : given, held: shown };
+  return { spendable: held ? held.spendable : given, held: shown, refresh };
 }
 
 function BookFlowView(props: ViewProps) {
   const wallet = useSpendable(props.balanceMinutes);
   const flow = useBookFlow({
     ...props, balanceMinutes: props.isAdmin ? props.balanceMinutes : wallet.spendable, held: wallet.held,
+    // R7 X7-2 — a refusal for want of minutes: the chip is read again, so it says what the sheet does.
+    onWalletStale: () => { void wallet.refresh(); },
   });
   const body = useRef<HTMLDivElement>(null);
   /** The sentence an unavailable Book button is described by. */

@@ -74,6 +74,11 @@ export type BookFlowInput = {
    */
   sheetOpen?: boolean;
   onBusy?: (busy: boolean) => void;
+  /**
+   * R7 X7-2 — the club refused for want of minutes, so the wallet on this phone is stale: read it
+   * again (the chip and every other figure follow).
+   */
+  onWalletStale?: () => void;
 };
 
 export type Primary =
@@ -247,6 +252,28 @@ export function refusalSentence(error: unknown, withPlayers = false, forName: st
     : describeFailure(error, { action: BOOK_SHEET.failedAction });
 }
 
+/**
+ * R7 X7-2 — what a 402 `insufficient_balance` says the payer can spend NOW (`current_minutes`, the
+ * club's spendable figure), or null for any other answer.
+ */
+function statedSpendable(error: unknown): number | null {
+  if (!(error instanceof ApiError) || error.code !== "insufficient_balance") return null;
+  const stated = error.detail("current_minutes");
+  return typeof stated === "number" && Number.isFinite(stated) ? Math.trunc(stated) : null;
+}
+
+/**
+ * The member's balance as the sheet reads it: the club's figure from a 402 while the wallet on
+ * this phone still says what it said when that refusal came (R7 X7-2), the wallet's otherwise —
+ * the moment the wallet's re-read lands with anything else, it is the truth again.
+ */
+function useAdoptedBalance(balance: number | null) {
+  const [adopted, setAdopted] = useState<{ over: number | null; value: number } | null>(null);
+  const shown = adopted && adopted.over === balance ? adopted.value : balance;
+  const adopt = useCallback((value: number) => setAdopted({ over: balance, value }), [balance]);
+  return { shown, adopt };
+}
+
 /** Where the steps go next — a step id, not an index, so inserting Split never shifts Confirm. */
 function neighbour(steps: readonly StepId[], at: StepId, by: 1 | -1): StepId {
   const index = Math.max(0, steps.indexOf(at));
@@ -256,7 +283,9 @@ function neighbour(steps: readonly StepId[], at: StepId, by: 1 | -1): StepId {
 /* ─────────────────────────────── the hook ─────────────────────────────── */
 
 export function useBookFlow(input: BookFlowInput) {
-  const { slots, timezone, sliceMinutes, isAdmin, actorUserId, balanceMinutes } = input;
+  const { slots, timezone, sliceMinutes, isAdmin, actorUserId } = input;
+  const wallet = useAdoptedBalance(input.balanceMinutes);
+  const balanceMinutes = wallet.shown;
   const [stepId, setStepId] = useState<StepId>(() => stepsFor({ isAdmin })[0]);
   const [who, setWhoState] = useState<BookAs>(() => initialWho(isAdmin, input.bookAsUserId));
   const [key, setKey] = useState(() => newIdempotencyKey(isAdmin ? "ab" : "mb"));
@@ -320,6 +349,11 @@ export function useBookFlow(input: BookFlowInput) {
       // A re-read already happened on the way here when there was one to make.
       failure: (error) => {
         input.onSending?.(null);
+        const stated = isAdmin ? null : statedSpendable(error);
+        if (stated !== null) {
+          wallet.adopt(stated);
+          input.onWalletStale?.();
+        }
         late.sayIfGone("danger", () => refusalSentence(error, Boolean(players.payload)));
         const reread = Boolean(input.reread) && worthRereading(error);
         if (!reread && provesStaleGrid(error)) input.onStale?.();
