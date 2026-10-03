@@ -89,13 +89,23 @@ export type FocusAfterOptions = {
  * (`ui/dialog` `rescueFromBody`). That rescue is the floor, not a choice: a caller that named a
  * target must still win over it. It raced this module on a slow runner: when the Record button
  * was already gone at the sheet's close, `<main>` took focus first, read as "held", and the
- * result card's heading never got it (ResultCard F2-12, red on CI only).
+ * result card's heading never got it (ResultCard F2-12, red on CI only). The dialog container
+ * itself is the same kind of floor.
  */
 function adrift(active: Element | null): boolean {
   if (active === null) return true;
   if (active === document.body) return true;
   if (active.tagName === "MAIN") return true;
+  // The dialog CONTENT element itself (not something inside it): Radix's FocusScope parks focus
+  // there when the control holding it unmounts, so it is as unchosen as the body (R10 X10-2).
+  if (isDialogContainer(active)) return true;
   return !active.isConnected;
+}
+
+/** The dialog surface itself — where FocusScope leaves focus nobody chose. */
+export function isDialogContainer(el: Element | null): boolean {
+  const role = el?.getAttribute("role");
+  return role === "dialog" || role === "alertdialog";
 }
 
 /**

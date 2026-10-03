@@ -717,7 +717,13 @@ export function ConfirmButton({
     // Only where focus is genuinely adrift. The doors pages move focus to a receipt heading
     // when a fleet action lands; a child effect runs before a parent's, so by the time
     // theirs runs this has already declined to compete with it.
-    if (active === null || active === document.body) triggerRef.current?.focus();
+    // So is this control's OWN dialog container: when the armed pair unmounts inside a sheet,
+    // Radix's FocusScope parks focus on the content element before this runs (R10 X10-2). A
+    // different dialog (one the action opened) holding focus is somebody's choice; leave it.
+    const ownDialog = triggerRef.current?.closest("[role=dialog],[role=alertdialog]") ?? null;
+    if (active === null || active === document.body || (ownDialog !== null && active === ownDialog)) {
+      triggerRef.current?.focus();
+    }
   }, [armed, pending]);
 
   /** The armed block, brought to where it can be read — never past what the caller needs. */

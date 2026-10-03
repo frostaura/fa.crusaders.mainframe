@@ -60,6 +60,22 @@ describe("focusAfterAction — filling a vacuum, and waiting for one", () => {
     expect(document.activeElement).toBe(target);
   });
 
+  it("treats a dialog container holding focus as a vacuum (R10 X10-2)", () => {
+    // Radix's FocusScope parks focus on the content element when the control holding it
+    // unmounts; that is nobody's choice, and a named target must still win over it.
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.tabIndex = -1;
+    document.body.append(dialog);
+    dialog.focus();
+    const target = button("successor");
+    dialog.append(target);
+    focusAfterAction(() => target);
+
+    vi.advanceTimersByTime(1);
+    expect(document.activeElement).toBe(target);
+  });
+
   it("leaves focus alone when somebody else is holding it on purpose", () => {
     const held = button("the-field-they-tabbed-to");
     const target = button("successor");
