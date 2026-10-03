@@ -26,7 +26,7 @@ const REPORT = {
 /** A day that moved by every bucket the API now sends, and adds up: 300 − 60 + 15 − 15 + 30 − 10 − 30 = 230. */
 const FULL_DAY = {
   date: "2026-09-10", top_ups_minutes: 300, spent_minutes: 60, refunds_minutes: 15, penalties_minutes: 15,
-  adjustments_minutes: 30, reversals_minutes: -10, share_transfers_minutes: -30, net_minutes: 230,
+  adjustments_minutes: 30, reversals_minutes: -10, share_transfers_minutes: -30, net_movement_minutes: 230,
   bookings: 1, attended: 1, minutes_on_court: 60, balance_minutes: 230,
 };
 

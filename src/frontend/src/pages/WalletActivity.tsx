@@ -242,7 +242,7 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
  */
 type DayPoint = DailyMePoint & {
   penalties_minutes?: number; adjustments_minutes?: number; reversals_minutes?: number;
-  share_transfers_minutes?: number; net_minutes?: number;
+  share_transfers_minutes?: number; net_movement_minutes?: number;
 };
 
 /** The daily table's headers beyond the totals' own words. */
@@ -256,7 +256,7 @@ export const DAY_COPY = {
   balance: "Balance",
 } as const;
 
-type DayKey = "top_ups_minutes" | "spent_minutes" | "refunds_minutes" | "penalties_minutes" | "adjustments_minutes" | "reversals_minutes" | "share_transfers_minutes" | "net_minutes";
+type DayKey = "top_ups_minutes" | "spent_minutes" | "refunds_minutes" | "penalties_minutes" | "adjustments_minutes" | "reversals_minutes" | "share_transfers_minutes" | "net_movement_minutes";
 
 /**
  * A movement column: every figure SIGNED (in +, out −), so a row reads as the sum it is — the old
@@ -280,14 +280,14 @@ const OPTIONAL_DAY_COLUMNS: { key: DayKey; column: DataColumn<DayPoint> }[] = [
 /** The period's columns: the fixed ones, every optional bucket that moved, then Net when the API sends it. */
 function dayColumns(days: DayPoint[]): DataColumn<DayPoint>[] {
   const moved = (key: DayKey) => days.some((d) => typeof d[key] === "number" && d[key] !== 0);
-  const hasNet = days.some((d) => typeof d.net_minutes === "number");
+  const hasNet = days.some((d) => typeof d.net_movement_minutes === "number");
   return [
     { key: "date", header: "Date", cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
     movement("top_ups_minutes", ACTIVITY_COPY.bought),
     movement("spent_minutes", ACTIVITY_COPY.spent, -1),
     movement("refunds_minutes", ACTIVITY_COPY.refunds),
     ...OPTIONAL_DAY_COLUMNS.filter((c) => moved(c.key)).map((c) => c.column),
-    ...(hasNet ? [movement("net_minutes", DAY_COPY.net)] : []),
+    ...(hasNet ? [movement("net_movement_minutes", DAY_COPY.net)] : []),
     { key: "bookings", header: DAY_COPY.bookings, align: "right", cell: (r) => <Cell>{r.bookings}</Cell>, sortValue: (r) => r.bookings },
     { key: "balance_minutes", header: DAY_COPY.balance, align: "right", cell: (r) => <Cell><MinutesFigure value={r.balance_minutes} /></Cell>, sortValue: (r) => r.balance_minutes },
   ];
