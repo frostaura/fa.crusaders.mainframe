@@ -80,6 +80,7 @@ export default function MemberDetailLayout() {
       {topUp.open ? (
         <TopUpSheet
           name={context.name}
+          userId={userId}
           balance={context.detail.balance_minutes}
           busy={topUp.busy}
           bookingError={topUp.bookingError}

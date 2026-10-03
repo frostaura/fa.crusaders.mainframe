@@ -238,6 +238,7 @@ function MemberOverlays(props: OverlayProps) {
       {adjust.target ? (
         <TopUpSheet
           name={adjust.target.full_name}
+          userId={adjust.target.user_id}
           // NOT zero where the row has no figure: a balance the console could not read is a
           // balance it must not do arithmetic on.
           balance={typeof adjust.target.balance_minutes === "number" ? adjust.target.balance_minutes : null}
