@@ -19,12 +19,14 @@ import { type AdjustmentReasonCode } from "@/lib/adminApi";
 import {
   ADD_LINK, ADJUST_SHEET as COPY, LIVE_PUSH_NOTE, LIVE_SAID, LOST_REPLY, MINUS_REFUSED, NOT_REVENUE, TAKE_BACK_CONSEQUENCE,
   TAKE_BACK_LINK, balanceSentence, confirmConsequence, doneSentence, overdraftWarning, parseMinutes, reasonChoicesFor,
-  reasonComplaints, reasonLabel, receiptHeader, sheetTitle, signedAmount, validateAmount, type MinutesDirection,
+  reasonComplaints, reasonLabel, receiptHeader, sheetTitle, shortOfCourtLine, signedAmount, validateAmount,
+  type MinutesDirection, type TakeBackRoom,
 } from "@/lib/deskMinutesCopy";
 import { cn } from "@/lib/utils";
 import { Minus, Plus } from "@/components/ui/icons";
 import { useMenuReturnFocus } from "./useMenuReturnFocus";
 import { useStepFocus } from "./useStepFocus";
+import { useTakeBackRoom } from "./useTakeBackRoom";
 
 /**
  * Adjust a member's minutes — goodwill and corrections (P13 §3.7, `/adjust`): add minutes or take
@@ -81,6 +83,11 @@ type Complaints = { amount?: string; code?: string; detail?: string };
 type Receipted = Applied & { before: number | null; amount: number };
 
 export type TopUpSheetProps = {
+  /**
+   * R11 J11-2: whose minutes — read for what is held for partners and the shortest court of the club,
+   * so the Check step of a take-back can say it leaves less than a court. Without it the line is not said.
+   */
+  userId?: string;
   name: string;
   /** What the member has now, or null where the read failed. Null is NOT zero. */
   balance: number | null;
@@ -199,7 +206,7 @@ function StepBody({ flow, ...props }: TopUpSheetProps & { flow: Flow }) {
   if (flow.done) return <Receipt name={props.name} done={flow.done} />;
   if (flow.step === 1) return <AmountStep flow={flow} balance={props.balance} />;
   if (flow.step === 2) return <ReasonStep flow={flow} bookingError={props.bookingError} renderBookingField={props.renderBookingField} />;
-  return <CheckStep flow={flow} balance={props.balance} bookingError={props.bookingError} />;
+  return <CheckStep flow={flow} balance={props.balance} bookingError={props.bookingError} userId={props.userId} />;
 }
 
 /**
@@ -293,9 +300,14 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
   );
 }
 
-function CheckStep({ flow, balance, bookingError }: { flow: Flow; balance: number | null; bookingError: string | null }) {
+type CheckStepProps = { flow: Flow; balance: number | null; bookingError: string | null; userId?: string };
+
+function CheckStep(props: CheckStepProps) {
+  const { flow, balance, bookingError, userId } = props;
+  const taking = flow.direction === "take_back";
+  const room = useTakeBackRoom(userId, taking);
   if (flow.valid === null || flow.reasonCode === null) return null;
-  const signed = flow.direction === "add" ? flow.valid : -flow.valid;
+  const signed = taking ? -flow.valid : flow.valid;
   return (
     <>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-border bg-bg-muted p-4 text-sm">
@@ -311,9 +323,23 @@ function CheckStep({ flow, balance, bookingError }: { flow: Flow; balance: numbe
       </dl>
       <p className="text-sm text-text-secondary">{COPY.reasonLine(reasonLabel(flow.reasonCode), flow.reasonText.trim())}</p>
       <p className="text-sm text-text-muted">{NOT_REVENUE}</p>
-      {flow.direction === "take_back" ? <p className="text-sm text-warning-strong">{TAKE_BACK_CONSEQUENCE}</p> : null}
+      {taking ? <TakeBackLines balance={balance} amount={flow.valid} room={room} /> : null}
       <p className="text-sm text-text-muted">{LIVE_PUSH_NOTE}</p>
       {bookingError ? <Alert tone="danger">{bookingError}</Alert> : null}
+    </>
+  );
+}
+
+/** What a take-back costs the member, and — R11 J11-2 — whether what is left still books a court. */
+type TakeBackLinesProps = { balance: number | null; amount: number; room: TakeBackRoom | null };
+
+function TakeBackLines(props: TakeBackLinesProps) {
+  const { balance, amount, room } = props;
+  const short = shortOfCourtLine(balance, amount, room);
+  return (
+    <>
+      <p className="text-sm text-warning-strong">{TAKE_BACK_CONSEQUENCE}</p>
+      {short ? <p className="text-sm font-semibold text-warning-strong">{short}</p> : null}
     </>
   );
 }

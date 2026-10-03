@@ -120,6 +120,31 @@ export function overdraftWarning(balance: number | null, amount: number | null):
     + "and cannot book until it is made up.";
 }
 
+/** What of a member's balance cannot be spent, and the club's shortest court, for {@link shortOfCourtLine}. */
+export type TakeBackRoom = { held: number; owedBack: number; slot: number };
+
+/**
+ * R11 J11-2 — the take-back's Check step says, as the member's mail does (`MinutesAdjusted`,
+ * J10-3), when what is left to SPEND (balance − held − owed back) is less than the club's shortest
+ * court. Null when it leaves enough, when anything it needs is unknown (an unread balance or room
+ * is not a reason to say they cannot book), and below zero, where {@link overdraftWarning} speaks.
+ */
+export function shortOfCourtLine(balance: number | null, amount: number | null, room: TakeBackRoom | null): string | null {
+  if (balance === null || amount === null || amount <= 0 || room === null || room.slot <= 0) return null;
+  const after = balance - amount;
+  if (after < 0) return null;
+  const spendable = after - room.held - room.owedBack;
+  if (spendable >= room.slot) return null;
+  const head = spendable > 0
+    ? `That leaves ${minutesSpoken(spendable)} to spend — less than the ${minutesSpoken(room.slot)} a court needs.`
+    : `That leaves nothing to spend — a court needs at least ${minutesSpoken(room.slot)}.`;
+  const kept = [
+    room.held > 0 ? `${minutesSpoken(room.held)} held for partners` : null,
+    room.owedBack > 0 ? `${minutesSpoken(room.owedBack)} owed back to partners` : null,
+  ].filter(Boolean);
+  return kept.length ? `${head} Their balance also carries ${kept.join(" and ")}, which they cannot spend.` : head;
+}
+
 /** The refusal when somebody types a minus into the amount on the ADD path. */
 export const MINUS_REFUSED = "Use “Take minutes back” at the bottom to remove minutes. This field only adds.";
 
