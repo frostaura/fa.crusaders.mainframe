@@ -50,3 +50,8 @@ Code: `Endpoints/{PackageEndpoints,AdminPackageEndpoints,TopUpEndpoints{,.Abando
   posted; a free give whose price is no longer 0 is the same 409. Neither `quotedPriceZar` nor
   `zarReceived` → 400 `quoted_price_required`. *Why:* the server filled in the write-time price, so a
   discount moving between confirm and Sell recorded and mailed R96 for an R108 confirmation.
+- **The desk's 409 moves the whole Sell sheet (R10 J10-1/X10-2)**: the body's `discount` goes on the header with
+  the package, then the shelf is re-read quietly (the chosen package keeps the 409's price — the server judges the
+  next press). The notice is said ONCE (the Sell button's live region on the check; itself only when a gift became
+  paid and the step changed), scrolled into view, and focus lands on Sell — Radix parks it on the dialog container
+  when the armed confirm unmounts, which `ConfirmButton`/`focusAfterAction` do not treat as adrift (`saleFocus.ts`).

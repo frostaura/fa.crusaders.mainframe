@@ -31,3 +31,8 @@ last_verified: 2026-10-03
 - **Wallet activity's figures are movements, signed (R7 E7-7/J7-2):** tiles and Totals alike; the
   daily table adds a column per bucket the period moved by (penalties, adjustments, reversals,
   shares — optional on the wire) and a signed Net (`net_movement_minutes`), so a row adds up.
+- **A row's Category says what it was, not only its type (R10 E10-5/J10-5, `lib/ledgerCopy.ledgerCategory`)**:
+  a `CancellationRefund` reads its stored reason + sign (outage refund / reversed, pay-for, no-show, displaced,
+  reinstated; an unknown negative is "Refund reversed") — *why:* an outage reversal of −15 read "Cancellation
+  refund". A desk sale names its `zar_paid` ("…, R96.00 received"); a gift "at no charge". The patterns follow the
+  server's stored reasons; a reworded reason there needs `REFUND_REASONS` here.
