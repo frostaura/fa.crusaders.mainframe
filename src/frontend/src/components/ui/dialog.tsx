@@ -237,6 +237,47 @@ function rescueFromBody(): void {
 }
 
 
+/** The root font size in px — a rem, as the text-size setting has made it. */
+function rootPx(): number {
+  return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+}
+
+/**
+ * R8 L8-12 — where a top-anchored dialog (`dialog-shape` TOP_ANCHORED_SHEET, D12) puts its top
+ * edge, published as `--dialog-top` on the surface. It opens CENTRED (it sat at a fixed 4rem: 64px
+ * above and 235px below a 500px Book dialog at 1280 × 800, and at 200 % text 8rem ran it to 808 of
+ * 800), then holds that top while a step changes its height — D12's point, only the bottom edge
+ * moves — and gives way upward only as far as keeps the bottom on the screen. One rem from either
+ * edge at least. The other shapes ignore the variable; below `sm` the sheet is a bottom sheet.
+ */
+function useOpenCentred() {
+  // A child of the surface, not a ref on it: the surface's own `ref` belongs to the call site.
+  const inside = React.useRef(null as HTMLSpanElement | null);
+  React.useLayoutEffect(() => {
+    const el = inside.current?.parentElement;
+    if (!el) return undefined;
+    let held: number | null = null;
+    const place = (recentre: boolean) => {
+      const room = window.innerHeight;
+      const gap = rootPx();
+      const height = el.offsetHeight;
+      if (held === null || recentre) held = Math.max(gap, (room - height) / 2);
+      const top = Math.max(gap, Math.min(held, room - gap - height));
+      el.style.setProperty("--dialog-top", `${Math.round(top)}px`);
+    };
+    place(true);
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => place(false)) : null;
+    observer?.observe(el);
+    const recentre = () => place(true);
+    window.addEventListener("resize", recentre);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", recentre);
+    };
+  }, []);
+  return inside;
+}
+
 /**
  * The raised panel with its guard, live region and close × — everything a dialog and a sheet
  * share except their shape. Exported for `sheet.tsx`; call sites use `DialogContent`/`SheetContent`.
@@ -258,6 +299,7 @@ function DialogSurface(props: SurfaceProps) {
   } = props;
   const guard = useTypedGuard(guardTyped);
   const opener = useOpener();
+  const inside = useOpenCentred();
   const returnFocus = (event: Event) => {
     if (event.defaultPrevented) return; // the call site placed focus itself
     const target = usableOpener(opener.current);
@@ -284,7 +326,7 @@ function DialogSurface(props: SurfaceProps) {
     >
       {children}
       <CloseButton />
-      <span aria-live="polite" className="sr-only">
+      <span ref={inside} aria-live="polite" className="sr-only">
         <span key={guard.kept}>{guard.kept > 0 ? DIALOG_KEPT_OPEN : ""}</span>
       </span>
     </DialogPrimitive.Content>
@@ -312,48 +354,93 @@ function DialogContent({ className, ...props }: SurfaceProps) {
 }
 
 /**
- * Title + description. Padded clear of the close × on the right.
+ * R8 L8-5 — the dialog's gutters stop growing with the text at their normal-text pixels below `sm`:
+ * at 320 / 200 % text a rem gutter was 32px a side of a 320px sheet, and the footer's rem padding
+ * and gap made two stacked buttons 212px of a 589px sheet. The words grow; the gutters need not.
+ */
+const SHEET_GUTTER = "px-[min(1rem,16px)] sm:px-6";
+
+/**
+ * Only the FIRST row of the header clears the close × (R8 L8-5): its right padding is the ×'s
+ * target less the header's own gutter, and it is at least as tall as the × reaches, so the next
+ * row starts under it. Every row used to carry `pr-14` — 112px of a 320px phone at 200 % text,
+ * all the way down a description that never came near the ×.
+ */
+const CLEAR_OF_CLOSE = "[&>:first-child]:pr-[calc(0.5rem+max(44px,2rem)-min(1rem,16px)+4px)] [&>:first-child]:min-h-[calc(0.5rem+max(44px,2rem)-min(1rem,16px))]";
+
+/**
+ * The header's cap: a quarter of the screen on a phone, a third from `sm` — but never less than its
+ * title needs (`--dialog-title-room`, measured), so the cap can cut the description, never the title.
+ */
+const HEADER_CAP = "max-h-[max(25dvh,var(--dialog-title-room,0px))] sm:max-h-[max(33dvh,var(--dialog-title-room,0px))]";
+
+/**
+ * Title + description. Padded clear of the close × beside its first row.
  *
- * R4: never more than a third of the screen's height — at 200 % text on a 320×640 phone the title,
+ * R4: never more than a share of the screen's height — at 200 % text on a 320×640 phone the title,
  * description and stepper took nearly the whole sheet and left the body a sliver. At normal text a
  * header is far below the cap; at large text it scrolls on its own and the body keeps the rest.
  */
 function DialogHeader({ className, children, ...props }: React.ComponentProps<"div">) {
   const ref = React.useRef<HTMLDivElement>(null);
-  const more = useMoreBelow(ref);
+  const { cut, more } = useHeaderCut(ref);
   return (
     <div
       ref={ref}
       data-slot="dialog-header"
       className={cn(
-        "flex max-h-[33dvh] shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain pb-2 pl-4 pr-14 pt-4 sm:pl-6 sm:pt-6",
+        "relative flex shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain pb-2 pt-[min(1rem,16px)] sm:pt-6",
+        // Its rows never shrink: the header scrolls instead (a floor on the first row let it squeeze).
+        "[&>*]:shrink-0", SHEET_GUTTER, HEADER_CAP, CLEAR_OF_CLOSE,
         className,
       )}
       {...props}
     >
       {children}
       {/*
-        R7 L7-14 — while the header is cut (200 % text on a phone), a fade and a caret at its foot
-        say there is more: the description used to stop mid-sentence at the cap with nothing to
-        show it scrolls. Sticky at the scroller's foot, over the last line; gone at the end.
+        R7 L7-14 / R8 — while the header is cut (200 % text on a phone) a strip at its foot says
+        there is more: a caret on the sheet's own surface, sticky at the scroller's foot. Opaque and
+        in the flow, so it ENDS the visible text rather than painting over its last line (R8: the
+        R7 fade and caret sat on top of the words); at the end of the scroll it is empty.
       */}
-      {more ? (
-        <span data-more-below="" aria-hidden="true"
-          className="pointer-events-none sticky -bottom-2 -mt-8 flex h-8 shrink-0 items-end justify-center bg-gradient-to-t from-bg-raised to-transparent">
-          <CaretDown size="1rem" weight="bold" className="text-text-secondary" />
+      {cut ? (
+        <span data-header-foot="" data-more-below={more ? "" : undefined} aria-hidden="true"
+          className={cn("pointer-events-none sticky -bottom-2 -mb-2 flex h-6 shrink-0 items-center justify-center bg-bg-raised", more && "border-t border-border")}>
+          {more ? <CaretDown size="1rem" weight="bold" className="text-text-secondary" /> : null}
         </span>
       ) : null}
     </div>
   );
 }
 
-/** Whether a scroller has more below what it shows — re-measured on scroll and on any resize. */
-function useMoreBelow(ref: React.RefObject<HTMLElement | null>): boolean {
-  const [more, setMore] = React.useState(false);
+/**
+ * The header's own measure: where its last row ends, whether its cap cuts it, whether more is below
+ * what shows above the foot strip — and the room its title needs, set as `--dialog-title-room`.
+ */
+function measureHeader(el: HTMLElement): { cut: boolean; more: boolean } {
+  const parts = Array.from(el.children).filter((c) => !c.hasAttribute("data-header-foot")).map((c) => c as HTMLElement);
+  const bottom = Math.max(0, ...parts.map((c) => c.offsetTop + c.offsetHeight));
+  const strip = 1.5 * rootPx();
+  const title = el.querySelector("[data-slot=dialog-title]") ?? parts[0];
+  if (title instanceof HTMLElement) el.style.setProperty("--dialog-title-room", `${Math.ceil(title.offsetTop + title.offsetHeight + strip + 4)}px`);
+  const cut = bottom + (parseFloat(getComputedStyle(el).paddingBottom) || 0) > el.clientHeight + 2;
+  return { cut, more: cut && el.scrollTop + el.clientHeight - strip < bottom - 2 };
+}
+
+/**
+ * Whether the header is cut by its cap, and whether there is more below what it shows — re-measured
+ * on scroll and on any resize. Publishes `--dialog-title-room`: what the title needs, from the top
+ * of the header to the foot of the strip under it.
+ */
+function useHeaderCut(ref: React.RefObject<HTMLElement | null>): { cut: boolean; more: boolean } {
+  const [state, setState] = React.useState({ cut: false, more: false });
   React.useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
-    const measure = () => setMore(el.scrollHeight - el.clientHeight - el.scrollTop > 2);
+    const measure = () => {
+      const next = measureHeader(el);
+      setState((prev) => (prev.cut === next.cut && prev.more === next.more ? prev : next));
+    };
     measure();
     el.addEventListener("scroll", measure, { passive: true });
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
@@ -364,7 +451,7 @@ function useMoreBelow(ref: React.RefObject<HTMLElement | null>): boolean {
       observer?.disconnect();
     };
   }, [ref]);
-  return more;
+  return state;
 }
 
 /** The part that scrolls when the content is taller than the screen; header and footer stay put. */
@@ -372,7 +459,7 @@ function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-body"
-      className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 sm:px-6", className)}
+      className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain py-2", SHEET_GUTTER, className)}
       {...props}
     />
   );
@@ -391,7 +478,8 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex flex-col gap-2 px-4 pb-4 pt-2 sm:flex-row sm:justify-end sm:px-6 sm:pb-6",
+        "flex flex-col gap-[min(0.5rem,8px)] pb-[min(1rem,16px)] pt-[min(0.5rem,8px)] sm:flex-row sm:justify-end sm:gap-2 sm:pb-6 sm:pt-2",
+        SHEET_GUTTER,
         className,
       )}
       {...props}
