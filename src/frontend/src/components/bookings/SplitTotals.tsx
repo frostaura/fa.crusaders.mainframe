@@ -30,7 +30,7 @@ function nameOfSeat(draft: PlayersDraft, seat: number): string {
 }
 
 function heading(preview: SplitPreview, count: number, bulk: boolean): string | null {
-  if (count > 1) return BOOK_SPLIT.perPrice(minutesSpoken(preview.price_minutes));
+  if (count > 1) return BOOK_SPLIT.perPrice(preview.price_minutes);
   return bulk ? BOOK_SPLIT.eachBooking : null;
 }
 

@@ -330,12 +330,40 @@ export const BOOK_SPLIT = {
   sharesLabel: "Shares",
   totalsLabel: "What each player is asked for",
   eachBooking: "Each booking",
-  perPrice: (price: string) => `Each ${price} booking`,
+  /** R12 J12-2 — "Each 15-minute booking": a length as an adjective, never "Each 15 minutes booking". */
+  perPrice: (minutes: number) => `Each ${lengthBooking(minutes, 1)}`,
   youPayNow: (now: string, back: string) => `You pay ${now} now · you get ${back} back as they accept`,
   addsUp: (price: string) => `Adds up to ${price}`,
   reading: "Working out the shares…",
   previewAction: "work out the shares",
 } as const;
+
+/**
+ * R12 J12-2 — a booking named by its length: "15-minute booking", "1-hour bookings", or the long
+ * way ("booking of 1 hour 30 minutes") for a length that is neither — `sliceLengthLine`'s rule.
+ */
+function lengthBooking(minutes: number, count: number): string {
+  const noun = count === 1 ? "booking" : "bookings";
+  const n = Math.trunc(minutes);
+  if (n > 0 && n < 60) return `${n}-minute ${noun}`;
+  if (n > 0 && n % 60 === 0 && n < 24 * 60) return `${n / 60}-hour ${noun}`;
+  return `${noun} of ${minutesSpoken(n)}`;
+}
+
+/**
+ * Which bookings a Confirm sentence is about: one booking ("You pay"), every booking of a batch of
+ * one length ("On each booking you pay"), or — lengths mixed (J12-2) — the ones of this length,
+ * counted, so two sentences never state two figures for "each booking".
+ */
+export type SentenceScope = boolean | { count: number };
+
+function sentenceLead(price: number, scope: SentenceScope): string {
+  if (scope === false) return "You";
+  if (scope === true) return "On each booking you";
+  return scope.count === 1
+    ? `On the ${lengthBooking(price, 1)} you`
+    : `On each of the ${scope.count} ${lengthBooking(price, scope.count)} you`;
+}
 
 /** "whoever takes your link", or "the 2 people who take your links". */
 function linkTakers(count: number): string {
@@ -364,8 +392,8 @@ function askClause(paying: readonly SentenceSeat[]): string {
  * The Confirm step's one sentence: "You pay 1 h 30 min now; Sam and Alex are asked for 22 min
  * each. Jo (guest) plays free." `price` is what the organiser is charged now (the whole court).
  */
-export function confirmPlayersSentence(price: number, seats: readonly SentenceSeat[], eachBooking = false): string {
-  const lead = `${eachBooking ? "On each booking you" : "You"} pay ${minutesSpoken(price)} now`;
+export function confirmPlayersSentence(price: number, seats: readonly SentenceSeat[], scope: SentenceScope = false): string {
+  const lead = `${sentenceLead(price, scope)} pay ${minutesSpoken(price)} now`;
   const paying = seats.filter((s) => s.kind !== "guest");
   const guests = seats.filter((s) => s.kind === "guest").map((s) => BOOK_PLAYERS.guestShort(s.name));
   const ask = paying.length ? `; ${askClause(paying)}` : "";

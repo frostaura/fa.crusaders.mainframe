@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { PickedPlayer } from "@/components/players/PlayerPicker";
 import type { SplitMode } from "@/lib/playersApi";
-import { confirmPlayersSentence } from "@/lib/playersCopy";
+import { confirmPlayersSentence, type SentenceScope } from "@/lib/playersCopy";
 import {
   EMPTY_DRAFT, addPlayer, hasPaying, playersPayload, removeSeat, sentenceSeats, updateSeat, withMode,
   type PlayersDraft,
@@ -26,17 +26,27 @@ export type PlayersInput = {
 
 export type ConfirmLine = { price: number; sentence: string };
 
-/** The Confirm sentence per distinct price, or null while the server's figures are being read. */
-function confirmLines(draft: PlayersDraft, prices: readonly number[], preview: PreviewState, bulk: boolean): ConfirmLine[] | null {
+/**
+ * Which bookings one price's sentence speaks for. A batch of one length: "each booking". Lengths
+ * mixed (R12 J12-2): the bookings of this length, counted — "On the 15-minute booking…".
+ */
+function scopeOf(price: number, allPrices: readonly number[], bulk: boolean): SentenceScope {
+  if (!bulk) return false;
+  if (new Set(allPrices).size === 1) return true;
+  return { count: allPrices.filter((p) => p === price).length };
+}
+
+/**
+ * The Confirm sentence per distinct price, or null while the server's figures are being read.
+ * `allPrices` is every slot's price (one per booking), so a length can be counted.
+ */
+export function confirmLines(draft: PlayersDraft, allPrices: readonly number[], preview: PreviewState, bulk: boolean): ConfirmLine[] | null {
   if (draft.seats.length === 0) return [];
-  if (!hasPaying(draft)) {
-    return prices.map((price) => ({ price, sentence: confirmPlayersSentence(price, sentenceSeats(draft, []), bulk) }));
-  }
+  const sentence = (price: number, shares: Parameters<typeof sentenceSeats>[1]) =>
+    confirmPlayersSentence(price, sentenceSeats(draft, shares), scopeOf(price, allPrices, bulk));
+  if (!hasPaying(draft)) return distinctPrices(allPrices).map((price) => ({ price, sentence: sentence(price, []) }));
   if (preview.status !== "ready") return null;
-  return preview.previews.map((p) => ({
-    price: p.price_minutes,
-    sentence: confirmPlayersSentence(p.price_minutes, sentenceSeats(draft, p.shares), bulk),
-  }));
+  return preview.previews.map((p) => ({ price: p.price_minutes, sentence: sentence(p.price_minutes, p.shares) }));
 }
 
 export function usePlayersStep(input: PlayersInput) {
@@ -69,7 +79,7 @@ export function usePlayersStep(input: PlayersInput) {
     /** The split the phone already knows cannot work — its code, for `playersRefusal`. */
     problem: preview.state.status === "invalid" ? preview.state.error : null,
     payload: enabled ? playersPayload(draft) : null,
-    lines: confirmLines(draft, prices, preview.state, bulk),
+    lines: confirmLines(draft, input.prices, preview.state, bulk),
     openPicker: (seat: number) => setPicking(seat),
     closePicker: () => setPicking(null),
     pick: (player: PickedPlayer) => {
