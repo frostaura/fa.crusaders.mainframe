@@ -45,6 +45,7 @@ public static partial class WalletEndpoints
         var reference = IdempotencyReference(services.Tenant.TenantId, req.IdempotencyKey);
         if (reference is { Length: 0 }) return Results.BadRequest(new { error = "idempotency_key_invalid" });
         if (!await services.Db.Users.AnyAsync(u => u.Id == userId, ct)) return Results.NotFound();
+        if (await ReplayedSaleAsync(userId, req, kind, reference, services, ct) is { } replay) return replay;
 
         var shelf = await PackageShelf.ForAsync(services.Db, userId, ct);
         if (shelf.Find(req.PackageId!.Value) is not { } item)
@@ -63,6 +64,39 @@ public static partial class WalletEndpoints
             Package = item,
         };
         return await MoveAsync(movement, ctx, services, ct);
+    }
+
+    /// <summary>
+    /// Review round 10, J10-2: a key this club already APPLIED answers with the sale it made,
+    /// whatever the shelf says now. The price and shelf checks used to run first, so a retry after
+    /// the discount moved, or after the package was retired, was 409 — the desk read "Nothing was
+    /// recorded", minted a fresh key, and the next confirm sold the package twice. The package is
+    /// read by id, archived or not (packages are never deleted); the replay compares the movement
+    /// as <see cref="Replay"/> does, so a changed payload under the same key is still refused, and
+    /// the package's price in the answer is the price the desk confirmed, not today's.
+    /// Null when the key is new (or none was sent): the sale meets the shelf as it stands.
+    /// </summary>
+    private static async Task<IResult?> ReplayedSaleAsync(
+        Guid userId, SellRequest req, AdminCreditReasons.Kind kind, string? reference, AdjustServices services, CancellationToken ct)
+    {
+        if (reference is null) return null;
+        var db = services.Db;
+        if (await ExistingAdjustmentAsync(db, reference, ct) is not { } stored) return null;
+        if (await db.MinutePackages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == req.PackageId, ct) is not { } package) return null;
+
+        var free = kind.Code == AdminCreditReasons.PackageFree;
+        var quoted = free ? 0m : req.QuotedPriceZarEither ?? req.ZarReceivedEither ?? 0m;
+        var item = new ShelfItem(package, package.GroupId is null ? ShelfSource.Club : ShelfSource.Group, null, 0, quoted);
+        var reason = req.Reason!.Trim();
+        var movement = new DeskMovement(
+            userId, kind, package.Minutes, free ? 0m : req.ZarReceivedEither ?? quoted, $"{reason} — {package.Name}", reason)
+        {
+            IdempotencyKey = req.IdempotencyKey,
+            Reference = reference,
+            Package = item,
+        };
+        var user = await db.Users.AsNoTracking().FirstAsync(u => u.Id == userId, ct);
+        return Replay(stored, movement, await services.Ledger.GetBalanceAsync(userId, ct), user);
     }
 
     /// <summary>

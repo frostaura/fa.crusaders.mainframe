@@ -118,6 +118,57 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
     }
 
     /// <summary>
+    /// Review round 10, J10-2: a replay of an APPLIED key answered 409 <c>package_price_changed</c>
+    /// (or <c>package_unavailable</c>) once the shelf had moved, because the price and shelf checks
+    /// ran before the key was looked up — the sheet said "Nothing was recorded", cleared the key,
+    /// and the admin's next confirm sold the package twice. The earlier sale wins over the shelf as
+    /// it stands now: same entry, one ledger row, after a discount move and after the package retired.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_replayed_sale_returns_the_earlier_sale_whatever_the_shelf_now_says()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkr");
+        await SetDiscountAsync(f, club.LeagueGroupId, 1000);
+        await JoinAsync(f, club, club.MemberUserId, club.LeagueGroupId);
+        var admin = Admin(f, club);
+        var body = new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash", idempotencyKey = "sale-r", quotedPriceZar = 495m };
+
+        var first = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), body);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var entryId = (await JsonOf(first)).GetProperty("entry_id").GetGuid();
+
+        // The discount moves to 20% (R440) before the reply reaches the desk; the desk retries.
+        await SetDiscountAsync(f, club.LeagueGroupId, 2000);
+        var moved = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), body);
+        Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+        var movedBody = await JsonOf(moved);
+        Assert.Equal(entryId, movedBody.GetProperty("entry_id").GetGuid());
+        Assert.Equal(495m, movedBody.GetProperty("zar_received").GetDecimal());
+        Assert.Equal(495m, movedBody.GetProperty("package").GetProperty("price_zar").GetDecimal());
+        Assert.Equal(300, movedBody.GetProperty("balance_after_minutes").GetInt32());
+
+        // The package is retired from the shelf; the retry still finds the sale it made.
+        await EditPackageAsync(f, club.FiveHours, p => p.Status = MinutePackageStatus.Archived);
+        var retired = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), body);
+        Assert.Equal(HttpStatusCode.OK, retired.StatusCode);
+        Assert.Equal(entryId, (await JsonOf(retired)).GetProperty("entry_id").GetGuid());
+
+        // A NEW key still meets the shelf as it stands: retired is unavailable.
+        var fresh = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), body with { idempotencyKey = "sale-r2" });
+        Assert.Equal(HttpStatusCode.Conflict, fresh.StatusCode);
+        Assert.Equal("package_unavailable", (await JsonOf(fresh)).GetProperty("error").GetString());
+
+        // The same key with a different movement is still refused, not replayed.
+        var changed = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), body with { quotedPriceZar = 440m });
+        Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        Assert.Equal("idempotency_key_reused", (await JsonOf(changed)).GetProperty("error").GetString());
+
+        Assert.Single(await LedgerAsync(f, club, club.MemberUserId));
+    }
+
+    /// <summary>
     /// <b>Cross-tenant injection on the desk shelf and sale</b> (§10.3). Club B's admin reads no
     /// shelf of club A's member and sells them nothing; club B's admin cannot sell club A's package
     /// to club B's own member either. Nothing is posted anywhere.
