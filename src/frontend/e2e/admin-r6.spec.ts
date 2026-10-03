@@ -76,3 +76,37 @@ test.describe("X6-1 — a sheet opened from a ⋯ menu gives focus back to the �
     await expect.poll(() => focusedName(page)).toBe("More actions for Bea Nkosi");
   });
 });
+
+/** Sideways scroll on the document or the app's scroller. */
+const sideways = (page: Page) => page.evaluate(() => {
+  const main = document.getElementById("main-content");
+  return Math.max(...[document.documentElement, main].filter(Boolean).map((el) => el!.scrollWidth - el!.clientWidth));
+});
+
+const HOOK = {
+  id: "00000000-0000-4000-8000-000000000621", owner_kind: "Tenant", description: "Court lights relay",
+  url_template: "https://lights.example.test/hooks/{court_id}/{event}?booking={booking_id}",
+  event_filter: "booking.created,booking.late_cancellation,minutes.penalty_applied", enabled: true,
+  failure_count: 3, last_success_at: null, last_failure_at: null, secret: null,
+};
+
+test.describe("L6-5 — a webhook row at 320 px", () => {
+  for (const bigText of [false, true]) {
+    test(`gives the details the row's width${bigText ? " at 200 % text" : ""}, and scrolls nothing sideways`, async ({ page }) => {
+      await open(page, "/admin/webhooks", adminRoutes([{ path: "/api/v1/admin/webhooks/", body: [HOOK] }]), 320);
+      if (bigText) await page.addStyleTag({ content: "html { font-size: 32px; }" });
+      const row = page.getByRole("listitem").filter({ hasText: "Court lights relay" }).first();
+      await expect(row).toBeVisible({ timeout: 30_000 });
+      await page.evaluate(() => document.fonts.ready);
+      const url = row.getByText(HOOK.url_template);
+      const width = (await url.boundingBox())!.width;
+      const inner = await row.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      });
+      // The details take the row's whole inner width, not what is left beside the buttons.
+      expect(width, "the URL is squeezed beside the buttons").toBeGreaterThanOrEqual(inner - 2);
+      expect(await sideways(page), "the page scrolls sideways").toBeLessThanOrEqual(1);
+    });
+  }
+});

@@ -468,8 +468,10 @@ function EndpointRow(props: {
   const name = endpointName(w);
   return (
     <li className="flex flex-col gap-3 p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+      {/* L6-5: the details have a real basis, so on a phone (or at 200 % text) the buttons wrap
+          UNDER them instead of squeezing them to ~50 px beside a 140 px button pair. */}
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="flex min-w-0 flex-1 basis-72 flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold text-text-primary">{name}</p>
             <Badge tone={w.enabled ? "success" : "neutral"}>{w.enabled ? "enabled" : "disabled"}</Badge>
@@ -484,7 +486,7 @@ function EndpointRow(props: {
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
           {/* The name does not flip with the state — `aria-expanded` carries it, so a
               screen-reader user is not left re-finding a control after every press. */}
           <Button variant="outline" size="sm" aria-expanded={open} onClick={props.onDeliveries}>
