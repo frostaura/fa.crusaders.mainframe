@@ -69,7 +69,7 @@ export function useCountUp(
     if (!started.current || instant || Math.abs(target - shown.current) < 0.5) {
       started.current = true;
       shown.current = target;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- the point of the hook is to mirror a prop
+      // The point of the hook is to mirror a prop.
       setDisplayed(target);
       return;
     }

@@ -23,6 +23,11 @@ export default tseslint.config(
       ],
     },
   },
+  // Test-only modules are never served by Vite, so Fast Refresh (the reason for this rule) never applies to them.
+  {
+    files: ["src/test/**", "**/__tests__/**", "**/*.test.{ts,tsx}"],
+    rules: { "react-refresh/only-export-components": "off" },
+  },
   // Icons come through ONE barrel (design-system.md, Icons): per-icon paths, one reviewable
   // vocabulary, no package-root import that drags in ~1 500 icons. `src/icons.test.ts` holds the
   // same line on every commit. lucide-react is gone from the manifest, and banned so it stays gone.

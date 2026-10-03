@@ -25,7 +25,7 @@ export function useCountdownSeconds(instant: string | null): number | null {
   useEffect(() => {
     if (!deadline) return;
     const read = () => setSeconds(secondsUntil(deadline));
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the first reading must not
+    // The first reading must not
     // wait a whole second: a member who has just opened this page would otherwise read a
     // number left over from the previous instant, which is the defect this module exists for.
     read();
@@ -39,7 +39,6 @@ export function useCountdownSeconds(instant: string | null): number | null {
       window.removeEventListener("focus", read);
       window.removeEventListener("pageshow", read);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `deadline` is memoised on the instant
   }, [deadline]);
 
   // Derived rather than stored for the null case, so a caller that stops passing an
