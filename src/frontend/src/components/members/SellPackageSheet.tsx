@@ -29,6 +29,7 @@ import { formatMoney } from "@/lib/utils";
 import type { AdjustmentKey } from "./adjustmentAttempt";
 import { attemptSale } from "./sellAttempt";
 import { useMenuReturnFocus } from "./useMenuReturnFocus";
+import { useStepFocus } from "./useStepFocus";
 import { shelfSections } from "@/lib/topUpShelf";
 
 /**
@@ -103,20 +104,39 @@ function useSaleFlow(shelf: ShelfState) {
     if (!Object.values(found).some(Boolean)) setStep(next);
   };
   const toPayment = () => settle({ pkg: pkg ? undefined : COPY.pickPackage }, 2);
+  // R7 J7-10: a package that costs this member nothing asks no payment questions at all.
+  const free = pkg !== null && isFree(pkg);
   const toCheck = () => settle({
-    code: code === null ? REASON_MISSING.code : undefined,
+    // R7 J7-6: said under "How was it paid?", so it names the payment.
+    code: !free && code === null ? COPY.paymentMissing : undefined,
     detail: detail.trim() ? undefined : REASON_MISSING.detail,
-    zar: validateZar(zarText) ?? undefined,
+    zar: free ? undefined : validateZar(zarText) ?? undefined,
   }, 3);
   /** Back to the shelf after a refusal said it changed: nothing chosen survives a re-read. */
   const restart = () => { setPkgId(null); setStep(1); setComplaints({}); };
   return {
     step, setStep, pkg, choose, code, setCode, detail, setDetail, zarText, setZarText, complaints, setComplaints,
-    done, setDone, toPayment, toCheck, restart, zar: parseZar(zarText),
+    done, setDone, toPayment, toCheck, restart, free, zar: free ? 0 : parseZar(zarText),
   };
 }
 
 type Flow = ReturnType<typeof useSaleFlow>;
+
+/** R7 J7-10: THIS member's price for it is R0.00 (a 100% discount) — given, not sold. */
+function isFree(pkg: ShelfPackage): boolean {
+  return pkg.price_zar === 0;
+}
+
+/**
+ * The `/sell` code: how the desk was paid, or — for a package that costs the member nothing —
+ * `package_free` (integrator's call, R7 J7-10: valid only when their shelf price is R0.00), so a
+ * gift never sits on the ledger as "Cash paid at the desk".
+ */
+function saleCode(flow: Flow): SellReasonCode | null {
+  // The API module's union does not carry package_free yet (ask r7-ask-FC1-to-integrator.md).
+  if (flow.free) return "package_free" as SellReasonCode;
+  return flow.code;
+}
 
 /** The press: one in flight at a time, under a key that names this sale. */
 function useSalePress(props: SellPackageSheetProps, flow: Flow, rereadShelf: () => Promise<void>) {
@@ -125,13 +145,14 @@ function useSalePress(props: SellPackageSheetProps, flow: Flow, rereadShelf: () 
   const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
   const press = async (): Promise<string> => {
-    const { pkg, code, zar } = flow;
+    const { pkg, zar } = flow;
+    const code = saleCode(flow);
     if (!pkg || code === null || inFlight.current) return LIVE_SAID.refused;
     inFlight.current = true;
     setBusy(true);
     try {
       // The price as the shelf said it is the server's default: send rand only when it differs.
-      const zarReceived = zar !== null && zar !== pkg.price_zar ? zar : undefined;
+      const zarReceived = !flow.free && zar !== null && zar !== pkg.price_zar ? zar : undefined;
       const outcome = await attemptSale({
         userId: props.userId, pkg, reasonCode: code, reason: flow.detail, zarReceived, name: props.name,
       }, key);
@@ -174,6 +195,7 @@ export function SellPackageSheet(props: SellPackageSheetProps) {
   const sale = useSalePress(props, flow, shelf.read);
   const guard = useSendingGuard((open) => { if (!open) onClose(); });
   const backToMenu = useMenuReturnFocus(props.returnFocus);
+  const [stepRef, stepLabel] = useStepFocus(flow.step, COPY.steps, flow.done !== null);
   return (
     <Sheet open onOpenChange={guard.onOpenChange}>
       <SheetContent side={wide ? "right" : "bottom"} data-sheet="sell-package" onCloseAutoFocus={backToMenu}>
@@ -182,7 +204,7 @@ export function SellPackageSheet(props: SellPackageSheetProps) {
           <SheetDescription>{shelfLine(shelf.state)}</SheetDescription>
           {flow.done ? null : <Stepper names={COPY.steps} current={flow.step - 1} />}
         </SheetHeader>
-        <SheetBody className="flex flex-col gap-4 pb-4">
+        <SheetBody ref={stepRef} tabIndex={-1} role="group" aria-label={stepLabel} className="flex flex-col gap-4 pb-4 outline-none">
           <SaleBody flow={flow} shelf={shelf} balance={props.balance} name={name} />
         </SheetBody>
         <SheetFooter className="sm:items-end">
@@ -205,7 +227,7 @@ type BodyProps = { flow: Flow; shelf: ReturnType<typeof useShelf>; balance: numb
 
 function SaleBody({ flow, shelf, balance, name }: BodyProps) {
   if (flow.done) return <SaleReceipt name={name} done={flow.done} />;
-  if (flow.step === 2 && flow.pkg) return <PaymentStep flow={flow} pkg={flow.pkg} />;
+  if (flow.step === 2 && flow.pkg) return flow.free ? <FreeStep flow={flow} /> : <PaymentStep flow={flow} pkg={flow.pkg} />;
   if (flow.step === 3 && flow.pkg) return <SaleCheck flow={flow} pkg={flow.pkg} balance={balance} />;
   const state = shelf.state;
   return (
@@ -291,13 +313,36 @@ function PaymentStep({ flow, pkg }: { flow: Flow; pkg: ShelfPackage }) {
         <FieldDescription>{differs ? COPY.zarDiffers(formatMoney(pkg.price_zar)) : COPY.zarHelp(formatMoney(pkg.price_zar))}</FieldDescription>
         <FieldError>{complaints.zar}</FieldError>
       </Field>
-      <Field>
-        <FieldLabel>{COPY.detailLabel}</FieldLabel>
-        <Input autoComplete="off" value={flow.detail} placeholder={COPY.detailPlaceholder} onChange={(e) => flow.setDetail(e.target.value)} />
-        <FieldDescription>{COPY.detailHint}</FieldDescription>
-        <FieldError>{complaints.detail}</FieldError>
-      </Field>
+      <NoteField flow={flow} />
     </>
+  );
+}
+
+/** How it was paid and the note, as the ledger will word them; a gift has only its note (R7 J7-10). */
+function noteLine(flow: Flow): string {
+  // Joined, not template literals in a ternary: lizard loses its place in those and swallows the file.
+  const quoted = "“" + flow.detail.trim() + "”";
+  return flow.free ? quoted : reasonLabel(flow.code ?? "") + " — " + quoted;
+}
+
+/** A package that costs the member nothing: no payment, no money received — only the note (R7 J7-10). */
+function FreeStep({ flow }: { flow: Flow }) {
+  return (
+    <>
+      <p className="text-sm text-text-secondary" data-sale-free="">{COPY.freeNote}</p>
+      <NoteField flow={flow} />
+    </>
+  );
+}
+
+function NoteField({ flow }: { flow: Flow }) {
+  return (
+    <Field>
+      <FieldLabel>{COPY.detailLabel}</FieldLabel>
+      <Input autoComplete="off" value={flow.detail} placeholder={COPY.detailPlaceholder} onChange={(e) => flow.setDetail(e.target.value)} />
+      <FieldDescription>{COPY.detailHint}</FieldDescription>
+      <FieldError>{flow.complaints.detail}</FieldError>
+    </Field>
   );
 }
 
@@ -313,11 +358,15 @@ function SaleCheck({ flow, pkg, balance }: { flow: Flow; pkg: ShelfPackage; bala
         <div aria-hidden="true" className="col-span-2 my-1 h-px bg-border" />
         <dt className="font-semibold text-text-primary">{COPY.balanceAfter}</dt>
         <dd className="text-right font-semibold text-text-primary">{balance === null ? "—" : <Minutes value={balance + pkg.minutes} />}</dd>
-        <dt className="text-text-secondary">{COPY.zarRow}</dt>
-        <dd className="text-right tabular-nums text-text-primary">{formatMoney(zar)}</dd>
+        {flow.free ? null : (
+          <>
+            <dt className="text-text-secondary">{COPY.zarRow}</dt>
+            <dd className="text-right tabular-nums text-text-primary">{formatMoney(zar)}</dd>
+          </>
+        )}
       </dl>
-      <p className="text-sm text-text-secondary">{`${reasonLabel(flow.code ?? "")} — “${flow.detail.trim()}”`}</p>
-      <p className="text-sm text-text-muted">{COPY.revenue(formatMoney(zar))}</p>
+      <p className="text-sm text-text-secondary">{noteLine(flow)}</p>
+      <p className="text-sm text-text-muted">{COPY.revenueFor(zar)}</p>
       <p className="text-sm text-text-muted">{LIVE_PUSH_NOTE}</p>
     </>
   );
@@ -368,7 +417,7 @@ function SaleFooter({ flow, guard, sale, shelf, name }: FooterProps) {
         <ConfirmButton
           idleLabel={COPY.idle(pkg.minutes)}
           cancelLabel={COPY.cancel}
-          confirmLabel={COPY.confirm(name, pkg.name, formatMoney(flow.zar ?? pkg.price_zar))}
+          confirmLabel={COPY.confirmFor(name, pkg.name, flow.zar ?? pkg.price_zar)}
           ariaLabel={name}
           subject={name}
           tone="info"

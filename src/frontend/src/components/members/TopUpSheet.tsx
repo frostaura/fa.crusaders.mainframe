@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Minus, Plus } from "@/components/ui/icons";
 import { useMenuReturnFocus } from "./useMenuReturnFocus";
+import { useStepFocus } from "./useStepFocus";
 
 /**
  * Adjust a member's minutes — goodwill and corrections (P13 §3.7, `/adjust`): add minutes or take
@@ -164,6 +165,7 @@ export function TopUpSheet(props: TopUpSheetProps) {
   const guard = useSendingGuard((open) => { if (!open) onClose(); });
   useFocusFirstInvalid(flow.refused);
   const backToMenu = useMenuReturnFocus(props.returnFocus);
+  const [stepRef, stepLabel] = useStepFocus(flow.step, COPY.steps, flow.done !== null);
   return (
     <Sheet open onOpenChange={guard.onOpenChange}>
       <SheetContent side={wide ? "right" : "bottom"} data-sheet="top-up" onCloseAutoFocus={backToMenu}>
@@ -176,7 +178,7 @@ export function TopUpSheet(props: TopUpSheetProps) {
           </SheetDescription>
           {flow.done ? null : <Stepper names={COPY.steps} current={flow.step - 1} />}
         </SheetHeader>
-        <SheetBody className="flex flex-col gap-4 pb-4">
+        <SheetBody ref={stepRef} tabIndex={-1} role="group" aria-label={stepLabel} className="flex flex-col gap-4 pb-4 outline-none">
           <StepBody flow={flow} {...props} />
         </SheetBody>
         {/* The check step stacks on every width (F3-14): beside Back, the armed confirm — a
@@ -216,10 +218,13 @@ function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
         aria-label={COPY.quickLabel}
         value={preset}
         onValueChange={(value) => flow.typeAmount(value)}
-        className="grid w-full grid-cols-2 gap-2"
+        // R7 L7-3: two fixed columns at 200 % text ran "+15 minutes" out of its button and over
+        // "30 minutes". As many 9rem columns as fit (one on a phone at large text), and a label
+        // that wraps inside a button that grows.
+        className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2"
       >
         {QUICK.map((value) => (
-          <ToggleGroupItem key={value} value={String(value)} className="tabular-nums">
+          <ToggleGroupItem key={value} value={String(value)} className="!h-auto min-h-touch min-w-0 whitespace-normal py-2 text-center tabular-nums">
             {signedAmount(flow.direction, value)}
           </ToggleGroupItem>
         ))}
