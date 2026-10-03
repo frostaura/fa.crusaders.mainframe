@@ -33,6 +33,10 @@ export const OFFLINE_COPY = {
   nothingKept: {
     inbox: "Your notifications haven't been opened on this phone yet, so there's nothing kept to show. They load by themselves once you're back online.",
     activity: "This period hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online — or pick a period you've looked at before.",
+    /** R7 X7-3 (FD1's pages): Invites, a booking's detail, Profile's My game. */
+    invites: "Your invites haven't been opened on this phone yet, so there's nothing kept to show. They load by themselves once you're back online.",
+    booking: "This booking hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
+    myGame: "Your game hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
   },
   /** R6 X6-4 — `/wallet/buy` offline: nothing to show from the phone, and nothing to buy without the club. */
   buyNeedsConnection: "Buying minutes needs a connection: the packages and their prices come from the club, and you pay at PayFast. Nothing was sent. This page loads by itself once you're back online.",
