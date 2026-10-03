@@ -46,7 +46,7 @@ the worker still caches NO member data. Code: `src/frontend/src/lib/offline/`.
 - **Kept reads come back key by key** (`loadKept`, first subscriber), never the whole store at boot
   (cost a cold My Code ~110 ms). Stale records are deleted once the app settles (15 s, then idle).
 - **Nothing kept + offline is said as offline (R6 X6-4)**: `OfflineNothingKept` ("You're offline —
-  … loads by itself once you're back online") on Inbox, Wallet activity and /wallet/buy, never red "couldn't be reached".
+  … loads by itself once you're back online") on Inbox, Wallet activity, /wallet/buy and (R8 X8-2) /wallet, never red "couldn't be reached" — keyed on the read failing to connect, never on `onLine` alone (Wi-Fi without internet); /wallet re-reads on `online`.
 
 ## Traps met
 

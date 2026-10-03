@@ -16,7 +16,7 @@ Code: `Endpoints/{PackageEndpoints,AdminPackageEndpoints,TopUpEndpoints{,.Abando
   packages the club priced; the cap protected nothing and every abandoned checkout counted against it.
 - **The purchase lock** (`PackageEndpoints.Lock`): package id/name, minutes, list price, discount bps,
   the discount's group, amount — written from the LIVE shelf before PayFast. A `quotedPriceZar` that
-  differs → 409 `package_price_changed`, no row; the screen restates the price and never re-prices.
+  differs → 409 `package_price_changed`, no row; the screen re-reads the WHOLE shelf (R8 J8-2: a discount gained or lost moves every price and the banner, not one) and names the fresh price — never re-prices on its own.
   The ITN credits `pending.Minutes`, checks the amount against `pending.AmountZar`, never reads
   `minute_packages`. *Why:* an admin edit under an open card page must not change what paid money buys.
 - **The shelf** (pure): club packages at `floor_cent(list × (10000 − d) / 10000)`, d = the LOWEST

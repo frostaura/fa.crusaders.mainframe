@@ -57,4 +57,4 @@ last_verified: 2026-10-03
   auto-placed into it and squeezed the title to a letter a line. Put a conditional control in its own row.
 - **`overflow: auto`/`hidden` on ANY ancestor captures `position: sticky`** (R5 V5-6): be a scroller
   only while wider (`ScrollArea onlyWhenWider`), clip with `overflow-clip`; a sticky `top` inside a
-  box that never scrolls vertically pushes the element DOWN over the rows (`[[data-scrolls]_&]:!top-0`).
+  box that never scrolls vertically pushes the element DOWN over the rows (`[[data-scrolls]_&]:!top-0`). Two sticky layers at ONE z tie on DOM order: a table head (z 20) painted over the stuck range bar above it (R8 L8-4) — `isolate` the later block.
