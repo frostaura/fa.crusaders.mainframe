@@ -35,9 +35,13 @@ Earlier rounds: `decisions-frontend-bookings.md`, `-r4.md`. Tests: `pages/bookin
 - **No `?date=`: the club's today, adopted from the first answer** (R6-CI-1, `useScheduleDay`
   `toClubToday`) — *why:* `lib/clubZone` is memory only, so a cold start guessed the READER's day;
   New York at 23:50 UTC opened a UTC club's yesterday, every cell past. A day asked for stays.
-- **The phone's first Book cell is ~555px down at 390, not ≤360** (R6, measured): header 81–145,
-  games strip 177–277, picker 297–418, court chips, grid header 495–551. 360 needs a product call
-  (drop/relocate the strip, chips or month row, or scroll to the grid on open).
+- **A phone OPENS Bookings at the week** (§4.2, Dean's call R7, `useOpenAtWeek`): `<main>` is
+  scrolled so the day picker sits under the app bar; first Book cell 555 → 315 at 390x844.
+  *Why this, not removal:* nothing is dropped (games strip, invites, notices one swipe up). Once
+  per visit, only from scrollTop 0, never on a re-read; phone width only; any date. e2e/member-r7.
+- **A 402 `insufficient_balance` is adopted** (R7 X7-2): its `current_minutes` (the club's
+  SPENDABLE) replaces the sheet's figure while the wallet still says the stale one, and the
+  wallet is re-read so the chip follows. Games lists read `sold_ends_at ?? ends_at` (E7-6).
 - **The desk's "book as" picker is lazy** (`BookAsChoice` via `lazyParts`, lane B's perf lead):
   a member's Schedule chunk no longer pulls the member combobox / cmdk; `lazyParts.test` guards it.
 - **Split late cancel toast** subtracts the penalty from a `net_credits` equal to gross − partners

@@ -13,9 +13,12 @@ Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admi
   0.1.1, pinned; every PageShell is `@container/page`) — *why:* beside the admin rail and at 200 %
   text a viewport breakpoint lies; rem thresholds also make large text fall back to one column.
 - **`narrow` is for single-task forms only** (My results left it in R6). **`wide` takes the 120rem
-  frame from 3xl by default** (`fullFrom3xl={false}` opts out) and the member app bar is 120rem at
-  3xl on EVERY page (R6 L6-10) — *why:* following each page's frame made the bar jump 320px at
-  1920, and an 80rem column left a third of the window empty (Dean: My Code at 61 %).
+  frame from 3xl by default** (`fullFrom3xl={false}` opts out; `content` pages opt IN — booking
+  detail, How it works, R7 L7-12) and the member app bar is 120rem at 3xl on EVERY page (R6 L6-10)
+  — *why:* the bar jumped 320px at 1920, and an 80rem column left a third of the window empty.
+- **Large text steps DOWN by rem container queries** (R7): the PageHeader h1 below 16/12rem of
+  header (L7-13), the injury pause stacks below 20rem (L7-5); a capped sheet header shows a fade +
+  caret while it has more below (L7-14). Inline glyphs are rem-sized (`size="1rem"`, L6-16).
 - **One control, one place:** a verb that is docked on a phone (bottom ContextBar: Top up, Invite a
   player, the one invite's Decline · Accept — then its card carries none, R6 L6-13) and inline on a desktop is chosen by `useMediaQuery(lg)`, never drawn
   twice and hidden by CSS — *why:* jsdom sees both (getByRole "multiple elements"), and so does a
@@ -33,16 +36,12 @@ Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admi
   still open shows under a back control, focus on its heading; a pick from the bare list is PUSHED,
   switching replaces (`usePickParam`). Picks are announced. Only the picked Inbox row names a
   border class: forced colours (`index.css`) frame every link whose class says "border".
-- **An invitee's answer is docked too** (R5 F5): Review your share + Decline in a bottom
-  ContextBar ("Your answer") below lg, inline from it — same JS switch as the organiser's Invite.
-- **A no-show and a late cancel show the ledger's own rows** (R5 M5-3/M5-7): paid at booking (the
-  charge), refunded (the whole charge), the penalty, shares, cost; partners "Paid 16 · 11.20 came
-  back". Refund/penalty come from optional `money.refunded_credits`/`penalty_credits` (asked of
-  the backend), else refund = price and penalty = owed when nobody checked in — *why:* exact on
-  every real-stack booking checked, but an admin compensation naming the booking would break it.
-  A no-show's title ends at `sold_ends_at` (the sweep truncates `ends_at`). Figures never wrap
-  mid-value: `dd` nowrap, `keepAmounts` NBSP inside sentences. A 404 with `?seat=` reads the
-  member's own seat and says "You were taken off this game".
+- **An invitee's answer is docked too** (R5 F5): Review your share + Decline, a bottom ContextBar below lg.
+- **A no-show and a late cancel show the ledger's own rows** (R5 M5-3/M5-7): charge, refund, penalty,
+  shares, cost (optional `money.refunded_credits`/`penalty_credits`, else refund = price and
+  penalty = owed when nobody checked in). A no-show's title ends at `sold_ends_at`. Figures never
+  wrap mid-value (`dd` nowrap, `keepAmounts` NBSP). A 404 with `?seat=` says "You were taken off".
+- **Offline with nothing kept says offline** (R7 X7-3, `shell/nothingKept`): Invites, booking detail, My game — only when the phone reports no network; a dropped connection keeps its retry.
 - **Not built:** rail selection dock; docked Record result; bell preselects first unread. Wallet: `decisions-ledger-layout`.
 
 ## Traps found
@@ -55,6 +54,7 @@ Rules: `docs/specs/design-system.md` (Widths, Page shell, "Use the width"). Admi
 - **`container-type: inline-size` does not trap `position: fixed` children** (Chromium, measured).
 - **A skeleton bar with a rem width beside a switch** (`w-48` = 384px at 200 %) pushed a 390 phone
   179px sideways while the switches were read: `min-w-0` on the column, `max-w-full` on the bar.
-- **lizard reads `<Columns min="panel" max={3} …>` as a TS generic** and the component runs to the
-  end of the file (Profile's AccountCards: "408 length"); an attribute before `min` fixes it.
+- **lizard's .tsx lexer runs a function to EOF on a generic it reads as a tag**: `<Columns min=…>`
+  (put an attribute before `min`), and `type X = React.ComponentProps<typeof …> & {` after a
+  function (dialog.tsx R7: types above every function). Check `python3 -m lizard <file>`'s list.
 - **Under load (≥40) lazy-route e2e tests time out on "Opening the page…"**: rerun alone first.
