@@ -1,6 +1,6 @@
 import { Card } from "../components/ui/card";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
-import { AutoGrid } from "../components/ui/auto-grid";
+import { cn } from "../lib/utils";
 import { TextLink } from "../components/ui/text-link";
 import { typography } from "../lib/typography";
 import { ILLUSTRATIONS } from "../components/onboarding/Illustrations";
@@ -38,6 +38,20 @@ import { GUIDE_INTRO, GUIDE_TITLE, guideSteps } from "../lib/onboardingCopy";
  * the door step and promises nothing.
  * </p>
  */
+/**
+ * R6 L6-17 — the steps in one, two or three columns by the LIST's width (so 200 % text keeps
+ * fewer), every card in a row one height, and the last step widened to close its row: seven steps
+ * in threes left step 7 alone at 1024 beside two empty tracks.
+ */
+const STEPS_GRID = "grid grid-cols-1 gap-6 @[38rem]/steps:grid-cols-2 @[58rem]/steps:grid-cols-3";
+
+/** The last step's span at two columns and at three: whatever its row has left. */
+function lastStepSpan(count: number): string {
+  const two = count % 2 === 1 ? "@[38rem]/steps:col-span-2" : "";
+  const three = ["@[58rem]/steps:col-span-1", "@[58rem]/steps:col-span-3", "@[58rem]/steps:col-span-2"][count % 3];
+  return cn(two, three);
+}
+
 export default function HowItWorksPage() {
   // doors: member — the same three-answer flag the home tile uses. "No" removes the door step
   // entirely, because a club with no gate must not meet the word; "unknown" keeps it, because
@@ -57,12 +71,13 @@ export default function HowItWorksPage() {
     // lg, three on a wide page) rather than one 36rem column of them.
     <PageShell width="content" className="xl:max-w-wide">
       <PageHeader title={GUIDE_TITLE} description={GUIDE_INTRO} />
-      <AutoGrid as="ol" min="card" max={3} gap="lg" className="items-start">
+      <div className="@container/steps">
+      <ol className={STEPS_GRID}>
         {steps.map((step, index) => {
           const Illustration = step.illustration ? ILLUSTRATIONS[step.illustration] : null;
           return (
-            <li key={step.id}>
-              <Card className="@container/step px-4 sm:px-6">
+            <li key={step.id} className={cn("flex", index === steps.length - 1 && lastStepSpan(steps.length))}>
+              <Card className="@container/step w-full px-4 sm:px-6">
                 <h2 className={`${typography({ variant: "h3" })} flex items-start gap-3`}>
                   {/* The step's number, as a badge — aria-hidden because the <ol> already says it. */}
                   <span
@@ -93,7 +108,8 @@ export default function HowItWorksPage() {
             </li>
           );
         })}
-      </AutoGrid>
+      </ol>
+      </div>
 
       {/* Where a member goes next. Links, because both navigate. */}
       <nav aria-label="Next steps" className="flex flex-wrap gap-x-6">

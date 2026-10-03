@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AutoGrid } from "@/components/ui/auto-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trophy } from "@/components/ui/icons";
@@ -49,7 +50,9 @@ export default function ProfileResultsPage() {
   const { held, reload, more } = useResults();
   const rows = held.rows;
   return (
-    <PageShell width="narrow">
+    // R6 F5 (R4 SPEC 3.7): `wide`, the results in columns — a 36rem column was 40 % of a 1280
+    // screen and 25 % of a 1920 one. `narrow` is for single-task forms only.
+    <PageShell width="wide">
       <PageHeader
         back={{ to: "/profile#my-game", label: RESULTS_PAGE.back }}
         title={RESULTS_PAGE.title}
@@ -70,9 +73,9 @@ export default function ProfileResultsPage() {
         emptyHint={RESULTS_PAGE.emptyHint}
         skeleton={<div className="flex flex-col gap-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-32 rounded-xl" />)}</div>}
       >
-        <ol data-results="" className="flex flex-col gap-3">
+        <AutoGrid as="ol" data-results="" min="panel" max={3} gap="md" className="items-start">
           {(rows ?? []).map((row) => <ResultRowItem key={row.result_id} row={row} />)}
-        </ol>
+        </AutoGrid>
         {more.error ? <Alert tone="danger" live="assertive">{playRefusal(more.error, RESULTS_PAGE.moreAction)}</Alert> : null}
         {held.next ? (
           <div><Button variant="outline" pending={more.pending} onClick={() => void more.run()}>{RESULTS_PAGE.more}</Button></div>
