@@ -40,7 +40,7 @@ describe("L7-16", () => {
  * the desk cannot cancel it from this member's record, and its figure is what this member is out.
  */
 describe("E7-5 — a court paid for at the box", () => {
-  it("has no Cancel, says who booked it, and shows what the payer is out", async () => {
+  it("has no Cancel, says it was paid for at the box, and shows what the payer is out", async () => {
     const payer = bookingRow({
       booking_id: "bk-paid", role: "payer", charged_minutes: 45, cost_minutes: 45,
       organiser: { user_id: "sam", name: "Sam Okafor", is_self: false },
@@ -50,7 +50,8 @@ describe("E7-5 — a court paid for at the box", () => {
       { path: `${BASE}/bookings`, body: { when: "upcoming", items: [payer], next_cursor: null } },
     ]));
     renderMember(`/admin/members/${MEMBER_ID}/bookings`);
-    const line = (await screen.findByText(BOOKINGS_TAB_COPY.bookedBy("Sam Okafor"))).closest("li")!;
+    const line = (await screen.findByText(BOOKINGS_TAB_COPY.payerOf("Sam Okafor"))).closest("li")!;
+    expect(within(line).getByText(BOOKINGS_TAB_COPY.payerBadge)).toBeInTheDocument();
     expect(within(line).queryByRole("button", { name: /^Cancel/ })).toBeNull();
     expect(line.textContent).toContain("45 minutes");
   });

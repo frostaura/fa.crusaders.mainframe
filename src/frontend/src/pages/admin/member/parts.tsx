@@ -16,6 +16,7 @@ import { bookingWhen, dayParts } from "./memberTime";
 
 function bookedByLine(row: MemberBookingRow): string {
   if (row.role === "partner") return COPY.partnerOf(row.organiser?.name ?? null);
+  if (row.role === "payer") return COPY.payerOf(row.organiser?.name ?? null);
   if (row.booked_by.is_self) return COPY.bookedBySelf;
   return row.booked_by.name ? COPY.bookedBy(row.booked_by.name) : COPY.bookedByUnknown;
 }
@@ -90,6 +91,7 @@ export function BookingLine({ row, zone, action, people }: {
           over two lines; now the actions drop to their own line and a figure never splits. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
         {partner ? <Badge tone="info">{COPY.partnerBadge}</Badge> : null}
+        {row.role === "payer" ? <Badge tone="info">{COPY.payerBadge}</Badge> : null}
         <Badge tone={status.tone}>{status.word}</Badge>
         {/* What this member is out on it (`cost_minutes`). Without it, a partner's row has no
             figure: `charged_minutes` there is the ORGANISER's charge, not what this member paid. */}

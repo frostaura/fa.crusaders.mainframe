@@ -243,6 +243,9 @@ export const BOOKINGS_TAB_COPY = {
   /** C6: a seat on somebody else's game — theirs to play, the organiser's to cancel. */
   partnerOf: (name: string | null) => (name ? `Playing as ${name}'s partner` : "Playing as a partner"),
   partnerBadge: "Partner",
+  /** R7 E7-5 — a court this member paid for at the box: somebody else's booking. */
+  payerOf: (name: string | null) => (name ? `Paid for ${name}'s court at the box` : "Paid for a court at the box"),
+  payerBadge: "Paid at the box",
   checkedIn: "Checked in",
   charged: (minutes: number) => minutesSpoken(minutes),
   unknownCourt: "A court",
