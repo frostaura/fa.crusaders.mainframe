@@ -356,10 +356,13 @@ public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
             Assert.Equal(leagueId, first.RootElement.GetProperty("tariff_after").GetProperty("discount_group_id").GetGuid());
         }
 
-        // Answerable from the member's side: the trace carries the rows, naming the action.
+        // Answerable from the member's side: the trace carries the rows under their own kind and a
+        // headline in words, not the raw action name (review round 8, E8-3).
         var trace = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}/trace");
-        Assert.Equal(3, trace.GetProperty("events").EnumerateArray()
-            .Count(e => e.GetProperty("headline").GetString()!.Contains("member.groups_changed", StringComparison.Ordinal)));
+        var moves = trace.GetProperty("events").EnumerateArray()
+            .Where(e => e.GetProperty("kind").GetString() == TraceKinds.AccountGroupsChanged).ToList();
+        Assert.Equal(3, moves.Count);
+        Assert.All(moves, e => Assert.EndsWith("changed their member groups", e.GetProperty("headline").GetString()!, StringComparison.Ordinal));
     }
 
     /// <summary>
