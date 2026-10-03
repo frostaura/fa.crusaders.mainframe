@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-ledger-layout
 description: "R5 lane A: the ledger folds by its own box (Amount never lost), its heads stick to the page, top bars stick by room and publish their height, the wallet rail's primary Top up and last 30 days."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Live decisions — the ledger, sticky bars and the wallet rail (review round 5, lane A)
@@ -28,3 +28,6 @@ last_verified: 2026-10-01
 - **Wallet rail (≥ lg):** Top up is PRIMARY beside the figure at any balance; the last 30 days
   (top-ups, spent, net) from `reportWallet` under it, three states, offline says it needs a connection.
 - **Wallet activity reads through D2's kept store** (`useKeptReport`), StaleNotice on a failed refresh.
+- **Wallet activity's figures are movements, signed (R7 E7-7/J7-2):** tiles and Totals alike; the
+  daily table adds a column per bucket the period moved by (penalties, adjustments, reversals,
+  shares — optional on the wire) and a signed Net (`net_movement_minutes`), so a row adds up.
