@@ -23,8 +23,9 @@ last_verified: 2026-10-03
   `data.identified_user_id` are the scanner (organiser, accepted partner or pay-for payer);
   `user_id` stays the owner, `paid_by_user_id` is who paid. Every `court.lights_on` audit row records
   `identified_user_id`, and the admin trace event's `code_holder {user_id, name}` names it, so the
-  Night says "with Pam's code" on Olga's booking (FD10 renders it). The cue worker's own
-  `booking.lights_on` still lacks `paid_by_user_id` / `identified_user_id` (pre-existing divergence).
+  Night says "with Pam's code" on Olga's booking (FD10 renders it). `LightsCueWorker` only ever
+  emits `booking.lights_off` (its `on:` branch is never called — `LightsCueTests` pins "no lights_on
+  event at all"), so `CourtActivationService` is the one `booking.lights_on` source.
 - **A pay-for refused `code_used` is on the payer's Night** like activate and walk-up (D10-1),
   attempt `pay_for`, quote and confirm both; the code is never recorded.
 - **Door `code_used` is "Code already used"** (`DoorWords`) and is a log filter value
