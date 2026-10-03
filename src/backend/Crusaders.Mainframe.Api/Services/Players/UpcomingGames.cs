@@ -176,6 +176,7 @@ public sealed class UpcomingGames
         {
             MyPaidMinutes = paid,
             MyOwingMinutes = owing,
+            SoldEndsAt = BookingService.OriginalEndsAt(b),
         };
     }
 
@@ -214,6 +215,10 @@ public sealed record GameItem(
     /// <summary>What the game has cost the caller so far, off their own wallet, net (review round 3, M-3).</summary>
     [JsonPropertyName("my_paid_minutes")]
     public int MyPaidMinutes { get; init; }
+
+    /// <summary>When the game was SOLD to end — <c>ends_at</c> is cut short by the no-show sweep (review round 7, E7-6).</summary>
+    [JsonPropertyName("sold_ends_at")]
+    public DateTimeOffset SoldEndsAt { get; init; }
 
     /// <summary>What a partner still owes on an open seat; 0 for the organiser (review round 3, M-3).</summary>
     [JsonPropertyName("my_owing_minutes")]

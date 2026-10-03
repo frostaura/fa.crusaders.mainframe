@@ -165,6 +165,32 @@ public sealed class R7ChainHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         Assert.Equal(HttpStatusCode.NotFound, (await c.Member(r.App, c.Sid).GetAsync($"/api/v1/bookings/{booking.Id}")).StatusCode);
     }
 
+    /// <summary>
+    /// E7-6 (FD1's ask): "Recent games" printed a no-show as 06:24–06:29 — the sweep's cut end —
+    /// for a game sold to 07:09. The member's lists carry the sold end beside the live one.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_recent_no_show_lists_the_end_it_was_sold_to()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        var r = await RigAsync(factory, "r7sold");
+        await using var _ = r.App;
+        var c = r.Club;
+        var booking = await c.BookAsync(r.App, c.Olga, courtIndex: 0, startsInMinutes: -120, minutes: 45);
+        await c.WriteAsync(r.App, async db =>
+        {
+            var row = await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == booking.Id);
+            row.Status = BookingStatus.NoShow;
+            row.EndsAt = row.StartsAt.AddMinutes(5);
+        });
+
+        var recent = await c.Member(r.App, c.Olga).GetFromJsonAsync<JsonElement>("/api/v1/me/bookings/recent");
+        var game = Assert.Single(Items(recent), g => g.GetProperty("booking_id").GetGuid() == booking.Id);
+        Assert.Equal(booking.StartsAt.AddMinutes(5), game.GetProperty("ends_at").GetDateTimeOffset());
+        Assert.Equal(booking.StartsAt.AddMinutes(45), game.GetProperty("sold_ends_at").GetDateTimeOffset());
+    }
+
     private static IEnumerable<JsonElement> Items(JsonElement list) =>
         list.ValueKind == JsonValueKind.Array ? list.EnumerateArray() : list.GetProperty("items").EnumerateArray();
 
