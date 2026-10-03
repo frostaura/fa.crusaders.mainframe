@@ -1566,7 +1566,7 @@ public sealed class BookingService
     /// </summary>
     public async Task<NoShowReversalResult> ReverseNoShowAsync(
         Booking booking, DateTimeOffset attendedAt, Guid actorUserId, CancellationToken ct,
-        DateTimeOffset? provisionalLitEnd = null)
+        DateTimeOffset? provisionalLitEnd = null, ReversalScan? scan = null)
     {
         if (booking.Status != BookingStatus.NoShow || booking.UserId is null) return new NoShowReversalResult.NotNoShow();
 
@@ -1578,6 +1578,7 @@ public sealed class BookingService
         var postings = legs.Postings.Concat(tail.Postings).ToList();
 
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
+        BookingParticipant? stamped = null;
 
         try
         {
@@ -1595,6 +1596,7 @@ public sealed class BookingService
 
             _db.AuditLogs.Add(ReversalAudit(booking, attendedAt, payerUserId, actorUserId, legs, tail));
             foreach (var other in tail.Displaced) _db.AuditLogs.Add(DisplacedAudit(booking, other, tail.Amounts[other.Id], actorUserId));
+            if (scan is not null) stamped = await RecordReversalScanAsync(booking, scan, attendedAt, payerUserId, ct);
 
             await _ledger.PostManyAsync(postings, ct);
         }
@@ -1611,6 +1613,7 @@ public sealed class BookingService
             DiscardPendingAdds();
             _db.Entry(booking).State = EntityState.Detached;
             foreach (var other in tail.Overlaps) _db.Entry(other).State = EntityState.Detached;
+            if (stamped is not null) _db.Entry(stamped).State = EntityState.Detached;
             return new NoShowReversalResult.Lost();
         }
 
@@ -1835,6 +1838,38 @@ public sealed class BookingService
     {
         var restoreTo = tail.Survivors.Aggregate(tail.ProvisionalEnd, (end, s) => s.StartsAt < end ? s.StartsAt : end);
         if (restoreTo > booking.EndsAt) booking.EndsAt = restoreTo;
+    }
+
+    /// <summary>
+    /// The scan behind a late-evidence reversal, recorded as an activation records it (review
+    /// round 8, E8-1): the scanner's own seat stamped (<see cref="SeatArrival"/>), and the
+    /// <c>court.activated</c> row naming them — the Night's "Checked in at Court N". Without it
+    /// the booking read checked in with no player checked in. Staged, not saved; returns the seat
+    /// it stamped so a lost race can forget it.
+    /// </summary>
+    private async Task<BookingParticipant?> RecordReversalScanAsync(
+        Booking booking, ReversalScan scan, DateTimeOffset attendedAt, Guid payerUserId, CancellationToken ct)
+    {
+        var seat = await SeatArrival.StampAsync(_db, booking.Id, scan.UserId, attendedAt, ct);
+        var courtNumber = await _db.Courts.Where(c => c.Id == booking.CourtId).Select(c => c.CourtNumber).FirstAsync(ct);
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = scan.UserId,
+            SubjectUserId = booking.UserId,
+            Action = "court.activated",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                court_number = courtNumber,
+                method = scan.Method,
+                payer_user_id = payerUserId,
+                amount_minutes = booking.AmountChargedMinutes,
+                occurred_at = attendedAt,
+                reversed_no_show = true,
+            }),
+        });
+        return seat;
     }
 
     private AuditLog ReversalAudit(Booking booking, DateTimeOffset attendedAt, Guid payerUserId, Guid actorUserId, SettledLegs legs, Displacement tail)
@@ -3081,6 +3116,12 @@ public abstract record CancellationResult
     public sealed record NotFound : CancellationResult;
     public sealed record AlreadyStarted : CancellationResult;
 }
+
+/// <summary>
+/// Who identified at the box, and how, when the evidence reversing a no-show is a member's scan
+/// (review round 8, E8-1). See <c>BookingService.ReverseNoShowAsync</c>.
+/// </summary>
+public sealed record ReversalScan(Guid UserId, string Method);
 
 /// <summary>What became of a late-attendance reversal. See <c>BookingService.ReverseNoShowAsync</c>.</summary>
 public abstract record NoShowReversalResult

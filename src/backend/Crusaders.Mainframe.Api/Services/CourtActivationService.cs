@@ -484,17 +484,11 @@ public class CourtActivationService
 
     /// <summary>
     /// The identified player's own <c>CheckedInAt</c> on their seat, when the booking has seats
-    /// and theirs is not yet stamped. Staged, not saved. Answers whether anything changed.
+    /// and theirs is not yet stamped (<see cref="SeatArrival"/>, the rule the no-show reversal
+    /// shares). Staged, not saved. Answers whether anything changed.
     /// </summary>
     private async Task<bool> StampPlayerArrivalAsync(Guid bookingId, Guid userId, DateTimeOffset at, CancellationToken ct)
-    {
-        var seat = await _db.BookingParticipants.FirstOrDefaultAsync(
-            p => p.BookingId == bookingId && p.UserId == userId && p.Status == ParticipantStatus.Accepted, ct);
-        if (seat is null || seat.CheckedInAt is not null) return false;
-        seat.CheckedInAt = at;
-        seat.UpdatedAt = StorableTime.UtcNow;
-        return true;
-    }
+        => await SeatArrival.StampAsync(_db, bookingId, userId, at, ct) is not null;
 
     /// <summary>
     /// The single <c>booking.lights_on</c> shape.

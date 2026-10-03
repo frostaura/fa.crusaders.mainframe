@@ -334,6 +334,49 @@ public sealed class PlayersHttpTests(PostgresFixture pg) : IClassFixture<Postgre
     }
 
     /// <summary>
+    /// Review round 8, E8-1: a no-show reversed by the box's late upload stamped the booking checked
+    /// in but no PLAYER — the page read "Checked in at 08:52" above "0 of 2 players checked in", and
+    /// the scanner's Night had no "Checked in" row. The reversal now records the scan exactly as an
+    /// activation does: the scanner's own seat, and the <c>court.activated</c> row with their name.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_reversed_no_show_checks_in_the_player_who_scanned()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await PlayersClub.SeedAsync(f, "plrevscan");
+        await club.CreditAsync(f, club.Sam, 50);
+        var start = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var bookingId = await club.InsertBookingAsync(f, start);
+        await club.CreditAsync(f, club.Organiser, 32);
+        var seat = await AddPartnerAsync(club, f, bookingId, club.Sam);
+        Assert.Equal(HttpStatusCode.OK, (await AcceptAsync(club, f, club.Sam, bookingId, seat)).StatusCode);
+
+        await new NoShowWorker(f.Services, f.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance)
+            .TickAsync(DateTimeOffset.UtcNow, default);
+
+        var scannedAt = start.AddMinutes(2).Storable();
+        var result = await club.InClubAsync(f, async sp =>
+        {
+            var row = await sp.GetRequiredService<MainframeDbContext>().Bookings.FirstAsync(b => b.Id == bookingId);
+            return await sp.GetRequiredService<BookingService>().ReverseNoShowAsync(
+                row, scannedAt, Guid.Empty, default, scan: new ReversalScan(club.Sam, "member_code"));
+        });
+        Assert.IsType<NoShowReversalResult.Ok>(result);
+
+        var detail = await JsonAsync(await club.Client(f, club.Sam).GetAsync($"/api/v1/bookings/{bookingId}"));
+        Assert.Equal(1, detail.GetProperty("attendance").GetProperty("players_checked_in").GetInt32());
+        var samSeat = detail.GetProperty("players").EnumerateArray().Single(p => p.GetProperty("participant_id").GetGuid() == seat);
+        Assert.Equal(JsonValueKind.String, samSeat.GetProperty("checked_in_at").ValueKind);
+
+        var night = await JsonAsync(await club.Client(f, club.Admin, admin: true)
+            .GetAsync($"/api/v1/admin/members/{club.Sam}/trace?day={scannedAt:yyyy-MM-dd}"));
+        var checkedIn = Assert.Single(night.GetProperty("events").EnumerateArray(),
+            e => e.GetProperty("kind").GetString() == TraceKinds.CourtCheckedIn);
+        Assert.StartsWith("Checked in at", checkedIn.GetProperty("headline").GetString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// No debts: when a reversal raises a partner's share back but they have spent the refund, the
     /// reconcile does NOT take them below zero — the rest is unpaid, theirs to pay until the deadline.
     /// </summary>
