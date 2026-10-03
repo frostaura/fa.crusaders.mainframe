@@ -372,7 +372,9 @@ test.describe("B12 — the chrome at a large root font size", () => {
     await page.getByRole("button", { name: "Account menu" }).click();
     const item = page.getByRole("menuitem", { name: /^Wallet/ });
     await expect(item).toBeVisible();
-    const inMenu = await item.locator("span").last().evaluate((el) => ({
+    // The figure a sighted member reads: <Minutes> pairs it (aria-hidden) with an sr-only spoken twin,
+    // which is clipped by design and must not be the span measured here.
+    const inMenu = await item.locator('span[aria-hidden="true"]').last().evaluate((el) => ({
       text: (el as HTMLElement).innerText,
       clipped: el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().right > window.innerWidth,
     }));

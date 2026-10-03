@@ -199,9 +199,9 @@ test.describe("god mode", () => {
     await expect(dialog).toContainText("This lands in the club's change log.");
     await dialog.getByRole("textbox", { name: "Reason" }).fill("Agreed at the desk");
     // R1 F2.13 — the go-ahead names who goes below zero in full, and the most it can be.
-    await dialog.getByRole("checkbox", { name: `Take 25 min from ${PEOPLE.alex.name} even if it puts them up to 25 min below zero` }).click();
+    await dialog.getByRole("checkbox", { name: `Take 25 minutes from ${PEOPLE.alex.name} even if it puts them up to 25 minutes below zero` }).click();
     await dialog.getByRole("button", { name: "Collect share" }).click();
-    await expect(page.getByText("Collected 25 min from Alex.")).toBeVisible();
+    await expect(page.getByText("Collected 25 minutes from Alex.")).toBeVisible();
     expect(sent).toEqual({ reason: "Agreed at the desk", allowNegativeBalance: true });
   });
 });

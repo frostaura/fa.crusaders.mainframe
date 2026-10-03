@@ -146,7 +146,7 @@ test.describe("the member page", () => {
     await expect(cancel).toBeVisible(ARRIVES);
     const [cardBox, cancelBox] = [await card.boundingBox(), await cancel.boundingBox()];
     expect(cancelBox!.x + cancelBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
-    const charge = card.getByText("1 h 40 min");
+    const charge = card.getByText("1 hour 40 minutes");
     const lineHeight = await charge.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     expect((await charge.boundingBox())!.height).toBeLessThanOrEqual(lineHeight + 1);
   });

@@ -98,7 +98,7 @@ test("a share raised after the sheet opened is shown and asked again", async ({ 
   await page.getByRole("button", { name: /Sam invited you to play/ }).click();
   const sheet = await answerSurface(page);
   await sheet.getByRole("button", { name: "Accept and pay 25 min" }).click();
-  await expect(sheet.getByText("Your share is now 30 min. Check it and say yes again if you're happy.")).toBeVisible();
+  await expect(sheet.getByText("Your share is now 30 minutes. Check it and say yes again if you're happy.")).toBeVisible();
   const again = sheet.getByRole("button", { name: "Accept and pay 30 min" });
   await expect(again).toBeVisible();
   expect(sent).toHaveLength(1);

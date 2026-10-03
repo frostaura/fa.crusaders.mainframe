@@ -160,10 +160,10 @@ test.describe("booking with players", () => {
     await expect(totals).toContainText(BOOK_SPLIT.addsUp("1 hour"));
     await next(page);
 
-    await expect(sheet.getByText("You pay 1 h now; Sam and whoever takes your link are asked for 20 min each.")).toBeVisible();
+    await expect(sheet.getByText("You pay 1 hour now; Sam and whoever takes your link are asked for 20 minutes each.")).toBeVisible();
     // Spendable, not raw: 100 of the 120 minutes, with the 20 held said under it.
     await expect(sheet.locator("dl")).toContainText(`${BOOK_SHEET.availableNow}1 h 40 min`);
-    await expect(sheet.locator("[data-held-line]")).toContainText("20 min held until");
+    await expect(sheet.locator("[data-held-line]")).toContainText("20 minutes held until");
 
     await page.evaluate(() => {
       (window as unknown as { __shared: unknown[] }).__shared = [];
@@ -238,7 +238,7 @@ test.describe("booking with players", () => {
     await next(page);
     await expect(sheet.getByText(BOOK_SPLIT.eachBooking)).toBeVisible();
     await next(page);
-    await expect(sheet.getByText("On each booking you pay 1 h now; Sam is asked for 30 min.")).toBeVisible();
+    await expect(sheet.getByText("On each booking you pay 1 hour now; Sam is asked for 30 minutes.")).toBeVisible();
     await sheet.getByRole("button", { name: BOOK_SHEET.primary(2, 120, null) }).click();
     await expect(sheet.getByText(PLAYERS_REFUSAL.member_not_found)).toBeVisible();
     expect(bulkCalls).toBe(1);
