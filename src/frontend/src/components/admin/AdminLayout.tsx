@@ -16,7 +16,7 @@ import { AdminTour } from "../onboarding/AdminTour";
  * </ul>
  *
  * <p>
- * <b>Why the rail waits for `xl` (1280px), not `lg`.</b> A 16rem rail at 1024px leaves a page 704px
+ * <b>Why the rail waits for `xl` (1280px), not `lg`.</b> A 16rem (ADMIN_RAIL_WIDTH) rail at 1024px leaves a page 704px
  * wide — narrower than a 768px phone-landscape screen without it — and the members table measured
  * exactly that: its name column squeezed to nothing and the Joined column (drawn at 1024 by
  * `e2e/admin-members-layout.spec.ts`) lost. From 1024 to 1279 the section bar costs one row of

@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react";
+import { ADMIN_RAIL_WIDTH, SCALING_ICON } from "@/components/ui/layout";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { typography } from "@/lib/typography";
@@ -97,8 +98,10 @@ function NavRow(props: NavRowProps) {
             : "font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary",
         )}
       >
-        <ItemIcon size={20} weight={active ? "fill" : "regular"} aria-hidden="true" className="shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {/* R6 L6-16 (FD1 ask): the icon grows with the text, and the name WRAPS at its words —
+            at 320 / 200 % "Match results" was cut to "Match re…". */}
+        <ItemIcon size={SCALING_ICON} weight={active ? "fill" : "regular"} aria-hidden="true" className="shrink-0" />
+        <span className="min-w-0 flex-1 break-words py-1">{item.label}</span>
         <AttentionCount item={item} counts={counts} />
       </Link>
     </li>
@@ -163,7 +166,9 @@ export function AdminRail({ pathname, counts }: { pathname: string; counts: Badg
   // Two boxes: the column stretches to the content's full height so its edge runs the length of
   // the page, and the aside inside it is the part that sticks.
   return (
-    <div data-admin-rail="" className="hidden w-64 shrink-0 border-r border-border bg-bg-surface xl:block print:hidden">
+    // X6-5 (FD1 ask): the shared width, so the rail, the crest box over it and the shut-doors
+    // banner's offset agree — and 200 % text no longer takes 512px of a 1280 screen.
+    <div data-admin-rail="" className={cn("hidden shrink-0 border-r border-border bg-bg-surface xl:block print:hidden", ADMIN_RAIL_WIDTH)}>
       {/* A div, not <aside> (F3.22): the rail renders inside <main>, where a complementary
           landmark is misplaced (axe landmark-complementary-is-top-level). The <nav> is the landmark. */}
       <div

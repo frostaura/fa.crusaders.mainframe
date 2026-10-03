@@ -231,3 +231,28 @@ test.describe("X5-12 — a group's Manage packages link", () => {
     expect(box.height, `${box.width}×${box.height}`).toBeGreaterThanOrEqual(44);
   });
 });
+
+test.describe("L6-16 / X6-5 — the admin sections at 200 % text", () => {
+  test("320: the switcher's names wrap rather than cut, and the icons grow with the text", async ({ page }) => {
+    await open(page, "/admin/members", adminRoutes(), 320);
+    await page.addStyleTag({ content: "html { font-size: 32px; }" });
+    await page.getByRole("button", { name: /Members/ }).first().click({ timeout: 30_000 });
+    const rows = page.getByRole("dialog").locator("[data-admin-nav]");
+    await expect(rows.first()).toBeVisible();
+    const cut = await rows.evaluateAll((links) => links.flatMap((a) => {
+      const label = a.querySelector("span.flex-1") as HTMLElement | null;
+      return label && label.scrollWidth > label.clientWidth + 1 ? [label.textContent] : [];
+    }));
+    expect(cut).toEqual([]);
+    const icon = await rows.first().locator("svg").first().boundingBox();
+    expect(icon!.width).toBeGreaterThanOrEqual(36);
+  });
+
+  test("1280: the rail takes at most a quarter of the screen", async ({ page }) => {
+    await open(page, "/admin/members", adminRoutes(), 1280);
+    await page.addStyleTag({ content: "html { font-size: 32px; }" });
+    const rail = page.locator("[data-admin-rail]");
+    await expect(rail).toBeVisible({ timeout: 30_000 });
+    expect((await rail.boundingBox())!.width).toBeLessThanOrEqual(320);
+  });
+});
