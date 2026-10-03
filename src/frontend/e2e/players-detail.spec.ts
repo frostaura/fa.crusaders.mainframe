@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { ALEX, BOOKING, PEOPLE, SAM, detailFixture, memberShellRoutes, seat } from "./playersKit";
+import { DETAIL_ACTIONS } from "../src/lib/playersCopy";
 
 /**
  * P11 — the booking's own page, `/bookings/:bookingId`, in a real browser on a phone and a
@@ -115,7 +116,8 @@ test.describe("the organiser's booking page", () => {
     await page.goto(`/bookings/${BOOKING}`);
     await page.getByRole("button", { name: "Remove Sam" }).click();
     const dialog = page.getByRole("dialog", { name: "Remove Sam?" });
-    await expect(dialog).toContainText("They're refunded anything they paid.");
+    // R7 J7-9 — the confirm names the money: what goes back to Sam, and that the organiser's cost rises.
+    await expect(dialog).toContainText(DETAIL_ACTIONS.removeBodyFor("Sam", { paid: 25, share: 25 }));
     await dialog.getByRole("button", { name: "Remove", exact: true }).click();
     await expect(page.getByText("Sam is off this game.")).toBeVisible();
     await expect(page.getByRole("listitem", { name: "Sam, Removed" })).toBeVisible();
