@@ -419,6 +419,8 @@ export type TraceEvent = {
   /** The instant came from a board's own clock after an outage, so it may be minutes out. */
   approximate?: boolean;
   device_code?: string | null;
+  /** R10 E10-2 — whose code the board read on a `lights_on` row (organiser, accepted partner or pay-for payer); null elsewhere. */
+  code_holder?: { user_id: string; name: string | null } | null;
   outage_id?: string | null;
   source?: string | null;
   source_id?: string | null;
