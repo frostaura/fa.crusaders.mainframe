@@ -169,6 +169,34 @@ function describePerDayCap(err: ApiError): string {
     + "Cancel one of them, or pick another day.";
 }
 
+const slotWord = (n: number) => (n === 1 ? "slot" : "slots");
+const count = (value: string | number | null): number | null =>
+  (typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null);
+
+/**
+ * R8 J8-1 — the daily SLOT limit, with its figures. It fell through to the sheet's fallback, "Try
+ * again in a moment", which can never work. Partner seats the member said yes to count against it
+ * (the server's `BookingRules.HeldAsync`), so the sentence says so: a grid reading "2 of 4" was
+ * refused at 4. About the member when the desk books for them (`forName`).
+ */
+function describePerDaySlotCap(err: ApiError, context: BookingErrorContext): string {
+  const name = context.forName ?? null;
+  const [has, your, youve] = name ? [`${name} already has`, "their", "they've"] : ["You already have", "your", "you've"];
+  const cap = count(err.detail("cap_slots"));
+  const booked = count(err.detail("booked_slots"));
+  const joined = `games ${youve} said yes to`;
+  const group = typeof err.detail("group_name") === "string" ? ` The limit is the ${err.detail("group_name")} group's.` : "";
+  if (cap === null || booked === null) {
+    return `${name ? `${name} has` : "You've"} booked all ${your} slots for that day — ${joined} count too. Cancel one, or pick another day.${group}`;
+  }
+  const left = count(err.detail("remaining_slots")) ?? Math.max(0, cap - booked);
+  if (left > 0) {
+    return `${name ? `${name} can` : "You can"} book ${left} more ${slotWord(left)} that day — ${booked} of ${your} ${cap} are booked, `
+      + `counting ${joined}. Pick fewer, or another day.${group}`;
+  }
+  return `${has} ${booked} of ${your} ${cap} ${slotWord(cap)} booked for that day — ${joined} count too. Cancel one, or pick another day.${group}`;
+}
+
 function describeOutOfHours(err: ApiError): string {
   const opens = err.detail("opens_at");
   const closes = err.detail("closes_at");
@@ -260,6 +288,7 @@ function describeInvalidDuration(err: ApiError): string {
 const FIGURED: Record<string, (e: ApiError, context: BookingErrorContext) => string> = {
   peak_hours_league_only: describePeakHours,
   per_day_cap_exceeded: describePerDayCap,
+  per_day_slot_cap_exceeded: describePerDaySlotCap,
   out_of_hours: describeOutOfHours,
   invalid_duration: describeInvalidDuration,
   no_time_available: () => "There's no free time on that court right now.",
