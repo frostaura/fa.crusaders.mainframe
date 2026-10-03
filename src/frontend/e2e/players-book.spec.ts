@@ -155,9 +155,9 @@ test.describe("booking with players", () => {
 
     const totals = sheet.getByRole("region", { name: BOOK_SPLIT.totalsLabel });
     // 60 minutes, three payers: 20 each, whole minutes, adding up to the price.
-    await expect(totals).toContainText(BOOK_SPLIT.youPayNow("1 h", "40 min"));
+    await expect(totals).toContainText(BOOK_SPLIT.youPayNow("1 hour", "40 minutes"));
     await expect(totals).toContainText("20 min");
-    await expect(totals).toContainText(BOOK_SPLIT.addsUp("1 h"));
+    await expect(totals).toContainText(BOOK_SPLIT.addsUp("1 hour"));
     await next(page);
 
     await expect(sheet.getByText("You pay 1 h now; Sam and whoever takes your link are asked for 20 min each.")).toBeVisible();

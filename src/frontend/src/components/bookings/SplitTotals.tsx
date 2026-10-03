@@ -5,7 +5,7 @@ import type { SplitPreview } from "@/lib/playersApi";
 import { BOOK_SHEET } from "@/lib/bookingsCopy";
 import { BOOK_SPLIT, PLAYERS_COPY, PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
 import { Minutes } from "@/components/Minutes";
-import { minutesCompact } from "@/lib/minutes";
+import { minutesSpoken } from "@/lib/minutes";
 import { seatName, type PlayersDraft } from "./playersDraft";
 import { partnersTotal } from "./splitMath";
 import type { SplitEditor } from "./usePlayersStep";
@@ -30,7 +30,7 @@ function nameOfSeat(draft: PlayersDraft, seat: number): string {
 }
 
 function heading(preview: SplitPreview, count: number, bulk: boolean): string | null {
-  if (count > 1) return BOOK_SPLIT.perPrice(minutesCompact(preview.price_minutes));
+  if (count > 1) return BOOK_SPLIT.perPrice(minutesSpoken(preview.price_minutes));
   return bulk ? BOOK_SPLIT.eachBooking : null;
 }
 
@@ -51,10 +51,10 @@ function TotalsBlock({ preview, draft, title, hidePayNow }: TotalsBlockProps) {
       </dl>
       {hidePayNow ? null : (
         <p className="border-t border-border pt-2 font-semibold text-text-primary">
-          {BOOK_SPLIT.youPayNow(minutesCompact(preview.price_minutes), minutesCompact(back))}
+          {BOOK_SPLIT.youPayNow(minutesSpoken(preview.price_minutes), minutesSpoken(back))}
         </p>
       )}
-      <p className="text-xs text-text-secondary">{BOOK_SPLIT.addsUp(minutesCompact(preview.price_minutes))}</p>
+      <p className="text-xs text-text-secondary">{BOOK_SPLIT.addsUp(minutesSpoken(preview.price_minutes))}</p>
     </div>
   );
 }

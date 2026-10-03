@@ -110,10 +110,11 @@ function chipTitle(state: string, loading: boolean, balance: number | null, f: C
   if (loading) return "Refreshing balance…";
   if (!f.parted || balance === null || f.shown === null) return "Wallet balance — tap to buy minutes";
   const parts = [
-    f.held > 0 ? `${minutesCompact(f.held)} held for partners${f.heldParts ? ` (${f.heldParts})` : ""}` : null,
-    f.owedBack > 0 ? `${minutesCompact(f.owedBack)} owed back to partners` : null,
+    f.held > 0 ? `${minutesSpoken(f.held)} held for partners${f.heldParts ? ` (${f.heldParts})` : ""}` : null,
+    f.owedBack > 0 ? `${minutesSpoken(f.owedBack)} owed back to partners` : null,
   ].filter(Boolean).join(", ");
-  return `${minutesCompact(Math.max(0, f.shown))} to spend — ${minutesCompact(balance)} in your wallet, ${parts}. Tap to buy minutes.`;
+  // R6 X6-2: a `title` is read as the chip's description — minutes in words, never "1 h 10 min".
+  return `${minutesSpoken(Math.max(0, f.shown))} to spend — ${minutesSpoken(balance)} in your wallet, ${parts}. Tap to buy minutes.`;
 }
 
 /**
