@@ -835,7 +835,8 @@ export const TIME_UNCERTAIN_NOTE = "The door's clock was out, so this time is ap
  */
 export function decisionAge(minutesAgo: number): string {
   if (minutesAgo <= 0) return "just now";
-  return minutesAgo === 1 ? "1 min ago" : `${minutesAgo} min ago`;
+  // Words (R7 J7-3): the age ends the card's sentence, which a screen reader reads whole.
+  return minutesAgo === 1 ? "1 minute ago" : `${minutesAgo} minutes ago`;
 }
 
 /** After this many minutes the decision card collapses to one line. D6, amending A3.2. */

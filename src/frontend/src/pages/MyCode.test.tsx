@@ -1687,7 +1687,7 @@ describe("MyCode at a club with a door", () => {
       }),
     }));
 
-    expect(await screen.findByText(/12 min ago/)).toBeInTheDocument();
+    expect(await screen.findByText(/12 minutes ago/)).toBeInTheDocument();
     // Collapsed: the body of the card is gone, the headline and the stamp are not. The
     // fixture is the OFFLINE open, so the body to look for is that arm's — a negative
     // assertion aimed at the online arm's sentence passes whether or not anything

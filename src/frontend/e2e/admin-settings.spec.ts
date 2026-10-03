@@ -56,7 +56,7 @@ test("opens as ten one-line answers, and a section opens to its fields", async (
   // Closed, the door section still says how the doors are set.
   const doors = page.getByRole("button", { name: "Door gates" });
   await expect(doors).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByText("Any member in good standing · lock released 15 s")).toBeVisible();
+  await expect(page.getByText("Any member in good standing · lock released 15 seconds")).toBeVisible();
   await expect(unlock(page)).toBeHidden();
 
   await doors.click();

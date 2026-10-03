@@ -502,7 +502,8 @@ export function cancelTermsLine(penaltyPct: number, windowMinutes: number): stri
   if (penaltyPct <= 0 || windowMinutes <= 0) {
     return "Cancel any time before you check in and the full amount comes back. Once the lights have been on, nothing does.";
   }
-  return `Cancel more than ${windowMinutes} min before the start and the full amount comes back; inside ${windowMinutes} min, ${penaltyPct}% is kept. Once the lights have been on, nothing comes back.`;
+  const window = minutesSpoken(windowMinutes);
+  return `Cancel more than ${window} before the start and the full amount comes back; inside ${window}, ${penaltyPct}% is kept. Once the lights have been on, nothing comes back.`;
 }
 
 /**

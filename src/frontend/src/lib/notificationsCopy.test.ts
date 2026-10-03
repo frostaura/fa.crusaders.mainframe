@@ -9,10 +9,15 @@ const ago = (seconds: number) => new Date(NOW - seconds * 1000).toISOString();
 describe("noticeAge", () => {
   it("counts up in the unit a person reads at a glance", () => {
     expect(noticeAge(ago(20), NOW)).toBe("just now");
-    expect(noticeAge(ago(5 * 60), NOW)).toBe("5 min ago");
-    expect(noticeAge(ago(3 * 3600), NOW)).toBe("3 h ago");
+    expect(noticeAge(ago(5 * 60), NOW)).toBe("5 minutes ago");
+    expect(noticeAge(ago(3 * 3600), NOW)).toBe("3 hours ago");
     expect(noticeAge(ago(26 * 3600), NOW)).toBe("yesterday");
     expect(noticeAge(ago(3 * 86400), NOW)).toBe("3 days ago");
+  });
+
+  it("says its unit in words, one or many (R7 J7-3)", () => {
+    expect(noticeAge(ago(60), NOW)).toBe("1 minute ago");
+    expect(noticeAge(ago(3600), NOW)).toBe("1 hour ago");
   });
 
   it("gives the club's date past a week, rather than arithmetic", () => {

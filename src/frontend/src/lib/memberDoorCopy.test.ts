@@ -2072,3 +2072,10 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     }
   }, SWEEP_MS);
 });
+
+describe("decisionAge — words, never 'min' (R7 J7-3)", () => {
+  it("ends the card's sentence in a unit a screen reader says", () => {
+    expect(decisionAge(1)).toBe("1 minute ago");
+    expect(decisionAge(12)).toBe("12 minutes ago");
+  });
+});

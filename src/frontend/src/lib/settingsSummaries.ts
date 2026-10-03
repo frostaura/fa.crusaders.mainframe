@@ -1,6 +1,7 @@
 import type { AdminSettings } from "./api";
 import { GATE_POLICY_LABELS } from "./gateCopy";
 import { DAY_KEYS } from "./tenantSettings";
+import { minutesSpoken } from "./minutes";
 import { minuteLabel, parsePeakHours, type SettingsSectionId } from "./settingsSchema";
 
 /**
@@ -41,9 +42,9 @@ function bookings(settings: AdminSettings): string {
   const slots = num(settings, "member_max_slots_per_day");
   const peak = parsePeakHours(settings.peak_hours ?? "");
   return join([
-    slice !== null && `${slice}-min slices`,
+    slice !== null && `${slice}-minute slices`,
     ahead !== null && `${plural(ahead, "day")} ahead`,
-    minutes !== null && (minutes > 0 ? `${minutes} min a day each` : "no daily time limit"),
+    minutes !== null && (minutes > 0 ? `${minutesSpoken(minutes)} a day each` : "no daily time limit"),
     slots !== null && slots > 0 && `${plural(slots, "slot")} a day`,
     peak && `peak ${peak.start}–${peak.end}`,
   ]);
@@ -62,18 +63,19 @@ function cancellations(settings: AdminSettings): string {
   const window = num(settings, "penalty_window_minutes");
   const grace = num(settings, "grace_window_minutes");
   return join([
-    pct !== null && window !== null && (pct > 0 ? `${pct}% penalty inside ${window} min` : "no late-cancel penalty"),
-    grace !== null && `${grace}-min grace before a no-show`,
+    pct !== null && window !== null && (pct > 0 ? `${pct}% penalty inside ${minutesSpoken(window)}` : "no late-cancel penalty"),
+    grace !== null && `${grace}-minute grace before a no-show`,
   ]);
 }
 
 /**
  * P13: the section holds the currency symbol alone — packages and group discounts live on their
- * own pages — so the line says how money works here and names the symbol (R6 L6-11: "priced in R" read as
- * a word).
+ * own pages — so the line says how money works here and shows the symbol where it sits, on a
+ * price (R6/R7 L6-11: "priced in R" read as a word, and "currency symbol R" was heard as
+ * "currency symbol are"; "R50.00" is read as a price by eye and by ear, and so is "CHF50.00").
  */
 function money(_settings: AdminSettings, currency: string): string {
-  return `Minutes bought in packages · currency symbol ${currency}`;
+  return `Minutes bought in packages · prices look like ${currency}50.00`;
 }
 
 function schedules(settings: AdminSettings): string {
@@ -85,8 +87,8 @@ function boxes(settings: AdminSettings): string {
   const walkUp = num(settings, "walk_up_max_minutes");
   const cue = num(settings, "activation_cue_window_minutes");
   return join([
-    walkUp !== null && `walk-ups up to ${walkUp} min`,
-    cue !== null && `lights on ${cue} min early`,
+    walkUp !== null && `walk-ups up to ${minutesSpoken(walkUp)}`,
+    cue !== null && `lights on ${minutesSpoken(cue)} early`,
   ]);
 }
 
@@ -94,15 +96,15 @@ function screens(settings: AdminSettings): string {
   const revert = num(settings, "lcd_revert_seconds");
   const rapid = num(settings, "rapid_scan_window_seconds");
   return join([
-    revert !== null && `results show ${revert} s`,
-    rapid !== null && (rapid > 0 ? `next scan within ${rapid} s` : "one person at a time"),
+    revert !== null && `results show ${plural(revert, "second")}`,
+    rapid !== null && (rapid > 0 ? `next scan within ${plural(rapid, "second")}` : "one person at a time"),
   ]);
 }
 
 function doors(settings: AdminSettings): string {
   const policy = GATE_POLICY_LABELS[settings.gate_access_policy] as string | undefined;
   const unlock = num(settings, "gate_unlock_seconds");
-  return join([policy, unlock !== null && `lock released ${unlock} s`]);
+  return join([policy, unlock !== null && `lock released ${plural(unlock, "second")}`]);
 }
 
 function records(settings: AdminSettings): string {
@@ -132,7 +134,7 @@ function alerts(settings: AdminSettings): string {
   const kept = num(settings, "admin_notification_retention_days");
   const line = join([
     reminder !== null && `applications chased after ${plural(reminder, "hour")}`,
-    count !== null && minutes !== null && `${count} faults in ${minutes} min is a spike`,
+    count !== null && minutes !== null && `${plural(count, "fault")} in ${minutesSpoken(minutes)} is a spike`,
     kept !== null && `alerts kept ${plural(kept, "day")}`,
   ]);
   // An API without the club's thresholds still has each admin's own switches in this section, so

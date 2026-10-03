@@ -11,6 +11,8 @@ import { PACKAGES_COPY, savesWords } from "./packagesCopy";
 import { ARCHIVE_COPY } from "./groupsCopy";
 import { explainFault, faultDetail } from "./deviceFaultCopy";
 import { FEATURES } from "./features";
+import { sectionSummary } from "./settingsSummaries";
+import type { AdminSettings } from "./api";
 import { keepAmounts } from "../components/players/detail/detailModel";
 import { CELEBRATION_COPY, RING_COPY, hoursAndMinutesSpoken } from "./playCopy";
 
@@ -28,6 +30,25 @@ import { CELEBRATION_COPY, RING_COPY, hoursAndMinutesSpoken } from "./playCopy";
 const ABBREVIATED = /\d[\s\u00a0]?(h|min|d)\b/;
 
 const said = (s: string) => expect(s, s).not.toMatch(ABBREVIATED);
+
+/** A number or an interpolation followed by a compact unit: `${n} min`, "15 min", `${h} h`, `${n}-min`. */
+const LITERAL_UNIT = /(\d|\$\{[^}]*\})([ \u00a0]|-)(min|h|d)\b/;
+
+/** The compact figure formatters a copy module may keep — each drawn only beside a spoken twin. */
+const COMPACT_FORMATTERS = [{ file: "playCopy.ts", fn: "hoursAndMinutes" }];
+
+/** The source with comments and the exempt formatters' bodies blanked, line numbers kept. */
+function codeOf(source: string, file: string): string {
+  const blank = (m: string) => m.replace(/[^\n]/g, " ");
+  let code = source
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, (m, lead: string) => lead + blank(m.slice(lead.length)));
+  for (const { file: f, fn } of COMPACT_FORMATTERS) {
+    if (f !== file) continue;
+    code = code.replace(new RegExp(`export function ${fn}\\([\\s\\S]*?\\n\\}`), blank);
+  }
+  return code;
+}
 
 describe("X6-2 — minutes in words are spoken words", () => {
   it("the desk's adjust and sell sheets", () => {
@@ -70,6 +91,29 @@ describe("X6-2 — minutes in words are spoken words", () => {
     said(bookings.cancelRowOutcome(45, 5));
     said(bookings.BOOKING_FOR.canSpend(90));
     said(bookings.BOOKING_FOR.held(15));
+    expect(bookings.cancelTermsLine(30, 15)).toBe(
+      "Cancel more than 15 minutes before the start and the full amount comes back; inside 15 minutes, 30% is kept. Once the lights have been on, nothing comes back.",
+    );
+  });
+
+  it("the settings summaries an admin reads down the collapsed sections (R7 J7-3)", () => {
+    const settings = {
+      slice_minutes: 15, advance_booking_days: 14, member_per_day_max_minutes: 60, penalty_pct: 30,
+      penalty_window_minutes: 15, grace_window_minutes: 10, walk_up_max_minutes: 90,
+      activation_cue_window_minutes: 10, fault_spike_count: 5, fault_spike_minutes: 15,
+      lcd_revert_seconds: 5, gate_unlock_seconds: 15,
+    } as unknown as AdminSettings;
+    const ids = ["bookings", "cancellations", "boxes", "alerts", "screens", "doors"] as const;
+    for (const id of ids) said(sectionSummary(id, settings, "R"));
+    expect(sectionSummary("bookings", settings, "R")).toBe("15-minute slices · 14 days ahead · 1 hour a day each");
+    expect(sectionSummary("cancellations", settings, "R")).toBe("30% penalty inside 15 minutes · 10-minute grace before a no-show");
+    expect(sectionSummary("boxes", settings, "R")).toBe("Walk-ups up to 1 hour 30 minutes · lights on 10 minutes early");
+    expect(sectionSummary("alerts", settings, "R")).toMatch(/^5 faults in 15 minutes is a spike/);
+  });
+
+  it("the package editor's hour chips are said as hours", () => {
+    expect(PACKAGES_COPY.hoursChip(1)).toBe("1 hour");
+    expect(PACKAGES_COPY.hoursChip(10)).toBe("10 hours");
   });
 
   it("the wallet's sentences", () => {
@@ -104,6 +148,33 @@ describe("X6-2 — minutes in words are spoken words", () => {
       .filter((f) => /Copy\.ts$/.test(f))
       .filter((f) => /\bminutes(Compact|Signed)\(/.test(readFileSync(join(dir, f), "utf8")));
     expect(offenders).toEqual([]);
+  });
+
+  it("no copy module writes a literal compact unit into its words (R7 J7-3)", () => {
+    // R6's guard caught a `minutesCompact(` call but not the unit typed by hand: "inside
+    // ${windowMinutes} min", "${minutes} min a day", "${hours} h" all reached members and
+    // admins as "min" and "h". Comments are documentation and are stripped before the scan.
+    const dir = __dirname;
+    const files = [
+      ...readdirSync(dir).filter((f) => /Copy\.ts$/.test(f)),
+      "settingsSummaries.ts",
+    ];
+    const offenders = files.flatMap((f) =>
+      codeOf(readFileSync(join(dir, f), "utf8"), f)
+        .split("\n")
+        .map((line, i) => ({ line, at: `${f}:${i + 1}` }))
+        .filter(({ line }) => LITERAL_UNIT.test(line))
+        .map(({ line, at }) => `${at}  ${line.trim()}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("the one compact formatter a copy module keeps is still a figure, not a sentence", () => {
+    // `hoursAndMinutes` draws the tile's and the ring's figure; each pairs it with a spoken twin
+    // (`hoursAndMinutesSpoken`, RING_COPY.aria). Exempt by name, so the exemption cannot outlive it.
+    for (const { file, fn } of COMPACT_FORMATTERS) {
+      expect(readFileSync(join(__dirname, file), "utf8")).toMatch(new RegExp(`export function ${fn}\\(`));
+    }
   });
 
   it("a spoken figure in a sentence is still held together (R5 V5-7)", () => {

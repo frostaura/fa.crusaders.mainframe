@@ -74,10 +74,10 @@ describe("the club's money symbol", () => {
 
     await findControl(/Currency symbol/);
     const trigger = screen.getByRole("button", { name: "Money & packages" });
-    expect(trigger).toHaveAccessibleDescription("Minutes bought in packages · currency symbol R");
+    expect(trigger).toHaveAccessibleDescription("Minutes bought in packages · prices look like R50.00");
     fireEvent.change(control(/Currency symbol/), { target: { value: "CHF" } });
 
-    await waitFor(() => expect(trigger).toHaveAccessibleDescription(/^Minutes bought in packages · currency symbol CHF\b/));
+    await waitFor(() => expect(trigger).toHaveAccessibleDescription(/^Minutes bought in packages · prices look like CHF50\.00/));
   });
 
   /**
@@ -92,7 +92,7 @@ describe("the club's money symbol", () => {
 
     // The line falls back rather than reading "currency symbol 50".
     expect(await screen.findByRole("button", { name: "Money & packages" }))
-      .toHaveAccessibleDescription(/^Minutes bought in packages · currency symbol R\b/);
+      .toHaveAccessibleDescription(/^Minutes bought in packages · prices look like R50\.00/);
 
     fireEvent.click(saveButton());
     await waitFor(() => {

@@ -76,7 +76,7 @@ describe("Settings → Admin alerts: the club's thresholds", () => {
     renderPage(<AdminSettingsPage />);
 
     expect(await screen.findByRole("button", { name: "Admin alerts" })).toHaveAccessibleDescription(
-      "Applications chased after 24 hours · 5 faults in 15 min is a spike · alerts kept 90 days",
+      "Applications chased after 24 hours · 5 faults in 15 minutes is a spike · alerts kept 90 days",
     );
   });
 
@@ -338,6 +338,6 @@ describe("Settings → Money & packages after P13", () => {
     expect(money).not.toHaveTextContent(/credit|top.?up|\bcr\b|conversion|per R1|over-65|their class/i);
     expect(within(money).getByRole("link", { name: SETTINGS_COPY.packagesLink })).toHaveAttribute("href", "/admin/packages");
     expect(within(money).getByRole("link", { name: SETTINGS_COPY.groupDiscountsLink })).toHaveAttribute("href", "/admin/groups");
-    expect(sectionTrigger("Money & packages")).toHaveAccessibleDescription("Minutes bought in packages · currency symbol R");
+    expect(sectionTrigger("Money & packages")).toHaveAccessibleDescription("Minutes bought in packages · prices look like R50.00");
   });
 });

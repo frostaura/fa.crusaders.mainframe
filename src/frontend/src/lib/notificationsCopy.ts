@@ -53,16 +53,17 @@ export function deliveryBadge(delivery: AdminNotice["delivery"]): { label: strin
 }
 
 /**
- * "just now" · "5 min ago" · "3 h ago" · "2 days ago" — and past a week the club's own date, because
- * "23 days ago" makes the reader do arithmetic to find the day.
+ * "just now" · "5 minutes ago" · "3 hours ago" · "2 days ago" — and past a week the club's own date,
+ * because "23 days ago" makes the reader do arithmetic to find the day. Words, never "min" or "h"
+ * (R7 J7-3): the age is read inside the alert's accessible description, a sentence.
  */
 export function noticeAge(iso: string, now: number, timezone?: string): string {
   const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   if (seconds < 60) return "just now";
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
   const days = Math.round(hours / 24);
   if (days < 7) return days === 1 ? "yesterday" : `${days} days ago`;
   // ICU's en-GB spells September "Sept"; the week strip and the grid say "Sep".

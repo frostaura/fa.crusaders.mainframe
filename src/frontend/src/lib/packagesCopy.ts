@@ -85,7 +85,8 @@ export const PACKAGES_COPY = {
   minutesLabel: "Minutes",
   minutesDescription: "Whole minutes. Use the hours below to fill it in.",
   hoursLabel: "Fill in hours",
-  hoursChip: (hours: number) => `${hours} h`,
+  /** R7 J7-3 — the chip is a button, and a button's name is read whole: "2 hours", never "2 h". */
+  hoursChip: (hours: number) => minutesSpoken(hours * 60),
   minutesEcho: (minutes: number) => `= ${minutesSpoken(minutes)}`,
   priceLabel: "Price (R)",
   priceDescription: "What a member pays, in rand. A group discount comes off a club package's price.",

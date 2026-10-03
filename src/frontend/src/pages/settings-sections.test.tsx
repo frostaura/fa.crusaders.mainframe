@@ -160,12 +160,12 @@ describe("R13 — summaries, unsaved marks and the save bar", () => {
     renderPage(<AdminSettingsPage />);
 
     const doors = await screen.findByRole("button", { name: "Door gates" });
-    expect(doors).toHaveAccessibleDescription(/Any member in good standing · lock released 15 s/);
-    expect(sectionTrigger("Bookings")).toHaveAccessibleDescription(/15-min slices · 14 days ahead · 60 min a day each/);
-    expect(sectionTrigger("Cancellations & no-shows")).toHaveAccessibleDescription(/30% penalty inside 15 min/);
+    expect(doors).toHaveAccessibleDescription(/Any member in good standing · lock released 15 seconds/);
+    expect(sectionTrigger("Bookings")).toHaveAccessibleDescription(/15-minute slices · 14 days ahead · 1 hour a day each/);
+    expect(sectionTrigger("Cancellations & no-shows")).toHaveAccessibleDescription(/30% penalty inside 15 minutes/);
 
     fireEvent.change(control(/Unlock time/), { target: { value: "20" } });
-    expect(doors).toHaveAccessibleDescription(/lock released 20 s/);
+    expect(doors).toHaveAccessibleDescription(/lock released 20 seconds/);
   });
 
   it("shows no save bar until something changes, then counts the changes and marks the section", async () => {
