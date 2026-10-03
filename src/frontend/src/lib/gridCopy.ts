@@ -313,3 +313,9 @@ function listNames(names: readonly string[]): string {
   return `${kept.slice(0, -1).join(", ")} and ${kept[kept.length - 1]}`;
 }
 
+
+/**
+ * R11 X11-3 — the Book sheet's primary once the club says the slot is gone (taken, out of hours,
+ * past): booking it again cannot work, so the one way on closes onto the refreshed grid.
+ */
+export const BOOK_SHEET_GONE = { pickAnother: "Pick another time" } as const;

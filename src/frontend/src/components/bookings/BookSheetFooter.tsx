@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
@@ -36,17 +36,18 @@ export function BookFooter(props: FooterProps) {
       {note}
       {/* R4 I4-1 — no way out while the booking is on its way; the note above says why. */}
       {flow.busy ? null : <Button variant="outline" onClick={first ? onClose : flow.back}>{way}</Button>}
-      {flow.confirming ? <PrimaryButton flow={flow} reasonId={reasonId} /> : <Button onClick={flow.next}>{BOOK_SHEET.next}</Button>}
+      {flow.confirming ? <PrimaryButton flow={flow} reasonId={reasonId} onClose={onClose} /> : <Button onClick={flow.next}>{BOOK_SHEET.next}</Button>}
     </DialogFooter>
   );
 }
 
-type PrimaryProps = { flow: BookFlow; reasonId: string };
+type PrimaryProps = { flow: BookFlow; reasonId: string; onClose: () => void };
 
 function PrimaryButton(props: PrimaryProps) {
-  const { flow, reasonId } = props;
+  const { flow, reasonId, onClose } = props;
   const { primary } = flow;
   if (primary.kind === "none") return null;
+  if (primary.kind === "gone") return <PickAnother label={primary.label} onClose={onClose} />;
   if (primary.kind === "unavailable") {
     // `aria-disabled`, never `disabled`: it stays focusable, so a reader reaches it and hears
     // why (its description) — and with no handler, a press does nothing.
@@ -66,6 +67,18 @@ function PrimaryButton(props: PrimaryProps) {
       {primary.label}
     </Button>
   );
+}
+
+/**
+ * R11 X11-3 — the slot is gone (the refusal above says so): Book again cannot work, so the primary
+ * closes onto the refreshed grid, and the keyboard is put on it — never left on a Book button for
+ * a slot that is somebody else's.
+ */
+function PickAnother(props: { label: string; onClose: () => void }) {
+  const { label, onClose } = props;
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  return <Button ref={ref} data-pick-another="" onClick={onClose}>{label}</Button>;
 }
 
 type ResultFooterProps = { flow: BookFlow; onClose: () => void; note: ReactNode };

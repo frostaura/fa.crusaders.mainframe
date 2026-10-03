@@ -5,6 +5,7 @@ import { NotSent, UnsureOutcome, refuseWhenOffline, type Reread } from "@/lib/bo
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { BOOK_SHEET, refusalReason } from "@/lib/bookingsCopy";
+import { BOOK_SHEET_GONE } from "@/lib/gridCopy";
 import { PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
 import type { ComboboxMember } from "@/components/ui/member-combobox";
 import type { SelectedSlot } from "./types";
@@ -89,7 +90,17 @@ export type Primary =
    * "You need X more" notice, which carries the "Buy minutes" link. Members never overdraw.
    */
   | { kind: "unavailable"; label: string }
+  /** R11 X11-3 — the club says the slot is gone: the one way on is back to the refreshed grid. */
+  | { kind: "gone"; label: string }
   | { kind: "none" };
+
+/** Refusals that say the slot itself is gone — not a lost answer, and not "already yours". */
+const NOT_GONE = new Set(["duplicate_request", "booking_not_found", "block_not_found"]);
+
+/** R11 X11-3 — sending this slot again cannot work: it is taken, closed, past or too far ahead. */
+function slotGone(error: unknown): boolean {
+  return provesStaleGrid(error) && !(error instanceof ApiError && error.code !== null && NOT_GONE.has(error.code));
+}
 
 /** A double tap on Continue must not land its second half on the Book button that replaces it. */
 const STEP_SETTLE_MS = 300;
@@ -429,6 +440,8 @@ export function useBookFlow(input: BookFlowInput) {
     const label = BOOK_SHEET.primary(count, total, null);
     primary = short !== null ? { kind: "unavailable", label } : { kind: "book", label, allowNegativeBalance: false };
   }
+
+  if (action.status === "error" && slotGone(action.error)) primary = { kind: "gone", label: BOOK_SHEET_GONE.pickAnother };
 
   return {
     steps, stepIndex, step, confirming, hold, count, refusedSlots, players,

@@ -7,6 +7,7 @@ import { AuthProvider } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
 import { refuse, stubFetch, type StubCall } from "@/test/harness";
 import { BOOK_SHEET, GOD_MODE, REFUSAL_REASON, RESULTS_LABEL, bookedInBookings } from "@/lib/bookingsCopy";
+import { BOOK_SHEET_GONE } from "@/lib/gridCopy";
 import { BOOK_PLAYERS, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BookSheet, type BookSheetProps } from "../BookSheet";
 import { slotCount } from "../bookFlow";
@@ -157,8 +158,10 @@ describe("BookSheet — a member, one slot", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/Someone just took that slot/);
     expect(onStale).toHaveBeenCalledTimes(1);
     expect(onBooked).not.toHaveBeenCalled();
-    // Still on the confirm, ready to be dismissed or tried again.
-    expect(screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) })).toBeTruthy();
+    // Still on the confirm — but R11 X11-3: a gone slot is never offered again; the way on is
+    // back to the refreshed grid.
+    expect(screen.queryByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) })).toBeNull();
+    expect(screen.getByRole("button", { name: BOOK_SHEET_GONE.pickAnother })).toBeTruthy();
   });
 
   it("tells a short member what they need, never a red negative balance — members never overdraw", async () => {
