@@ -379,7 +379,7 @@ public class AdminOverdraftBookingTests
         var club = new Crusaders.Mainframe.Api.Email.ClubIdentity(
             "Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
         var overdrawn = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 15, -12, 15, 30));
+            "Court 1", "Sat 06 Sep 09:00", "15 minutes", 15, -12, 15, 30, MadeByClub: true));
         var ordinary = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
             "Court 1", "Sat 06 Sep 09:00", "15 min", 15, 185, 15, 30));
 
@@ -391,6 +391,45 @@ public class AdminOverdraftBookingTests
         }
         Assert.DoesNotContain("The club made this booking for you", ordinary.HtmlBody);
         Assert.DoesNotContain("The club made this booking for you", MailText.Unwrap(ordinary.PlainBody));
+    }
+
+    /// <summary>
+    /// Review round 9, J9-5: a booking the club made for a member, with the member in funds, mailed
+    /// "Your court is booked" — the same words as one they made themselves; only an overdraft said
+    /// who made it. The member's confirmation now says the club booked it whenever an admin did,
+    /// and a member's own booking still does not.
+    /// </summary>
+    [Fact]
+    public async Task A_booking_the_club_made_for_a_member_says_so_in_the_mail_overdraft_or_not()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var (bookings, _, _) = await ArrangeAsync(host, scope, seedMinutes: 100);
+        host.EmailService.Clear();
+
+        Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id, new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true),
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+        var byClub = await MailToAsync(host, host.PlayerUser.Email);
+        Assert.Contains("The club booked this court for you", MailText.Unwrap(byClub.PlainBody));
+        Assert.DoesNotContain("Buy minutes to clear it", byClub.HtmlBody);   // in funds: no overdraft line
+
+        host.EmailService.Clear();
+        Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[1].Id, new BookingPayer(host.PlayerUser.Id, host.PlayerUser.Id),
+            TestHost.BookableSlot(3), sliceCount: 1, default));
+        var own = await MailToAsync(host, host.PlayerUser.Email);
+        Assert.DoesNotContain("The club booked", MailText.Unwrap(own.PlainBody));
+    }
+
+    private static async Task<EmailMessage> MailToAsync(TestHost host, string to)
+    {
+        for (var i = 0; i < 100; i++)
+        {
+            if (host.EmailService.Sent.FirstOrDefault(m => m.To == to && m.Subject.StartsWith("Booking confirmed", StringComparison.Ordinal)) is { } m) return m;
+            await Task.Delay(50);
+        }
+        throw new Xunit.Sdk.XunitException("no booking confirmation arrived");
     }
 
     /// <summary>

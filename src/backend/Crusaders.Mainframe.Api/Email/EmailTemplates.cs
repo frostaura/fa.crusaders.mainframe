@@ -27,7 +27,7 @@ public sealed record BookingConfirmationDetails(
     int PenaltyWindowMinutes,
     decimal PenaltyPct,
     bool IsWalkUp = false,
-    bool MadeByClub = true);
+    bool MadeByClub = false);
 
 /// <summary>
 /// The two things a member needs when the <b>club</b> cancelled their booking rather than they
@@ -426,9 +426,7 @@ public static partial class EmailTemplates
     {
         var blocks = new List<EmailBlock>
         {
-            new Paragraph(d.IsWalkUp
-                ? $"You bought court time at the box and the court is yours now."
-                : $"Your court is booked. Bring your phone — you open the door and the court with the member code on it when you get there."),
+            new Paragraph(ConfirmationOpening(d)),
             new Facts(
             [
                 new FactRow("Court", d.CourtName),
@@ -449,9 +447,21 @@ public static partial class EmailTemplates
             Preheader: d.IsWalkUp
                 ? $"{d.Duration} on {d.CourtName}. {Min(d.AmountMinutes)} charged."
                 : $"{d.StartsAtLocal} on {d.CourtName}. {Min(d.AmountMinutes)} charged.",
-            Heading: d.IsWalkUp ? "You're on court" : "You're booked",
+            Heading: d.IsWalkUp ? "You're on court" : d.MadeByClub ? "The club booked you a court" : "You're booked",
             Blocks: blocks,
             WhyThis: WhyBooking), receipt);
+    }
+
+    /// <summary>
+    /// Who made the booking, first (review round 9, J9-5): a booking the club made for a member
+    /// read "Your court is booked" — the words of one they made themselves — unless it overdrew
+    /// them. <see cref="BookingConfirmationDetails.MadeByClub"/> is the booker not being the member.
+    /// </summary>
+    private static string ConfirmationOpening(BookingConfirmationDetails d)
+    {
+        const string bring = "Bring your phone — you open the door and the court with the member code on it when you get there.";
+        if (d.IsWalkUp) return "You bought court time at the box and the court is yours now.";
+        return d.MadeByClub ? $"The club booked this court for you. {bring}" : $"Your court is booked. {bring}";
     }
 
     /// <summary>
