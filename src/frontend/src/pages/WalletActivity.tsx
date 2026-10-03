@@ -100,7 +100,8 @@ export default function WalletActivityPage() {
       <WalletNav />
       <div ref={rangeBar} data-range-bar="" data-sticks={sticks || undefined} className={cn("-my-2 py-2", sticks && "sticky top-0 z-sticky bg-bg-app")}>
         <RangeToolbar range={range} onChange={setRange}>
-          <Button variant="outline" onClick={() => void csv.run()} pending={csv.pending} icon={<DownloadSimple aria-hidden="true" />}>
+          {/* R8 L8-6 — wraps inside the card: nowrap, it pushed a 320 phone at 200 % 11px sideways. */}
+          <Button variant="outline" className="max-w-full whitespace-normal" onClick={() => void csv.run()} pending={csv.pending} icon={<DownloadSimple aria-hidden="true" />}>
             Download CSV
           </Button>
         </RangeToolbar>
@@ -293,17 +294,31 @@ function dayColumns(days: DayPoint[]): DataColumn<DayPoint>[] {
   ];
 }
 
+/**
+ * R8 L8-4 — the daily table on a phone. `isolate` makes the table one layer below the stuck range
+ * bar: its head is sticky (z 20) like the bar, and later in the page, so it painted OVER the bar
+ * as it scrolled under it. And the Date column is pinned while the table scrolls sideways — a row
+ * of figures with its day scrolled off is a row nobody can read. Whole class names (the scanner).
+ */
+const DAILY_TABLE = [
+  "isolate",
+  "[&_tbody_td:first-child]:sticky [&_tbody_td:first-child]:left-0 [&_tbody_td:first-child]:z-raised [&_tbody_td:first-child]:bg-bg-surface",
+  "[&_thead_th:first-child]:left-0 [&_thead_th:first-child]:z-sticky-corner",
+].join(" ");
+
 function DailyBreakdown({ days }: { days: DayPoint[] }) {
   return (
     <Section title="Daily breakdown" description={`${days.length} day${days.length === 1 ? "" : "s"}`}>
-      <DataTable
-        rows={days}
-        rowKey={(r) => r.date}
-        defaultSort={{ key: "date", dir: "desc" }}
-        emptyTitle="No activity in this window."
-        maxHeight="60vh"
-        columns={dayColumns(days)}
-      />
+      <div className={DAILY_TABLE} data-daily-table="">
+        <DataTable
+          rows={days}
+          rowKey={(r) => r.date}
+          defaultSort={{ key: "date", dir: "desc" }}
+          emptyTitle="No activity in this window."
+          maxHeight="60vh"
+          columns={dayColumns(days)}
+        />
+      </div>
       <TableNotes>
         <NetNote what="Refunds" />
       </TableNotes>
