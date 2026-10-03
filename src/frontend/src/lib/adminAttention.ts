@@ -5,7 +5,6 @@ import { adminEndpoints, type DeviceErrorCounts } from "./adminApi";
 import { useAuth } from "./auth";
 import { pendingApplicationsKnown, pendingApplicationsVersion, subscribePendingApplications } from "./pendingApplications";
 import { playEndpoints } from "./playApi";
-import { disputesAttentionLabel } from "./playCopy";
 import { refreshDoorsView, useDoorsStore } from "../components/doors/useDoorsChrome";
 
 /**
@@ -111,6 +110,19 @@ export function doorsAttentionLabel(count: number): string {
  */
 export function faultsAttentionLabel(count: number): string {
   return `${count} ${count === 1 ? "fault needs" : "faults need"} attention`;
+}
+
+/**
+ * "1 disputed match result" / "3 disputed match results" — the Match results badge's name (P12).
+ *
+ * <p>
+ * Here with its three siblings, not in `playCopy`: this module is in every first load (the app
+ * shell's Admin tab reads it), and importing one function from `playCopy` put that file and
+ * `playersCopy` behind it — ~65 kB of source, ~4 kB gzip — in every member's entry chunk (R7 perf).
+ * </p>
+ */
+export function disputesAttentionLabel(count: number): string {
+  return `${count} disputed match ${count === 1 ? "result" : "results"}`;
 }
 
 /** Joins "a", "a and b", "a, b and c". */
