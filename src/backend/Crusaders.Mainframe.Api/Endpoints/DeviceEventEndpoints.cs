@@ -1027,6 +1027,17 @@ public static class DeviceEventEndpoints
         return node.ToJsonString();
     }
 
+    /// <summary>
+    /// R12 E12-1: the court a court box's event happened at, from its relay through the box's map as
+    /// it stands at the upload — stamped so the Night names the court, never the relay index. Null
+    /// for a door, or a relay the box is not wired for (-1 is the wire's "no court").
+    /// </summary>
+    private static int? RelayCourtOf(Device device, DeviceEventDto e)
+    {
+        if (device.Kind != DeviceKind.CourtBox || e.Court is not { } relay || relay < 0 || relay >= device.CourtNumbers.Count) return null;
+        return device.CourtNumbers[relay];
+    }
+
     /// <summary>What a v1 subject on an uploaded event proved: its member, or the outcome that refuses it.</summary>
     private sealed record V1Evidence(Guid UserId, ActivationOutcome? Refusal);
 
@@ -1466,7 +1477,7 @@ public static class DeviceEventEndpoints
             booking_id = outcome?.BookingId,
             related_booking_id = outcome?.RelatedBookingId,
         };
-        var detailsJson = WithCourtNumber(System.Text.Json.JsonSerializer.Serialize(details), outcome?.CourtNumber);
+        var detailsJson = WithCourtNumber(System.Text.Json.JsonSerializer.Serialize(details), outcome?.CourtNumber ?? RelayCourtOf(device, e));
 
         // Named when the handler could name them. Only the gate-open path sets this today:
         // an activation names its member through the booking on the receipt, while a door

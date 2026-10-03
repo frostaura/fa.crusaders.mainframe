@@ -95,6 +95,21 @@ public readonly record struct TraceFacts
     public bool RefusedOffline { get; init; }
 
     /// <summary>
+    /// The server's verdict on an uploaded court-box <c>activation</c> it did not accept — the
+    /// stored <c>outcome</c> of a <c>device.activation_{outcome}</c> row (review round 12, E12-1):
+    /// <c>forgery_suspected</c>, <c>unresolved</c>, <c>unverifiable</c>, <c>wrong_court</c>. Said as
+    /// the reason, neutrally — a forgery is "the code could not be verified", never an accusation.
+    /// </summary>
+    public string? Verdict { get; init; }
+
+    /// <summary>
+    /// A court box's own name, for a court-box row that happened at no court (relay -1) — review
+    /// round 12, D12-2: the relay index is the board's wiring, never a court. Null when the box is
+    /// unnamed, and the sentence says "the court box".
+    /// </summary>
+    public string? BoxName { get; init; }
+
+    /// <summary>
     /// The club took no rand for this desk top-up — a free package (<c>package_free</c>) or a sale
     /// recorded at R0.00 — so it was given, not sold (review round 8, E8-5).
     /// </summary>
@@ -478,13 +493,18 @@ public static class TraceKinds
         if (Matches(action, DoorTrail.OfflineUnknownScanAction)) return DoorRefused;
         // R11 D11-2: a court box's offline refusal reaches a member's night only once the server named them.
         if (action == CourtOfflineRefusalAction) return CourtRefused;
-        if (Matches(action, ActivationAction)) return action == ActivationAction ? CourtCheckedIn : CourtRefused;
+        // R12 E12-1: the uploaded event's OWN row is never the member's story. Its subject is set only
+        // when the server refused it, and then its verdict row (`device.activation_{outcome}`) says
+        // so; an accepted one is `court.activated` (the check-in) and the receipt (the lights). Read
+        // as "Checked in", a forged or bookingless upload claimed a check-in that never counted.
+        if (action == ActivationAction) return null;
+        if (Matches(action, ActivationAction)) return CourtRefused;
         if (Matches(action, ReleaseAction)) return LightsOff;
         return null;
     }
 
     /// <summary>The uploaded activation's own action.</summary>
-    private const string ActivationAction = "device.activation";
+    public const string ActivationAction = "device.activation";
 
     /// <summary>The uploaded release's own action — the only measurement of what the lights did.</summary>
     private const string ReleaseAction = "device.release";
@@ -581,7 +601,7 @@ public static class TraceKinds
             WalkUpRefunded => $"Light time at {court} was given back",
 
             CourtCheckedIn => $"Checked in at {court}",
-            CourtRefused => facts.CodeUsed ? TurnedAway(facts, court) : $"Was refused at {court}{Offline(facts)}",
+            CourtRefused => CourtRefusedHeadline(facts, court),
 
             LightsOn => $"{court} lights came on",
             LightsOff => $"{court} lights went off",
@@ -601,6 +621,44 @@ public static class TraceKinds
 
     /// <summary>R11 D11-2: an offline refusal of a genuine code, said neutrally; empty otherwise.</summary>
     private static string Offline(TraceFacts facts) => facts.RefusedOffline ? " — refused offline" : "";
+
+    /// <summary>
+    /// A court-box refusal (review round 12, E12-1 / D12-2): a used code by what was attempted; an
+    /// offline refusal said once ("while its box was offline", never "refused … refused offline");
+    /// an uploaded activation the server did not accept, with the server's reason. A row at no
+    /// court names the box, never the relay index.
+    /// </summary>
+    private static string CourtRefusedHeadline(TraceFacts facts, string court)
+    {
+        var known = !string.IsNullOrWhiteSpace(facts.CourtName);
+        var box = string.IsNullOrWhiteSpace(facts.BoxName) ? null : facts.BoxName.Trim();
+        if (facts.CodeUsed) return TurnedAway(facts, known ? court : box ?? court);
+        if (facts.RefusedOffline)
+        {
+            return known
+                ? $"Was refused at {court} while its box was offline"
+                : $"Was refused at {box ?? "the court box"} while it was offline";
+        }
+        return $"Was refused at {(known ? court : box ?? court)}{VerdictWords(facts.Verdict)}";
+    }
+
+    /// <summary>
+    /// E12-1: why the server did not accept a court box's uploaded check-in, in the club's words —
+    /// empty when the row carries no verdict (an online refusal says its own reason elsewhere).
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static string VerdictWords(string? verdict)
+    {
+        return verdict switch
+        {
+            null or "" => "",
+            "forgery_suspected" => " — the code could not be verified",
+            "unresolved" => " — no booking of theirs on that court then",
+            "unverifiable" => " — the box's clock was wrong, so the code could not be checked",
+            "wrong_court" => " — the box lit a court their booking was not on",
+            _ => " — the club did not accept the box's check-in",
+        };
+    }
 
     /// <summary>R11 E11-4: a refusal of a used code, worded by what the member was trying to do.</summary>
     private static string TurnedAway(TraceFacts facts, string court)

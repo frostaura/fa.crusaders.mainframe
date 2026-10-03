@@ -106,7 +106,6 @@ public sealed class TraceKindsTests
     [InlineData("device.gate_open", TraceKinds.DoorOpenedOffline)]
     [InlineData("device.gate_open_not_a_court_box", TraceKinds.DoorRefused)]
     [InlineData("device.unknown_scan", TraceKinds.DoorRefused)]
-    [InlineData("device.activation", TraceKinds.CourtCheckedIn)]
     [InlineData("device.activation_no_booking", TraceKinds.CourtRefused)]
     [InlineData("device.release", TraceKinds.LightsOff)]
     [InlineData("court.activated", TraceKinds.CourtCheckedIn)]
@@ -181,6 +180,8 @@ public sealed class TraceKindsTests
     [InlineData("booking.lit_window_narrowed")]
     [InlineData("booking.payer_reassigned")]
     [InlineData("booking.block_lifted")]
+    // R12 E12-1: the uploaded activation's own row — its verdict row, `court.activated` and the receipt tell it.
+    [InlineData("device.activation")]
     [InlineData("device.event_time_clamped")]
     [InlineData("device.boot")]
     [InlineData("device.fault")]

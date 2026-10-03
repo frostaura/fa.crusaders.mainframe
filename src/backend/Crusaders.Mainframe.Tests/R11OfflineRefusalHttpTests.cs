@@ -107,7 +107,8 @@ public sealed class R11OfflineRefusalHttpTests(PostgresFixture pg) : IClassFixtu
 
         var night = await NightAsync(club, app, club.Olga);
         var refused = Assert.Single(night, e => e.GetProperty("kind").GetString() == TraceKinds.CourtRefused);
-        Assert.Equal("Was refused at Court 2 — refused offline", refused.GetProperty("headline").GetString());
+        // R12 D12-2: said once — never "refused … refused offline".
+        Assert.Equal("Was refused at Court 2 while its box was offline", refused.GetProperty("headline").GetString());
 
         // Never a door row.
         Assert.DoesNotContain(await DoorLogAsync(club, app), r => r.GetProperty("action").GetString()!.Contains("unknown_scan", StringComparison.Ordinal));

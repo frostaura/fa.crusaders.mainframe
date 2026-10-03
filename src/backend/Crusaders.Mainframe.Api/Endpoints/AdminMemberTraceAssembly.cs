@@ -143,6 +143,9 @@ public static partial class AdminMemberTraceAssembly
 
         /// <summary>Those boards' outages that reach into the night.</summary>
         public List<DeviceOutage> Outages { get; init; } = [];
+
+        /// <summary>The court boxes' relay maps NOW, by id — relay index → court number (R12 D12-2).</summary>
+        public Dictionary<Guid, List<int>> DeviceCourts { get; init; } = [];
     }
 
     public static async Task<TraceNight> BuildAsync(
@@ -217,6 +220,7 @@ public static partial class AdminMemberTraceAssembly
             DeviceCodes = boards.Codes,
             DeviceNames = boards.Names,
             Outages = boards.Outages,
+            DeviceCourts = boards.Courts,
         };
     }
 
@@ -226,7 +230,7 @@ public static partial class AdminMemberTraceAssembly
     /// row prints at its scan, which can be earlier than the range it was heard in, so the
     /// outage window opens at the earliest scan.
     /// </summary>
-    private static async Task<(Dictionary<Guid, string> Codes, Dictionary<Guid, string> Names, List<DeviceOutage> Outages)> BoardsAsync(
+    private static async Task<BoardFacts> BoardsAsync(
         MainframeDbContext db, List<AuditLog> audit, List<ReceiptRow> receipts, AdminMemberTraceQuery q,
         CancellationToken ct)
     {
@@ -234,22 +238,28 @@ public static partial class AdminMemberTraceAssembly
             .Where(id => id is not null).Select(id => id!.Value)
             .Concat(receipts.Select(r => r.DeviceId))
             .Distinct().ToList();
-        if (ids.Count == 0) return ([], [], []);
+        if (ids.Count == 0) return new BoardFacts([], [], [], []);
 
         var boards = await db.Devices.AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Select(d => new { d.Id, d.DeviceCode, d.Name })
+            .Select(d => new { d.Id, d.DeviceCode, d.Name, d.CourtNumbers })
             .ToListAsync(ct);
         var codes = boards.ToDictionary(d => d.Id, d => d.DeviceCode);
         var names = boards.ToDictionary(d => d.Id, d => d.Name);
+        var courts = boards.ToDictionary(d => d.Id, d => d.CourtNumbers.ToList());
 
-        var floor = audit.Select(a => a.ScanAt).Append(q.From).Min().ToUniversalTime();
+        var floor = audit.Select(a => AtOf(a, DoorActivityView.Details(a.DetailsJson))).Append(q.From).Min().ToUniversalTime();
         var to = q.To.ToUniversalTime();
         var outages = await db.DeviceOutages.AsNoTracking()
             .Where(o => ids.Contains(o.DeviceId) && o.StartedAt < to && (o.EndedAt == null || o.EndedAt > floor))
             .ToListAsync(ct);
-        return (codes, names, outages);
+        return new BoardFacts(codes, names, outages, courts);
     }
+
+    /// <summary>What <see cref="BoardsAsync"/> read about the boards a night's rows name.</summary>
+    private sealed record BoardFacts(
+        Dictionary<Guid, string> Codes, Dictionary<Guid, string> Names, List<DeviceOutage> Outages,
+        Dictionary<Guid, List<int>> Courts);
 
     /// <summary>The outage of <paramref name="deviceId"/> that <paramref name="at"/> fell inside, or null.</summary>
     private static Guid? OutageAt(Strands s, Guid? deviceId, DateTimeOffset at)
@@ -393,22 +403,28 @@ public static partial class AdminMemberTraceAssembly
             // says it, at the scan's instant; this row says it again at the upload's.
             if (IsReceiptTwin(row.Action, details, s)) continue;
 
-            var court = CourtOf(details, s.Courts);
             var deviceId = DoorTrail.DeviceIdOf(details);
+            var boardRow = IsBoardRow(row.Action);
+            var court = boardRow ? CourtOfBoard(details, deviceId, s) : CourtOf(details, s.Courts);
+            var at = AtOf(row, details);
             var actorKind = ActorKindOf(row.ActorUserId, deviceId is not null, s.Admins);
             var actorName = PersonNames.Of(row.ActorUserId, s.Names);
             var deviceCode = deviceId is { } id && s.DeviceCodes.TryGetValue(id, out var code) ? code : Text(details, "device_code");
             var doorName = DoorLabelOf(details, deviceId, deviceCode, s);
 
             yield return new TraceEventRow(
-                At: row.ScanAt,
+                At: at,
                 SourceId: row.Id,
                 Source: AuditSource,
                 Kind: kind,
                 Headline: TraceKinds.Headline(kind, new TraceFacts
                 {
                     DoorName = doorName,
-                    CourtName = court?.Name ?? Text(details, "court"),
+                    // R12 D12-2: a board row's `court` is its RELAY INDEX, never a court's name.
+                    CourtName = court?.Name ?? (boardRow ? null : Text(details, "court")),
+                    BoxName = boardRow && court is null ? BoxLabelOf(deviceId, s) : null,
+                    // R12 E12-1: the server's verdict on an uploaded activation it did not accept.
+                    Verdict = row.Action.StartsWith(VerdictPrefix, StringComparison.Ordinal) ? Text(details, "outcome") : null,
                     ActorName = actorName,
                     ActorKind = actorKind,
                     RawAction = row.Action,
@@ -426,12 +442,12 @@ public static partial class AdminMemberTraceAssembly
                 Court: court,
                 AmountMinutes: null,
                 BalanceAfterMinutes: null,
-                Detail: AuditDetail(row.Action, details, doorName))
+                Detail: AuditDetail(row.Action, details, doorName, boardRow ? court?.Number : null))
             {
                 // A removed board keeps the code its rows were written with.
                 DeviceCode = deviceCode,
                 Approximate = DoorActivityView.TimeUncertain(details, row.CreatedAt),
-                OutageId = OutageAt(s, deviceId, row.ScanAt),
+                OutageId = OutageAt(s, deviceId, at),
                 CodeHolderUserId = CodeHolderOf(row),
                 CodeHolderName = CodeHolderOf(row) is { } holder ? PersonNames.Of(holder, s.Names) : null,
             };
@@ -520,13 +536,13 @@ public static partial class AdminMemberTraceAssembly
     {
         foreach (var row in s.Receipts)
         {
-            var kind = TraceKinds.OfAudit($"device.{row.Kind}", actorIsSubject: false);
-            if (kind is null || kind == TraceKinds.Unrecognised) continue;
-
             // An uploaded ACTIVATION is what lit the relay. On this strand it is the LIGHTS
             // coming on and not a check-in: the check-in is the person identifying, which
             // `court.activated` already records with a person's name on it.
-            if (kind == TraceKinds.CourtCheckedIn) kind = TraceKinds.LightsOn;
+            var kind = row.Kind == DeviceEventEndpoints.ActivationKind
+                ? TraceKinds.LightsOn
+                : TraceKinds.OfAudit($"device.{row.Kind}", actorIsSubject: false);
+            if (kind is null || kind == TraceKinds.Unrecognised) continue;
 
             s.Courts.TryGetValue(row.CourtId, out var court);
             var holder = TwinCodeHolderOf(row, s);
@@ -579,14 +595,17 @@ public static partial class AdminMemberTraceAssembly
     }
 
     /// <summary>The named fields one audit row is allowed to publish, and nothing else.</summary>
-    private static Dictionary<string, object?> AuditDetail(string action, JsonElement? details, string? doorName)
+    private static Dictionary<string, object?> AuditDetail(string action, JsonElement? details, string? doorName, int? boardCourt)
     {
         var detail = Detail(
             ("door_name", doorName),
             ("reason", Text(details, "reason") ?? Text(details, "outcome")),
             ("method", Text(details, "method")),
             ("booking_id", Text(details, "booking_id")),
-            ("court", Text(details, "court") ?? Text(details, "court_number")),
+            // R12 D12-2: a board row's stored `court` is the relay index; it publishes the court it maps to, or nothing.
+            ("court", IsBoardRow(action)
+                ? boardCourt?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : Text(details, "court") ?? Text(details, "court_number")),
             // R11 E11-4: a court-box refusal's attempt (activate / walkup / pay_for), as stored.
             ("attempt", Text(details, "attempt")));
 

@@ -123,6 +123,55 @@ public static partial class AdminMemberTraceAssembly
         return TraceKinds.DoorLabel(name, deviceCode);
     }
 
+    /// <summary>A row an uploaded board event wrote (<c>device.*</c>): its <c>court</c> is a relay index and its instant is the scan's.</summary>
+    private static bool IsBoardRow(string action) => action.StartsWith("device.", StringComparison.Ordinal);
+
+    /// <summary>The verdict row of an uploaded activation the server did not accept: <c>device.activation_{outcome}</c>.</summary>
+    private const string VerdictPrefix = TraceKinds.ActivationAction + "_";
+
+    /// <summary>
+    /// Review round 12, E12-1: when a row PRINTS. A board's uploaded row at the scan the box
+    /// reported (<c>occurred_at</c>, as the door log does), never at the upload that delivered it
+    /// minutes or hours later; every other row at its stored <see cref="AuditLog.ScanAt"/>.
+    /// </summary>
+    private static DateTimeOffset AtOf(AuditLog row, JsonElement? details)
+    {
+        return IsBoardRow(row.Action) ? DoorActivityView.ScannedAt(details, row.CreatedAt) : row.ScanAt;
+    }
+
+    /// <summary>
+    /// Review round 12, D12-2 / E12-1: the court a board row happened at — the <c>court_number</c>
+    /// the server stamped, else the row's relay index through the box's relay map — and never the
+    /// relay index read as a court's name ("Checked in at 0", "Was refused at -1").
+    /// </summary>
+    private static TraceCourtRef? CourtOfBoard(JsonElement? details, Guid? deviceId, Strands s)
+    {
+        if (Text(details, "court_number") is { } stamped) return CourtOf(details, s.Courts) ?? CourtByNumber(stamped, s);
+        if (deviceId is not { } id || !s.DeviceCourts.TryGetValue(id, out var map)) return null;
+        if (Text(details, "court") is not { } text
+            || !int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var relay)
+            || relay < 0 || relay >= map.Count)
+        {
+            return null;
+        }
+        return CourtByNumber(map[relay].ToString(CultureInfo.InvariantCulture), s);
+    }
+
+    private static TraceCourtRef? CourtByNumber(string number, Strands s)
+    {
+        return int.TryParse(number, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+            ? s.Courts.Values.FirstOrDefault(c => c.Number == n)
+            : null;
+    }
+
+    /// <summary>D12-2: a court box's name for a row at no court, or null when it carries only the auto-registration placeholder.</summary>
+    private static string? BoxLabelOf(Guid? deviceId, Strands s)
+    {
+        if (deviceId is not { } id || !s.DeviceNames.TryGetValue(id, out var name)) return null;
+        var trimmed = name?.Trim();
+        return string.IsNullOrEmpty(trimmed) || trimmed == DeviceRegistryService.CourtBoxPlaceholderName ? null : trimmed;
+    }
+
     /// <summary>
     /// The member's ledger rows plus the OTHER half of each share transfer among them (E7-3).
     ///

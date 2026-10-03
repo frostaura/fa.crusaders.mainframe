@@ -674,7 +674,7 @@ public sealed class DeviceRegistryService
             TenantId = _tenant.TenantId,
             MacAddress = macAddress,
             DeviceCode = await AvailableDeviceCodeAsync(macAddress, DeviceKind.CourtBox, ct),
-            Name = "Court box",
+            Name = CourtBoxPlaceholderName,
             Kind = DeviceKind.CourtBox,
             Hardware = DeviceHardware.Esp8266,
             CourtNumbers = courtNumbers,
@@ -682,6 +682,9 @@ public sealed class DeviceRegistryService
             AutoRegistered = true,
         };
     }
+
+    /// <summary>The display name auto-registration gives a court box until somebody names it (R12 D12-2: the Night says "the court box").</summary>
+    public const string CourtBoxPlaceholderName = "Court box";
 
     /// <summary>
     /// A gate has nothing to guess. No courts, no button map, and no name for the door it
