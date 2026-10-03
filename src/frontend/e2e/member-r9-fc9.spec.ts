@@ -196,3 +196,24 @@ for (const [width, height] of [[320, 640], [390, 844]] as const) {
     await page.screenshot({ path: test.info().outputPath(`bookfor-member-page-${width}.png`) });
   });
 }
+
+/* L9-6 member part — /wallet/activity's tiles and totals at 320 / 200 % ("ADJUSTME/NTS"); the fix is FB9's ReportParts. */
+test("L9-6 — wallet activity's tile and totals labels keep every word whole at 320 px, 200 % text", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await signIn(page);
+  await serveApi(page, [
+    ...memberShellRoutes(),
+    { path: "/api/v1/reports/me/wallet", body: {
+      from: "", to: "", top_ups_minutes: 1800, spent_minutes: 1350, refunds_minutes: 0, penalties_minutes: 75, adjustments_minutes: 600,
+      reversals_minutes: 0, share_transfers_minutes: 30, net_court_spend_minutes: 90, net_movement_minutes: 375, penalty_count: 5,
+      attended_bookings: 30, minutes_on_court: 1350, count: 41,
+    } },
+    { path: "/api/v1/reports/me/daily", body: [] },
+  ]);
+  await page.goto("/wallet/activity");
+  await page.addStyleTag({ content: "html { font-size: 32px; }" });
+  await expect(page.locator("[data-stat-tiles]")).toBeVisible({ timeout: 20_000 });
+  await page.getByText("Adjustments", { exact: false }).first().scrollIntoViewIfNeeded();
+  expect(await brokenWords(page, "[data-stat-tiles]")).toEqual([]);
+  expect(await brokenWords(page, "#main-content")).toEqual([]);
+});
