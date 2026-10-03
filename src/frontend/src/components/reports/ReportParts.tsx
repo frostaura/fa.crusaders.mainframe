@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Minutes } from "@/components/Minutes";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
-import { typography } from "@/lib/typography";
 import { Toggle } from "@/components/ui/toggle";
 import { AutoGrid } from "@/components/ui/auto-grid";
 import { Card } from "@/components/ui/card";
@@ -96,6 +95,16 @@ const TILE_TONES: Record<TileTone, string> = {
 export type Tile = { label: string; value: ReactNode; tone: TileTone };
 
 /**
+ * A label's capitals and tracking only where its tile has the room (R9 L9-6). At 320 with 200 %
+ * text a tile's label box is ~140px, and "ADJUSTMENTS", "REVERSALS" and "MOVEMENTS" in tracked
+ * capitals were wider than that, so `break-words` cut them mid-word ("ADJUSTME/NTS"). Under a
+ * 7rem label box (a rem container, so it follows the text size) the label is set in sentence case
+ * with plain tracking, which fits; `break-words` stays only as the last resort for a word no box
+ * could hold.
+ */
+const LABEL_STEPS = "normal-case tracking-normal @[7rem]:uppercase @[7rem]:tracking-overline";
+
+/**
  * The headline figures for a period: as many 9rem tiles across as the BOX holds, four at most
  * (R5 X5-4). A fixed `grid-cols-2` at 390 with 200 % text gave each tile 150px and `break-words`
  * cut the money mid-figure ("R2 / 50. / 50"); an AutoGrid falls to one column there instead, and
@@ -106,7 +115,7 @@ export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
     <AutoGrid as="dl" min="stat" max={4} gap="md" aria-label={label} data-stat-tiles="">
       {tiles.map((tile) => (
         <div key={tile.label} className={cn("@container flex min-w-0 flex-col gap-1 rounded-xl p-4", TILE_TONES[tile.tone])}>
-          <dt className="break-words text-xs font-semibold uppercase tracking-overline">{tile.label}</dt>
+          <dt className={cn("break-words text-xs font-semibold", LABEL_STEPS)}>{tile.label}</dt>
           <dd className={cn("font-semibold tabular-nums tracking-tight", FIGURE_FITS.tile)}>{tile.value}</dd>
         </div>
       ))}
@@ -124,8 +133,11 @@ export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
  */
 export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="@container flex min-w-0 flex-col gap-0.5 rounded-lg bg-bg-muted px-3 py-2.5">
-      <dt className={cn(typography({ variant: "overline" }), "break-words")}>{label}</dt>
+    // px-2 under a 16rem list (R9 L9-6): at 320 / 200 % text the cell's 24px sides left "Adjustments"
+    // no line of its own even in sentence case.
+    <div className="@container flex min-w-0 flex-col gap-0.5 rounded-lg bg-bg-muted px-2 py-2.5 @[16rem]:px-3">
+      {/* The overline's look, spelled out: its tracking class would outrank LABEL_STEPS' plain one. */}
+      <dt className={cn("break-words text-xs font-semibold text-text-secondary", LABEL_STEPS)}>{label}</dt>
       <dd className={cn("font-semibold tabular-nums text-text-primary", FIGURE_FITS.stat)}>{value}</dd>
     </div>
   );
@@ -167,7 +179,8 @@ export function TotalsCard({ children, footnote, columns = 4 }: {
 }) {
   return (
     <Card className="px-4 sm:px-6">
-      <AutoGrid as="dl" min="stat" max={columns} gap="md">{children}</AutoGrid>
+      {/* A container, so a totals cell gives its label the room when the list is narrow (R9 L9-6). */}
+      <AutoGrid as="dl" min="stat" max={columns} gap="md" className="@container">{children}</AutoGrid>
       <p className="text-sm text-text-secondary">{footnote}</p>
     </Card>
   );
