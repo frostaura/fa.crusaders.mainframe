@@ -45,3 +45,8 @@ Code: `Endpoints/{PackageEndpoints,AdminPackageEndpoints,TopUpEndpoints{,.Abando
   stays disabled — said before the press, not refused after it (`isFreeHere`).
 - **Accepted gap:** a completion racing a cancel return clears the reason by forcing
   `FailureReason` modified; no test can force the interleaving; the cost is a stale `failure_code`.
+- **A desk sale carries the price the admin confirmed (R9 J9-1)**: `quotedPriceZar` must equal the live
+  shelf price or 409 `package_price_changed` {package, discount} (the purchase path's answer), nothing
+  posted; a free give whose price is no longer 0 is the same 409. Neither `quotedPriceZar` nor
+  `zarReceived` → 400 `quoted_price_required`. *Why:* the server filled in the write-time price, so a
+  discount moving between confirm and Sell recorded and mailed R96 for an R108 confirmation.
