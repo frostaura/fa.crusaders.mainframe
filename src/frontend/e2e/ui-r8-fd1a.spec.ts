@@ -238,3 +238,20 @@ test.describe("L7-13 — How it works' step titles keep their words whole at 200
     expect(beside).toBe(true);
   });
 });
+
+test.describe("L7-13 — every page title steps down rather than break a word", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test('Transactions at 320 / 200 % paints whole (was "Transaction / s")', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 320, height: 700 });
+    await signIn(page);
+    await serveApi(page, memberShellRoutes({ admin: true }));
+    await page.goto("/admin/transactions");
+    const h1 = page.getByRole("heading", { level: 1, name: "Transactions" });
+    await expect(h1).toBeVisible({ timeout: 20_000 });
+    await bigText(page);
+    await fontsReady(page);
+    expect(await brokenWords(page, "main h1")).toEqual([]);
+  });
+});

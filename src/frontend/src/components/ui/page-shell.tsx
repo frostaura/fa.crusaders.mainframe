@@ -130,9 +130,15 @@ function BackLink({ to, label }: { to: string; label: string }) {
  * R7 L7-13 — the title steps DOWN when the text is large for the header's box: a rem query on the
  * header (`@container/head`), so at 100 % a 320 phone (18rem) keeps the full size and at 200 % the
  * same phone (9rem) takes a smaller one — "Notifications" painted "Notificatio / ns" there. Below
- * 12rem it steps once more. `break-words` stays the last resort for one word wider than that.
+ * 12rem it steps once more, and below 9rem (R8: an admin page's 8rem at 320 / 200 %, where
+ * "Transactions" still broke "Transaction / s") a third time. One rule per width range, so no
+ * two variants compete by stylesheet order. `break-words` stays the last resort.
  */
-const TITLE_STEPS_DOWN = "[@container_head_(max-width:16rem)]:text-xl [@container_head_(max-width:12rem)]:text-lg";
+const TITLE_STEPS_DOWN = [
+  "[@container_head_(min-width:12rem)_and_(max-width:16rem)]:text-xl",
+  "[@container_head_(min-width:9rem)_and_(max-width:11.99rem)]:text-lg",
+  "[@container_head_(max-width:8.99rem)]:text-base",
+].join(" ");
 
 export function PageHeader(props: PageHeaderProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
