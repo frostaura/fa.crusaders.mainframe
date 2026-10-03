@@ -107,7 +107,7 @@ test("the shelf uses the width it has, and one Cancel closes an open purchase", 
   expect(await sideways(page)).toBeLessThanOrEqual(0);
   await page.screenshot({ path: info.outputPath(`shelf-${width}.png`), fullPage: true });
 
-  await page.getByRole("button", { name: /^Cancel the 1 hour \(1 h\) for R120\.00 purchase/ }).click();
+  await page.getByRole("button", { name: /^Cancel the 1 hour for R120\.00 purchase/ }).click();
   await expect(page.getByText("Cancelled. Nothing was charged.")).toBeVisible();
   await expect(cancels).toHaveCount(1);
   expect(cancelled.has(A)).toBe(true);
