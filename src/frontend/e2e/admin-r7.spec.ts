@@ -464,3 +464,32 @@ test.describe("L7-15 — the Night timeline", () => {
     expect(new Set(cols.map((c) => c.timeRight)).size, `times end ragged: ${JSON.stringify(cols)}`).toBe(1);
   });
 });
+
+/* ───────────────────────── L6-16 remainder (FD1 ask) — Overview glyphs grow with the text ───────────────────────── */
+
+test.describe("L6-16 — the Overview's glyphs at 200 % text", () => {
+  const svgWidths = (page: Page, selector: string) => page.locator(selector).evaluateAll((els) =>
+    els.map((el) => Math.round(el.getBoundingClientRect().width)));
+
+  test("eyebrow, card arrow, alert icon and caret are drawn at twice their size", async ({ page }, info) => {
+    const width = info.project.name === "mobile" ? 390 : 1280;
+    await open(page, "/admin", [
+      { path: "/api/v1/admin/notifications", body: ALERTS },
+      { path: "/api/v1/admin/monitoring/summary", body: { open: { critical: 3 } } },
+    ], width, 900);
+    await expect(page.locator("[data-alert]").first()).toBeVisible(ARRIVES);
+    await bigText(page);
+    await fontsReady(page);
+    const eyebrows = await svgWidths(page, "[data-attention-card] > span:first-child svg");
+    const arrows = await svgWidths(page, "[data-attention-card][data-state='waiting'] > span:last-child svg");
+    expect(eyebrows.length).toBeGreaterThan(0);
+    expect(Math.min(...eyebrows), `eyebrows ${eyebrows}`).toBeGreaterThanOrEqual(28);
+    expect(Math.min(...arrows), `arrows ${arrows}`).toBeGreaterThanOrEqual(28);
+    if (width === 1280) {
+      const alertIcons = await page.locator("[data-alert] svg").evaluateAll((els) =>
+        els.filter((el) => getComputedStyle(el).display !== "none").map((el) => Math.round(el.getBoundingClientRect().width)));
+      expect(alertIcons.length).toBeGreaterThan(0);
+      expect(Math.min(...alertIcons), `alert glyphs ${alertIcons}`).toBeGreaterThanOrEqual(28);
+    }
+  });
+});

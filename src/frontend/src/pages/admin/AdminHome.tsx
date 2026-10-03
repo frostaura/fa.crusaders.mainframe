@@ -98,7 +98,8 @@ function CardEyebrow({ item, tone }: { item: AdminNavItem; tone: CardTone | "mut
           tone === "muted" ? "bg-bg-muted text-text-secondary" : TONE_CHIP[tone],
         )}
       >
-        <ItemIcon size={16} weight="bold" />
+        {/* R7 L6-16 (FD1 ask): rem-sized, so the glyph grows with the text in its rem tile. */}
+        <ItemIcon size="1rem" weight="bold" />
       </span>
       <span className={typography({ variant: "overline" })}>{item.label}</span>
     </span>
@@ -169,7 +170,7 @@ function WaitingCard(props: AttentionCardProps) {
         {copy.detail ? <span id={detailId} className="text-sm text-text-secondary">{copy.detail}</span> : null}
         <span aria-hidden="true" className="mt-auto inline-flex items-center gap-1 text-sm font-semibold text-accent-strong">
           {copy.cta}
-          <ArrowRight size={16} weight="bold" />
+          <ArrowRight size="1rem" weight="bold" className="shrink-0" />
         </span>
       </Link>
     </Interactable>
@@ -355,7 +356,7 @@ function QuickLink({ item, attention }: { item: AdminNavItem; attention: AdminAt
             </span>
             <span id={`${item.id}-quick-description`} className="text-sm text-text-secondary">{item.description}</span>
           </span>
-          <CaretRight size={16} weight="bold" aria-hidden="true" className="mt-1 shrink-0 text-text-muted" />
+          <CaretRight size="1rem" weight="bold" aria-hidden="true" className="mt-1 shrink-0 text-text-muted" />
         </Link>
       </Interactable>
     </li>

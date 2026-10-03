@@ -133,7 +133,8 @@ function AlertRow({ notice, now, rowRef }: { notice: AdminNotice; now: number; r
           broke mid-word. A rem container query is a large-text query: the tile goes when the ROW is
           under 16rem (256px at normal text, 512px at 200 %). */}
       <span aria-hidden="true" className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-bg-muted text-text-secondary [@container(max-width:16rem)]:hidden">
-        <KindIcon size={20} />
+        {/* R7 L6-16 (FD1 ask): the glyph grows with the text, as its rem tile does. */}
+        <KindIcon size="1.25rem" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span id={headlineId} className="break-words font-semibold text-text-primary">{notice.headline}</span>
@@ -153,7 +154,7 @@ function AlertRow({ notice, now, rowRef }: { notice: AdminNotice; now: number; r
       </span>
       {/* R7 L7-8: the caret goes with the tile under a 16rem row — the whole row is the link, and
           at 320 / 200 % its 40px left the headline 150px ("members / hip"). */}
-      {to ? <CaretRight size={16} weight="bold" aria-hidden="true" className="mt-3 shrink-0 text-text-muted [@container(max-width:16rem)]:hidden" /> : null}
+      {to ? <CaretRight size="1rem" weight="bold" aria-hidden="true" className="mt-3 shrink-0 text-text-muted [@container(max-width:16rem)]:hidden" /> : null}
     </>
   );
   // R7 L7-8: under a 16rem row (a large-text query) the insets halve, so the headline keeps its
