@@ -97,7 +97,12 @@ public static class DevicePayForEndpoint
         if (req.Confirm && await ReplayAsync(device, req, services, now, ct) is { } replayed) return replayed;
 
         var decision = await JudgeAsync(device, req, services, settings, now, ct);
-        if (decision.Refusal is { } no) return Refuse(req, no);
+        if (decision.Refusal is { } no)
+        {
+            // D10-1: a reused code turned away here is on the payer's Night, as at activate and walk-up (E9-6).
+            if (no == MemberCodeIdentity.CodeUsed) await CodeUsedAsync(device, req, decision.PayerUserId, services);
+            return Refuse(req, no);
+        }
 
         if (!req.Confirm)
         {
@@ -160,6 +165,14 @@ public static class DevicePayForEndpoint
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Review round 10, D10-1: a pay-for refused <c>code_used</c> — on the quote, the confirm, or a
+    /// claim lost to a court or money use — is on the payer's record like an activation or a
+    /// walk-up's (<see cref="DeviceFaultSink.CodeUsedAtCourtAsync"/>). The code is never recorded.
+    /// </summary>
+    private static Task CodeUsedAsync(Device device, PayForRequest req, Guid payer, PayForServices services) =>
+        services.Faults.CodeUsedAtCourtAsync(device, payer, req.Court, "pay_for", req.Method);
+
     /// <summary>Whether this box's nonce was quoted for exactly this booking.</summary>
     private static Task<bool> QuotedAsync(Device device, PayForRequest req, Booking booking, PayForServices services, CancellationToken ct) =>
         services.Db.DevicePayForQuotes.AsNoTracking()
@@ -194,7 +207,7 @@ public static class DevicePayForEndpoint
         // Checked on the quote and again on the confirm, which judges afresh.
         if (match is not null && await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.CourtOrMoney, ct))
         {
-            return new Judgement(MemberCodeIdentity.CodeUsed);
+            return new Judgement(MemberCodeIdentity.CodeUsed, PayerUserId: payer);
         }
 
         if (await MembershipAccess.IsBarredFromCourtsAsync(db, payer, ct)) return new Judgement(MemberNotActive);
@@ -285,7 +298,11 @@ public static class DevicePayForEndpoint
         {
             claim = await services.MemberCodes.TryClaimAsync(
                 j.Match, MemberCodeUseClass.Money, device.Id, "pay_for", ct, claimKey: "payfor:" + req.Nonce);
-            if (claim is null) return await AbandonAsync(services, row, null, req, MemberCodeIdentity.CodeUsed);
+            if (claim is null)
+            {
+                await CodeUsedAsync(device, req, j.PayerUserId, services);
+                return await AbandonAsync(services, row, null, req, MemberCodeIdentity.CodeUsed);
+            }
         }
 
         // THE PAID STATE IS STAGED BEFORE THE MONEY, SO IT COMMITS WITH IT. The reassignment's
@@ -587,6 +604,8 @@ public sealed record PayForServices(
     IEmailService Email,
     ClubIdentityResolver Club,
     ILoggerFactory Logs,
+    /// <summary>Where a refused scan is recorded for the member's Night (D10-1). See <see cref="DeviceFaultSink"/>.</summary>
+    DeviceFaultSink Faults,
     /// <summary>The instant the decision is taken at, and so the member-code step it checks — see <see cref="GateServices.Clock"/>.</summary>
     TimeProvider Clock);
 
