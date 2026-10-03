@@ -4,6 +4,7 @@ using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Crusaders.Mainframe.Tests;
@@ -77,6 +78,56 @@ public abstract partial class DeviceEventHttpTests
             var night = await NightAsync(factory, box);
             Assert.DoesNotContain(night.GetProperty("events").EnumerateArray(),
                 e => e.GetProperty("kind").GetString() == TraceKinds.LightsOff);
+        }
+
+        /// <summary>
+        /// Review round 8, E8-1 (asked of this file by lane BE). A late box upload that reverses a
+        /// no-show stamped the booking and no seat: the page read "Checked in" above "0 of 2 players
+        /// checked in", and the scanner's night had no "Checked in" row. The upload now hands the
+        /// reversal who scanned, so the scanner's own accepted seat is stamped and the
+        /// <c>court.activated</c> row names them.
+        /// </summary>
+        [SkippableFact]
+        public async Task A_late_upload_that_reverses_a_no_show_checks_in_the_player_who_scanned()
+        {
+            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+            var factory = CreateFactory();
+            var box = await SeedAsync(factory);
+            var (booked, _) = await SweptNoShowAsync(factory, box);
+            var partner = await AnotherMemberAsync(factory, box);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+                foreach (var (seat, user) in new[] { (1, box.MemberId), (2, partner) })
+                {
+                    db.BookingParticipants.Add(new BookingParticipant
+                    {
+                        TenantId = box.TenantId, BookingId = booked.BookingId, Seat = seat, UserId = user,
+                        Status = ParticipantStatus.Accepted, InvitedAt = DateTimeOffset.UtcNow,
+                        CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+                    });
+                }
+                await db.SaveChangesAsync();
+            }
+
+            // The organiser's queued scan, uploaded after the sweep.
+            (await factory.CreateClient().SendAsync(FromBox(box, EventsPath, Batch(
+                Activation(1, subject: booked.Code, court: 0))))).EnsureSuccessStatusCode();
+            Assert.NotNull((await BookingAsync(factory, booked.BookingId)).CheckedInAt);
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+                var seats = await db.BookingParticipants.IgnoreQueryFilters()
+                    .Where(p => p.BookingId == booked.BookingId).OrderBy(p => p.Seat).ToListAsync();
+                Assert.NotNull(seats[0].CheckedInAt);     // the organiser, who scanned
+                Assert.Null(seats[1].CheckedInAt);        // the partner, who did not
+            }
+            var activated = Assert.Single(await AuditAsync(factory, box.TenantId, "court.activated"));
+            Assert.Equal(box.MemberId, activated.ActorUserId);
+            using var details = JsonDocument.Parse(activated.DetailsJson!);
+            Assert.True(details.RootElement.GetProperty("reversed_no_show").GetBoolean());
         }
 
         /// <summary>The admin's view of the box member's night, through the real route.</summary>

@@ -1198,8 +1198,11 @@ public static class DeviceEventEndpoints
                 // The system actor, as the sweep's own rows are: the evidence came from a box,
                 // and Guid.Empty is how every device-originated row already names it.
                 var provisional = LitWindowOf(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, t.DurationMs, heldMs: null);
+                // Who scanned (review round 8, E8-1): the reversal stamps their own accepted seat
+                // and writes the court.activated row naming them, as an activation would.
                 var reversal = await bookings.ReverseNoShowAsync(
-                    t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct, provisional.End);
+                    t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct, provisional.End,
+                    new ReversalScan(t.UserId, t.Method));
                 if (reversal is NoShowReversalResult.Ok) return new SettleOutcome(ActivationOutcome.ReversedNoShow);
                 t = t with { Booking = await FreshAsync(db, t.Booking, ct) };
                 continue;
