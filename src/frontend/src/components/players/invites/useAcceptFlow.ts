@@ -105,7 +105,10 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
 
   const money = inviteMoney(invite);
   const blocked: Blocked = rereading ? "rereading" : invite.cap ? "cap" : money.shortBy > 0 ? "short" : null;
-  const error = acceptAction.error ?? declineAction.error;
+  // R9 X9-5 — a 402 the re-read explains (the sheet is now short) is said once, by the short
+  // notice and its Buy minutes; the red refusal above it said the same thing a second time.
+  const raw = acceptAction.error ?? declineAction.error;
+  const error = codeOf(raw) === "insufficient_balance" && money.shortBy > 0 ? null : raw;
   const { run: runAccept } = acceptAction;
   const { run: runDecline } = declineAction;
   const accept = useCallback(() => {
