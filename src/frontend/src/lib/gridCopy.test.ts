@@ -7,14 +7,14 @@ import { quotaCellLabel } from "./gridCopy";
  */
 describe("quotaCellLabel", () => {
   it("says 'for today' on today's grid", () => {
-    expect(quotaCellLabel("Court 1 at 17:00", 4, null)).toBe("Court 1 at 17:00 — you've booked your 4 slots for today");
+    expect(quotaCellLabel("Court 1 at 17:00", 4, null)).toBe("Court 1 at 17:00 — you've used your 4 slots for today");
   });
 
   it("names the day on any other day's grid", () => {
-    expect(quotaCellLabel("Court 1 at 17:00", 4, "Thu 1 Oct")).toBe("Court 1 at 17:00 — you've booked your 4 slots on Thu 1 Oct");
+    expect(quotaCellLabel("Court 1 at 17:00", 4, "Thu 1 Oct")).toBe("Court 1 at 17:00 — you've used your 4 slots on Thu 1 Oct");
   });
 
   it("is singular for a one-slot cap", () => {
-    expect(quotaCellLabel("Court 1 at 17:00", 1, "Thu 1 Oct")).toBe("Court 1 at 17:00 — you've booked your 1 slot on Thu 1 Oct");
+    expect(quotaCellLabel("Court 1 at 17:00", 1, "Thu 1 Oct")).toBe("Court 1 at 17:00 — you've used your 1 slot on Thu 1 Oct");
   });
 });

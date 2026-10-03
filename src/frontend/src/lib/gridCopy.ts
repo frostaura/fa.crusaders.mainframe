@@ -95,7 +95,8 @@ export function holdLiftLabel(where: string, label: string | null): string {
  * other day is named ("on Thu 1 Oct"), because the count is the SHOWN day's (R2 F1-5).
  */
 export function quotaCellLabel(where: string, maxSlots: number, dayLabel: string | null = null): string {
-  return `${where} — you've booked your ${maxSlots} ${maxSlots === 1 ? "slot" : "slots"} ${dayLabel ? `on ${dayLabel}` : "for today"}`;
+  // R11 E11-6 — "used", not "booked": games the member said yes to fill the limit too.
+  return `${where} — you've used your ${maxSlots} ${maxSlots === 1 ? "slot" : "slots"} ${dayLabel ? `on ${dayLabel}` : "for today"}`;
 }
 
 /**
@@ -107,14 +108,26 @@ export function quotaCellLabel(where: string, maxSlots: number, dayLabel: string
  * `role="alert"` — an alert interrupts, and this is a condition the member arrived into.
  * </p>
  */
-export function quotaBannerTitle(maxSlots: number, day: string): string {
+export function quotaBannerTitle(maxSlots: number, day: string, accepted = 0): string {
   const slots = maxSlots === 1 ? "slot" : "slots";
+  // R11 E11-6 — games the member SAID YES TO count toward the limit too; a member whose slots are
+  // all accepted invites booked nothing, so "You've booked" is not true of them.
+  if (accepted >= maxSlots) return `Your ${maxSlots} ${slots} for ${weekdayName(day)} ${maxSlots === 1 ? "is a game" : "are games"} you said yes to.`;
+  if (accepted > 0) {
+    const them = accepted === 1 ? "1 of them is a game" : `${accepted} of them are games`;
+    return `You've booked your ${maxSlots} ${slots} for ${weekdayName(day)} — ${them} you said yes to.`;
+  }
   return `You've booked your ${maxSlots} ${slots} for ${weekdayName(day)}.`;
 }
 
-export function quotaBannerBody(maxSlots: number): string {
+export function quotaBannerBody(maxSlots: number, accepted = 0): string {
+  const limit = `${maxSlots} ${maxSlots === 1 ? "slot" : "slots"}`;
+  // R11 E11-6 — never "cancel" what the member cannot: an accepted seat is somebody else's booking.
+  const counts = `Games you said yes to count toward your daily limit of ${limit}, so everyone gets court time.`;
+  if (accepted >= maxSlots) return `${counts} Pick another day.`;
+  if (accepted > 0) return `Cancel one of your own bookings, or pick another day. ${counts}`;
   // R9 J9-4 — "your" limit, never "the club caps it": a group may set it, and the club's word was wrong then.
-  return `Cancel one of them, or pick another day. Your daily limit is ${maxSlots} ${maxSlots === 1 ? "slot" : "slots"}, so everyone gets court time.`;
+  return `Cancel one of them, or pick another day. Your daily limit is ${limit}, so everyone gets court time.`;
 }
 
 /**

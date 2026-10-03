@@ -146,8 +146,10 @@ const SENTENCE: Partial<Record<GridReason, (c: SentenceContext) => string>> = {
   group_window: (c) => restrictionSentence(c.where, c.rules.groups, c.rules.allowedWindows ?? []),
   peak_league_only: (c) => `${c.where} is reserved for league and senior members until closer to the time. `
     + "It becomes yours to book if it is still free then.",
-  per_day_slot_cap: (c) =>
-    `${quotaBannerTitle(c.rules.maxSlotsPerDay ?? 0, c.clubDay)} ${quotaBannerBody(c.rules.maxSlotsPerDay ?? 0)}`,
+  per_day_slot_cap: (c) => {
+    const accepted = acceptedSlotsOn(c.day);
+    return `${quotaBannerTitle(c.rules.maxSlotsPerDay ?? 0, c.clubDay, accepted)} ${quotaBannerBody(c.rules.maxSlotsPerDay ?? 0, accepted)}`;
+  },
   per_day_minute_cap: (c) => `You've booked your ${c.rules.maxMinutesPerDay ?? 0} minutes of court time for that day. `
     + "Cancel one of them, or pick another day.",
   court_inactive: (c) => `${c.where} is not in use at the moment. The club can tell you when it is back.`,
@@ -185,12 +187,21 @@ function buildNotices(
   rules: ViewerRules, balanceMinutes: number | null, day: ScheduleDay | null, isAdmin: boolean, shownIsToday: boolean,
 ): Notice[] {
   const clubDay = rules.clubDay ?? day?.date ?? "";
-  return [ruleNotice(rules, clubDay, shownIsToday), walletNotice(balanceMinutes, day, isAdmin)]
+  return [ruleNotice(rules, clubDay, shownIsToday, acceptedSlotsOn(day)), walletNotice(balanceMinutes, day, isAdmin)]
     .filter((n): n is Notice => n !== null);
 }
 
+/**
+ * R11 E11-6 — how many of the shown day's slots are the member's ACCEPTED seats on somebody
+ * else's game (`isMine` with `role: "partner"`): they count toward the daily cap, and the member
+ * cannot cancel them.
+ */
+export function acceptedSlotsOn(day: ScheduleDay | null): number {
+  return day ? day.slots.filter((s) => s.isMine && s.role === "partner").length : 0;
+}
+
 /** At most one rule notice: the empty intersection outranks the cap, because it outlasts it. */
-function ruleNotice(rules: ViewerRules, clubDay: string, shownIsToday: boolean): Notice | null {
+export function ruleNotice(rules: ViewerRules, clubDay: string, shownIsToday: boolean, accepted = 0): Notice | null {
   // An exempt viewer has no window and no cap to be told about, whatever else the block carries.
   if (rules.adminExempt) return null;
   if (rules.emptyWindow) {
@@ -200,8 +211,8 @@ function ruleNotice(rules: ViewerRules, clubDay: string, shownIsToday: boolean):
   if (rules.remainingToday !== 0 || max <= 0) return null;
   return {
     id: "quota", tone: "warning",
-    title: quotaBannerTitle(max, clubDay),
-    body: quotaBannerBody(max),
+    title: quotaBannerTitle(max, clubDay, accepted),
+    body: quotaBannerBody(max, accepted),
     action: nextDayAction(clubDay, shownIsToday),
   };
 }

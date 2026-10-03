@@ -64,7 +64,7 @@ describe("item 19 — the daily maximum, on the grid", () => {
     open(dayWith({ maxSlotsPerDay: 4, bookedSlotsToday: 4, remainingToday: 0, adminExempt: false }));
 
     // R2 F1-5 — the fixture's day is not today, so the name says the day it is about.
-    const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've booked your 4 slots on Mon 9 Sep/ });
+    const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've used your 4 slots on Mon 9 Sep/ });
     // An ordinary enabled button, NOT `disabled` and not `aria-disabled` — it is operable, and
     // operating it is how the member finds out why. See the note on `UnavailableCell`.
     expect(cell).not.toBeDisabled();
@@ -97,7 +97,7 @@ describe("item 19 — the daily maximum, on the grid", () => {
 
   it("answers when a locked cell is pressed, and says the same thing the banner says", async () => {
     open(dayWith({ maxSlotsPerDay: 4, bookedSlotsToday: 4, remainingToday: 0 }));
-    const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've booked your 4/ });
+    const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've used your 4/ });
     await act(async () => { cell.click(); });
     expect(document.body.textContent).toMatch(/You've booked your 4 slots for Monday/);
   });
