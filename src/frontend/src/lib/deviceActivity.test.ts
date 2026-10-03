@@ -130,8 +130,12 @@ describe("describeActivityReason", () => {
    * server now proves the code at its scan time and names the member with `refused_offline`.
    */
   it("says an offline refusal of a genuine code as refused offline, never not recognised", () => {
-    const row = entry({ action: "device.gate_unknown_scan", reason: "refused_offline" });
-    expect(describeActivityReason(row)).toBe("The door refused the code while it was offline");
+    // The real row: the door's offline upload keeps its action, the server names the reason.
+    const row = entry({ action: "device.unknown_scan", reason: "refused_offline", offline: true });
+    expect(describeActivityReason(row)).toBe("The board refused the code while it was offline");
+    // An unprovable code is still the saved-list sentence, nobody named.
+    expect(describeActivityReason(entry({ action: "device.unknown_scan", reason: null, offline: true })))
+      .toBe("Code not on the door's saved list");
     expect(DOOR_OUTCOME_CHIPS.refused_offline).toBe("Refused offline");
   });
 

@@ -74,7 +74,7 @@ export const DOOR_REFUSAL_REASONS: Record<string, string> = {
   code_used: "The code had already been used",
   /** R11 D11-2: an offline door refused a code the server later proved genuine (replayed, too
    *  early or late, a stale saved list) — the member is named; nothing was opened. */
-  refused_offline: "The door refused the code while it was offline",
+  refused_offline: "The board refused the code while it was offline",
 };
 
 /**
@@ -189,6 +189,8 @@ export const DOOR_EVENT_WORDS: Record<string, string> = {
   "device.relay_restore_failed": "The board did not put the lit courts back on after restarting",
   /** A court box's own rows. A gate never writes these; the dictionary is shared. */
   "device.activation": "Court activated",
+  /** R11 D11-2: a court box's offline refusal of a code, uploaded later — named when genuine. */
+  "device.court_unknown_scan": "The box refused a code while offline",
   "device.release": "Court released",
   "device.release_unpaired": "Court released with nothing paired",
   "device.turnstile_spun": "Turnstile spun",
@@ -459,6 +461,9 @@ export function describeActivityAction(entry: DeviceActivityEntry): string {
  */
 export function describeActivityReason(entry: DeviceActivityEntry): string | null {
   if (entry.action === "device.gate_open") return OFFLINE_OPENED;
+  // R11 D11-2: the server proved the code genuine and named the member — the saved-list
+  // sentence would be false. Checked before the action rule, which answers for the rest.
+  if (entry.reason === "refused_offline") return DOOR_REFUSAL_REASONS.refused_offline;
   if (entry.action === "device.unknown_scan") return OFFLINE_REFUSED;
   if (entry.reason === null || entry.reason.trim() === "") return null;
   if (entry.reason === "ok" && entry.action === "gate.opened") return null;
