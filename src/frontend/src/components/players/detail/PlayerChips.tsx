@@ -57,11 +57,13 @@ function Team(props: TeamProps) {
 
 function FreeSeat({ seat }: { seat: number }) {
   return (
-    <li data-seat={seat} data-free="" className="flex min-h-touch items-center gap-3 rounded-xl border border-dashed border-control p-3">
-      <span aria-hidden="true" className="size-10 shrink-0 rounded-full border border-dashed border-control" />
-      <span className="grid min-w-0">
-        <span className="text-sm font-semibold text-text-secondary">{DETAIL_COPY.freeSeat}</span>
-        <span className="text-xs text-text-muted">{DETAIL_COPY.freeSeatHint}</span>
+    <li data-seat={seat} data-free="" className="@container/seat flex min-h-touch items-center rounded-xl border border-dashed border-control p-3">
+      <span className="flex min-w-0 flex-1 flex-col items-start gap-3 @[16rem]/seat:flex-row @[16rem]/seat:items-center">
+        <span aria-hidden="true" className="size-10 shrink-0 rounded-full border border-dashed border-control" />
+        <span className="grid min-w-0">
+          <span className="text-sm font-semibold text-text-secondary">{DETAIL_COPY.freeSeat}</span>
+          <span className="text-xs text-text-muted">{DETAIL_COPY.freeSeatHint}</span>
+        </span>
       </span>
     </li>
   );
@@ -92,9 +94,11 @@ function SeatChip({ player, isMe, actions, cancelled = false, players }: ChipPro
       data-seat={player.seat}
       data-status={player.status}
       aria-label={DETAIL_COPY.seatLabel(shown, word)}
-      className={cn("flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-3", isMe && "border-accent-strong")}
+      className={cn("@container/seat flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-3", isMe && "border-accent-strong")}
     >
-      <div className="flex min-w-0 items-center gap-3">
+      {/* R9 L9-6 — when the text is large for the chip (under 16rem of its own width) the photo stands
+          above the name: beside it, the column left over broke the status pill "Orga/niser". */}
+      <div className="flex min-w-0 flex-col items-start gap-3 @[16rem]/seat:flex-row @[16rem]/seat:items-center">
         <SeatAvatar player={player} name={name} />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="break-words text-sm font-semibold text-text-primary">{shown}</span>
