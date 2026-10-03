@@ -84,3 +84,22 @@ export function moveListFocus(event: KeyboardEvent<HTMLElement>) {
   items[next].scrollIntoView?.({ block: "nearest" });
 }
 
+
+/**
+ * The admin rail's width (R6 X6-5): 16rem, but never more than a quarter of the window — at 200 %
+ * text a 16rem rail was 512px of a 1280 screen and squeezed every admin title beside it. Shared
+ * here because three boxes must agree on it to the pixel: the rail itself (`AdminRail`), the crest
+ * box over it and the shut-doors banner's offset beside it (`AppShell`). Full literal class strings
+ * so Tailwind generates them; arbitrary lengths live in `components/ui` only (theme-vocabulary).
+ */
+export const ADMIN_RAIL_WIDTH = "w-[max(256px,min(16rem,24vw))]";
+export const ADMIN_RAIL_WIDTH_XL = "xl:w-[max(256px,min(16rem,24vw))]";
+export const ADMIN_RAIL_OFFSET_XL = "xl:ml-[max(256px,min(16rem,24vw))]";
+
+/**
+ * R6 L6-16 — an icon button's glyph: 20px at 100 % text, growing with it (1.25rem), in a target
+ * that is 44px at least and grows too (2.25rem). At 200 % text the refresh and the dialog's ×
+ * stayed 20px beside 32px words. The refresh button and the dialog's close share it.
+ */
+export const SCALING_ICON = "1.25rem";
+export const SCALING_ICON_TARGET = "size-[max(44px,2.25rem)]";

@@ -54,10 +54,12 @@ describe("PageHeader", () => {
     const actions = document.querySelector<HTMLElement>("[data-page-actions]")!;
     expect(within(actions).getByRole("button", { name: "Refresh" })).toBeInTheDocument();
     expect(actions.className).toContain("justify-end");
-    // From `sm` both are in grid row 1; on a phone the row wraps, and the title's basis is its
-    // longest word — the actions drop under it rather than a word being broken (R1 F1.16).
-    expect(actions.className).toContain("sm:row-start-1");
-    expect(screen.getByRole("heading", { level: 1 }).className).toContain("sm:row-start-1");
+    // At EVERY width the row wraps and the title's basis is its longest word — the actions drop
+    // under it rather than a word being broken (R1 F1.16; R6 L6-1: the `sm` grid broke words).
+    // The geometry is e2e/layout-r6's; here, that no grid column is back.
+    const row = actions.parentElement!;
+    expect(row.className).toContain("flex-wrap");
+    expect(row.className).not.toMatch(/grid/);
     expect(screen.getByRole("heading", { level: 1 }).className).toContain("flex-[1_1_min-content]");
     expect(screen.getByText("Updated 12s ago")).toBeInTheDocument();
   });

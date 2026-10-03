@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useTicker } from "@/lib/useTicker";
 import { ArrowsClockwise, WarningCircle } from "./icons";
+import { SCALING_ICON, SCALING_ICON_TARGET } from "./layout";
 
 /**
  * Refresh, and how fresh (design-system.md, Patterns → Refresh). Both always sit in the page
@@ -61,14 +62,15 @@ export function RefreshButton({ onRefresh, loading = false, label = "Refresh", c
       data-spinning={spinning || undefined}
       onClick={press}
       className={cn(
-        "no-lift inline-flex size-touch shrink-0 items-center justify-center rounded-lg border border-transparent",
+        "no-lift inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent",
         "text-text-secondary transition-colors duration-fast ease-standard hover:bg-bg-muted hover:text-text-primary",
         "aria-disabled:cursor-progress",
+        SCALING_ICON_TARGET,
         className,
       )}
     >
       <ArrowsClockwise
-        size={20}
+        size={SCALING_ICON}
         aria-hidden="true"
         className={cn(spinning && "animate-spin motion-reduce:animate-none")}
       />

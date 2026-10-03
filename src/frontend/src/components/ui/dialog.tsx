@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { X } from "@/components/ui/icons";
+import { SCALING_ICON, SCALING_ICON_TARGET } from "@/components/ui/layout";
 import { cn } from "@/lib/utils";
 
 /**
@@ -121,12 +122,12 @@ function CloseButton() {
       ref={ref}
       data-slot="dialog-close"
       className={cn(
-        "absolute right-2 top-2 inline-flex size-touch items-center justify-center rounded-lg",
+        "absolute right-2 top-2 inline-flex items-center justify-center rounded-lg", SCALING_ICON_TARGET,
         "border border-transparent text-text-secondary transition-colors duration-fast ease-standard",
         "hover:bg-bg-muted hover:text-text-primary motion-reduce:transition-none",
       )}
     >
-      <X size={20} aria-hidden="true" />
+      <X size={SCALING_ICON} aria-hidden="true" />
       <span id={wordId} className="sr-only">{DIALOG_CLOSE}</span>
     </DialogPrimitive.Close>
   );

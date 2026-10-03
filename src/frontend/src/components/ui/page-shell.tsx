@@ -108,7 +108,16 @@ function BackLink({ to, label }: { to: string; label: string }) {
  * The title wraps between words to make room (a refresh button stays beside it on a 360px phone);
  * a wider action cluster wraps inside its own box. No rem floor on the title: at a 32px root font
  * a 12rem floor alone is wider than a 320px screen, and the header pushed the page sideways
- * (e2e/admin-devices, admin-doors, large-text). From `sm` it is a three-column grid.
+ * (e2e/admin-devices, admin-doors, large-text).
+ * </p>
+ *
+ * <p>
+ * <b>The same wrapping row at every width</b> (R6 L6-1 / X6-5). From `sm` it used to be a
+ * `[1fr auto auto]` grid, whose title column shrank to whatever the actions left: at 200 % text
+ * "Repeating bookings" painted "Repe / ating / booki / ngs" at 768 beside its create button, and
+ * "Transactio / ns" at 1280 beside the admin rail. A flex row decides by the title's longest word
+ * instead, so the actions drop under the title when that word does not fit beside them. From
+ * `sm` the freshness line stands between the title and the actions.
  * </p>
  */
 export function PageHeader(props: PageHeaderProps) {
@@ -118,15 +127,15 @@ export function PageHeader(props: PageHeaderProps) {
     <header data-page-header="" className={cn("-mb-2 flex flex-col gap-2", className)}>
       {back ? <BackLink to={back.to} label={back.label} /> : null}
       {eyebrow ? <p className={typography({ variant: "overline" })}>{eyebrow}</p> : null}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), "min-w-0 flex-[1_1_min-content] break-words sm:col-start-1 sm:row-start-1")}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), "min-w-0 flex-[1_1_min-content] break-words")}>
           {title}
         </h1>
         {freshness ? (
-          <div className="order-last basis-full sm:order-none sm:col-start-2 sm:row-start-1">{freshness}</div>
+          <div className="order-last basis-full sm:order-none sm:basis-auto">{freshness}</div>
         ) : null}
         {actions ? (
-          <div data-page-actions="" className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
+          <div data-page-actions="" className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {actions}
           </div>
         ) : null}
