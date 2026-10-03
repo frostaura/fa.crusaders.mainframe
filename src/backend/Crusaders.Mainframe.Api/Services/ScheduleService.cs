@@ -200,15 +200,8 @@ public sealed class ScheduleService
         var minuteCap = GroupRules.MinuteCapFor(groups, BookingLimits.MaxMinutesPerDay(settings));
 
         var (dayStart, dayEnd) = ClubClock.DayWindow(settings, date);
-        var held = await _db.Bookings
-            .Where(b => b.UserId == userId
-                     && b.Status != BookingStatus.Cancelled
-                     && b.StartsAt < dayEnd && b.EndsAt > dayStart)
-            .Select(b => new { b.SliceCount, b.StartsAt, b.EndsAt })
-            .ToListAsync(ct);
-
-        var bookedSlots = held.Sum(b => b.SliceCount);
-        var bookedMinutes = (int)held.Sum(b => (b.EndsAt - b.StartsAt).TotalMinutes);
+        // The POST's own count (J8-1): accepted partner seats in other people's games included.
+        var (bookedSlots, bookedMinutes) = await _rules.HeldOnDayAsync(userId, dayStart, dayEnd, ct);
 
         // The number item 19 asks the UI to lock buttons on: the tighter of the two headrooms,
         // floored at zero. A cap of 0 is unlimited, which is null here rather than a big number.

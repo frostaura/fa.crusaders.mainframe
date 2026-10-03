@@ -751,6 +751,49 @@ public class BookingCapAndGroupTests
     }
 
     /// <summary>
+    /// Review round 8, J8-1: an ACCEPTED seat in somebody else's game counts against the partner's
+    /// daily cap on the POST (D12, <c>BookingRules.HeldAsync</c>) — and the grid counted only the
+    /// member's own bookings, so it showed "2 of 2 left", the sheet promised two slots and the
+    /// server refused. One count, so the grid's limit is the server's.
+    /// </summary>
+    [Fact]
+    public async Task The_grids_remaining_count_includes_a_partner_seat_like_the_post_does()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await GiveSettingsAsync(host, Settings("\"member_max_slots_per_day\":2,\"member_per_day_max_minutes\":0"));
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var schedule = scope.ServiceProvider.GetRequiredService<ScheduleService>();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000, host.PlayerUser.Id), default);
+        await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 5000, host.LeaguePlayerUser.Id), default);
+
+        var day = DateOnly.FromDateTime(NextWeekAt(9).UtcDateTime);
+        var game = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[0].Id, host.LeaguePlayerUser.Id, host.LeaguePlayerUser.Id, NextWeekAt(9), 1, default));
+        db.BookingParticipants.Add(new BookingParticipant
+        {
+            TenantId = host.Tenant.Id, BookingId = game.Booking.Id, Seat = 2, UserId = host.PlayerUser.Id,
+            Status = ParticipantStatus.Accepted, ShareMinutes = 0, ShareWeight = 1,
+            InvitedAt = DateTimeOffset.UtcNow, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var rules = (await schedule.GetDayAsync(day, host.PlayerUser.Id, default)).Rules!;
+        Assert.Equal(1, rules.BookedSlotsToday);
+        Assert.Equal(15, rules.BookedMinutesToday);
+        Assert.Equal(1, rules.RemainingToday);
+
+        // The grid's "1 left" is the POST's: one more slot goes through, two would not have.
+        Assert.IsType<BookingResult.PerDaySlotCapExceeded>(await booking.CreateAsync(
+            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(11), 2, default));
+        Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, NextWeekAt(11), 1, default));
+        Assert.Equal(0, (await schedule.GetDayAsync(day, host.PlayerUser.Id, default)).Rules!.RemainingToday);
+    }
+
+    /// <summary>
     /// The grid carries no price (contract §3.12). Review round 5 (I5-1) made it carry what THIS
     /// viewer paid on EACH court; since P13 a cell costs its minutes for everyone, so the client
     /// computes <c>slices × slice_minutes</c> and the server sends no figure that could drift from

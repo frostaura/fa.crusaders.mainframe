@@ -334,10 +334,7 @@ public sealed class BookingRules
 
         var (dayStart, dayEnd) = ClubClock.DayWindow(settings, day);
 
-        var held = await HeldAsync(subject.UserId, dayStart, dayEnd, ct);
-
-        var bookedSlots = held.Sum(b => b.SliceCount);
-        var bookedMinutes = (int)held.Sum(b => (b.EndsAt - b.StartsAt).TotalMinutes);
+        var (bookedSlots, bookedMinutes) = await HeldOnDayAsync(subject.UserId, dayStart, dayEnd, ct);
         var attemptedMinutes = (int)Math.Round((slot.EndsAt - slot.StartsAt).TotalMinutes);
 
         var overSlots = slotCap > 0 && bookedSlots + slot.SliceCount > slotCap;
@@ -358,23 +355,29 @@ public sealed class BookingRules
             : MinuteRefusal(subject, settings, day, minuteCap, bookedMinutes, attemptedMinutes);
     }
 
-    private sealed record HeldSlot(int SliceCount, DateTimeOffset StartsAt, DateTimeOffset EndsAt);
-
     /// <summary>
-    /// The court time this member holds on one club day. D12: a game somebody else booked and
-    /// this member ACCEPTED a seat in is court time they occupy, so it counts against their cap
-    /// exactly as their own booking would. Seat 1 is the organiser, whose booking already counts
-    /// through <c>UserId</c>.
+    /// The court time this member holds on one club day, as slots and minutes. D12: a game
+    /// somebody else booked and this member ACCEPTED a seat in is court time they occupy, so it
+    /// counts against their cap exactly as their own booking would. Seat 1 is the organiser, whose
+    /// booking already counts through <c>UserId</c>.
+    ///
+    /// <para>
+    /// <b>The one count.</b> The schedule grid's <c>booked_slots_today</c> / <c>remaining_today</c>
+    /// read it too (review round 8, J8-1): the grid counted only the member's own bookings, so it
+    /// promised slots a partner seat had already used and the POST refused them.
+    /// </para>
     /// </summary>
-    private async Task<List<HeldSlot>> HeldAsync(Guid userId, DateTimeOffset dayStart, DateTimeOffset dayEnd, CancellationToken ct)
+    public async Task<(int Slots, int Minutes)> HeldOnDayAsync(
+        Guid userId, DateTimeOffset dayStart, DateTimeOffset dayEnd, CancellationToken ct)
     {
         var partnerOn = BookingPlayerQueries.PartnerBookingIds(_db, userId);
-        return await _db.Bookings
+        var held = await _db.Bookings
             .Where(b => (b.UserId == userId || partnerOn.Contains(b.Id))
                      && b.Status != BookingStatus.Cancelled
                      && b.StartsAt < dayEnd && b.EndsAt > dayStart)
-            .Select(b => new HeldSlot(b.SliceCount, b.StartsAt, b.EndsAt))
+            .Select(b => new { b.SliceCount, b.StartsAt, b.EndsAt })
             .ToListAsync(ct);
+        return (held.Sum(b => b.SliceCount), (int)held.Sum(b => (b.EndsAt - b.StartsAt).TotalMinutes));
     }
 
     /// <summary>
