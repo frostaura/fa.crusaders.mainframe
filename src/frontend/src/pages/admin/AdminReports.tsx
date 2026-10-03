@@ -1,7 +1,7 @@
 import {
   endpoints, type DailyAdminPoint, type RevenueReport, type UtilisationRow,
 } from "../../lib/api";
-import { formatMinutes, formatMoney } from "../../lib/utils";
+import { formatMoney } from "../../lib/utils";
 import { AutoGrid } from "../../components/ui/auto-grid";
 import { Minutes } from "../../components/Minutes";
 import { CLUB_REPORT_COPY as COPY, randPerHour } from "../../lib/reportsCopy";
@@ -15,7 +15,7 @@ import {
 } from "../../components/Charts";
 import type { CarouselSlide } from "../../components/Carousel";
 import {
-  Cell, ChartsCard, NetMinutes, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
+  Cell, ChartsCard, MinutesGroups, NetMinutes, NetNote, RangeToolbar, ReportSkeleton, Stat, StatTiles, TableNotes, TotalsCard,
   type Tile,
 } from "../../components/reports/ReportParts";
 import { prettyDay, useReport, useReportRange } from "../../components/reports/range";
@@ -89,7 +89,7 @@ function ClubBody({ data }: { data: ClubReport }) {
   const { revenue, noShows, days } = data;
   const tiles: Tile[] = [
     { label: COPY.tiles.received, value: formatMoney(revenue.net_zar), tone: "accent" },
-    { label: COPY.tiles.sold, value: <Minutes value={revenue.net_minutes} />, tone: "success" },
+    { label: COPY.tiles.sold, value: <MinutesGroups value={revenue.net_minutes} />, tone: "success" },
     { label: COPY.tiles.perHour, value: randPerHour(revenue.zar_per_minute_sold), tone: "neutral" },
     { label: COPY.tiles.noShows, value: `${noShows.no_show_pct.toFixed(1)}%`, tone: noShows.no_show_pct > 5 ? "warning" : "neutral" },
   ];
@@ -136,9 +136,9 @@ function Sales({ revenue }: { revenue: RevenueReport }) {
         <Stat label={COPY.sales.receivedGross} value={formatMoney(revenue.gross_topups_zar)} />
         <Stat label={COPY.sales.receivedReversed} value={formatMoney(-revenue.reversals_zar)} />
         <Stat label={COPY.sales.receivedNet} value={formatMoney(revenue.net_zar)} />
-        <Stat label={COPY.sales.soldGross} value={<Minutes value={revenue.gross_topups_minutes} />} />
-        <Stat label={COPY.sales.soldReversed} value={<Minutes value={-revenue.reversals_minutes} />} />
-        <Stat label={COPY.sales.soldNet} value={<Minutes value={revenue.net_minutes} />} />
+        <Stat label={COPY.sales.soldGross} value={<MinutesGroups value={revenue.gross_topups_minutes} />} />
+        <Stat label={COPY.sales.soldReversed} value={<MinutesGroups value={-revenue.reversals_minutes} />} />
+        <Stat label={COPY.sales.soldNet} value={<MinutesGroups value={revenue.net_minutes} />} />
         <Stat label={COPY.sales.perHour} value={randPerHour(revenue.zar_per_minute_sold)} />
         <Stat label={COPY.sales.perMinute} value={randPerMinuteToCent(revenue.zar_per_minute_sold)} />
       </TotalsCard>
@@ -216,13 +216,13 @@ function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
         {/* Each bucket as the daily table below shows it (R6 L6-14): the sentence under the card
             ("sold − bookings + refunds − penalties …") applies the signs. Bookings was "−24 min" in
             danger red above a table saying "24 min" — subtracted twice by anyone who read both. */}
-        <Stat label={COPY.totals.sold} value={<Minutes value={t.topUps} />} />
-        <Stat label={COPY.totals.charges} value={<Minutes value={t.charges} />} />
-        <Stat label={COPY.totals.refunds} value={<NetMinutes value={t.refunds} />} />
-        <Stat label={COPY.totals.penalties} value={<NetMinutes value={t.penalties} />} />
-        <Stat label={COPY.totals.adjustments} value={<NetMinutes value={t.adjustments} />} />
-        <Stat label={COPY.totals.reversals} value={<NetMinutes value={t.reversals} />} />
-        {shares ? <Stat label={REPORT_SHARES_COPY.clubShares} value={<NetMinutes value={t.shares} />} /> : null}
+        <Stat label={COPY.totals.sold} value={<MinutesGroups value={t.topUps} />} />
+        <Stat label={COPY.totals.charges} value={<MinutesGroups value={t.charges} />} />
+        <Stat label={COPY.totals.refunds} value={<NetMinutes wrap value={t.refunds} />} />
+        <Stat label={COPY.totals.penalties} value={<NetMinutes wrap value={t.penalties} />} />
+        <Stat label={COPY.totals.adjustments} value={<NetMinutes wrap value={t.adjustments} />} />
+        <Stat label={COPY.totals.reversals} value={<NetMinutes wrap value={t.reversals} />} />
+        {shares ? <Stat label={REPORT_SHARES_COPY.clubShares} value={<NetMinutes wrap value={t.shares} />} /> : null}
         <Stat label={COPY.totals.courtsPlayed} value={String(t.bookings)} />
         <Stat label={COPY.totals.noShows} value={String(t.noShows)} />
         <Stat label={COPY.totals.days} value={String(days.length)} />
@@ -237,8 +237,9 @@ const COURT_COLUMNS: DataColumn<UtilisationRow>[] = [
   { key: "court_name", header: U.court, cell: (r) => <Cell>{r.court_name}</Cell> },
   { key: "bookings", header: U.bookings, align: "right", cell: (r) => <Cell>{r.bookings}</Cell>, sortValue: (r) => r.bookings },
   // How long, not slices. A 60-minute walk-up is SliceCount 1 and was counted the same as a
-  // 15-minute booking, so the column mixed units. A duration, so `formatMinutes`.
-  { key: "booked_minutes", header: U.booked, align: "right", cell: (r) => <Cell>{formatMinutes(r.booked_minutes)}</Cell>, sortValue: (r) => r.booked_minutes },
+  // 15-minute booking, so the column mixed units. A duration — drawn through `<Minutes>` (R7 X7-6)
+  // so a screen reader hears "3 hours", not "3 h", like every other figure in this table.
+  { key: "booked_minutes", header: U.booked, align: "right", cell: (r) => <Cell><Minutes value={r.booked_minutes} /></Cell>, sortValue: (r) => r.booked_minutes },
   // P13 §3.15: `sold_minutes` is Σ AmountChargedMinutes — what the bookings were charged. The
   // header said "Quoted", which was the price-list word; there is no price list any more.
   { key: "sold_minutes", header: U.charged, align: "right", cell: (r) => <Cell><Minutes value={r.sold_minutes} /></Cell>, sortValue: (r) => r.sold_minutes },

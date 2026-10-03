@@ -276,9 +276,9 @@ describe("the Overview's Recent alerts (R23)", () => {
 
     const first = await within(alerts()).findByRole("link", { name: "Thandi Mokoena applied to join" });
     expect(first).toHaveAttribute("href", "/admin/members");
-    expect(first).toHaveAccessibleDescription("New membership applications, 5 min ago. Emailed 3 admins.");
+    expect(first).toHaveAccessibleDescription("New membership applications, 5 minutes ago. Emailed 3 admins.");
     const second = within(alerts()).getByRole("link", { name: "Court 2 box stopped reporting" });
-    expect(second).toHaveAccessibleDescription(/3 h ago\. Email failed\./);
+    expect(second).toHaveAccessibleDescription(/3 hours ago\. Email failed\./);
     expect(second.querySelector("[data-delivery='failed']")).toHaveTextContent("Email failed");
     // No older page: nothing to load.
     expect(within(alerts()).queryByRole("button", { name: RECENT_ALERTS_COPY.loadMore })).toBeNull();

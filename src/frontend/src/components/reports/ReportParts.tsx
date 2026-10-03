@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Minutes } from "@/components/Minutes";
+import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
 import { typography } from "@/lib/typography";
 import { Toggle } from "@/components/ui/toggle";
 import { AutoGrid } from "@/components/ui/auto-grid";
@@ -70,6 +71,17 @@ function DayField({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * A figure's size, capped by its box (R7 L7-7): the box is a size container and the figure never
+ * takes more than 17 % of its width per character-em — about ten characters ("R12025.00") across
+ * — so at 320 / 200 % a money amount steps down to fit instead of breaking or running out. On any
+ * ordinary box the cap is above the type size and changes nothing.
+ */
+const FIGURE_FITS = {
+  tile: "text-[length:min(1.5rem,17cqi)]",
+  stat: "text-[length:min(1rem,17cqi)]",
+} as const;
+
 export type TileTone = "accent" | "success" | "warning" | "neutral";
 
 /** Tone → fill and ink. Existing soft/strong pairs, every one measured ≥4.5:1 in both themes. */
@@ -93,22 +105,50 @@ export function StatTiles({ tiles, label }: { tiles: Tile[]; label: string }) {
   return (
     <AutoGrid as="dl" min="stat" max={4} gap="md" aria-label={label} data-stat-tiles="">
       {tiles.map((tile) => (
-        <div key={tile.label} className={cn("flex min-w-0 flex-col gap-1 rounded-xl p-4", TILE_TONES[tile.tone])}>
+        <div key={tile.label} className={cn("@container flex min-w-0 flex-col gap-1 rounded-xl p-4", TILE_TONES[tile.tone])}>
           <dt className="break-words text-xs font-semibold uppercase tracking-overline">{tile.label}</dt>
-          <dd className="text-2xl font-semibold tabular-nums tracking-tight">{tile.value}</dd>
+          <dd className={cn("font-semibold tabular-nums tracking-tight", FIGURE_FITS.tile)}>{tile.value}</dd>
         </div>
       ))}
     </AutoGrid>
   );
 }
 
-/** One labelled figure in a totals list. `dt` then `dd`, so the pair reads as one line. */
+/**
+ * One labelled figure in a totals list. `dt` then `dd`, so the pair reads as one line.
+ *
+ * <p>
+ * R7 L7-7: no `break-words` on the figure — at 320 / 200 % it cut "R2025.0 / 0". A figure wraps
+ * only between whole groups ({@link MinutesGroups}); a money amount is one group and stays whole.
+ * </p>
+ */
 export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-bg-muted px-3 py-2.5">
-      <dt className={typography({ variant: "overline" })}>{label}</dt>
-      <dd className="break-words text-base font-semibold tabular-nums text-text-primary">{value}</dd>
+    <div className="@container flex min-w-0 flex-col gap-0.5 rounded-lg bg-bg-muted px-3 py-2.5">
+      <dt className={cn(typography({ variant: "overline" }), "break-words")}>{label}</dt>
+      <dd className={cn("font-semibold tabular-nums text-text-primary", FIGURE_FITS.stat)}>{value}</dd>
     </div>
+  );
+}
+
+/**
+ * A minutes figure that may wrap — in a tile or a totals card, never a table cell — with a
+ * no-break space between each number and its unit, so a narrow box breaks it "10 d 20 h /
+ * 30 min" and never "10 / d" (R7 X5-4: the whole figure was `nowrap`, 250px in a 212px box). The
+ * compact form is for the eye; the spoken twin is for a screen reader (contract §7.1).
+ */
+export function MinutesGroups({ value, signed = false, tone = "danger" }: {
+  value: number; signed?: boolean;
+  /** A negative's ink: the danger tone as `<Minutes>`, or warning where it is the netting working. */
+  tone?: "danger" | "warning";
+}) {
+  const shown = (signed ? minutesSigned(value) : minutesCompact(value)).replace(/(\d) (d|h|min)\b/g, "$1\u00A0$2");
+  const negative = Math.trunc(value) < 0;
+  return (
+    <span className={cn("tabular-nums", negative && (tone === "warning" ? "font-medium text-warning-strong" : "text-danger-strong"))}>
+      <span aria-hidden="true">{shown}</span>
+      <span className="sr-only">{minutesSpoken(value, { signed })}</span>
+    </span>
   );
 }
 
@@ -155,7 +195,12 @@ export function ChartsCard({ slides }: { slides: CarouselSlide[] }) {
  * happened at all. Marked in the warning ink: "look at this day", not "error".
  * </p>
  */
-export function NetMinutes({ value }: { value: number }) {
+export function NetMinutes({ value, wrap = false }: {
+  value: number;
+  /** In a tile or totals card the figure may wrap between its groups; in a table cell it never does. */
+  wrap?: boolean;
+}) {
+  if (wrap) return <MinutesGroups value={value} tone="warning" />;
   // Warning ink, not `<Minutes>`' own danger ink: a negative day is the netting working.
   return <Minutes value={value} className={cn("whitespace-nowrap", 0 > value && "font-medium text-warning-strong")} />;
 }
