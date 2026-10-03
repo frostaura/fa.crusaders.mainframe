@@ -47,8 +47,11 @@ Spec: round 4 `SPEC.md` §3/§4. `components/ui` primitives decide by their own 
 - **A failed refresh keeps what is on screen** (integrator ask, D's `StaleNotice`): Members (a
   re-read publishes only a WHOLE club), Transactions (same filters only — new filters that fail
   drop the rows, R12), Courts, Webhooks, Settings (and its draft), Schedules (same list only).
-- **Not built (no data or another lane's file):** Overview's court-occupancy strip, the board's
-  live-event rail; split views for Groups/Schedules/Boards (cards); Settings' third help column.
+- **Not built:** Overview occupancy strip, board live-event rail, Groups/Schedules/Boards split views, Settings' help column.
+- **R10 (FD10) — 200 % text, by the box in rem, never `sm:`:** ChangeDiff stacks label over "Before/After …" under 24rem
+  (`@container/diff`); door-log filters 3-up from 34rem; button map rows by `@container/bmap` (20/28rem, insets
+  step down <12rem; model in `lib/buttonMap.ts`); GroupCard ⋯ on its own row <14rem card; change headline
+  steps down <12rem list. Night lights name `code_holder` (whose code lit it), else subject. `e2e/admin-r10-fd`.
 - **R5 (lane E2) — phones and large text.** Overview: 5 alerts, then "See all N" opens the rest IN
   PLACE (there is no alerts page), focus on the first revealed; the Console folds under a 48rem box
   (*why:* it repeats the section switcher; 5,790 → ~2,000px at 390). Faults: text takes the row,
