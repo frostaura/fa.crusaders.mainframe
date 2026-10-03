@@ -27,7 +27,7 @@ import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { DaySummary } from "../components/bookings/DaySummary";
 import { WithAside } from "@/components/ui/with-aside";
 import { useScheduleLiveness } from "../components/bookings/useScheduleLiveness";
-import { useStickyDayStrip } from "../components/bookings/useStickyDayStrip";
+import { useOpenAtWeek, useStickyDayStrip } from "../components/bookings/useStickyDayStrip";
 import { cn } from "../lib/utils";
 import { RecentGames } from "../components/bookings/RecentGames";
 import type { CancelledOutcome } from "../components/bookings/CancelSheet";
@@ -218,7 +218,7 @@ export default function BookingsPage() {
             </>
           )}
         >
-          <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} />
+          <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} drawn={ctx !== null} />
           <ScheduleNotices
             notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
             onDismiss={explainer.dismiss} onNextDay={schedule.nextDay}
@@ -352,11 +352,14 @@ const DATE_TRIGGER = "ml-1 w-11 shrink-0 justify-center px-0 sm:w-auto sm:px-3 [
 function DayPicker(props: {
   schedule: ScheduleState; isAdmin: boolean;
   quota: { text: string; atLimit: boolean } | null;
+  /** The day's grid is on screen — the moment a phone's page opens at the week (§4.2). */
+  drawn: boolean;
 }) {
-  const { schedule, isAdmin, quota } = props;
+  const { schedule, isAdmin, quota, drawn } = props;
   const { date, setDate, bounds, today } = schedule;
   const strip = useRef<HTMLDivElement>(null);
   const sticks = useStickyDayStrip(strip);
+  useOpenAtWeek(strip, drawn);
   return (
     // R5 §4.2 — on a phone the week sticks under the app bar while the grid is worked. The whole
     // picker sticks: its parent is the column the grid is in, which is what a sticky box needs.

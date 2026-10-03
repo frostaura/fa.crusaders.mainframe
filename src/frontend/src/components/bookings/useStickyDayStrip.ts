@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 /** Below this viewport width the day strip sticks (the grid's `md:` — a phone). */
 const PHONE_MAX_PX = 767;
@@ -41,4 +41,31 @@ export function useStickyDayStrip(ref: RefObject<HTMLElement | null>): boolean {
     };
   }, [ref]);
   return sticks;
+}
+
+/**
+ * §4.2 (Dean's call, R7) — on a phone Bookings OPENS with the week at the top of the page, so the
+ * first bookable row is on the first screen (y 555 → ~300 at 390). Nothing is removed: the games
+ * strip, the invites and the notices stay where they were, one swipe up. The grid's own scroller
+ * already opens at the first live row (`BookingGrid` `useBoardScroll`); this moves the PAGE.
+ *
+ * <ul>
+ *   <li>Once per visit, when the day first draws — never on a re-read or a day change, which
+ *   would yank the page out from under a member who scrolled.</li>
+ *   <li>Only from the top: a member who already scrolled (or a restored position) is left alone.</li>
+ *   <li>Only on a phone (the strip's own width rule); a desktop opens at the top.</li>
+ *   <li>Any day — today or a date the member asked for in the address.</li>
+ * </ul>
+ */
+export function useOpenAtWeek(ref: RefObject<HTMLElement | null>, ready: boolean): void {
+  const done = useRef(false);
+  useLayoutEffect(() => {
+    if (!ready || done.current) return;
+    done.current = true;
+    const el = ref.current;
+    const main = el?.closest("main");
+    if (!el || !main || window.innerWidth > PHONE_MAX_PX || main.scrollTop > 0) return;
+    const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    if (top > 0) main.scrollTop = top;
+  }, [ready, ref]);
 }
