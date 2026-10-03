@@ -53,11 +53,14 @@ public sealed record BoardLostMemberCodes(string DeviceName, string DeviceCode, 
 /// </remarks>
 public static partial class EmailTemplates
 {
+    /// <summary>Whole hours in words — "1 hour", "26 hours" (R9: "1 hours" read wrong).</summary>
+    private static string HoursSpoken(int n) => n == 1 ? "1 hour" : $"{n} hours";
+
     /// <summary>A daily nudge while applications wait. Names the oldest, because that is the one somebody is waiting on.</summary>
     public static EmailMessage AdminApplicationsWaiting(ClubIdentity club, string to, ApplicationsWaiting w) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: w.Count == 1 ? "1 application is still waiting" : $"{w.Count} applications are still waiting",
-            Preheader: $"The oldest, {w.OldestName}, has waited {w.OldestHours} hours. Nobody can book until they're approved.",
+            Preheader: $"The oldest, {w.OldestName}, has waited {HoursSpoken(w.OldestHours)}. Nobody can book until they're approved.",
             Heading: "Applications are waiting for approval",
             Blocks:
             [
@@ -66,7 +69,7 @@ public static partial class EmailTemplates
                 [
                     new FactRow("Waiting", w.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                     new FactRow("Oldest", w.OldestName),
-                    new FactRow("Waiting for", $"{w.OldestHours} hours"),
+                    new FactRow("Waiting for", $"{HoursSpoken(w.OldestHours)}"),
                 ]),
                 new Paragraph("Each applicant was told this takes a day or two. You'll get this reminder at most once a day while any application is waiting."),
                 new CallToAction("Review the applications", w.ConsoleUrl),
@@ -76,12 +79,12 @@ public static partial class EmailTemplates
     /// <summary>Several faults at once — the pattern a single fault row cannot show.</summary>
     public static EmailMessage AdminFaultSpike(ClubIdentity club, string to, FaultSpike f) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"{f.Faults} device faults in {f.Minutes} minutes",
+            Subject: $"{f.Faults} device faults in {Min(f.Minutes)}",
             Preheader: "Several different faults opened across the club's boards at once.",
             Heading: "The club's boards are reporting several faults",
             Blocks:
             [
-                new Paragraph($"{f.Faults} different faults have been reported at {club.Name} in the last {f.Minutes} minutes. One fault on its own is on the Faults page; several at once usually share a cause — the network, the power, or a firmware change."),
+                new Paragraph($"{f.Faults} different faults have been reported at {club.Name} in the last {Min(f.Minutes)}. One fault on its own is on the Faults page; several at once usually share a cause — the network, the power, or a firmware change."),
                 new Facts(
                 [
                     new FactRow("Faults", f.Faults.ToString(System.Globalization.CultureInfo.InvariantCulture)),
@@ -98,11 +101,11 @@ public static partial class EmailTemplates
     public static EmailMessage AdminDoorRefusalSpike(ClubIdentity club, string to, DoorRefusalSpike r) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"{r.DoorName} is turning people away",
-            Preheader: $"{r.Refusals} refused scans in {r.Minutes} minutes.",
+            Preheader: $"{r.Refusals} refused scans in {Min(r.Minutes)}.",
             Heading: "A door is refusing a lot of scans",
             Blocks:
             [
-                new Paragraph($"{r.DoorName} at {club.Name} refused {r.Refusals} scans in the last {r.Minutes} minutes."),
+                new Paragraph($"{r.DoorName} at {club.Name} refused {r.Refusals} scans in the last {Min(r.Minutes)}."),
                 new Facts(
                 [
                     new FactRow("Door", Door(r.GateKey)),

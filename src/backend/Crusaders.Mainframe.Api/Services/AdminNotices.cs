@@ -159,7 +159,7 @@ public static class AdminNotices
             AdminEventCatalogue.FaultSpike,
             $"{AdminEventCatalogue.FaultSpike}:{bucket.ToString(CultureInfo.InvariantCulture)}",
             new FaultSpikePayload(faults, minutes, boards),
-            $"{faults} device faults in {minutes} minutes",
+            $"{faults} device faults in {MoneyFormat.Minutes(minutes)}",
             "/admin/monitoring/faults");
     }
 
@@ -170,7 +170,7 @@ public static class AdminNotices
             AdminEventCatalogue.RefusalSpike,
             $"{AdminEventCatalogue.RefusalSpike}:{door.Id:N}:{bucket.ToString(CultureInfo.InvariantCulture)}",
             new RefusalSpikePayload(door.Id, door.Name, door.DeviceCode, door.GateKey, refusals, minutes),
-            $"{door.Name} refused {refusals} scans in {minutes} minutes",
+            $"{door.Name} refused {refusals} scans in {MoneyFormat.Minutes(minutes)}",
             $"/admin/monitoring/doors/{door.Id}")
         {
             CooldownScope = door.Id.ToString("N"),

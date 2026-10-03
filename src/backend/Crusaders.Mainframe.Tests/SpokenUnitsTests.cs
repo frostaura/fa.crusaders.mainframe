@@ -78,6 +78,25 @@ public sealed class SpokenUnitsTests
         Assert.True(offenders.Count == 0, string.Join(Environment.NewLine, offenders));
     }
 
+    /// <summary>
+    /// R9 J9-6: mail and admin notices say a minutes figure through <c>MoneyFormat.Minutes</c>, so
+    /// "90" reads "1 hour 30 minutes" and "1" reads "1 minute" — never "{n} minutes" by hand.
+    /// </summary>
+    [Fact]
+    public void Mail_and_notices_say_minutes_through_the_one_formatter()
+    {
+        var root = ApiSourceRoot();
+        var byHand = new Regex(@"\{[A-Za-z_.]+\} minutes\b", RegexOptions.CultureInvariant);
+        var files = Directory.EnumerateFiles(Path.Combine(root, "Email"), "*.cs")
+            .Append(Path.Combine(root, "Services", "AdminNotices.cs"));
+        var offenders = files.SelectMany(f => File.ReadAllLines(f)
+                .Select((line, i) => (line: line.TrimStart(), i))
+                .Where(x => !x.line.StartsWith("//", StringComparison.Ordinal) && byHand.IsMatch(x.line))
+                .Select(x => $"{Path.GetFileName(f)}:{x.i + 1}: {x.line}"))
+            .ToList();
+        Assert.True(offenders.Count == 0, string.Join(Environment.NewLine, offenders));
+    }
+
     private static string ApiSourceRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

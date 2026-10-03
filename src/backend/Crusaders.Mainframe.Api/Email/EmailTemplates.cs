@@ -509,7 +509,7 @@ public static partial class EmailTemplates
         }
 
         return new Callout(CalloutTone.Warning,
-            $"Cancel more than {d.PenaltyWindowMinutes} minutes before the start and you get everything back. "
+            $"Cancel more than {Min(d.PenaltyWindowMinutes)} before the start and you get everything back. "
             + $"Cancel inside that window — or leave the lights off and not turn up — and it costs you "
             + $"{Num(d.PenaltyPct)}% of the booking's minutes ({Min(PenaltyOf(d.AmountMinutes, d.PenaltyPct))}).");
     }
@@ -667,7 +667,7 @@ public static partial class EmailTemplates
         ClubIdentity club, string to, string courtName, int minutes, int amountMinutes) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Lights charged — {courtName}",
-            Preheader: $"{minutes} minutes of court time on a booking you had cancelled: {Min(amountMinutes)}.",
+            Preheader: $"{Min(minutes)} of court time on a booking you had cancelled: {Min(amountMinutes)}.",
             Heading: "Your cancelled booking was used",
             Blocks:
             [
@@ -959,11 +959,11 @@ public static partial class EmailTemplates
     public static EmailMessage AdminPeripheralUnhealthy(ClubIdentity club, string to, PeripheralAlert alert) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Court box not reporting — {alert.DeviceCode}",
-            Preheader: $"Silent for {alert.Minutes} minutes on {Courts(alert.CourtNumbers)}. Do not power-cycle it yet.",
+            Preheader: $"Silent for {Min(alert.Minutes)} on {Courts(alert.CourtNumbers)}. Do not power-cycle it yet.",
             Heading: "A court box has stopped reporting",
             Blocks:
             [
-                new Paragraph($"{alert.DeviceName} at {club.Name} last called home {alert.Minutes} minutes ago."),
+                new Paragraph($"{alert.DeviceName} at {club.Name} last called home {Min(alert.Minutes)} ago."),
                 new Facts(
                 [
                     new FactRow("Box", alert.DeviceCode),
@@ -984,11 +984,11 @@ public static partial class EmailTemplates
     public static EmailMessage AdminPeripheralRecovered(ClubIdentity club, string to, PeripheralAlert alert) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Court box back online — {alert.DeviceCode}",
-            Preheader: $"Back after {alert.Minutes} minutes. What happens to the scans it was holding depends on its power.",
+            Preheader: $"Back after {Min(alert.Minutes)}. What happens to the scans it was holding depends on its power.",
             Heading: "The court box is reporting again",
             Blocks:
             [
-                new Paragraph($"{alert.DeviceName} ({alert.DeviceCode}) at {club.Name} is back after {alert.Minutes} minutes."),
+                new Paragraph($"{alert.DeviceName} ({alert.DeviceCode}) at {club.Name} is back after {Min(alert.Minutes)}."),
                 new Paragraph("Anything the box recorded while it was offline uploads on its next few calls if it stayed powered, and a member who did play during the outage then settles as attended."),
                 new Callout(CalloutTone.Warning, "If it lost power or was restarted, those scans are gone. Courts it lit are refunded in full and the club carries them."),
                 new CallToAction("Open the Devices page", alert.ConsoleUrl),
@@ -1023,11 +1023,11 @@ public static partial class EmailTemplates
     public static EmailMessage AdminGateUnhealthy(ClubIdentity club, string to, GateAlert alert) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Door gate not reporting — {alert.DeviceCode}",
-            Preheader: $"Silent for {alert.Minutes} minutes. It still opens for booked members, for about 6 hours.",
+            Preheader: $"Silent for {Min(alert.Minutes)}. It still opens for booked members, for about 6 hours.",
             Heading: "A door gate has stopped reporting",
             Blocks:
             [
-                new Paragraph($"{alert.DeviceName} at {club.Name} last called home {alert.Minutes} minutes ago."),
+                new Paragraph($"{alert.DeviceName} at {club.Name} last called home {Min(alert.Minutes)} ago."),
                 new Facts(
                 [
                     new FactRow("Board", alert.DeviceCode),
@@ -1052,11 +1052,11 @@ public static partial class EmailTemplates
     public static EmailMessage AdminGateRecovered(ClubIdentity club, string to, GateAlert alert) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Door gate back online — {alert.DeviceCode}",
-            Preheader: $"Back after {alert.Minutes} minutes, with a current list.",
+            Preheader: $"Back after {Min(alert.Minutes)}, with a current list.",
             Heading: "The door gate is reporting again",
             Blocks:
             [
-                new Paragraph($"{alert.DeviceName} ({alert.DeviceCode}) at {club.Name} is back after {alert.Minutes} minutes."),
+                new Paragraph($"{alert.DeviceName} ({alert.DeviceCode}) at {club.Name} is back after {Min(alert.Minutes)}."),
                 new Callout(CalloutTone.Success, "It has a current list again, so it opens for every member it should."),
                 new Footnote("Any opens it decided on its own while it was away upload on its next few calls, for the record only."),
                 new CallToAction("Open the Devices page", alert.ConsoleUrl),
