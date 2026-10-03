@@ -19,10 +19,10 @@ const COURTS = ["a", "b", "c", "d"].map((x, i) => ({
 const inDays = (n: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const DAY = inDays(2);
 
-function wholeDay() {
+function wholeDay(courts = COURTS) {
   return {
     date: DAY, timezone: "UTC", sliceMinutes: 15, dayStartMinute: 8 * 60, dayEndMinute: 20 * 60,
-    advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15, courts: COURTS, slots: [],
+    advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15, courts, slots: [],
   };
 }
 
@@ -35,11 +35,11 @@ function game(n: number) {
   };
 }
 
-async function openBookings(page: Page, width: number, height: number, query = `?date=${DAY}`) {
+async function openBookings(page: Page, width: number, height: number, query = `?date=${DAY}`, courts = COURTS) {
   await page.setViewportSize({ width, height });
   await signIn(page);
   const routes: ApiRoute[] = [
-    { path: "/api/v1/schedule", body: wholeDay() },
+    { path: "/api/v1/schedule", body: wholeDay(courts) },
     { path: "/api/v1/me/bookings/upcoming", body: { timezone: "UTC", items: [game(1), game(2), game(3)] } },
     { path: "/api/v1/me/bookings/recent", body: { timezone: "UTC", items: [] } },
     ...memberShellRoutes({ invites: [inviteFixture({ invite_id: "i0" }), inviteFixture({ invite_id: "i1" })] }),
@@ -254,4 +254,41 @@ test.describe("L7-14 — a phone sheet's header that scrolls shows that it does"
     await page.waitForTimeout(400);
     await expect(header.locator("[data-more-below]")).toHaveCount(0);
   });
+});
+
+/* ───────────────────────────── L7-4 — the Book sheet's slot row at 200 % ───────────────────────────── */
+
+test.describe("L7-4 — the Book sheet's slot row keeps the court's name and figure whole at 200 %", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  for (const [width, height] of [[390, 844], [320, 640]] as const) {
+    test(`${width} / 200 %: the court's name is never cut to "Gla…", and the figure stays inside the sheet`, async ({ page }) => {
+      // A club's real names run longer than "Court 1" (the reviewer's sheet cut it to "Cou…").
+      await openBookings(page, width, height, `?date=${DAY}`, COURTS.map((c) => ({ ...c, name: `Glass court ${c.courtNumber}` })));
+      await bigText(page);
+      await page.locator(FIRST_BOOK).first().click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      // The slot rows are on Confirm (the first step shows a one-line summary).
+      await dialog.getByRole("button", { name: "Continue" }).click();
+      await page.waitForTimeout(500);
+      const row = dialog.locator("li").filter({ hasText: "Glass court 1" }).first();
+      await row.scrollIntoViewIfNeeded();
+      const m = await row.evaluate((li) => {
+        const name = Array.from(li.querySelectorAll("span")).find((s) => s.textContent === "Glass court 1") as HTMLElement;
+        // The list clips (rounded card, overflow hidden): a figure past ITS edge is not seen.
+        const list = li.closest("ul")!.getBoundingClientRect();
+        const figures = Array.from(li.querySelectorAll("span.tabular-nums > [aria-hidden=true]")).map((f) => f.getBoundingClientRect());
+        return {
+          cut: name.scrollWidth - name.clientWidth,
+          figures: figures.filter((r) => r.width > 0).length,
+          right: Math.max(...figures.map((r) => r.right)),
+          listRight: list.right,
+        };
+      });
+      expect(m.cut, "the name is cut").toBeLessThanOrEqual(0);
+      expect(m.figures, "the price and the length are both drawn").toBe(2);
+      expect(m.right, "a figure paints past the list's clipped edge").toBeLessThanOrEqual(m.listRight + 1);
+    });
+  }
 });
