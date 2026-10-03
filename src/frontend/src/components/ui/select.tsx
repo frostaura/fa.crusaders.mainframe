@@ -47,7 +47,7 @@ export function SelectTrigger({ className, children, ...props }: ComponentProps<
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <CaretDown aria-hidden="true" size={16} className="shrink-0 text-text-secondary" />
+        <CaretDown aria-hidden="true" size="1rem" className="shrink-0 text-text-secondary" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
@@ -58,7 +58,7 @@ const scrollButton = "flex h-8 cursor-default items-center justify-center text-t
 export function SelectScrollUpButton({ className, ...props }: ComponentProps<typeof SelectPrimitive.ScrollUpButton>) {
   return (
     <SelectPrimitive.ScrollUpButton data-slot="select-scroll-up" className={cn(scrollButton, className)} {...props}>
-      <CaretUp aria-hidden="true" size={16} />
+      <CaretUp aria-hidden="true" size="1rem" />
     </SelectPrimitive.ScrollUpButton>
   );
 }
@@ -66,7 +66,7 @@ export function SelectScrollUpButton({ className, ...props }: ComponentProps<typ
 export function SelectScrollDownButton({ className, ...props }: ComponentProps<typeof SelectPrimitive.ScrollDownButton>) {
   return (
     <SelectPrimitive.ScrollDownButton data-slot="select-scroll-down" className={cn(scrollButton, className)} {...props}>
-      <CaretDown aria-hidden="true" size={16} />
+      <CaretDown aria-hidden="true" size="1rem" />
     </SelectPrimitive.ScrollDownButton>
   );
 }
@@ -128,7 +128,7 @@ export function SelectItem({ className, children, ...props }: ComponentProps<typ
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
       <span className="absolute right-3 flex size-4 items-center justify-center text-accent-strong">
         <SelectPrimitive.ItemIndicator>
-          <Check aria-hidden="true" size={16} weight="bold" />
+          <Check aria-hidden="true" size="1rem" weight="bold" />
         </SelectPrimitive.ItemIndicator>
       </span>
     </SelectPrimitive.Item>

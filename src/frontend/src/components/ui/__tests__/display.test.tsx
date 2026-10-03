@@ -11,14 +11,24 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 const strict = { reactStrictMode: true };
 
 describe("Badge", () => {
-  it("keeps the label in its own min-w-0 break-words span (flex text cannot shrink otherwise)", () => {
+  it("keeps the label in its own span that wraps between words but never inside one (R9 L9-6)", () => {
     render(<Badge tone="success">Checked in</Badge>, strict);
     const label = screen.getByText("Checked in");
     expect(label.tagName).toBe("SPAN");
-    expect(label.className).toBe("min-w-0 break-words");
+    // "Orga / niser", "Archi / ved" at 320 / 200 %: `break-words` + `min-w-0` let a caller's narrow
+    // row squeeze the pill under its word. The pill now floors at its longest word.
+    expect(label.className).not.toMatch(/break-words|break-all|min-w-0/);
+    expect(label.className).toContain("[overflow-wrap:normal]");
     const badge = label.parentElement!;
     expect(badge).toHaveAttribute("data-tone", "success");
     expect(badge.className).toContain("bg-success-soft text-success-strong");
+  });
+
+  it("draws its icon at the label's size, so it grows with the text (R9 L6-16)", () => {
+    render(<Badge icon={<svg data-testid="glyph" width={14} height={14} />}>Offline</Badge>, strict);
+    const badge = screen.getByText("Offline").parentElement!;
+    // 14px beside 12px text; in em it is 28px at 200 % instead of staying 14.
+    expect(badge.className).toContain("[&>svg]:size-[1.1667em]");
   });
 
   it("has the six tones and nothing else, neutral by default", () => {

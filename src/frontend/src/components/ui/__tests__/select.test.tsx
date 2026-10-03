@@ -66,4 +66,13 @@ describe("Select", () => {
     fireEvent.keyDown(option, { key: "Enter" });
     expect(onValueChange).toHaveBeenCalledWith("a");
   });
+
+  it("draws its chevron in rem, so it grows with the text (R9 L6-16)", () => {
+    render(<Court />, { reactStrictMode: true });
+    const trigger = screen.getByRole("combobox", { name: "Court" });
+    const caret = trigger.querySelector("svg")!;
+    // Was a fixed 16px: half the size of its own words at 200 % in every admin filter.
+    expect(caret.getAttribute("width")).toBe("1rem");
+    expect(caret.getAttribute("height")).toBe("1rem");
+  });
 });
