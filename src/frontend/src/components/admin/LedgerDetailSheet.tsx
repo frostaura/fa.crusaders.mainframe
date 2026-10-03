@@ -1,7 +1,6 @@
 import type { LedgerRow } from "@/lib/api";
 import { clubDayAndClock } from "@/lib/clubClock";
 import { LEDGER_COPY, ledgerCategory, ledgerDoneBy } from "@/lib/ledgerCopy";
-import { minutesSigned } from "@/lib/minutes";
 import { Minutes } from "@/components/Minutes";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -25,7 +24,7 @@ export function LedgerDetailSheet({ row, onClose }: { row: LedgerRow | null; onC
         {row ? (
           <>
             <SheetHeader>
-              <SheetTitle>{rowTitle(row)}</SheetTitle>
+              <SheetTitle><RowTitle row={row} /></SheetTitle>
               <SheetDescription>{clubDayAndClock(row.at)}</SheetDescription>
             </SheetHeader>
             <SheetBody>
@@ -41,8 +40,13 @@ export function LedgerDetailSheet({ row, onClose }: { row: LedgerRow | null; onC
   );
 }
 
-function rowTitle(row: LedgerRow): string {
-  return `${ledgerCategory(row)} · ${minutesSigned(row.signedAmountMinutes)}`;
+/**
+ * "Booking charge · −30 min" for the eye, "Booking charge · minus 30 minutes" for the ear (R7
+ * X7-6): the title names the sheet, its close × and the panel, so the figure carries its spoken
+ * twin through `<Minutes>` instead of being read as "min".
+ */
+function RowTitle({ row }: { row: LedgerRow }) {
+  return <>{`${ledgerCategory(row)} · `}<Minutes value={row.signedAmountMinutes} signed className="text-inherit" /></>;
 }
 
 /**
@@ -68,7 +72,7 @@ export function LedgerDetailPanel({ row, onClose }: { row: LedgerRow | null; onC
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 id="ledger-panel-title" className="break-words text-base font-semibold text-text-primary">{rowTitle(row)}</h2>
+          <h2 id="ledger-panel-title" className="break-words text-base font-semibold text-text-primary"><RowTitle row={row} /></h2>
           <p className="text-sm text-text-secondary">{clubDayAndClock(row.at)}</p>
         </div>
         <IconButton label={LEDGER_COPY.closePanel} size="icon-sm" onClick={onClose}>
