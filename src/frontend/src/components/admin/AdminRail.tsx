@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from "react";
-import { ADMIN_RAIL_WIDTH, SCALING_ICON } from "@/components/ui/layout";
+import { ADMIN_RAIL_INSET, ADMIN_RAIL_ROW, ADMIN_RAIL_WIDTH, SCALING_ICON } from "@/components/ui/layout";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { typography } from "@/lib/typography";
@@ -87,7 +87,8 @@ function NavRow(props: NavRowProps) {
         data-admin-nav={item.id}
         onClick={() => onNavigate?.(item, active)}
         className={cn(
-          "no-lift relative flex min-h-touch items-center gap-3 rounded-lg px-3 text-sm",
+          "no-lift relative flex min-h-touch items-center rounded-lg text-sm",
+          density === "rail" ? ADMIN_RAIL_ROW : "gap-3 px-3",
           "transition-colors duration-fast ease-standard motion-reduce:transition-none",
           density === "sheet" && "text-base",
           active
@@ -122,7 +123,7 @@ export function AdminNavList({ pathname, counts, density = "rail", onNavigate }:
   return (
     <div className="flex flex-col gap-5">
       {ADMIN_NAV.map((group) => (
-        <NavGroup key={group.id} label={group.label} hideLabel={group.id === "overview"}>
+        <NavGroup key={group.id} label={group.label} hideLabel={group.id === "overview"} inset={density === "rail" ? ADMIN_RAIL_INSET : "px-3"}>
           {group.items.map((item) => (
             <NavRow
               key={item.id}
@@ -139,13 +140,13 @@ export function AdminNavList({ pathname, counts, density = "rail", onNavigate }:
   );
 }
 
-function NavGroup({ label, hideLabel, children }: { label: string; hideLabel: boolean; children: ReactNode }) {
+function NavGroup({ label, hideLabel, inset, children }: { label: string; hideLabel: boolean; inset: string; children: ReactNode }) {
   const id = useId();
   return (
     <div className="flex flex-col gap-1">
       {/* The Overview group holds one item named the same as the group: a heading over it says
           the same word twice. It stays in the tree for the list's name, just not on screen. */}
-      <p id={id} className={cn(typography({ variant: "overline" }), "px-3", hideLabel && "sr-only")}>{label}</p>
+      <p id={id} className={cn(typography({ variant: "overline" }), inset, hideLabel && "sr-only")}>{label}</p>
       <ul aria-labelledby={id} className="flex flex-col gap-0.5">{children}</ul>
     </div>
   );
@@ -175,8 +176,8 @@ export function AdminRail({ pathname, counts }: { pathname: string; counts: Badg
         className="sticky overflow-y-auto overscroll-contain"
         style={{ top: "var(--app-content-top, 0px)", maxHeight: "calc(100dvh - var(--app-chrome-height, 0px))" }}
       >
-        <nav aria-label="Admin" className="flex flex-col gap-4 px-3 pb-10 pt-8">
-          <p aria-hidden="true" className={cn(typography({ variant: "overline" }), "px-3 text-accent-strong")}>Admin console</p>
+        <nav aria-label="Admin" className={cn("flex flex-col gap-4 pb-10 pt-8", ADMIN_RAIL_INSET)}>
+          <p aria-hidden="true" className={cn(typography({ variant: "overline" }), ADMIN_RAIL_INSET, "text-accent-strong")}>Admin console</p>
           <AdminNavList pathname={pathname} counts={counts} density="rail" />
         </nav>
       </div>

@@ -97,6 +97,14 @@ export const ADMIN_RAIL_WIDTH_XL = "xl:w-[max(256px,min(16rem,24vw))]";
 export const ADMIN_RAIL_OFFSET_XL = "xl:ml-[max(256px,min(16rem,24vw))]";
 
 /**
+ * R7 L7-6 / J7-5 — the rail's insets and its row gap stop growing with the text at 12px. The rail
+ * is capped at 24vw (307px at 1280), and at 200 % text three rem insets (nav, row, icon gap: 72px)
+ * left "Transactions" 147px and broke it "Transactio / ns". The words grow; the gutters need not.
+ */
+export const ADMIN_RAIL_INSET = "px-[min(0.75rem,12px)]";
+export const ADMIN_RAIL_ROW = "gap-[min(0.75rem,12px)] px-[min(0.75rem,12px)]";
+
+/**
  * R6 L6-16 — an icon button's glyph: 20px at 100 % text, growing with it (1.25rem), in a target
  * that is 44px at least and grows too (2rem — 64px at 200 %, so a header row does not double). At 200 % text the refresh and the dialog's ×
  * stayed 20px beside 32px words. The refresh button and the dialog's close share it.

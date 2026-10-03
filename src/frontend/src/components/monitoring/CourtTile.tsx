@@ -101,7 +101,8 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
     <article
       // A real border (the card edge, same as every other card) so forced colours keep every
       // tile's edge — without one the tiles merge into one field of text at high contrast.
-      className="flex flex-col gap-[calc(0.5rem*var(--board-scale,1))] rounded-xl border border-border bg-bg-surface p-[calc(1rem*var(--board-scale,1))] shadow-xs"
+      // R7 L7-2: a query container, so the Booked by / Next rows stack under a narrow (large-text) tile.
+      className="@container/tile flex flex-col gap-[calc(0.5rem*var(--board-scale,1))] rounded-xl border border-border bg-bg-surface p-[calc(1rem*var(--board-scale,1))] shadow-xs"
       aria-labelledby={`court-${court.court_id}-name`}
     >
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
@@ -125,14 +126,17 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
         squash match. The digits carry `aria-hidden`; what the region actually holds is the
         sentence below, written only when the state word changes — see {@link StateSpeech}.
       */}
-      <div className={cn("rounded-lg px-[calc(0.75rem*var(--board-scale,1))] py-[calc(0.5rem*var(--board-scale,1))]", TONE_BY_STATE[state])}>
-        <p className="text-[calc(1.5rem*var(--board-scale,1))] font-bold leading-tight tracking-tight" aria-hidden>
+      {/* R7 L7-2: the band is a size container and the word and the digits are capped by its width
+          (cqi), so at 320 / 200 % "UNKNOWN" and "34:57" shrink to fit instead of running out of the
+          band. The caps sit above the normal sizes everywhere else: they only bite on a narrow band. */}
+      <div data-state-band="" className={cn("@container rounded-lg px-[calc(0.75rem*var(--board-scale,1))] py-[calc(0.5rem*var(--board-scale,1))]", TONE_BY_STATE[state])}>
+        <p className="text-[length:min(calc(1.5rem*var(--board-scale,1)),18cqi)] font-bold leading-tight tracking-tight" aria-hidden>
           {EXPECTATION_WORD[state]}
         </p>
         {left !== null && (
           <p
             aria-hidden
-            className="font-mono text-[calc(2.25rem*var(--board-scale,1))] font-bold leading-none tabular-nums"
+            className="font-mono text-[length:min(calc(2.25rem*var(--board-scale,1)),22cqi)] font-bold leading-none tabular-nums"
           >
             {countdownFace(left)}
           </p>
@@ -147,7 +151,9 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
         {expectationMeaning(state, graceMinutes)}
       </p>
 
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[calc(0.875rem*var(--board-scale,1))]">
+      {/* R7 L7-2: the term beside its value only where the tile has room for both (a 14rem box —
+          448px at 200 % text); under it, the value goes under its term and keeps its words whole. */}
+      <dl className="grid grid-cols-1 gap-x-3 gap-y-1 text-[calc(0.875rem*var(--board-scale,1))] @[14rem]/tile:grid-cols-[auto_1fr]">
         {bookedBy && (
           <>
             <dt className="text-text-muted">Booked by</dt>
