@@ -37,6 +37,8 @@ export const OFFLINE_COPY = {
     invites: "Your invites haven't been opened on this phone yet, so there's nothing kept to show. They load by themselves once you're back online.",
     booking: "This booking hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
     myGame: "Your game hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
+    /** R8 X8-2 (FD1b) — Bookings on a cold start with no signal: no day kept, so no grid and no games. */
+    schedule: "This day hasn't been opened on this phone yet, so there's no schedule or games kept to show. They load by themselves once you're back online.",
     /** R8 X8-2 — the Wallet on a cold start with no signal. */
     wallet: "Your wallet hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
   },
