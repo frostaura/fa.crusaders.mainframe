@@ -408,3 +408,53 @@ test.describe("J8-5 — the Retire confirmation is not squeezed into the Actions
     });
   }
 });
+
+/* ───────────────────────────── Reports: L7-17 / L6-14 one caret placement, L8-13 a scroll cue ───────────────────────────── */
+
+const DAY = (i: number) => ({
+  date: `2026-09-${String(i + 1).padStart(2, "0")}`, top_ups_minutes: 2280, booking_charges_minutes: 4215, refunds_minutes: -1755,
+  penalties_minutes: 69, adjustments_minutes: i === 0 ? 19810 : 0, reversals_minutes: -60, share_transfers_minutes: 0,
+  net_movement_minutes: -122, bookings: 29, no_shows: 7,
+});
+const reportRoutes = () => adminRoutes([
+  { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 3680, reversals_zar: 0, net_zar: 3680, gross_topups_minutes: 2280, reversals_minutes: 0, net_minutes: 2280, zar_per_minute_sold: 1.614 } },
+  { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [
+    { court_id: "c-1", court_name: "Court 1", bookings: 4, booked_minutes: 180, sold_minutes: 180, kept_minutes: 135 },
+    { court_id: "c-2", court_name: "Court 2", bookings: 2, booked_minutes: 90, sold_minutes: 90, kept_minutes: 90 },
+  ] } },
+  { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 24, no_show: 2, no_show_pct: 8.3 } },
+  { path: "/api/v1/admin/reports/daily", body: Array.from({ length: 5 }, (_, i) => DAY(i)) },
+]);
+
+test.describe("L7-17 / L6-14 — one sort-caret placement on the Reports page", () => {
+  for (const width of [1280, 1920]) {
+    test(`at ${width}: every sortable header in every table has its caret under its label`, async ({ page }) => {
+      await open(page, "/admin/reports", reportRoutes(), width);
+      await expect(page.getByRole("region", { name: "Daily breakdown" }).getByRole("table")).toBeVisible({ timeout: 30_000 });
+      await page.evaluate(() => document.fonts.ready);
+      const carets = await page.evaluate(() => [...document.querySelectorAll("#main-content table thead th button")].map((b) => {
+        const svg = b.querySelector("svg")!.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(b.querySelector("span")!);
+        const bottom = Math.max(...[...range.getClientRects()].filter((r) => r.width > 0.5).map((r) => r.bottom));
+        return { name: b.closest("table")!.getAttribute("aria-label") + " / " + b.textContent, under: svg.top >= bottom - 1 };
+      }));
+      expect(carets.length).toBeGreaterThan(10);
+      expect(carets.filter((c) => !c.under).map((c) => c.name), "a caret beside its header").toEqual([]);
+    });
+  }
+});
+
+test("L8-13 — the daily table says it scrolls sideways while a column is out of view", async ({ page }) => {
+  await open(page, "/admin/reports", reportRoutes(), 1280);
+  const region = page.getByRole("region", { name: "Daily breakdown, one row per day", exact: true });
+  await expect(region.getByRole("table")).toBeVisible({ timeout: 30_000 });
+  await page.evaluate(() => document.fonts.ready);
+  const wider = await region.evaluate((el) => el.scrollWidth - el.clientWidth);
+  test.skip(wider <= 1, "the table fits at this width with this font — nothing to cue");
+  const cue = region.locator("xpath=..").locator("[data-scroll-cue='right']");
+  await expect(cue).toHaveCSS("opacity", "1");
+  await region.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+  await expect(cue).toHaveCSS("opacity", "0");
+  await expect(region.locator("xpath=..").locator("[data-scroll-cue='left']")).toHaveCSS("opacity", "1");
+});

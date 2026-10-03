@@ -257,6 +257,9 @@ function Utilisation({ rows }: { rows: UtilisationRow[] }) {
         search={{ placeholder: U.filter, fields: (r) => r.court_name }}
         defaultSort={{ key: "kept_minutes", dir: "desc" }}
         emptyTitle={U.empty}
+        // R8 (L6-14 / L7-17): the same header shape as the daily table below, so a sort caret sits
+        // UNDER its label in every table on the page, never beside here and under there.
+        wrapHeaders
         columns={COURT_COLUMNS}
       />
       <TableNotes>

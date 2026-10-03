@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { revealOnFocus } from "../lib/revealInScroller";
 import { cn } from "../lib/utils";
 import { Input } from "./ui/input";
@@ -97,6 +97,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     return rows.filter((r) => search.fields(r).toLowerCase().includes(needle));
   }, [rows, search, q]);
   const sorted = useMemo(() => sortRows(filtered, columns, sort), [filtered, columns, sort]);
+  const scroller = useRef<HTMLDivElement>(null);
   const onSort = (key: string) => setSort((s) => (s.key === key
     ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
     : { key, dir: "asc" }));
@@ -116,7 +117,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
           className="rounded-xl border border-dashed border-border bg-bg-surface"
         />
       ) : (
+        <SidewaysCue label={props.label} scroller={scroller} rows={sorted.length}>
         <div
+          ref={scroller}
           data-slot="table-container"
           {...(props.label ? { role: "region", "aria-label": props.label, tabIndex: 0 } : {})}
           className="relative w-full overflow-auto rounded-xl border border-border bg-bg-surface shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong"
@@ -139,9 +142,55 @@ export function DataTable<T>(props: DataTableProps<T>) {
             </TableBody>
           </table>
         </div>
+        </SidewaysCue>
       )}
     </div>
   );
+}
+
+/**
+ * R8 L8-13: a table wider than its box says so. The Reports daily table hid its last column
+ * (No-shows) past the right edge at 1280 with nothing to show it was one swipe away. A fade on
+ * the side that has more — the same affordance as `ScrollArea`'s — and a sentence for a screen
+ * reader, present only while there is more to reach.
+ */
+function SidewaysCue({ label, scroller, rows, children }: {
+  label?: string; scroller: React.RefObject<HTMLDivElement | null>; rows: number; children: ReactNode;
+}) {
+  const more = useSidewaysMore(scroller, rows);
+  const fade = "pointer-events-none absolute inset-y-px w-6 transition-opacity duration-fast to-transparent from-bg-surface";
+  return (
+    <div className="relative">
+      {children}
+      <div aria-hidden data-scroll-cue="left" className={cn(fade, "left-px rounded-l-xl bg-gradient-to-r", more.left ? "opacity-100" : "opacity-0")} />
+      <div aria-hidden data-scroll-cue="right" className={cn(fade, "right-px rounded-r-xl bg-gradient-to-l", more.right ? "opacity-100" : "opacity-0")} />
+      {more.left || more.right ? <p className="sr-only">{`${label ?? "This table"} scrolls sideways — there is more to see.`}</p> : null}
+    </div>
+  );
+}
+
+function useSidewaysMore(scroller: React.RefObject<HTMLDivElement | null>, rows: number) {
+  const [more, setMore] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const measure = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      setMore((was) => {
+        const now = { left: el.scrollLeft > 1, right: max - el.scrollLeft > 1 };
+        return was.left === now.left && was.right === now.right ? was : now;
+      });
+    };
+    // A ResizeObserver reports once on observe, which is the first measure; the frame covers a
+    // browser without one.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    if (el.firstElementChild) observer?.observe(el.firstElementChild);
+    const frame = requestAnimationFrame(measure);
+    el.addEventListener("scroll", measure, { passive: true });
+    return () => { observer?.disconnect(); cancelAnimationFrame(frame); el.removeEventListener("scroll", measure); };
+  }, [scroller, rows]);
+  return more;
 }
 
 function SearchField({ value, onChange, placeholder }: { value: string; onChange: (next: string) => void; placeholder: string }) {
