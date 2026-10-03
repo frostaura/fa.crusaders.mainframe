@@ -126,6 +126,7 @@ internal static class EmailCatalogue
             ("MinutesAdjusted", EmailTemplates.MinutesAdjusted(club, to, 45, 186, "Refund for the lights on court 4")),
             ("MinutesAdjustedDeduction", EmailTemplates.MinutesAdjusted(club, to, -90, 86, "Duplicate desk sale reversed")),
             ("PackageSoldAtDesk", EmailTemplates.PackageSoldAtDesk(club, to, new DeskPackageSale("10 hours", 600, 900m, 645, symbol))),
+            ("PackageSoldAtDesk (no charge)", EmailTemplates.PackageSoldAtDesk(club, to, new DeskPackageSale("Welcome hour", 60, 0m, 105, symbol) { NoCharge = true })),
             ("AdminPeripheralUnhealthy", EmailTemplates.AdminPeripheralUnhealthy(club, to, peripheral)),
             ("AdminPeripheralRecovered", EmailTemplates.AdminPeripheralRecovered(club, to, peripheral)),
             ("AdminGateUnhealthy", EmailTemplates.AdminGateUnhealthy(club, to, gate)),

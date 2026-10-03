@@ -382,7 +382,10 @@ public static partial class WalletEndpoints
         {
             var symbol = CurrencySymbol.For(await services.Settings.GetAsync(ct));
             return Crusaders.Mainframe.Api.Email.EmailTemplates.PackageSoldAtDesk(club, to, new Crusaders.Mainframe.Api.Email.DeskPackageSale(
-                item.Package.Name, item.Package.Minutes, posted.Entry.ZarPaid ?? 0m, posted.BalanceAfter, symbol));
+                item.Package.Name, item.Package.Minutes, posted.Entry.ZarPaid ?? 0m, posted.BalanceAfter, symbol)
+            {
+                NoCharge = movement.Kind.Code == AdminCreditReasons.PackageFree,
+            });
         }
         return Crusaders.Mainframe.Api.Email.EmailTemplates.MinutesAdjusted(
             club, to, posted.Entry.AmountMinutes, posted.BalanceAfter, movement.GivenReason);

@@ -167,6 +167,52 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
             s.AddSingleton<IEmailService>(mail);
         }));
 
+    /// <summary>
+    /// Review round 7, J7-10: a R0.00 package could only be sold as "Cash paid at the desk" and was
+    /// worded as revenue. <c>package_free</c> gives it at no charge — only on a package that costs
+    /// this member nothing, never with a rand figure, and the mail says nothing was paid.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_free_package_is_given_at_no_charge_and_only_a_free_package_can_be()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkf");
+        await SetDiscountAsync(f, club.LeagueGroupId, 10_000);
+        await JoinAsync(f, club, club.MemberUserId, club.LeagueGroupId);
+
+        var mail = new StubEmailService();
+        await using var app = WithMail(f, mail);
+        var admin = Admin(app, club);
+
+        // The other member pays list price for the hour: "free" is not true of it.
+        var priced = await admin.PostAsJsonAsync(SellPath(club.OtherUserId), new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome" });
+        Assert.Equal(HttpStatusCode.BadRequest, priced.StatusCode);
+        var pricedBody = await JsonOf(priced);
+        Assert.Equal("reason_code_invalid", pricedBody.GetProperty("error").GetString());
+        Assert.Equal(["top_up_cash", "top_up_eft", "top_up_card_offline"], pricedBody.GetProperty("valid").EnumerateArray().Select(v => v.GetString()));
+
+        var withRand = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome", zarReceived = 5m });
+        Assert.Equal(HttpStatusCode.BadRequest, withRand.StatusCode);
+        Assert.Equal("zar_received_out_of_range", (await JsonOf(withRand)).GetProperty("error").GetString());
+        Assert.Empty(await LedgerAsync(f, club, club.MemberUserId));
+
+        var given = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome", zarReceived = 0m });
+        Assert.Equal(HttpStatusCode.OK, given.StatusCode);
+        var body = await JsonOf(given);
+        Assert.Equal("package_free", body.GetProperty("reason_code").GetString());
+        Assert.Equal(0m, body.GetProperty("zar_received").GetDecimal());
+        var entry = Assert.Single(await LedgerAsync(f, club, club.MemberUserId));
+        Assert.Equal(LedgerEntryType.AdminTopUp, entry.Type);
+        Assert.Equal(0m, entry.ZarPaid);
+
+        var sent = await PollMailAsync(mail);
+        Assert.NotNull(sent);
+        Assert.Contains("no charge", sent!.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("Amount received", sent.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("what you paid", sent.HtmlBody, StringComparison.Ordinal);
+    }
+
     /// <summary>Every player-affecting event sends an email: a sale says the package, the minutes and the rand; an adjustment says the minutes and the reason.</summary>
     [SkippableFact]
     public async Task A_sale_and_an_adjustment_each_mail_the_member_in_minutes()

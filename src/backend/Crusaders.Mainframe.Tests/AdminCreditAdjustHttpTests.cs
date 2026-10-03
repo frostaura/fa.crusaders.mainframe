@@ -462,7 +462,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(HttpStatusCode.BadRequest, onSell.StatusCode);
         var sellBody = await onSell.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("reason_code_invalid", sellBody.GetProperty("error").GetString());
-        Assert.Equal(["top_up_cash", "top_up_eft", "top_up_card_offline"],
+        Assert.Equal(["top_up_cash", "top_up_eft", "top_up_card_offline", "package_free"],
             sellBody.GetProperty("valid").EnumerateArray().Select(v => v.GetString()));
 
         Assert.Equal(0, await BalanceAsync(factory, seeded));

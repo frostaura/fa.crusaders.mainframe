@@ -33,6 +33,15 @@ public static class AdminCreditReasons
     /// <summary>A card taken on the club's own terminal rather than through PayFast.</summary>
     public const string TopUpCardOffline = "top_up_card_offline";
 
+    /// <summary>
+    /// A package whose shelf price for this member is R0.00, handed over at no charge (review
+    /// round 7, J7-10). A sale like the other three — the minutes post as <c>AdminTopUp</c> with
+    /// <c>ZarPaid</c> 0, which revenue counts as nothing — but the desk is never asked "how was it
+    /// paid?" for something nobody paid for, and nothing it writes says cash changed hands. Valid
+    /// ONLY on a R0.00 package; a free package may still be sold for money under the paid codes.
+    /// </summary>
+    public const string PackageFree = "package_free";
+
     /// <summary>A gesture — an apology, a prize, a welcome. Not money the club took.</summary>
     public const string Goodwill = "goodwill";
 
@@ -49,7 +58,10 @@ public static class AdminCreditReasons
     /// The codes the desk SELLS a package under (<c>POST /admin/minutes/{id}/sell</c>, P13 §3.7):
     /// money the club took, posted as <c>AdminTopUp</c> and counted as revenue.
     /// </summary>
-    public static readonly string[] SaleCodes = [TopUpCash, TopUpEft, TopUpCardOffline];
+    public static readonly string[] SaleCodes = [TopUpCash, TopUpEft, TopUpCardOffline, PackageFree];
+
+    /// <summary>The sale codes that take money — every one but <see cref="PackageFree"/>, the valid set for a priced package.</summary>
+    public static readonly string[] PaidSaleCodes = [TopUpCash, TopUpEft, TopUpCardOffline];
 
     /// <summary>
     /// The codes the desk ADJUSTS a balance under (<c>POST /admin/minutes/{id}/adjust</c>):

@@ -476,16 +476,17 @@ Dean's answer 1 removes the cap entirely. This disappears:
 **`POST /api/v1/admin/minutes/{userId}/sell`.** This replaces the three top-up reason codes on `/adjust`.
 
 ```json
-{ "packageId": "uuid", "reasonCode": "top_up_cash|top_up_eft|top_up_card_offline",
+{ "packageId": "uuid", "reasonCode": "top_up_cash|top_up_eft|top_up_card_offline|package_free",
   "zarReceived": 495.00, "reason": "Paid cash at the bar", "idempotencyKey": "…" }
 ```
 
 - The package must be on the member's shelf now. If not, 409 `package_unavailable`.
 - `zarReceived` is optional. **It defaults to the member's shelf `price_zar`.** When sent, it must be 0 to 1 000 000 in whole cents (B7: `zar_received_out_of_range`, `zar_received_not_whole_cents`). It may differ from the price.
-- `reasonCode` outside the three codes: 400 `reason_code_invalid`, with `valid` listing the three. A blank `reason`: 400 `reason_required`.
+- `reasonCode` outside the four codes: 400 `reason_code_invalid`, with `valid` listing the four. A blank `reason`: 400 `reason_required`.
+- **`package_free` (review round 7, J7-10)** is valid ONLY when the member's shelf `price_zar` for that package is 0.00; on a priced package it is 400 `reason_code_invalid` with `valid` listing the three paid codes. With it, `zarReceived` is optional and, when sent, must be 0 (else 400 `zar_received_out_of_range`, `max: 0`); the row records `ZarPaid = 0`, the change record and audit carry `reason_code: package_free`, and the mail says the package was given at no charge (no "Amount received"). Revenue counts it as R0.00, as it already did. A R0.00 package may still be sold under a paid code — the desk may take money anyway.
 - On success it posts one `AdminTopUp` row: `AmountMinutes = package.Minutes`, `ZarPaid = zarReceived`, `Reason = "{reason} — {package name}"`, and `ExternalReference = adjust:{tenant:N}:{key}` when a key was sent. Idempotency works as today (`idempotency_key_reused` on a different replay).
 - It records change action `credit.topped_up` (code kept, §2.5) and audit action `credit.adjusted`. The audit details add `package_id`, `package_name` and `minutes`.
-- It mails `EmailTemplates.PackageSoldAtDesk` (§6).
+- It mails `EmailTemplates.PackageSoldAtDesk` (§6) — its no-charge form for `package_free`.
 - It answers `{ entry_id, type: "AdminTopUp", reason_code, amount_minutes, zar_received, balance_before_minutes, balance_after_minutes, member: {user_id, email}, package: {id, name, minutes, price_zar} }`.
 
 **`POST /api/v1/admin/minutes/{userId}/adjust`** handles goodwill and corrections.

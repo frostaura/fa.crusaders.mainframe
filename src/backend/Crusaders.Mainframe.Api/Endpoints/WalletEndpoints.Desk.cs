@@ -50,9 +50,14 @@ public static partial class WalletEndpoints
         if (shelf.Find(req.PackageId!.Value) is not { } item)
             return Results.Json(new { error = "package_unavailable" }, statusCode: StatusCodes.Status409Conflict);
 
+        // J7-10: "given at no charge" is only true of a package that costs this member nothing.
+        var free = kind.Code == AdminCreditReasons.PackageFree;
+        if (free && item.PriceZar != 0m)
+            return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.PaidSaleCodes });
+
         var reason = req.Reason!.Trim();
         var movement = new DeskMovement(
-            userId, kind, item.Package.Minutes, req.ZarReceivedEither ?? item.PriceZar,
+            userId, kind, item.Package.Minutes, free ? 0m : req.ZarReceivedEither ?? item.PriceZar,
             $"{reason} — {item.Package.Name}", reason)
         {
             IdempotencyKey = req.IdempotencyKey,
@@ -90,6 +95,10 @@ public static partial class WalletEndpoints
         if (AdminCreditReasons.ResolveSale(req.ReasonCodeEither) is null)
             return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.SaleCodes });
         if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
+
+        // J7-10: nothing was taken for a package given free, so a rand figure other than 0 is a contradiction.
+        if (req.ReasonCodeEither?.Trim() == AdminCreditReasons.PackageFree && req.ZarReceivedEither is { } zar && zar != 0m)
+            return Results.BadRequest(new { error = "zar_received_out_of_range", max = 0m });
         return RefuseZar(req.ZarReceivedEither);
     }
 
