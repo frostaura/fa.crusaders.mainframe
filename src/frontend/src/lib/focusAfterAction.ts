@@ -60,6 +60,30 @@ const BACKOFF_MS = [0, 32, 64, 128, 256, 512, 1024, 2048];
 let currentRun = 0;
 
 /**
+ * The run that is still looking, or 0 once it has landed, given up or stood down.
+ *
+ * <p>
+ * A FLOOR search (see {@link FocusAfterOptions.floor}) yields to it. ConfirmDialog's last-resort
+ * rescue fires 1.1 s after a success, and it used to start a fresh run unconditionally — so a
+ * newer, specific search (the result card's heading, after the result sheet closed) was stood
+ * down by a stale floor whose target, the page `h1`, was not there to take it, and focus stayed
+ * on `<body>`. CI caught it as the ResultCard F2-12 test going red under load: the rescue came
+ * from an earlier confirm in the same file. In the product it is a confirm followed within about
+ * a second by any other action.
+ * </p>
+ */
+let liveRun = 0;
+
+export type FocusAfterOptions = {
+  /**
+   * A last resort, not an answer: never stands down a search that is still looking. Use it for
+   * the page-heading fallback a component schedules after the fact, never for the target an
+   * action itself names.
+   */
+  floor?: boolean;
+};
+
+/**
  * Whether focus is nowhere in particular: the body, nothing, a node that has been removed — or
  * the page's `<main>`, which is where a closing dialog parks focus when its opener has gone
  * (`ui/dialog` `rescueFromBody`). That rescue is the floor, not a choice: a caller that named a
@@ -91,14 +115,19 @@ function adrift(active: Element | null): boolean {
  * deliberately: there is one way to focus a heading in this product.
  * </p>
  */
-export function focusAfterAction(find: () => HTMLElement | null | undefined): void {
+export function focusAfterAction(find: () => HTMLElement | null | undefined, options: FocusAfterOptions = {}): void {
   if (typeof document === "undefined") return;
+  if (options.floor && liveRun !== 0) return;
   const run = ++currentRun;
+  liveRun = run;
+  /** This run is over: landed or out of steps. A later run has already replaced `liveRun`. */
+  const finish = () => { if (liveRun === run) liveRun = 0; };
   let attempts = 0;
 
   /** Try again later, while the schedule has a step left. One caller per outcome, below. */
   const again = () => {
     if (attempts < BACKOFF_MS.length) window.setTimeout(attempt, BACKOFF_MS[attempts]);
+    else finish();
   };
 
   const attempt = () => {
@@ -160,6 +189,7 @@ export function focusAfterAction(find: () => HTMLElement | null | undefined): vo
       } else {
         target.focus({ preventScroll: true });
       }
+      finish();
       return;
     }
     again();

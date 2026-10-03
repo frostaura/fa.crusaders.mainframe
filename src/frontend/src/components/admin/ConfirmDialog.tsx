@@ -79,12 +79,13 @@ export type ConfirmDialogProps = {
 
 /**
  * The last resort after a success: if, once every retry has had its chance, focus is still
- * nowhere (its trigger went with the row it acted on), it goes to the page's `h1`.
+ * nowhere (its trigger went with the row it acted on), it goes to the page's `h1` — as a floor, so
+ * it never takes over from a newer action's own search that is still looking.
  */
 function rescueFocus() {
   window.setTimeout(() => {
     const active = document.activeElement;
-    if (active === null || active === document.body || !active.isConnected) focusAfterAction(pageHeading);
+    if (active === null || active === document.body || !active.isConnected) focusAfterAction(pageHeading, { floor: true });
   }, 1100);
 }
 

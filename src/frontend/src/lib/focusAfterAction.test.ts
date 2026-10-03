@@ -146,6 +146,34 @@ describe("focusAfterAction — filling a vacuum, and waiting for one", () => {
   });
 
   /**
+   * ResultCard F2-12, red on CI only: ConfirmDialog's page-heading rescue fires 1.1 s after an
+   * EARLIER confirm and used to stand down the newer action's own search. Its target (the page
+   * h1) was not there, so focus stayed on <body>. A floor yields to a search still looking.
+   */
+  it("never lets a floor search stand down a specific one that is still looking", () => {
+    const card = document.createElement("section");
+    focusAfterAction(() => card.querySelector<HTMLElement>("h2"));
+    vi.advanceTimersByTime(100);
+    focusAfterAction(pageHeading, { floor: true });
+    card.innerHTML = "<h2>Result</h2>";
+    document.body.append(card);
+    vi.advanceTimersByTime(5000);
+
+    expect(document.activeElement).toBe(card.querySelector("h2"));
+  });
+
+  it("still lets a floor search run once nothing else is looking", () => {
+    focusAfterAction(() => null);
+    vi.advanceTimersByTime(5000); // out of steps: that search is over
+    document.body.innerHTML = '<main id="main-content"><h1>Doors</h1></main>';
+
+    focusAfterAction(pageHeading, { floor: true });
+    vi.advanceTimersByTime(1);
+
+    expect(document.activeElement).toBe(pageHeading());
+  });
+
+  /**
    * The floor under a call site that has not named anything. A heading is not naturally
    * focusable, so it is given the route-heading treatment rather than being skipped.
    */
