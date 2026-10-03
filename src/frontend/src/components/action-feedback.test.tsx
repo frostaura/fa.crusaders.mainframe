@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Button } from "./ui/button";
-import { ConfirmButton, confirmSubject } from "./ConfirmButton";
+import { ConfirmButton } from "./ConfirmButton";
+import { confirmSubject } from "./confirmSubject";
 import { glyphKindFor, outcomeClassName, pressClassName, useActionFeedback, type ActionIntent } from "./useActionFeedback";
 
 /** The marks a button shows, by name — never the hidden spinner the primitive keeps for width. */

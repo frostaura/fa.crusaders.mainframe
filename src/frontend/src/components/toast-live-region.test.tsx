@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { act, render, screen } from "@testing-library/react";
-import { NOTHING_CHANGED, ToastProvider, useToast } from "./Toast";
+import { NOTHING_CHANGED, ToastProvider } from "./Toast";
+import { useToast } from "./toastContext";
 
 /**
  * C10 — a toast was announced twice, and nothing in the DOM looked wrong.

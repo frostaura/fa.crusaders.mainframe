@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { ConfirmDialog } from "../admin/ConfirmDialog";
-import { useToast } from "../Toast";
+import { useToast } from "../toastContext";
 import { Checkbox } from "../ui/checkbox";
 import { Field, FieldDescription, FieldLabel } from "../ui/field";
 import { Textarea } from "../ui/textarea";

@@ -5,7 +5,7 @@ import { Bell, CaretRight } from "@/components/ui/icons";
 import { clubInstant } from "@/lib/clubClock";
 import type { MemberNotification } from "@/lib/playersApi";
 import { INBOX_COPY as COPY } from "@/lib/playersCopy";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { failureOf, knownUnchanged, markReadOrProve } from "./inboxReadBack";

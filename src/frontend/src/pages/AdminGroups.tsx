@@ -8,7 +8,7 @@ import { StateBlock } from "../components/ui/state-block";
 import { Plus, UsersThree } from "../components/ui/icons";
 import { CardListSkeleton } from "../components/monitoring/parts";
 import { MemberCombobox } from "../components/ui/member-combobox";
-import { useToast } from "../components/Toast";
+import { useToast } from "../components/toastContext";
 import { GroupCard } from "../components/groups/GroupCard";
 import { clubWeek } from "../components/groups/weekGrid";
 import type { ClubContext, GroupSaveBody, PackagesRead } from "../components/groups/groupDraft";

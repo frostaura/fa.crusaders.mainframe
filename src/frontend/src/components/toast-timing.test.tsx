@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { ToastProvider, useToast } from "./Toast";
+import { ToastProvider } from "./Toast";
+import { useToast } from "./toastContext";
 import { toastReadingMs } from "./toastTiming";
 
 /**

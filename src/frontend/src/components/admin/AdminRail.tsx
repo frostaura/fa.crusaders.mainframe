@@ -3,8 +3,9 @@ import { ADMIN_RAIL_INSET, ADMIN_RAIL_ROW, ADMIN_RAIL_WIDTH, SCALING_ICON } from
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { typography } from "@/lib/typography";
-import { attentionBadge, type AdminAttention } from "@/lib/adminAttention";
+import { attentionBadge } from "@/lib/adminAttention";
 import { ADMIN_NAV, activeAdminItem, type AdminNavItem } from "./adminNav";
+import { attentionName, type BadgeCounts } from "./attentionName";
 
 /**
  * The admin console's navigation, drawn once and placed twice: the desktop rail (this file's
@@ -18,8 +19,6 @@ import { ADMIN_NAV, activeAdminItem, type AdminNavItem } from "./adminNav";
  * No watermark: nav is on the spec's "never" list.
  * </p>
  */
-
-type BadgeCounts = Pick<AdminAttention, "pending" | "doors" | "faults">;
 
 /**
  * The count bubble. The digits are decoration (`aria-hidden`); the sentence is in the link's name
@@ -44,26 +43,6 @@ export function AttentionCount({ item, counts }: { item: AdminNavItem; counts: B
       {count > 99 ? "99+" : count}
     </span>
   );
-}
-
-/**
- * The link's accessible name: the label, then the count in words — "Members, 2 membership
- * applications awaiting review" — or the label alone at zero.
- *
- * <p>
- * An `aria-label` rather than a visually hidden span, and that is the fix, not a style. The
- * count used to be a sibling flex item, then a visually hidden span inside the label; both are
- * block-level to Chromium's name computation (a flex item is blockified, an absolutely placed
- * `sr-only` box is block), and Chromium puts a space between block children — so the rail read
- * "Members , 7 membership applications…". jsdom does not, so no unit test could see it;
- * `e2e/admin-devices.spec.ts` asks Chromium's own accessibility tree. The name still opens with
- * the words on screen (WCAG 2.5.3).
- * </p>
- */
-export function attentionName(item: AdminNavItem, counts: BadgeCounts): string {
-  if (!item.badge) return item.label;
-  const { count, label } = attentionBadge(item.badge, counts);
-  return count > 0 ? `${item.label}, ${label}` : item.label;
 }
 
 type NavRowProps = {

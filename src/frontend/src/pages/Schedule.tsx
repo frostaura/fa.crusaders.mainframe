@@ -11,7 +11,7 @@ import { PageHeader, PageShell } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
 import { WeekStrip } from "@/components/ui/week-strip";
-import { useToast } from "../components/Toast";
+import { useToast } from "../components/toastContext";
 import { ScheduleNotices } from "../components/ScheduleNotices";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";

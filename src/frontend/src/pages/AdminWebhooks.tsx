@@ -26,7 +26,7 @@ import { LOST_REPLY, unsureWords } from "../lib/lostReplyCopy";
 import { CaretDown, CaretUp, Check, Copy, Plus, Trash, WebhooksLogo, X } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { clubDayAndClock } from "../lib/clubClock";
-import { useToast } from "../components/Toast";
+import { useToast } from "../components/toastContext";
 import { cn } from "../lib/utils";
 import { useAsyncAction } from "../lib/useAsyncAction";
 

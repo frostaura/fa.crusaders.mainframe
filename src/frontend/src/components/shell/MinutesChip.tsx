@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { useChipBalance, type ChipFigures, type NoFigure } from "./chipBalance";
 import { namedShareMovement } from "./shareMovement";
-import { useToast } from "../Toast";
+import { useToast } from "../toastContext";
 
 /**
  * The minutes chip in the top bar (item 8, rebuilt on the P1 tokens for the P2 shell; P13 renamed

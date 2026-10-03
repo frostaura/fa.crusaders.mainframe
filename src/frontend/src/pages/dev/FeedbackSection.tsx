@@ -1,5 +1,6 @@
 import { Alert, type AlertTone } from "@/components/Alert";
-import { useToast, type ToastTone } from "@/components/Toast";
+import { type ToastTone } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
 import { AnimatedAlert, AnimatedCheck } from "@/components/ui/feedback-marks";
 import { CalendarBlank } from "@/components/ui/icons";

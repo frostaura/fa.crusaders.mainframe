@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
+import { nextSegmentIndex } from "./segmentIndex";
 
 /**
  * The capsule tab control (item 9) — a real WAI-ARIA tablist, with manual activation.
@@ -37,30 +38,6 @@ export type Segment<T extends string> = {
   /** Said when focus reaches a disabled segment. Without it the dimming is the whole message. */
   disabledReason?: string;
 };
-
-/**
- * Where a key moves focus, given where it is. `null` means "not this control's business".
- *
- * <p>
- * Pure and exported so the wrapping rules can be tested without a DOM — the off-by-one at
- * either end is the classic defect in a roving tabindex and it is invisible in the middle of
- * a list.
- * </p>
- */
-export function nextSegmentIndex(
-  key: string,
-  from: number,
-  count: number,
-  orientation: "horizontal" | "vertical",
-): number | null {
-  const previous = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
-  const next = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
-  if (key === next) return (from + 1) % count;
-  if (key === previous) return (from - 1 + count) % count;
-  if (key === "Home") return 0;
-  if (key === "End") return count - 1;
-  return null;
-}
 
 /**
  * Whether the labels have stopped fitting side by side — measured, and measured from a

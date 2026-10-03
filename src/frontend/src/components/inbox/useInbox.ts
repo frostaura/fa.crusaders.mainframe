@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { playersEndpoints, type MemberNotification, type MemberNotificationPage } from "@/lib/playersApi";
 import { INBOX_COPY } from "@/lib/playersCopy";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { describeFailure } from "@/lib/errors";
 import { OfflineError, phoneIsOffline } from "@/lib/api";
 import { useAsyncAction } from "@/lib/useAsyncAction";

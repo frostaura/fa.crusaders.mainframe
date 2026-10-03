@@ -7,7 +7,8 @@ import {
   type AdminAttention, type AttentionSource,
 } from "@/lib/adminAttention";
 import { Alert } from "@/components/Alert";
-import { AttentionCount, attentionName } from "@/components/admin/AdminRail";
+import { AttentionCount } from "@/components/admin/AdminRail";
+import { attentionName } from "@/components/admin/attentionName";
 import { ADMIN_NAV, ADMIN_NAV_ITEMS, PENDING_APPLICATIONS_HREF, type AdminNavItem } from "@/components/admin/adminNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

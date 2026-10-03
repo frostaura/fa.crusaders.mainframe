@@ -10,7 +10,7 @@ import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { IconButton } from "./ui/icon-button";
 import { Check, Copy, Eye, EyeSlash, Key } from "./ui/icons";
-import { useToast } from "./Toast";
+import { useToast } from "./toastContext";
 
 /**
  * The club's one device API key.

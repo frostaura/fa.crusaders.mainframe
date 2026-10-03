@@ -1,10 +1,11 @@
-import { Children, isValidElement, useContext, useEffect, useRef, useState } from "react";
+import { Children, isValidElement, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { UNSAFE_LocationContext } from "react-router-dom";
 import { cn } from "../lib/utils";
 import { buttonVariants } from "./ui/button-variants";
 import { Spinner } from "./ui/spinner";
 import { focusAfterAction, pageHeading } from "../lib/focusAfterAction";
 import { useActionFeedback, type ActionIntent } from "./useActionFeedback";
+import { confirmSubject } from "./confirmSubject";
 
 export type ConfirmTone = "info" | "danger";
 
@@ -146,63 +147,6 @@ type ConfirmButtonProps = {
    */
   intent?: ActionIntent;
 };
-
-/**
- * What the way OUT is about, as a noun — from whichever of the three the call site gave.
- *
- * <p>
- * <b>C-M3, and the half of it that was still open.</b> The way out was named
- * <code>"Keep it open — Shut this door"</code>: a control whose whole job is to NOT do the
- * thing, named after the thing, with the destructive verb inside its own accessible name.
- * `subject` fixed it for the call sites that pass one. The doors console passes the door's name
- * through <code>ariaLabel</code> instead — <code>"Shut Side door"</code> — and those call sites
- * fell through to the idle label and got the defect back.
- * </p>
- *
- * <p>
- * So where there is an <code>ariaLabel</code> and no <code>subject</code>, the shared leading
- * WORDS are dropped: <code>"Shut Side door"</code> against <code>"Shut this door"</code> shares
- * <code>"Shut"</code>, leaving <code>"Side door"</code> — which is exactly what
- * <code>subject</code> would have said. Word boundaries, not characters: a character-wise
- * common prefix of those two strings is <code>"Shut "</code> plus nothing useful on other
- * pairs, and half a word in an accessible name is worse than none.
- * </p>
- *
- * <p>
- * It never returns empty. Where stripping would leave nothing — the label and the context are
- * the same words — the whole context is used, and where there is no context at all the idle
- * label is, which is the behaviour every call site had before `subject` existed.
- * </p>
- */
-/**
- * Run-of-whitespace, hoisted — and hoisted for a REASON, not for reuse.
- *
- * <p>
- * `split(/\s+/)` inline made lizard's JavaScript tokeniser read the `/` as the start of a
- * regex it never closed, so `confirmSubject` was reported as spanning lines 176-930 — 97 NLOC
- * and 755 lines long — and the complexity gate failed on a ten-line function. The function is
- * CCN 7 and 23 lines; the measurement was the only thing over the limit, and silencing that
- * with a whitelist entry would have frozen a number that was never real. Hoisted, the parser
- * closes it and the file reports what it is.
- * </p>
- *
- * <p>
- * No flags, deliberately: a `g` regex carries `lastIndex` between calls, and a shared one
- * would return different answers for the same string depending on who called it last.
- * </p>
- */
-const RUN_OF_SPACE = /\s+/;
-
-export function confirmSubject(subject: string | undefined, ariaLabel: string | undefined, idleText: string): string {
-  if (subject) return subject;
-  if (!ariaLabel) return idleText;
-  const label = idleText.split(RUN_OF_SPACE).filter(Boolean);
-  const context = ariaLabel.split(RUN_OF_SPACE).filter(Boolean);
-  let shared = 0;
-  while (shared < label.length && shared < context.length && label[shared] === context[shared]) shared += 1;
-  const rest = context.slice(shared).join(" ").trim();
-  return rest || ariaLabel;
-}
 
 /**
  * The primitive button's LOOK — its variant fill, ink, hover, radius, weight and forced-colours
@@ -581,7 +525,7 @@ function GlyphLabel({ glyph, children }: { glyph: React.ReactNode; children: Rea
  * double-click never is — without a timer that would also swallow a fast, intended confirm.
  * </p>
  */
-export function secondClickOfOne(e: { detail: number }): boolean {
+function secondClickOfOne(e: { detail: number }): boolean {
   return e.detail >= 2;
 }
 
@@ -619,7 +563,9 @@ export function ConfirmButton({
   const armedFromTrigger = useRef(false);
   const routeKey = useRouteKey();
 
-  const say = (text: string) => setAnnouncement((previous) => ({ text, seq: previous.seq + 1 }));
+  // Stable (useCallback) so the document listeners below can depend on the handlers built from
+  // it without re-subscribing on every render.
+  const say = useCallback((text: string) => setAnnouncement((previous) => ({ text, seq: previous.seq + 1 })), []);
 
   // Set on mount as well as cleared on unmount. Without the assignment this effect only ever
   // wrote `false`, and React's development double-invoke runs mount → cleanup → mount — so
@@ -631,10 +577,10 @@ export function ConfirmButton({
   }, []);
 
   /** Back to rest, saying so. Every way out of the armed state comes through here. */
-  const disarm = () => {
+  const disarm = useCallback(() => {
     setArmed(false);
     say(CONFIRM_CANCELLED_ANNOUNCEMENT);
-  };
+  }, [say]);
 
   /**
    * Whether focus is inside this control right now.
@@ -647,16 +593,16 @@ export function ConfirmButton({
    * confirm that yanks it is a worse defect than the silent disarm this replaced.
    * </p>
    */
-  const holdsFocus = () => {
+  const holdsFocus = useCallback(() => {
     const active = document.activeElement;
     return active !== null && Boolean(groupRef.current?.contains(active));
-  };
+  }, []);
 
   /** Cancel, from the button or from Escape: focus goes back to the control it came from. */
-  const cancel = () => {
+  const cancel = useCallback(() => {
     restoreFocus.current = holdsFocus();
     disarm();
-  };
+  }, [holdsFocus, disarm]);
 
   // Escape, and a pointer press anywhere outside the group. Neither waits for anything.
   useEffect(() => {
@@ -671,7 +617,7 @@ export function ConfirmButton({
       document.removeEventListener("pointerdown", onDocPointerDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [armed, pending]);
+  }, [armed, pending, cancel, disarm]);
 
   /**
    * A route change disarms it. (B5)

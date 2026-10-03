@@ -55,7 +55,7 @@ export type ActionIntent = "affirm" | "decline" | "neutral" | "destructive";
 
 export type FeedbackPhase = "rest" | "press" | "working" | "success" | "failure";
 
-const MS = (value: string) => Number.parseInt(value, 10);
+const msOf = (value: string) => Number.parseInt(value, 10);
 
 /** The mark a phase wears. There is none at rest or on the press — R8 retired the thumbs. */
 export type FeedbackMarkKind = "working" | "success" | "failure";
@@ -208,7 +208,7 @@ export function useActionFeedback(intent: ActionIntent): ActionFeedback {
      * timer and the transition finish together.
      * </p>
      */
-    later(() => setPhase((current) => (current === "press" ? "rest" : current)), MS(motion.duration.press));
+    later(() => setPhase((current) => (current === "press" ? "rest" : current)), msOf(motion.duration.press));
   }, [later]);
 
   const release = useCallback(() => {
@@ -223,7 +223,7 @@ export function useActionFeedback(intent: ActionIntent): ActionFeedback {
         setPhase("success");
         // The hold is READING TIME, and it is the one number in this spec outside M3's band.
         // It is kept in full under reduced motion, because it is not motion.
-        later(() => setPhase("rest"), MS(motion.duration.hold));
+        later(() => setPhase("rest"), msOf(motion.duration.hold));
       }
       return { ok: true, value };
     } catch (error) {
@@ -231,7 +231,7 @@ export function useActionFeedback(intent: ActionIntent): ActionFeedback {
       // error gets it back in the outcome; this is the visual half of the report.
       if (mounted.current) {
         setPhase("failure");
-        later(() => setPhase("rest"), MS(motion.duration.hold));
+        later(() => setPhase("rest"), msOf(motion.duration.hold));
       }
       return { ok: false, error };
     }

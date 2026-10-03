@@ -31,7 +31,7 @@ import {
 import { UNNAMED_GATE, gateDeleteConfirm, gateDeleteStandingNotice } from "../lib/gateCopy";
 import { ACTIVITY_READ_FAILED } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
-import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
+import { withDoorsBoundary } from "../components/doors/withDoorsBoundary";
 import {
   endpoints, type AdminDoorDevice, type AdminSettings, type DeviceActivityEntry,
   type DoorEventEntry, type DoorsView,

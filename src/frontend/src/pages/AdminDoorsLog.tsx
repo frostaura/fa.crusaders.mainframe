@@ -12,7 +12,7 @@ import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { RefreshButton } from "../components/ui/refresh-button";
 import { TextLink } from "../components/ui/text-link";
 import { DownloadSimple } from "../components/ui/icons";
-import { useToast } from "../components/Toast";
+import { useToast } from "../components/toastContext";
 import { DoorFeedRow } from "../components/doors/DoorFeedRow";
 import { useTicker } from "../lib/useTicker";
 import {
@@ -27,7 +27,7 @@ import { clubClock, clubDayAndClock, clubRangeInWords } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
 import { DOOR_OUTCOME_CHIPS, isDoorScan } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
-import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
+import { withDoorsBoundary } from "../components/doors/withDoorsBoundary";
 import {
   ApiError, doorEndpoints, type DoorLogEntry, type DoorLogFilters, type DoorLogPeriod,
   type DoorsView, type RemovedDoor,

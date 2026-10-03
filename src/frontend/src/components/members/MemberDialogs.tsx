@@ -1,7 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { REQUIRED_MARK } from "@/lib/confirmDialogCopy";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,

@@ -3,7 +3,7 @@ import { ActionsMenu } from "../../components/admin/ActionsMenu";
 import { pageHeading } from "../../lib/focusAfterAction";
 import { ConfirmDialog } from "../../components/admin/ConfirmDialog";
 import { Minutes } from "../../components/Minutes";
-import { useToast } from "../../components/Toast";
+import { useToast } from "../../components/toastContext";
 import { useBoxAtLeast } from "../../components/admin/useBoxAtLeast";
 import { useInlineEditorFocus } from "../../components/admin/useInlineEditorFocus";
 import { PackageEditor } from "../../components/packages/PackageEditor";

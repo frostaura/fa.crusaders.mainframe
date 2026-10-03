@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { DoorsErrorBoundary, withDoorsBoundary } from "./DoorsErrorBoundary";
+import { DoorsErrorBoundary } from "./DoorsErrorBoundary";
+import { withDoorsBoundary } from "./withDoorsBoundary";
 import { renderPage } from "../../test/harness";
 
 /**

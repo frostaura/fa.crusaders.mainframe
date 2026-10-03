@@ -11,7 +11,7 @@ import { PrintSheet } from "../components/doors/PrintSheet";
 import { DOORS_READ_FAILED, describePowerLoss, doorDisplayName } from "../lib/doorsCopy";
 import { clubDate } from "../lib/clubClock";
 import { UNNAMED_GATE } from "../lib/gateCopy";
-import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
+import { withDoorsBoundary } from "../components/doors/withDoorsBoundary";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } from "../lib/api";
 
 /**

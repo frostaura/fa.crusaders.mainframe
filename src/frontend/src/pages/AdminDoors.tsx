@@ -20,7 +20,7 @@ import {
   DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_LIVENESS_SUSPENDED, DOORS_READ_FAILED,
   doorAttentionReason, doorDisplayName, doorStaleChecksNotice, doorsAttentionSummary,
 } from "../lib/doorsCopy";
-import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
+import { withDoorsBoundary } from "../components/doors/withDoorsBoundary";
 import { endpoints, type AdminSettings, type DoorRow } from "../lib/api";
 
 /**

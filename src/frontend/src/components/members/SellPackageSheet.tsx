@@ -4,7 +4,7 @@ import { ConfirmButton } from "@/components/ConfirmButton";
 import { Minutes } from "@/components/Minutes";
 import { SendingNote, Stepper } from "@/components/bookings/SheetParts";
 import { useSendingGuard, type SendingGuard } from "@/components/bookings/useSendingGuard";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

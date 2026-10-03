@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { AdminRoleSwitch } from "@/components/members/AdminRoleSwitch";
 import { EmailWithBreaks } from "@/components/members/EmailWithBreaks";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
 import { Envelope, Fingerprint, Key, Password, Trash } from "@/components/ui/icons";
 import { Section } from "@/components/ui/page-shell";

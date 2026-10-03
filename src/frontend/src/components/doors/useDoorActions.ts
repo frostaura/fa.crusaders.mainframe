@@ -1,4 +1,4 @@
-import { useToast } from "../Toast";
+import { useToast } from "../toastContext";
 import { doorDeletedNotice, doorDisplayName, doorStateNotice } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import { doorAlreadyNotice, unnamedGateOfflineNotice } from "../../lib/gateCopy";

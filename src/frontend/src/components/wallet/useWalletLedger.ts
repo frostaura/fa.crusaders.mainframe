@@ -6,7 +6,7 @@ import { memberReads, WALLET_PAGE_SIZE } from "@/lib/offline/memberReads";
 import { fetchQuery, peekQuery, subscribeQuery } from "@/lib/offline/queryCache";
 import { isConnectionFailure, JOIN_MS, useDataOwner } from "@/lib/offline/useCachedRead";
 import { minutesArrivedSentence, minutesLeftSentence } from "@/lib/walletCopy";
-import { useToast } from "../Toast";
+import { useToast } from "../toastContext";
 import { shareBookingsFrom, type ShareBookings } from "./useShareBookings";
 import { useBalanceMovement, useCountUp, useWalletLive } from "./useWalletLive";
 

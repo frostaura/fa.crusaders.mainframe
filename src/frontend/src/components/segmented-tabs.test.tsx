@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { SegmentedTabs, SegmentedTabPanel, nextSegmentIndex, type Segment } from "./SegmentedTabs";
+import { SegmentedTabs, SegmentedTabPanel, type Segment } from "./SegmentedTabs";
+import { nextSegmentIndex } from "./segmentIndex";
 
 /**
  * Item 9's primitive — the WAI-ARIA tabs pattern, with manual activation.

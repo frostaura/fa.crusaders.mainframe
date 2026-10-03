@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, within, waitFor } from "@testing-library/react";
-import { MonitoringFaultsPage, groupByBoard } from "./MonitoringFaults";
+import { MonitoringFaultsPage } from "./MonitoringFaults";
+import { groupByBoard } from "./faultBoards";
 import { renderPage, signIn, stubFetch, unreachable, type StubRoute } from "../../test/harness";
 import { deviceErrorFixture, deviceErrorPageFixture } from "../../test/monitoringFixtures";
 import { NOTHING_CHANGED } from "../../components/Toast";

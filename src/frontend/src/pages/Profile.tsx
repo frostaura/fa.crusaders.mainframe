@@ -6,7 +6,7 @@ import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { endpoints, NetworkError, type WebAuthnCredentialRow, type MyProfile } from "../lib/api";
 import { useProfile } from "../lib/profile";
 import { useAsyncAction } from "../lib/useAsyncAction";
-import { useToast } from "../components/Toast";
+import { useToast } from "../components/toastContext";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";

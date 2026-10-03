@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ActionsMenuItem } from "@/components/admin/ActionsMenu";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { adminEndpoints } from "@/lib/adminApi";

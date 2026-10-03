@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert } from "@/components/Alert";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { Button } from "@/components/ui/button";
 import { ContextBar } from "@/components/ui/context-bar";
 import { useMediaQuery } from "@/components/ui/use-media-query";

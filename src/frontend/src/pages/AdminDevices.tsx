@@ -36,7 +36,7 @@ import { ButtonMapEditor } from "../components/ButtonMapEditor";
 import { buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../lib/buttonMap";
 import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
-import { useToast } from "../components/Toast";
+import { useToast } from "../components/toastContext";
 import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
 import { AutoGrid } from "../components/ui/auto-grid";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";

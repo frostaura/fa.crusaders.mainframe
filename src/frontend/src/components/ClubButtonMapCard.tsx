@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { SquaresFour } from "./ui/icons";
 import { ButtonMapEditor } from "./ButtonMapEditor";
 import { buttonMapWithinCap } from "../lib/buttonMap";
-import { useToast } from "./Toast";
+import { useToast } from "./toastContext";
 
 /**
  * The club's button map, and the warning about the buttons its own walk-up cap will refuse.

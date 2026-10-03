@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { CheckCircle, Info, Warning, WarningCircle, type Icon } from "./ui/icons";
 import { toastReadingMs } from "./toastTiming";
+import { ToastContext, type ToastContextValue } from "./toastContext";
 
 export type ToastTone = "info" | "success" | "danger" | "warning";
 
@@ -15,32 +16,6 @@ type ToastItem = {
   unchanged: boolean;
 };
 
-type ToastContextValue = {
-  push: (input: {
-    tone?: ToastTone;
-    text: string;
-    durationMs?: number;
-    /**
-     * Say, in the same breath, that nothing happened. (R3-28 / B10)
-     *
-     * <p>
-     * A failure toast tells an admin that something did not work. It does not tell them
-     * whether the door is now shut, half-shut, or exactly as it was — and that is the only
-     * question they have. Reviewer B watched a failed shut produce "Could not shut that door."
-     * over a status line still reading the old state, with nothing anywhere saying which of
-     * the two to believe.
-     * </p>
-     *
-     * <p>
-     * Deliberately opt-IN and never inferred from the tone. "It failed" and "nothing changed"
-     * are different facts: a request that timed out after the server committed it failed and
-     * changed everything. Only a call site that knows the write did not land may say so.
-     * </p>
-     */
-    unchanged?: boolean;
-  }) => void;
-};
-
 /**
  * The sentence, in one place, because it is a claim about the world and not a wording.
  *
@@ -48,14 +23,6 @@ type ToastContextValue = {
  * device ones cannot each invent their own near-miss of it.
  */
 export const NOTHING_CHANGED = "Nothing changed.";
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
-export function useToast(): ToastContextValue {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error("useToast must be used inside <ToastProvider>");
-  return ctx;
-}
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);

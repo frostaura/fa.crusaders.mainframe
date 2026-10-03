@@ -3,7 +3,7 @@ import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMenu";
 import { useResetMemberCodeConfirm } from "@/components/member-code/useResetMemberCodeConfirm";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/toastContext";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { ArrowCounterClockwise, Envelope, HourglassMedium, Key, Lock, Prohibit, ShieldCheck, ShieldWarning, UserMinus, UserPlus } from "@/components/ui/icons";
 import { Textarea } from "@/components/ui/textarea";

@@ -69,7 +69,7 @@ function secondsLeft(endsAt: string | null | undefined, now: number): number | n
 }
 
 /** "24:13" — always two digits, `tabular-nums` so the tile does not reflow as digits change. */
-export function countdownFace(seconds: number): string {
+function countdownFace(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   if (mins >= 60) {
