@@ -231,4 +231,50 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         await ReverseAsync(r);
         Assert.Contains(r.BalanceFrames(), f => f.GetProperty("reason").GetString() == WalletStreamReasons.NoShowReversed);
     }
+    /// <summary>
+    /// Review round 10, E10-7: after an OUTAGE refund the partner read "7 minutes of your share came
+    /// back from Olive" — as if the organiser had returned it. The club refunded the session because
+    /// the court's box was offline, and both the headline and the mail now say so.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_share_returned_by_an_outage_refund_says_the_club_refunded_it_and_why()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await SweptAsync("r10outshare", dark: true);
+        await using var owned = r.App;
+
+        var sam = await PlayersClub.ReadAsync(r.App, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.RecipientUserId == r.Club.Sam && n.Kind == MemberEventCatalogue.ShareMoved)
+            .OrderByDescending(n => n.CreatedAt).FirstAsync());
+        Assert.Equal("16 minutes of your share came back — the club refunded the session: the court's box was offline", sam.Headline);
+        Assert.Equal("outage", JsonDocument.Parse(sam.PayloadJson).RootElement.GetProperty("club_refund").GetString());
+
+        var olive = await PlayersClub.ReadAsync(r.App, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.RecipientUserId == r.Club.Organiser && n.Kind == MemberEventCatalogue.ShareMoved)
+            .OrderByDescending(n => n.CreatedAt).FirstAsync());
+        Assert.Contains("the club refunded the session", olive.Headline, StringComparison.Ordinal);
+    }
+
+    /// <summary>E10-7, the mails: the club's refund and its cause, never "came back from" the organiser.</summary>
+    [Fact]
+    public void A_share_mail_after_a_club_refund_names_the_club_and_the_cause()
+    {
+        // The text part is wrapped at 72 columns; the sentences are read flat.
+        static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+        ShareMovement Move(ShareDirection d, string? cause) =>
+            new(d, "Olive Organiser", "Court 2", "Sat 3 Oct, 10:00", 16, "https://x.test/b") { ClubRefund = cause };
+
+        var partner = EmailTemplates.ShareMoved(EmailCatalogue.Riverside, "s@x.test", Move(ShareDirection.Refunded, ShareRefundCauses.Outage));
+        Assert.Contains("The club refunded the session because the court's box was offline", Flat(partner.PlainBody), StringComparison.Ordinal);
+        Assert.Contains("16 minutes of your share came back to your balance", Flat(partner.PlainBody), StringComparison.Ordinal);
+        Assert.DoesNotContain("came back from", Flat(partner.PlainBody), StringComparison.Ordinal);
+        Assert.Equal("The club refunded your share — Court 2", partner.Subject);
+
+        var organiser = EmailTemplates.ShareMoved(EmailCatalogue.Riverside, "o@x.test", Move(ShareDirection.Returned, ShareRefundCauses.NoShow));
+        Assert.Contains("nobody checked in", Flat(organiser.PlainBody), StringComparison.Ordinal);
+
+        // An ordinary return is unchanged.
+        var plain = EmailTemplates.ShareMoved(EmailCatalogue.Riverside, "s@x.test", Move(ShareDirection.Refunded, null));
+        Assert.Contains("16 minutes of your share came back from Olive Organiser.", Flat(plain.PlainBody), StringComparison.Ordinal);
+    }
 }

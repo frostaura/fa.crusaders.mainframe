@@ -43,6 +43,37 @@ public sealed record ShareMovement(
     /// share" told the partner nothing about why minutes left their balance for a refunded game.
     /// </summary>
     public bool AfterAttendance { get; init; }
+
+    /// <summary>
+    /// Review round 10, E10-7: the share went back because the CLUB refunded the session — one of
+    /// <see cref="ShareRefundCauses"/> — not because the organiser returned it. Null otherwise.
+    /// </summary>
+    public string? ClubRefund { get; init; }
+}
+
+/// <summary>Why the club refunded a split session, so a returned share can say so (E10-7).</summary>
+public static class ShareRefundCauses
+{
+    /// <summary>The sweep refunded it in full: the court's box was offline.</summary>
+    public const string Outage = "outage";
+
+    /// <summary>The sweep settled it as a no-show: nobody checked in.</summary>
+    public const string NoShow = "no_show";
+
+    /// <summary>It was displaced: the court was already in use by an earlier booking.</summary>
+    public const string Displaced = "displaced";
+
+    /// <summary>The cause in words, after "because"; null for a value this build does not know.</summary>
+    public static string? Because(string? cause)
+    {
+        return cause switch
+        {
+            Outage => "the court's box was offline",
+            NoShow => "nobody checked in",
+            Displaced => "the court was already in use by an earlier booking",
+            _ => null,
+        };
+    }
 }
 
 /// <summary>
@@ -297,6 +328,12 @@ public static partial class EmailTemplates
     {
         if (m.AfterAttendance && m.Direction == ShareDirection.Paid) return $"Share taken again — {m.CourtName}";
         if (m.AfterAttendance && m.Direction == ShareDirection.Received) return $"{m.OtherName}'s share came back to you — {m.CourtName}";
+        if (ShareRefundCauses.Because(m.ClubRefund) is not null)
+        {
+            return m.Direction == ShareDirection.Refunded
+                ? $"The club refunded your share — {m.CourtName}"
+                : $"The club refunded {m.OtherName}'s share — {m.CourtName}";
+        }
         if (m.ByClub && m.Direction == ShareDirection.Paid) return $"The club collected your share — {m.CourtName}";
         if (m.ClubRemoved && m.Direction == ShareDirection.Refunded) return $"The club took you off the game — {m.CourtName}";
         if (m.ClubRemoved) return $"The club took {m.OtherName} off your game — {m.CourtName}";
@@ -328,6 +365,7 @@ public static partial class EmailTemplates
         if (m.ByClub) return ClubShareSentence(m);
         if (m.AfterAttendance) return AttendedSentence(m);
         if (m.ClubRemoved) return ClubRemovedSentence(m);
+        if (ShareRefundCauses.Because(m.ClubRefund) is { } because) return ClubRefundSentence(m, because);
         switch (m.Direction)
         {
             case ShareDirection.Paid: return $"You paid {Min(m.AmountMinutes)} to {m.OtherName} for your share of the court.";
@@ -346,6 +384,18 @@ public static partial class EmailTemplates
         return m.Direction == ShareDirection.Refunded
             ? $"The club took you off the game {m.OtherName} booked, and {Min(m.AmountMinutes)} of your share came back to your balance."
             : $"The club took {m.OtherName} off your game, and {Min(m.AmountMinutes)} of their share went back to them from your balance.";
+    }
+
+    /// <summary>
+    /// Review round 10, E10-7: the CLUB refunded the session (an outage, a no-show sweep, a
+    /// displacement), and the share followed. "came back from Olive" told the partner the organiser
+    /// had returned it.
+    /// </summary>
+    private static string ClubRefundSentence(ShareMovement m, string because)
+    {
+        return m.Direction == ShareDirection.Refunded
+            ? $"The club refunded the session because {because}, so {Min(m.AmountMinutes)} of your share came back to your balance."
+            : $"The club refunded the session because {because}, so {Min(m.AmountMinutes)} of {m.OtherName}'s share went back to them from your balance.";
     }
 
     /// <summary>Review round 9, E9-2: the refund was reversed because the session was attended, so the share follows the court again.</summary>

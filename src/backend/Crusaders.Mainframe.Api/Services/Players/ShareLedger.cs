@@ -555,15 +555,17 @@ public sealed class ShareLedger
         // R9 E9-2: a share collected after the booking's refund was reversed on a late check-in is
         // taken AGAIN because the session was attended — both receipts say so.
         var attended = club is null && move.Delta > 0 && booking.NoShowReversedAt is not null;
+        var refund = club is null && move.Delta < 0 ? ClubRefundOf(booking) : null;
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason,
-                AfterAttendance: attended),
-            move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub, attended), settings,
+                AfterAttendance: attended, ClubRefund: refund),
+            move.PartnerUserId, $"{key}:partner", RefundHeadline(partnerSide, organiserName, amount, refund) ?? ShareHeadline(partnerSide, organiserName, amount, byClub, attended), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
-                HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended),
-            move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub, attended), settings,
+                HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
+                ClubRefund: refund),
+            move.OrganiserUserId, $"{key}:organiser", RefundHeadline(organiserSide, partnerName, amount, refund) ?? ShareHeadline(organiserSide, partnerName, amount, byClub, attended), settings,
             Own(move.OrganiserUserId));
     }
 
@@ -579,6 +581,29 @@ public sealed class ShareLedger
         {
             BornRead = ownAction,
         }, settings);
+    }
+
+    /// <summary>
+    /// Review round 10, E10-7: why the CLUB refunded a split session a share is going back on — an
+    /// outage refund, a no-show settled by the sweep, a displacement — or null when it did not (an
+    /// organiser's cancel or remove, a split change), which keeps the ordinary words.
+    /// </summary>
+    internal static string? ClubRefundOf(Booking booking)
+    {
+        if (booking.NoShowReversedAt is not null) return null;
+        if (booking.OutageRefundedAt is not null) return ShareRefundCauses.Outage;
+        if (booking.DisplacedByBookingId is not null) return ShareRefundCauses.Displaced;
+        return booking.Status == BookingStatus.NoShow ? ShareRefundCauses.NoShow : null;
+    }
+
+    /// <summary>E10-7: the headline for a share the club's refund sent back, or null to use <see cref="ShareHeadline"/>.</summary>
+    private static string? RefundHeadline(ShareDirection d, string other, int amount, string? cause)
+    {
+        if (ShareRefundCauses.Because(cause) is not { } because) return null;
+        var minutes = MoneyFormat.Minutes(amount);
+        return d == ShareDirection.Refunded
+            ? $"{minutes} of your share came back — the club refunded the session: {because}"
+            : $"{minutes} went back to {other} — the club refunded the session: {because}";
     }
 
     private static string ShareHeadline(ShareDirection d, string other, int amount, bool byClub = false, bool attended = false)
