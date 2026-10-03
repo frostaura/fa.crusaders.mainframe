@@ -5,10 +5,17 @@ import { clubDayLabel } from "./bookFlow";
 /** How many games a list shows before "Show n more". */
 export const SHOWN = 3;
 
-/** "Thu 1 Oct · 10:30–11:00", in the club's zone. */
-export function when(game: UpcomingGame, zone: string | undefined): string {
+/**
+ * R7 E7-6 — `sold_ends_at` (asked of the API): `ends_at` is cut short by the no-show sweep, so a
+ * no-show read 06:24–06:29 for a game sold to 07:09. Widened here so it reads before and after
+ * the API type carries it.
+ */
+type Listed = UpcomingGame & { sold_ends_at?: string };
+
+/** "Thu 1 Oct · 10:30–11:00", in the club's zone — to the time the game was SOLD to end. */
+export function when(game: Listed, zone: string | undefined): string {
   const start = new Date(game.starts_at);
-  return `${clubDayLabel(start, zone)} · ${clubClock(start, zone)}–${clubClock(game.ends_at, zone)}`;
+  return `${clubDayLabel(start, zone)} · ${clubClock(start, zone)}–${clubClock(game.sold_ends_at ?? game.ends_at, zone)}`;
 }
 
 /**
