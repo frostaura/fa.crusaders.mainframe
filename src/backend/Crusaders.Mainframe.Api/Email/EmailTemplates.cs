@@ -105,7 +105,11 @@ public sealed record DeskPackageSale(
     int Minutes,
     decimal ZarReceived,
     int BalanceAfterMinutes,
-    string CurrencySymbol);
+    string CurrencySymbol)
+{
+    /// <summary>Given at no charge (<c>package_free</c>, review round 7 J7-10): the mail says so instead of "Amount received".</summary>
+    public bool NoCharge { get; init; }
+}
 
 /// <summary>
 /// A court box, for the two alerts about one. The club is no longer a field here: it arrives
@@ -661,7 +665,7 @@ public static partial class EmailTemplates
                 new Facts(
                 [
                     new FactRow("Court", courtName),
-                    new FactRow("Lights were on for", $"{minutes} min"),
+                    new FactRow("Lights were on for", Min(minutes)),
                     new FactRow("Charged", Min(amountMinutes)),
                 ]),
                 new Callout(CalloutTone.Warning, "Court time is not refunded once the lights have been on, so this charge stands."),
@@ -870,7 +874,7 @@ public static partial class EmailTemplates
     /// the member's own memory of the counter is what they will check it against.
     /// </remarks>
     public static EmailMessage PackageSoldAtDesk(ClubIdentity club, string to, DeskPackageSale sale) =>
-        EmailChrome.Compose(club, to, new EmailContent(
+        sale.NoCharge ? PackageGivenAtDesk(club, to, sale) : EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Minutes bought at the desk — {sale.PackageName}",
             Preheader: $"{Min(sale.Minutes)} added. Your balance is now {Min(sale.BalanceAfterMinutes)}.",
             Heading: "Your minutes are in",
@@ -885,6 +889,29 @@ public static partial class EmailTemplates
                     new FactRow("Balance after", Min(sale.BalanceAfterMinutes)),
                 ]),
                 new Paragraph("If that doesn't match what you paid at the club, reply to this email or speak to the desk."),
+            ],
+            WhyThis: WhyMoney));
+
+    /// <summary>
+    /// A R0.00 package the desk handed over at no charge (review round 7, J7-10). Nothing was
+    /// paid, so nothing here says it was — no "Amount received", no "what you paid".
+    /// </summary>
+    private static EmailMessage PackageGivenAtDesk(ClubIdentity club, string to, DeskPackageSale sale) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: $"Minutes given at the desk — {sale.PackageName}",
+            Preheader: $"{Min(sale.Minutes)} added at no charge. Your balance is now {Min(sale.BalanceAfterMinutes)}.",
+            Heading: "Your minutes are in",
+            Blocks:
+            [
+                new Paragraph($"The desk at {club.Name} has given you a package at no charge and the minutes are in your wallet. You can book a court now."),
+                new Facts(
+                [
+                    new FactRow("Package", sale.PackageName),
+                    new FactRow("Minutes added", Min(sale.Minutes)),
+                    new FactRow("Charged", "Nothing — given at no charge"),
+                    new FactRow("Balance after", Min(sale.BalanceAfterMinutes)),
+                ]),
+                new Paragraph("If that doesn't look right, reply to this email or speak to the desk."),
             ],
             WhyThis: WhyMoney));
 

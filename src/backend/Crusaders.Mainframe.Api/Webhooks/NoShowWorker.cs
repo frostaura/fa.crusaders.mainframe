@@ -219,13 +219,14 @@ public sealed class NoShowWorker : BackgroundService
         var courtWasDark = darkness != CourtDarkness.Lit;
 
         var penalty = PenaltyFor(b, tSettings, wasCharged, courtWasDark);
+        var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == b.CourtId, ct);
 
         var postings = new List<LedgerPosting>(2);
         if (wasCharged && b.AmountChargedMinutes > 0)
         {
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountMinutes: b.AmountChargedMinutes,
-                ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: "No-show — booking refunded"));
+                ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: RefundReason(courtWasDark, court)));
         }
 
         // A penalty is only collectable against money that moved. Charging one for a
@@ -278,6 +279,7 @@ public sealed class NoShowWorker : BackgroundService
         // grows forward into the next booking on the court and the exclusion constraint
         // throws — stalling the sweep for every tenant.
         if (now < b.EndsAt) b.EndsAt = now;
+        var marked = StageNoShowRow(db, b, courtWasDark, penalty);   // E7-1: rides the money's save
 
         try
         {
@@ -285,12 +287,12 @@ public sealed class NoShowWorker : BackgroundService
         }
         catch (DbUpdateConcurrencyException)
         {
-            // Somebody checked in, or an admin cancelled, while this tick was
-            // walking its list. Nothing was written. Undo the in-memory status so
-            // the rest of the tick is unaffected, and leave the row to whoever won.
+            // Somebody checked in, or an admin cancelled, while this tick was walking its list.
+            // Nothing was written. Undo the in-memory status and the staged row; leave it to the winner.
             _logger.LogInformation(
                 "No-show sweep skipped {BookingId}: the booking changed underneath it", b.Id);
             db.Entry(b).State = EntityState.Detached;
+            db.Entry(marked).State = EntityState.Detached;
             return;
         }
 
@@ -308,8 +310,6 @@ public sealed class NoShowWorker : BackgroundService
         // is missing here is somebody to notify, not somebody to charge. The ledger
         // is the record; the email is the courtesy.
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == b.UserId, ct);
-        var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == b.CourtId, ct);
-
 
         // The refund LEG, exactly as it was posted above — gross, and zero when nothing was
         // ever taken, because quoting a member a refund they did not receive is how a
@@ -354,6 +354,45 @@ public sealed class NoShowWorker : BackgroundService
                 // (§6a). A club reconciling its no-show revenue needs to tell the two apart.
                 ["peripheral_outage"] = courtWasDark,
             }), ct);
+    }
+
+    /// <summary>
+    /// The refund row's words (review round 7, E7-2). A refund because the court's box was
+    /// offline is not a no-show: the member was told "you have not been marked down for missing
+    /// it", and the wallet, the club's ledger and the <c>minutes.refunded</c> webhook all read
+    /// this one string — "No-show — booking refunded" said the opposite on every one of them.
+    /// </summary>
+    internal static string RefundReason(bool courtWasDark, Court? court)
+    {
+        if (!courtWasDark) return "No-show — booking refunded";
+        return $"{court?.Name ?? "The court"} was offline — booking refunded in full";
+    }
+
+    /// <summary>
+    /// The sweep's verdict on the member's record — <c>booking.no_show</c>, by the system, about
+    /// the booker — staged into the save that moves the money, so it exists exactly when the
+    /// verdict does (review round 7, E7-1). <b>Why:</b> nothing wrote one, so a late upload's
+    /// "The club took a no-show back" on a member's night followed no row saying it was marked,
+    /// and a refund for the club's own outage read as nothing at all.
+    /// </summary>
+    private static AuditLog StageNoShowRow(MainframeDbContext db, Booking b, bool courtWasDark, int penalty)
+    {
+        var row = new AuditLog
+        {
+            TenantId = b.TenantId,
+            ActorUserId = Guid.Empty,
+            SubjectUserId = b.UserId,
+            Action = "booking.no_show",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = b.Id,
+                penalty_minutes = penalty,
+                refund_minutes = b.ChargedAt is null ? 0 : b.AmountChargedMinutes,
+                peripheral_outage = courtWasDark,
+            }),
+        };
+        db.AuditLogs.Add(row);
+        return row;
     }
 
     internal Task TickAsync(CancellationToken ct) => TickAsync(DateTimeOffset.UtcNow, ct);

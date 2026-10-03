@@ -1350,6 +1350,10 @@ public static class DeviceEventEndpoints
             // and docs/specs/settlement-model.md §4. -1 is the wire's "no court".
             Court = e.Court is >= 0 ? e.Court : null,
             BookingId = outcome?.BookingId,
+
+            // The verdict beside the evidence, so a reader of receipts alone — the night trace —
+            // can tell a relay the server accepted from one it refused (E7-1).
+            Outcome = outcome?.Code,
         };
         db.DeviceEventReceipts.Add(receipt);
 

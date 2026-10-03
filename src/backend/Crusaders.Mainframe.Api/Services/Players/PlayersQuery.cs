@@ -184,13 +184,26 @@ public sealed partial class PlayersQuery
         return new OrganiserCost(Math.Max(0, -own), payer);
     }
 
-    /// <summary>Who the viewer is to this booking — or null, which is a 404.</summary>
+    /// <summary>
+    /// Who the viewer is to this booking — or null, which is a 404.
+    ///
+    /// <para>
+    /// <b><c>payer</c>: somebody who paid for this court at the box (D10, review round 7 E7-5).</b>
+    /// Their wallet carries the whole charge for it, and the page answered "Booking not found".
+    /// The role is read-only — every permission is the organiser's or a seat's, and a payer has
+    /// neither — and it sees what a player sees, never the organiser's history of who said no.
+    /// </para>
+    /// </summary>
     private static string? RoleOf(Booking booking, Guid viewer, BookingParticipant? mySeat, bool viewerIsAdmin)
     {
         if (booking.UserId == viewer) return "organiser";
         if (mySeat is not null) return "player";
+        if (booking.PaidByUserId == viewer) return PayerRole;
         return viewerIsAdmin ? "admin" : null;
     }
+
+    /// <summary>The viewer paid for somebody else's court at the box. See <see cref="RoleOf"/>.</summary>
+    public const string PayerRole = "payer";
 
     private sealed record DetailContext(
         Booking Booking, List<BookingParticipant> Seats, Dictionary<Guid, PublicMember> People, int Owed, string Role, Guid? MySeatId,
@@ -250,10 +263,11 @@ public sealed partial class PlayersQuery
 
     /// <summary>
     /// Whether a seat is a row of the viewer's table: every live seat; a dead one (who said no)
-    /// to the organiser and admins, never the organiser's own seat, and to a player only their own.
+    /// to the organiser and admins, never the organiser's own seat, to a player only their own,
+    /// and to a payer at the box (E7-5) none.
     /// </summary>
     private static bool IsShown(BookingParticipant s, string role, Guid? mySeatId) =>
-        s.IsLive || !(s.Seat == 1 || (role == "player" && s.Id != mySeatId));
+        s.IsLive || !(s.Seat == 1 || role == PayerRole || (role == "player" && s.Id != mySeatId));
 
     /// <summary>
     /// What one live partner seat still owes. An OPEN LINK SEAT (nobody has claimed it yet) owes

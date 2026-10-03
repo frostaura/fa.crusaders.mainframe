@@ -100,7 +100,7 @@ public sealed record TraceNight(
 /// surface returning the document whole publishes every field any writer ever adds to it.
 /// </para>
 /// </summary>
-public static class AdminMemberTraceAssembly
+public static partial class AdminMemberTraceAssembly
 {
     /// <summary>The row came from <c>audit_log</c>.</summary>
     public const string AuditSource = "audit_log";
@@ -113,7 +113,11 @@ public static class AdminMemberTraceAssembly
 
     /// <summary>One receipt with its booking's court already resolved.</summary>
     private sealed record ReceiptRow(
-        Guid Id, DateTimeOffset OccurredAt, string Kind, Guid BookingId, Guid CourtId, int? Relay, Guid DeviceId);
+        Guid Id, DateTimeOffset OccurredAt, string Kind, Guid BookingId, Guid CourtId, int? Relay, Guid DeviceId)
+    {
+        /// <summary>The board's sequence number, which a reversal's <c>court.lights_on</c> row repeats (E7-1).</summary>
+        public long Seq { get; init; }
+    }
 
     /// <summary>Everything the three reads produced, before any of it is a sentence.</summary>
     private sealed record Strands(
@@ -123,6 +127,9 @@ public static class AdminMemberTraceAssembly
     {
         /// <summary>The boards the rows name, by id → code.</summary>
         public Dictionary<Guid, string> DeviceCodes { get; init; } = [];
+
+        /// <summary>The same boards' display names NOW, by id — a rename reaches history (E7-4).</summary>
+        public Dictionary<Guid, string> DeviceNames { get; init; } = [];
 
         /// <summary>Those boards' outages that reach into the night.</summary>
         public List<DeviceOutage> Outages { get; init; } = [];
@@ -198,6 +205,7 @@ public static class AdminMemberTraceAssembly
             await OpeningBalanceAsync(db, q, ct))
         {
             DeviceCodes = boards.Codes,
+            DeviceNames = boards.Names,
             Outages = boards.Outages,
         };
     }
@@ -208,7 +216,7 @@ public static class AdminMemberTraceAssembly
     /// row prints at its scan, which can be earlier than the range it was heard in, so the
     /// outage window opens at the earliest scan.
     /// </summary>
-    private static async Task<(Dictionary<Guid, string> Codes, List<DeviceOutage> Outages)> BoardsAsync(
+    private static async Task<(Dictionary<Guid, string> Codes, Dictionary<Guid, string> Names, List<DeviceOutage> Outages)> BoardsAsync(
         MainframeDbContext db, List<AuditLog> audit, List<ReceiptRow> receipts, AdminMemberTraceQuery q,
         CancellationToken ct)
     {
@@ -216,18 +224,21 @@ public static class AdminMemberTraceAssembly
             .Where(id => id is not null).Select(id => id!.Value)
             .Concat(receipts.Select(r => r.DeviceId))
             .Distinct().ToList();
-        if (ids.Count == 0) return ([], []);
+        if (ids.Count == 0) return ([], [], []);
 
-        var codes = await db.Devices.AsNoTracking()
+        var boards = await db.Devices.AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .ToDictionaryAsync(d => d.Id, d => d.DeviceCode, ct);
+            .Select(d => new { d.Id, d.DeviceCode, d.Name })
+            .ToListAsync(ct);
+        var codes = boards.ToDictionary(d => d.Id, d => d.DeviceCode);
+        var names = boards.ToDictionary(d => d.Id, d => d.Name);
 
         var floor = audit.Select(a => a.ScanAt).Append(q.From).Min().ToUniversalTime();
         var to = q.To.ToUniversalTime();
         var outages = await db.DeviceOutages.AsNoTracking()
             .Where(o => ids.Contains(o.DeviceId) && o.StartedAt < to && (o.EndedAt == null || o.EndedAt > floor))
             .ToListAsync(ct);
-        return (codes, outages);
+        return (codes, names, outages);
     }
 
     /// <summary>The outage of <paramref name="deviceId"/> that <paramref name="at"/> fell inside, or null.</summary>
@@ -260,14 +271,17 @@ public static class AdminMemberTraceAssembly
             .Take(q.StrandRows)
             .ToListAsync(ct);
 
-    private static Task<List<LedgerEntry>> LedgerRowsAsync(
+    private static async Task<List<LedgerEntry>> LedgerRowsAsync(
         MainframeDbContext db, AdminMemberTraceQuery q, CancellationToken ct)
-        => db.LedgerEntries.AsNoTracking()
+    {
+        var rows = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.UserId == q.UserId || l.ActorUserId == q.UserId)
             .Where(l => l.CreatedAt >= q.From && l.CreatedAt < q.To)
             .OrderBy(l => l.CreatedAt)
             .Take(q.StrandRows)
             .ToListAsync(ct);
+        return await WithShareTwinsAsync(db, q.UserId, rows, ct);
+    }
 
     /// <summary>
     /// What the relays did on this member's bookings — the only MEASUREMENT in this product of
@@ -292,17 +306,21 @@ public static class AdminMemberTraceAssembly
         var byBooking = bookings.ToDictionary(b => b.Id, b => b.CourtId);
         var ids = byBooking.Keys.ToList();
 
+        // E7-1: a receipt the server REFUSED still names the booking it was refused for, and is
+        // no evidence the booking's court was lit. Null is a receipt from before the verdict was
+        // kept, read as it always was.
         var rows = await db.DeviceEventReceipts.AsNoTracking()
             .Where(r => r.BookingId != null && ids.Contains(r.BookingId!.Value))
             .Where(r => r.OccurredAt >= q.From && r.OccurredAt < q.To)
+            .Where(r => r.Outcome == null || !RefusedReceiptOutcomes.Contains(r.Outcome))
             .OrderBy(r => r.OccurredAt)
-            .Select(r => new { r.Id, r.OccurredAt, r.Kind, r.BookingId, r.Court, r.DeviceId })
+            .Select(r => new { r.Id, r.OccurredAt, r.Kind, r.BookingId, r.Court, r.DeviceId, r.Seq })
             .Take(q.StrandRows)
             .ToListAsync(ct);
 
         return [.. rows.Select(r => new ReceiptRow(
             r.Id, r.OccurredAt, r.Kind, r.BookingId!.Value, byBooking[r.BookingId!.Value],
-            r.Court, r.DeviceId))];
+            r.Court, r.DeviceId) { Seq = r.Seq })];
     }
 
     /// <summary>
@@ -361,10 +379,16 @@ public static class AdminMemberTraceAssembly
             var kind = TraceKinds.OfAudit(row.Action, actorIsSubject: row.ActorUserId == q.UserId);
             if (kind is null) continue;
 
+            // E7-1: the server's own lights row for a scan a board uploaded. The receipt already
+            // says it, at the scan's instant; this row says it again at the upload's.
+            if (IsReceiptTwin(row.Action, details, s)) continue;
+
             var court = CourtOf(details, s.Courts);
             var deviceId = DoorTrail.DeviceIdOf(details);
             var actorKind = ActorKindOf(row.ActorUserId, deviceId is not null, s.Admins);
             var actorName = PersonNames.Of(row.ActorUserId, s.Names);
+            var deviceCode = deviceId is { } id && s.DeviceCodes.TryGetValue(id, out var code) ? code : Text(details, "device_code");
+            var doorName = DoorLabelOf(details, deviceId, deviceCode, s);
 
             yield return new TraceEventRow(
                 At: row.ScanAt,
@@ -373,12 +397,13 @@ public static class AdminMemberTraceAssembly
                 Kind: kind,
                 Headline: TraceKinds.Headline(kind, new TraceFacts
                 {
-                    DoorName = Text(details, "door_name"),
+                    DoorName = doorName,
                     CourtName = court?.Name ?? Text(details, "court"),
                     ActorName = actorName,
                     ActorKind = actorKind,
                     RawAction = row.Action,
                     SubjectName = PersonNames.Of(row.SubjectUserId, s.Names),
+                    CourtWasDark = Flag(details, "peripheral_outage"),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -388,10 +413,10 @@ public static class AdminMemberTraceAssembly
                 Court: court,
                 AmountMinutes: null,
                 BalanceAfterMinutes: null,
-                Detail: AuditDetail(row.Action, details))
+                Detail: AuditDetail(row.Action, details, doorName))
             {
                 // A removed board keeps the code its rows were written with.
-                DeviceCode = deviceId is { } id && s.DeviceCodes.TryGetValue(id, out var code) ? code : Text(details, "device_code"),
+                DeviceCode = deviceCode,
                 Approximate = DoorActivityView.TimeUncertain(details, row.CreatedAt),
                 OutageId = OutageAt(s, deviceId, row.ScanAt),
             };
@@ -443,7 +468,10 @@ public static class AdminMemberTraceAssembly
                 SubjectUserId: row.UserId,
                 SubjectName: PersonNames.Of(row.UserId, s.Names),
                 Court: court,
-                AmountMinutes: row.AmountMinutes,
+                // E7-3: the amount column is THIS member's money. Somebody else's movement is told in
+                // the sentence ("Dan Splitter got 15 minutes back") and adds nothing to the column
+                // beside this member's own −15.
+                AmountMinutes: own ? row.AmountMinutes : null,
                 BalanceAfterMinutes: own ? running : null,
                 Detail: Detail(
                     ("ledger_type", row.Type.ToString()),
@@ -522,10 +550,10 @@ public static class AdminMemberTraceAssembly
     }
 
     /// <summary>The named fields one audit row is allowed to publish, and nothing else.</summary>
-    private static Dictionary<string, object?> AuditDetail(string action, JsonElement? details)
+    private static Dictionary<string, object?> AuditDetail(string action, JsonElement? details, string? doorName)
     {
         var detail = Detail(
-            ("door_name", Text(details, "door_name")),
+            ("door_name", doorName),
             ("reason", Text(details, "reason") ?? Text(details, "outcome")),
             ("method", Text(details, "method")),
             ("booking_id", Text(details, "booking_id")),

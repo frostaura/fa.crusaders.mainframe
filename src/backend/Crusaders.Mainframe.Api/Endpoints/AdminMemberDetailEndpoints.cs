@@ -218,7 +218,8 @@ public static class AdminMemberDetailEndpoints
     private static IQueryable<Booking> PlayedBy(MainframeDbContext db, Guid userId)
     {
         var partnerOn = BookingPlayerQueries.PartnerBookingIds(db, userId);
-        return db.Bookings.AsNoTracking().Where(b => b.UserId == userId || partnerOn.Contains(b.Id));
+        // E7-5: and the courts they paid for at the box — on their wallet, so on their record.
+        return db.Bookings.AsNoTracking().Where(b => b.UserId == userId || partnerOn.Contains(b.Id) || b.PaidByUserId == userId);
     }
 
     /// <summary>
@@ -371,7 +372,10 @@ public sealed record MemberBookingRow(
     [property: JsonPropertyName("cancelled_at")] DateTimeOffset? CancelledAt,
     [property: JsonPropertyName("booked_by")] MemberBookingActor BookedBy)
 {
-    /// <summary><c>organiser</c> — the member's own booking — or <c>partner</c>: a seat on somebody else's (C6).</summary>
+    /// <summary>
+    /// <c>organiser</c> — the member's own booking — or <c>partner</c>: a seat on somebody else's (C6);
+    /// or <c>payer</c>: somebody else's court this member paid for at the box (E7-5).
+    /// </summary>
     [JsonPropertyName("role")]
     public string Role { get; init; } = "organiser";
 
@@ -435,11 +439,22 @@ public sealed record MemberBookingRow(
                 PersonNames.Of(b.ActorUserId, names),
                 b.ActorUserId == userId))
         {
-            Role = b.UserId == userId ? "organiser" : "partner",
+            Role = RoleOf(b, userId),
             Organiser = new MemberBookingActor(b.UserId, PersonNames.Of(b.UserId, names), b.UserId == userId),
             SoldEndsAt = BookingService.OriginalEndsAt(b),
             CostMinutes = Math.Max(0, -costs.GetValueOrDefault(b.Id)),
         }).ToList();
+    }
+
+    /// <summary>
+    /// <c>organiser</c>, <c>partner</c>, or <c>payer</c> — a court this member paid for at the box
+    /// (D10, review round 7 E7-5). Pay-for is refused on a split booking, so a payer holds no
+    /// partner seat on it.
+    /// </summary>
+    private static string RoleOf(Booking b, Guid userId)
+    {
+        if (b.UserId == userId) return "organiser";
+        return b.PaidByUserId == userId ? PlayersQuery.PayerRole : "partner";
     }
 
     /// <summary>The status as the admin console's chip reads it — see <see cref="RefundedOutage"/>.</summary>

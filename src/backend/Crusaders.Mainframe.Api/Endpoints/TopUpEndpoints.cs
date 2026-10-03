@@ -341,7 +341,25 @@ public static partial class TopUpEndpoints
     /// what this member paid. Invariant separators, as everywhere money is written.
     /// </summary>
     internal static string PurchaseReason(PendingTopup pending, string symbol)
-        => $"PayFast purchase: {pending.PackageName} ({MoneyFormat.Minutes(pending.Minutes)}) for {EmailTemplates.Zar(pending.AmountZar, symbol)}";
+    {
+        return $"PayFast purchase: {PackageWords(pending.PackageName, pending.Minutes)} for {EmailTemplates.Zar(pending.AmountZar, symbol)}";
+    }
+
+    /// <summary>
+    /// The package as a ledger line names it: its name and, in brackets, its minutes — unless the
+    /// name already IS its minutes ("5 hours", "5 h"), when the bracket only repeated it: the
+    /// wallet read "5 hours (5 hours)" (review round 7, cosmetic). A name that says something
+    /// else ("Club night") keeps its minutes beside it, because the name alone does not say them.
+    /// </summary>
+    internal static string PackageWords(string? packageName, int minutes)
+    {
+        var spoken = MoneyFormat.Minutes(minutes);
+        var name = packageName?.Trim();
+        if (string.IsNullOrEmpty(name)) return spoken;
+        var sameThing = string.Equals(name, spoken, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(name, MoneyFormat.MinutesCompact(minutes), StringComparison.OrdinalIgnoreCase);
+        return sameThing ? name : $"{name} ({spoken})";
+    }
 
     /// <summary>
     /// The confirmation mail and the <c>minutes.purchased</c> event, after the money has posted.

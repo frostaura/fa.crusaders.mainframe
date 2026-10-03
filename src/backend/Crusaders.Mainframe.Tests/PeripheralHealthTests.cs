@@ -510,6 +510,44 @@ public class PeripheralHealthTests
         Assert.Equal(false, evt.Data["peripheral_outage"]);
     }
 
+    /// <summary>
+    /// Review round 7, E7-1 / E7-2. An outage refund was labelled "No-show — booking refunded" on
+    /// the member's wallet, the club's ledger and the <c>minutes.refunded</c> webhook, and the
+    /// sweep wrote no audit row at all — so the member's night had no row saying the booking was
+    /// settled, and a later "The club took a no-show back" followed nothing. The refund now says
+    /// the court was offline, and the verdict is on the record with the outage beside it.
+    /// </summary>
+    [Fact]
+    public async Task An_outage_refund_says_the_court_was_offline_and_the_sweeps_verdict_is_recorded()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -45, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddHours(-3));
+
+        await CreateWorker(host).TickAsync(default);
+        Drain(host);
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var refund = await db.LedgerEntries.IgnoreQueryFilters()
+            .SingleAsync(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund);
+        Assert.DoesNotContain("No-show", refund.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("was offline", refund.Reason, StringComparison.Ordinal);
+
+        var verdict = await db.AuditLogs.IgnoreQueryFilters()
+            .SingleAsync(a => a.Action == "booking.no_show" && a.SubjectUserId == host.PlayerUser.Id);
+        Assert.Equal(Guid.Empty, verdict.ActorUserId);
+        Assert.Contains("\"peripheral_outage\":true", verdict.DetailsJson, StringComparison.Ordinal);
+        Assert.Contains(booking.Id.ToString(), verdict.DetailsJson, StringComparison.Ordinal);
+    }
+
     // ----- how often a board may mail the club about itself ----------------------------
 
     /// <summary>

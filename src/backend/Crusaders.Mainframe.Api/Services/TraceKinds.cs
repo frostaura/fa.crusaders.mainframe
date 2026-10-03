@@ -66,6 +66,12 @@ public readonly record struct TraceFacts
     /// read as the payer's own; the sentence names whose minutes moved instead.
     /// </summary>
     public bool OthersMoney { get; init; }
+
+    /// <summary>
+    /// The no-show sweep refunded the booking in full because no box on its court could be
+    /// reached (§6a) — the club's outage, not the member's absence (review round 7, E7-1/E7-2).
+    /// </summary>
+    public bool CourtWasDark { get; init; }
 }
 
 /// <summary>
@@ -151,13 +157,13 @@ public static class TraceKinds
     public const string BookingCancelledByClub = "booking.cancelled_by_club";
 
     /// <summary>
-    /// The club's automatic check marked a booking as missed.
+    /// The club's automatic check marked a booking as missed — or refunded it in full because the
+    /// court's box was offline, which the row's <c>peripheral_outage</c> says.
     ///
     /// <para>
-    /// <b>Nothing writes an audit row for this today</b> — <c>NoShowWorker</c> moves money and a
-    /// status and writes no <c>audit_log</c> row at all — so the only trace of a no-show is the
-    /// penalty on the wallet strand. The word is here, as D2 §6.2 declares it, so the lane that
-    /// adds the row has somewhere to put it; until then nothing emits it, which is honest.
+    /// <c>NoShowWorker</c> writes the row in the sweep's own save (review round 7, E7-1). Before
+    /// it did, a late upload's "The club took a no-show back" followed no row saying one was ever
+    /// marked.
     /// </para>
     /// </summary>
     public const string BookingNoShow = "booking.no_show";
@@ -519,7 +525,9 @@ public static class TraceKinds
             BookingMadeForThem => BookedForThem(court, facts),
             BookingCancelled => $"Cancelled {court}",
             BookingCancelledByClub => CancelledByClub(court, facts),
-            BookingNoShow => "The club's automatic check marked this as a no-show",
+            BookingNoShow => facts.CourtWasDark
+                ? $"The club refunded {court} in full — its box was offline"
+                : "The club's automatic check marked this as a no-show",
             BookingNoShowReversed => "The club took a no-show back",
             BookingBlockedOver => $"The club blocked out {court}",
             BookingDisplaced => $"The club moved this booking on {court} aside",
@@ -576,6 +584,24 @@ public static class TraceKinds
             _ => $"A share of a split booking moved for {whose}: {Amount(facts)}",
         };
     }
+
+    /// <summary>
+    /// What a door is called on a night (review round 7, E7-4) — the console's
+    /// <c>doorDisplayName</c> rule, said once on the server: the club's name for it, unless that is
+    /// still <see cref="DeviceRegistryService.GatePlaceholderName"/>; then "Unnamed scanner" with the
+    /// board's code. Null when the row knows neither, and the sentence says "a door".
+    /// </summary>
+    public static string? DoorLabel(string? name, string? deviceCode)
+    {
+        var trimmed = name?.Trim();
+        if (!string.IsNullOrEmpty(trimmed) && trimmed != DeviceRegistryService.GatePlaceholderName) return trimmed;
+        var code = deviceCode?.Trim();
+        if (!string.IsNullOrEmpty(code)) return $"{UnnamedScanner} ({code})";
+        return string.IsNullOrEmpty(trimmed) ? null : UnnamedScanner;
+    }
+
+    /// <summary>The console's word for a door the club has not named (<c>doorsCopy.doorDisplayName</c>).</summary>
+    public const string UnnamedScanner = "Unnamed scanner";
 
     /// <summary>The person a row is about, named, or a neutral phrase when the row cannot say.</summary>
     private static string Subject(TraceFacts facts)

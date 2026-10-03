@@ -87,5 +87,20 @@ public sealed class DeviceEventReceipt : ITenantScoped
     /// </summary>
     public Guid? BookingId { get; set; }
 
+    /// <summary>
+    /// What the server made of the event — the activation or release outcome code
+    /// (<c>ok</c>, <c>wrong_court</c>, <c>unpaired</c>, …), or null for an event with no outcome
+    /// and for every receipt written before the column existed.
+    ///
+    /// <para>
+    /// <b>Why the receipt carries it (review round 7, E7-1).</b> The night trace reads relay
+    /// receipts as "the lights came on", and a REFUSED upload — a box that lit a relay wired to
+    /// another court — still names the booking it was refused for. Without the verdict beside
+    /// it the member's night invented a lit court out of the very event the server turned down,
+    /// and counted its minutes as time on court. Null is read as the old behaviour: shown.
+    /// </para>
+    /// </summary>
+    public string? Outcome { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

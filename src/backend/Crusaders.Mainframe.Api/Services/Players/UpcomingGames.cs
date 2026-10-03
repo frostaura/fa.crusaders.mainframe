@@ -37,10 +37,8 @@ public sealed class UpcomingGames
 
     public async Task<List<GameItem>> ForAsync(Guid me, DateTimeOffset now, CancellationToken ct)
     {
-        var partnerOn = BookingPlayerQueries.PartnerBookingIds(_db, me);
-        var bookings = await _db.Bookings.AsNoTracking()
-            .Where(b => b.Status == BookingStatus.Booked && b.EndsAt > now
-                        && (b.UserId == me || partnerOn.Contains(b.Id)))
+        var bookings = await Mine(me)
+            .Where(b => b.Status == BookingStatus.Booked && b.EndsAt > now)
             .OrderBy(b => b.StartsAt).ThenBy(b => b.Id)
             .Take(Cap)
             .ToListAsync(ct);
@@ -59,11 +57,9 @@ public sealed class UpcomingGames
     public async Task<List<GameItem>> RecentAsync(Guid me, DateTimeOffset now, TenantSettingsView settings, CancellationToken ct)
     {
         var from = now.AddDays(-PlaySettings.RecordDays(settings));
-        var partnerOn = BookingPlayerQueries.PartnerBookingIds(_db, me);
-        var bookings = await _db.Bookings.AsNoTracking()
+        var bookings = await Mine(me)
             .Where(b => (b.Status == BookingStatus.Booked || b.Status == BookingStatus.Completed || b.Status == BookingStatus.NoShow)
-                        && b.EndsAt <= now && b.EndsAt > from
-                        && (b.UserId == me || partnerOn.Contains(b.Id)))
+                        && b.EndsAt <= now && b.EndsAt > from)
             .OrderByDescending(b => b.StartsAt).ThenBy(b => b.Id)
             .Take(Cap)
             .ToListAsync(ct);
@@ -88,6 +84,16 @@ public sealed class UpcomingGames
             items[i] = items[i] with { ResultStatus = status, CanRecord = canRecord };
         }
         return items;
+    }
+
+    /// <summary>
+    /// The games that are the caller's: organised, on an accepted partner seat, or paid for at the
+    /// box (review round 7, E7-5 — a court a member paid for listed nowhere for them).
+    /// </summary>
+    private IQueryable<Booking> Mine(Guid me)
+    {
+        var partnerOn = BookingPlayerQueries.PartnerBookingIds(_db, me);
+        return _db.Bookings.AsNoTracking().Where(b => b.UserId == me || partnerOn.Contains(b.Id) || b.PaidByUserId == me);
     }
 
     private async Task<List<GameItem>> ItemsAsync(List<Booking> bookings, Guid me, CancellationToken ct)
@@ -144,7 +150,12 @@ public sealed class UpcomingGames
         int myShare;
         var owing = 0;
         var needsAction = false;
-        if (organiser)
+        if (!organiser && mySeat is null && b.PaidByUserId == me)
+        {
+            // E7-5: a court this member paid for at the box. The whole price is theirs.
+            myShare = b.AmountChargedMinutes;
+        }
+        else if (organiser)
         {
             var partners = live.Where(s => s.IsPartner).ToList();
             var acceptedShare = partners.Where(s => s.Status == ParticipantStatus.Accepted).Sum(s => s.ShareMinutes);
@@ -160,12 +171,22 @@ public sealed class UpcomingGames
         }
 
         return new GameItem(
-            b.Id, context.Courts.GetValueOrDefault(b.CourtId), b.StartsAt, b.EndsAt, organiser ? "organiser" : "partner",
+            b.Id, context.Courts.GetValueOrDefault(b.CourtId), b.StartsAt, b.EndsAt, RoleOf(b, me, organiser, mySeat),
             PlayerViews.BookingStatusName(b.Status), players, myShare, needsAction)
         {
             MyPaidMinutes = paid,
             MyOwingMinutes = owing,
         };
+    }
+
+    /// <summary>
+    /// <c>organiser</c>, <c>partner</c> — or <c>payer</c>: a court this member paid for at the box
+    /// and is on no seat of (review round 7, E7-5), which listed nowhere and opened as "not found".
+    /// </summary>
+    private static string RoleOf(Booking b, Guid me, bool organiser, BookingParticipant? mySeat)
+    {
+        if (organiser) return "organiser";
+        return mySeat is null && b.PaidByUserId == me ? PlayersQuery.PayerRole : "partner";
     }
 
     private static object Player(Guid? userId, string? guestName, string status, Dictionary<Guid, PublicMember> people)

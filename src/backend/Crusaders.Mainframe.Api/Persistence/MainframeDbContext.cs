@@ -570,6 +570,7 @@ public partial class MainframeDbContext : DbContext
             e.ToTable("device_event_receipts");
             e.HasKey(r => r.Id);
             e.Property(r => r.Kind).HasMaxLength(32).IsRequired();
+            e.Property(r => r.Outcome).HasMaxLength(64);
             e.HasQueryFilter(r => r.TenantId == _tenant.TenantId);
 
             // The whole reason this table exists. A box retrying an upload it never saw the

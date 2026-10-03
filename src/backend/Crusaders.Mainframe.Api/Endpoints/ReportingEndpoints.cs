@@ -305,6 +305,16 @@ public static class ReportingEndpoints
                     top_ups_minutes = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     spent_minutes = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     refunds_minutes = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    // Review round 7, J7-2: every bucket the wallet report has, so a day's row adds
+                    // up to what the balance moved that day. Without these four a day with a share,
+                    // a penalty or a desk adjustment read "+4 h 48 min" beside columns summing to
+                    // something else. Same signs as /reports/me/wallet: penalties as a positive
+                    // figure taken, the others signed as they moved.
+                    penalties_minutes = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    adjustments_minutes = le.Where(x => LedgerEntryTypes.Adjustment.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    reversals_minutes = le.Where(x => LedgerEntryTypes.Reversal.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    share_transfers_minutes = le.Where(x => LedgerEntryTypes.Transfer.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    net_movement_minutes = dayDelta,
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     // Attendance, which nothing in the product showed anywhere. CheckedInAt
                     // is the source of truth for it — the settlement model hangs the refund
@@ -485,8 +495,10 @@ public static class ReportingEndpoints
         // D11: shares paid to (−) or received from (+) other players for split bookings.
         var shares = entries.Where(e => LedgerEntryTypes.Transfer.Contains(e.Type)).Sum(e => e.AmountMinutes);
         // A penalty is a debit. A reversed no-show posts a positive row of the same type
-        // to give the money back, and that row is not a second penalty.
-        var penalties = entries.Count(e => LedgerEntryTypes.Penalty.Contains(e.Type) && e.AmountMinutes < 0);
+        // to give the money back, and that row is not a second penalty — nor is the penalty it
+        // gave back still one (review round 7, E7-7: "Penalty count 1" beside "Penalties 0 min"
+        // after the club returned it). Counted per booking, on what its penalty rows net to.
+        var penalties = PenaltyCount(entries);
         return new
         {
             from,
@@ -508,6 +520,19 @@ public static class ReportingEndpoints
             minutes_on_court = minutesOnCourt,
             count = entries.Count,
         };
+    }
+
+    /// <summary>
+    /// How many penalties this member is still out: one per booking whose penalty rows net to a
+    /// debit, plus each unbooked penalty debit on its own. A penalty given back nets to nothing.
+    /// </summary>
+    internal static int PenaltyCount(IEnumerable<LedgerEntry> entries)
+    {
+        var rows = entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).ToList();
+        var booked = rows.Where(e => e.RelatedBookingId is not null)
+            .GroupBy(e => e.RelatedBookingId)
+            .Count(g => g.Sum(e => e.AmountMinutes) < 0);
+        return booked + rows.Count(e => e.RelatedBookingId is null && e.AmountMinutes < 0);
     }
 
     private static string LedgerCsv(IEnumerable<LedgerEntry> entries)

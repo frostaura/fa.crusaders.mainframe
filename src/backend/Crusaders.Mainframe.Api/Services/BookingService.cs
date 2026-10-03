@@ -223,7 +223,7 @@ public sealed class BookingService
             Court: court,
             Settings: settings,
             TotalCost: totalCost,
-            DurationLabel: $"{settings.SliceMinutes * sliceCount} min",
+            DurationLabel: MoneyFormat.Minutes(settings.SliceMinutes * sliceCount),
             IsWalkUp: false,
             ExternalReference: externalReference,
             AllowNegativeBalance: overdraftAuthorised,
@@ -420,7 +420,7 @@ public sealed class BookingService
             Court: court,
             Settings: settings,
             TotalCost: totalCost,
-            DurationLabel: $"{grantedMinutes} min",
+            DurationLabel: MoneyFormat.Minutes(grantedMinutes),
             IsWalkUp: true,
             ExternalReference: externalReference,
             DeferConfirmation: true,
@@ -513,7 +513,7 @@ public sealed class BookingService
         // The figures come off the row and the ledger rather than from a caller: this runs in
         // a different request from the purchase, so there is nothing in scope to trust.
         var details = new Email.BookingConfirmationDetails(
-            court.Name, startsAtLocal, $"{minutes} min",
+            court.Name, startsAtLocal, MoneyFormat.Minutes(minutes),
             booking.AmountChargedMinutes, await _ledger.GetBalanceAsync(userId, ct),
             settings.PenaltyWindowMinutes, settings.PenaltyPct,
             IsWalkUp: true);

@@ -1086,6 +1086,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset>("OccurredAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<long>("Seq")
                         .HasColumnType("bigint");
 

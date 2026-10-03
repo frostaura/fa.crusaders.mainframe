@@ -445,7 +445,7 @@ public sealed class TopUpFlowTests(PostgresFixture pg) : IClassFixture<PostgresF
         Assert.Equal(HttpStatusCode.OK, (await PostItnAsync(factory, club, bought.CheckoutId, "1000.00", "8800001")).StatusCode);
 
         var entry = Assert.Single(await LedgerAsync(factory, club, club.MemberUserId));
-        Assert.Equal("PayFast purchase: 10 hours (10 hours) for R1000.00", entry.Reason);
+        Assert.Equal("PayFast purchase: 10 hours for R1000.00", entry.Reason);   // R7: a package named by its minutes says them once
         Assert.Equal($"topup:{club.TenantId:N}:8800001", entry.ExternalReference);
         Assert.Equal(600, entry.AmountMinutes);
         Assert.DoesNotContain("credit", entry.Reason, StringComparison.OrdinalIgnoreCase);
