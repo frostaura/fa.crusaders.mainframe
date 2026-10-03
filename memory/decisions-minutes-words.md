@@ -36,3 +36,6 @@ last_verified: 2026-10-03
   breaks between number and unit, R5 V5-7).
 - **A saving is said one way**: `packagesCopy.savesWords` → "Saves R50.00 (8%)" (desk Sell badge,
   console preview; the console table cell drops the verb under its "Saves" header). L6-11.
+- **A figure that may wrap keeps number and unit together** (R7 L7-1/J7-5): `components/members/keepUnits`
+  binds "4 h" and "33 min" with U+00A0, so it breaks between groups, never "4 h 33 | min"
+  (`KeptMinutes` on the member card and header). Not yet folded into `<Minutes>` (integrator ask).

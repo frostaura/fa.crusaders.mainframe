@@ -19,9 +19,9 @@ Spec: round 4 `SPEC.md` §3/§4. `components/ui` primitives decide by their own 
   the record's back link returns to the list as it was left (`membersSplit` context).
 - **The list draws 50 rows a page ("Show N more")**; every row is still READ (chip counts, search
   and sort are the club's — paging on demand waits on F: `status_counts` + server `q`/`sort`).
-  **R5 §4.3: a phone card is a 3-column grid, ~72px** (R4's wrap was ~126): who over two lines ·
-  balance over status · the 44px ⋯, which holds Top up below a 48rem box (`useBoxAtLeast(48)`);
-  an application keeps Approve/Reject on a third line — they are the queue.
+  **R5 §4.3: a phone card is a 3-column grid, ~72px**: who · balance over status · 44px ⋯ (Top up in it
+  below 48rem); applications keep Approve/Reject on a third line. **R7 L7-1: a box under 20rem (320, any
+  phone at 200 %) is NARROW** — who on its own line (avatar over name under 13rem), balance, badges, ⋯ beside; cards pair from 41rem.
 - **R5 P5: an open record reads no groups, no enrolments** (`enabled`): only the table draws them;
   a deep link read every group's list for nothing. Attention counts: `lib/adminAttention` (arrival =
   the 30 s fresh window; the members loader's pending count is adopted, not re-asked).

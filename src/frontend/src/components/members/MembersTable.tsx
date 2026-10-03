@@ -14,7 +14,7 @@ import {
 } from "@/lib/membersCopy";
 import { cn } from "@/lib/utils";
 import { minutesCompact } from "@/lib/minutes";
-import { Minutes } from "@/components/Minutes";
+import { KeptMinutes } from "./KeptMinutes";
 import { initialsOf, type GroupChip, type MemberRow, type Sort, type SortKey } from "./membersModel";
 import { EmailWithBreaks } from "./EmailWithBreaks";
 import { RowActions, type RowActionHandlers } from "./RowActions";
@@ -31,7 +31,7 @@ import { RowActions, type RowActionHandlers } from "./RowActions";
  * 48rem each row is a card (identity on top, status and balance side by side, the
  * actions along the bottom); from it, a fixed-layout table whose every column but Member is
  * declared on the spacing scale, so its total is a property of the CSS rather than of the club's
- * longest name. Below the table, cards pair up from 36rem. Columns arrive in this order as the
+ * longest name. Below the table, cards pair up from 41rem (R7 L7-1). Columns arrive in this order as the
  * card widens: Groups from 59rem, then the date from 65rem. A column that does not fit is <b>not drawn</b> rather than drawn underneath
  * something.
  * </p>
@@ -73,7 +73,18 @@ const TABLE = "block [@container(min-width:48rem)]:table [@container(min-width:4
 const HEAD = "hidden [@container(min-width:48rem)]:table-header-group";
 /** `grid-cols-1`, not an implicit column: that one is floored at the card's widest word and ran the
  *  compact card past a 390 phone at 200 % text (gotchas-frontend-layout). */
-const BODY = "grid grid-cols-1 gap-3 [@container(min-width:36rem)]:grid-cols-2 [@container(min-width:48rem)]:table-row-group";
+/** Cards pair up from 41rem (R7 L7-1: from 36rem each card was ~17.6rem, a NARROW card — see below). */
+const BODY = "grid grid-cols-1 gap-3 [@container(min-width:41rem)]:grid-cols-2 [@container(min-width:48rem)]:table-row-group";
+
+/*
+ * R7 L7-1 — a NARROW card (a list box under 20rem: a 320 phone, or any phone at 200 % text). Beside
+ * the who column, the balance and the badges took half the card and the ⋯ its 44px, so at 390/200 %
+ * a name ran a letter per line, the balance read "0 min…" and the ⋯ was pushed off the card. Narrow,
+ * the who takes the card's whole first line; the balance and then the badges go under it, with the
+ * ⋯ beside them. Under 13rem (200 % text) the avatar stands over the name, so the name has the
+ * card's full width and a word is never cut. Every narrow rule is `[@container(max-width:19.99rem)]`
+ * (avatar: 12.99rem), spelled out in full on each class so Tailwind's scanner sees it.
+ */
 
 /**
  * A card is COMPACT (R4 form factor, SPEC §3.8/§4.3; R5 to the spec's ~72px): a three-column grid
@@ -87,6 +98,7 @@ const ROW = cn(
   // L6-9: the who column keeps at least half the card; the badges and the balance beside it WRAP
   // in what is left (min 0) instead of taking their one-line width and cutting the name to nothing.
   "no-lift group grid grid-cols-[minmax(50%,1fr)_minmax(0,auto)_auto] items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-bg-surface p-3 shadow-xs",
+  "[@container(max-width:19.99rem)]:grid-cols-[minmax(0,1fr)_auto] [@container(max-width:19.99rem)]:gap-y-2",
   "hover:border-control",
   "[@container(min-width:48rem)]:table-row [@container(min-width:48rem)]:rounded-none",
   "[@container(min-width:48rem)]:border-0 [@container(min-width:48rem)]:p-0 [@container(min-width:48rem)]:shadow-none",
@@ -113,10 +125,14 @@ const COL = {
   identity: cn(
     CELL,
     "col-start-1 row-span-2 row-start-1",
+    "[@container(max-width:19.99rem)]:col-span-2 [@container(max-width:19.99rem)]:row-span-1",
     "[@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:left-0 [@container(min-width:48rem)]:z-raised",
   ),
   email: cn(CELL, EMAIL_COLUMN, "[@container(min-width:48rem)]:w-72"),
-  status: cn(CELL, "col-start-2 row-start-2 justify-self-end [@container(min-width:48rem)]:w-32"),
+  status: cn(
+    CELL, "col-start-2 row-start-2 justify-self-end [@container(min-width:48rem)]:w-32",
+    "[@container(max-width:19.99rem)]:col-start-1 [@container(max-width:19.99rem)]:row-start-3 [@container(max-width:19.99rem)]:justify-self-start",
+  ),
   // `hidden` at the table's own threshold too: CELL makes every cell a table-cell from 48rem, and
   // a cell drawn under a header that is not shifts every column after it (`hidden` sorts last).
   groups: cn(CELL, "hidden [@container(min-width:48rem)]:hidden [@container(min-width:59rem)]:!table-cell [@container(min-width:48rem)]:w-36", GROUPS_WIDE),
@@ -124,19 +140,25 @@ const COL = {
   balance: cn(
     CELL,
     "col-start-2 row-start-1 self-end text-right",
+    "[@container(max-width:19.99rem)]:col-start-1 [@container(max-width:19.99rem)]:row-start-2",
+    "[@container(max-width:19.99rem)]:justify-self-start [@container(max-width:19.99rem)]:text-left",
     "[@container(min-width:48rem)]:w-36 [@container(min-width:48rem)]:sticky [@container(min-width:48rem)]:right-64",
     "[@container(min-width:48rem)]:z-raised [@container(min-width:48rem)]:border-l",
   ),
   actions: cn(
     CELL,
     "col-start-3 row-span-2 row-start-1",
+    "[@container(max-width:19.99rem)]:col-start-2 [@container(max-width:19.99rem)]:row-start-2 [@container(max-width:19.99rem)]:self-center",
     "[@container(min-width:48rem)]:w-64 [@container(min-width:48rem)]:min-w-64 [@container(min-width:48rem)]:sticky",
     "[@container(min-width:48rem)]:right-0 [@container(min-width:48rem)]:z-raised",
   ),
 } as const;
 
 /** On a card, an application's actions run the card's width on a third line. */
-const APPLICATION_ACTIONS = "col-span-3 col-start-1 row-span-1 row-start-3";
+const APPLICATION_ACTIONS = cn(
+  "col-span-3 col-start-1 row-span-1 row-start-3",
+  "[@container(max-width:19.99rem)]:col-span-2 [@container(max-width:19.99rem)]:col-start-1 [@container(max-width:19.99rem)]:row-start-4",
+);
 
 /**
  * The header cells carry the same widths, pins and thresholds as their columns.
@@ -274,7 +296,7 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
       <DateCell row={row} dateColumn={dateColumn} now={now} />
       <td data-label={COLUMNS.balance} className={COL.balance}>
         <span title={minutesCompact(row.balance_minutes)} className="block whitespace-normal font-semibold text-text-primary">
-          <Minutes value={row.balance_minutes} />
+          <KeptMinutes value={row.balance_minutes} />
         </span>
       </td>
       {/* An application's Approve and Reject take the card's third line (the queue's two words). */}
@@ -294,7 +316,7 @@ function groupsHiddenOnCard(row: MemberRow, groupsOf: (row: MemberRow) => GroupC
 function Identity({ row }: { row: MemberRow }) {
   const sub = [row.membership_number, row.email].filter(Boolean).join(" · ");
   return (
-    <div className="flex min-w-0 items-center gap-3">
+    <div className="flex min-w-0 items-center gap-3 [@container(max-width:12.99rem)]:flex-col [@container(max-width:12.99rem)]:items-start">
       <Avatar size={40} aria-hidden="true">
         {row.photo_url ? <AvatarImage src={row.photo_url} alt="" /> : null}
         <AvatarFallback>{initialsOf(row.full_name)}</AvatarFallback>
@@ -357,7 +379,7 @@ function AdminBadge({ source }: { source: "config" | "granted" | null }) {
 
 function StatusCell({ row }: { row: MemberRow }) {
   return (
-    <div className="flex flex-wrap items-center justify-end gap-1 [@container(min-width:48rem)]:justify-start">
+    <div className="flex flex-wrap items-center justify-end gap-1 [@container(max-width:19.99rem)]:justify-start [@container(min-width:48rem)]:justify-start">
       <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
       {row.is_admin ? <AdminBadge source={row.admin_source ?? null} /> : null}
       {row.email_verified === false ? (

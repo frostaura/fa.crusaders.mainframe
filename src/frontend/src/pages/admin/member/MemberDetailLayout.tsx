@@ -7,7 +7,7 @@ import { GroupAssign } from "@/components/members/GroupAssign";
 import { RelatedBookingField } from "@/components/members/RelatedBookingField";
 import { SellPackageSheet } from "@/components/members/SellPackageSheet";
 import { TopUpSheet } from "@/components/members/TopUpSheet";
-import { Minutes } from "@/components/Minutes";
+import { KeptMinutes } from "@/components/members/KeptMinutes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -363,9 +363,10 @@ function BalancePanel({ detail, name, onSell }: { detail: MemberDetail; name: st
         <dd
           data-testid="member-balance"
           // May wrap between its parts (R4 V4-9): nowrap ran the figure off a 320 phone at 200% text.
+          // Between whole parts only (R7 J7-5): "4 h 33 | min" split a number from its unit.
           className={cn(typography({ variant: "display" }), "min-w-0 break-words text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
         >
-          <Minutes value={detail.balance_minutes} />
+          <KeptMinutes value={detail.balance_minutes} />
         </dd>
         {overdrawn ? <dd className="basis-full text-xs text-danger-strong">{MEMBER_COPY.balanceOverdrawn}</dd> : null}
         <BalanceParts detail={detail} name={name} />
