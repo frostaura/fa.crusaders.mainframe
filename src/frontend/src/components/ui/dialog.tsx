@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { X } from "@/components/ui/icons";
+import { CaretDown, X } from "@/components/ui/icons";
 import { SCALING_ICON, SCALING_ICON_TARGET } from "@/components/ui/layout";
 import { cn } from "@/lib/utils";
 
@@ -311,17 +311,53 @@ function DialogContent({ className, ...props }: SurfaceProps) {
  * description and stepper took nearly the whole sheet and left the body a sliver. At normal text a
  * header is far below the cap; at large text it scrolls on its own and the body keeps the rest.
  */
-function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+function DialogHeader({ className, children, ...props }: React.ComponentProps<"div">) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const more = useMoreBelow(ref);
   return (
     <div
+      ref={ref}
       data-slot="dialog-header"
       className={cn(
         "flex max-h-[33dvh] shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain pb-2 pl-4 pr-14 pt-4 sm:pl-6 sm:pt-6",
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+      {/*
+        R7 L7-14 — while the header is cut (200 % text on a phone), a fade and a caret at its foot
+        say there is more: the description used to stop mid-sentence at the cap with nothing to
+        show it scrolls. Sticky at the scroller's foot, over the last line; gone at the end.
+      */}
+      {more ? (
+        <span data-more-below="" aria-hidden="true"
+          className="pointer-events-none sticky -bottom-2 -mt-8 flex h-8 shrink-0 items-end justify-center bg-gradient-to-t from-bg-raised to-transparent">
+          <CaretDown size="1rem" weight="bold" className="text-text-secondary" />
+        </span>
+      ) : null}
+    </div>
   );
+}
+
+/** Whether a scroller has more below what it shows — re-measured on scroll and on any resize. */
+function useMoreBelow(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [more, setMore] = React.useState(false);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const measure = () => setMore(el.scrollHeight - el.clientHeight - el.scrollTop > 2);
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(el);
+    for (const child of Array.from(el.children)) observer?.observe(child);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      observer?.disconnect();
+    };
+  }, [ref]);
+  return more;
 }
 
 /** The part that scrolls when the content is taller than the screen; header and footer stay put. */

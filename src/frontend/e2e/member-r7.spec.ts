@@ -225,3 +225,33 @@ test.describe("L6-16 — the Bookings date controls' icons grow with the text", 
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
 });
+
+/* ───────────────────────────── L7-14 — a sheet header that scrolls says so ───────────────────────────── */
+
+test.describe("L7-14 — a phone sheet's header that scrolls shows that it does", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("320 / 200 %: the Book sheet's cut header carries a 'more below' hint until it is scrolled to its end", async ({ page }) => {
+    await openBookings(page, 320, 640);
+    await bigText(page);
+    await page.locator(FIRST_BOOK).first().click();
+    const header = page.locator("[data-slot=dialog-header]");
+    await expect(header).toBeVisible();
+    await page.waitForTimeout(400);
+    const overflows = await header.evaluate((el) => el.scrollHeight - el.clientHeight);
+    expect(overflows, "precondition: the header is cut at this size").toBeGreaterThan(4);
+    const hint = header.locator("[data-more-below]");
+    await expect(hint, "no hint that the header scrolls").toBeVisible();
+    await header.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await expect(hint).toHaveCount(0);
+  });
+
+  test("390 at 100 %: a header that fits shows no hint", async ({ page }) => {
+    await openBookings(page, 390, 844);
+    await page.locator(FIRST_BOOK).first().click();
+    const header = page.locator("[data-slot=dialog-header]");
+    await expect(header).toBeVisible();
+    await page.waitForTimeout(400);
+    await expect(header.locator("[data-more-below]")).toHaveCount(0);
+  });
+});
