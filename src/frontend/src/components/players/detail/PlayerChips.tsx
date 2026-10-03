@@ -23,7 +23,9 @@ export function PlayerChips({ detail, actions }: Props) {
   const cancelled = isCancelled(detail);
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* R8 L8-3 — `grid-cols-1`, not an implicit column: that one is floored at its longest word and
+          pushed the page 15px sideways at 320 / 200 % (gotchas-frontend-layout). */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Team label={DETAIL_COPY.teamA} seats={seats.slice(0, 2)} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
         <Team label={DETAIL_COPY.teamB} seats={seats.slice(2, 4)} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
       </div>
