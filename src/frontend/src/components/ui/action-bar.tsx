@@ -1,7 +1,7 @@
 import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Toolbar } from "radix-ui";
 import { cn } from "@/lib/utils";
-import { DOCK_BOTTOM, DOCK_PANEL, usePublishDockedHeight } from "./layout";
+import { DOCK_BOTTOM, DOCK_PANEL, SCALING_ICON, usePublishDockedHeight } from "./layout";
 import { X } from "./icons";
 
 /**
@@ -91,7 +91,7 @@ export function ActionBar(props: ActionBarProps) {
             "text-text-secondary transition-colors duration-fast ease-standard hover:bg-bg-muted hover:text-text-primary",
           )}
         >
-          <X size={20} aria-hidden="true" />
+          <X size={SCALING_ICON} aria-hidden="true" />
         </Toolbar.Button>
         <div className="min-w-0 flex-1 basis-24">
           <p className="break-words text-sm font-semibold tabular-nums">{headline}</p>

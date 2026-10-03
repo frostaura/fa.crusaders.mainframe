@@ -27,8 +27,8 @@ export function Checkbox({ className, ...props }: ComponentProps<typeof Checkbox
       {...wired}
     >
       <CheckboxPrimitive.Indicator data-slot="checkbox-indicator" className="flex items-center justify-center">
-        <Check aria-hidden="true" size={14} weight="bold" className="group-data-[state=indeterminate]:hidden" />
-        <Minus aria-hidden="true" size={14} weight="bold" className="hidden group-data-[state=indeterminate]:block" />
+        <Check aria-hidden="true" size="0.875rem" weight="bold" className="group-data-[state=indeterminate]:hidden" />
+        <Minus aria-hidden="true" size="0.875rem" weight="bold" className="hidden group-data-[state=indeterminate]:block" />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

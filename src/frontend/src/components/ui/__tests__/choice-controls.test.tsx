@@ -47,12 +47,12 @@ describe("Checkbox", () => {
 });
 
 describe("Switch", () => {
-  it("is a named 44×26 no-lift switch that flips on click", () => {
+  it("is a named 44×26 no-lift switch (pixels throughout — R10 FA10) that flips on click", () => {
     const onCheckedChange = vi.fn();
     render(<Switch aria-label="Email me" onCheckedChange={onCheckedChange} />, strict);
     const sw = screen.getByRole("switch", { name: "Email me" });
     expect(sw.tagName).toBe("BUTTON");
-    expect(sw.className).toContain("w-11");
+    expect(sw.className).toContain("w-[44px]");
     expect(sw.className).toContain("h-[26px]");
     expect(sw.className).toContain("no-lift");
     expect(sw.className).toContain("border-transparent");

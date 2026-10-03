@@ -141,7 +141,7 @@ export function FieldError({ className, id, children, ...props }: ComponentProps
       className={cn("flex items-start gap-1.5 text-sm font-medium text-danger-strong", className)}
       {...props}
     >
-      <WarningCircle aria-hidden="true" size={16} weight="bold" className="mt-0.5 shrink-0" />
+      <WarningCircle aria-hidden="true" size="1rem" weight="bold" className="mt-0.5 shrink-0" />
       <span className="min-w-0 break-words">{children}</span>
     </p>
   );

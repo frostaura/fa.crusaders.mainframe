@@ -135,7 +135,7 @@ type Empty = Pick<StateBlockProps, "emptyTitle" | "emptyHint" | "emptyIcon" | "e
 function EmptyState({ emptyTitle, emptyHint, emptyIcon: EmptyIcon, emptyAction, className }: Empty) {
   return (
     <div data-state-block="empty" className={cn("flex flex-col items-center gap-2 px-4 py-10 text-center", className)}>
-      {EmptyIcon ? <EmptyIcon size={40} weight="duotone" aria-hidden="true" className="text-text-muted" /> : null}
+      {EmptyIcon ? <EmptyIcon size="2.5rem" weight="duotone" aria-hidden="true" className="text-text-muted" /> : null}
       <p className="text-base font-semibold text-text-primary">{emptyTitle ?? "Nothing here yet."}</p>
       {emptyHint ? <div className="max-w-prose text-sm text-text-secondary">{emptyHint}</div> : null}
       {emptyAction ? <div className="mt-2">{emptyAction}</div> : null}
@@ -146,7 +146,7 @@ function EmptyState({ emptyTitle, emptyHint, emptyIcon: EmptyIcon, emptyAction, 
 function StaleBand({ readAt, staleHint }: { readAt: string; staleHint?: string }) {
   return (
     <p data-state-block="stale" className="flex items-start gap-2 rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
-      <WarningCircle size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
+      <WarningCircle size="1rem" weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
       <span>
         {`Read at ${readAt}.`}
         {staleHint ? ` ${staleHint}` : ""}

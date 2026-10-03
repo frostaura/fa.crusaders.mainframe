@@ -58,10 +58,20 @@ export type MemberComboboxProps = {
   className?: string;
 };
 
+/*
+  R10 (lane FA10) — the row at 200 % text. At 320 / 200 % the trigger and every list row had
+  ~90px for the name beside a 64px avatar and a no-shrink balance, so names truncated to nothing
+  and the balance ran under the caret. The row is a query container: when the TEXT is large for
+  the row (under 12rem — 192px at 100 %, 384px at 200 %) the avatar, which is decoration (the
+  name is what is read), is not drawn. Names wrap at their spaces, never cut; the balance sits
+  beside the name and wraps UNDER it, right-aligned, when the two do not fit on one line.
+*/
+const ROW_STEPS_DOWN = "[@container_member-row_(max-width:12rem)]:hidden";
+
 /** Decorative: the name beside it is what is read, so the avatar is hidden from assistive tech. */
 function MemberAvatar({ member }: { member: ComboboxMember }) {
   return (
-    <Avatar size={32} aria-hidden="true">
+    <Avatar size={32} aria-hidden="true" className={ROW_STEPS_DOWN}>
       {member.photoUrl ? <AvatarImage src={member.photoUrl} alt="" /> : null}
       <AvatarFallback name={member.name} />
     </Avatar>
@@ -71,21 +81,25 @@ function MemberAvatar({ member }: { member: ComboboxMember }) {
 function Balance({ value }: { value: number | null | undefined }) {
   if (value === null || value === undefined) return null;
   return (
-    <Minutes value={value} className={cn("ml-auto shrink-0 text-xs", value < 0 ? "text-danger-strong" : "text-text-secondary")} />
+    <Minutes value={value} className={cn("ml-auto whitespace-nowrap text-xs", value < 0 ? "text-danger-strong" : "text-text-secondary")} />
   );
 }
 
 /** Avatar, name (and subtitle), balance — the same row in the trigger and in the list. */
 function MemberRow({ member }: { member: ComboboxMember }) {
   return (
-    <>
-      <MemberAvatar member={member} />
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate text-sm font-medium text-text-primary">{member.name}</span>
-        {member.subtitle ? <span className="truncate text-xs text-text-muted">{member.subtitle}</span> : null}
+    <span data-member-row="" className="flex min-w-0 flex-1 [container:member-row/inline-size]">
+      <span className="flex min-w-0 flex-1 items-center gap-3">
+        <MemberAvatar member={member} />
+        <span className="flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-3">
+          <span className="flex min-w-0 flex-col">
+            <span className="break-words text-sm font-medium text-text-primary">{member.name}</span>
+            {member.subtitle ? <span className="break-words text-xs text-text-muted">{member.subtitle}</span> : null}
+          </span>
+          <Balance value={member.balance} />
+        </span>
       </span>
-      <Balance value={member.balance} />
-    </>
+    </span>
   );
 }
 
@@ -110,7 +124,7 @@ function ComboTrigger({ selected, placeholder, valueId, invalid, className, ...p
       <span id={valueId} className="flex min-w-0 flex-1 items-center gap-3">
         {selected ? <MemberRow member={selected} /> : <span className="text-sm text-text-muted">{placeholder}</span>}
       </span>
-      <CaretDown size={16} aria-hidden="true" className="shrink-0 text-text-secondary" />
+      <CaretDown size="1rem" aria-hidden="true" className="shrink-0 text-text-secondary" />
     </button>
   );
 }
@@ -163,7 +177,7 @@ function MemberOptions({ members, value, loading, emptyText, onPick, className }
           >
             <MemberRow member={member} />
             <Check
-              size={16}
+              size="1rem"
               aria-hidden="true"
               className={cn("shrink-0 text-accent-strong", member.id === value ? "opacity-100" : "opacity-0")}
             />

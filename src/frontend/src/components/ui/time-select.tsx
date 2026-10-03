@@ -83,7 +83,7 @@ function TimeSelect({
     <Select value={current} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger id={id} aria-label={label} data-slot="time-select-trigger" className={cn("tabular-nums", className)}>
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          <Clock size={16} aria-hidden="true" className="shrink-0 text-text-secondary" />
+          <Clock size="1rem" aria-hidden="true" className="shrink-0 text-text-secondary" />
           <SelectValue placeholder={placeholder} />
         </span>
       </SelectTrigger>

@@ -34,7 +34,7 @@ const PANEL = [
 ].join(" ");
 
 const ROW = [
-  "no-lift relative flex min-h-touch cursor-default select-none items-center gap-2 rounded-lg border border-transparent",
+  "no-lift relative flex min-h-touch cursor-default select-none items-center gap-2 rounded-lg border border-transparent [&>svg]:size-4 [&>svg]:shrink-0",
   "px-3 text-sm transition-colors duration-fast ease-standard data-[highlighted]:bg-bg-muted",
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50 motion-reduce:transition-none",
 ].join(" ");
@@ -87,7 +87,7 @@ function DropdownMenuCheckboxItem({
     <MenuPrimitive.CheckboxItem data-slot="dropdown-menu-checkbox-item" className={cn(ROW, "pl-9", className)} {...props}>
       <Indicator>
         <MenuPrimitive.ItemIndicator>
-          <Check size={16} weight="bold" aria-hidden="true" />
+          <Check size="1rem" weight="bold" aria-hidden="true" />
         </MenuPrimitive.ItemIndicator>
       </Indicator>
       {children}
@@ -147,7 +147,7 @@ function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <CaretRight size={16} className="ml-auto" aria-hidden="true" />
+      <CaretRight size="1rem" className="ml-auto" aria-hidden="true" />
     </MenuPrimitive.SubTrigger>
   );
 }

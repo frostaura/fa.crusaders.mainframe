@@ -46,7 +46,7 @@ function CommandDialog({ title = "Search", description = "Type to filter, then c
 function CommandInput({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
     <div data-slot="command-input-wrapper" className="flex items-center gap-2 border-b border-border px-3">
-      <MagnifyingGlass size={16} aria-hidden="true" className="shrink-0 text-text-muted" />
+      <MagnifyingGlass size="1rem" aria-hidden="true" className="shrink-0 text-text-muted" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Info } from "@/components/ui/icons";
+import { SCALING_ICON } from "@/components/ui/layout";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +35,7 @@ function InfoPopover({ label, children, side = "top", className }: InfoPopoverPr
           className,
         )}
       >
-        <Info size={20} aria-hidden="true" />
+        <Info size={SCALING_ICON} aria-hidden="true" />
       </PopoverTrigger>
       <PopoverContent side={side} className="w-80" aria-label={label}>
         <p className="mb-1 font-semibold text-text-primary">{label}</p>

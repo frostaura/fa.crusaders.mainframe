@@ -68,6 +68,9 @@ function notchMask(edge: "top" | "bottom"): CSSProperties {
   };
 }
 
+/** The card's width (D7: viewport pixels) and the margin that centres it on a narrower column. */
+const PASS_WIDTH = "w-[min(calc(100vw-32px),360px)] ml-[calc((100%-min(calc(100vw-32px),360px))/2)]";
+
 const BAND_MASK = notchMask("bottom");
 const BODY_MASK = notchMask("top");
 
@@ -111,11 +114,19 @@ export function PassCard(props: PassCardProps) {
   const {
     clubName, crest, overline = "MEMBER", memberName, avatar, qr, code, meta, footer, label, className,
   } = props;
+  /*
+    R10 L10-3 — the card is as wide as before (D7: pixels and the viewport, never the root font, so
+    the QR is the same size at any text size), and it is centred on its COLUMN by a margin of half
+    the difference, which goes negative when the column is narrower. It was `mx-auto`, and an auto
+    margin never goes below zero: at 200 % text the page gutter is 32px, the column 32px narrower
+    than the card, and the card hung off the column's right side to the screen's edge — off-centre,
+    its right corners and shadow cut. Now it reaches 16px into each gutter, symmetrically.
+  */
   return (
     <article
       aria-label={label}
       data-pass-card=""
-      className={cn("mx-auto flex w-[min(calc(100vw-32px),360px)] flex-col rounded-2xl shadow-lg", className)}
+      className={cn(PASS_WIDTH, "flex flex-col rounded-2xl shadow-lg", className)}
     >
       <div className="overflow-hidden rounded-t-2xl [container:pass-band/inline-size]">
         <Band crest={crest} overline={overline} clubName={clubName} memberName={memberName} avatar={avatar} />

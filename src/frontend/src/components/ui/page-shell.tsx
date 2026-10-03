@@ -85,7 +85,7 @@ function BackLink({ to, label }: { to: string; label: string }) {
       data-page-back=""
       className="no-lift -ml-1 inline-flex min-h-touch items-center gap-1 self-start px-1 text-sm font-semibold text-accent-strong underline-offset-2 hover:underline"
     >
-      <CaretLeft size={16} weight="bold" aria-hidden="true" />
+      <CaretLeft size="1rem" weight="bold" aria-hidden="true" />
       <span>{label}</span>
     </Link>
   );

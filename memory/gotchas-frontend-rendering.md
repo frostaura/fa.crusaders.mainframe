@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas-frontend-rendering
-description: "Rendering traps the unit suite cannot see: forced-colours backplates, sticky headers not scrolled into view on focus, a fixture field nobody reads, and an inherited change on <body> restyling every node."
+description: "Rendering traps the unit suite cannot see: forced-colours backplates, unscrolled sticky focus, unread fixture fields, inheriting <body> changes, px glyphs and mx-auto at 200 % text."
 type: gotcha
-last_verified: 2026-09-30
+last_verified: 2026-10-03
 ---
 
 # Gotchas — what only a real browser shows (review round 3, lane F4)
@@ -34,3 +34,12 @@ last_verified: 2026-09-30
   registers it `inherits: false` with `@property`) and Radix's `pointer-events: none` (the grid
   declares its own value while a sheet is up). Find these with a trace (`UpdateLayoutTree`
   elementCount ≈ the whole DOM), not by reading code; content-visibility did not help.
+- **A Phosphor `size={16}` is a 16px `width` attribute, blind to the reader's text size** (R10 FA10):
+  at 200 % the combobox caret, field-error mark, calendar chevrons, time clock and info "i" stayed
+  14–20px beside 32px words. In `components/ui/` glyphs are `size="1rem"`/`SCALING_ICON`, menu rows
+  size a caller's icon `[&>svg]:size-4`; `scaling-glyphs.test` bans numeric sizes (Avatar exempt).
+  A **mixed px/rem control** breaks the same way: the Switch's `w-11` track (88px at 200 %) left its
+  px thumb a quarter along when on — all px now. **`mx-auto` floors at 0**: a px-wide child of a
+  narrower rem-guttered column hangs off its right side (the pass card, L10-3) — centre it with
+  `ml-[calc((100%-W)/2)]`, which may go negative. A row's no-shrink figure + avatar at 200 % squeezed
+  combobox names to nothing AND pushed the page sideways: query the row (avatar under 12rem), wrap.

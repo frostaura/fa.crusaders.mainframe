@@ -14,7 +14,7 @@ export function Switch({ className, ...props }: ComponentProps<typeof SwitchPrim
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
-        "no-lift peer relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-full border-2 border-transparent",
+        "no-lift peer relative inline-flex h-[26px] w-[44px] shrink-0 items-center rounded-full border-2 border-transparent",
         "after:absolute after:-inset-y-[11px] after:inset-x-0",
         "bg-control data-[state=checked]:bg-primary",
         "transition-colors duration-fast ease-standard motion-reduce:transition-none",

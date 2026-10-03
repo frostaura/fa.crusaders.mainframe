@@ -128,7 +128,7 @@ export function Freshness({ at, staleAfterMs = 60_000, className }: FreshnessPro
         className,
       )}
     >
-      {stale ? <WarningCircle size={14} weight="bold" aria-hidden="true" /> : null}
+      {stale ? <WarningCircle size="0.875rem" weight="bold" aria-hidden="true" /> : null}
       {describeAge(age)}
     </time>
   );

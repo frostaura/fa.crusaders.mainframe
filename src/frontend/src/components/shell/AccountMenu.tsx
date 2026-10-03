@@ -116,7 +116,7 @@ export function AccountMenu() {
       >
         <Avatar size={32}>
           {profile?.photo_url ? <AvatarImage src={profile.photo_url} alt="" /> : null}
-          <AvatarFallback aria-hidden="true">{initials(name)}</AvatarFallback>
+          <AvatarFallback aria-hidden="true"><Mark name={profile ? name : null} /></AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -128,7 +128,7 @@ export function AccountMenu() {
           focusWhereItWent();
         }}
       >
-        <Identity name={name} email={profile?.email ?? null} photo={profile?.photo_url ?? null} />
+        <Identity name={name} known={profile !== null} email={profile?.email ?? null} photo={profile?.photo_url ?? null} />
         <DropdownMenuSeparator />
         {chipFolded ? <WalletItem onSelect={going} /> : null}
         <DropdownMenuItem asChild onSelect={going}>
@@ -216,12 +216,12 @@ function WalletItem({ onSelect }: { onSelect: () => void }) {
 }
 
 /** Who is signed in — not interactive, so it is a label row rather than an item. */
-function Identity({ name, email, photo }: { name: string; email: string | null; photo: string | null }) {
+function Identity({ name, known, email, photo }: { name: string; known: boolean; email: string | null; photo: string | null }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2">
       <Avatar size={40}>
         {photo ? <AvatarImage src={photo} alt="" /> : null}
-        <AvatarFallback aria-hidden="true">{initials(name)}</AvatarFallback>
+        <AvatarFallback aria-hidden="true"><Mark name={known ? name : null} /></AvatarFallback>
       </Avatar>
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-text-primary">{name}</p>
@@ -229,6 +229,15 @@ function Identity({ name, email, photo }: { name: string; email: string | null; 
       </div>
     </div>
   );
+}
+
+/**
+ * R10 X10-1 — what the avatar draws without a photo: the member's initials, or, with no profile in
+ * hand (not read yet, failed, offline with nothing kept), the neutral person glyph. "Your account"
+ * is a phrase for the menu's text, and its letters — "YA" — are nobody's initials.
+ */
+function Mark({ name }: { name: string | null }) {
+  return name === null ? <UserCircle size="100%" aria-hidden="true" /> : <>{initials(name)}</>;
 }
 
 /** "Dean Martin" → "DM"; first and last word so a middle name never crowds the circle. */

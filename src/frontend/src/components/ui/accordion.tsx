@@ -45,7 +45,7 @@ function AccordionTrigger({
       >
         {children}
         <CaretDown
-          size={16}
+          size="1rem"
           aria-hidden="true"
           className={cn(
             "shrink-0 text-text-secondary transition-transform duration-base ease-standard",

@@ -44,7 +44,7 @@ function Content({ variant, label }: { variant: TextLinkVariant; label: ReactNod
   return (
     <>
       <span className="min-w-0 break-words">{label}</span>
-      <CaretRight size={16} weight="bold" aria-hidden="true" className="shrink-0" />
+      <CaretRight size="1rem" weight="bold" aria-hidden="true" className="shrink-0" />
     </>
   );
 }

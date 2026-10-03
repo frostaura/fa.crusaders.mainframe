@@ -2,6 +2,7 @@ import * as React from "react";
 import { DayPicker, type ChevronProps, type DayButtonProps } from "react-day-picker";
 import { enGB } from "react-day-picker/locale";
 import { CaretDown, CaretLeft, CaretRight, CaretUp } from "@/components/ui/icons";
+import { SCALING_ICON } from "@/components/ui/layout";
 import { clubZone } from "@/lib/clubZone";
 import { cn } from "@/lib/utils";
 
@@ -94,7 +95,7 @@ const CHEVRONS = { left: CaretLeft, right: CaretRight, up: CaretUp, down: CaretD
 
 function CalendarChevron({ orientation = "left", className }: ChevronProps) {
   const Icon = CHEVRONS[orientation];
-  return <Icon size={20} aria-hidden="true" className={className} />;
+  return <Icon size={SCALING_ICON} aria-hidden="true" className={className} />;
 }
 
 function Calendar({

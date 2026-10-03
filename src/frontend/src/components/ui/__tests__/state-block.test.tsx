@@ -91,7 +91,7 @@ describe("StateBlock (ui) — the new slots", () => {
     expect(status.className).toContain("sr-only");
   });
 
-  it("draws the empty state's 40px duotone icon, and its next step", () => {
+  it("draws the empty state's 2.5rem duotone icon (40px at 100 %, growing with the text), and its next step", () => {
     render(
       <StateBlock
         empty
@@ -103,7 +103,7 @@ describe("StateBlock (ui) — the new slots", () => {
     const block = document.querySelector<HTMLElement>("[data-state-block=empty]")!;
     const icon = block.querySelector("svg")!;
     expect(icon).toHaveAttribute("aria-hidden", "true");
-    expect(icon).toHaveAttribute("width", "40");
+    expect(icon).toHaveAttribute("width", "2.5rem");
     expect(screen.getByRole("button", { name: "Book a court" })).toBeInTheDocument();
   });
 
