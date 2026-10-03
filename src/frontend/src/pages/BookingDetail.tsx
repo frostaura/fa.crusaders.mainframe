@@ -23,6 +23,8 @@ import { ResultCard } from "@/components/play/ResultCard";
 import { ContextBar } from "@/components/ui/context-bar";
 import { useMediaQuery } from "@/components/ui/use-media-query";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
+// R11 (FA11 ask): "Sun 4 / Oct" split a figure from its unit at 320 / 200 %.
+import { KeptFigures } from "@/components/players/detail/KeptFigures";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
 import { TextLink } from "@/components/ui/text-link";
@@ -69,7 +71,7 @@ export default function BookingDetailPage() {
     <PageShell width="content" fullFrom3xl className="xl:max-w-wide">
       <PageHeader
         back={{ to: "/bookings", label: DETAIL_COPY.back }}
-        title={read.data ? detailTitle(read.data) : DETAIL_COPY.title}
+        title={read.data ? <KeptFigures text={detailTitle(read.data)} /> : DETAIL_COPY.title}
         description={read.data ? headerLine(read.data) : undefined}
         actions={<RefreshButton onRefresh={read.reload} loading={read.loading} label={DETAIL_COPY.refresh} />}
         freshness={<Freshness at={read.readAt} />}
@@ -114,7 +116,7 @@ export function BookingDetailPanel({ bookingId, seatId = null }: { bookingId: st
     <section aria-labelledby={headingId} data-booking-panel={bookingId} className="@container/page flex min-w-0 flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0 flex-[1_1_16rem]">
-          <h2 id={headingId} className={cn(typography({ variant: "h2" }), "break-words")}>{read.data ? detailTitle(read.data) : DETAIL_COPY.title}</h2>
+          <h2 id={headingId} className={cn(typography({ variant: "h2" }), "break-words")}>{read.data ? <KeptFigures text={detailTitle(read.data)} /> : DETAIL_COPY.title}</h2>
           {read.data ? <p className="mt-1 text-sm text-text-secondary">{headerLine(read.data)}</p> : null}
         </div>
         <div className="flex items-center gap-2">

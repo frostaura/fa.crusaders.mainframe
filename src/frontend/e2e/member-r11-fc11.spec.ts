@@ -46,6 +46,12 @@ for (const width of [320, 390]) {
     await cancel.scrollIntoViewIfNeeded();
     await expect(cancel).toBeVisible();
     expect(await spills(page)).toEqual([]);
+    // FA11's ask: the heading's day number never leaves its month ("Sun 4 / Oct").
+    const heading = page.getByRole("heading", { level: 1 });
+    const lines = await heading.evaluate((h) => [...h.querySelectorAll("[data-kept-figure]")].map((s) => s.getClientRects().length));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((n) => n === 1), JSON.stringify(lines)).toBe(true);
+    await heading.screenshot({ path: info.outputPath(`heading-${width}x2.png`) });
     await page.screenshot({ path: info.outputPath(`booking-${width}x2.png`), fullPage: false });
   });
 }
