@@ -177,6 +177,7 @@ public sealed class UpcomingGames
             MyPaidMinutes = paid,
             MyOwingMinutes = owing,
             SoldEndsAt = BookingService.OriginalEndsAt(b),
+            BookedByClub = BookedByClub.For(b, me),
         };
     }
 
@@ -219,6 +220,10 @@ public sealed record GameItem(
     /// <summary>When the game was SOLD to end — <c>ends_at</c> is cut short by the no-show sweep (review round 7, E7-6).</summary>
     [JsonPropertyName("sold_ends_at")]
     public DateTimeOffset SoldEndsAt { get; init; }
+
+    /// <summary>The club made this booking for the caller (review round 9, J9-5). See <see cref="Services.BookedByClub"/>.</summary>
+    [JsonPropertyName("booked_by_club")]
+    public bool BookedByClub { get; init; }
 
     /// <summary>What a partner still owes on an open seat; 0 for the organiser (review round 3, M-3).</summary>
     [JsonPropertyName("my_owing_minutes")]

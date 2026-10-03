@@ -115,6 +115,8 @@ public sealed partial class PlayersQuery
             starts_at = booking.StartsAt,
             ends_at = booking.EndsAt,
             sold_ends_at = BookingService.OriginalEndsAt(booking),
+            // R9 J9-5: the club made it for the viewer — "You booked" would be false.
+            booked_by_club = BookedByClub.For(booking, viewer),
             status = PlayerViews.BookingStatusName(booking.Status),
             // R6 (E6-6): a no-show the sweep refunded in full because no box on its court was
             // reachable. The status stays the settlement's; this says it is not held against them.
