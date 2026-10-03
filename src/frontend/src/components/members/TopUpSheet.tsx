@@ -243,8 +243,9 @@ function AmountStep({ flow, balance }: { flow: Flow; balance: number | null }) {
         <FieldError>{flow.complaints.amount}</FieldError>
       </Field>
       {warning ? <Alert tone="warning" live="polite">{warning}</Alert> : null}
-      {/* A button that looks like one (VIS F3-15): as a ghost it read as a line of text. */}
-      <Button variant="outline" className="self-start" onClick={flow.flip} icon={flipIcon}>
+      {/* A button that looks like one (VIS F3-15): as a ghost it read as a line of text. R10 L10-1: its
+          label wraps at word boundaries inside the sheet — nowrap ran it 415 px wide at 320/390 and 200 % text. */}
+      <Button variant="outline" className="max-w-full self-start whitespace-normal" onClick={flow.flip} icon={flipIcon}>
         {flow.direction === "add" ? TAKE_BACK_LINK : ADD_LINK}
       </Button>
     </>
