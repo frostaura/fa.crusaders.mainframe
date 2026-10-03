@@ -64,19 +64,22 @@ export function GroupCard(props: {
   return (
     // Muted by its surface, never its ink (R5 X5-6): `opacity-80` faded the text with the card and
     // the Archived badge fell to 3.24:1. A dashed edge and the muted fill say "set aside" instead.
-    <Card data-group-card={group.id} className={archived ? "border-dashed bg-bg-muted shadow-none" : undefined}>
+    <Card data-group-card={group.id} className={cn("@container/groupcard", archived && "border-dashed bg-bg-muted shadow-none")}>
+      {/* R10 L10-6: under a 14rem card (a phone at 200 % text) the ⋯ takes its own row above the
+          title, and the title and its line take the card's whole width — beside the ⋯ the title
+          column was narrower than "members" and broke it "membe/rs". From 14rem, as before. */}
       <CardHeader>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="col-span-2 row-start-2 flex min-w-0 flex-wrap items-center gap-2 @[14rem]/groupcard:col-span-1 @[14rem]/groupcard:row-start-auto">
           <CardTitle asChild><h2>{group.name}</h2></CardTitle>
           {builtIn ? <Badge tone="info" icon={<Lock size={14} weight="bold" aria-hidden="true" />}>{SYSTEM_GROUP.badge}</Badge> : null}
           {!builtIn && group.is_system_default ? <Badge tone="info">Standing group</Badge> : null}
           {archived ? <Badge tone="warning" icon={<Archive size={14} weight="bold" aria-hidden="true" />}>Archived</Badge> : null}
         </div>
-        <CardDescription>
+        <CardDescription className="col-span-2 row-start-3 @[14rem]/groupcard:col-span-1 @[14rem]/groupcard:row-start-auto">
           {memberCountLine(group.member_count)}
           {group.description ? ` · ${group.description}` : ""}
         </CardDescription>
-        <CardAction>
+        <CardAction className="row-span-1 row-start-1 @[14rem]/groupcard:row-span-2 @[14rem]/groupcard:row-start-1">
           <ActionsMenu
             label={GROUP_ACTIONS.more(group.name)}
             items={[

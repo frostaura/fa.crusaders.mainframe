@@ -221,6 +221,9 @@ function doorOptions(view: DoorsView | null, rows: DoorLogEntry[] | null): Picke
 /** "Every door" / "every outcome" inside a Radix Select, which has no empty value. Never on the wire. */
 const ALL = "__all__";
 
+/** R10 L10-4: a value wraps at its spaces rather than clamp to one line — a word stays whole (Faults, L7-10). */
+const WRAPPING_TRIGGER = "w-full whitespace-normal [&_[data-slot=select-value]]:line-clamp-none";
+
 function keepFocus() {
   const active = document.activeElement as HTMLElement | null;
   if (!active || active === document.body) return;
@@ -588,119 +591,124 @@ function AdminDoorsLogPageBody() {
           fix and the same measurement as the door page — see the note there. */}
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4 lg:order-1">
-          <fieldset className="grid gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:grid-cols-3">
-            <legend className="sr-only">Filter these scans</legend>
-            <Field controlId={`${base}-door`}>
-              <FieldLabel>Door</FieldLabel>
-              <Select
-                value={(removedDoorKey ? `removed:${removedDoorKey}` : doorId) || ALL}
-                onValueChange={(picked) => {
-                  const value = picked === ALL ? "" : picked;
-                  const next = new URLSearchParams(params);
-                  next.delete("door");
-                  next.delete("removed_door");
-                  // A2: a deleted board has no id, so its rows are reached by the key they
-                  // stored. Never both parameters — the API answers 400 for the pair.
-                  if (value.startsWith("removed:")) next.set("removed_door", value.slice("removed:".length));
-                  else if (value !== "") next.set("door", value);
-                  keepFocus();
-                  setParams(next);
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All doors</SelectItem>
-                  {/* A5: the DISPLAY name first, always. A6: when the doors read fails the
-                      options collapse to "All doors" alone, which silently looked like a club
-                      with one door — so the chosen door keeps its own option, and the picker
-                      says why it is short. */}
-                  {pickerDoors.map((device) => (
-                    <SelectItem key={device.id} value={device.id}>{doorPickerLabel(device)}</SelectItem>
-                  ))}
-                  {/* A2 — the doors that are GONE. Their rows stay until the club's retention
-                      rule takes them, and this group is how somebody gets to them. */}
-                  {page.removedDoors.length > 0 && (
-                    <SelectGroup>
-                      <SelectLabel>Removed doors</SelectLabel>
-                      {page.removedDoors.map((door) => (
-                        <SelectItem key={door.key} value={`removed:${door.key}`}>{removedDoorName(door)}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
-                </SelectContent>
-              </Select>
-              {/* The server caps this list, and a full one is not a complete one. */}
-              {removedDoorsCapNotice(page.removedDoors.length) && (
-                <FieldDescription className="text-xs">{removedDoorsCapNotice(page.removedDoors.length)}</FieldDescription>
-              )}
-              {doors === null && (
-                <p className="text-xs text-warning-strong">
-                  The club's doors could not be read, so this list may be short. The scans below are
-                  unaffected.
-                </p>
-              )}
-            </Field>
-            <div className="flex flex-col gap-3">
-              <Field controlId={`${base}-range`}>
-                <FieldLabel>When</FieldLabel>
-                <Select value={params.get("range") ?? DEFAULT_RANGE} onValueChange={(value) => setFilter("range", value)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+          {/* R10 L10-4: three columns by the filters' own BOX in rem, never `sm:` — beside the
+              help panel at 200 % text a viewport rule gave each select ~140px ("Al", "La"). Under
+              34rem the three stack, full width, and a value wraps at its spaces (as Faults, L7-10). */}
+          <div className="@container/doorfilters">
+            <fieldset className="grid gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs @[34rem]/doorfilters:grid-cols-3">
+              <legend className="sr-only">Filter these scans</legend>
+              <Field controlId={`${base}-door`}>
+                <FieldLabel>Door</FieldLabel>
+                <Select
+                  value={(removedDoorKey ? `removed:${removedDoorKey}` : doorId) || ALL}
+                  onValueChange={(picked) => {
+                    const value = picked === ALL ? "" : picked;
+                    const next = new URLSearchParams(params);
+                    next.delete("door");
+                    next.delete("removed_door");
+                    // A2: a deleted board has no id, so its rows are reached by the key they
+                    // stored. Never both parameters — the API answers 400 for the pair.
+                    if (value.startsWith("removed:")) next.set("removed_door", value.slice("removed:".length));
+                    else if (value !== "") next.set("door", value);
+                    keepFocus();
+                    setParams(next);
+                  }}
+                >
+                  <SelectTrigger className={WRAPPING_TRIGGER}><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {RANGES.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                    <SelectItem value={ALL}>All doors</SelectItem>
+                    {/* A5: the DISPLAY name first, always. A6: when the doors read fails the
+                        options collapse to "All doors" alone, which silently looked like a club
+                        with one door — so the chosen door keeps its own option, and the picker
+                        says why it is short. */}
+                    {pickerDoors.map((device) => (
+                      <SelectItem key={device.id} value={device.id}>{doorPickerLabel(device)}</SelectItem>
+                    ))}
+                    {/* A2 — the doors that are GONE. Their rows stay until the club's retention
+                        rule takes them, and this group is how somebody gets to them. */}
+                    {page.removedDoors.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel>Removed doors</SelectLabel>
+                        {page.removedDoors.map((door) => (
+                          <SelectItem key={door.key} value={`removed:${door.key}`}>{removedDoorName(door)}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                  </SelectContent>
+                </Select>
+                {/* The server caps this list, and a full one is not a complete one. */}
+                {removedDoorsCapNotice(page.removedDoors.length) && (
+                  <FieldDescription className="text-xs">{removedDoorsCapNotice(page.removedDoors.length)}</FieldDescription>
+                )}
+                {doors === null && (
+                  <p className="text-xs text-warning-strong">
+                    The club's doors could not be read, so this list may be short. The scans below are
+                    unaffected.
+                  </p>
+                )}
+              </Field>
+              <div className="flex flex-col gap-3">
+                <Field controlId={`${base}-range`}>
+                  <FieldLabel>When</FieldLabel>
+                  <Select value={params.get("range") ?? DEFAULT_RANGE} onValueChange={(value) => setFilter("range", value)}>
+                    <SelectTrigger className={WRAPPING_TRIGGER}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {RANGES.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                {/* A4: the sixth choice is a calendar question, so it takes a date — shown only
+                    when it is the answer being given. It is the club-day DatePicker (P3, R7): a
+                    picked day is always a whole club day, so the half-typed dates C-H2 / R3-12
+                    had to hold back from the URL cannot be produced at all. */}
+                {(params.get("range") ?? DEFAULT_RANGE) === "day" && (
+                  <div className="flex flex-col gap-1.5">
+                    <span aria-hidden="true" className="text-sm font-medium text-text-primary">Which day</span>
+                    <DatePicker
+                      label="Which day"
+                      value={isClubDay(params.get("day") ?? "") ? params.get("day") : null}
+                      onChange={(value) => setFilter("day", value)}
+                      placeholder="Pick a day"
+                    />
+                    {!isClubDay(params.get("day") ?? "") && (
+                      <p className="text-xs text-text-muted">Pick a day to narrow the log to it.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <Field controlId={`${base}-outcome`}>
+                <FieldLabel>Outcome</FieldLabel>
+                <Select
+                  value={params.get("reason") ?? params.get("outcome") ?? ALL}
+                  onValueChange={(picked) => {
+                    const value = picked === ALL ? "" : picked;
+                    const next = new URLSearchParams(params);
+                    next.delete("outcome");
+                    next.delete("reason");
+                    if (value === "released" || value === "refused") next.set("outcome", value);
+                    else if (value !== "") next.set("reason", value);
+                    keepFocus();
+                    setParams(next);
+                  }}
+                >
+                  <SelectTrigger className={WRAPPING_TRIGGER}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All outcomes</SelectItem>
+                    <SelectItem value="released">Lock released</SelectItem>
+                    <SelectItem value="refused">Refused (any)</SelectItem>
+                    {/* `ok` is deliberately absent: it is the same set of rows as "Lock
+                        released" above, and two options with one label is a picker an admin
+                        cannot choose between. */}
+                    {Object.entries(DOOR_OUTCOME_CHIPS)
+                      .filter(([reason]) => reason !== "ok")
+                      .map(([reason, label]) => (
+                        <SelectItem key={reason} value={reason}>{label}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </Field>
-              {/* A4: the sixth choice is a calendar question, so it takes a date — shown only
-                  when it is the answer being given. It is the club-day DatePicker (P3, R7): a
-                  picked day is always a whole club day, so the half-typed dates C-H2 / R3-12
-                  had to hold back from the URL cannot be produced at all. */}
-              {(params.get("range") ?? DEFAULT_RANGE) === "day" && (
-                <div className="flex flex-col gap-1.5">
-                  <span aria-hidden="true" className="text-sm font-medium text-text-primary">Which day</span>
-                  <DatePicker
-                    label="Which day"
-                    value={isClubDay(params.get("day") ?? "") ? params.get("day") : null}
-                    onChange={(value) => setFilter("day", value)}
-                    placeholder="Pick a day"
-                  />
-                  {!isClubDay(params.get("day") ?? "") && (
-                    <p className="text-xs text-text-muted">Pick a day to narrow the log to it.</p>
-                  )}
-                </div>
-              )}
-            </div>
-            <Field controlId={`${base}-outcome`}>
-              <FieldLabel>Outcome</FieldLabel>
-              <Select
-                value={params.get("reason") ?? params.get("outcome") ?? ALL}
-                onValueChange={(picked) => {
-                  const value = picked === ALL ? "" : picked;
-                  const next = new URLSearchParams(params);
-                  next.delete("outcome");
-                  next.delete("reason");
-                  if (value === "released" || value === "refused") next.set("outcome", value);
-                  else if (value !== "") next.set("reason", value);
-                  keepFocus();
-                  setParams(next);
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All outcomes</SelectItem>
-                  <SelectItem value="released">Lock released</SelectItem>
-                  <SelectItem value="refused">Refused (any)</SelectItem>
-                  {/* `ok` is deliberately absent: it is the same set of rows as "Lock
-                      released" above, and two options with one label is a picker an admin
-                      cannot choose between. */}
-                  {Object.entries(DOOR_OUTCOME_CHIPS)
-                    .filter(([reason]) => reason !== "ok")
-                    .map(([reason, label]) => (
-                      <SelectItem key={reason} value={reason}>{label}</SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </fieldset>
+            </fieldset>
+          </div>
 
           <p className="text-xs text-text-muted">
             This log filters by door, time and outcome. It does not filter by member: a member's own

@@ -1,6 +1,16 @@
 import { useMemo } from "react";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { cn } from "@/lib/utils";
+import { normaliseButtonMap, parseAction, RELAYS, toWire, withinCap, type ActionKind, MAX_GRANT_MINUTES } from "@/lib/buttonMap";
+
+/** A select that takes its row and wraps its value at spaces (R10 L10-5) until the box is wide enough to share one. */
+const WRAPS = cn(
+  "w-full min-w-0 whitespace-normal [&_[data-slot=select-value]]:line-clamp-none",
+  // A phone at 200 % text: "minutes" is wider than a 1rem-inset box leaves, so under 12rem the
+  // inset, the gap and the type step down (a button takes no focus zoom; `sm:text-sm` is unchanged).
+  "gap-1 px-2 text-sm @[12rem]/bmap:gap-2 @[12rem]/bmap:px-3 @[12rem]/bmap:text-base",
+);
 
 /**
  * The eight-slot button-map editor.
@@ -17,70 +27,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
  * now does — that is what makes remapping mean anything.
  * </p>
  */
-
-/** The relay bank on a court box, in the order `court_numbers` is indexed. */
-export const RELAYS = ["A", "B", "C", "D"] as const;
-
-export const BUTTON_COUNT = 8;
-
-/**
- * The longest a single button may grant, minutes.
- *
- * <p>
- * The relay bank's own timer opens the relay at ninety minutes whatever the grant said,
- * so a button set to more sells darkness — paid for, with no refund and no re-light
- * path. The number is the hardware's, shared by the API (`Services/RelayHardCap.cs`)
- * and the firmware, and pinned between them as `relay_hard_cap_minutes` in
- * `src/contracts/device-protocol/buttonmap/cases.json`. This field offered 240 while
- * the API refused anything over 90, so the only thing the extra range bought an admin
- * was a save that failed after the fact.
- * </p>
- */
-export const MAX_GRANT_MINUTES = 90;
-
-type ActionKind = "court" | "minutes" | "off" | "none";
-
-function parseAction(wire: string): { kind: ActionKind; value: string } {
-  const text = wire.trim().toLowerCase();
-  if (text === "off") return { kind: "off", value: "" };
-  if (text.startsWith("court:")) return { kind: "court", value: text.slice(6).toUpperCase() };
-  if (text.startsWith("minutes:")) return { kind: "minutes", value: text.slice(8) };
-  return { kind: "none", value: "" };
-}
-
-function toWire(kind: ActionKind, value: string) {
-  if (kind === "court") return `court:${value || "A"}`;
-  if (kind === "minutes") return `minutes:${value || "15"}`;
-  return kind;
-}
-
-/** Whether a grant is one the relay bank can actually deliver. Blank reads as the default 15. */
-function withinCap(detail: string): boolean {
-  const minutes = Number(detail || "15");
-  return Number.isFinite(minutes) && minutes >= 1 && minutes <= MAX_GRANT_MINUTES;
-}
-
-/**
- * Whether every grant in a map is one the relay bank can deliver.
- *
- * <p>
- * Exported so a save button can be held rather than a refusal explained after the
- * round trip: the API applies the same bound, from the same shared constant.
- * </p>
- */
-export function buttonMapWithinCap(value: string[]): boolean {
-  return value.every((wire) => {
-    const { kind, value: detail } = parseAction(wire);
-    return kind !== "minutes" || withinCap(detail);
-  });
-}
-
-/** Pads or trims a map to exactly eight slots, so the editor never shows a ninth button or hides an eighth. */
-function normaliseButtonMap(value: string[]): string[] {
-  const padded = [...value];
-  while (padded.length < BUTTON_COUNT) padded.push("none");
-  return padded.slice(0, BUTTON_COUNT);
-}
 
 export function ButtonMapEditor({
   value, onChange, disabled, labelPrefix,
@@ -102,7 +48,11 @@ export function ButtonMapEditor({
   }
 
   return (
-    <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-bg-surface">
+    // R10 L10-5: decided by the editor's own BOX in rem (`@container/bmap`), never `sm:` — at 390 /
+    // 200 % text the two selects shared a row and showed "Select c", "Grant m". Under 20rem each
+    // control takes its own row; 20–28rem the label sits above the two selects side by side; from
+    // 28rem the row is label · action · court on one line. A value wraps at its spaces, never cut.
+    <div className="@container/bmap flex flex-col divide-y divide-border rounded-lg border border-border bg-bg-surface">
       {rows.map((wire, index) => {
         const { kind, value: detail } = parseAction(wire);
         return (
@@ -110,11 +60,11 @@ export function ButtonMapEditor({
           // two intrinsically-sized controls had a min-content of 362 px, which is what made
           // the whole Devices page 410 px wide inside a 375 px phone. A row that can wrap costs
           // a desktop nothing.
-          <div key={index} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-            <span className="w-full shrink-0 text-sm font-medium text-text-secondary sm:w-20">Button {index + 1}</span>
+          <div key={index} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2 py-2 @[12rem]/bmap:px-3">
+            <span className="w-full shrink-0 text-sm font-medium text-text-secondary @[28rem]/bmap:w-20">Button {index + 1}</span>
 
             <Select value={kind} disabled={disabled} onValueChange={(next) => update(index, next as ActionKind, "")}>
-              <SelectTrigger aria-label={name(index, "action")} className="min-w-0 flex-[1_1_9rem] sm:w-44 sm:flex-none">
+              <SelectTrigger aria-label={name(index, "action")} className={cn(WRAPS, "@[20rem]/bmap:w-auto @[20rem]/bmap:flex-[1_1_9rem] @[28rem]/bmap:w-44 @[28rem]/bmap:flex-none")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -127,7 +77,7 @@ export function ButtonMapEditor({
 
             {kind === "court" && (
               <Select value={detail || "A"} disabled={disabled} onValueChange={(next) => update(index, "court", next)}>
-                <SelectTrigger aria-label={name(index, "court")} className="min-w-0 flex-[1_1_7rem] sm:w-32 sm:flex-none">
+                <SelectTrigger aria-label={name(index, "court")} className={cn(WRAPS, "@[20rem]/bmap:w-auto @[20rem]/bmap:flex-[1_1_7rem] @[28rem]/bmap:w-32 @[28rem]/bmap:flex-none")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

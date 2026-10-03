@@ -1,5 +1,5 @@
 import { ApiError } from "./api";
-import { RELAYS } from "../components/ButtonMapEditor";
+import { RELAYS } from "./buttonMap";
 import { DEVICE_NAME_MAX_LENGTH, GATE_KEY_MAX_LENGTH } from "./gateCopy";
 import { LOCATION_NOTE_MAX_LENGTH } from "../components/doors/DoorCardFields";
 import {

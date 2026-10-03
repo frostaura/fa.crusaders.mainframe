@@ -4,7 +4,8 @@ import { describeDeviceError } from "../lib/deviceErrors";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./ui/card";
 import { SquaresFour } from "./ui/icons";
-import { ButtonMapEditor, buttonMapWithinCap } from "./ButtonMapEditor";
+import { ButtonMapEditor } from "./ButtonMapEditor";
+import { buttonMapWithinCap } from "../lib/buttonMap";
 import { useToast } from "./Toast";
 
 /**
@@ -141,7 +142,9 @@ export function ClubButtonMapCard({
   }
 
   return (
-    <Card>
+    // R10 L10-5: a phone at 200 % text — the content inset steps down by the card's own box, so
+    // the map's selects keep a word's width ("minutes" was cut at 320).
+    <Card className="@container/bmcard">
       <CardHeader>
         <CardTitle asChild>
           <h2 className="flex items-center gap-2">
@@ -157,7 +160,7 @@ export function ClubButtonMapCard({
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-3">
+      <CardContent className="flex flex-col gap-3 px-2 @[14rem]/bmcard:px-4">
         <ButtonMapEditor value={value} onChange={onChange} disabled={saving || loading} />
         <WalkUpCapNotice map={value} cap={walkUpCap} />
       </CardContent>

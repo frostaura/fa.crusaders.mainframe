@@ -175,7 +175,7 @@ export function AdminChangeRecordPage() {
         emptyHint="Every admin action lands here the moment it happens, so an empty range means nobody did anything in it."
         skeleton={<CardListSkeleton rows={4} />}
       >
-        <ul className="flex flex-col gap-3">
+        <ul className="@container/changes flex flex-col gap-3">
           {rows.map((row) => <ChangeRow key={row.id} row={row} timezone={timezone} />)}
         </ul>
         <div className="mt-3 flex flex-col items-start gap-2">
@@ -226,12 +226,14 @@ const PERIOD_OPTIONS: FilterOption[] = [
 function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | undefined }) {
   return (
     // tabIndex -1: focusable by script only, so "Load more" can hand focus to the first row it brought.
-    <li data-change-row="" tabIndex={-1} className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
+    // R10 L10-6: the card's inset and the headline step down by the LIST's box in rem — at 320 /
+    // 200 % text "administrator" was wider than the card's text column and broke "administrato/r".
+    <li data-change-row="" tabIndex={-1} className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-3 shadow-xs @[12rem]/changes:p-4">
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
         <time dateTime={row.occurred_at} className="shrink-0 text-sm tabular-nums text-text-muted">
           {clubDayAndClock(row.occurred_at, timezone)}
         </time>
-        <p className="min-w-0 break-words font-medium text-text-primary">
+        <p className="min-w-0 break-words text-sm font-medium text-text-primary @[12rem]/changes:text-base">
           {/* Server-composed, from a closed dictionary, with `unrecognised` for anything the
               dictionary has not got. Never a sentence assembled here out of `action`. */}
           {changeHeadline(row)}
