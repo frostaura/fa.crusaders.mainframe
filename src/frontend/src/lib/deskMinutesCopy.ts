@@ -307,6 +307,10 @@ export function zarField(value: number): string {
   return value.toFixed(2);
 }
 
+const ON_THE_LEDGER = "This goes on the ledger and cannot be deleted.";
+const SELL_REVENUE = (zar: string) => `${zar} counts as money the club took, and appears in the club's revenue.`;
+const SELL_NO_REVENUE = "No money changes hands, so the club's revenue does not change.";
+
 export const SELL_COPY = {
   title: (name: string) => `Sell ${name} a package`,
   steps: ["Package", "Payment", "Check"] as const,
@@ -323,19 +327,32 @@ export const SELL_COPY = {
   pickPackage: "Choose a package.",
   paymentLabel: "How was it paid?",
   paymentPlaceholder: "Choose how",
+  /** R7 J7-6 — said under "How was it paid?", so it names the payment, not a reason. */
+  paymentMissing: "Choose how it was paid.",
+  /**
+   * R7 J7-10 — a package that costs this member nothing (a 100% discount, contract §3.7/§3.4
+   * `package_price_zero`) has no payment to record; this stands where the payment questions were.
+   */
+  freeNote: "This package costs them nothing, so there is nothing to pay and no money to record.",
   zarLabel: "Money received",
   zarHelp: (price: string) => `In rand, exactly as handed over. Their price is ${price}; if they paid something else, say what.`,
   zarDiffers: (price: string) => `Not their price of ${price} — the club's revenue shows what you enter here.`,
   detailLabel: "Note",
   detailPlaceholder: "e.g. Receipt 0412",
   detailHint: "The member sees this on their wallet, with the package's name.",
-  revenue: (zar: string) => `${zar} counts as money the club took, and appears in the club's revenue.`,
+  revenue: SELL_REVENUE,
+  /** R7 J7-10 — the revenue line by amount: R0.00 is not "money the club took". */
+  revenueFor: (zar: number) => (zar > 0 ? SELL_REVENUE(formatMoney(zar)) : SELL_NO_REVENUE),
   balanceNow: "Balance now",
   adds: "Package",
   balanceAfter: "Balance after",
   zarRow: "Money received",
   idle: (minutes: number) => `Sell ${minutesSpoken(minutes)}`,
   confirm: (name: string, pkg: string, zar: string) => `Sell ${pkg} to ${name} for ${zar}? This goes on the ledger and cannot be deleted.`,
+  /** R7 J7-10 — the confirm by amount: a free package is given, not sold for R0.00. */
+  confirmFor: (name: string, pkg: string, zar: number) => (zar > 0
+    ? `Sell ${pkg} to ${name} for ${formatMoney(zar)}? ${ON_THE_LEDGER}`
+    : `Give ${pkg} to ${name} at no charge? ${ON_THE_LEDGER}`),
   receipt: (name: string, pkg: string, minutes: number) => `${pkg} sold — ${minutesSpoken(minutes)} added for ${name}.`,
   unavailable: "That package isn't on this member's shelf any more — it was changed or retired. Their packages were read again; choose again.",
   sending: (name: string) => `Waiting for the club to answer about ${name}'s package. This stays open until it does.`,
