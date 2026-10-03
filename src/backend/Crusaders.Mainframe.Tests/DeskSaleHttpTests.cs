@@ -277,6 +277,37 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         }));
 
     /// <summary>
+    /// Review round 11, J11-4 (asked by FC11): the member's wallet called a package the club GAVE
+    /// "Bought". The member's reports carry <c>given_minutes</c> — the part of
+    /// <c>top_ups_minutes</c> handed over for no rand — on the totals and on each day.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_members_reports_say_how_much_of_the_top_ups_was_given_free()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkg");
+        var admin = Admin(f, club);
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 120m })).StatusCode);
+        await SetDiscountAsync(f, club.LeagueGroupId, 10_000);
+        await JoinAsync(f, club, club.MemberUserId, club.LeagueGroupId);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome", quotedPriceZar = 0m })).StatusCode);
+
+        var member = Member(f, club);
+        var report = await JsonOf(await member.GetAsync("/api/v1/reports/me/wallet"));
+        Assert.Equal(120, report.GetProperty("top_ups_minutes").GetInt32());
+        Assert.Equal(60, report.GetProperty("given_minutes").GetInt32());
+        Assert.Equal(120, report.GetProperty("net_movement_minutes").GetInt32());
+
+        var days = (await JsonOf(await member.GetAsync("/api/v1/reports/me/daily"))).EnumerateArray().ToList();
+        Assert.Equal(60, days.Sum(d => d.GetProperty("given_minutes").GetInt32()));
+        Assert.Equal(120, days.Sum(d => d.GetProperty("top_ups_minutes").GetInt32()));
+    }
+
+    /// <summary>
     /// Review round 7, J7-10: a R0.00 package could only be sold as "Cash paid at the desk" and was
     /// worded as revenue. <c>package_free</c> gives it at no charge — only on a package that costs
     /// this member nothing, never with a rand figure, and the mail says nothing was paid.

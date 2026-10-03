@@ -303,6 +303,8 @@ public static class ReportingEndpoints
                 {
                     date = d.ToString("yyyy-MM-dd"),
                     top_ups_minutes = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountMinutes),
+                    // R11 J11-4: the part of top_ups_minutes the club gave at no charge (a subset; not summed twice).
+                    given_minutes = GivenMinutes(le),
                     spent_minutes = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     refunds_minutes = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountMinutes),
                     // Review round 7, J7-2: every bucket the wallet report has, so a day's row adds
@@ -499,6 +501,14 @@ public static class ReportingEndpoints
     /// count it already had.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// R11 J11-4: minutes the desk handed over for no rand — an <see cref="LedgerEntryType.AdminTopUp"/>
+    /// with <c>ZarPaid</c> 0 (<c>package_free</c>, or a sale recorded at R0.00). The wallet called a
+    /// free package "Bought"; this is the figure that lets it say "Given by the club".
+    /// </summary>
+    internal static int GivenMinutes(IEnumerable<LedgerEntry> entries) =>
+        entries.Where(e => e.Type == LedgerEntryType.AdminTopUp && e.ZarPaid == 0m).Sum(e => e.AmountMinutes);
+
     internal static object BuildWalletReport(
         List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to,
         int attendedBookings = 0, int minutesOnCourt = 0)
@@ -521,6 +531,9 @@ public static class ReportingEndpoints
             from,
             to,
             top_ups_minutes = topUps,
+            // R11 J11-4: the part of top_ups_minutes the club gave at no charge — a desk package
+            // given free (or sold at R0.00). A SUBSET of top_ups_minutes, never added to the net.
+            given_minutes = GivenMinutes(entries),
             spent_minutes = spent,
             refunds_minutes = refunds,
             penalties_minutes = penaltiesTotal,
