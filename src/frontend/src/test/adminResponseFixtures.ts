@@ -384,7 +384,7 @@ export function memberDoorsPage(): MemberDoorsPage {
 export function memberDoorRow(): MemberDoorRow {
   return {
     at: AT, delivered_at: null, time_uncertain: false, action: "gate.released", outcome: "released", reason: null,
-    reason_text: "…", offline: false, method: null, fingerprint: null, door: { id: ID, name: "Front door", gate_key: "front", removed: false },
+    reason_text: "…", offline: false, method: null, fingerprint: null, door: { id: ID, name: "Front door", gate_key: "front", device_code: "gate-44c103", removed: false },
   };
 }
 

@@ -70,6 +70,7 @@ public static class DoorRowDoor
             id = (Guid?)null,
             name = DeviceView.Named(StoredName(details)),
             gate_key = StoredKey(details),
+            device_code = StoredCode(details),
             removed = true,
         };
     }
@@ -89,6 +90,12 @@ public static class DoorRowDoor
     {
         if (details is not { } root) return null;
         return DoorActivityView.Text(root, "door_name") ?? DoorActivityView.Text(root, "device_code");
+    }
+
+    /// <summary>The board's own code as the row recorded it (<c>gate-44c103</c>), or null.</summary>
+    public static string? StoredCode(JsonElement? details)
+    {
+        return details is { } root ? DoorActivityView.Text(root, "device_code") : null;
     }
 
     /// <summary>The club's key for the door as the row recorded it, or null.</summary>

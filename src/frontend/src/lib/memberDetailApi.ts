@@ -129,7 +129,7 @@ export type MemberDoorRow = {
   offline: boolean;
   method: string | null;
   fingerprint: string | null;
-  door: { id: string | null; name: string | null; gate_key: string | null; removed: boolean };
+  door: { id: string | null; name: string | null; gate_key: string | null; device_code?: string | null; removed: boolean };
 };
 
 export type MemberDoorsPage = {
