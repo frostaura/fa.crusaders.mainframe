@@ -716,6 +716,8 @@ export const DETAIL_PLAYER = {
 export const DETAIL_ATTENDANCE = {
   title: "At the court",
   checkedInAt: (clock: string) => `Checked in at ${clock}`,
+  /** R9 E9-7 — the court went dark before the end it was sold to. */
+  lightsOffAt: (clock: string) => `Lights off at ${clock}`,
   notYet: "Nobody has checked in yet.",
   count: (n: number, of: number) => `${n} of ${of} player${of === 1 ? "" : "s"} checked in`,
 } as const;

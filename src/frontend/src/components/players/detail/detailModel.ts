@@ -42,9 +42,23 @@ export function settlementOf(d: BookingDetail): { refunded: number; penalty: num
   };
 }
 
-/** R5 M5-3 — the end a no-show was SOLD with: the sweep truncates `ends_at` to its own clock. */
+/**
+ * The end a booking was SOLD to — the one end every screen shows (R9 E9-7). `ends_at` moves: the
+ * no-show sweep cuts it to its own clock (R5 M5-3), and a reversed no-show narrows it to when the
+ * relay went dark, so the member read 12:08–12:22 where the admin read 12:08–12:23.
+ */
 export function soldEnd(d: BookingDetail): string {
-  return isNoShow(d) ? d.sold_ends_at ?? d.ends_at : d.ends_at;
+  return d.sold_ends_at ?? d.ends_at;
+}
+
+/**
+ * R9 E9-7 — when the court went dark before its sold end, for a game somebody played: the server
+ * narrows `ends_at` to what the relay measured. Null otherwise — a no-show's `ends_at` is the
+ * sweep's cut, not the lights, and a cancelled game never lit.
+ */
+export function lightsOffAt(d: BookingDetail): string | null {
+  if (!d.attendance.checked_in_at || isNoShow(d) || isCancelled(d)) return null;
+  return Date.parse(d.ends_at) < Date.parse(soldEnd(d)) ? d.ends_at : null;
 }
 
 /**

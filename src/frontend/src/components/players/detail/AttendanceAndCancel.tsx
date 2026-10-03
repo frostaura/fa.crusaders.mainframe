@@ -8,7 +8,7 @@ import { useBalance } from "@/lib/balance";
 import { clubClock } from "@/lib/clubClock";
 import type { BookingDetail } from "@/lib/playersApi";
 import { DETAIL_ATTENDANCE, DETAIL_CANCEL, DETAIL_NO_SHOW } from "@/lib/playersCopy";
-import { isNoShow, liveCount } from "./detailModel";
+import { isNoShow, lightsOffAt, liveCount } from "./detailModel";
 import { gridBookingOf, rereadAsDay } from "./gridBooking";
 import type { Notice } from "./useOrganiserHands";
 
@@ -16,6 +16,7 @@ import type { Notice } from "./useOrganiserHands";
 export function Attendance({ detail }: { detail: BookingDetail }) {
   const at = detail.attendance.checked_in_at;
   const players = Math.max(liveCount(detail), 1);
+  const dark = lightsOffAt(detail);
   return (
     <Section title={DETAIL_ATTENDANCE.title}>
       <div className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 text-sm">
@@ -25,6 +26,7 @@ export function Attendance({ detail }: { detail: BookingDetail }) {
           {at ? DETAIL_ATTENDANCE.checkedInAt(clubClock(at)) : isNoShow(detail) ? DETAIL_NO_SHOW.attendance : DETAIL_ATTENDANCE.notYet}
         </p>
         <p className="text-text-secondary">{DETAIL_ATTENDANCE.count(detail.attendance.players_checked_in, players)}</p>
+        {dark ? <p className="text-text-secondary" data-lights-off="">{DETAIL_ATTENDANCE.lightsOffAt(clubClock(dark))}</p> : null}
       </div>
     </Section>
   );
