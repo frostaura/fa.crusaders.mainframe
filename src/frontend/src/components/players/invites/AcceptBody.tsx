@@ -10,6 +10,7 @@ import {
   shortByLine,
 } from "@/lib/playersCopy";
 import { useBalance } from "@/lib/balance";
+import { heldPartsLine } from "@/lib/walletCopy";
 import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { Minutes } from "@/components/Minutes";
 import { inviteCapSentence, inviteRefusal, inviteWhen, organiserName } from "./inviteFacts";
@@ -101,19 +102,24 @@ function MoneyRow({ label, value, strong = false }: { label: string; value: numb
 function MoneyFacts({ flow }: { flow: AcceptFlow }) {
   const { invite, money } = flow;
   const { held } = useBalance();
+  // R9 J9-2 — two or more share deadlines: the total takes no date, each part its own (the Wallet's rule).
+  const parts = heldPartsLine(held?.parts);
+  // With anything held or owed back the figures are what may be SPENT — said so, as the Book sheet does.
+  const holding = money.held > 0 || money.owedBack > 0;
   return (
     <div className="flex flex-col gap-2">
       <dl className="flex flex-col gap-2" data-money="">
         <MoneyRow label={INVITES_COPY.yourShare} value={invite.share_minutes} strong />
         {money.toPay !== invite.share_minutes ? <MoneyRow label={INVITES_COPY.toPayNow} value={money.toPay} /> : null}
         {/* Signed, not clamped: owing partners more than the balance is real, and "short by" adds up from it. */}
-        <MoneyRow label={INVITES_COPY.spendable} value={money.spendable} />
+        <MoneyRow label={holding ? INVITES_COPY.availableNow : INVITES_COPY.balanceNow} value={money.spendable} />
         {/* Short, there is no "after" — a negative figure would read as an overdraft the accept never allows. */}
-        {money.shortBy > 0 ? null : <MoneyRow label={INVITES_COPY.balanceAfter} value={money.after} strong />}
+        {money.shortBy > 0 ? null : <MoneyRow label={holding ? INVITES_COPY.availableAfter : INVITES_COPY.balanceAfter} value={money.after} strong />}
       </dl>
       {money.held > 0 ? (
         <div className="rounded-lg bg-bg-muted p-3 text-sm text-text-secondary" data-held="">
-          <p className="font-medium text-text-primary">{heldLine(money.held, held?.until ?? null)}</p>
+          <p className="font-medium text-text-primary">{heldLine(money.held, parts ? null : held?.until ?? null)}</p>
+          {parts ? <p data-held-parts="" className="tabular-nums text-text-primary">{parts}</p> : null}
           <p>{HELD_EXPLAINER}</p>
         </div>
       ) : null}

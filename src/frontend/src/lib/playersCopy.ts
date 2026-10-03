@@ -852,8 +852,12 @@ export const INVITES_COPY = {
   players: "Players",
   yourShare: "Your share",
   toPayNow: "To pay now",
-  spendable: "Available to spend",
   balanceAfter: "Balance after",
+  /** R9 J9-2 — the Book sheet's words: with nothing held the figures ARE the balance. */
+  balanceNow: "Balance now",
+  /** With anything held for or owed back to partners, the figures are what may be SPENT (J9-2). */
+  availableNow: "Available now",
+  availableAfter: "Available after",
   heldHint: "Why some isn't spendable",
   capCounts: "This game counts toward your own daily limit on court.",
   decline: "Decline",

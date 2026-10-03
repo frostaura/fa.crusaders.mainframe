@@ -180,8 +180,8 @@ describe("the accept sheet", () => {
     expect(sheet).toHaveTextContent("Sam");
     expect(within(sheet).getByText(INVITES_COPY.yourShare).nextSibling).toHaveTextContent("25 minutes");
     // Spendable (100), not the raw balance (120): 100 − 25 = 75.
-    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("1 hour 40 minutes");
-    expect(within(sheet).getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("1 hour 15 minutes");
+    expect(within(sheet).getByText(INVITES_COPY.availableNow).nextSibling).toHaveTextContent("1 hour 40 minutes");
+    expect(within(sheet).getByText(INVITES_COPY.availableAfter).nextSibling).toHaveTextContent("1 hour 15 minutes");
     expect(sheet).toHaveTextContent("20 minutes held");
     expect(sheet).toHaveTextContent(/held until 48 hours after each game/);
     expect(sheet).toHaveTextContent(/lapses to Sam — no debt either way/);
@@ -247,7 +247,7 @@ describe("the accept sheet", () => {
     openInvites({ invites: [invite({ balance_minutes: 10, held_minutes: 0, owed_back_minutes: 16, spendable_minutes: -6, to_pay_minutes: 25 })] });
     const sheet = await openSheet();
     // −6 to spend and 25 to pay: 31 short, and the sheet's figures agree with each other.
-    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("−6 min");
+    expect(within(sheet).getByText(INVITES_COPY.availableNow).nextSibling).toHaveTextContent("−6 min");
     const accept = within(sheet).getByRole("button", { name: acceptLabel(25) });
     expect(accept).toHaveAccessibleDescription(new RegExp(shortByLine(31).replace(/\./g, "\\.")));
     const owed = sheet.querySelector("[data-owed-back]");
@@ -294,7 +294,6 @@ describe("the accept sheet", () => {
     const sheet = await openSheet();
     expect(sheet.querySelector("[data-deadline]")).toBeNull();
     expect(sheet).not.toHaveTextContent(/lapses/);
-    expect(INVITES_COPY.spendable).toBe("Available to spend");
   });
 
   it("an accepted seat asked again reads what is still to pay", async () => {

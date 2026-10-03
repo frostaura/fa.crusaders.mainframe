@@ -71,7 +71,8 @@ test("the Bookings badge leads to Invites, and an accept ends in a calm confirma
   await page.getByRole("button", { name: /Sam invited you to play/ }).click();
   const sheet = await answerSurface(page);
   await expect(sheet).toBeVisible();
-  await expect(sheet.getByText("Balance after")).toBeVisible();
+  // R9 J9-2 — 20 minutes are held in the fixture: the figure is what may be spent after.
+  await expect(sheet.getByText("Available after")).toBeVisible();
   await sheet.getByRole("button", { name: "Accept and pay 25 min" }).click();
 
   await expect(sheet.getByText("You're in", { exact: true })).toBeVisible();
