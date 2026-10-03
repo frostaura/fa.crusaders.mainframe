@@ -418,11 +418,13 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    `code_step` to `codes:m1` devices. Phones still show legacy codes. Dean can pilot v1 on his own
    phone: v1 tokens are accepted online everywhere, even from un-flashed boards, because a board
    passes scanned bytes through unchanged.
-2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.3 —
+2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.4 —
    2.2.0 shows pay-for amounts in minutes, §9.3, 2.2.1 shows the member who rescans the code
    that just lit their own court its ON screen rather than `CODE USED`, 2.2.2 does the same
    on a court the box lit online for them, §6.5, and 2.2.3 arms nothing for a used code and
-   forgets its scan, §4.4, and waits on `ONE MOMENT / Checking code` while it asks) and each
+   forgets its scan, §4.4, and waits on `ONE MOMENT / Checking code` while it asks, and 2.2.4
+   keeps the scan through a walk-up refusal the member can fix by choosing less time, forgetting
+   it only for a used or unknown code, and reads a used code at pay-for as `CODE USED`, §9.3) and each
    ESP32 door (1.1.0) — the physical USB
    step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
@@ -448,8 +450,8 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
   **1 ON 2 ON 3 ON 4 ON 5–8 OFF**. (`make flash-bridge` is the PlatformIO equivalent.)
 - **Each door (ESP32)**: Arduino IDE, sketch `src/iot/door-gate/arduino/door_gate/`, board
   `esp32:esp32:esp32` (core 2.0.17), its own `secrets.h`; USB, upload.
-- **Proof it landed**: the Devices page shows firmware **2.2.3** for the box (a box still on
-  2.1.0, 2.2.0, 2.2.1 or 2.2.2 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
+- **Proof it landed**: the Devices page shows firmware **2.2.4** for the box (a box still on
+  2.1.0, 2.2.0, 2.2.1, 2.2.2 or 2.2.3 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
   `codes:m1`. The Mega stays **2.0.0**: the bridge is the only half of the box that is flashed.
 
 ---

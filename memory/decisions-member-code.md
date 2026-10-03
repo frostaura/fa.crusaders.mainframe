@@ -7,8 +7,7 @@ last_verified: 2026-10-03
 
 # Live decisions — the single rotating member code, in firmware and contract
 
-Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membercode/` (from
-`src/iot/tools/membercode_vectors.py`, checked by `make corpus-check`).
+Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membercode/` (generated).
 
 - **Token = `1` + REF(4 Crockford) + ON(8) + OFF(6) = 19 characters.** *Why:* it fits every limit
   the Mega already enforces (`!SCAN` 24, roster cap 20), so the Mega is not reflashed; every
@@ -50,11 +49,12 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   this box lit ONLINE for that REF (`OnlineGrants`) — a walk-up/pay-for buyer is on no roster yet.
   2.2.3 (R8): only no_booking, wrong_court, too_early, insufficient_balance, not_chargeable and
   ended arm; `code_used`, not_recognised and an unknown reason arm nothing (fail closed) and the
-  scan is FORGOTTEN, as on a pay-for/walk-up refusal of the code. Activation waits on `ONE MOMENT
-  / Checking code` (D8-2); a grant is remembered only if its `!ON` left, dropped on retry give-up.
-- **Versions: bridge 2.2.3, Mega stays 2.0.0, door 1.1.0.** The bridge unflags `[common]`'s MINOR
-  and PATCH by `[common]`'s own tokens and sets its own; `[common]` stays byte-identical and the
-  Mega sketch does not move. The Devices page showing these numbers is how a flash is confirmed.
+  scan is FORGOTTEN. Activation waits on `ONE MOMENT / Checking code` (D8-2). **A walk-up or
+  pay-for forgets the scan ONLY for `code_used`/`not_recognised`** (2.2.4, D9-1, in bridgelogic's
+  `WalkUpResult::forgetsScan`) — never on `recognised`, false for every refusal made before the
+  token resolves (TOO LONG lost the scan); `code_used` reads `CODE USED` at pay-for too (D9-2).
+- **Versions: bridge 2.2.4, Mega 2.0.0 (never reflashed), door 1.1.0.** The bridge unflags
+  `[common]`'s MINOR/PATCH by its own tokens; the Devices page showing these confirms a flash.
 - **Owed, and nobody but Dean can do the first:** flash the ESP8266 bridge and each door ESP32
   (spec §8.1; the Mega is not touched); the PWA lane (enrol, WebCrypto, My Code). The backend
   half landed on `be/p7-code` — see `decisions-member-code-backend.md`. Nothing has run on hardware.

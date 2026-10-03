@@ -24,11 +24,13 @@ constexpr ReasonScreen kReasons[] = {
     {"own_booking", ScreenId::PayForNothingToPay},
     {"already_paid", ScreenId::PayForNothingToPay},
     {"insufficient_balance", ScreenId::InsufficientBalance},
-    // A code the server could not tie to a member, and a code that was already
-    // used for something the server acted on, send the member to the same
-    // place: a fresh code in the app.
+    // A code the server could not tie to a member: a fresh code in the app.
     {"not_recognised", ScreenId::NotRecognised},
-    {"code_used", ScreenId::NotRecognised},
+    // A code the server already acted on reads CODE USED / WAIT 30 SECONDS, the
+    // words the activation, the walk-up and the offline path paint for it. It
+    // read CODE NOT KNOWN here, about a code the server knew perfectly well —
+    // one situation, two screens (D9-2). Both refusals still forget the scan.
+    {"code_used", ScreenId::CodeUsed},
     {"ended", ScreenId::SlotEnded},
     {"price_changed", ScreenId::PayForPriceChanged},
 };

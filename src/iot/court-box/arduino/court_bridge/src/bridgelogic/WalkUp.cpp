@@ -47,7 +47,7 @@ constexpr ErrorLines kErrors[] = {
     // A replayed nonce whose purchase is over. The API grants a replay what is
     // LEFT of the purchase, and nothing once the window has ended (#20).
     {"purchase_ended", "PURCHASE ENDED", "SCAN TO START", true},
-    // Nobody the API knows. No window.
+    // Nobody the API knows. No window, and the scan is forgotten.
     {"not_recognised", "SEE THE DESK", "SCAN TO START", false},
     // A relay the heartbeat never mapped, or a court this box does not drive.
     {"court_not_on_device", "SEE THE DESK", "SCAN TO START", false},
@@ -60,9 +60,12 @@ constexpr ErrorLines kErrors[] = {
     // `recognised` is FALSE, and that is deliberate rather than an oversight.
     // The refusal comes out of `RefuseFields`, which runs BEFORE the API resolves
     // the token, so it is not a verdict about anybody — exactly like
-    // court_not_on_device beside it. Nothing on this path acts on the bit
-    // (AuthPolicy::afterWalkUp ignores a refusal), so the honest value costs
-    // nothing, and a `true` here would be a claim the API never made.
+    // court_not_on_device beside it. A `true` here would be a claim the API
+    // never made. NOR is it a verdict against the CODE, so it must not cost the
+    // member their scan: the walk-up forgets the scan only for `code_used` and
+    // `not_recognised` (WalkUpResult::forgetsScan), never on this bit. Bridge
+    // 2.2.3 keyed the forget on `recognised`, and the shorter press this screen
+    // asks for was dropped by the Mega until the member scanned again (D9-1).
     {"minutes_out_of_range", "TOO LONG", "TRY LESS TIME", false},
     // The API sold the court, could not open it, and UNDID the sale — the money is
     // back and the slot is released before this answer is written
@@ -79,7 +82,8 @@ constexpr ErrorLines kErrors[] = {
     {"activation_refused", "COULD NOT START", "SCAN TO RETRY", true},
     // A single rotating code the server already acted on (docs/specs/member-
     // code.md §4.4). The member's next code works; the same words the activate
-    // path and the offline path use. Not recognised: a used code may be a photo.
+    // path and the offline path use. Not recognised: a used code may be a photo,
+    // and the scan is forgotten.
     {"code_used", "CODE USED", "WAIT 30 SECONDS", false},
 };
 
@@ -148,6 +152,18 @@ court::Outcome refusal(uint16_t status, const char* body, size_t len) {
     }
   }
   return byStatus(status);
+}
+
+/// A refusal of the CODE itself: one the server already acted on, and one it
+/// cannot tie to a member. The same two pay-for forgets the scan on
+/// (PayFor.cpp, spendsTheScan) — one rule, whichever button asked. Keyed on the
+/// body's `error` and on nothing else: `recognised` is false for every refusal
+/// the API makes BEFORE it resolves the token, and those say nothing against
+/// the code (D9-1).
+bool refusesTheCode(const char* body, size_t len) {
+  char error[32] = {};
+  return devapi::json::topLevelStringField(body, len, "error", error, sizeof(error)) &&
+         (strcmp(error, "code_used") == 0 || strcmp(error, "not_recognised") == 0);
 }
 
 bool undecided(uint16_t status) {
@@ -239,6 +255,7 @@ WalkUpResult onWalkUpResponse(uint16_t status, const char* body, size_t len, uin
   // stays usable for another attempt. No connection and a server fault say
   // nothing about who scanned, and neither does a status on its own.
   result.outcome = refusal(status, body, len);
+  result.forgetsScan = result.decided && refusesTheCode(body, len);
   return result;
 }
 

@@ -142,7 +142,10 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.3 and Mega 2.0.0**: 2.2.3
+`platformio.ini`. The current images are **bridge 2.2.4 and Mega 2.0.0**: 2.2.4
+keeps a walk-up's scan through a refusal the member can fix by choosing less
+time (`TOO LONG / TRY LESS TIME`), forgetting it only for a used or unknown
+code, and reads a used code at pay-for as `CODE USED`; 2.2.3
 arms nothing for a code the server already acted on (`code_used`), a code
 nobody owns or a refusal it cannot name, and forgets that scan, so a photo of
 the code that just lit somebody's court cannot buy a walk-up or a pay-for on

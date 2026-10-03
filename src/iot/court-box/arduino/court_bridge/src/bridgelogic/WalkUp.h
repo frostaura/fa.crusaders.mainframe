@@ -110,6 +110,19 @@ struct WalkUpResult {
   bool decided = false;
   /// What to paint and, on a grant, which relay to drive for how long.
   court::Outcome outcome;
+  /// A decided refusal of the CODE itself — `code_used` or `not_recognised`,
+  /// the same two pay-for's PayForAnswer::spendsScan names. The caller forgets
+  /// the scan and closes the button window: the code buys nothing more here,
+  /// and a used code may be a photo (D8-1).
+  ///
+  /// EVERY OTHER refusal keeps the scan, `recognised` or not. `recognised`
+  /// says the API identified the member; it is false for every refusal made
+  /// BEFORE the token resolved — minutes_out_of_range, court_not_on_device, a
+  /// bare 402/409 — and those say nothing against the code. Keying the forget
+  /// on that bit (bridge 2.2.3) made TOO LONG / TRY LESS TIME a dead end: the
+  /// scan was gone, the Mega dropped the shorter press it told the member to
+  /// make, and they had to scan again (D9-1).
+  bool forgetsScan = false;
 };
 
 /// Interprets the walk-up response for the relay the member pressed.

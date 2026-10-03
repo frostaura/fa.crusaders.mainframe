@@ -210,9 +210,17 @@ enum class ScreenId : uint8_t {
   /// just scanned. Its own words, because the walk-up's "Buying your time" is
   /// false for a booked member and frightening for one with no booking.
   CheckingCode,
+
+  // --- review round 9 (D9-2). APPENDED, for the same reason. ---------------
+
+  /// A pay-for refused with `code_used`: the code the member scanned was
+  /// already acted on. The SAME words the activation and the walk-up paint for
+  /// it — one situation, one screen — where pay-for used to say CODE NOT KNOWN
+  /// about a code the server knew perfectly well.
+  CodeUsed,
 };
 
-inline constexpr uint8_t kScreenCount = 31U;
+inline constexpr uint8_t kScreenCount = 32U;
 
 /// What the glass shows while `/activate` is asked about a scan.
 inline constexpr ScreenId kActivateWaitScreen = ScreenId::CheckingCode;
