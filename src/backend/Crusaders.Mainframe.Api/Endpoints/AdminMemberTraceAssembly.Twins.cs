@@ -20,7 +20,7 @@ public static partial class AdminMemberTraceAssembly
     /// ones the settlement declined to stamp (too early, after a cancel), because the lights did
     /// come on and the night is the record of what happened, not of what was charged.
     /// </summary>
-    private static readonly string[] RefusedReceiptOutcomes = ["wrong_court", "unresolved", "unpaired"];
+    private static readonly string[] RefusedReceiptOutcomes = DeviceEventReceipt.RefusedOutcomes;
 
     /// <summary>A receipt and its server-written lights row are the same event when their instants agree to this.</summary>
     private static readonly TimeSpan TwinTolerance = TimeSpan.FromSeconds(1);

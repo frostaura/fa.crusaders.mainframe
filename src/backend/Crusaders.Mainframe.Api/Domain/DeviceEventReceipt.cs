@@ -102,5 +102,14 @@ public sealed class DeviceEventReceipt : ITenantScoped
     /// </summary>
     public string? Outcome { get; set; }
 
+    /// <summary>
+    /// <see cref="Outcome"/>s that are NOT evidence of the receipt's booking's court being lit or
+    /// measured: a relay wired to another court, a booking whose court is gone, a release the server
+    /// could not pair. The member's night leaves them out (E7-1), and a release never pairs with one
+    /// (review round 8, D8-4) — a refused receipt keeps its booking on the row (the legacy path), and
+    /// paired it settled that booking's court from a relay this box never lit for it.
+    /// </summary>
+    public static readonly string[] RefusedOutcomes = ["wrong_court", "unresolved", "unpaired"];
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

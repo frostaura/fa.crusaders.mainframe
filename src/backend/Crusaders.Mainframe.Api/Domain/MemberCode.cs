@@ -90,6 +90,17 @@ public static class MemberCodeUseClass
     public const string Door = "door";
     public const string Court = "court";
     public const string Money = "money";
+
+    /// <summary>
+    /// A code with a use in either of these has been ACTED ON for something the member pays for
+    /// (review round 8, D8-1), and two things follow. Money refuses it — a walk-up, a pay-for quote
+    /// and its confirm — even though the money class itself is unspent: the use table is per class,
+    /// and a photo of the code that had just lit a court bought on that member's minutes. And an
+    /// activation's booking refusal (no booking here, wrong court) becomes <c>code_used</c>, the one
+    /// refusal the box arms no buttons for. The door is not here: a member who opens the front door
+    /// and lights or buys a court inside one step is doing two different things (§4.4).
+    /// </summary>
+    public static readonly string[] CourtOrMoney = [Court, Money];
 }
 
 /// <summary>

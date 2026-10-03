@@ -48,6 +48,37 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(0, night.GetProperty("summary").GetProperty("minutes_on_court").GetInt32());
         }
 
+        /// <summary>
+        /// Review round 8, D8-4. A release names no session, so it is paired with the last
+        /// activation receipt on its relay — and a REFUSED receipt (a relay wired to another court:
+        /// the legacy path keeps its booking on the row) is no lighting of that booking. Paired, it
+        /// settled the member's court from a relay this box never lit for them, and the night said
+        /// the lights went off with no lighting before it.
+        /// </summary>
+        [SkippableFact]
+        public async Task A_release_never_pairs_with_a_refused_activation_receipt()
+        {
+            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+            var factory = CreateFactory();
+            var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+            var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: -2);
+            var client = factory.CreateClient();
+
+            // Relay 0 is court 1: the activation is refused as wrong_court. Five minutes later the
+            // relay opens — the release reconciles with that receipt to the second.
+            (await client.SendAsync(FromBox(box, EventsPath, Batch(
+                Activation(1, subject: booked.Code, court: 0, uptimeMs: 200_000))))).EnsureSuccessStatusCode();
+            Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_wrong_court"));
+            (await client.SendAsync(FromBox(box, EventsPath, Batch(
+                Release(2, court: 0, heldMs: 300_000, uptimeMs: 500_000))))).EnsureSuccessStatusCode();
+
+            Assert.Single(await AuditAsync(factory, box.TenantId, "device.release_unpaired"));
+            var night = await NightAsync(factory, box);
+            Assert.DoesNotContain(night.GetProperty("events").EnumerateArray(),
+                e => e.GetProperty("kind").GetString() == TraceKinds.LightsOff);
+        }
+
         /// <summary>The admin's view of the box member's night, through the real route.</summary>
         private static async Task<JsonElement> NightAsync(TestWebAppFactory factory, Box box)
         {

@@ -1067,7 +1067,8 @@ public static class DeviceEventEndpoints
     /// <para>
     /// The release names nothing, so it is paired by <b>device, relay and time</b> against
     /// the last activation receipt for the same relay — which is why the receipt now carries
-    /// the relay index and the booking the activation resolved to. A pairing that does not
+    /// the relay index and the booking the activation resolved to — that the server did not
+    /// refuse (<see cref="DeviceEventReceipt.RefusedOutcomes"/>, review round 8 D8-4). A pairing that does not
     /// reconcile within <see cref="ReleasePairingTolerance"/> is audited
     /// <c>device.release_unpaired</c> and corrects nothing.
     /// </para>
@@ -1083,6 +1084,7 @@ public static class DeviceEventEndpoints
                         && r.Kind == ActivationKind
                         && r.Court == relay
                         && r.BookingId != null
+                        && (r.Outcome == null || !DeviceEventReceipt.RefusedOutcomes.Contains(r.Outcome))
                         && r.OccurredAt <= occurredAt)
             .OrderByDescending(r => r.OccurredAt)
             .FirstOrDefaultAsync(ct);
@@ -1645,9 +1647,18 @@ public static class DeviceEventEndpoints
         // `code_used`; and keyed by that nonce, so two identical retries IN FLIGHT together (both
         // past the replay check before either committed) re-enter one claim instead of one of
         // them reading CODE USED for a purchase that went through.
+        //
+        // A code that has already lit a court at this step buys nothing either (review round 8,
+        // D8-1): the use table is per class, and a photo of the code that just lit somebody's court
+        // read an untouched money class and bought a walk-up on their minutes. Read before the
+        // claim, which re-enters only its own nonce's money row — a walk-up claims no court use.
         MemberCodeClaim? claim = null;
         if (match is not null)
         {
+            if (await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.Court, ct))
+            {
+                return Results.Conflict(new { error = MemberCodeIdentity.CodeUsed });
+            }
             claim = await services.MemberCodes.TryClaimAsync(
                 match, MemberCodeUseClass.Money, device.Id, "walkup", ct, claimKey: "walkup:" + req.Nonce);
             if (claim is null) return Results.Conflict(new { error = MemberCodeIdentity.CodeUsed });

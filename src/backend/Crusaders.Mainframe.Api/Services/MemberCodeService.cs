@@ -411,6 +411,11 @@ public sealed class MemberCodeService
         _db.MemberCodeUses.AsNoTracking()
             .AnyAsync(u => u.Ref == match.RefValue && u.Step == match.Step && u.UseClass == useClass, ct);
 
+    /// <summary>Whether this code has already been acted on in ANY of <paramref name="useClasses"/>.</summary>
+    public Task<bool> IsUsedAsync(MemberCodeMatch match, IReadOnlyCollection<string> useClasses, CancellationToken ct) =>
+        _db.MemberCodeUses.AsNoTracking()
+            .AnyAsync(u => u.Ref == match.RefValue && u.Step == match.Step && useClasses.Contains(u.UseClass), ct);
+
     /// <summary>
     /// Claims one acting use, or answers null when it is already taken — <c>code_used</c>.
     ///

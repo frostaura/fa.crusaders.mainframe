@@ -96,17 +96,20 @@ public static class DeviceActivateEndpoint
         // standing at the court.
         if (await MembershipAccess.IsBarredFromCourtsAsync(services.Db, resolved.UserId, ct))
         {
-            return Refused("no_booking", display: display);
+            return await BookingRefusalAsync(new Found(null, null, "no_booking"), match, display, services, ct);
         }
 
         // A court named in the request narrows the search, and must be one of this box's.
-        if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed)) return Refused("wrong_court", display: display);
+        if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed))
+        {
+            return await BookingRefusalAsync(new Found(null, null, "wrong_court"), match, display, services, ct);
+        }
 
         var found = resolved.Purpose == AccessCodePurpose.BookingActivation
             ? await ForBookingCodeAsync(device, req, resolved, services, now, ct)
             : await ForIdentCodeAsync(device, req, resolved, services, now, ct);
 
-        if (found.Reason is not null) return Refused(found.Reason, found.Court, display);
+        if (found.Reason is not null) return await BookingRefusalAsync(found, match, display, services, ct);
 
         // One acting use per code per class (§4.4): claimed before the court is lit, given back
         // below if it is not. A used code is a DECISION — `code_used` — never a second opinion.
@@ -149,6 +152,24 @@ public static class DeviceActivateEndpoint
     }
 
     private sealed record Found(Booking? Booking, Court? Court, string? Reason);
+
+    /// <summary>
+    /// A refusal decided before the use table — no booking here, wrong court, ended — or
+    /// <c>code_used</c> when the v1 code has already been acted on for a court or for money (review
+    /// round 8, D8-1). The box arms its buttons for a booking refusal, so that a member with no
+    /// booking can buy; for a photo of a code that lit a court at another box, or bought something,
+    /// that window's only use was buying on the victim's minutes. <c>code_used</c> arms nothing.
+    /// </summary>
+    private static async Task<DeviceActivateResponse> BookingRefusalAsync(
+        Found found, MemberCodeMatch? match, string? display, DeviceActivateServices services, CancellationToken ct)
+    {
+        if (match is not null
+            && await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.CourtOrMoney, ct))
+        {
+            return Refused(MemberCodeIdentity.CodeUsed, found.Court, display);
+        }
+        return Refused(found.Reason!, found.Court, display);
+    }
 
     /// <summary>
     /// A booking-activation code names its booking; the only questions are whether that

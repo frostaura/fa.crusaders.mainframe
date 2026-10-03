@@ -189,7 +189,10 @@ public static class DevicePayForEndpoint
         if (resolved is not { Purpose: AccessCodePurpose.MemberIdent }) return new Judgement(NotRecognised);
         var payer = resolved.UserId;
 
-        if (match is not null && await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.Money, ct))
+        // Money AND court (review round 8, D8-1): a photo of the code that just lit a court has an
+        // unspent money use, and paid for somebody else's court on the member whose court it lit.
+        // Checked on the quote and again on the confirm, which judges afresh.
+        if (match is not null && await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.CourtOrMoney, ct))
         {
             return new Judgement(MemberCodeIdentity.CodeUsed);
         }
