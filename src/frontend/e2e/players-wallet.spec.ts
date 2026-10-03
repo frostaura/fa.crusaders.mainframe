@@ -150,6 +150,6 @@ test.describe("P11: the club's ledger, filtered to shares", () => {
     await expect(page.getByRole("table", { name: "Club ledger" }).getByText("Share of a split booking").filter({ visible: true }).first()).toBeVisible();
     // The club's book never groups: both legs are rows, and they net to zero.
     await expect(page.getByRole("button", { name: /Shares for|Your share/ })).toHaveCount(0);
-    await expect(page.locator("[data-ledger-total]").last()).toHaveText(/^0 min/);
+    await expect(page.locator("[data-ledger-total]").last()).toHaveText(/^0\smin/); // \s: the unit is bound with a no-break space (R8 L8-7)
   });
 });

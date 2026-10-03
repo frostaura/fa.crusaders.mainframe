@@ -165,15 +165,15 @@ function Fact({ icon, term, wide, children }: { icon: ReactNode; term: string; w
   return (
     // dt and dd are the wrapper's DIRECT children (F3.22): a <dl> may group each pair in one
     // <div>, and nothing deeper — the icon lives inside the term, the value is indented under it.
-    // R8 L8-11 / L6-16: the icon is 1rem and the value hangs past it (the gutter is rem, so it
+    // R8 L8-11 / L6-16: the icon is 1rem and the value hangs past it (pl-6 = the 1rem icon + the gap-2 gutter, both rem, so it
     // grows with the icon) — until the text is large for the fact's box (a 14rem container query,
     // as the Alert primitive), when the gutter goes and the value takes the fact's whole width.
     <div className={cn("flex min-w-0 flex-col gap-0.5 [container-type:inline-size]", wide && "sm:col-span-2")}>
-      <dt className="flex items-center gap-2.5 text-xs font-medium uppercase tracking-overline text-text-muted">
+      <dt className="flex items-center gap-2 text-xs font-medium uppercase tracking-overline text-text-muted">
         <span className="shrink-0">{icon}</span>
         {term}
       </dt>
-      <dd className="break-words pl-[1.625rem] text-text-secondary [@container(max-width:14rem)]:pl-0">{children}</dd>
+      <dd className="break-words pl-6 text-text-secondary [@container(max-width:14rem)]:pl-0">{children}</dd>
     </div>
   );
 }
