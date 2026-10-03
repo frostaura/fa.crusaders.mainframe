@@ -26,7 +26,14 @@ export function AdminSeatMenu({ player, onAct, players }: Props) {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" icon={<ShieldCheck aria-hidden="true" />} aria-label={DETAIL_ADMIN.menu(seatName(player, players))}>
+        <Button
+          size="sm"
+          variant="outline"
+          icon={<ShieldCheck aria-hidden="true" />}
+          aria-label={DETAIL_ADMIN.menu(seatName(player, players))}
+          // R7 X7-1: where an act's dialog gives focus back (`AdminActDialog`).
+          data-admin-seat-menu={player.participant_id ?? ""}
+        >
           {DETAIL_ADMIN.title}
         </Button>
       </DropdownMenuTrigger>

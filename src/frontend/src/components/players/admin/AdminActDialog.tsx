@@ -15,6 +15,7 @@ import { useAsyncAction } from "@/lib/useAsyncAction";
 import { seatName, type AdminAct } from "../detail/detailModel";
 import { seatWriteOrProve } from "../detail/detailReadBack";
 import type { Notice } from "../detail/useOrganiserHands";
+import { useMenuReturnFocus } from "../../members/useMenuReturnFocus";
 import { ACTS, overdraftSentence } from "./adminActs";
 
 /**
@@ -83,12 +84,13 @@ export function AdminActDialog(props: Props) {
   const flow = useActFlow(props);
   const { spec, name, run } = flow;
   const overdraftAsk = refusalCode(run.error) === "overdraft_not_authorised";
+  const backToSeat = useMenuReturnFocus(() => seatMenuOf(props.player));
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !run.pending) props.onClose(); }}>
-      <DialogContent data-dialog={`admin-${props.act}`}>
+      <DialogContent data-dialog={`admin-${props.act}`} onCloseAutoFocus={backToSeat}>
         <DialogHeader>
           <DialogTitle>{spec.title(name)}</DialogTitle>
-          <DialogDescription>{`${spec.body} ${DETAIL_ADMIN.changeLog}`}</DialogDescription>
+          <DialogDescription>{`${actBody(props)} ${DETAIL_ADMIN.changeLog}`}</DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-4">
           <ReasonField flow={flow} />
@@ -104,6 +106,36 @@ export function AdminActDialog(props: Props) {
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * R7 J7-9 — the club's Remove names the money: what goes back to the player from whose balance,
+ * and how much the organiser's cost rises. The static sentence stands where a figure is missing.
+ */
+function actBody({ act, player, detail }: Props): string {
+  const spec = ACTS[act];
+  if (act !== "remove" || typeof player.paid_minutes !== "number" || typeof player.share_minutes !== "number") return spec.body;
+  return DETAIL_ADMIN.removeBodyFor({
+    paid: player.paid_minutes, share: player.share_minutes, organiser: firstName(detail.organiser.name),
+  });
+}
+
+/**
+ * R7 X7-1 — where focus goes when an act's dialog closes. It was opened from the seat's Admin menu,
+ * whose item unmounted with the menu, so the surface fell back to <main>: the seat's own Admin
+ * button, or — once a remove has taken the seat away — another seat's, or the page's heading.
+ */
+function seatMenuOf(player: DetailPlayer): HTMLElement | null {
+  const own = player.participant_id
+    ? document.querySelector<HTMLElement>(`[data-admin-seat-menu="${CSS.escape(player.participant_id)}"]`)
+    : null;
+  return own ?? document.querySelector<HTMLElement>("[data-admin-seat-menu]") ?? headingOfPage();
+}
+
+function headingOfPage(): HTMLElement | null {
+  const heading = document.querySelector<HTMLElement>("main h1");
+  if (heading && !heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+  return heading;
 }
 
 function ReasonField({ flow }: { flow: Flow }) {
