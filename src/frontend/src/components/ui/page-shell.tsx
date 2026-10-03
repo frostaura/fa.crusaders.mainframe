@@ -126,15 +126,23 @@ function BackLink({ to, label }: { to: string; label: string }) {
  * `sm` the freshness line stands between the title and the actions.
  * </p>
  */
+/**
+ * R7 L7-13 — the title steps DOWN when the text is large for the header's box: a rem query on the
+ * header (`@container/head`), so at 100 % a 320 phone (18rem) keeps the full size and at 200 % the
+ * same phone (9rem) takes a smaller one — "Notifications" painted "Notificatio / ns" there. Below
+ * 12rem it steps once more. `break-words` stays the last resort for one word wider than that.
+ */
+const TITLE_STEPS_DOWN = "[@container_head_(max-width:16rem)]:text-xl [@container_head_(max-width:12rem)]:text-lg";
+
 export function PageHeader(props: PageHeaderProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { title, description, eyebrow, back, actions, freshness, className } = props;
   return (
-    <header data-page-header="" className={cn("-mb-2 flex flex-col gap-2", className)}>
+    <header data-page-header="" className={cn("@container/head -mb-2 flex flex-col gap-2", className)}>
       {back ? <BackLink to={back.to} label={back.label} /> : null}
       {eyebrow ? <p className={typography({ variant: "overline" })}>{eyebrow}</p> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), "min-w-0 flex-[1_1_min-content] break-words")}>
+        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), TITLE_STEPS_DOWN, "min-w-0 flex-[1_1_min-content] break-words")}>
           {title}
         </h1>
         {freshness ? (

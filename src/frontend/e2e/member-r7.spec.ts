@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { bigText, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
 
 /**
@@ -122,5 +123,47 @@ test.describe("L7-12 — booking detail and How it works take the 120rem frame f
     await openMember(page, "/how-it-works", [], 1280, 800);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 20_000 });
     expect((await page.locator("[data-page-shell]").first().boundingBox())!.width).toBeLessThanOrEqual(1280);
+  });
+});
+
+/* ───────────────────────────── L7-13 — the page title at large text ───────────────────────────── */
+
+/** The words of the page's h1 that paint on more than one line — a word broken mid-word. */
+async function brokenWords(page: Page): Promise<string[]> {
+  return page.getByRole("heading", { level: 1 }).first().evaluate((h1) => {
+    const out: string[] = [];
+    const walker = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent ?? "";
+      const re = /\S+/g;
+      for (let m = re.exec(text); m; m = re.exec(text)) {
+        const range = document.createRange();
+        range.setStart(node, m.index);
+        range.setEnd(node, m.index + m[0].length);
+        const tops = new Set(Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+        if (tops.size > 1) out.push(m[0]);
+      }
+    }
+    return out;
+  });
+}
+
+test.describe("L7-13 — a page title steps down at large text rather than break a word", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("Notifications at 320 / 200 % paints whole (was \"Notificatio / ns\")", async ({ page }) => {
+    await openMember(page, "/inbox", [{ path: "/api/v1/me/notifications", body: { items: [], next_cursor: null, unread_count: 0 } }], 320, 700);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 20_000 });
+    await bigText(page);
+    await fontsReady(page);
+    expect(await brokenWords(page)).toEqual([]);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+
+  test("at 100 % a phone keeps the full title size", async ({ page }) => {
+    await openMember(page, "/inbox", [{ path: "/api/v1/me/notifications", body: { items: [], next_cursor: null, unread_count: 0 } }], 320, 700);
+    const h1 = page.getByRole("heading", { level: 1 });
+    await expect(h1).toBeVisible({ timeout: 20_000 });
+    expect(await h1.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(24);
   });
 });
