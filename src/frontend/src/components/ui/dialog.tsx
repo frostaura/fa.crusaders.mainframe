@@ -470,12 +470,17 @@ function useHeaderCut(ref: React.RefObject<HTMLElement | null>): { cut: boolean;
   return state;
 }
 
-/** The part that scrolls when the content is taller than the screen; header and footer stay put. */
+/**
+ * The part that scrolls when the content is taller than the screen; header and footer stay put.
+ * Its rows never shrink (R11 L11-2): callers make it a flex column, and a column child's
+ * `min-height` floor (a Button's `min-h-touch`) replaces `min-height: auto`, so a two-line label
+ * was squeezed to 44 px and spilled — the body scrolls instead.
+ */
 function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-body"
-      className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain py-2", SHEET_GUTTER, className)}
+      className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain py-2 [&>*]:shrink-0", SHEET_GUTTER, className)}
       {...props}
     />
   );

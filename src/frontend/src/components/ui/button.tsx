@@ -57,6 +57,19 @@ export type ButtonProps = ComponentProps<"button"> &
  */
 const LAYER = "col-start-1 row-start-1 inline-flex items-center justify-center gap-2";
 
+/**
+ * A label's figure glued to the word after it with a no-break space (R11): a button now wraps, and
+ * "Book · 15 / minutes" splits a number from its unit. Only a plain-text label is touched, and a
+ * glued one keeps its plain spelling as the accessible name — the name a reader hears (and every
+ * test asks for) does not change because the paint learned to keep two words together.
+ */
+function glueFigures(children: ReactNode, props: ComponentProps<"button">): { label: ReactNode; name?: string } {
+  if (typeof children !== "string") return { label: children };
+  const label = children.replace(/(\d) (?=\p{L})/gu, "$1\u00a0");
+  const named = props["aria-label"] !== undefined || props["aria-labelledby"] !== undefined;
+  return { label, name: label === children || named ? undefined : children };
+}
+
 function PendingLayer({ pending, children }: Pick<ButtonProps, "pending" | "children">) {
   const text = typeof children === "string" || typeof children === "number" ? String(children) : null;
   return (
@@ -101,16 +114,18 @@ export function Button(allProps: ButtonProps) {
     }
     onClick?.(event);
   };
+  const glued = glueFigures(children, props);
   return (
     <button
       data-slot="button"
       className={classes}
+      aria-label={glued.name}
       {...props}
       aria-busy={pending || undefined}
       aria-disabled={pending || ariaDisabled || undefined}
       onClick={handleClick}
     >
-      <ButtonContent pending={pending} icon={icon}>{children}</ButtonContent>
+      <ButtonContent pending={pending} icon={icon}>{glued.label}</ButtonContent>
     </button>
   );
 }

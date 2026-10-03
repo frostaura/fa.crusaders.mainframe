@@ -3,7 +3,10 @@ import { cva } from "class-variance-authority";
 /** The design-system button's look (see `button.tsx` for the reasoning behind each size and variant). */
 export const buttonVariants = cva(
   [
-    "relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap text-center",
+    // No `whitespace-nowrap` (R11): a label wraps — balanced, centred, a word kept whole — rather than
+    // run past its container; `white-space` is inherited, so a deliberately nowrap row (a table head)
+    // still keeps its buttons on one line.
+    "relative inline-flex max-w-full select-none items-center justify-center gap-2 text-balance text-center [overflow-wrap:break-word]",
     "rounded-lg border border-transparent font-semibold",
     "transition-colors duration-fast ease-standard motion-reduce:transition-none",
     "disabled:pointer-events-none disabled:opacity-50 aria-busy:cursor-progress",
