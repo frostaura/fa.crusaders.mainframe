@@ -13,6 +13,8 @@ import { LedgerTable } from "../components/LedgerTable";
 import type { ShareBookings } from "../components/wallet/useShareBookings";
 import { useWalletLedger } from "../components/wallet/useWalletLedger";
 import { StaleNotice } from "../components/shell/StaleNotice";
+import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
+import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { walletTone } from "../lib/balance";
 import { BUY_MINUTES_PATH } from "../lib/minutes";
 import { Minutes } from "../components/Minutes";
@@ -174,29 +176,32 @@ export default function WalletPage() {
       />
       <WalletNav />
       <StaleNotice stale={stale} readAt={readAt} offline={offline} />
-      {/* A failed read is never "no movements yet" — that tells a member their history is gone. */}
-      <StateBlock
-        loading={!loaded}
-        error={loaded ? null : error}
-        action="load your wallet"
-        onRetry={refresh}
-        skeleton={<WalletSkeleton />}
-        className="gap-8"
-      >
-        {loaded ? (
-          // R4 form factor (SPEC 3.4): from a 64rem page the balance is a sticky rail beside the
-          // ledger, first in reading order — the figure and Buy minutes together, not 800px apart.
-          // The rail carries the last 30 days under the figure (R5 M5-9) where it is a rail.
-          <WithAside placement="before" at="64rem" asideLabel={WALLET_LAYOUT.railLabel} aside={
-            <>
-              <BalanceCard balance={balance} painted={painted} held={held} topUp={wide} />
-              {wide ? <WalletMiniTotals offline={offline} /> : null}
-            </>
-          }>
-            <LedgerSection rows={rows} shareBookings={shareBookings} total={total} busy={busy} error={stale ? null : error} onOlder={() => void load(shown + PAGE_SIZE)} />
-          </WithAside>
-        ) : null}
-      </StateBlock>
+      {/* A failed read is never "no movements yet" — that tells a member their history is gone.
+          R8 X8-2 — and with no signal and nothing kept it is said as offline, not as red failure. */}
+      {!loaded && error !== null && offline ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.wallet} /> : (
+        <StateBlock
+          loading={!loaded}
+          error={loaded ? null : error}
+          action="load your wallet"
+          onRetry={refresh}
+          skeleton={<WalletSkeleton />}
+          className="gap-8"
+        >
+          {loaded ? (
+            // R4 form factor (SPEC 3.4): from a 64rem page the balance is a sticky rail beside the
+            // ledger, first in reading order — the figure and Buy minutes together, not 800px apart.
+            // The rail carries the last 30 days under the figure (R5 M5-9) where it is a rail.
+            <WithAside placement="before" at="64rem" asideLabel={WALLET_LAYOUT.railLabel} aside={
+              <>
+                <BalanceCard balance={balance} painted={painted} held={held} topUp={wide} />
+                {wide ? <WalletMiniTotals offline={offline} /> : null}
+              </>
+            }>
+              <LedgerSection rows={rows} shareBookings={shareBookings} total={total} busy={busy} error={stale ? null : error} onOlder={() => void load(shown + PAGE_SIZE)} />
+            </WithAside>
+          ) : null}
+        </StateBlock>
+      )}
       {loaded && !wide ? (
         // One verb, the bar's whole width: the figure it is about is the card just above.
         <ContextBar position="bottom" until="lg" label={WALLET_LAYOUT.actionsLabel}>

@@ -133,6 +133,13 @@ export function useWalletLedger() {
     firstRead.current = false;
   }, [load, live.balance]);
 
+  // R8 X8-2 — a visit that found no signal loads by itself when the phone finds one again.
+  useEffect(() => {
+    const again = () => { void load(WALLET_PAGE_SIZE); };
+    window.addEventListener("online", again);
+    return () => window.removeEventListener("online", again);
+  }, [load]);
+
   /*
     The figure the CARD is painting is what movement is measured against, not the stream's
     alone — see `useBalanceMovement`. `load` sets the rows and the figure in one batch, so by

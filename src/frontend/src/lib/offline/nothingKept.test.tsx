@@ -4,6 +4,7 @@ import { renderPage, signIn, signOut } from "@/test/harness";
 import InboxPage from "@/pages/Inbox";
 import WalletActivityPage from "@/pages/WalletActivity";
 import BuyMinutesPage from "@/pages/TopUp";
+import WalletPage from "@/pages/Wallet";
 import { BUY_COPY } from "@/lib/topUpShelf";
 import { minutesShelf } from "@/test/minutesFixtures";
 import { OFFLINE_COPY } from "./offlineCopy";
@@ -71,5 +72,43 @@ describe("offline with nothing kept (R6 X6-4)", () => {
     await act(async () => { window.dispatchEvent(new Event("online")); });
     expect(await screen.findByRole("radio", { name: "5 hours" }, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByText(OFFLINE_COPY.buyNeedsConnection, { exact: false })).toBeNull();
+  });
+
+  it("R8 X8-2 — Wallet says it is offline and what is missing, never red, and loads once the signal is back", async () => {
+    offlinePhone();
+    renderPage(<WalletPage />, { initialEntries: ["/wallet"] });
+    expect(screen.getByRole("heading", { level: 1, name: "Wallet" })).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COPY.nothingKept.wallet, { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be reached|couldn't load/i)).toBeNull();
+
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const body = url.includes("/whoami") ? { is_authenticated: true, is_admin: false, user_id: ANA, tenant_id: "t", tenant_slug: "crusaders" }
+        : { balance_minutes: 90, entries: [], total_entries: 0, offset: 0, limit: 100 };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    await act(async () => { window.dispatchEvent(new Event("online")); });
+    expect(await screen.findByText("No movements yet", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText(OFFLINE_COPY.nothingKept.wallet, { exact: false })).toBeNull();
+  });
+
+  it("R8 X8-2 / X7-3 — Wi-Fi without internet (onLine true, the read fails to connect) is said as offline too", async () => {
+    offlinePhone();
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    renderPage(<WalletPage />, { initialEntries: ["/wallet"] });
+    expect(await screen.findByText(OFFLINE_COPY.nothingKept.wallet, { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be reached|couldn't load/i)).toBeNull();
+  });
+
+  it("R8 X7-3 rest — Inbox and Wallet activity say offline on a failed connection even when onLine says true", async () => {
+    offlinePhone();
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    const inbox = renderPage(<InboxPage />, { initialEntries: ["/inbox"] });
+    expect(await screen.findByText(OFFLINE_COPY.nothingKept.inbox, { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    inbox.unmount();
+    renderPage(<WalletActivityPage />, { initialEntries: ["/wallet/activity"] });
+    expect(await screen.findByText(OFFLINE_COPY.nothingKept.activity, { exact: false }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be reached/i)).toBeNull();
   });
 });
