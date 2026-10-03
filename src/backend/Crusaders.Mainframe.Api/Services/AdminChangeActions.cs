@@ -295,7 +295,7 @@ public static class AdminChangeActions
             PackageSold => $"Sold a member a package{of}",
             PackageCreated => $"Created a minutes package{of}",
             PackageUpdated => $"Changed a minutes package{of}",
-            PackageArchived => $"Archived a minutes package{of}",
+            PackageArchived => $"Retired a minutes package{of}",   // R9 J9-7: the console's word
 
             GroupCreated => $"Created a member group{of}",
             GroupUpdated => $"Changed a member group{of}",

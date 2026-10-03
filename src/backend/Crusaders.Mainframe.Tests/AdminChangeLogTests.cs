@@ -95,6 +95,13 @@ public sealed class AdminChangeLogTests
     /// stops the same defect arriving from inside.
     /// </para>
     /// </summary>
+    /// <summary>Review round 9, J9-7: the console calls it Retire, so the record does too — not "Archived".</summary>
+    [Fact]
+    public void A_retired_package_is_recorded_as_retired()
+    {
+        Assert.Equal("Retired a minutes package — 5 hours", AdminChangeActions.Headline(AdminChangeActions.PackageArchived, "5 hours"));
+    }
+
     [Fact]
     public void An_unknown_action_gets_a_neutral_sentence_naming_it()
     {
