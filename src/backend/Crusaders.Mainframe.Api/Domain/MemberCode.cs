@@ -97,7 +97,9 @@ public static class MemberCodeUseClass
     /// and its confirm — even though the money class itself is unspent: the use table is per class,
     /// and a photo of the code that had just lit a court bought on that member's minutes. And an
     /// activation's booking refusal (no booking here, wrong court) becomes <c>code_used</c>, the one
-    /// refusal the box arms no buttons for. The door is not here: a member who opens the front door
+    /// refusal the box arms no buttons for. The rule runs the other way too: an activation that
+    /// WOULD light a court is <c>code_used</c> when the code holds a money use, because a photo of
+    /// the code that bought a walk-up at one box lit the member's booking at another. The door is not here: a member who opens the front door
     /// and lights or buys a court inside one step is doing two different things (§4.4).
     /// </summary>
     public static readonly string[] CourtOrMoney = [Court, Money];

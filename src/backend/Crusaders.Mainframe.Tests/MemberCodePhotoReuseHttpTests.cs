@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Crusaders.Mainframe.Api.Domain;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -122,5 +123,111 @@ public sealed class MemberCodePhotoReuseHttpTests(PostgresFixture pg) : IClassFi
         var door = club.Code(club.Pam, at: clock.Now, stepOffset: 1);
         Assert.True((await SendAsync(device, club.Gate(door))).Body.GetProperty("opened").GetBoolean());
         Assert.Equal("no_booking", Reason((await SendAsync(device, ActivateAt(club, boxTwo, door))).Body));
+    }
+
+    /// <summary>What a refused activation must have left untouched: the booking dark, the purse whole, no court use, no audit row.</summary>
+    private static async Task AssertNothingLitAsync(
+        MemberCodeClub club, WebApplicationFactory<Program> app, Booking booking, Guid member, int balance, int courtUses, int audits)
+    {
+        var stored = await club.ReadAsync(app, db => db.Bookings.IgnoreQueryFilters().AsNoTracking().FirstAsync(b => b.Id == booking.Id));
+        Assert.Null(stored.CheckedInAt);
+        Assert.Equal(balance, await club.BalanceAsync(app, member));
+        Assert.Equal(courtUses, await club.UsesAsync(app, MemberCodeUseClass.Court));
+        Assert.Equal(audits, await AuditsAsync(club, app));
+    }
+
+    private static Task<int> AuditsAsync(MemberCodeClub club, WebApplicationFactory<Program> app) =>
+        club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters().CountAsync(a => a.TenantId == club.TenantId));
+
+    /// <summary>
+    /// Review round 8, D8-1 — the other direction. The use table is per class, so a photo of the
+    /// code that had just BOUGHT a walk-up at box one still had an unspent court class, and lit the
+    /// member's own booking at box two. An activation that would light a court is now
+    /// <c>code_used</c> when the code holds a money use: nothing lit, nothing charged, and no audit
+    /// row, exactly as for any other <c>code_used</c> on this path.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_code_that_bought_a_walk_up_lights_nothing_at_another_box()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
+        var club = await MemberCodeClub.SeedAsync(app, "photo3");
+        var boxTwo = await SecondBoxAsync(club, app, 4);
+        var device = app.CreateClient();
+
+        // Pam buys a walk-up on court 3 at box one. Somebody photographed the code.
+        var photo = club.Code(club.Pam, at: clock.Now);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(device, club.WalkUp(photo, court: 3, nonce: "5555666677778888"))).Status);
+        Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Money));
+
+        // Her own booking on court 4, which only box two drives.
+        var hers = await club.BookAsync(app, club.Pam, courtIndex: 3, startsInMinutes: -5);
+        var balance = await club.BalanceAsync(app, club.Pam);
+        var courtUses = await club.UsesAsync(app, MemberCodeUseClass.Court);
+        var audits = await AuditsAsync(club, app);
+
+        var there = await SendAsync(device, ActivateAt(club, boxTwo, photo));
+        Assert.False(there.Body.GetProperty("activated").GetBoolean());
+        Assert.Equal("code_used", Reason(there.Body));
+        await AssertNothingLitAsync(club, app, hers, club.Pam, balance, courtUses, audits);
+
+        // Her next code lights it as it always did.
+        var next = club.Code(club.Pam, at: clock.Now, stepOffset: 1);
+        Assert.True((await SendAsync(device, ActivateAt(club, boxTwo, next))).Body.GetProperty("activated").GetBoolean());
+    }
+
+    /// <summary>The same for a code that paid for somebody else's court at box one.</summary>
+    [SkippableFact]
+    public async Task A_code_that_paid_for_a_court_lights_nothing_at_another_box()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
+        var club = await MemberCodeClub.SeedAsync(app, "photo4");
+        await club.BookAsync(app, club.Pam, courtIndex: 1, startsInMinutes: -10, checkedIn: true);  // Pam: court 2, payable
+        var boxTwo = await SecondBoxAsync(club, app, 4);
+        var device = app.CreateClient();
+
+        // Olga pays for Pam's court at box one.
+        var photo = club.Code(club.Olga, at: clock.Now);
+        var quote = await SendAsync(device, club.PayFor(photo, 2, "9999aaaabbbbcccc", confirm: false));
+        Assert.True(quote.Body.GetProperty("payable").GetBoolean());
+        var label = quote.Body.GetProperty("amount_label").GetString();
+        var paid = await SendAsync(device, club.PayFor(photo, 2, "9999aaaabbbbcccc", confirm: true, label: label));
+        Assert.True(paid.Body.GetProperty("paid").GetBoolean());
+
+        // Olga's own booking on court 4, at box two: the photo of the paying code lights nothing.
+        var hers = await club.BookAsync(app, club.Olga, courtIndex: 3, startsInMinutes: -5);
+        var balance = await club.BalanceAsync(app, club.Olga);
+        var courtUses = await club.UsesAsync(app, MemberCodeUseClass.Court);
+        var audits = await AuditsAsync(club, app);
+
+        var there = await SendAsync(device, ActivateAt(club, boxTwo, photo));
+        Assert.False(there.Body.GetProperty("activated").GetBoolean());
+        Assert.Equal("code_used", Reason(there.Body));
+        await AssertNothingLitAsync(club, app, hers, club.Olga, balance, courtUses, audits);
+    }
+
+    /// <summary>
+    /// The door is still another class: a front door opened on the code, then the member's own
+    /// court lit on it inside the same step (§4.4).
+    /// </summary>
+    [SkippableFact]
+    public async Task Front_door_then_court_on_one_code_still_lights_the_court()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
+        var club = await MemberCodeClub.SeedAsync(app, "photo5");
+        await club.BookAsync(app, club.Olga, courtIndex: 0, startsInMinutes: -5);
+        var device = app.CreateClient();
+
+        var code = club.Code(club.Olga, at: clock.Now);
+        Assert.True((await SendAsync(device, club.Gate(code))).Body.GetProperty("opened").GetBoolean());
+        Assert.True((await SendAsync(device, club.Activate(code))).Body.GetProperty("activated").GetBoolean());
     }
 }

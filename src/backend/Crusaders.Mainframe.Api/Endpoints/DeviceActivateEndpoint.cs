@@ -113,12 +113,8 @@ public static class DeviceActivateEndpoint
 
         // One acting use per code per class (§4.4): claimed before the court is lit, given back
         // below if it is not. A used code is a DECISION — `code_used` — never a second opinion.
-        MemberCodeClaim? claim = null;
-        if (match is not null)
-        {
-            claim = await services.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Court, device.Id, "activate", ct);
-            if (claim is null) return Refused(MemberCodeIdentity.CodeUsed, found.Court, display);
-        }
+        var (used, claim) = await ClaimCourtUseAsync(match, device, services, ct);
+        if (used) return Refused(MemberCodeIdentity.CodeUsed, found.Court, display);
 
         // Given back if the activation THROWS, too: a claim stranded by a 500 refused the member's
         // own code as `code_used` for the rest of its window, at a court that never lit.
@@ -152,6 +148,23 @@ public static class DeviceActivateEndpoint
     }
 
     private sealed record Found(Booking? Booking, Court? Court, string? Reason);
+
+    /// <summary>
+    /// The court use for a v1 code: <c>Used</c> when the code may not light a court, else the
+    /// claim (null for a legacy code, which has no use table). A code that has already BOUGHT
+    /// something at this step lights nothing (review round 8, D8-1, the other direction): its
+    /// court class is unspent, so a photo of the code that bought a walk-up or paid for a court at
+    /// one box lit the member's own booking at another. The mirror of money's court check; the
+    /// door is still another class.
+    /// </summary>
+    private static async Task<(bool Used, MemberCodeClaim? Claim)> ClaimCourtUseAsync(
+        MemberCodeMatch? match, Device device, DeviceActivateServices services, CancellationToken ct)
+    {
+        if (match is null) return (false, null);
+        if (await services.MemberCodes.IsUsedAsync(match, MemberCodeUseClass.Money, ct)) return (true, null);
+        var claim = await services.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Court, device.Id, "activate", ct);
+        return (claim is null, claim);
+    }
 
     /// <summary>
     /// A refusal decided before the use table — no booking here, wrong court, ended — or

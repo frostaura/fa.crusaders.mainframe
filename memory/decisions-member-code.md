@@ -30,10 +30,10 @@ Oracle: `docs/specs/member-code.md`; corpus `src/contracts/device-protocol/membe
   doubling to 30 min (`GuessGuard.h`). *Why:* a REF is public; unguarded, scanner-speed guessing
   opened a door in hours. Only `wrong_code` counts, so a keyless member cannot lock the door.
 - **Server use table is per (REF, step, class ∈ door/court/money)**; a used code arms no buttons.
-  *Why:* front door then court inside one step is two uses, not a replay or a forgery. **But money
-  refuses a code with a court use too, and an activation's no_booking/wrong_court of a code with a
-  court or money use is `code_used`** (R8 D8-1). *Why:* a photo of the code that just lit a court
-  had an unspent money class and bought a walk-up/pay-for on the victim (also via a second box).
+  *Why:* door then court in one step is two uses. **But court and money exclude each other** (R8
+  D8-1): a court use refuses money and turns no_booking/wrong_court into `code_used`; a money use
+  refuses a court. *Why:* per class, a photo of a code that lit a court bought on the victim, and
+  one that bought lit their booking at a second box.
 - **A device that loses its key entitlement is sent EMPTY `code_days`/`code_keys`, never an
   omission** — an absent key means "no member codes here" and keeps the old ring.
 - **D10 pay-for runs down three rows** — `CT2 BOOKED` / `PAY 45 MIN?` / `PRESS CT2 TO PAY`. *Why:*

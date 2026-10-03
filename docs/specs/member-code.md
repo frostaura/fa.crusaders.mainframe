@@ -227,8 +227,16 @@ walk-up, a pay-for quote and a pay-for confirm are therefore `code_used` when th
 step)` holds a `court` **or** a `money` use; and an activation whose answer would be a booking
 refusal — `no_booking`, `wrong_court` — is `code_used` instead when the code holds either, because
 the box arms its buttons for those two and the photo, shown at a second box, would arrive as a
-known member with nothing booked. The door class is in neither rule: front door then a court
-inside one step is still two things. The member's next code, thirty seconds on, is unaffected.
+known member with nothing booked. **And the other way round:** an activation that would light a
+court is `code_used` when the same `(ref, step)` holds a `money` use — the court class of a code
+that bought a walk-up or paid for a court is unspent, so a photo of it, shown at a second box,
+lit the member's own booking there. Same answer as any `code_used` on `/activate`: nothing lit,
+nothing charged, no use row, no audit row. So, stated both ways: a code with a court use buys
+nothing, and a code with a money use lights nothing. The member's own re-scans at the box that
+acted are unaffected because they never reach this rule — the box refuses or answers a known
+replay itself (§6.5: `ALREADY LIT` on the member's own court). The door class is in no rule:
+front door then a court, or front door then a purchase, inside one step is still two things.
+The member's next code, thirty seconds on, is unaffected.
 
 ---
 
