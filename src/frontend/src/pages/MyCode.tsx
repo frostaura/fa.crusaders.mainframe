@@ -170,6 +170,10 @@ export default function MyCodePage() {
   const code = view.code ? ONE_CODE : null;
   const codeSecondsLeft = view.code ? Math.ceil(view.remainingMs / 1000) : 0;
   const whatsNext = <WhatsNextCard booking={facts.door?.next_booking} timezone={facts.door?.timezone} doors={facts.doorsKnowledge} />;
+  // Where "what happens next" stands, and the rest's columns — one decision, from one measure.
+  const placed = threeColumns
+    ? { inRest: null, inSide: whatsNext, columns: REST_COLUMNS_FULL }
+    : { inRest: whatsNext, inSide: null, columns: REST_COLUMNS };
 
   return (
     // R3-29: the pinned decision line is `position: fixed` at the foot of a phone, so the page
@@ -201,20 +205,20 @@ export default function MyCodePage() {
           )}
         </div>
 
-        <div data-my-code-rest="" className={cn(REST, threeColumns ? REST_COLUMNS_FULL : REST_COLUMNS)}>
+        <div data-my-code-rest="" className={cn(REST, placed.columns)}>
           <div className={COLUMN}>
             {/* Setup leads the rest (Dean, R5): a to-do list is read first or not at all, and it
                 is dismissable (its ×), so it costs a finished member nothing. */}
             {view.signedOut ? null : <SetupChecklist />}
             <p className="text-sm text-text-secondary">{codeUseLine(facts.doorsClub)}</p>
-            {threeColumns ? null : whatsNext}
+            {placed.inRest}
             <Link to={GUIDE_PATH} className={MEMBER_DOOR_LINK_TAPPABLE}>{GUIDE_FROM_CODE}</Link>
             <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
           </div>
           <div data-my-code-side="" className={COLUMN}>
             {/* Beside the pass only: on a phone the chip in the bar already carries the balance. */}
             {view.signedOut ? null : <div className="hidden @[60rem]/page:block"><WalletGlance /></div>}
-            {threeColumns ? whatsNext : null}
+            {placed.inSide}
             <DoorFooter doorsKnowledge={facts.doorsKnowledge} contact={facts.contact} />
           </div>
         </div>

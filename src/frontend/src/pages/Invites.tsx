@@ -76,7 +76,7 @@ export default function InvitesPage() {
           back={{ label: SPLIT_PANE_COPY.backToInvites, onBack: picked.unpick }}
           pickedKey={picked.shown?.participant_id ?? null}
           announce={announceOf(picked.shown)}
-          list={<InviteList items={items} pending={pending} wide={wide} picked={picked} openSheet={sheet.openFor} docked={Boolean(only) && !wide} />}
+          list={<InviteList items={items} pending={pending} wide={wide} picked={picked} openSheet={sheet.openFor} docked={dockedOf(only, wide) !== null} />}
           detail={picked.shown ? <InviteDetail key={picked.shown.participant_id} invite={picked.shown} onReread={reread} /> : null}
           placeholder={<StateBlock empty emptyIcon={Envelope} emptyTitle={INVITES_COPY.pickTitle} emptyHint={INVITES_COPY.pickHint} />}
         />
@@ -86,11 +86,7 @@ export default function InvitesPage() {
         only there (R6 L6-13: the card's own Accept beside a docked "Answer this invite" was two
         primaries for one question). The card drops its answers while the dock carries them.
       */}
-      {only && !wide ? (
-        <ContextBar position="bottom" until="lg" label={INVITES_COPY.actionsLabel}>
-          <CardAnswers invite={only} onAnswer={sheet.openFor} docked />
-        </ContextBar>
-      ) : null}
+      <OneInviteDock invite={dockedOf(only, wide)} onAnswer={sheet.openFor} />
       <AcceptSheet
         invite={sheet.invite} open={sheet.open} onOpenChange={sheet.setOpen} onReread={reread}
         session={sheet.session} onBusyChange={sheet.onBusyChange} startWith={sheet.startWith}
@@ -100,6 +96,20 @@ export default function InvitesPage() {
 }
 
 const SPLIT_AT = "56rem";
+
+/** The one invite whose answers are docked: exactly one, and the list stacked (a phone). */
+function dockedOf(only: Invite | null, wide: boolean): Invite | null {
+  return only && !wide ? only : null;
+}
+
+function OneInviteDock({ invite, onAnswer }: { invite: Invite | null; onAnswer: (invite: Invite, startWith?: "decline") => void }) {
+  if (!invite) return null;
+  return (
+    <ContextBar position="bottom" until="lg" label={INVITES_COPY.actionsLabel}>
+      <CardAnswers invite={invite} onAnswer={onAnswer} docked />
+    </ContextBar>
+  );
+}
 
 /**
  * §3.5 (R5) — on a phone (the list stacked) each card carries its answers. Accept opens the sheet,
