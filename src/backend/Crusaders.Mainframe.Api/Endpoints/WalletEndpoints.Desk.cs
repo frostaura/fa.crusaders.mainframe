@@ -50,14 +50,12 @@ public static partial class WalletEndpoints
         if (shelf.Find(req.PackageId!.Value) is not { } item)
             return Results.Json(new { error = "package_unavailable" }, statusCode: StatusCodes.Status409Conflict);
 
-        // J7-10: "given at no charge" is only true of a package that costs this member nothing.
         var free = kind.Code == AdminCreditReasons.PackageFree;
-        if (free && item.PriceZar != 0m)
-            return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.PaidSaleCodes });
+        if (PriceRefusal(req, item, shelf, free) is { } priceRefusal) return priceRefusal;
 
         var reason = req.Reason!.Trim();
         var movement = new DeskMovement(
-            userId, kind, item.Package.Minutes, free ? 0m : req.ZarReceivedEither ?? item.PriceZar,
+            userId, kind, item.Package.Minutes, free ? 0m : req.ZarReceivedEither ?? req.QuotedPriceZarEither!.Value,
             $"{reason} — {item.Package.Name}", reason)
         {
             IdempotencyKey = req.IdempotencyKey,
@@ -88,6 +86,31 @@ public static partial class WalletEndpoints
         });
     }
 
+    /// <summary>
+    /// The price the admin confirmed against the shelf as it stands (review round 9, J9-1). The
+    /// server used to fill in the LIVE price when the desk sent none, so a discount that moved
+    /// between the confirm step and Sell recorded — and mailed — a figure nobody saw. A quoted
+    /// price that no longer matches is 409 <c>package_price_changed</c> with the fresh item and
+    /// discount, the member purchase path's answer; so is a free give whose price is no longer
+    /// zero, unless the admin quoted that very (non-zero) price, which is a wrong code, not a
+    /// stale screen (J7-10's <c>reason_code_invalid</c>).
+    /// </summary>
+    private static IResult? PriceRefusal(SellRequest req, ShelfItem item, MemberShelf shelf, bool free)
+    {
+        var quoted = req.QuotedPriceZarEither;
+        var stale = quoted is { } q ? q != item.PriceZar : free && item.PriceZar != 0m;
+        if (stale)
+        {
+            return Results.Json(
+                new { error = "package_price_changed", package = PackageShelf.ItemWire(item), discount = PackageShelf.DiscountWire(shelf.Tariff) },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+        // J7-10: "given at no charge" is only true of a package that costs this member nothing.
+        if (free && item.PriceZar != 0m)
+            return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.PaidSaleCodes });
+        return null;
+    }
+
     /// <summary>Everything that refuses a sale before the database is read.</summary>
     private static IResult? RefuseSale(SellRequest req)
     {
@@ -95,6 +118,13 @@ public static partial class WalletEndpoints
         if (AdminCreditReasons.ResolveSale(req.ReasonCodeEither) is null)
             return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.SaleCodes });
         if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
+
+        // J9-1: a sale states the price the admin was shown, or the rand they took — never neither,
+        // which is what let the server price it at write time.
+        if (req.QuotedPriceZarEither is null && req.ZarReceivedEither is null)
+            return Results.BadRequest(new { error = "quoted_price_required" });
+        if (req.QuotedPriceZarEither is { } quoted && (quoted < 0 || quoted > MaxZarReceived))
+            return Results.BadRequest(new { error = "quoted_price_out_of_range", max = MaxZarReceived });
 
         // J7-10: nothing was taken for a package given free, so a rand figure other than 0 is a contradiction.
         if (req.ReasonCodeEither?.Trim() == AdminCreditReasons.PackageFree && req.ZarReceivedEither is { } zar && zar != 0m)
@@ -116,9 +146,11 @@ public static partial class WalletEndpoints
 }
 
 /// <summary>
-/// A package sold at the desk (P13 §3.7). <paramref name="ZarReceived"/> is optional and defaults
-/// to the member's shelf price; both spellings of the code and the rand bind, for the reason
-/// <see cref="AdjustRequest"/> gives.
+/// A package sold at the desk (P13 §3.7). <paramref name="QuotedPriceZar"/> is the shelf price the
+/// admin was shown and confirmed (J9-1): it must equal the live price or the sale is 409
+/// <c>package_price_changed</c>. <paramref name="ZarReceived"/> is the rand taken and defaults to
+/// the quoted price. At least one of the two is required. Both spellings of every field bind, for
+/// the reason <see cref="AdjustRequest"/> gives.
 /// </summary>
 public sealed record SellRequest(
     Guid? PackageId,
@@ -127,8 +159,13 @@ public sealed record SellRequest(
     decimal? ZarReceived = null,
     string? IdempotencyKey = null,
     [property: System.Text.Json.Serialization.JsonPropertyName("reason_code")] string? ReasonCodeSnake = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("zar_received")] decimal? ZarReceivedSnake = null)
+    [property: System.Text.Json.Serialization.JsonPropertyName("zar_received")] decimal? ZarReceivedSnake = null,
+    decimal? QuotedPriceZar = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("quoted_price_zar")] decimal? QuotedPriceZarSnake = null)
 {
+    /// <summary>The shelf price the admin confirmed, under either spelling.</summary>
+    public decimal? QuotedPriceZarEither => QuotedPriceZar ?? QuotedPriceZarSnake;
+
     /// <summary>The rand the desk took, under either spelling; null to take the shelf price.</summary>
     public decimal? ZarReceivedEither => ZarReceived ?? ZarReceivedSnake;
 

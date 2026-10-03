@@ -67,7 +67,7 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         var leagueOnly = await AddPackageAsync(f, club, "League night", 120, 150m, club.LeagueGroupId);
         var admin = Admin(f, club);
 
-        var sold = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.FiveHours, reasonCode = "top_up_eft", reason = "EFT 0912" });
+        var sold = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.FiveHours, reasonCode = "top_up_eft", reason = "EFT 0912", quotedPriceZar = 495m });
         Assert.Equal(HttpStatusCode.OK, sold.StatusCode);
         var body = await JsonOf(sold);
         Assert.Equal(495m, body.GetProperty("zar_received").GetDecimal());
@@ -79,13 +79,13 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         Assert.Equal("EFT 0912 — 5 hours", entry.Reason);
 
         // The other member is not in the league: its package is not theirs to buy.
-        var notTheirs = await admin.PostAsJsonAsync(SellPath(club.OtherUserId), new { packageId = leagueOnly, reasonCode = "top_up_cash", reason = "Cash" });
+        var notTheirs = await admin.PostAsJsonAsync(SellPath(club.OtherUserId), new { packageId = leagueOnly, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 150m });
         Assert.Equal(HttpStatusCode.Conflict, notTheirs.StatusCode);
         Assert.Equal("package_unavailable", (await JsonOf(notTheirs)).GetProperty("error").GetString());
 
         // A 100%-discounted package cannot go to PayFast, but the desk can sell it — for R0.
         await SetDiscountAsync(f, club.LeagueGroupId, 10_000);
-        var free = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Staff" });
+        var free = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.OneHour, reasonCode = "top_up_cash", reason = "Staff", quotedPriceZar = 0m });
         Assert.Equal(HttpStatusCode.OK, free.StatusCode);
         Assert.Equal(0m, (await JsonOf(free)).GetProperty("zar_received").GetDecimal());
 
@@ -104,13 +104,13 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         var club = await SeedAsync(f, "dki");
         var admin = Admin(f, club);
 
-        object Body(Guid package) => new { packageId = package, reasonCode = "top_up_cash", reason = "Cash", idempotencyKey = "sale-1" };
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId), Body(club.OneHour))).StatusCode);
-        var again = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), Body(club.OneHour));
+        object Body(Guid package, decimal shown) => new { packageId = package, reasonCode = "top_up_cash", reason = "Cash", idempotencyKey = "sale-1", quotedPriceZar = shown };
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId), Body(club.OneHour, 120m))).StatusCode);
+        var again = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), Body(club.OneHour, 120m));
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
         Assert.Equal(60, (await JsonOf(again)).GetProperty("balance_after_minutes").GetInt32());
 
-        var other = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), Body(club.TenHours));
+        var other = await admin.PostAsJsonAsync(SellPath(club.MemberUserId), Body(club.TenHours, 1000m));
         Assert.Equal(HttpStatusCode.Conflict, other.StatusCode);
         Assert.Equal("idempotency_key_reused", (await JsonOf(other)).GetProperty("error").GetString());
 
@@ -133,10 +133,10 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
 
         Assert.Equal(HttpStatusCode.NotFound, (await intruder.GetAsync(ShelfPath(club.MemberUserId))).StatusCode);
 
-        var toTheirMember = await intruder.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = rival.FiveHours, reasonCode = "top_up_cash", reason = "Cash" });
+        var toTheirMember = await intruder.PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = rival.FiveHours, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 550m });
         Assert.Equal(HttpStatusCode.NotFound, toTheirMember.StatusCode);
 
-        var theirPackage = await intruder.PostAsJsonAsync(SellPath(rival.MemberUserId), new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash" });
+        var theirPackage = await intruder.PostAsJsonAsync(SellPath(rival.MemberUserId), new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 550m });
         Assert.Equal(HttpStatusCode.Conflict, theirPackage.StatusCode);
         Assert.Equal("package_unavailable", (await JsonOf(theirPackage)).GetProperty("error").GetString());
 
@@ -186,7 +186,7 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         var admin = Admin(app, club);
 
         // The other member pays list price for the hour: "free" is not true of it.
-        var priced = await admin.PostAsJsonAsync(SellPath(club.OtherUserId), new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome" });
+        var priced = await admin.PostAsJsonAsync(SellPath(club.OtherUserId), new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome", quotedPriceZar = 120m });
         Assert.Equal(HttpStatusCode.BadRequest, priced.StatusCode);
         var pricedBody = await JsonOf(priced);
         Assert.Equal("reason_code_invalid", pricedBody.GetProperty("error").GetString());
@@ -239,7 +239,7 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         var saleMail = new StubEmailService();
         await using (var app = WithMail(f, saleMail))
         {
-            var res = await Admin(app, club).PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash" });
+            var res = await Admin(app, club).PostAsJsonAsync(SellPath(club.MemberUserId), new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 550m });
             Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         }
         var sale = await PollMailAsync(saleMail);
@@ -261,5 +261,81 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         Assert.Contains("45 minutes", adjust!.Subject + adjust.HtmlBody, StringComparison.Ordinal);
         Assert.Contains("Double-booked court", adjust.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("credit", adjust.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Review round 9, J9-1: the desk confirmed R495 for five hours, the league's discount moved
+    /// before Sell was pressed, and the server filled in the LIVE price — R440 recorded and mailed,
+    /// a figure the admin never saw. The sale now carries the price the admin was shown
+    /// (<c>quotedPriceZar</c>); a shelf that moved answers 409 <c>package_price_changed</c> with the
+    /// fresh item and discount, and nothing is posted.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_sale_whose_shelf_price_moved_is_refused_with_the_new_price()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkq");
+        await SetDiscountAsync(f, club.LeagueGroupId, 1000);
+        await JoinAsync(f, club, club.MemberUserId, club.LeagueGroupId);
+        var admin = Admin(f, club);
+
+        // Shown R495 (10% off R550); the discount becomes 20% before the admin confirms.
+        await SetDiscountAsync(f, club.LeagueGroupId, 2000);
+        var stale = await admin.PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 495m });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var body = await JsonOf(stale);
+        Assert.Equal("package_price_changed", body.GetProperty("error").GetString());
+        Assert.Equal(440m, body.GetProperty("package").GetProperty("price_zar").GetDecimal());
+        Assert.Equal(2000, body.GetProperty("discount").GetProperty("bps").GetInt32());
+        Assert.Empty(await LedgerAsync(f, club, club.MemberUserId));
+
+        // Confirmed at the new price: recorded at it.
+        var sold = await admin.PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 440m });
+        Assert.Equal(HttpStatusCode.OK, sold.StatusCode);
+        Assert.Equal(440m, Assert.Single(await LedgerAsync(f, club, club.MemberUserId)).ZarPaid);
+    }
+
+    /// <summary>
+    /// J9-1, backward compatibility: a client that states neither the price it showed nor the rand
+    /// it took is refused — never handed the live price in silence, which is the defect itself.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_sale_that_states_no_price_is_refused_not_priced_by_the_server()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkn");
+        var res = await Admin(f, club).PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.FiveHours, reasonCode = "top_up_cash", reason = "Cash" });
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Equal("quoted_price_required", (await JsonOf(res)).GetProperty("error").GetString());
+        Assert.Empty(await LedgerAsync(f, club, club.MemberUserId));
+    }
+
+    /// <summary>
+    /// J9-1, the other direction: a free give confirmed while the member's discount was 100%, after
+    /// the discount went away, was "400 reason_code_invalid — That didn't go through", naming
+    /// nothing. It is the same stale price, and it is told the same way: 409 with the new price.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_free_give_whose_discount_vanished_is_told_the_new_price()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkv");
+        await SetDiscountAsync(f, club.LeagueGroupId, 10_000);
+        await JoinAsync(f, club, club.MemberUserId, club.LeagueGroupId);
+        await SetDiscountAsync(f, club.LeagueGroupId, null);
+
+        var res = await Admin(f, club).PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome", quotedPriceZar = 0m, zarReceived = 0m });
+        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+        var body = await JsonOf(res);
+        Assert.Equal("package_price_changed", body.GetProperty("error").GetString());
+        Assert.True(body.GetProperty("package").GetProperty("price_zar").GetDecimal() > 0m);
+        Assert.Empty(await LedgerAsync(f, club, club.MemberUserId));
     }
 }

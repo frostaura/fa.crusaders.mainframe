@@ -50,7 +50,7 @@ public sealed class R1MoneyHttpTests(PostgresFixture pg) : IClassFixture<Postgre
         var ok = await admin.PostAsJsonAsync(Sell(club.Sam), new { packageId = hour, reason = "Cash at the bar, slip 12", reasonCode = "top_up_cash", zarReceived = 100m });
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         Assert.Equal(100m, (await JsonAsync(ok)).GetProperty("zar_received").GetDecimal());
-        var snake = await admin.PostAsJsonAsync(Sell(club.Alex), new { packageId = hour, reason = "EFT cleared", reason_code = "top_up_eft" });
+        var snake = await admin.PostAsJsonAsync(Sell(club.Alex), new { packageId = hour, reason = "EFT cleared", reason_code = "top_up_eft", quoted_price_zar = 120m });
         Assert.Equal(HttpStatusCode.OK, snake.StatusCode);
         Assert.Equal(120m, (await JsonAsync(snake)).GetProperty("zar_received").GetDecimal());
 

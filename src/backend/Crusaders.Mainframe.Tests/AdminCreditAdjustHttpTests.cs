@@ -326,6 +326,7 @@ public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
             reasonCode,
             zarReceived,
             idempotencyKey,
+            quotedPriceZar = 550m,   // J9-1: the 5-hour package's shelf price, as the desk was shown it
         });
     }
 
