@@ -668,3 +668,34 @@ describe("the lights name whose code lit the court (R10 E10-2)", () => {
     expect(screen.getByText("with Ava Organiser's code, at the board")).toBeInTheDocument();
   });
 });
+
+/**
+ * R11 E11-4: a court box's code_used refusal carries what the scan was trying to do (`detail.attempt`),
+ * and the server words it in the headline. Three different attempts at one court in a minute were
+ * folded into "3 in 1 minute" behind one disclosure — three stories, one row.
+ */
+describe("a box's refusals are never folded across different attempts (R11 E11-4)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const refused = (attempt: string, headline: string, second: number) => traceEvent({
+    at: `2026-09-22T18:00:${String(second).padStart(2, "0")}.000Z`,
+    strand: "lights", kind: "court.refused", headline,
+    actor: { user_id: null, name: null, kind: "device", is_self: false },
+    court: { id: "c1", number: 1, name: "Court 1" },
+    detail: { reason: "code_used", attempt },
+  });
+
+  it("a lights scan, a walk-up and a pay-for in one minute are three rows on the rail", async () => {
+    stubFetch(nightRoutes(traceView([
+      refused("activate", "Was turned away at Court 1 — code already used", 0),
+      refused("walkup", "Was turned away buying light time at Court 1 — code already used", 10),
+      refused("pay_for", "Was turned away paying for somebody's booking at Court 1 — code already used", 20),
+    ])));
+    renderNight();
+    expect(await screen.findByText("Was turned away at Court 1 — code already used")).toBeVisible();
+    expect(screen.getByText("Was turned away buying light time at Court 1 — code already used")).toBeVisible();
+    expect(screen.getByText("Was turned away paying for somebody's booking at Court 1 — code already used")).toBeVisible();
+    expect(screen.queryByText(/3 in /)).not.toBeInTheDocument();
+  });
+});

@@ -254,3 +254,32 @@ describe("readableEvents — no raw codes on a member's night (F3.6)", () => {
     expect(readableEvents([unknown("member.something_new", "a8")])[0].headline).toBe(UNKNOWN_ACCOUNT_EVENT);
   });
 });
+
+/**
+ * R11 E11-4: a court box turning a used code away records what it was asked to do (`detail.attempt`:
+ * the lights for a booking, a walk-up, paying for someone). Three different asks at one box in a
+ * minute folded into "3 in 1 minute" with three identical "Court 1" rows — three stories, one row.
+ */
+describe("a box's refusals keep what each scan was trying to do (R11 E11-4)", () => {
+  const refusal = (at: number, attempt: string | undefined) => event({
+    at: AT(at), strand: "lights", kind: "court.refused", device_code: undefined,
+    headline: "Was turned away at Court 1 — code already used",
+    court: { id: "c1", number: 1, name: "Court 1" },
+    detail: { reason: "code_used", ...(attempt ? { attempt } : {}) },
+  });
+
+  it("three different attempts in a minute stay three rows", () => {
+    const rows = buildTimeline([refusal(0, "activate"), refusal(10, "walkup"), refusal(20, "pay_for")]);
+    expect(rows.map((r) => r.kind)).toEqual(["event", "event", "event"]);
+  });
+
+  it("three tries at the same thing are still one story", () => {
+    const rows = buildTimeline([refusal(0, "walkup"), refusal(10, "walkup"), refusal(20, "walkup")]);
+    expect(rows.map((r) => r.kind)).toEqual(["burst"]);
+  });
+
+  it("rows written before the field still fold as before", () => {
+    const rows = buildTimeline([refusal(0, undefined), refusal(10, undefined), refusal(20, undefined)]);
+    expect(rows.map((r) => r.kind)).toEqual(["burst"]);
+  });
+});

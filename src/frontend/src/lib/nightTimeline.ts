@@ -58,7 +58,10 @@ function burstKey(event: TraceEvent): string {
   // is settled on. A unique key per row puts every one on the rail.
   if (isMoney(event)) return `money:${event.source ?? ""}:${event.source_id ?? event.at}:${event.headline ?? ""}`;
   const family = (event.kind ?? "").split(".")[0];
-  return `${event.strand ?? ""}:${family}:${placeOf(event)}`;
+  // R11 E11-4: a box's refusal names what the scan was trying to do; a lights scan, a walk-up and
+  // a pay-for at one box are three stories, never "3 in 1 minute".
+  const attempt = typeof event.detail?.attempt === "string" ? event.detail.attempt : "";
+  return `${event.strand ?? ""}:${family}:${placeOf(event)}:${attempt}`;
 }
 
 /** A row about minutes: the wallet strand, a ledger row, or any row carrying an amount. */
