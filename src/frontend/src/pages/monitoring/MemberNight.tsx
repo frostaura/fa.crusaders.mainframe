@@ -432,42 +432,50 @@ function TraceCard({ event, subjectName, timezone }: {
   const onBehalf = isOnBehalf(event.actor);
   return (
     // R7 L7-15: every card carries the 4px rule — transparent unless somebody acted on the member —
-    // and the time is a right-aligned column wide enough for "≈00:00", so the accented cards are
-    // not indented 4px and the headlines start on one line whatever the time says.
-    <div className={cn("border-l-4 pl-3", onBehalf ? "border-info-strong" : "border-transparent")}>
-      <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+    // so the accented cards are not indented 4px.
+    // R8 (L7-15 rest): the time is a COLUMN and every line of the card — headline, money, court —
+    // starts on the text's edge beside it (the detail lines began 14px left of the headline at
+    // 1280). When the text is large for the card (a container query, in rem) the time goes above
+    // the text on the same edge instead of being indented past it.
+    <div className={cn("border-l-4 pl-3 @container", onBehalf ? "border-info-strong" : "border-transparent")}>
+      <div className="grid grid-cols-1 items-baseline gap-x-2 @[18rem]:grid-cols-[auto_minmax(0,1fr)]">
         <time
           dateTime={event.at}
-          className="min-w-14 shrink-0 text-right font-mono text-sm tabular-nums text-text-muted"
+          data-night-time
+          className="font-mono text-sm tabular-nums text-text-muted @[18rem]:min-w-14 @[18rem]:text-right"
         >
           {/* The ≈ is part of the time, not a footnote beside it: a reader scanning a column
               of times has to be able to see which ones are estimates without reading prose. */}
           {`${event.approximate ? "≈" : ""}${clubClock(event.at, timezone)}`}
         </time>
-        <p className="min-w-0 break-words font-medium text-text-primary">
-          {/* The server's sentence, rendered. Never one composed here from `kind` — that is
-              the dictionary-drift defect this whole surface is written around. */}
-          {event.headline ?? burstOutcomes([event])[0]}
-        </p>
-        {clause && (
-          // Wraps, never shrink-0 (R4 V4-6): "by Priya Naidoo on Thandi's behalf" is wider than a
-          // 320 phone and a shrink-0 clause made the Night tab scroll sideways.
-          <span className={onBehalf ? "min-w-0 break-words text-sm text-info-strong" : "min-w-0 break-words text-sm text-text-muted"}>
-            {clause}
-          </span>
-        )}
+        <div className="min-w-0" data-night-text>
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <p className="min-w-0 break-words font-medium text-text-primary">
+              {/* The server's sentence, rendered. Never one composed here from `kind` — that is
+                  the dictionary-drift defect this whole surface is written around. */}
+              {event.headline ?? burstOutcomes([event])[0]}
+            </p>
+            {clause && (
+              // Wraps, never shrink-0 (R4 V4-6): "by Priya Naidoo on Thandi's behalf" is wider than a
+              // 320 phone and a shrink-0 clause made the Night tab scroll sideways.
+              <span className={onBehalf ? "min-w-0 break-words text-sm text-info-strong" : "min-w-0 break-words text-sm text-text-muted"}>
+                {clause}
+              </span>
+            )}
+          </div>
+          {typeof event.amount_minutes === "number" && (
+            <p className="text-sm text-text-secondary" data-night-money="">
+              {/* P13: whole minutes in the app's one format ("+1 h", "−45 min"), heard in words. A
+                  charge is the body ink, not the danger ink: a booking is not an error. */}
+              <Minutes value={event.amount_minutes} signed className="text-text-secondary" />
+              {typeof event.balance_after_minutes === "number"
+                ? <> · {NIGHT_BALANCE_AFTER} <Minutes value={event.balance_after_minutes} /></>
+                : null}
+            </p>
+          )}
+          {event.court?.name && <p className="text-sm text-text-muted">{event.court.name}</p>}
+        </div>
       </div>
-      {typeof event.amount_minutes === "number" && (
-        <p className="text-sm text-text-secondary" data-night-money="">
-          {/* P13: whole minutes in the app's one format ("+1 h", "−45 min"), heard in words. A
-              charge is the body ink, not the danger ink: a booking is not an error. */}
-          <Minutes value={event.amount_minutes} signed className="text-text-secondary" />
-          {typeof event.balance_after_minutes === "number"
-            ? <> · {NIGHT_BALANCE_AFTER} <Minutes value={event.balance_after_minutes} /></>
-            : null}
-        </p>
-      )}
-      {event.court?.name && <p className="text-sm text-text-muted">{event.court.name}</p>}
     </div>
   );
 }

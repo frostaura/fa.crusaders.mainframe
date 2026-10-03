@@ -494,3 +494,51 @@ test.describe("L8-10 — a tile's duplicate-box warning keeps its Review button 
     });
   }
 });
+
+/* ───────────────────────────── L7-15 the Night's cards line up on one text edge ───────────────────────────── */
+
+test.describe("L7-15 — every line of a Night card starts on the text's edge", () => {
+  for (const [width, large] of [[1280, false], [390, false], [390, true], [320, true]] as const) {
+    test(`at ${width}${large ? " / 200 %" : ""}`, async ({ page }) => {
+      const money = { ...traceEvent("2026-09-22T06:48:00.000Z", "Eve Deskadmin changed their minutes by 5 hours"),
+        actor: { user_id: "u-eve", name: "Eve Deskadmin", kind: "admin", is_self: false },
+        amount_minutes: 300, balance_after_minutes: 300, court: { id: "c-2", name: "Court 2" } };
+      const plain = { ...traceEvent("2026-09-22T06:49:00.000Z", "Paid 30 minutes for Court 2"), amount_minutes: -30, balance_after_minutes: 270, court: { id: "c-2", name: "Court 2" } };
+      const view = { ...traceView([money, plain], null), total: 2 };
+      await open(page, `/admin/members/${USER}/night?day=2026-09-22`, adminRoutes([
+        { path: `/api/v1/admin/members/${USER}/trace`, body: view },
+        { path: `/api/v1/admin/members/${USER}`, body: memberDetail() },
+      ]), width);
+      await expect(page.locator("[data-night-money]").first()).toBeVisible({ timeout: 30_000 });
+      if (large) await big(page);
+      await page.evaluate(() => document.fonts.ready);
+      // Read through the card's own elements (time, first <p>, money, last <p>), not this fix's hooks,
+      // so the same measure runs on the layout before it.
+      const cards = await page.evaluate(() => [...document.querySelectorAll("[data-night-row] > div")].map((text) => {
+        const card = text;
+        const left = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().left) : null);
+        const headline = text.querySelector("p")!;
+        const range = document.createRange();
+        range.selectNodeContents(headline);
+        const first = range.getClientRects()[0];
+        const time = card.querySelector("time")!.getBoundingClientRect();
+        return {
+          headline: Math.round(first.left), money: left(text.querySelector("[data-night-money]")),
+          court: left([...text.querySelectorAll("p")].at(-1)!), timeLeft: Math.round(time.left), timeRight: Math.round(time.right),
+        };
+      }));
+      expect(cards.length).toBe(2);
+      for (const c of cards) {
+        expect(Math.abs(c.money! - c.headline), JSON.stringify(c)).toBeLessThanOrEqual(1);
+        expect(Math.abs(c.court! - c.headline), JSON.stringify(c)).toBeLessThanOrEqual(1);
+        // Beside the text, or above it on the same edge — never indented past the text's edge.
+        const beside = c.timeRight <= c.headline;
+        const above = Math.abs(c.timeLeft - c.headline) <= 1;
+        expect(beside || above, JSON.stringify(c)).toBe(true);
+      }
+      // One column: every card's headline on the same edge, accented or not.
+      expect(new Set(cards.map((c) => c.headline)).size, JSON.stringify(cards)).toBe(1);
+      expect(await sideways(page)).toBeLessThanOrEqual(1);
+    });
+  }
+});
