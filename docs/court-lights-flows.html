@@ -240,7 +240,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
   <div class="eyebrow">FrostAura Technologies · Crusaders Mainframe</div>
   <h1>Every path from a booking to a lit court</h1>
   <p class="lead">One box, four courts, no moving parts you have to babysit. Every flow the system runs, drawn lane by lane; what happens when the network is down; and how to put the whole thing in service with the Arduino IDE and one Docker command.</p>
-  <div class="stamp"><i></i> Firmware 2.0 · one API key · box polls, backend answers · wiring unchanged from Carl's schematic</div>
+  <div class="stamp"><i></i> Bridge 2.2.1 · Mega 2.0.0 · one code per member · one API key · box polls, backend answers · wiring unchanged from Carl's schematic</div>
 </div>
 
 <section id="how">
@@ -248,7 +248,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
   <div class="tiles">
     <div class="tile"><div class="k">Direction</div><div class="v">The box calls. The backend answers.</div><div class="d">The box runs no server and opens no port. It asks the backend on every scan and once a minute for its settings. Nothing ever needs to know the box's address.</div></div>
     <div class="tile"><div class="k">Configuration</div><div class="v">Desired state, rebuilt every minute.</div><div class="d">Each heartbeat reply is a fresh snapshot: which court sits on which relay, what each button means, and the next two hours of bookings. The box replaces what it holds. A lost reply loses nothing.</div></div>
-    <div class="tile"><div class="k">Identity</div><div class="v">A code is a random key.</div><div class="d">Twelve characters, sixty random bits, meaning nothing on their own. The backend looks the code up; the box compares it to its cached roster when the backend is out of reach.</div></div>
+    <div class="tile"><div class="k">Identity</div><div class="v">One code per member, new every 30 seconds.</div><div class="d">The member's <b>My Code</b> page shows one 19-character code, made on the phone with no signal, that opens the door, lights their own court or one they are a partner on, and pays for somebody else's. The backend checks both halves of it; offline the box checks the half it holds a key for and looks the member up among the players its roster names. Each code works once.</div></div>
   </div>
 </section>
 
@@ -346,7 +346,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
         <li>Within a few seconds the glass shows <span class="lcd">CONNECTED
 SCAN TO START</span>.</li>
         <li>Within a minute the box is on the <b>Devices</b> page as <code>box-xxxxxx</code>. Rename it; check that court 1 is on relay A and so on; save.</li>
-        <li>Book a court a few minutes ahead on a phone, scan the code at the box, watch the light. Press OFF. Check the wallet.</li>
+        <li>Book a court a few minutes ahead on a phone, scan <b>My Code</b> at the box, watch the light. Press OFF. Check the wallet. The Devices page shows the bridge as <b>2.2.1</b>; the Mega is never reflashed and stays 2.0.0.</li>
       </ol>
     </li>
   </ol>
@@ -432,14 +432,26 @@ SCAN TO START</span></td><td>A walk-up purchase was attempted while the backend 
       <tr><td><span class="lcd">TOO EARLY
 WAIT 7 MIN</span></td><td>Valid booking, but more than 10 minutes before its start.</td><td>Wait for the cue window.</td></tr>
       <tr><td><span class="lcd">NOT RECOGNISED
-SEE THE DESK</span></td><td>Code unknown, expired, or (offline) not in the roster.</td><td>Refresh the Court Code page; a walk-up code lives 60 s.</td></tr>
+SEE THE DESK</span></td><td>The code does not check out: older than about 90 seconds, or (offline) a member this box holds no key for.</td><td>Scan the code on My Code as it is now; it changes every 30 seconds.</td></tr>
+      <tr><td><span class="lcd">CODE USED
+WAIT 30 SECONDS</span></td><td>This exact code already lit a court or bought something. A photo of somebody's screen reads the same, so it arms nothing.</td><td>Wait for the next code on My Code. If you lit your own court with it and it is still on, the box shows <span class="lcd">COURT B IS ON</span> instead.</td></tr>
+      <tr><td><span class="lcd">TOO MANY TRIES
+TRY IN A MINUTE</span></td><td>Offline, five wrong codes inside a minute: the box stops checking codes for a while so nobody can guess one.</td><td>Wait a minute; it unlocks on the first good code after that.</td></tr>
       <tr><td><span class="lcd">NO BOOKING
 SEE THE DESK</span> / <span class="lcd">SLOT ENDED
 SEE THE DESK</span></td><td>The code is known but there is nothing to light: no booking behind it, or the slot is already over.</td><td>Book, or see the desk.</td></tr>
       <tr><td><span class="lcd">WRONG COURT
-SEE THE DESK</span></td><td>Booking code for a court this box doesn't switch (offline it names it: <span class="lcd">COURT B NOT C</span>).</td><td>Go to the right court.</td></tr>
+SEE THE DESK</span></td><td>The member's booking is on a court this box doesn't switch (offline it names it: <span class="lcd">WRONG COURT
+YOU ARE ON B</span>).</td><td>Go to the right court.</td></tr>
       <tr><td><span class="lcd">COURT B IS ON
-ALREADY LIT</span></td><td>Offline re-scan on a court that is already lit.</td><td>Nothing; OFF still works for the person who lit it.</td></tr>
+ALREADY LIT</span></td><td>Offline re-scan on a court that is already lit — with a fresh code or the very one that lit it.</td><td>Nothing; OFF still works for the person who lit it.</td></tr>
+      <tr><td><span class="lcd">CT2 BOOKED
+PAY 50 MIN?</span></td><td>Somebody pressed a booked court that is not theirs: the club is asking whether they want to pay for it (row 2 says <span class="lcd">PRESS CT2 TO PAY</span>).</td><td>Press the same court again to pay, or anything else to leave it.</td></tr>
+      <tr><td><span class="lcd">PAID FOR CT2
+50 MIN PAID</span></td><td>Paid: the payer was charged, the booker refunded the same.</td><td>Nothing.</td></tr>
+      <tr><td><span class="lcd">SPLIT BOOKING
+PAY IN APP</span></td><td>That booking is shared between players, and shares are paid in the app, never at the box. Nothing was charged.</td><td>Pay your share in the app.</td></tr>
+      <tr><td><span class="lcd">NOTHING TO PAY</span> / <span class="lcd">PRICE CHANGED</span></td><td>Already paid for; or the price moved between the question and the yes, so nothing was charged.</td><td>Nothing; or press the court again to be asked the new price.</td></tr>
       <tr><td><span class="lcd">TOO FEW MINUTES
 BUY &amp; RETRY</span> / <span class="lcd">COURT NOT FREE
 SCAN TO START</span> / <span class="lcd">NO TIME BEFORE
@@ -458,7 +470,7 @@ Please wait</span> then back to the landing screen</td><td>The Mega painted this
 <div class="sig">
   <div class="mark" aria-hidden="true"></div>
   <div><div class="who">FrostAura Technologies</div><div class="line">We build the future of human capability.</div></div>
-  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>FIRMWARE 2.0 · SEPTEMBER 2026</div>
+  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>BRIDGE 2.2.1 · MEGA 2.0.0 · OCTOBER 2026</div>
 </div>
 
 </div>
@@ -490,29 +502,29 @@ var FLOWS=[
  s:'One request a minute carries everything the box needs to run the evening on its own.',
  steps:[
   {l:'box',t:'POST heartbeat',d:'Sends <code>{mac, firmware_version, uptime_ms}</code>.'},
-  {l:'api',t:'Build the snapshot',d:'Fresh from the database: <code>court_numbers</code> (index = relay), the button map, <code>heartbeat_seconds</code>, and the <b>roster</b>.<small>Roster = every booking on this box\'s courts whose window touches the next two hours, as up to 16 entries of <code>CODE|relay|opens_in|closes_in</code> in relative seconds, capped at 2 KB. Already-attended bookings stay in so a re-scan can re-light.</small>'},
-  {l:'box',t:'Replace roster + settings',d:'Overwrites what it holds wholesale. An absent key leaves the old value; an empty roster clears it; a malformed entry is skipped and counted.<small>There is no incremental command stream, so a missed heartbeat can never leave the box half-updated.</small>',
+  {l:'api',t:'Build the snapshot',d:'Fresh from the database: <code>court_numbers</code> (index = relay), the button map, <code>heartbeat_seconds</code>, and the <b>roster</b>.<small>Roster = every booking on this box\'s courts whose window touches the next two hours, as up to 16 entries of <code>m&lt;players&gt;|relay|opens_in|closes_in</code> in relative seconds: each booking names its players by their four-character member reference, organiser first, then every partner who accepted. Beside it, the code clock and today\'s per-member keys for up to 24 of those players, so the box can check a code with no network. Capped at 2 KB. Already-attended bookings stay in so a re-scan can re-light.</small>'},
+  {l:'box',t:'Replace roster + settings',d:'Overwrites what it holds wholesale, keys and code clock included. An absent key leaves the old value; an empty roster clears it; a malformed entry is skipped and counted.<small>There is no incremental command stream, so a missed heartbeat can never leave the box half-updated.</small>',
    o:[{t:'no reply',d:'The roster keeps working for up to six hours from the last good heartbeat; then offline grants stop. A circuit breaker stops the box hammering a dead backend and probes again on a backoff.'}]},
   {l:'api',t:'Last seen',d:'Stamps <i>last seen</i>. The Devices page calls a box offline after three missed beats at the interval you set, but never sooner than three minutes.<small>The floor matters at short intervals: on the 15-second minimum, three beats is 45 seconds and ordinary WiFi jitter would paint healthy boxes red all evening. At the default 60 s the two agree exactly.</small>'}
  ]},
 {id:'book',t:'Booking a court',tags:['member','money'],tg:['charge at booking'],
- s:'The slot, the charge in minutes and the court code are created in one transaction. The code is what the member shows at the box.',
+ s:'The slot and the charge in minutes are created in one transaction. Nothing new is minted: the member\'s own code, and each accepted partner\'s, is what lights this court.',
  steps:[
   {l:'phone',t:'Pick a slot',d:'Member picks a court and a time slice. The grid shows photo and name only, and it only draws the hours that weekday is open — the club\'s opening hours are a per-day setting the booking rule enforces, not a label.',
    o:[{t:'outside opening hours',d:'Refused with that day\'s own open and close times. A slice that starts inside the window but runs past close is refused too, rather than silently shortened.'},{t:'too few minutes',d:'Refused with the balance and the price. An admin booking on the member\'s behalf may re-send the request asking for the overdraft by name — same price, same charge, wallet goes negative, and the audit row says who authorised it and how deep.'}]},
-  {l:'api',t:'Reserve + charge + mint',d:'In one unit of work: reserve the slot (a database exclusion constraint makes a double-booking impossible), post the <code>BookingCharge</code> ledger row for exactly the booking\'s length in minutes, mint the booking\'s 12-character code.<small>Balance is never a stored number; it is the sum of ledger rows. Every row carries actor, subject, reason and reference.</small>'},
-  {l:'phone',t:'Court Code page',d:'Shows the code as a QR and as text. Valid until the booking ends plus the grace window.'},
+  {l:'api',t:'Reserve + charge',d:'In one unit of work: reserve the slot (a database exclusion constraint makes a double-booking impossible) and post the <code>BookingCharge</code> ledger row for exactly the booking\'s length in minutes.<small>Balance is never a stored number; it is the sum of ledger rows. Every row carries actor, subject, reason and reference.</small>'},
+  {l:'phone',t:'My Code',d:'The same page as yesterday and tomorrow: one code per member, as a QR and as text, changing every 30 seconds. Nothing on it is about this booking, and it works with no signal once the phone has set it up.'},
   {l:'api',t:'Email + webhooks',d:'The member gets an email. Webhooks mirror the same event for anyone the club has wired up.',
    o:[{t:'cancel early',d:'Full refund as a separate ledger row.'},{t:'cancel late',d:'Refund minus the late-cancellation penalty, posted as two rows so "how much penalty did I pay?" always has an answer.'},{t:'after lights-on',d:'Nothing comes back.'}]},
-  {l:'box',t:'In the roster',d:'Once the booking is within two hours, its code rides down in the next heartbeat\'s roster.'}
+  {l:'box',t:'In the roster',d:'Once the booking is within two hours, it rides down in the next heartbeat\'s roster naming its players, so the organiser or any accepted partner can light it with their own code.'}
  ]},
 {id:'scan-on',t:'Scan at the box, backend reachable',tags:['member','hardware'],tg:['online first'],
  s:'The box asks the backend and lights the court on the answer. The backend\'s word is final.',
  steps:[
-  {l:'mega',t:'Scanner → frame',d:'The scanner reads the QR and the Mega forwards the 12 characters to the ESP as a checksummed frame.<small>The Mega paints this itself, before any answer exists, so a scan is visibly happening even with the bridge dead. It is an overlay like every other screen: if the ESP never answers, its own deadline returns the glass to the landing screen. No screen on this box can outlive two minutes.</small>',lcd:L('CHECKING YOUR CODE','Please wait')},
-  {l:'box',t:'POST activate',d:'Refuses anything over 20 characters or outside the code alphabet. Otherwise sends <code>{mac, method, token}</code>.',lcd:L('ONE MOMENT')},
-  {l:'api',t:'Look up, decide',d:'Looks the code up in this club\'s table. On <code>ok</code> it stamps attendance and settles whatever the settlement model says is owed, then answers granted seconds and the court number.<small>The cue window is 10 minutes before the start. A refusal is never second-guessed against the local roster.</small>',
-   o:[{t:'too_early',d:'More than 10 minutes before the start. Nothing charged, nothing stamped.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'wrong_court',d:'Booking on a court this box doesn\'t switch.',lcd:L('WRONG COURT','SEE THE DESK')},{t:'already_active',d:'Court already lit for this booking: answered with the remaining seconds, so a re-scan simply re-lights.'},{t:'not_recognised',d:'Unknown or expired code.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'no_booking',d:'Known code, nothing to light behind it.',lcd:L('NO BOOKING','SEE THE DESK')}]},
+  {l:'mega',t:'Scanner → frame',d:'The scanner reads the QR and the Mega forwards the 19 characters to the ESP as a checksummed frame, exactly as it always forwarded a code.<small>The Mega paints this itself, before any answer exists, so a scan is visibly happening even with the bridge dead. It is an overlay like every other screen: if the ESP never answers, its own deadline returns the glass to the landing screen. No screen on this box can outlive two minutes.</small>',lcd:L('CHECKING YOUR CODE','Please wait')},
+  {l:'box',t:'POST activate',d:'Refuses anything over 20 characters or outside the code alphabet. Otherwise sends <code>{mac, method, token, scan_age_ms}</code>, the code exactly as scanned.<small>A code this box has already acted on is never asked about: it is answered at the box as the used code it is (below).</small>',lcd:L('ONE MOMENT')},
+  {l:'api',t:'Check, decide',d:'Checks both halves of the code at the moment it was read, finds the member, and finds their booking on this box — or one they are an accepted partner on. On <code>ok</code> it records the code as used, stamps attendance and settles whatever the settlement model says is owed, then answers granted seconds and the court number.<small>The cue window is 10 minutes before the start. A refusal is never second-guessed against the local roster.</small>',
+   o:[{t:'too_early',d:'More than 10 minutes before the start. Nothing charged, nothing stamped.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'wrong_court',d:'Booking on a court this box doesn\'t switch.',lcd:L('WRONG COURT','SEE THE DESK')},{t:'already_active',d:'Court already lit for this booking: answered with the remaining seconds, so a re-scan simply re-lights.'},{t:'not_recognised',d:'A code that does not check out, or one more than about 90 seconds old.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'code_used',d:'This exact code already lit a court. The member\'s next code, at most 30 seconds away, works.',lcd:L('CODE USED','WAIT 30 SECONDS')},{t:'no_booking',d:'A known member with nothing to light here. The buttons arm: they may buy time, or pay for somebody else\'s court.',lcd:L('NO BOOKING','SEE THE DESK')}]},
   {l:'box',t:'!ON relay',d:'Maps court number → relay via its court list and sends <code>!ON,&lt;relay&gt;,&lt;seconds&gt;</code>.<small>Grants are capped at 90 minutes on both boards; a longer booking is re-lit with <code>!EXT</code> before the cap runs out.</small>',lcd:L('COURT B  45 MIN')},
   {l:'mega',t:'Relay closes, timer starts',d:'The Mega closes the relay and starts its own independent timer. Even if the ESP dies, the court goes dark on time.',
    o:[{t:'!ON lost',d:'The ESP retries within 1.5 s; if the Mega still never confirms, the promise is withdrawn.',lcd:L('TRY AGAIN','SCAN TO START')}]}
@@ -522,24 +534,38 @@ var FLOWS=[
  steps:[
   {l:'mega',t:'Scanner → frame',d:'Same as online: the Mega forwards the code to the ESP.',lcd:L('CHECKING YOUR CODE','Please wait')},
   {l:'box',t:'Activate fails',d:'The call times out, returns 5xx, or the breaker is open. Only transport failures fall back; a real answer never does.'},
-  {l:'box',t:'Match the roster',d:'Compares the scanned string, exactly, to the roster tokens.<small>Only booking codes are ever in the roster. A walk-up code offline is refused because money can\'t be decided without the backend.</small>',
-   o:[{t:'match, open',d:'Light the relay for what is left of the booking (a late arrival gets what\'s left) and queue an activation event.',lcd:L('COURT B  38 MIN')},{t:'match, not yet',d:'The booking exists but its window hasn\'t opened.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'no match',d:'',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'walk-up code',d:'',lcd:L('NO CONNECTION','SEE THE DESK')},{t:'court already lit',d:'Refused, and the button window is bound to that court so the member\'s own OFF still works.',lcd:L('COURT B IS ON','ALREADY LIT')}]},
+  {l:'box',t:'Check the code, find the member',d:'Checks the half of the code it holds today\'s key for, at its own clock\'s 30-second step or one either side, then looks for a booking in the roster that names that member, as organiser or accepted partner.<small>The box never holds what the other half is made from, so it cannot make a code — and when its record of this scan uploads, the backend checks that other half. Nothing offline ever buys anything: a walk-up or a pay-for needs the backend whatever code is shown.</small>',
+   o:[{t:'their booking, open',d:'Light the relay for what is left of the booking (a late arrival gets what\'s left) and queue an activation event carrying the scanned code.',lcd:L('COURT B  38 MIN')},{t:'their booking, not yet',d:'The booking exists but its window hasn\'t opened.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'code does not check out',d:'Not a member this box holds a key for, or the wrong digits.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'same code again',d:'This box already lit a court on it. If that court is the member\'s own and still on, they read the ON screen below and their OFF works; otherwise the code is spent.',lcd:L('CODE USED','WAIT 30 SECONDS')},{t:'many wrong codes',d:'Five wrong codes inside a minute lock offline checks for a minute, longer each time, so nobody can guess their way onto a court.',lcd:L('TOO MANY TRIES','TRY IN A MINUTE')},{t:'court already lit',d:'Refused, and the button window is bound to that court so the member\'s own OFF still works — whether they show a fresh code or the one that lit it.',lcd:L('COURT B IS ON','ALREADY LIT')}]},
   {l:'mega',t:'Lights',d:'Relay closes; the Mega\'s own timer runs the court.'},
-  {l:'box',t:'Queue the event',d:'Token, relay and uptime go into the RAM ring (64 slots) until the link returns.<small>A power cut before upload loses queued events; attendance for them is then whatever the desk records.</small>'}
+  {l:'box',t:'Queue the event',d:'The scanned code, relay and uptime go into the RAM ring (64 slots) until the link returns, and the code is marked used on this box.<small>A power cut before upload loses queued events; attendance for them is then whatever the desk records.</small>'}
  ]},
-{id:'walkup',t:'Walk-up, or paying for a friend',tags:['member','money','hardware'],tg:['charge on grant'],
- s:'Scan, then card, then court, then time. A 60-second identity code arms the buttons; the backend prices and charges the press before anything lights.',
+{id:'walkup',t:'Walk-up: buying time at the box',tags:['member','money','hardware'],tg:['charge on grant'],
+ s:'Scan, then court, then time. The member\'s own code arms the buttons; the backend prices and charges the press before anything lights.',
  steps:[
-  {l:'phone',t:'Walk-up code',d:'On the Court Code page, switch to <b>Walk up / pay for someone</b>. A fresh identity code appears; it lives 60 seconds and the page swaps it before it dies.'},
+  {l:'phone',t:'The same code',d:'The member shows <b>My Code</b> — the one code they use for everything. There is no separate walk-up code any more.'},
   {l:'mega',t:'Scan',d:'The Mega paints its own <b>CHECKING YOUR CODE</b> the instant the scan completes, before any answer exists, so the member sees something happen even if the bridge is dead. The bridge\'s answer replaces it within a second when the bridge is alive.'},
-  {l:'box',t:'Card',d:'Activate → the backend answers <code>recognised</code>. The box arms the buttons for that member for 30 seconds.<small>Buttons are dead until a recognised scan. What each of the 15 buttons means comes from the button map.</small>',
+  {l:'box',t:'Recognised',d:'Activate → the backend knows the member (no booking to light is still a known member). The box arms the buttons for that member for 30 seconds.<small>Buttons are dead until a recognised scan. What each of the 15 buttons means comes from the button map.</small>',
    o:[{t:'press without scan',d:'Row 3 alone says so, for three seconds, and the rest of the screen is left exactly as it was — a member part-way through reading does not lose the screen they were reading. Repeated presses are counted rather than repainted, so a jammed button cannot strobe the glass.',lcd:L('SCAN YOUR CODE FIRST')}]},
   {l:'mega',t:'Court',d:'The member presses a court; the glass names it and asks for a time, while row 2 goes on showing which courts are already lit and for how long.',lcd:L('COURT C','CHOOSE TIME')},
   {l:'mega',t:'Time',d:'They press a duration and the ESP turns the two presses into an intent: court C, 30 minutes. Any press re-arms the screen\'s own clock, so reading it slowly never loses the choice.'},
-  {l:'box',t:'POST walkup',d:'Sends <code>{mac, court, minutes, token, nonce}</code>. The nonce is reused on a retry so a flaky link can\'t charge twice.'},
-  {l:'api',t:'Price, charge, grant',d:'Checks the balance, creates a walk-up booking, posts the charge, answers granted seconds. A replayed nonce returns the original grant.',
+  {l:'box',t:'POST walkup',d:'Sends <code>{mac, court, minutes, token, nonce, scan_age_ms}</code>. The nonce is reused on a retry so a flaky link can\'t charge twice; <code>scan_age_ms</code> lets the backend check a code that was read a few presses ago.'},
+  {l:'api',t:'Price, charge, grant',d:'Checks the code and the balance, creates a walk-up booking, posts the charge in minutes, answers granted seconds. A replayed nonce returns the original grant; a code that already bought something is refused as used.',
    o:[{t:'insufficient_balance',d:'',lcd:L('TOO FEW MINUTES','BUY & RETRY')},{t:'court_in_use',d:'',lcd:L('COURT NOT FREE','SCAN TO START')},{t:'no_time_available',d:'The court is free but a booking starts before the requested time would end.',lcd:L('NO TIME BEFORE','NEXT BOOKING')},{t:'offline',d:'Money needs the backend.',lcd:L('NO CONNECTION','SCAN TO START')}]},
   {l:'mega',t:'Lights',d:'Relay closes; the button window disarms on spend so a second press can\'t buy again on the same scan.',lcd:L('COURT C  30 MIN')}
+ ]},
+{id:'payfor',t:'Paying for somebody else\'s court',tags:['member','money','hardware'],tg:['charge on confirm'],
+ s:'Scan, press the booked court, press it again. The payer takes over the booking\'s charge and the booker gets theirs back. Online only.',
+ steps:[
+  {l:'mega',t:'Scan',d:'The payer shows their own <b>My Code</b>. With nothing of their own to light here, the buttons arm for them.',lcd:L('NO BOOKING','SEE THE DESK')},
+  {l:'mega',t:'Press the booked court',d:'They press a court somebody holds now — booked in the roster, or lit — that is not their own. (Pressing their own lit court is the first half of switching it OFF, as it always was; a free court is the walk-up choice.)'},
+  {l:'box',t:'Ask for a quote',d:'<code>POST pay-for</code> with <code>confirm:false</code>, which moves nothing.',lcd:L('ONE MOMENT','Asking the club')},
+  {l:'api',t:'Quote',d:'Answers what the booking costs in whole minutes, as the label the glass will show.',
+   o:[{t:'split booking',d:'Any accepted partner holds a share: shares are paid in the app, never at the box. Nothing is charged.',lcd:L('SPLIT BOOKING','PAY IN APP')},{t:'already paid',d:'',lcd:L('NOTHING TO PAY','Already paid for')},{t:'too few minutes',d:'No overdraft at a device.',lcd:L('TOO FEW MINUTES','Buy more time')},{t:'nothing booked there',d:'The old walk-up choice: pick a time.'},{t:'no connection',d:'Also the walk-up choice — a box flashed before the backend learned pay-for behaves exactly as before.'}]},
+  {l:'mega',t:'The question',d:'Three rows, so the instruction is never cut off: <span class="lcd">CT2 BOOKED</span> <span class="lcd">PAY 50 MIN?</span> <span class="lcd">PRESS CT2 TO PAY</span>. The court selection is cleared, so a time press cannot turn the question into a walk-up on a court somebody is playing on.'},
+  {l:'mega',t:'Press it again',d:'The same court again is the yes. Anything else, or the countdown running out, is a no.'},
+  {l:'api',t:'Confirm, pay',d:'<code>confirm:true</code> echoes the label the glass showed. The payer is charged those minutes and the booker refunded the same, together; both are emailed. If nobody has started the booking and its window is open, the court lights too.',
+   o:[{t:'price changed',d:'The label no longer matches: nothing is charged, and the member is asked again.',lcd:L('PRICE CHANGED','Nothing charged')},{t:'no answer',d:'The quote and its nonce stay armed, so pressing again retries the same payment and can never pay twice.'}]},
+  {l:'mega',t:'Paid',d:'The glass says so, with <span class="lcd">Booker refunded</span> under it. If the court lights too, these words go out just ahead of the light.',lcd:L('PAID FOR CT2','50 MIN PAID')}
  ]},
 {id:'off',t:'Lights off: on time, by button, or past the cap',tags:['member','hardware'],tg:['hardware'],
  s:'Three ways a court goes dark, and the one way a two-hour booking stays lit past the 90-minute relay cap.',
@@ -555,7 +581,7 @@ var FLOWS=[
  steps:[
   {l:'box',t:'POST event #n',d:'Uploads the oldest queued event with its own sequence number and the uptime it happened at.'},
   {l:'api',t:'Receipt #n',d:'Converts uptime to wall-clock (upload time minus how long ago on the box\'s counter; bounded at 30 days), writes a receipt keyed on device + sequence, then applies the event.<small>A duplicate sequence returns the same receipt and does nothing.</small>'},
-  {l:'api',t:'Apply activation',d:'Resolve the code → stamp attendance. If the no-show sweep already refunded and penalised that member, run the reversal from the settlement model.',
+  {l:'api',t:'Apply activation',d:'Re-check the scanned code, both halves, at the moment it was read; find the member\'s booking — organiser or accepted partner — by court and time → stamp attendance. A code whose second half does not check out raises a forgery alert and is never attendance. If the no-show sweep already refunded and penalised that member, run the reversal from the settlement model.',
    o:[{t:'displaced booking',d:'A booking the reversal already refunded is never charged for its own late scan.'}]},
   {l:'api',t:'Apply release',d:'Paired with its activation by device and relay; corrects the charged window to what the relay measured and reinstates any resold booking whose slot hasn\'t started.'},
   {l:'box',t:'Next event',d:'Frees the slot in the ring and sends the next one.'}
@@ -570,10 +596,10 @@ var FLOWS=[
   {l:'api',t:'Release narrows',d:'When the release lands, the window shrinks to the real lit time and a displaced booking the court never reached is reinstated.'}
  ]},
 {id:'canlit',t:'Cancelled, then lit anyway',tags:['money','offline'],tg:['pro-rata','offline'],
- s:'A member cancels, keeps the still-cached code, and scans during an outage. The court lights; the backend bills what actually ran, never more than the original price.',
+ s:'A member cancels, then scans during an outage before the box has heard. The court lights; the backend bills what actually ran, never more than the original price.',
  steps:[
-  {l:'api',t:'Cancel (refund)',d:'Refund, minus any late penalty. The code stays valid to its own expiry so a scan that predates the cancel still resolves correctly.'},
-  {l:'box',t:'Offline scan lights',d:'The roster still lists the booking for up to a minute; offline, the scan matches and the court lights.'},
+  {l:'api',t:'Cancel (refund)',d:'Refund, minus any late penalty. The booking stays on record, so a scan that predates the cancel still resolves correctly when it uploads.'},
+  {l:'box',t:'Offline scan lights',d:'The roster still lists the booking until the next heartbeat lands; offline, the member\'s code checks out, the roster names them and the court lights.'},
   {l:'api',t:'Activation lands',d:'The cue gate applies (scanned before the window → nothing charged). Otherwise the lit window is bounded to the booking\'s own slot, the sold minutes and the release\'s held time, and priced pro-rata. The retained late penalty is netted so the total never exceeds the original price.'},
   {l:'phone',t:'Email',d:'Says the lights ran N minutes and what it cost.'}
  ]},
@@ -717,17 +743,17 @@ var DOORS=[
    o:[{t:'WiFi / URL / key wrong',d:'Nothing is created server-side, the lamp keeps its slow blink, and the door opens for nobody. Check the four values and reflash.'}]},
   {l:'api',t:'Auto-register',d:'Key → club. Unknown MAC + <code>kind: "gate"</code> → a device row appears as <code>gate-xxxxxx</code>, a door with no courts, no button map and no name.<small>A board can only say this once: on a MAC the club already knows, the row wins and the hint is ignored. A box cannot turn itself into a door, or the other way about.</small>'},
   {l:'desk',t:'Name the door',d:'Open the row and give it a name — <b>front-door</b>, <b>side-door</b>. That name is what the audit trail says instead of <code>gate-0a1b2c</code>.',
-   o:[{t:'until you name it',d:'The door works, but only while it can reach the server: an unnamed board is deliberately sent an EMPTY booking list. Anyone holding the club key could invent a board and be handed the club\'s live codes otherwise, so naming it is your acknowledgement that this one is yours.'}]},
+   o:[{t:'until you name it',d:'The door works, but only while it can reach the server: an unnamed board is deliberately sent an EMPTY booking list. Anyone holding the club key could invent a board and be handed the club\'s bookings and member keys otherwise, so naming it is your acknowledgement that this one is yours.'}]},
   {l:'gate',t:'Bookings arrive',d:'From the next heartbeat the door holds the club\'s current bookings — all courts, not four — and can decide on its own if it has to.'}
  ]},
 {id:'door-in',t:'A member arrives at the door',tags:[],tg:['online first'],
  s:'Phone, scan, door. The backend answers, and its answer is final — the door never argues with it.',
  steps:[
-  {l:'phone',t:'The same code',d:'The Court Code screen shows the same 12 characters as at the box, as a QR. Nothing extra to set up for doors.'},
+  {l:'phone',t:'The same code',d:'<b>My Code</b> shows the same code as at the box, as a QR. Nothing extra to set up for doors.'},
   {l:'gate',t:'Scanner → token',d:'Reads the line, trims it, and refuses anything too long or outside the code alphabet without truncating it.<small>A scanner re-reads while a phone is held at the window, so the same code within two seconds of a decision is simply dropped — no second call, no second audit row.</small>'},
   {l:'gate',t:'Ask the backend',d:'With the radio up it posts the code and waits. Only the backend knows about a booking made a minute ago or a membership suspended this morning.'},
-  {l:'api',t:'Decide, and record',d:'Under the default policy any member the club has not barred gets in; under the other they need a live booking on any court, and club admins always pass that check. A booking\'s QR opens a door only inside that booking\'s own window.<small>One audit row per decision, naming the member — and never the code itself. That row is the whole record that anything happened: no ledger entry, no booking, nothing else to reconstruct it from.</small>',
-   o:[{t:'too early',d:'A real booking, but its entry window has not opened yet. Told plainly, because the club minted that code for that person and a desk may not be staffed.'},{t:'not recognised',d:'Unknown, expired, another club\'s — or a booking code presented after its slot ended. Deliberately one answer for all of them: a door that told them apart would be a way to test which codes are real.'},{t:'not an active member',d:'Suspended, rejected, or not yet approved.'},{t:'no booking',d:'Only under the bookings-only policy, and only for somebody who is not a club admin.'}]},
+  {l:'api',t:'Decide, and record',d:'Under the default policy any member the club has not barred gets in; under the other they need a live booking on any court, and club admins always pass that check.<small>One audit row per decision, naming the member — and never the code itself. That row is the whole record that anything happened: no ledger entry, no booking, nothing else to reconstruct it from.</small>',
+   o:[{t:'code used',d:'This exact code already opened a door. The next one, at most 30 seconds away, works.'},{t:'not recognised',d:'A code that does not check out, is too old, or is another club\'s. Deliberately one answer for all of them: a door that told them apart would be a way to test which codes are real.'},{t:'not an active member',d:'Suspended, rejected, or not yet approved.'},{t:'no booking',d:'Only under the bookings-only policy, and only for somebody who is not a club admin.'}]},
   {l:'gate',t:'Release the lock',d:'For the club\'s release time — <b>fifteen seconds</b> by default, and never more than thirty however the setting is edited. The lamp goes solid.<small>Never for "what is left of the booking": a door held open for twenty-five minutes is not a door.</small>',
    o:[{t:'a second member arrives while it is open',d:'The thirty-second cap is a budget for the whole opening, not for one scan, so a longer release buys fewer extensions. At fifteen seconds a queue gets <b>one</b>: scan at 14 s and the door stays open to 29 s; the next scan gets the second that is left, and the one after that is refused while the lock relatches. At the old three seconds the same rule allowed nine. Nobody who scans once notices; somebody holding a phone at the reader meets the cap nine times sooner, which is what the cap is for.'}]},
   {l:'api',t:'Nothing else happens',d:'No attendance stamped, no no-show reversed, no minutes moved, no booking touched. Walking through a door says nothing about a court.'}
@@ -736,8 +762,8 @@ var DOORS=[
  s:'It decides from the bookings it already holds — a narrower rule than the court box\'s, and knowingly so.',
  steps:[
   {l:'gate',t:'The call fails',d:'A timeout, a 5xx, no route, or the breaker is open after two failures in a row. <b>Only that</b> hands the scan to the local list; a refusal from the backend never does.'},
-  {l:'gate',t:'Match what it holds',d:'Compares the scanned code, exactly, against the bookings from the last heartbeat.',
-   o:[{t:'match, in window',d:'The lock releases and the door remembers what it did, to tell the backend later.'},{t:'match, too early',d:'The booking exists but its window has not opened. Three blinks.'},{t:'no match',d:'Three blinks. A walk-up member\'s 60-second code can never be in the list, by construction — offline, they go to the desk.'},{t:'list older than six hours',d:'Nobody gets in, however good the match looks. A week-old list would admit a member suspended since.'},{t:'never had a heartbeat',d:'Nobody gets in. So does an unnamed door, whose list is empty on purpose.'}]},
+  {l:'gate',t:'Check the code, find the member',d:'Checks the half of the code it holds today\'s key for, then looks for a booking from the last heartbeat that names that member — organiser or accepted partner.',
+   o:[{t:'their booking, in window',d:'The lock releases and the door remembers what it did — the code as scanned — to tell the backend later.'},{t:'their booking, too early',d:'The booking exists but its window has not opened. Three blinks.'},{t:'no booking of theirs, or a bad code',d:'Three blinks. Offline, a member with no booking that day goes to the desk.'},{t:'same code again',d:'Three blinks: a code opens once. The next one on their phone works.'},{t:'list older than six hours',d:'Nobody gets in, however good the match looks. A week-old list would admit a member suspended since.'},{t:'never had a heartbeat',d:'Nobody gets in. So does an unnamed door, whose list is empty on purpose.'}]},
   {l:'gate',t:'Queue it',d:'Only what the backend does not already know: an open it decided itself, a refusal it decided itself, and its own boot.'},
   {l:'api',t:'Catch up',d:'Each event is receipted on its sequence number, so a retry can never double-apply. The member is identified as of <b>the moment they scanned</b>, not the moment it uploaded — otherwise somebody who walked in during an outage becomes a stranger.<small>Still no attendance, and no booking is ever paired to it.</small>'}
  ]},

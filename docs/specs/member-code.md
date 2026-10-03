@@ -358,6 +358,7 @@ server still sees both uploads.
 | ok + allow | the grant, as for any roster grant | `ok`, released for `unlock_seconds` | `activation` / `gate_open`, **subject = the scanned token** |
 | ok + too early / late / wrong court / stale | the roster's own screens | `too_early` / `too_late` / `roster_stale` | `unknown_scan` |
 | ok on a court already lit | `COURT B IS ON / ALREADY LIT` — the re-scan guard | — | nothing |
+| replayed, on the member's own court already lit (bridge 2.2.1) | `COURT B IS ON / ALREADY LIT`, the OFF bound to that court; the scan is spent, so it buys nothing | — | nothing |
 | replayed | `CODE USED` / `WAIT 30 SECONDS` (arms nothing) | `replayed` | `unknown_scan` |
 | throttled | `TOO MANY TRIES` / `TRY IN A MINUTE` (arms nothing) | `too_fast` | `unknown_scan` |
 | no_clock | the stale roster's screen | `roster_stale` | `unknown_scan` |
@@ -397,8 +398,9 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    `code_step` to `codes:m1` devices. Phones still show legacy codes. Dean can pilot v1 on his own
    phone: v1 tokens are accepted online everywhere, even from un-flashed boards, because a board
    passes scanned bytes through unchanged.
-2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.0,
-   which also shows pay-for amounts in minutes, §9.3) and each ESP32 door (1.1.0) — the physical USB
+2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.1 —
+   2.2.0 shows pay-for amounts in minutes, §9.3, and 2.2.1 shows the member who rescans the code
+   that just lit their own court its ON screen rather than `CODE USED`) and each ESP32 door (1.1.0) — the physical USB
    step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
    `codes:m1` on its latest heartbeat (and at least one does), the phase becomes `v1` and
@@ -423,8 +425,8 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
   **1 ON 2 ON 3 ON 4 ON 5–8 OFF**. (`make flash-bridge` is the PlatformIO equivalent.)
 - **Each door (ESP32)**: Arduino IDE, sketch `src/iot/door-gate/arduino/door_gate/`, board
   `esp32:esp32:esp32` (core 2.0.17), its own `secrets.h`; USB, upload.
-- **Proof it landed**: the Devices page shows firmware **2.2.0** for the box (a box still on
-  2.1.0 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
+- **Proof it landed**: the Devices page shows firmware **2.2.1** for the box (a box still on
+  2.1.0 or 2.2.0 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
   `codes:m1`. The Mega stays **2.0.0**: the bridge is the only half of the box that is flashed.
 
 ---
@@ -496,7 +498,7 @@ the buffer and wire bound; four digits is the content rule. The server refuses a
 or nothing.
 
 A bridge still on 2.1.0 keeps working against this server, because a whole-number label passes its
-older check, but its glass names the unit `cr` instead of `MIN` until it is flashed to 2.2.0.
+older check, but its glass names the unit `cr` instead of `MIN` until it is flashed to 2.2.0 or later.
 
 Reasons: `not_booked` (nothing live on that court — the box falls back to walk-up), `split_booking`
 (**any** accepted partner holds a share — D11: shares are paid in the app, never at the box),
@@ -605,7 +607,7 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
 | Roster REF lists, 1–4 players, the two paths never cross | `roster.json` + `test_a_scanned_ref_list_never_matches_and_a_ref_never_matches_a_code` |
 | Code sync grammar and the roster rules | `codesync.json` → `test_key_and_day_elements`, `test_code_sync_applies_a_whole_body_by_the_roster_rules` |
 | Court box bodies, capability, scan age, pay-for answers, the 2048 budget | `http.json` → `court-box/test/test_membercode` |
-| Offline v1 at the box: partner lights, subject = scanned token, CODE USED (arming nothing), throttling, re-scan guard | `court-box/test/test_membercode` (`test_offline_v1_*`) |
+| Offline v1 at the box: partner lights, subject = scanned token, CODE USED (arming nothing), throttling, re-scan guard, the same code rescanned on its own lit court | `court-box/test/test_membercode` (`test_offline_v1_*`) |
 | A code the device already acted on is refused locally, never asked about online | `test_a_code_this_box_acted_on_offline_is_not_asked_about_online`, `test_app_a_code_opened_offline_is_refused_locally_once_the_link_returns` |
 | The guess guard; online uses recorded on the device | `test_guess_guard_locks_after_five_wrong_codes_and_backs_off`, `test_verify_guarded_throttles_guessing_and_a_good_code_resets_it`, `test_an_online_use_is_recorded_so_the_code_cannot_be_used_offline_after`, `test_the_door_throttles_offline_guessing` |
 | `code_used` on activate and walk-up | `http.json` `activate-response-code-used`, `walkup-response-code-used` |
