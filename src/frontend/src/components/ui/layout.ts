@@ -119,3 +119,12 @@ export const FILTER_TRIGGER_INSET = "px-[min(0.75rem,12px)]";
  */
 export const SCALING_ICON = "1.25rem";
 export const SCALING_ICON_TARGET = "size-[max(44px,2rem)]";
+
+/**
+ * R8 L8-9 — the admin bar's crest box (over the rail, from xl) is a query container, and the club's
+ * name goes when the box is under 12.75rem: the mark and the whole name need 44px + ~10.1rem, so at
+ * 200 % text the name hid instead of truncating to "Crusader…" in a 307px box, and at 100 % (even
+ * the 256px rail at 1920) it shows whole. `!` — the bar's own `@[60rem]/appbar:block` must not win.
+ */
+export const CREST_BOX_OVER_RAIL = "xl:@container/crest";
+export const CREST_NAME_FITS_BOX = "[@container_crest_(max-width:12.75rem)]:!hidden";

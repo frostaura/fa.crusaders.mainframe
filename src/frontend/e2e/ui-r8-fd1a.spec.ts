@@ -255,3 +255,46 @@ test.describe("L7-13 — every page title steps down rather than break a word", 
     expect(await brokenWords(page, "main h1")).toEqual([]);
   });
 });
+
+/* ───────────────────────── L8-9 — the admin app bar's crest ───────────────────────── */
+
+async function crest(page: Page, path: string, width: number, height: number, big: boolean) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width, height });
+  await signIn(page);
+  await serveApi(page, memberShellRoutes({ admin: true }));
+  await page.goto(path);
+  await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 20_000 });
+  if (big) await bigText(page);
+  await fontsReady(page);
+  await page.waitForTimeout(200);
+  return page.locator("[data-crest-link]").evaluate((link) => {
+    const mark = link.querySelector("svg")!.getBoundingClientRect();
+    const name = link.querySelector("span") as HTMLElement;
+    const shown = getComputedStyle(name).display !== "none";
+    return { x: Math.round(mark.left), shown, cut: shown ? name.scrollWidth - name.clientWidth : 0 };
+  });
+}
+
+test.describe("L8-9 — the admin bar's crest: the club's name whole or not at all, and where the member bar has it", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test('1280 / 200 %: never "Crusader…" over the rail', async ({ page }) => {
+    const admin = await crest(page, "/admin", 1280, 800, true);
+    expect(admin.cut, "the name is truncated").toBeLessThanOrEqual(0);
+  });
+
+  for (const [width, height, big] of [[1280, 800, true], [1280, 800, false], [1920, 1080, false]] as const) {
+    test(`${width}${big ? " / 200 %" : ""}: the crest stands where it does on a member page`, async ({ page }) => {
+      const member = await crest(page, "/how-it-works", width, height, big);
+      const admin = await crest(page, "/admin", width, height, big);
+      expect(Math.abs(admin.x - member.x), `admin ${admin.x} vs member ${member.x}`).toBeLessThanOrEqual(1);
+    });
+  }
+
+  test("1280 at 100 %: the name still shows over the rail", async ({ page }) => {
+    const admin = await crest(page, "/admin", 1280, 800, false);
+    expect(admin.shown).toBe(true);
+    expect(admin.cut).toBeLessThanOrEqual(0);
+  });
+});

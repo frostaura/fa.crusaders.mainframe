@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ADMIN_RAIL_OFFSET_XL, ADMIN_RAIL_WIDTH_XL } from "@/components/ui/layout";
+import { ADMIN_RAIL_OFFSET_XL, ADMIN_RAIL_WIDTH_XL, CREST_BOX_OVER_RAIL } from "@/components/ui/layout";
 import { tokenStore } from "@/lib/api";
 import { useAdminAttention } from "@/lib/adminAttention";
 import { useAuth } from "@/lib/auth";
@@ -99,8 +99,12 @@ const HEADER_FRAME = [
 ].join(" ");
 /** 3xl: the frame's gutter is 3rem, so the gap from the crest box is too (3xl:px-12 would put the pl back). */
 const HEADER_OVER_RAIL = "xl:max-w-none xl:gap-x-8 xl:pl-0 3xl:gap-x-12 3xl:pl-0";
-/** The rail's width (`ui/layout` ADMIN_RAIL_WIDTH, R6 X6-5) and its items start 24px in (px-3 + px-3). */
-const CREST_OVER_RAIL = cn(ADMIN_RAIL_WIDTH_XL, "xl:pl-6");
+/**
+ * The rail's width (`ui/layout` ADMIN_RAIL_WIDTH, R6 X6-5), and the crest where a MEMBER page has it
+ * — the frame's own gutter (2rem, 3rem from 3xl). R8 L8-9: it sat 24px in, at the rail's items, so
+ * it jumped 8px (16px at 200 % text) between Bookings and Admin; it holds still now.
+ */
+const CREST_OVER_RAIL = cn(ADMIN_RAIL_WIDTH_XL, "xl:pl-8 3xl:pl-12", CREST_BOX_OVER_RAIL);
 
 const BANNER = "mx-auto w-full max-w-wide px-4 pt-4 empty:hidden print:hidden sm:px-6 lg:px-8 3xl:px-12";
 /** On /admin from xl the shut-doors banner starts where the content does: right of the rail. */

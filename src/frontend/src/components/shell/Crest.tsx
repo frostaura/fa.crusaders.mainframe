@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { CREST_NAME_FITS_BOX } from "@/components/ui/layout";
 import { cn } from "@/lib/utils";
 
 /**
@@ -31,7 +32,8 @@ export function CrestMark({ className }: { className?: string }) {
  * in the top bar that carries no action of its own — and is shown only where the bar has room for
  * it: hidden on a phone (the chip and the avatar need the width) and where the four tabs have just
  * joined the bar (44–60rem). In the BAR's rem (`@container/appbar`, V5-3), not the viewport's, so
- * at 200 % text it gives the room back instead of pushing the row onto three lines. Its
+ * at 200 % text it gives the room back instead of pushing the row onto three lines. Over the admin
+ * rail it also goes when its own box is too narrow for it whole (R8 L8-9, `@container/crest`). Its
  * accessible name is always the club.
  */
 export function CrestLink({ to }: { to: string }) {
@@ -40,10 +42,10 @@ export function CrestLink({ to }: { to: string }) {
       to={to}
       data-crest-link=""
       aria-label="Crusaders Squash — home"
-      className="no-lift flex min-h-touch min-w-touch items-center justify-center gap-2.5 rounded-lg"
+      className="no-lift flex min-h-touch min-w-touch items-center justify-start gap-2.5 rounded-lg"
     >
       <CrestMark />
-      <span aria-hidden="true" className="hidden min-w-0 truncate font-display text-lg font-bold tracking-tight text-text-primary @[24rem]/appbar:block @[44rem]/appbar:hidden @[60rem]/appbar:block">
+      <span aria-hidden="true" className={cn("hidden min-w-0 truncate font-display text-lg font-bold tracking-tight text-text-primary @[24rem]/appbar:block @[44rem]/appbar:hidden @[60rem]/appbar:block", CREST_NAME_FITS_BOX)}>
         Crusaders Squash
       </span>
     </Link>
