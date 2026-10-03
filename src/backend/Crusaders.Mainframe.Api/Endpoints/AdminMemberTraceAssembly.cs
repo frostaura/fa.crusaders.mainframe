@@ -528,6 +528,7 @@ public static partial class AdminMemberTraceAssembly
             if (kind == TraceKinds.CourtCheckedIn) kind = TraceKinds.LightsOn;
 
             s.Courts.TryGetValue(row.CourtId, out var court);
+            var holder = TwinCodeHolderOf(row, s);
             yield return new TraceEventRow(
                 At: row.OccurredAt,
                 SourceId: row.Id,
@@ -549,6 +550,8 @@ public static partial class AdminMemberTraceAssembly
             {
                 DeviceCode = s.DeviceCodes.GetValueOrDefault(row.DeviceId),
                 OutageId = OutageAt(s, row.DeviceId, row.OccurredAt),
+                CodeHolderUserId = holder,
+                CodeHolderName = holder is { } h ? PersonNames.Of(h, s.Names) : null,
             };
         }
     }

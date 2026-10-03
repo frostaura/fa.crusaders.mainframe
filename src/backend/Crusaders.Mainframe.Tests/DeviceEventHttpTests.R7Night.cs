@@ -4,8 +4,10 @@ using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -128,6 +130,71 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(box.MemberId, activated.ActorUserId);
             using var details = JsonDocument.Parse(activated.DetailsJson!);
             Assert.True(details.RootElement.GetProperty("reversed_no_show").GetBoolean());
+        }
+
+        /// <summary>Keeps every event the server emits and still hands them on.</summary>
+        private sealed class KeepingBus : IEventBus
+        {
+            private readonly System.Threading.Channels.Channel<DomainEvent> _channel =
+                System.Threading.Channels.Channel.CreateUnbounded<DomainEvent>();
+            private readonly List<DomainEvent> _kept = [];
+
+            public System.Threading.Channels.ChannelReader<DomainEvent> Reader => _channel.Reader;
+
+            public List<DomainEvent> Kept
+            {
+                get { lock (_kept) return [.. _kept]; }
+            }
+
+            public async ValueTask EmitAsync(DomainEvent evt, CancellationToken ct = default)
+            {
+                lock (_kept) _kept.Add(evt);
+                await _channel.Writer.WriteAsync(evt, ct);
+            }
+        }
+
+        /// <summary>
+        /// Review round 11, E11-3. A late upload that reversed a settled no-show: the Night's lights
+        /// row was the board's receipt and said only "reported by the court's board" though its
+        /// server twin recorded whose code was read; <c>booking.no_show_reversed</c> had no actor;
+        /// and no <c>booking.lights_on</c> went out at all, though the webhooks contract lists the
+        /// roster fallback uploaded later. All three name the scanner now.
+        /// </summary>
+        [SkippableFact]
+        public async Task A_late_upload_that_reverses_a_no_show_names_the_scanner_everywhere()
+        {
+            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+            var factory = CreateFactory();
+            var box = await SeedAsync(factory);
+            var (booked, _) = await SweptNoShowAsync(factory, box);
+
+            var bus = new KeepingBus();
+            await using var app = factory.WithWebHostBuilder(b => b.ConfigureServices(sv =>
+            {
+                sv.RemoveAll<IEventBus>();
+                sv.AddSingleton<IEventBus>(bus);
+                sv.RemoveAll<Crusaders.Mainframe.Api.Email.IEmailService>();
+                sv.AddSingleton<Crusaders.Mainframe.Api.Email.IEmailService>(new StubEmailService());
+            }));
+            (await app.CreateClient().SendAsync(FromBox(box, EventsPath, Batch(
+                Activation(1, subject: booked.Code, court: 0))))).EnsureSuccessStatusCode();
+            Assert.Equal(BookingStatus.Booked, (await BookingAsync(factory, booked.BookingId)).Status);
+
+            var reversed = Assert.Single(bus.Kept, e => e.Type == "booking.no_show_reversed");
+            Assert.Equal(box.MemberId, reversed.ActorUserId);
+            Assert.Equal(box.MemberId, (Guid?)reversed.Data["identified_user_id"]);
+
+            var lit = Assert.Single(bus.Kept, e => e.Type == "booking.lights_on");
+            Assert.Equal(box.MemberId, lit.ActorUserId);
+            Assert.Equal(booked.BookingId, (Guid)lit.Data["booking_id"]!);
+            Assert.Equal(box.MemberId, (Guid)lit.Data["identified_user_id"]!);
+
+            var night = await NightAsync(factory, box);
+            var on = Assert.Single(night.GetProperty("events").EnumerateArray(),
+                e => e.GetProperty("kind").GetString() == TraceKinds.LightsOn);
+            Assert.Equal(TraceActors.Device, on.GetProperty("actor").GetProperty("kind").GetString());
+            Assert.Equal(box.MemberId, on.GetProperty("code_holder").GetProperty("user_id").GetGuid());
         }
 
         /// <summary>The admin's view of the box member's night, through the real route.</summary>

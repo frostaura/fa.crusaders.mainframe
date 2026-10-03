@@ -1619,7 +1619,7 @@ public sealed class BookingService
 
         await payerLock.CommitAsync(ct);
 
-        await NotifyNoShowReversedAsync(booking, legs.RefundBack, legs.PenaltyBack, attendedAt, ct);
+        await NotifyNoShowReversedAsync(booking, legs.RefundBack, legs.PenaltyBack, attendedAt, ct, scan);
         foreach (var other in tail.Displaced) await NotifyDisplacedAsync(other, booking, ct);
         return new NoShowReversalResult.Ok(legs.RefundBack, legs.PenaltyBack)
         {
@@ -2473,8 +2473,12 @@ public sealed class BookingService
     /// money is committed by now and the email is the courtesy, so a member with no
     /// <c>users</c> row is logged and skipped, and a failed send is logged and swallowed.
     /// </summary>
+    /// <param name="scan">
+    /// Who the box identified (review round 11, E11-3): the event's actor and
+    /// <c>data.identified_user_id</c>, as on <c>booking.lights_on</c>. Null for a reversal no scan made.
+    /// </param>
     private async Task NotifyNoShowReversedAsync(
-        Booking booking, int refunded, int penalised, DateTimeOffset attendedAt, CancellationToken ct)
+        Booking booking, int refunded, int penalised, DateTimeOffset attendedAt, CancellationToken ct, ReversalScan? scan = null)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == booking.UserId, ct);
         var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
@@ -2500,13 +2504,14 @@ public sealed class BookingService
             Id: $"evt_{Guid.NewGuid():N}",
             Type: "booking.no_show_reversed",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: null, ActorIsAdmin: false, SubjectUserId: booking.UserId,
+            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: scan?.UserId, ActorIsAdmin: false, SubjectUserId: booking.UserId,
             Data: new()
             {
                 ["booking_id"] = booking.Id,
                 ["court_id"] = booking.CourtId,
                 ["court_number"] = court?.CourtNumber,
                 ["user_id"] = booking.UserId,
+                ["identified_user_id"] = scan?.UserId,
                 ["penalty_minutes"] = penalised,
                 ["refund_minutes"] = refunded,
                 ["attended_at"] = attendedAt,

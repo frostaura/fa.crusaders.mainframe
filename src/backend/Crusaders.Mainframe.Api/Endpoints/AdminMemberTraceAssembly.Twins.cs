@@ -59,6 +59,26 @@ public static partial class AdminMemberTraceAssembly
         return false;
     }
 
+    /// <summary>
+    /// Review round 11, E11-3: whose code the board read for an ACTIVATION receipt, taken from its
+    /// server-written <c>court.lights_on</c> twin — the row <see cref="IsReceiptTwin"/> drops. The
+    /// receipt keeps its place as the measurement, but it knows no person, so a late check-in that
+    /// reversed a refund read "reported by the court's board" while the twin named the scanner.
+    /// </summary>
+    private static Guid? TwinCodeHolderOf(ReceiptRow r, Strands s)
+    {
+        if (r.Kind != DeviceEventEndpoints.ActivationKind) return null;
+        foreach (var row in s.Audit)
+        {
+            if (row.Action != TraceKinds.LightsOnAction) continue;
+            var details = DoorActivityView.Details(row.DetailsJson);
+            var inner = Inner(details);
+            if (GuidOf(inner, "booking_id") != r.BookingId || DoorTrail.DeviceIdOf(details) != r.DeviceId) continue;
+            if (SameEvent(r.Kind, r, inner) && GuidOf(inner, "identified_user_id") is { } holder) return holder;
+        }
+        return null;
+    }
+
     /// <summary>The event half of <see cref="IsReceiptTwin"/>. Block body for the lizard reason.</summary>
     private static bool SameEvent(string receiptKind, ReceiptRow r, JsonElement? inner)
     {

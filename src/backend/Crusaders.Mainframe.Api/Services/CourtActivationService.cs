@@ -508,6 +508,18 @@ public class CourtActivationService
     /// <c>paid_by_user_id</c> is who actually paid. <c>identified_user_id</c> names the scanner in
     /// the payload too, because a webhook consumer reads <c>data</c>, not the envelope.
     /// </para>
+    /// <summary>
+    /// Review round 11, E11-3: <c>booking.lights_on</c> for a court a box lit offline whose upload
+    /// REVERSED a settled no-show — the "roster fallback uploaded later" the webhooks contract
+    /// lists. The reversal goes through the booking service, not <see cref="ActivateAsync"/>, so
+    /// it emitted nothing and a consumer mirroring lit courts never heard of that session.
+    /// </summary>
+    public ValueTask EmitReversedLightsOnAsync(Court court, Booking booking, Guid identifiedUserId, string method, CancellationToken ct)
+    {
+        var payer = booking.PaidByUserId ?? booking.UserId ?? identifiedUserId;
+        return _bus.EmitAsync(LightsOnEvent(court, booking, (payer, identifiedUserId), method, DateTimeOffset.UtcNow), ct);
+    }
+
     private DomainEvent LightsOnEvent(Court court, Booking booking, (Guid Payer, Guid Identified) who, string method, DateTimeOffset now)
     {
         // Block body, not an expression body. lizard's C# parser mis-scopes any
