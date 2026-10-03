@@ -30,6 +30,27 @@ describe("member detail — bookings tab", () => {
     expect(screen.queryByRole("button", { name: BOOKINGS_TAB_COPY.loadMore })).not.toBeInTheDocument();
   });
 
+  /**
+   * Review round 6, E6-10 — a swept no-show's row: `ends_at` is the sweep's cut end and
+   * `charged_minutes` the whole charge, so the desk read "01:55–02:00 · 45 minutes" where the
+   * member's own page says "01:55–02:40 · cost 13". The row now reads the hours it was SOLD to
+   * and what the member is out on it (`sold_ends_at`, `cost_minutes`, from BE).
+   */
+  it("shows a swept no-show at the hours it was sold to and at what it cost the member", async () => {
+    serve(baseRoutes(detailFixture(), [{
+      path: `${BASE}/bookings`,
+      body: { when: "upcoming", next_cursor: null, items: [{
+        ...bookingRow({ status: "noshow", starts_at: "2026-09-22T23:55:00Z", ends_at: "2026-09-23T00:00:00Z", charged_minutes: 45 }),
+        sold_ends_at: "2026-09-23T00:40:00Z", cost_minutes: 13,
+      }] },
+    }]));
+    renderMember(at("bookings"));
+    const line = (await screen.findByText(/Court 1/)).closest("li")!;
+    expect(line).toHaveTextContent("01:55–02:40");
+    expect(line).toHaveTextContent(BOOKINGS_TAB_COPY.charged(13));
+    expect(line).not.toHaveTextContent(BOOKINGS_TAB_COPY.charged(45));
+  });
+
   it("switches to past bookings through the URL's own toggle", async () => {
     const stub = serve(baseRoutes(detailFixture(), [
       { path: `${BASE}/bookings`, body: { when: "upcoming", items: [], next_cursor: null } },
@@ -133,6 +154,14 @@ describe("member detail — door history (D9)", () => {
     expect(screen.getByText(DOORS_TAB_COPY.refused)).toBeInTheDocument();
     expect(screen.getByText(/^≈/)).toBeInTheDocument();
     expect(screen.getByText(DOORS_TAB_COPY.offlineNote)).toBeInTheDocument();
+  });
+
+  /** Review round 6, E6-9: the placeholder a gate registers under is not a name (doorsCopy A11). */
+  it("names a door nobody has named as the club log does, never \"Door gate\"", async () => {
+    serve(doorRoutes(doorsPage([doorRow({ door: { id: "d2", name: "Door gate", gate_key: "gate-44c103", removed: false } })])));
+    renderMember(at("doors"));
+    expect(await screen.findByText("Unnamed scanner (gate-44c103)")).toBeInTheDocument();
+    expect(screen.queryByText("Door gate")).not.toBeInTheDocument();
   });
 
   it("says nothing was recorded about the look-up when the read failed", async () => {

@@ -19,6 +19,7 @@ import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useRead } from "@/lib/useRead";
 import { useTicker } from "@/lib/useTicker";
 import { cn } from "@/lib/utils";
+import { doorDisplayName } from "@/lib/doorsCopy";
 import { useMemberDetail } from "./useMemberDetail";
 
 /**
@@ -132,8 +133,13 @@ function DoorPagesView({ pages }: { pages: Pages }) {
   );
 }
 
+/**
+ * What the club log calls the door (E6-9): its own name, or "Unnamed scanner (gate-44c103)" —
+ * never the "Door gate" placeholder a gate registers under, which is not a name (doorsCopy A11).
+ */
 function doorName(row: MemberDoorRow): string {
-  const name = row.door.name ?? row.door.gate_key ?? COPY.unknownDoor;
+  const { name: given, gate_key: key } = row.door;
+  const name = given === null && key === null ? COPY.unknownDoor : doorDisplayName({ name: given, device_code: key });
   return row.door.removed ? `${name} ${COPY.removedDoor}` : name;
 }
 

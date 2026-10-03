@@ -24,8 +24,16 @@ function bookedByLine(row: MemberBookingRow): string {
  * One booking. A date tile, the court and the hours, who booked it, then its status, what it
  * cost and — where the caller offers one — the action. Stacks on a phone; one line on a desk.
  */
+/**
+ * R6 E6-10 (BE): the end a booking was SOLD to — `ends_at` is the sweep's cut end on a no-show —
+ * and what THIS member is out on it (13 on a swept 45-minute no-show; a partner's share on a
+ * partner row). Optional until the API module declares them (ask to the integrator); an older
+ * API sends neither and the row reads as it did.
+ */
+type SoldRow = MemberBookingRow & { sold_ends_at?: string | null; cost_minutes?: number | null };
+
 export function BookingLine({ row, zone, action, people }: {
-  row: MemberBookingRow; zone: string; action?: ReactNode;
+  row: SoldRow; zone: string; action?: ReactNode;
   /** D9 — who else is on the court ("with Sam"), when it has been read. */
   people?: ReactNode;
 }) {
@@ -34,6 +42,8 @@ export function BookingLine({ row, zone, action, people }: {
   const court = row.court_name ?? COPY.unknownCourt;
   const cancelled = row.status === "cancelled";
   const partner = row.role === "partner";
+  const ends = row.sold_ends_at ?? row.ends_at;
+  const cost = typeof row.cost_minutes === "number" ? row.cost_minutes : partner ? null : row.charged_minutes;
   return (
     <li
       data-booking-id={row.booking_id}
@@ -50,8 +60,8 @@ export function BookingLine({ row, zone, action, people }: {
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
           <p className={cn("break-words font-semibold text-text-primary", cancelled && "text-text-secondary line-through")}>
-            <span className="sr-only">{`${bookingWhen(row, zone)}, `}</span>
-            <span aria-hidden="true">{`${clubClock(row.starts_at, zone)}–${clubClock(row.ends_at, zone)}`}</span>
+            <span className="sr-only">{`${bookingWhen({ starts_at: row.starts_at, ends_at: ends }, zone)}, `}</span>
+            <span aria-hidden="true">{`${clubClock(row.starts_at, zone)}–${clubClock(ends, zone)}`}</span>
             {` · ${court}`}
           </p>
           {/* A div, not a <p> (F3.23): the people line can hold a loading Skeleton, a <div>. */}
@@ -74,8 +84,9 @@ export function BookingLine({ row, zone, action, people }: {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
         {partner ? <Badge tone="info">{COPY.partnerBadge}</Badge> : null}
         <Badge tone={status.tone}>{status.word}</Badge>
-        {/* The charge on a partner's row is the ORGANISER's, not what this member paid — no figure. */}
-        {partner ? null : <span className="whitespace-nowrap text-sm tabular-nums text-text-secondary">{COPY.charged(row.charged_minutes)}</span>}
+        {/* What this member is out on it (`cost_minutes`). Without it, a partner's row has no
+            figure: `charged_minutes` there is the ORGANISER's charge, not what this member paid. */}
+        {cost === null ? null : <span className="whitespace-nowrap text-sm tabular-nums text-text-secondary">{COPY.charged(cost)}</span>}
         {action ? <div className="ml-auto sm:ml-0">{action}</div> : null}
       </div>
     </li>
