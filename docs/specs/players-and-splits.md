@@ -147,6 +147,7 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earm
   round 7). Its single `players.return_waiting` notice likewise stays the one sent when it first
   waited, showing the amount owed back THEN — the growth is not re-announced; the receipt when it
   posts carries the full figure (accepted, review round 8).
+- **A no-show return names the penalty.** Its receipt and mail say a partner's share came back less their part of the no-show penalty ("11 minutes of your share came back — nobody checked in, and 4 minutes are your part of the no-show penalty"), never "the club refunded the session" alone; the member notice payload carries `kept_minutes` (review round 11, E11-2).
 - **A game cancelled after check-in earmarks nothing.** Every share on it stays owed in full, so it
   held nothing and the organiser could spend it; its "hold" appears only once a return falls due on
   it — the very return being asked about. Its returns are payable from the free balance only (and

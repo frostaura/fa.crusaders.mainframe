@@ -563,7 +563,9 @@ There are two frames per movement, as today.
 - **Unnamed legacy frame:** `{ "balance_minutes": int }`.
 - **Named `balance` event:** `{ balance_minutes, delta_minutes, reason, at, held_minutes, owed_back_minutes, spendable_minutes, held_until, held_parts: [{minutes, until}] }`.
 
-`reason` keeps its closed set: `top_up | admin_adjustment | admin_top_up | booking_charge | cancellation_refund | penalty | lights_purchase | share_transfer | correction | mixed | share_set_aside`. The same keys are used on `GET /api/v1/wallet`, together with `entries`, `total_entries`, `offset`, `limit` and `share_bookings`.
+`reason` keeps its closed set: `top_up | admin_adjustment | admin_top_up | booking_charge | cancellation_refund | penalty | lights_purchase | share_transfer | correction | mixed | share_set_aside | outage_refund | outage_refund_reversed | no_show_settled | no_show_reversed | pay_for_refund | pay_for_charge | displaced_refund | displaced_reinstated` (the last eight since review round 10, E10-1; a real cancellation keeps `cancellation_refund`).
+
+The named event also carries `parts` (R10 E10-1) — each row `{reason, delta_minutes}`, summing to `delta_minutes` (`[]` on `share_set_aside`); `share_cause` (R11 E11-1) — null unless a `share_transfer` row moved, else one of `share_paid | club_collected | attended | share_returned | booking_cancelled | club_removed | outage_refund | no_show | displaced` (direction is the sign of `delta_minutes`); and `share_kept_minutes` — with `no_show` only: the partner's part of the no-show penalty that did not come back. The same keys are used on `GET /api/v1/wallet`, together with `entries`, `total_entries`, `offset`, `limit` and `share_bookings`.
 
 ### 3.11 Quotes
 

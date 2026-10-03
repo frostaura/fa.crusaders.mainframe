@@ -73,11 +73,13 @@ member actually paid rand, under a `*_zar` key. The two are never converted into
 | `GET /api/v1/admin/reports/revenue` | `gross_topups_zar`, `reversals_zar`, `net_zar` (rand); `gross_topups_minutes`, `reversals_minutes`, `net_minutes`; `zar_per_minute_sold` = `net_zar ÷ net_minutes` rounded **down** to 4 decimals, `null` when `net_minutes ≤ 0` |
 | `GET /api/v1/admin/reports/utilisation` | per court `booked_minutes`, `blocked_minutes`, `sold_minutes` (Σ `AmountChargedMinutes`, what the bookings were charged) and `kept_minutes` (what the ledger says the club kept — charged, less refunds, net of penalties kept) |
 | `GET /api/v1/admin/reports/daily`, `/reports/me/daily` | every movement bucket as `*_minutes` |
-| `GET /api/v1/reports/me/wallet`, `GET /api/v1/admin/members/{id}/spend` | `top_ups_minutes`, `spent_minutes`, `refunds_minutes`, `penalties_minutes`, `adjustments_minutes`, `reversals_minutes`, `share_transfers_minutes`, `net_court_spend_minutes`, `net_movement_minutes`; `minutes_on_court` is play time, not money |
+| `GET /api/v1/reports/me/wallet`, `GET /api/v1/admin/members/{id}/spend` | `top_ups_minutes` (with `given_minutes`, the part the club gave at no charge — R11 J11-4, member report and its daily series), `spent_minutes`, `refunds_minutes`, `penalties_minutes`, `adjustments_minutes`, `reversals_minutes`, `share_transfers_minutes`, `net_court_spend_minutes`, `net_movement_minutes`; `minutes_on_court` is play time, not money |
 
 CSV money columns are **raw integers with no unit suffix** — `45`, never `45.00`:
 `/reports/me/wallet.csv` is `created_at,type,amount_minutes,reason,external_reference,related_booking_id`;
 `/admin/members/{id}/trace.csv` ends `…,court,amount_minutes,balance_after_minutes,source`.
+
+The JSON trace (`GET /admin/members/{id}/trace`, the member's Night) carries `code_holder {user_id, name}` on `lights_on` rows — whose code the board read: organiser, accepted partner or pay-for payer (R10 E10-2; a receipt-sourced lights row from a late upload fills it too, R11 E11-3). `court.refused` rows for a `code_used` refusal carry `detail.attempt` (`activate | walkup | pay_for`) and a headline worded by it; an activate refusal with no booking records the court the box reported (R11 E11-4). The Night never folds refusals of different attempts into one group.
 
 The admin ledger's `totals` are `{count, in_minutes, out_minutes, net_minutes}` — minutes in, minutes
 out (a magnitude) and their difference over the filtered range.
