@@ -121,6 +121,7 @@ public sealed class TraceKindsTests
     [InlineData("booking.blocked", TraceKinds.BookingBlockedOver)]
     [InlineData("booking.displaced", TraceKinds.BookingDisplaced)]
     [InlineData("booking.no_show_reversed", TraceKinds.BookingNoShowReversed)]
+    [InlineData("booking.paid_for_at_box", TraceKinds.BookingPaidForSomebody)]
     // Review round 1 (F3): the account's own story had no words, so the Night tab printed codes.
     [InlineData("member.registered", TraceKinds.AccountApplied)]
     [InlineData("member.approved", TraceKinds.AccountApproved)]
@@ -279,6 +280,56 @@ public sealed class TraceKindsTests
         ];
 
         foreach (var word in fromD2) Assert.Contains(word, TraceKinds.All);
+    }
+
+    /// <summary>
+    /// E6-3: D10's pay-for row read "no word for this". The payer's night and the booker's tell it
+    /// from their own side, each naming the other.
+    /// </summary>
+    [Fact]
+    public void A_pay_for_at_the_box_is_told_from_each_side()
+    {
+        Assert.Equal(TraceKinds.BookingPaidForSomebody, TraceKinds.OfAudit("booking.paid_for_at_box", actorIsSubject: true));
+        Assert.Equal(TraceKinds.BookingPaidForThem, TraceKinds.OfAudit("booking.paid_for_at_box", actorIsSubject: false));
+
+        var payer = TraceKinds.Headline(TraceKinds.BookingPaidForSomebody, new TraceFacts { CourtName = "Court 2", SubjectName = "Olga" });
+        var booker = TraceKinds.Headline(TraceKinds.BookingPaidForThem, new TraceFacts { CourtName = "Court 2", ActorName = "Pam", ActorKind = TraceActors.Member });
+        Assert.Equal("Paid for Olga's booking on Court 2 at the box", payer);
+        Assert.Equal("Pam paid for their booking on Court 2 at the box", booker);
+    }
+
+    /// <summary>
+    /// E6-1: on a payer's night the booker's refund read "Got 60 minutes back" — the traced
+    /// member was only its actor. A movement of somebody else's money names whose it was.
+    /// </summary>
+    [Fact]
+    public void Somebody_elses_money_is_named_as_theirs()
+    {
+        foreach (var kind in TraceKinds.All.Where(k => TraceKinds.StrandOf(k) == TraceKinds.WalletStrand))
+        {
+            var sentence = TraceKinds.Headline(kind, new TraceFacts { AmountMinutes = 60, OthersMoney = true, SubjectName = "Olga Organiser" });
+            Assert.Contains("Olga Organiser", sentence);
+        }
+        Assert.Equal("Got 1 hour back", TraceKinds.Headline(TraceKinds.WalletRefunded, new TraceFacts { AmountMinutes = 60 }));
+    }
+
+    /// <summary>
+    /// E6-11: the reversal of a no-show posts a NEGATIVE refund and a POSITIVE penalty, and the
+    /// night said "Got 45 minutes back" beside −45. Each says what it did.
+    /// </summary>
+    [Fact]
+    public void A_reversed_refund_and_a_returned_penalty_say_so()
+    {
+        var system = new TraceFacts { ActorKind = TraceActors.System };
+        Assert.Equal(
+            "The club's automatic check took back a refund of 45 minutes",
+            TraceKinds.Headline(TraceKinds.WalletRefunded, system with { AmountMinutes = -45 }));
+        Assert.Equal(
+            "The club's automatic check returned a penalty of 13 minutes",
+            TraceKinds.Headline(TraceKinds.WalletPenalised, system with { AmountMinutes = 13 }));
+        Assert.Equal(
+            "The club's automatic check charged a penalty of 13 minutes",
+            TraceKinds.Headline(TraceKinds.WalletPenalised, system with { AmountMinutes = -13 }));
     }
 
     /// <summary>The vocabulary holds no duplicates — a set that repeats itself is a set nobody counted.</summary>

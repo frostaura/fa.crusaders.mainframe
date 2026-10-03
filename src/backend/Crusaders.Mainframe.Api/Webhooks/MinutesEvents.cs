@@ -29,6 +29,17 @@ public static class MinutesEvents
     /// <summary>A package was sold at the desk.</summary>
     public const string SoldAtDesk = "minutes.sold_at_desk";
 
+    /// <summary>
+    /// A refund was taken back — the NEGATIVE refund row a late-evidence no-show reversal posts.
+    /// It went out as <c>minutes.refunded</c> carrying −45, a name saying the opposite of its
+    /// figure (review round 6, E6-11).
+    /// </summary>
+    public const string RefundReversed = "minutes.refund_reversed";
+
+    /// <summary>A penalty was given back — the POSITIVE penalty row of the same reversal (E6-11).</summary>
+    public const string PenaltyReturned = "minutes.penalty_returned";
+
     /// <summary>Every name above, for the coverage test.</summary>
-    public static readonly IReadOnlyList<string> All = [Purchased, Refunded, PenaltyApplied, Adjusted, SoldAtDesk];
+    public static readonly IReadOnlyList<string> All =
+        [Purchased, Refunded, PenaltyApplied, Adjusted, SoldAtDesk, RefundReversed, PenaltyReturned];
 }

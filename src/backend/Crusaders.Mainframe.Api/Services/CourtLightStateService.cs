@@ -395,8 +395,17 @@ public sealed class CourtLightStateService
         };
     }
 
-    /// <summary>Writes the audit row that puts a lights change into the night trace and the club's history.</summary>
-    public void Audit(string action, Guid courtId, int courtNumber, Guid? subjectUserId, object details)
+    /// <summary>
+    /// Writes the audit row that puts a lights change into the night trace and the club's history.
+    ///
+    /// <para>
+    /// <paramref name="deviceId"/> is written at the TOP level, where every reader of a board on an
+    /// audit row looks (<see cref="DoorTrail.DeviceIdOf"/>). Nested only inside <c>details</c>, a box
+    /// scan that lit a court read on the night as "the club's own automatic check" with no board
+    /// code (review round 6, E6-8). Null for a change no board made.
+    /// </para>
+    /// </summary>
+    public void Audit(string action, Guid courtId, int courtNumber, Guid? subjectUserId, object details, Guid? deviceId = null)
     {
         _db.AuditLogs.Add(new AuditLog
         {
@@ -408,6 +417,7 @@ public sealed class CourtLightStateService
             {
                 court_id = courtId,
                 court_number = courtNumber,
+                device_id = deviceId,
                 details,
             }),
         });

@@ -101,10 +101,11 @@ public sealed partial class PlayersQuery
 
         var settings = await _settings.GetAsync(ct);
         var owed = await _shares.OwedAsync(booking, ct);
-        var people = await MembersAsync(seats.Select(s => s.UserId).Append(booking.UserId), ct);
+        var people = await MembersAsync(seats.Select(s => s.UserId).Append(booking.UserId).Append(booking.PaidByUserId), ct);
         var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id, settings), ct);
         var (refunded, penalty) = await SettledAsync(booking, ct);
+        var cost = await OrganiserCostAsync(booking, owed, ct);
 
         return new
         {
@@ -115,6 +116,9 @@ public sealed partial class PlayersQuery
             ends_at = booking.EndsAt,
             sold_ends_at = BookingService.OriginalEndsAt(booking),
             status = PlayerViews.BookingStatusName(booking.Status),
+            // R6 (E6-6): a no-show the sweep refunded in full because no box on its court was
+            // reachable. The status stays the settlement's; this says it is not held against them.
+            refunded_for_outage = NoShows.IsRefundedForOutage(booking),
             split_mode = seats.FirstOrDefault(s => s.Seat == 1)?.SplitMode ?? SplitModes.Equal,
             viewer = new { role, participant_id = mySeat?.Id },
             organiser = Member(booking.UserId, people),
@@ -122,9 +126,9 @@ public sealed partial class PlayersQuery
             money = new
             {
                 price_minutes = booking.AmountChargedMinutes,
-                organiser_owed_minutes = owed,
+                organiser_owed_minutes = cost.Owed,
                 shares_received_minutes = table.Received,
-                organiser_net_minutes = owed - table.Received,
+                organiser_net_minutes = cost.Owed - table.Received,
                 unpaid_minutes = table.Unpaid,
                 share_deadline = PlayerSettings.ShareDeadline(booking, settings),
                 is_split = seats.Any(s => s.IsPartner && s.IsLive && s.ShareMinutes > 0) || table.Received != 0,
@@ -132,11 +136,16 @@ public sealed partial class PlayersQuery
                 // own rows — the client derived both and was wrong beside an admin compensation.
                 refunded_minutes = refunded,
                 penalty_minutes = penalty,
+                // R6 (E6-2): somebody else took the charge over at the box (D10). The organiser is
+                // then out what their own rows say — nothing, once refunded — and the page names who
+                // paid and how much, instead of labelling the PAYER's charge "You paid at booking".
+                paid_by = cost.PaidBy is { } payer ? Member(payer, people) : null,
+                paid_by_minutes = cost.PaidBy is null ? 0 : owed,
             },
             attendance = new
             {
                 checked_in_at = booking.CheckedInAt,
-                players_checked_in = seats.Count(s => s.CheckedInAt is not null),
+                players_checked_in = PlayersCheckedIn(booking, seats),
             },
             permissions = Permissions(booking, settings, role, mySeat),
 
@@ -145,6 +154,34 @@ public sealed partial class PlayersQuery
             // phone's. The client learns it from any response that carries it (lib/clubZone).
             timezone = DoorClock.ZoneOf(settings).Name,
         };
+    }
+
+    /// <summary>
+    /// How many players are recorded as having arrived. A booking nobody added players to has no
+    /// seat to stamp, so its one player — the organiser — is counted from the booking's own
+    /// <c>CheckedInAt</c>: a solo game checked in read "0 of 1 player checked in" (review round 6, E6-7).
+    /// </summary>
+    private static int PlayersCheckedIn(Booking booking, List<BookingParticipant> seats) =>
+        seats.Count == 0
+            ? (booking.CheckedInAt is null ? 0 : 1)
+            : seats.Count(s => s.CheckedInAt is not null);
+
+    /// <summary>What the organiser is out on this booking, and who else paid for it — null when nobody did.</summary>
+    private sealed record OrganiserCost(int Owed, Guid? PaidBy);
+
+    /// <summary>
+    /// The organiser's own cost. When they are the payer it is <paramref name="payerOwed"/>, the
+    /// share rules' figure; when somebody else took the charge over (D10) it is what the
+    /// organiser's OWN rows on this booking net to — the charge and its refund, so nothing.
+    /// </summary>
+    private async Task<OrganiserCost> OrganiserCostAsync(Booking booking, int payerOwed, CancellationToken ct)
+    {
+        var payer = ShareLedger.PayerOf(booking);
+        if (booking.UserId is not { } organiser || payer == organiser) return new OrganiserCost(payerOwed, null);
+        var own = await _db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId == booking.Id && l.UserId == organiser && l.Type != LedgerEntryType.ShareTransfer)
+            .SumAsync(l => (int?)l.AmountMinutes, ct) ?? 0;
+        return new OrganiserCost(Math.Max(0, -own), payer);
     }
 
     /// <summary>Who the viewer is to this booking — or null, which is a 404.</summary>

@@ -56,6 +56,16 @@ public readonly record struct TraceFacts
 
     /// <summary>The raw action, for <see cref="TraceKinds.Unrecognised"/> and nothing else.</summary>
     public string? RawAction { get; init; }
+
+    /// <summary>The person the row is ABOUT, when the sentence has to name them — see <see cref="OthersMoney"/>.</summary>
+    public string? SubjectName { get; init; }
+
+    /// <summary>
+    /// The movement is somebody else's money: the person whose night this is only ACTED on it
+    /// (review round 6, E6-1). "Got 60 minutes back" on a payer's night was the booker's refund
+    /// read as the payer's own; the sentence names whose minutes moved instead.
+    /// </summary>
+    public bool OthersMoney { get; init; }
 }
 
 /// <summary>
@@ -164,6 +174,15 @@ public static class TraceKinds
     /// <summary>A no-show was taken back and the penalty returned. <b>Added beyond D2 §6.2.</b></summary>
     public const string BookingNoShowReversed = "booking.no_show_reversed";
 
+    /// <summary>
+    /// They paid for somebody else's court at the box (D10). <b>Added beyond D2 §6.2</b> — review
+    /// round 6, E6-3: the pay-for's own row read "no word for this" on both members' nights.
+    /// </summary>
+    public const string BookingPaidForSomebody = "booking.paid_for_somebody";
+
+    /// <summary>Somebody else paid for their court at the box (D10). <b>Added beyond D2 §6.2.</b></summary>
+    public const string BookingPaidForThem = "booking.paid_for_them";
+
     /// <summary>They bought light time at the court rather than reserving it.</summary>
     public const string WalkUpBought = "walkup.bought";
 
@@ -254,6 +273,7 @@ public static class TraceKinds
         DoorOpened, DoorRefused, DoorOpenedOffline,
         BookingMade, BookingMadeForThem, BookingCancelled, BookingCancelledByClub, BookingNoShow,
         BookingNoShowReversed, BookingBlockedOver, BookingDisplaced, BookingDisplacementReversed,
+        BookingPaidForSomebody, BookingPaidForThem,
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
@@ -348,6 +368,7 @@ public static class TraceKinds
             "booking.displaced" => BookingDisplaced,
             "booking.displacement_reversed" => BookingDisplacementReversed,
             "booking.blocked" => BookingBlockedOver,
+            Endpoints.DevicePayForEndpoint.PaidAction => actorIsSubject ? BookingPaidForSomebody : BookingPaidForThem,
 
             _ => OfAccountAction(action),
         };
@@ -483,6 +504,8 @@ public static class TraceKinds
     /// </summary>
     public static string Headline(string kind, TraceFacts facts)
     {
+        if (facts.OthersMoney && StrandOf(kind) == WalletStrand) return OthersMoneyHeadline(kind, facts);
+
         var door = string.IsNullOrWhiteSpace(facts.DoorName) ? "a door" : facts.DoorName.Trim();
         var court = string.IsNullOrWhiteSpace(facts.CourtName) ? "a court" : facts.CourtName.Trim();
 
@@ -501,6 +524,8 @@ public static class TraceKinds
             BookingBlockedOver => $"The club blocked out {court}",
             BookingDisplaced => $"The club moved this booking on {court} aside",
             BookingDisplacementReversed => $"The club put this booking on {court} back",
+            BookingPaidForSomebody => $"Paid for {Subject(facts)}'s booking on {court} at the box",
+            BookingPaidForThem => $"{Who(facts)} paid for their booking on {court} at the box",
 
             WalkUpBought => $"Bought light time at {court}",
             WalkUpRefunded => $"Light time at {court} was given back",
@@ -522,6 +547,40 @@ public static class TraceKinds
 
             _ => AccountHeadline(kind, facts),
         };
+    }
+
+    /// <summary>
+    /// A movement of SOMEBODY ELSE's minutes that the person whose night this is performed — an
+    /// admin's adjustment, a payer whose box payment refunded the booker (review round 6, E6-1).
+    /// Every sentence names whose money it was; none of them reads as the traced member's own.
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static string OthersMoneyHeadline(string kind, TraceFacts facts)
+    {
+        var whose = Subject(facts);
+        return kind switch
+        {
+            WalletToppedUp => $"{whose} bought {Amount(facts)}",
+            WalletToppedUpAtTheDesk => $"{Who(facts)} sold {whose} {Amount(facts)} at the desk",
+            WalletSpent => string.IsNullOrWhiteSpace(facts.CourtName)
+                ? $"{whose} paid {Amount(facts)}"
+                : $"{whose} paid {Amount(facts)} for {facts.CourtName.Trim()}",
+            WalletRefunded => facts.AmountMinutes < 0
+                ? $"A refund of {Amount(facts)} to {whose} was taken back"
+                : $"{whose} got {Amount(facts)} back",
+            WalletPenalised => facts.AmountMinutes > 0
+                ? $"A penalty of {Amount(facts)} was returned to {whose}"
+                : $"{whose} was charged a penalty of {Amount(facts)}",
+            WalletAdjustedByAdmin => $"{Who(facts)} changed {whose}'s minutes by {Amount(facts)}",
+            WalletReversed => $"A payment of {whose}'s for {Amount(facts)} was reversed",
+            _ => $"A share of a split booking moved for {whose}: {Amount(facts)}",
+        };
+    }
+
+    /// <summary>The person a row is about, named, or a neutral phrase when the row cannot say.</summary>
+    private static string Subject(TraceFacts facts)
+    {
+        return string.IsNullOrWhiteSpace(facts.SubjectName) ? "another member" : facts.SubjectName.Trim();
     }
 
     /// <summary>The account sentences (F3). Block body for the lizard reason in <c>memory/gotchas.md</c>.</summary>
@@ -575,15 +634,37 @@ public static class TraceKinds
             ? $"The club's automatic check cancelled {court}"
             : $"{Who(facts)} cancelled {court} for them";
 
+    /// <summary>
+    /// Money back — or, on a NEGATIVE refund row, a refund taken back: the late-evidence reversal
+    /// of a no-show posts the refund's opposite under the same type, and "Got 45 minutes back"
+    /// beside −45 said the opposite of what happened (review round 6, E6-11).
+    /// </summary>
     private static string Refunded(TraceFacts facts)
-        => BySystem(facts)
+    {
+        if (facts.AmountMinutes < 0)
+        {
+            return BySystem(facts)
+                ? $"The club's automatic check took back a refund of {Amount(facts)}"
+                : $"A refund of {Amount(facts)} was taken back";
+        }
+        return BySystem(facts)
             ? $"The club's automatic check returned {Amount(facts)}"
             : $"Got {Amount(facts)} back";
+    }
 
+    /// <summary>A penalty — or, on a POSITIVE penalty row, a penalty given back (E6-11, as above).</summary>
     private static string Penalised(TraceFacts facts)
-        => BySystem(facts)
+    {
+        if (facts.AmountMinutes > 0)
+        {
+            return BySystem(facts)
+                ? $"The club's automatic check returned a penalty of {Amount(facts)}"
+                : $"A penalty of {Amount(facts)} was returned";
+        }
+        return BySystem(facts)
             ? $"The club's automatic check charged a penalty of {Amount(facts)}"
             : $"Was charged a penalty of {Amount(facts)}";
+    }
 
     private static string AdjustedByAdmin(TraceFacts facts)
         => $"{Who(facts)} changed their minutes by {Amount(facts)}";

@@ -123,7 +123,11 @@ public static class DeviceActivateEndpoint
         try
         {
             result = await services.Activation.ActivateAsync(
-                found.Court!, found.Booking!, resolved.UserId, payerOverrideUserId: null, req.Method!, ct);
+                new ActivationRequest(found.Court!, found.Booking!, resolved.UserId, PayerOverrideUserId: null, req.Method!, OccurredAt: null)
+                {
+                    DeviceId = device.Id,
+                },
+                ct);
         }
         catch
         {

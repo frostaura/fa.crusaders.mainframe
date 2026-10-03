@@ -759,6 +759,8 @@ The event names become constants in one new file, **`Webhooks/MinutesEvents.cs`*
 | `credit.penalty_applied` | `minutes.penalty_applied` | MirrorAsync (`NoShowPenalty`, `LateCancellationPenalty`) |
 | `credit.adjusted` | `minutes.adjusted` | MirrorAsync (`AdminAdjustment`) |
 | `credit.topped_up_by_admin` | `minutes.sold_at_desk` | MirrorAsync (`AdminTopUp`) |
+| — (was `minutes.refunded` with a negative figure) | `minutes.refund_reversed` | MirrorAsync (`CancellationRefund` < 0; review round 6, E6-11) |
+| — (was `minutes.penalty_applied` with a positive figure) | `minutes.penalty_returned` | MirrorAsync (`NoShowPenalty` / `LateCancellationPenalty` > 0; E6-11) |
 
 **`minutes.purchased` data:**
 
@@ -770,7 +772,7 @@ The event names become constants in one new file, **`Webhooks/MinutesEvents.cs`*
 
 Old to new keys: `topup_id` becomes `purchase_id`, `credits` becomes `minutes`, and `rate_group_id` becomes `discount_group_id`. `conversion_rate` and `member_class` are removed (§12.10).
 
-**Mirror data** (the four MirrorAsync events): `{ entry_id, user_id, entry_type, amount_minutes, booking_id, reason }`.
+**Mirror data** (the six MirrorAsync events): `{ entry_id, user_id, entry_type, amount_minutes, booking_id, reason }`.
 
 **Every other event's `data`** follows the §3.2 table, for example `booking.created` `amount_minutes` / `balance_after_minutes`, `booking.no_show` `penalty_minutes` / `refund_minutes`, and `lights.*` `amount_charged_minutes`.
 

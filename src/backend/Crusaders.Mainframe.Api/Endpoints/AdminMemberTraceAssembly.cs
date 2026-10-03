@@ -378,6 +378,7 @@ public static class AdminMemberTraceAssembly
                     ActorName = actorName,
                     ActorKind = actorKind,
                     RawAction = row.Action,
+                    SubjectName = PersonNames.Of(row.SubjectUserId, s.Names),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
@@ -431,6 +432,10 @@ public static class AdminMemberTraceAssembly
                     CourtName = court?.Name,
                     ActorName = actorName,
                     ActorKind = actorKind,
+                    // E6-1: a row where this member was only the actor is somebody else's money,
+                    // and its sentence names whose — it carries no balance for the same reason.
+                    OthersMoney = !own,
+                    SubjectName = own ? null : PersonNames.Of(row.UserId, s.Names),
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,

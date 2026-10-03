@@ -56,11 +56,14 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `booking.cancelled_lights_charged` | A cancelled booking was lit from an offline box's roster and charged pro rata for the lit minutes |
 | `booking.displacement_reversed` | The box's own `release` proved the earlier court went dark before a displaced booking's slot, so it was reinstated and re-charged (settlement model I9) |
 | `booking.completed` | A booking's slice ends naturally |
+| `booking.payer_changed` | Somebody took a booking's charge over — D10's pay-for at the box, or a payer override at the court. **Subject and `data.user_id` are the NEW payer**, so a member-registered endpoint hears that its member paid; `data` also carries `booker_user_id`, `previous_payer_user_id`, `amount_minutes`, `court_id`, `court_number`, `starts_at`, `ends_at` (sold end). The previous payer's refund is its own `minutes.refunded` (review round 6, E6-4). `Webhooks/BookingEvents.cs` |
 | `minutes.purchased` | PayFast confirms a package purchase (ITN). Was `credit.topped_up` |
 | `minutes.sold_at_desk` | The desk sells a member a package (an `AdminTopUp` ledger row). Was `credit.topped_up_by_admin` |
 | `minutes.refunded` | A cancellation/no-show refund ledger entry is written. Was `credit.refunded` |
 | `minutes.penalty_applied` | A no-show or late-cancellation penalty ledger entry is written. Was `credit.penalty_applied` |
 | `minutes.adjusted` | An admin adjusts a member's minutes by hand (goodwill, a correction). Was `credit.adjusted` |
+| `minutes.refund_reversed` | A NEGATIVE refund row is written — a refund taken back, e.g. by the late-evidence reversal of a no-show. It went out as `minutes.refunded` with a negative figure until review round 6 (E6-11) |
+| `minutes.penalty_returned` | A POSITIVE penalty row is written — a penalty given back, e.g. by the same reversal. It went out as `minutes.penalty_applied` with a positive figure until review round 6 (E6-11) |
 | `peripheral.unhealthy` | A court box has not heart-beaten for longer than `offline_after_seconds`. Fires **once per outage**, from `PeripheralHealthWorker`. It means "the box is not reporting" — never "the reader is faulty": `BiometricDeviceState.Faulted` is still set by no driver, so a fingerprint reader failing behind a healthy box remains invisible. See `feature-spec.md` §6a and §9. |
 | `peripheral.recovered` | The same box called in again; carries how long the outage lasted |
 | `webhook.test` | The "send test ping" button is clicked |
@@ -127,8 +130,9 @@ nothing until it is re-filtered. The constants are in `Webhooks/MinutesEvents.cs
 `member_class` are gone: there is no rate, and the renamed event has no template naming `{member_class}`
 to protect.
 
-`data` for the four ledger mirrors (`minutes.sold_at_desk`, `minutes.refunded`, `minutes.penalty_applied`,
-`minutes.adjusted`):
+`data` for the six ledger mirrors (`minutes.sold_at_desk`, `minutes.refunded`, `minutes.penalty_applied`,
+`minutes.adjusted`, `minutes.refund_reversed`, `minutes.penalty_returned` — the event is chosen by the row's type
+AND its sign, `LedgerService.MirrorTypeOf`):
 ```json
 { "entry_id": "<uuid>", "user_id": "<uuid>", "entry_type": "AdminAdjustment",
   "amount_minutes": -45, "booking_id": "<uuid-or-null>", "reason": "Goodwill — lights failed" }

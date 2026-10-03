@@ -2570,6 +2570,7 @@ public sealed class BookingService
                 return new ChargeResult.NotChargeable();
             }
 
+            await _outbox.EnqueueAsync(PayerChangedEvent(booking, court, currentPayer, actorUserId), ct);
             await volunteerLock.CommitAsync(ct);
             return new ChargeResult.Ok(booking, reassignTo.Value, booking.AmountChargedMinutes);
         }
@@ -2611,6 +2612,37 @@ public sealed class BookingService
         await _db.SaveChangesAsync(ct);
         await payerLock.CommitAsync(ct);
         return new ChargeResult.Ok(booking, payerUserId, booking.AmountChargedMinutes);
+    }
+
+    /// <summary>
+    /// <c>booking.payer_changed</c> (review round 6, E6-4), queued behind the reassignment's commit
+    /// so a rolled-back takeover announces nothing. The booker's side already reached the stream
+    /// as its refund's <c>minutes.refunded</c>; the new payer's debit reached nothing, so an
+    /// endpoint scoped to the payer never heard that its member paid for a court. The SUBJECT is
+    /// the new payer for exactly that reason.
+    /// </summary>
+    private Func<CancellationToken, Task> PayerChangedEvent(Booking booking, Court court, Guid previousPayer, Guid actorUserId)
+    {
+        var evt = new DomainEvent(
+            Id: $"evt_{Guid.NewGuid():N}",
+            Type: BookingEvents.PayerChanged,
+            TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
+            OccurredAt: DateTimeOffset.UtcNow,
+            ActorUserId: actorUserId == Guid.Empty ? null : actorUserId, ActorIsAdmin: false,
+            SubjectUserId: booking.PaidByUserId,
+            Data: new()
+            {
+                ["booking_id"] = booking.Id,
+                ["court_id"] = booking.CourtId,
+                ["court_number"] = court.CourtNumber,
+                ["user_id"] = booking.PaidByUserId,
+                ["booker_user_id"] = booking.UserId,
+                ["previous_payer_user_id"] = previousPayer,
+                ["amount_minutes"] = booking.AmountChargedMinutes,
+                ["starts_at"] = booking.StartsAt,
+                ["ends_at"] = BookingService.OriginalEndsAt(booking),
+            });
+        return token => _bus.EmitAsync(evt, token).AsTask();
     }
 
     // ---- helpers ----

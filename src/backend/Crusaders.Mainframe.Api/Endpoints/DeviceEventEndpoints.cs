@@ -664,7 +664,7 @@ public static class DeviceEventEndpoints
             return new ActivationOutcome("wrong_court", booking.Id);
         }
 
-        var target = new ActivationTarget(court, booking, userId, e.Method ?? "offline", occurredAt, e.DurationMs);
+        var target = new ActivationTarget(court, booking, userId, e.Method ?? "offline", occurredAt, e.DurationMs) { DeviceId = device.Id };
         var settled = await SettleAsync(services, target, ct);
 
         // The server's belief about this court's relay.
@@ -777,7 +777,8 @@ public static class DeviceEventEndpoints
                 relay = evidence.Relay,
                 booking_id = booking.Id,
                 seq = evidence.Seq,
-            });
+            },
+            evidence.DeviceId);
     }
 
     /// <summary>
@@ -1117,7 +1118,7 @@ public static class DeviceEventEndpoints
             {
                 services.Lights.Audit(
                     CourtLightStateService.LightsOffAction, court.Id, court.CourtNumber, booking.UserId,
-                    new { device_id = device.Id, relay, booking_id = booking.Id, minutes = window.Minutes });
+                    new { device_id = device.Id, relay, booking_id = booking.Id, minutes = window.Minutes }, device.Id);
             }
         }
 
@@ -1204,7 +1205,7 @@ public static class DeviceEventEndpoints
 
             if (t.Booking.Status == BookingStatus.Cancelled) return await CancelledOutcomeAsync(bookings, t, ct);
 
-            var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt);
+            var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt) { DeviceId = t.DeviceId };
             try
             {
                 return new SettleOutcome(await activation.ActivateAsync(request, ct) switch
@@ -1720,7 +1721,7 @@ public static class DeviceEventEndpoints
         // and a use that moved money keeps its row — the box's retry of this nonce is answered
         // by the replay, never by a second purchase.
         var activated = await ActivateOnceAsync(db, activation,
-            new ActivationTarget(court, ok.Booking, userId, req.Method ?? "qr", OccurredAt: null, DurationMs: 0), ct);
+            new ActivationTarget(court, ok.Booking, userId, req.Method ?? "qr", OccurredAt: null, DurationMs: 0) { DeviceId = device.Id }, ct);
         if (activated is not ActivationResult.Activated live)
         {
             // The purchase is undone rather than left standing. Charged and un-checked-in on a
@@ -1747,7 +1748,11 @@ public static class DeviceEventEndpoints
     /// own time for an uploaded event; <c>DurationMs</c> is how long the box's relay ran
     /// for an uploaded event, zero for a walk-up.
     /// </summary>
-    private sealed record ActivationTarget(Court Court, Booking Booking, Guid UserId, string Method, DateTimeOffset? OccurredAt, long DurationMs);
+    private sealed record ActivationTarget(Court Court, Booking Booking, Guid UserId, string Method, DateTimeOffset? OccurredAt, long DurationMs)
+    {
+        /// <summary>The board the scan was made at — named on the lights-on row (review round 6, E6-8).</summary>
+        public Guid? DeviceId { get; init; }
+    }
 
     /// <summary>
     /// Activation that survives its twin. Two retries of one purchase — or two uploads of
@@ -1759,7 +1764,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationResult> ActivateOnceAsync(
         MainframeDbContext db, CourtActivationService activation, ActivationTarget t, CancellationToken ct)
     {
-        var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt);
+        var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt) { DeviceId = t.DeviceId };
         try
         {
             return await activation.ActivateAsync(request, ct);

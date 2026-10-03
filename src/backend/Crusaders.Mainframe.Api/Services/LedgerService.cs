@@ -279,16 +279,30 @@ public sealed class LedgerService
     /// not have. Emitting is a channel write; it cannot fail the money path.
     /// </para>
     /// </summary>
-    private async Task MirrorAsync(LedgerEntry entry, CancellationToken ct)
+    /// <summary>
+    /// The event name for one row, read from its type AND its sign. A refund row is money back and
+    /// a penalty row money kept — except on the late-evidence reversal of a no-show, which posts
+    /// each leg's opposite under the same type. Named by type alone those went out as
+    /// <c>minutes.refunded</c> −45 and <c>minutes.penalty_applied</c> +13 (review round 6, E6-11).
+    /// Block body for the lizard reason in <c>memory/gotchas-gates.md</c>.
+    /// </summary>
+    internal static string? MirrorTypeOf(LedgerEntry entry)
     {
-        var type = entry.Type switch
+        return entry.Type switch
         {
+            LedgerEntryType.CancellationRefund when entry.AmountMinutes < 0 => MinutesEvents.RefundReversed,
             LedgerEntryType.CancellationRefund => MinutesEvents.Refunded,
+            LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty when entry.AmountMinutes > 0 => MinutesEvents.PenaltyReturned,
             LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => MinutesEvents.PenaltyApplied,
             LedgerEntryType.AdminAdjustment => MinutesEvents.Adjusted,
             LedgerEntryType.AdminTopUp => MinutesEvents.SoldAtDesk,
             _ => null,
         };
+    }
+
+    private async Task MirrorAsync(LedgerEntry entry, CancellationToken ct)
+    {
+        var type = MirrorTypeOf(entry);
         if (type is null) return;
 
         var (actorUserId, actorIsAdmin) = ActorOf(entry);

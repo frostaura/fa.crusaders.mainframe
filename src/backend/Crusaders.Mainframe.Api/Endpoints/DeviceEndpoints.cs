@@ -681,7 +681,8 @@ public static class DeviceEndpoints
                     relay = item.Relay,
                     booking_id = item.BookingId,
                     remaining_seconds = item.RemainingSeconds,
-                });
+                },
+                device.Id);
         }
     }
 

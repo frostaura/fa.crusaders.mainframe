@@ -165,10 +165,13 @@ public static class DevicePayForEndpoint
         services.Db.DevicePayForQuotes.AsNoTracking()
             .AnyAsync(q => q.DeviceId == device.Id && q.Nonce == req.Nonce && q.BookingId == booking.Id, ct);
 
-    /// <summary>Everything decided before any money: who pays, which booking, how much.</summary>
+    /// <summary>
+    /// Everything decided before any money: who pays, which booking, how much — and the box the
+    /// payer stood at, named on the lights-on row when the pay-for lights the court (E6-8).
+    /// </summary>
     private sealed record Judgement(
         string? Refusal, string? Label = null, int Amount = 0, Guid PayerUserId = default,
-        Booking? Booking = null, Court? Court = null, MemberCodeMatch? Match = null);
+        Booking? Booking = null, Court? Court = null, MemberCodeMatch? Match = null, Guid? DeviceId = null);
 
     private static async Task<Judgement> JudgeAsync(
         Device device, PayForRequest req, PayForServices services, TenantSettingsView settings,
@@ -230,10 +233,13 @@ public static class DevicePayForEndpoint
         if (amount > MaxLabelMinutes) return new Judgement(AmountUnshowable);
         var label = Label(amount);
 
-        // No overdraft at a device (§9.2): god mode never reaches a device path.
-        if (await services.Ledger.GetBalanceAsync(payer, ct) < amount) return new Judgement(InsufficientBalance, label);
+        // No overdraft at a device (§9.2): god mode never reaches a device path. SPENDABLE, not the
+        // balance — the confirm's reassignment asks what is spendable, so a quote asking the balance
+        // showed a payer whose minutes were held PAY 270 MIN? and then refused them (review round 6,
+        // E6-5). The quote and the confirm ask the same question.
+        if (await services.Ledger.GetSpendableAsync(payer, ct) < amount) return new Judgement(InsufficientBalance, label);
 
-        return new Judgement(null, label, amount, payer, booking, court, match);
+        return new Judgement(null, label, amount, payer, booking, court, match, device.Id);
     }
 
     private static async Task<IResult> PayAsync(
@@ -386,7 +392,11 @@ public static class DevicePayForEndpoint
         if (booking.CheckedInAt is null && cueOpen)
         {
             var result = await services.Activation.ActivateAsync(
-                j.Court!, booking, j.PayerUserId, j.PayerUserId, req.Method ?? "qr", ct);
+                new ActivationRequest(j.Court!, booking, j.PayerUserId, j.PayerUserId, req.Method ?? "qr", OccurredAt: null)
+                {
+                    DeviceId = j.DeviceId,
+                },
+                ct);
             return result switch
             {
                 ActivationResult.Activated => null,

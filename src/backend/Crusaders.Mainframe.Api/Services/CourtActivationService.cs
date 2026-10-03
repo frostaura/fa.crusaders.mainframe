@@ -437,7 +437,8 @@ public class CourtActivationService
         {
             _lights.Audit(
                 CourtLightStateService.LightsOnAction, court.Id, court.CourtNumber, booking.UserId,
-                new { method, payer_user_id = payerUserId, booking_id = booking.Id, occurred_at = occurredAt });
+                new { method, payer_user_id = payerUserId, booking_id = booking.Id, occurred_at = occurredAt },
+                request.DeviceId);
         }
 
         // Saved before the event so a failure here cannot leave a cued light with no
@@ -550,7 +551,15 @@ public sealed record ActivationRequest(
     Guid IdentifiedUserId,
     Guid? PayerOverrideUserId,
     string Method,
-    DateTimeOffset? OccurredAt);
+    DateTimeOffset? OccurredAt)
+{
+    /// <summary>
+    /// The board the identification was made at, when one was — written on the lights-on audit
+    /// row so the night names the box rather than the club's automatic check (review round 6,
+    /// E6-8). Null for a kiosk, a PIN pad or a biometric reader the server drives itself.
+    /// </summary>
+    public Guid? DeviceId { get; init; }
+}
 
 /// <summary>
 /// The two dependencies <see cref="CourtActivationService"/> needs that are not part of the

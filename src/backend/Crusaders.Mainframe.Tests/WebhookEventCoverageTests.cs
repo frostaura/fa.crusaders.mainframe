@@ -134,8 +134,34 @@ public class WebhookEventCoverageTests
     public void The_money_event_names_are_the_contracts()
     {
         Assert.Equal(
-            ["minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk"],
+            ["minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk",
+             "minutes.refund_reversed", "minutes.penalty_returned"],
             MinutesEvents.All);
+    }
+
+    /// <summary>
+    /// E6-11: the late-evidence reversal of a no-show posts each leg's opposite under the same
+    /// type, and went out as <c>minutes.refunded</c> −45 and <c>minutes.penalty_applied</c> +13 —
+    /// names saying the opposite of their figures. Each leg is named for what it does.
+    /// </summary>
+    [Fact]
+    public async Task A_reversed_refund_and_a_returned_penalty_are_named_for_what_they_do()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        Drain(host);
+
+        await ledger.PostManyAsync(
+        [
+            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.CancellationRefund, -45, Guid.Empty),
+            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.NoShowPenalty, 13, Guid.Empty),
+        ], default);
+
+        var events = Drain(host);
+        Assert.DoesNotContain(events, e => e.Type is MinutesEvents.Refunded or MinutesEvents.PenaltyApplied);
+        Assert.Equal(-45, Assert.Single(events, e => e.Type == MinutesEvents.RefundReversed).Data["amount_minutes"]);
+        Assert.Equal(13, Assert.Single(events, e => e.Type == MinutesEvents.PenaltyReturned).Data["amount_minutes"]);
     }
 
     /// <summary>A top-up and a booking charge are not refunds; they have their own events or none.</summary>
