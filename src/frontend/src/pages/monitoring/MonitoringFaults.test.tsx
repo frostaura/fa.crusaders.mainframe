@@ -281,6 +281,17 @@ describe("the fault list", () => {
     expect(screen.getByText("flux_capacitor_drift")).toBeInTheDocument();
   });
 
+  /** Review round 6, L6-15: a refused walk-up's card said "out_of_hours" — the server's reason, raw. */
+  it("says a refused walk-up's reason in words, never the bare code", async () => {
+    stubFetch(routes([deviceErrorFixture({
+      code: "walkup_refused", headline: "A walk-up purchase at the box was refused", detail: "out_of_hours",
+    })]));
+    renderPage(<MonitoringFaultsPage />);
+    const row = (await screen.findAllByText(/walk-up/i))[0].closest("li")!;
+    expect(row).toHaveTextContent("The club was closed at that time.");
+    expect(row.textContent).not.toMatch(/out_of_hours|out of hours/);
+  });
+
   it("keeps a resolved fault readable rather than merely filtering it away", async () => {
     stubFetch(routes([deviceErrorFixture({
       resolved_at: "2026-09-22T05:15:00Z",
