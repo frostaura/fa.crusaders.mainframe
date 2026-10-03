@@ -1,7 +1,7 @@
 import { ApiError, endpoints, OfflineError, type OpenCheckout, type PurchaseStatus } from "./api";
 import { writeOrReadBack, UnsureOutcome } from "./lostReply";
 import { clubClock } from "./clubClock";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { formatMoney } from "./utils";
 
 /**
@@ -25,9 +25,14 @@ import { formatMoney } from "./utils";
 
 export type { OpenCheckout };
 
-/** What a checkout is called in a sentence: "5 hours (5 h) for R550.00". */
+/**
+ * What a checkout is called in a sentence: "5 hours for R550.00", "Coaches pack (5 hours) for
+ * R550.00" — the minutes in words (R6 X6-2), and not said twice when the name already says them.
+ */
 export function checkoutWhat(c: { package_name: string; minutes: number; amount_zar: number }): string {
-  return `${c.package_name} (${minutesCompact(c.minutes)}) for ${formatMoney(c.amount_zar)}`;
+  const spoken = minutesSpoken(c.minutes);
+  const name = c.package_name.trim().toLowerCase() === spoken.toLowerCase() ? c.package_name : `${c.package_name} (${spoken})`;
+  return `${name} for ${formatMoney(c.amount_zar)}`;
 }
 
 export const OPEN_CHECKOUTS = {
@@ -43,7 +48,7 @@ export const OPEN_CHECKOUTS = {
 /** What a cancel ended in, in the member's words. Every branch says what the club's record shows. */
 export const CANCEL_SAID = {
   cancelled: "Cancelled. Nothing was charged.",
-  completed: (minutes: number) => `That payment went through after all, so it wasn't cancelled — ${minutesCompact(minutes)} are in your wallet.`,
+  completed: (minutes: number) => `That payment went through after all, so it wasn't cancelled — ${minutesSpoken(minutes)} went into your wallet.`,
   lostLanded: "The reply got lost, so the club's record was checked: the purchase is cancelled and nothing was charged.",
   lostStillWaiting: "The reply got lost, so the club's record was checked: this purchase is still waiting and nothing was cancelled. Try again.",
   lostUnknown: "The reply got lost and the club couldn't be checked either, so we can't say yet whether this was cancelled. Look again in a moment before trying again.",

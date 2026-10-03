@@ -63,7 +63,7 @@ describe("Top-up status — the cancel return is told to the club (M4-1)", () =>
       // The ITN had landed first: the money moved, and the page says so.
       { path: `/api/v1/minutes/purchase/${ID}`, body: row({ status: "Completed" }) },
     ]);
-    expect(await screen.findByText("5 h added to your wallet.")).toBeInTheDocument();
+    expect(await screen.findByText("5 hours added to your wallet.")).toBeInTheDocument();
     expect(topupCalls(stub)).toEqual(["POST /cancel", "GET "]);
   });
 
@@ -72,7 +72,7 @@ describe("Top-up status — the cancel return is told to the club (M4-1)", () =>
       { method: "POST", path: `/api/v1/minutes/purchase/${ID}/cancel`, body: row({ status: "Completed" }) },
       { path: `/api/v1/minutes/purchase/${ID}`, body: row({ status: "Completed" }) },
     ]);
-    expect(await screen.findByText("5 h added to your wallet.")).toBeInTheDocument();
+    expect(await screen.findByText("5 hours added to your wallet.")).toBeInTheDocument();
     expect(screen.queryByText(/You cancelled/)).toBeNull();
   });
 
@@ -95,7 +95,7 @@ describe("Top-up status — the cancel return is told to the club (M4-1)", () =>
 
   it("does not tell the club anything without the cancel flag", async () => {
     const stub = show([{ path: `/api/v1/minutes/purchase/${ID}`, body: row({ status: "Completed" }) }], "");
-    await screen.findByText("5 h added to your wallet.");
+    await screen.findByText("5 hours added to your wallet.");
     expect(topupCalls(stub)).toEqual(["GET "]);
   });
 });

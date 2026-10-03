@@ -77,7 +77,7 @@ test("the shelf uses the width it has, and one Cancel closes an open purchase", 
   await expect(page).toHaveURL(/\/wallet\/(topup|buy)$/);
   const cards = page.getByRole("radio");
   await expect(cards).toHaveCount(3);
-  await expect(page.getByRole("radio", { name: "10 hours" })).toContainText("Save 16%");
+  await expect(page.getByRole("radio", { name: "10 hours" })).toContainText("Saves R200.00 (16%)");
   await expect(page.getByRole("radio", { name: "10 hours" })).toContainText("10 h");
   await expect(page.getByText(/credit|top up|limit/i)).toHaveCount(0);
 

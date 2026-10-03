@@ -47,10 +47,10 @@ describe("Buy minutes — purchases waiting on PayFast", () => {
   it("lists each open purchase by package, minutes and rand, with when it started and when it closes", async () => {
     showShelf([{ path: SHELF, body: both }]);
     const list = await screen.findByRole("region", { name: OPEN_CHECKOUTS.title });
-    const row = within(list).getByText("1 hour (1 h) for R120.00").closest("li") as HTMLElement;
+    const row = within(list).getByText("1 hour for R120.00").closest("li") as HTMLElement;
     expect(within(row).getByText(OPEN_CHECKOUTS.line(AT_A))).toBeInTheDocument();
     expect(within(row).getByText(OPEN_CHECKOUTS.expires(one.expires_at))).toBeInTheDocument();
-    expect(within(list).getByText("10 hours (10 h) for R1000.00")).toBeInTheDocument();
+    expect(within(list).getByText("10 hours for R1000.00")).toBeInTheDocument();
     expect(list.textContent).not.toMatch(/limit|credit/i);
   });
 
@@ -68,10 +68,10 @@ describe("Buy minutes — purchases waiting on PayFast", () => {
     ]);
     fireEvent.click(await cancelOne());
     // Gone before the club answers — the press is the member's word, and a failure puts it back.
-    expect(screen.queryByText("1 hour (1 h) for R120.00")).toBeNull();
+    expect(screen.queryByText("1 hour for R120.00")).toBeNull();
     expect(await screen.findByText(CANCEL_SAID.cancelled)).toBeInTheDocument();
     await waitFor(() => expect(stub.calls.filter((c) => c.path === SHELF).length).toBeGreaterThanOrEqual(2));
-    expect(screen.getByText("10 hours (10 h) for R1000.00")).toBeInTheDocument();
+    expect(screen.getByText("10 hours for R1000.00")).toBeInTheDocument();
   });
 
   it("puts the row back and says why when the club refuses", async () => {
@@ -114,7 +114,7 @@ describe("Buy minutes — purchases waiting on PayFast", () => {
     ]);
     fireEvent.click(await cancelOne());
     expect(await screen.findByText(CANCEL_SAID.completed(60))).toBeInTheDocument();
-    expect(CANCEL_SAID.completed(60)).toContain("1 h are in your wallet");
+    expect(CANCEL_SAID.completed(60)).toContain("1 hour went into your wallet");
   });
 });
 

@@ -171,7 +171,7 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     await walkTheClock(40);
 
     expect(screen.getByText("Done")).toBeInTheDocument();
-    expect(screen.getByText(/5 h added to your wallet\./)).toBeInTheDocument();
+    expect(screen.getByText(/5 hours added to your wallet\./)).toBeInTheDocument();
     expect(screen.queryByText(/Waiting for confirmation from PayFast/)).not.toBeInTheDocument();
   });
 
@@ -205,7 +205,7 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
 
     expect(screen.getByText("Done")).toBeInTheDocument();
-    expect(screen.getByText(/5 h added to your wallet\./)).toBeInTheDocument();
+    expect(screen.getByText(/5 hours added to your wallet\./)).toBeInTheDocument();
   });
 });
 
@@ -310,7 +310,7 @@ describe("Top-up status — when the club cannot be reached", () => {
     await tick();
 
     expect(screen.getByText("Done")).toBeInTheDocument();
-    expect(screen.getByText(/5 h added to your wallet\./)).toBeInTheDocument();
+    expect(screen.getByText(/5 hours added to your wallet\./)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
@@ -497,7 +497,7 @@ describe("Top-up status — back from PayFast after cancelling", () => {
 
   it("still believes the club when the payment went through after all", async () => {
     show("Completed");
-    expect(await screen.findByText("5 h added to your wallet.")).toBeInTheDocument();
+    expect(await screen.findByText("5 hours added to your wallet.")).toBeInTheDocument();
     expect(screen.queryByText(/You cancelled this payment/)).not.toBeInTheDocument();
   });
 
@@ -560,7 +560,7 @@ describe("Top-up status — the way back", () => {
 
   it("ignores a returnTo that leaves the app, and says nothing while the payment is pending", async () => {
     show("Completed", "?returnTo=https%3A%2F%2Fevil.example");
-    await screen.findByText("5 h added to your wallet.");
+    await screen.findByText("5 hours added to your wallet.");
     expect(screen.queryByRole("link", { name: /Back to/ })).toBeNull();
   });
 });
@@ -588,7 +588,7 @@ describe("Purchase status — what was bought", () => {
     show("/wallet/buy/:purchaseId", `/wallet/buy/${ID}`, { id: ID, status: "Completed", amount_zar: 495, failure_code: null, ...EXTRA, list_price_zar: 550, discount_bps: 1000 });
     expect(await screen.findByText("Done")).toBeInTheDocument();
     expect(screen.getByText("5 hours for R495.00 (10% off R550.00)")).toBeInTheDocument();
-    expect(screen.getByText("5 h added to your wallet.")).toBeInTheDocument();
+    expect(screen.getByText("5 hours added to your wallet.")).toBeInTheDocument();
     // The status card's big figure is heard as words (R6: the details beside it say "5 hours" too).
     const card = document.querySelector<HTMLElement>("[data-status-card]")!;
     expect(within(card).getByText("5 hours", { selector: ".sr-only" })).toBeInTheDocument();

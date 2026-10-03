@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, endpoints, type PurchaseStatus } from "../lib/api";
 import { useBalance } from "../lib/balance";
 import { formatMoney } from "../lib/utils";
-import { minutesCompact } from "../lib/minutes";
+import { minutesSpoken } from "../lib/minutes";
 import { discountPercent } from "../lib/topUpShelf";
 import { BUY_MINUTES_PATH } from "../lib/minutes";
 import { Minutes } from "../components/Minutes";
@@ -375,7 +375,7 @@ export const STATUS_COPY = {
   notFound: "We can't find this purchase on your account. The link may be wrong, or it may belong to a different account — nothing has been charged for it. Your wallet shows every purchase that did go through.",
   gaveUp: "We've stopped checking on this page. PayFast can take a while — an instant EFT usually lands within minutes and a normal EFT can take until the next working day. Your minutes appear the moment it clears, and we'll email you.",
   waiting: "Waiting for confirmation from PayFast…",
-  done: (minutes: number) => `${minutesCompact(minutes)} added to your wallet.`,
+  done: (minutes: number) => `${minutesSpoken(minutes)} added to your wallet.`,
   cancelled: "You cancelled this payment, so nothing was charged and no minutes were added.",
   failedFallback: "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening.",
   tryAgain: "Try again",

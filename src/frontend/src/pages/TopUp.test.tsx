@@ -53,11 +53,11 @@ describe("Buy minutes — the shelf", () => {
     const five = await card("5 hours");
     expect(within(five).getByText("5 h")).toBeInTheDocument();
     expect(within(five).getByText(formatMoney(550))).toBeInTheDocument();
-    expect(within(five).getByText(BUY_COPY.save(8))).toBeInTheDocument();
+    expect(within(five).getByText(BUY_COPY.save(50, 8))).toBeInTheDocument();
     // §4.3's worked example: 10 h saves R200 (16%) against 1 h at a time.
     const ten = await card("10 hours");
-    expect(within(ten).getByText(BUY_COPY.save(16))).toBeInTheDocument();
-    expect(within(ten).getByText(`${formatMoney(200)} less than 1 h at a time`)).toBeInTheDocument();
+    expect(within(ten).getByText(BUY_COPY.save(200, 16))).toBeInTheDocument();
+    expect(within(ten).getByText("against buying 1 hour at a time")).toBeInTheDocument();
     // The baseline itself never claims a saving.
     expect(within(await card("1 hour")).queryByText(/Save/)).toBeNull();
     // Screen readers hear the long form, never "h".
@@ -232,7 +232,7 @@ describe("Buy minutes — a lost reply", () => {
     fireEvent.click(await card("5 hours"));
     fireEvent.click(continueButton());
     expect(await screen.findByText(BUY_SAID.lostStarted)).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /^Cancel the 5 hours \(5 h\) for R550\.00 purchase/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Cancel the 5 hours for R550\.00 purchase/ })).toBeInTheDocument();
     expect(submitted).toHaveLength(0);
     expect(stub.calls.filter((c) => c.method === "POST" && c.path === PURCHASE)).toHaveLength(1);
   });

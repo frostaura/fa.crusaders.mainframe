@@ -106,7 +106,7 @@ function PackageCard({ pkg, baseline }: { pkg: ShelfPackage; baseline: ShelfPack
       <span aria-hidden="true" className="flex min-w-0 flex-col gap-3 break-words pt-1">
         <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <span className="text-2xl font-bold tracking-tight tabular-nums text-text-primary @[18rem]/page:text-3xl">{minutesCompact(pkg.minutes)}</span>
-          {pkg.saving_pct !== null && saving ? <Badge tone="success">{BUY_COPY.save(pkg.saving_pct)}</Badge> : null}
+          {pkg.saving_pct !== null && saving ? <Badge tone="success">{BUY_COPY.save(pkg.saving_zar!, pkg.saving_pct)}</Badge> : null}
         </span>
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-base font-semibold tabular-nums text-text-primary @[18rem]/page:text-xl">{formatMoney(pkg.price_zar)}</span>
@@ -116,7 +116,7 @@ function PackageCard({ pkg, baseline }: { pkg: ShelfPackage; baseline: ShelfPack
         </span>
         <span className="flex flex-col gap-0.5 text-sm text-text-secondary">
           {perHour !== null ? <span className="tabular-nums">{BUY_COPY.perHour(perHour)}</span> : null}
-          {saving && baseline ? <span className="text-success-strong">{BUY_COPY.savingLine(pkg.saving_zar!, baseline)}</span> : null}
+          {saving && baseline ? <span className="text-success-strong">{BUY_COPY.savingLine(baseline)}</span> : null}
         </span>
         {isFreeHere(pkg) ? <Badge tone="warning" className="self-start">{BUY_COPY.freeAtDesk}</Badge> : null}
       </span>

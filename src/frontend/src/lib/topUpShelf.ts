@@ -1,6 +1,7 @@
 import { ApiError, OfflineError, type MinutesShelf, type ShelfPackage } from "./api";
 import { outcomeUnknown } from "./lostReply";
-import { minutesCompact, minutesSpoken } from "./minutes";
+import { minutesSpoken } from "./minutes";
+import { savesWords } from "./packagesCopy";
 import { formatMoney } from "./utils";
 
 /**
@@ -103,7 +104,8 @@ export const BUY_COPY = {
   emptyTitle: "No packages to buy yet",
   emptyHint: "The club hasn't set up any minutes packages. Ask at the desk — they can add minutes for you.",
   /** The saving badge, against the smallest package (§4.3). */
-  save: (pct: number) => `Save ${pct}%`,
+  /** R6 L6-11 — one wording for a saving everywhere (`savesWords`): "Saves R50.00 (8%)". */
+  save: (zar: number, pct: number | null) => savesWords(formatMoney(zar), pct),
   perHour: (zar: number) => `${formatMoney(zar)} an hour`,
   wasPrice: (zar: number) => `was ${formatMoney(zar)}`,
   discountBadge: (pct: string) => `${pct} off`,
@@ -131,7 +133,7 @@ export const BUY_COPY = {
     return `${parts.join(", ")}.`;
   },
   /** The saving's visible sentence under the badge. */
-  savingLine: (savingZar: number, baseline: ShelfPackage) => `${formatMoney(savingZar)} less than ${minutesCompact(baseline.minutes)} at a time`,
+  savingLine: (baseline: ShelfPackage) => `against buying ${minutesSpoken(baseline.minutes)} at a time`,
 } as const;
 
 /** What a refused or unanswered purchase says. Every branch says whether anything was charged. */
