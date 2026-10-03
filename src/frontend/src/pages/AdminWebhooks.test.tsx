@@ -139,6 +139,8 @@ describe("AdminWebhooks", () => {
       "booking.completed", "booking.no_show_reversed",
       "booking.displaced", "booking.displacement_reversed",
       "booking.cancelled_lights_charged",
+      // R6 E6-4 / E6-11: the payer of a pay-for, and the reversal legs under their own names.
+      "booking.payer_changed", "minutes.refund_reversed", "minutes.penalty_returned",
       // P13 §5: the money events are named for minutes; the old unit's names are gone.
       "minutes.purchased", "minutes.refunded", "minutes.penalty_applied", "minutes.adjusted", "minutes.sold_at_desk",
       "member.registered", "member.approved", "member.rejected",
@@ -178,7 +180,10 @@ describe("AdminWebhooks", () => {
     const section = spec.split(/^## 9\. Webhooks$/m)[1]?.split(/^## /m)[0];
     expect(section, "feature-spec.md has no §9. Webhooks").toBeTruthy();
 
-    const bullets = Array.from(section!.matchAll(/^- `([a-z]+\.[a-z_]+)`(.*)$/gm));
+    // A bullet may name two events before its dash ("- `minutes.refund_reversed` /
+    // `minutes.penalty_returned` — …", R6 E6-11): each name in the head is stated.
+    const bullets = Array.from(section!.matchAll(/^- (`[a-z]+\.[a-z_]+`(?:\s*\/\s*`[a-z]+\.[a-z_]+`)*)(.*)$/gm))
+      .flatMap(([, head, rest]) => Array.from(head.matchAll(/`([a-z]+\.[a-z_]+)`/g), ([whole, name]) => [whole, name, rest] as const));
     // Guard against the regex quietly matching nothing and the test passing on an empty set.
     expect(bullets.length).toBeGreaterThan(10);
 

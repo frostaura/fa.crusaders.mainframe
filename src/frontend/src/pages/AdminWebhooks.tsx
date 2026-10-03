@@ -142,6 +142,12 @@ const EVENTS: EventDef[] = [
     vars: ["booking_id", "court_id", "court_number", "user_id", "lit_minutes", "amount_minutes", "occurred_at"],
   },
   {
+    name: "booking.payer_changed",
+    label: "Payer changed",
+    description: "Somebody took a booking's charge over — paid for another member's court at the box, or volunteered to pay at the court. The subject is the NEW payer; the previous payer's refund is its own minutes.refunded.",
+    vars: ["booking_id", "court_id", "court_number", "user_id", "booker_user_id", "previous_payer_user_id", "amount_minutes", "starts_at", "ends_at"],
+  },
+  {
     name: "minutes.purchased",
     label: "Minutes package bought",
     description: "A member's PayFast purchase of a minutes package cleared. Carries the package, the minutes added, the list price, any group discount and the rand paid.",
@@ -153,13 +159,25 @@ const EVENTS: EventDef[] = [
   {
     name: "minutes.refunded",
     label: "Minutes refunded",
-    description: "A refund was written to a member's ledger — by a cancellation, a no-show reversal or a displacement.",
+    description: "A refund was written to a member's ledger — by a cancellation or a displacement.",
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
+  },
+  {
+    name: "minutes.refund_reversed",
+    label: "Refund taken back",
+    description: "A refund was taken back off a member's ledger (a negative refund row) — for example when a court box proved after the sweep that a no-show did play.",
     vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
     name: "minutes.penalty_applied",
     label: "Penalty charged",
     description: "A no-show or late-cancellation penalty was taken off a member. Says how many minutes moved, where the booking event only says what happened.",
+    vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
+  },
+  {
+    name: "minutes.penalty_returned",
+    label: "Penalty returned",
+    description: "A penalty was given back to a member (a positive penalty row) — for example when a no-show is reversed by late attendance evidence.",
     vars: ["entry_id", "user_id", "entry_type", "amount_minutes", "booking_id", "reason"],
   },
   {
