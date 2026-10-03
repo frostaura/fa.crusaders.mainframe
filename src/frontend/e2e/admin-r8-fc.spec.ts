@@ -458,3 +458,39 @@ test("L8-13 — the daily table says it scrolls sideways while a column is out o
   await expect(cue).toHaveCSS("opacity", "0");
   await expect(region.locator("xpath=..").locator("[data-scroll-cue='left']")).toHaveCSS("opacity", "1");
 });
+
+/* ───────────────────────────── L8-10 the control board's "Review" disclosure ───────────────────────────── */
+
+test.describe("L8-10 — a tile's duplicate-box warning keeps its Review button inside the box", () => {
+  for (const width of [320, 390]) {
+    test(`at ${width} / 200 %`, async ({ page }) => {
+      const now = Date.now();
+      const at = (m: number) => new Date(now + m * 60_000).toISOString();
+      await open(page, "/admin/monitoring", adminRoutes([
+        { path: "/api/v1/admin/control-board", body: { generated_at: new Date(now).toISOString(), timezone: "Africa/Johannesburg", courts: [{
+          court_id: "c-1", court_number: 1, name: "Court 1", lights: null, current: null, next: null,
+          device: { device_id: "d-1", device_code: "box-af1737", link: "online", last_seen_at: at(-1), silent_seconds: 60 },
+          boxes_on_court: 3,
+          other_boxes: [
+            { device_id: "d-2", device_code: "box-bb2222", name: "Cupboard box", last_seen_at: at(-90) },
+            { device_id: "d-3", device_code: "box-cc3333", name: null, last_seen_at: null },
+          ],
+        }] } },
+        { path: "/api/v1/admin/settings", body: { grace_window_minutes: 10 } },
+      ]), width, 800);
+      const warning = page.locator("[data-duplicate-boxes]");
+      await expect(warning).toBeVisible({ timeout: 30_000 });
+      await big(page);
+      const review = warning.locator("button[aria-expanded]");
+      for (const state of ["closed", "open"]) {
+        const box = (await warning.boundingBox())!;
+        const button = (await review.boundingBox())!;
+        expect(button.x + button.width, `${state}: Review past the warning's edge`).toBeLessThanOrEqual(box.x + box.width + 1);
+        expect(await labelSpills(review), `${state}: the label spills its button`).toBe(false);
+        if (state === "closed") await review.click();
+      }
+      if (process.env.FC_SHOTS) await warning.screenshot({ path: `${process.env.FC_SHOTS}/l8-10-${width}.png` });
+      expect(await sideways(page)).toBeLessThanOrEqual(1);
+    });
+  }
+});

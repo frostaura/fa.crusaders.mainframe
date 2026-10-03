@@ -208,7 +208,8 @@ function DuplicateBoxes({ parts }: { parts: NonNullable<ReturnType<typeof duplic
           aria-expanded={open}
           aria-controls={id}
           onClick={() => setOpen((v) => !v)}
-          className="ml-auto text-warning-strong"
+          // R8 L8-10: nowrap, it ran 49px past the warning box at 320 / 200 % text; it wraps instead.
+          className="ml-auto max-w-full whitespace-normal text-warning-strong"
         >
           {open ? DUPLICATE_BOXES_HIDE : DUPLICATE_BOXES_REVIEW}
           {open ? <CaretUp size={14} weight="bold" aria-hidden="true" /> : <CaretDown size={14} weight="bold" aria-hidden="true" />}
