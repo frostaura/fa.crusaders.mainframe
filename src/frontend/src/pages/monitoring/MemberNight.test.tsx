@@ -632,3 +632,39 @@ describe("a board's row is worded by what the board knew (R9 E9-5)", () => {
     expect(screen.queryByText(/nobody signed in/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * R10 E10-2: "who scanned" disagreed. A partner lit the organiser's court with HIS code and the
+ * organiser's Night said "Checked in — by Ben" beside "lights came on — with Ava Organiser's
+ * code"; a pay-for payer's lighting named the booker's code. The row stays on the owner's Night
+ * (`subject`), and the clause names `code_holder` — whose code the board actually read.
+ */
+describe("the lights name whose code lit the court (R10 E10-2)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  /** `code_holder` is the server's new field (BE10); the shared type gains it via the integrator. */
+  const litBy = (holder: { user_id: string; name: string | null } | null) => traceEvent({
+    strand: "lights", kind: "court.lights_on", headline: "Court 2 lights came on",
+    actor: { user_id: null, name: null, kind: "device", is_self: false },
+    subject: { user_id: "u-ava", name: "Ava Organiser" },
+    ...({ code_holder: holder } as Partial<TraceEvent>),
+  });
+
+  for (const [who, name] of [["an accepted partner", "Ben Partner"], ["a pay-for payer", "Pat Payer"]] as const) {
+    it(`${who}'s scan names their code, not the organiser's`, async () => {
+      stubFetch(nightRoutes(traceView([litBy({ user_id: "u-holder", name })])));
+      renderNight();
+      await screen.findByText("Court 2 lights came on");
+      expect(screen.getByText(`with ${name}'s code, at the board`)).toBeInTheDocument();
+      expect(screen.queryByText("with Ava Organiser's code, at the board")).not.toBeInTheDocument();
+    });
+  }
+
+  it("a row written before the field still names the subject's code", async () => {
+    stubFetch(nightRoutes(traceView([litBy(null)])));
+    renderNight();
+    await screen.findByText("Court 2 lights came on");
+    expect(screen.getByText("with Ava Organiser's code, at the board")).toBeInTheDocument();
+  });
+});

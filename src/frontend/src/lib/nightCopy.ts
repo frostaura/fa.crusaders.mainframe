@@ -72,10 +72,11 @@ export function nightWindowHint(range: TraceView["range"], timezone: string | un
  */
 export function actorClause(
   actor: TraceActor | null | undefined, subjectName: string, subject?: AdminPerson | null,
+  codeHolder?: CodeHolder | null,
 ): string | null {
   if (!actor) return null;
   if (actor.kind === "system") return "by the club's own automatic check";
-  if (actor.kind === "device") return deviceClause(subject);
+  if (actor.kind === "device") return deviceClause(codeHolder ?? subject);
   const name = (actor.name ?? "").trim();
   if (actor.is_self === true) {
     // "by Thandi herself" needs a first name and a pronoun this product does not hold. The
@@ -91,11 +92,19 @@ export function actorClause(
  * row a member's own scan produced, as if nobody had been there. The board knows a code, not a
  * person: when the row names whose code it read, it says so; when it names nobody (a relay's own
  * report), it says the board reported it. Neither claims who held the phone, or that nobody did.
+ *
+ * R10 E10-2: a lighting names `code_holder` — whose code the board read (the organiser, an
+ * accepted partner or a pay-for payer) — when the server sends it; the row's `subject` stays the
+ * booking's owner, which is why the row is on the owner's Night. A row written before the field
+ * existed names the subject, as before.
  */
-function deviceClause(subject: AdminPerson | null | undefined): string {
-  const name = (subject?.name ?? "").trim();
+function deviceClause(person: { name?: string | null } | null | undefined): string {
+  const name = (person?.name ?? "").trim();
   return name === "" ? "reported by the court's board" : `with ${name}'s code, at the board`;
 }
+
+/** Whose code a board read on a lights-on row (R10 E10-2, the trace's `code_holder`). */
+export type CodeHolder = { user_id?: string | null; name?: string | null };
 
 /** True when this row is somebody acting ON the traced member — the thing worth seeing. */
 export function isOnBehalf(actor: TraceActor | null | undefined): boolean {
