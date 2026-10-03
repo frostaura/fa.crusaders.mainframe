@@ -19,14 +19,11 @@ public static class ReportingEndpoints
             var userId = ctx.User.Id() ?? Guid.Empty;
             var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
             var entries = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
-            var attended = await db.Bookings
-                .Where(b => b.UserId == userId && b.StartsAt >= f && b.StartsAt < t && b.CheckedInAt != null)
-                .Select(b => new { b.SliceMinutes, b.SliceCount })
-                .ToListAsync(ct);
+            var attended = await SessionsInAsync(db, userId, f, t, ct);
             return Results.Ok(BuildWalletReport(
                 entries, f, t,
                 attendedBookings: attended.Count,
-                minutesOnCourt: attended.Sum(b => b.SliceMinutes * b.SliceCount)));
+                minutesOnCourt: attended.Sum(s => s.PlayedMinutes)));
         });
 
         me.MapGet("/wallet.csv", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
@@ -288,6 +285,8 @@ public static class ReportingEndpoints
             var allDays = EnumerateDays(firstDay, lastDay).ToList();
             var ledgerByDay = entries.GroupBy(e => LocalDay(e.CreatedAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
             var bookingsByDay = bookings.GroupBy(b => LocalDay(b.StartsAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
+            var sessionsByDay = (await SessionsInAsync(db, userId, f, t, ct))
+                .GroupBy(s => LocalDay(s.StartsAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
 
             int running = 0;
             // Seed running balance with everything before the window so the chart line starts at the right value.
@@ -297,6 +296,7 @@ public static class ReportingEndpoints
             {
                 var le = ledgerByDay.GetValueOrDefault(d) ?? new();
                 var bk = bookingsByDay.GetValueOrDefault(d) ?? new();
+                var played = sessionsByDay.GetValueOrDefault(d) ?? new();
                 var dayDelta = le.Sum(x => x.AmountMinutes);
                 running += dayDelta;
                 return new
@@ -320,8 +320,10 @@ public static class ReportingEndpoints
                     // is the source of truth for it — the settlement model hangs the refund
                     // and the no-show penalty off this field — and a member could not see
                     // whether the club believed they had turned up.
-                    attended = bk.Count(b => b.CheckedInAt is not null),
-                    minutes_on_court = bk.Where(b => b.CheckedInAt is not null).Sum(b => b.SliceMinutes * b.SliceCount),
+                    // Time on court by the play rule (E8-4): sessions as booker or accepted partner,
+                    // played minutes as the row stands — the figure the profile shows.
+                    attended = played.Count,
+                    minutes_on_court = played.Sum(s => s.PlayedMinutes),
                     balance_minutes = running,
                 };
             }).ToList();
@@ -329,6 +331,21 @@ public static class ReportingEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// The member's attended sessions whose court time starts inside the window — "time on court"
+    /// by ONE rule on every member screen (review round 8, E8-4): <see cref="AttendanceQuery"/>,
+    /// play.md §1. A booking they made OR an accepted seat in somebody else's game, attended by
+    /// <c>CheckedInAt</c>, and its minutes as the row stands (a released tail and a cancellation
+    /// after check-in stop the clock). The wallet report had counted only bookings the member
+    /// made, at their sold length, so a partner read "0 min" on Wallet beside "57 min" on Profile.
+    /// </summary>
+    private static async Task<List<AttendedSession>> SessionsInAsync(
+        MainframeDbContext db, Guid userId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        var sessions = await AttendanceQuery.SessionsAsync(db, userId, ct);
+        return sessions.Where(s => s.StartsAt >= from && s.StartsAt < to).ToList();
     }
 
     /// <summary>
