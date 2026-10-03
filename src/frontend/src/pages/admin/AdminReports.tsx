@@ -4,7 +4,7 @@ import {
 import { formatMinutes, formatMoney } from "../../lib/utils";
 import { AutoGrid } from "../../components/ui/auto-grid";
 import { Minutes } from "../../components/Minutes";
-import { CLUB_REPORT_COPY as COPY, randPerHour, randPerMinute } from "../../lib/reportsCopy";
+import { CLUB_REPORT_COPY as COPY, randPerHour } from "../../lib/reportsCopy";
 import { PageHeader, PageShell, Section } from "../../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
 import { StateBlock } from "../../components/ui/state-block";
@@ -140,7 +140,7 @@ function Sales({ revenue }: { revenue: RevenueReport }) {
         <Stat label={COPY.sales.soldReversed} value={<Minutes value={-revenue.reversals_minutes} />} />
         <Stat label={COPY.sales.soldNet} value={<Minutes value={revenue.net_minutes} />} />
         <Stat label={COPY.sales.perHour} value={randPerHour(revenue.zar_per_minute_sold)} />
-        <Stat label={COPY.sales.perMinute} value={randPerMinute(revenue.zar_per_minute_sold)} />
+        <Stat label={COPY.sales.perMinute} value={randPerMinuteToCent(revenue.zar_per_minute_sold)} />
       </TotalsCard>
     </Section>
   );
@@ -183,6 +183,15 @@ function carriesShares(days: DailyAdminPoint[]): boolean {
 const signed = (value: number) => <Minutes value={value} signed />;
 
 /**
+ * Rand per minute sold, to the cent and rounded down like every figure under it (R6 L6-14): the
+ * server keeps four places for the per-HOUR sum, but "R1.8611" printed four places of rand.
+ */
+function randPerMinuteToCent(zarPerMinute: number | null | undefined): string {
+  if (typeof zarPerMinute !== "number" || !Number.isFinite(zarPerMinute)) return COPY.noRate;
+  return formatMoney(Math.floor(zarPerMinute * 100 + 1e-9) / 100);
+}
+
+/**
  * The club's own minutes, including the figure that was once on no screen at all: what the desk
  * added or took back by hand (Adjustments), and a payment clawed back after the fact (Reversals).
  */
@@ -204,13 +213,16 @@ function ClubTotals({ days }: { days: DailyAdminPoint[] }) {
           </>
         )}
       >
-        <Stat label={COPY.totals.sold} value={signed(t.topUps)} />
-        <Stat label={COPY.totals.charges} value={signed(-t.charges)} />
-        <Stat label={COPY.totals.refunds} value={signed(t.refunds)} />
-        <Stat label={COPY.totals.penalties} value={signed(-t.penalties)} />
-        <Stat label={COPY.totals.adjustments} value={signed(t.adjustments)} />
-        <Stat label={COPY.totals.reversals} value={signed(t.reversals)} />
-        {shares ? <Stat label={REPORT_SHARES_COPY.clubShares} value={signed(t.shares)} /> : null}
+        {/* Each bucket as the daily table below shows it (R6 L6-14): the sentence under the card
+            ("sold − bookings + refunds − penalties …") applies the signs. Bookings was "−24 min" in
+            danger red above a table saying "24 min" — subtracted twice by anyone who read both. */}
+        <Stat label={COPY.totals.sold} value={<Minutes value={t.topUps} />} />
+        <Stat label={COPY.totals.charges} value={<Minutes value={t.charges} />} />
+        <Stat label={COPY.totals.refunds} value={<NetMinutes value={t.refunds} />} />
+        <Stat label={COPY.totals.penalties} value={<NetMinutes value={t.penalties} />} />
+        <Stat label={COPY.totals.adjustments} value={<NetMinutes value={t.adjustments} />} />
+        <Stat label={COPY.totals.reversals} value={<NetMinutes value={t.reversals} />} />
+        {shares ? <Stat label={REPORT_SHARES_COPY.clubShares} value={<NetMinutes value={t.shares} />} /> : null}
         <Stat label={COPY.totals.courtsPlayed} value={String(t.bookings)} />
         <Stat label={COPY.totals.noShows} value={String(t.noShows)} />
         <Stat label={COPY.totals.days} value={String(days.length)} />
@@ -300,6 +312,7 @@ function DailyBreakdown({ days }: { days: DailyAdminPoint[] }) {
         defaultSort={{ key: "date", dir: "desc" }}
         emptyTitle={D.empty}
         maxHeight="60vh"
+        wrapHeaders
         columns={dayColumns(shares)}
       />
       <TableNotes>

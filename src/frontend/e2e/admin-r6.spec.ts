@@ -185,3 +185,36 @@ test.describe("L6-9 — a member's name on a phone card", () => {
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
 });
+
+const DAY = (i: number) => ({
+  // A busy club day: 10 h sold, twelve courts charged, a refund reversed, a desk correction.
+  date: `2026-09-${String(i + 1).padStart(2, "0")}`, top_ups_minutes: 600 + i, booking_charges_minutes: 540, refunds_minutes: -45,
+  penalties_minutes: 13, adjustments_minutes: -120, reversals_minutes: -60, share_transfers_minutes: 30, net_movement_minutes: -122,
+  bookings: 12, no_shows: 2,
+});
+const reportRoutes = () => adminRoutes([
+  { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 3350, reversals_zar: 0, net_zar: 3350, gross_topups_minutes: 1800, reversals_minutes: 0, net_minutes: 1800, zar_per_minute_sold: 1.8611 } },
+  { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
+  { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 24, no_show: 2, no_show_pct: 8.3 } },
+  { path: "/api/v1/admin/reports/daily", body: Array.from({ length: 10 }, (_, i) => DAY(i)) },
+]);
+
+test.describe("L6-14 — Reports at a desk's width", () => {
+  test("at 1280 the daily table shows every column, unclipped", async ({ page }) => {
+    await open(page, "/admin/reports", reportRoutes(), 1280);
+    const table = page.getByRole("region", { name: "Daily breakdown" }).getByRole("table");
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(() => document.fonts.ready);
+    const clip = await table.evaluate((t) => {
+      const region = t.closest("[data-slot='section'], section") ?? t.parentElement!;
+      const last = t.querySelector("thead tr")!.lastElementChild!.getBoundingClientRect();
+      let scroller: HTMLElement | null = t.parentElement;
+      while (scroller && scroller.scrollWidth <= scroller.clientWidth + 1) scroller = scroller.parentElement;
+      const cols = [...t.querySelectorAll("thead th")].map((th) => `${(th.textContent ?? "").slice(0, 14)}:${Math.round(th.getBoundingClientRect().width)}`).join(" ");
+      return { cols, lastRight: Math.round(last.right), regionRight: Math.round(region.getBoundingClientRect().right), scrolls: scroller ? scroller.tagName + "." + scroller.className.slice(0, 60) : null };
+    });
+    expect(clip.lastRight, JSON.stringify(clip)).toBeLessThanOrEqual(clip.regionRight + 1);
+    if (process.env.FC_SHOTS) await table.screenshot({ path: `${process.env.FC_SHOTS}/daily-1280.png` });
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});

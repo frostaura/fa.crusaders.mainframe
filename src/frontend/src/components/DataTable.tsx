@@ -44,6 +44,12 @@ type DataTableProps<T> = {
    * so a table wider than a phone can be scrolled from the keyboard.
    */
   label?: string;
+  /**
+   * Let the headers wrap at their words (R6 L6-14): a wide table of short figures whose one-line
+   * uppercase headers ("PENALTIES (NET)", "SHARES BETWEEN PLAYERS") made it 440 px wider than a
+   * 1280 screen's column; wrapped, the figures decide the widths.
+   */
+  wrapHeaders?: boolean;
 };
 
 const ALIGN = { left: "text-left", right: "text-right", center: "text-center" } as const;
@@ -119,7 +125,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           <table data-slot="table" aria-label={props.label} className="w-full border-collapse text-sm">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                {columns.map((c) => <HeaderCell key={c.key} column={c} sort={sort} onSort={onSort} />)}
+                {columns.map((c) => <HeaderCell key={c.key} column={c} sort={sort} onSort={onSort} wrap={props.wrapHeaders === true} />)}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -154,7 +160,9 @@ function SearchField({ value, onChange, placeholder }: { value: string; onChange
   );
 }
 
-function HeaderCell<T>({ column: c, sort, onSort }: { column: DataColumn<T>; sort: Sort; onSort: (key: string) => void }) {
+type HeaderCellProps<T> = { column: DataColumn<T>; sort: Sort; onSort: (key: string) => void; wrap: boolean };
+
+function HeaderCell<T>({ column: c, sort, onSort, wrap }: HeaderCellProps<T>) {
   const sortable = c.sortable !== false;
   const active = sort.key === c.key;
   const Icon = !active ? CaretUpDown : sort.dir === "asc" ? CaretUp : CaretDown;
@@ -163,7 +171,7 @@ function HeaderCell<T>({ column: c, sort, onSort }: { column: DataColumn<T>; sor
     <TableHead
       style={c.width ? { width: c.width } : undefined}
       aria-sort={sortable ? ariaSort : undefined}
-      className={cn("sticky top-0 z-sticky", ALIGN[c.align ?? "left"])}
+      className={cn("sticky top-0 z-sticky", ALIGN[c.align ?? "left"], wrap && "h-auto whitespace-normal py-1 align-bottom")}
     >
       {sortable ? (
         <button
@@ -175,6 +183,8 @@ function HeaderCell<T>({ column: c, sort, onSort }: { column: DataColumn<T>; sor
             "no-lift -mx-1 inline-flex min-h-touch items-center gap-1 rounded-md px-1 uppercase tracking-overline",
             "transition-colors duration-fast ease-standard hover:text-text-primary motion-reduce:transition-none",
             active && "text-text-primary",
+            // Wrapping headers: the caret may drop under the word, so the WORD sets the width.
+            wrap && "flex-wrap",
           )}
         >
           <span>{c.header}</span>

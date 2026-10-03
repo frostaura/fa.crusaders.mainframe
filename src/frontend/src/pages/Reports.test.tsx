@@ -142,7 +142,8 @@ describe("Reports — net daily buckets", () => {
     const stats = within(region.querySelector("dl")!);
 
     expect(stats.getByText("Adjustments")).toBeInTheDocument();
-    expect(stats.getByText("+25 min")).toBeInTheDocument();
+    // R6 L6-14: each bucket as the daily table shows it; the sentence under the card carries the signs.
+    expect(stats.getByText("Adjustments").parentElement).toHaveTextContent("Adjustments25 min");
     expect(card.getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
 
     // The desk's own wallet is gone from the club's report — and is not even asked for.
@@ -184,6 +185,27 @@ describe("Reports — net daily buckets", () => {
     // P13: the card's sentence is about members' minutes, and buys are "sold", not "top-ups".
     expect(card.getByText(/sold − bookings \+ refunds/)).toBeInTheDocument();
     expect(card.getByText(/clawed back after the fact/)).toBeInTheDocument();
+  });
+
+  /**
+   * Review round 6, L6-14 — the card and the table under it said the same bucket two ways: the
+   * card's Bookings was "−24 min" in danger red, the table's "24 min", and the card's own sentence
+   * reads "sold − bookings", so a minus on the figure as well subtracted it twice. The card now
+   * shows each bucket as the table does and the sentence applies the signs; the per-minute rate is
+   * money, to the cent (R1.8611 read as four decimal places of rand).
+   */
+  it("shows Bookings and Penalties on the card as the table shows them, and the rate per minute to the cent", async () => {
+    const revenue = { from: "", to: "", gross_topups_zar: 100, reversals_zar: 0, net_zar: 100, gross_topups_minutes: 160, reversals_minutes: 0, net_minutes: 160, zar_per_minute_sold: 1.8611 };
+    stubFetch(routes(true).map((r) => (r.path === "/api/v1/admin/reports/revenue" ? { ...r, body: revenue } : r)));
+    renderAdmin();
+    const region = await screen.findByRole("region", { name: CLUB_TOTALS });
+    const stats = within(region.querySelector("dl")!);
+    expect(stats.getByText("Bookings").parentElement).toHaveTextContent("Bookings24 min");
+    expect(stats.getByText("Bookings").parentElement!.querySelector(".text-danger-strong")).toBeNull();
+    expect(stats.getByText("Penalties (net)").parentElement).toHaveTextContent("Penalties (net)0 min");
+    const sales = await regionNamed(CLUB_REPORT_COPY.sales.title);
+    expect(sales.getByText(CLUB_REPORT_COPY.sales.perMinute).parentElement).toHaveTextContent(`${CLUB_REPORT_COPY.sales.perMinute}R1.86`);
+    expect(sales.queryByText(/1\.8611/)).not.toBeInTheDocument();
   });
 
   /**
