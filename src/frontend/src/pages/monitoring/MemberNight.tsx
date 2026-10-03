@@ -95,7 +95,7 @@ function NightTimeline({ rows, subjectName, timezone }: {
       {rows.map((row, index) => (
         // tabIndex -1: focusable by script only, so "Show more" can hand focus to the first row it
         // brought (R8 X8-4 — the last page took the button away and focus fell to <body>).
-        <li key={`${row.kind}-${index}`} data-night-row="" tabIndex={-1} className="rounded-sm">
+        <li data-night-row className="rounded-sm" key={`${row.kind}-${index}`} tabIndex={-1}>
           {row.kind === "gap" ? (
             /* Drawn, not closed up. A night with an hour missing from the middle and
                no sign of it reads as a continuous evening, which is a claim. */
@@ -192,16 +192,6 @@ function useMemberNight(userId: string, day: string) {
     }
   };
   return { view, loading: read.loading, error: read.error, retry, loadMore, more: { pending: mine?.pending ?? false, error: mine?.error ?? null } };
-}
-
-/**
- * The first timeline row a page added takes focus (R8 X8-4): the button may be gone with the last
- * page, and a reader carries on from where the night continues. A burst that absorbed the new
- * events is the last row there was — that one, then.
- */
-function focusFirstNew(before: number) {
-  const rows = document.querySelectorAll<HTMLElement>("[data-night-row]");
-  rows[Math.min(before, rows.length - 1)]?.focus();
 }
 
 /** Events a page holds beyond the first read, for one night (`key`). `cursor` undefined: not paged yet. */
@@ -480,4 +470,15 @@ function TraceCard({ event, subjectName, timezone }: {
       {event.court?.name && <p className="text-sm text-text-muted">{event.court.name}</p>}
     </div>
   );
+}
+
+/**
+ * The first timeline row a page added takes focus (R8 X8-4): the button may be gone with the last
+ * page, and a reader carries on from where the night continues. A burst that absorbed the new
+ * events is the last row there was — that one, then.
+ */
+function focusFirstNew(before: number) {
+  const rows = document.querySelectorAll("[data-night-row]");
+  const row = rows[Math.min(before, rows.length - 1)];
+  if (row instanceof HTMLElement) row.focus();
 }
