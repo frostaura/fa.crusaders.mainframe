@@ -183,39 +183,21 @@ function HeaderCell<T>({ column: c, sort, onSort, wrap }: HeaderCellProps<T>) {
             "no-lift -mx-1 inline-flex min-h-touch items-center gap-1 rounded-md px-1 uppercase tracking-overline",
             "transition-colors duration-fast ease-standard hover:text-text-primary motion-reduce:transition-none",
             active && "text-text-primary",
+            // R7 L7-17: a wrapping header puts its caret on a line of its own UNDER the label, in
+            // every column. A flex-wrapped caret sat beside one header and under the next,
+            // depending on whose words filled the column; glued beside the last word it cost every
+            // column 18px and the daily table no longer fit 1280 (L6-14). Under, the carets of a
+            // bottom-aligned header row share one line.
+            wrap && ["flex-col justify-end gap-0.5", c.align === "right" ? "items-end" : c.align === "center" ? "items-center" : "items-start"],
           )}
         >
-          {wrap ? (
-            // R7 L7-17: a wrapping header keeps its caret on the LAST word's line — the caret is
-            // glued to that word, inline. A flex-wrapped caret sat beside one header and under the
-            // next, depending on whose words happened to fill the column.
-            <WrappedHeader header={c.header}>
-              <Icon size={14} weight="bold" aria-hidden="true" className={cn("ml-1 inline-block align-[-0.125em]", !active && "text-text-muted")} />
-            </WrappedHeader>
-          ) : (
-            <>
-              <span>{c.header}</span>
-              <Icon size={14} weight="bold" aria-hidden="true" className={active ? "" : "text-text-muted"} />
-            </>
-          )}
+          <span>{c.header}</span>
+          <Icon size={14} weight="bold" aria-hidden="true" className={active ? "" : "text-text-muted"} />
         </button>
       ) : (
         <span>{c.header}</span>
       )}
     </TableHead>
-  );
-}
-
-/** A header that may wrap at its spaces, with `children` (the caret) never parted from its last word. */
-function WrappedHeader({ header, children }: { header: string; children: ReactNode }) {
-  const cut = header.lastIndexOf(" ");
-  const head = cut < 0 ? "" : header.slice(0, cut + 1);
-  const last = cut < 0 ? header : header.slice(cut + 1);
-  return (
-    <span>
-      {head}
-      <span className="whitespace-nowrap">{last}{children}</span>
-    </span>
   );
 }
 

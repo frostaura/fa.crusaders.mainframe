@@ -40,7 +40,8 @@ async function open(page: Page, path: string, routes: ApiRoute[], width: number,
 
 /**
  * Words under `selector` that paint on more than one line: broken mid-word. A word is a run between
- * spaces, hyphens, dashes and slashes — a line may legitimately break after "Khoza-".
+ * spaces, hyphens, dashes, slashes and dots — a line may legitimately break after "Khoza-" or
+ * "booking." (a money figure has its own group test below).
  */
 async function brokenWords(page: Page, selector: string): Promise<string[]> {
   return page.evaluate((sel) => {
@@ -51,7 +52,7 @@ async function brokenWords(page: Page, selector: string): Promise<string[]> {
         const el = node.parentElement;
         if (!el || el.closest(".sr-only")) continue;
         const text = node.textContent ?? "";
-        const re = /[^\s\-‐–—/·]+/g;
+        const re = /[^\s\-‐–—/·.]+/g;
         for (let m = re.exec(text); m; m = re.exec(text)) {
           const range = document.createRange();
           range.setStart(node, m.index);
@@ -232,30 +233,26 @@ test.describe("L7-17 — the daily table's sort carets", () => {
   test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
 
   for (const [width, big] of [[1280, false], [1280, true], [1920, false]] as const) {
-    test(`at ${width}${big ? " / 200 %" : ""}: every caret sits beside its header's last word, never under it`, async ({ page }) => {
+    test(`at ${width}${big ? " / 200 %" : ""}: every caret sits in the same place — under its header, on one line`, async ({ page }) => {
       await open(page, "/admin/reports", reportRoutes(), width);
       const table = page.getByRole("region", { name: "Daily breakdown" }).getByRole("table");
       await expect(table).toBeVisible(ARRIVES);
       if (big) await bigText(page);
       await fontsReady(page);
-      const misplaced = await table.evaluate((t) => [...t.querySelectorAll("thead th button")].flatMap((b) => {
+      const carets = await table.evaluate((t) => [...t.querySelectorAll("thead th button")].map((b) => {
         const svg = b.querySelector("svg")!.getBoundingClientRect();
-        // The header's last word, from its own text node (an element's rect would include the caret).
-        const texts: Text[] = [];
-        const walker = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
-        for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.textContent?.trim()) texts.push(n as Text);
-        const node = texts[texts.length - 1];
-        const text = node.textContent!.trimEnd();
+        const label = b.querySelector("span")!;
         const range = document.createRange();
-        range.setStart(node, text.lastIndexOf(" ") + 1);
-        range.setEnd(node, text.length);
-        const rects = [...range.getClientRects()].filter((r) => r.width > 0.5);
-        const last = rects[rects.length - 1];
-        const mid = svg.top + svg.height / 2;
-        const beside = mid >= last.top - 1 && mid <= last.bottom + 1 && svg.left >= last.right - 1;
-        return beside ? [] : [`${b.textContent}: caret ${Math.round(svg.left)},${Math.round(svg.top)} last word ${Math.round(last.left)}–${Math.round(last.right)},${Math.round(last.top)}–${Math.round(last.bottom)}`];
+        range.selectNodeContents(label);
+        const lines = [...range.getClientRects()].filter((r) => r.width > 0.5);
+        const bottom = Math.max(...lines.map((r) => r.bottom));
+        return { name: b.textContent, under: svg.top >= bottom - 1, top: Math.round(svg.top) };
       }));
-      expect(misplaced).toEqual([]);
+      // Under its own label, every one: never beside one header and under the next.
+      expect(carets.filter((c) => !c.under).map((c) => c.name), "a caret beside its header").toEqual([]);
+      // And on one line across the row (the header row is bottom-aligned).
+      const tops = new Set(carets.map((c) => c.top));
+      expect([...tops].length, JSON.stringify(carets)).toBeLessThanOrEqual(1);
     });
   }
 });
@@ -376,6 +373,37 @@ test.describe("L7-10 — Faults at 320 / 200 %", () => {
       .map((v) => `${v.textContent} ${v.clientWidth}/${v.scrollWidth}`));
     expect(clipped, "a filter's value cut short").toEqual([]);
     expect(await brokenWords(page, "[data-fault-text] p"), "a fault's words broken mid-word").toEqual([]);
+    expect(await textOffScreen(page), "text past the screen").toEqual([]);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});
+
+/* ───────────────────────── L7-11 — Webhooks at 320 / 200 % ───────────────────────── */
+
+const HOOKS = ["a", "b"].map((x, i) => ({
+  id: `00000000-0000-4000-8000-00000000072${i}`, owner_kind: "Tenant", description: null,
+  url_template: `https://hook-${x}.e7-r7.review.test/{event}`, event_filter: "booking.created,minutes.refunded", enabled: i === 0,
+  failure_count: i, last_success_at: null, last_failure_at: null, secret: null,
+}));
+
+test.describe("L7-11 — a webhook row at 320 / 200 %", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "mobile", "a phone"); });
+
+  test("its badge says \"enabled\" whole and Deliveries stays inside the row", async ({ page }) => {
+    await open(page, "/admin/webhooks", [{ path: "/api/v1/admin/webhooks/", body: HOOKS }], 320, 800);
+    const row = page.getByRole("listitem").filter({ hasText: "hook-a.e7-r7" }).first();
+    await expect(row).toBeVisible(ARRIVES);
+    await bigText(page);
+    await fontsReady(page);
+    if (process.env.FC_SHOTS) await row.screenshot({ path: `${process.env.FC_SHOTS}/webhook-320.png` });
+    const badges = await brokenWords(page, "li [data-slot='badge']");
+    expect(badges, "a badge broken mid-word").toEqual([]);
+    const outside = await row.evaluate((li) => {
+      const box = li.getBoundingClientRect();
+      return [...li.querySelectorAll("button")].map((b) => b.getBoundingClientRect())
+        .filter((r) => r.left < box.left - 1 || r.right > box.right + 1).map((r) => `${Math.round(r.left)}–${Math.round(r.right)} in ${Math.round(box.left)}–${Math.round(box.right)}`);
+    });
+    expect(outside, "a button past the row's edge").toEqual([]);
     expect(await textOffScreen(page), "text past the screen").toEqual([]);
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });

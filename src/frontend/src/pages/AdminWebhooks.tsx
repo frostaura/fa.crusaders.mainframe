@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { describeFailure } from "../lib/errors";
 import { LOST_CREATE, endpointName } from "../lib/webhooksCopy";
@@ -385,7 +385,10 @@ export default function AdminWebhooksPage() {
           endpoints — sticky, scrolling on its own — instead of a table that made the page 2,800–
           5,600px tall; narrower, it follows the endpoints, folded until asked for. */}
       <WithAside at="64rem" asideWidth="24rem" asideLabel="Variable catalogue" aside={<VariableCatalogCard />}>
-      <Card>
+      {/* R7 L7-11: a size container — under 16rem (512px at 200 % text, so large text only) the
+          card's and each row's insets halve: card, list and row padding left a row 158px at
+          320 / 200 %, "enable / d" and Deliveries pushed past the row's left edge. */}
+      <Card className="@container/hooks">
         {/* On a phone the action goes UNDER the heading (R3 X-4): beside it, the heading's longest
             word plus "New endpoint" at 200% text were wider than the card and the page scrolled. */}
         <CardHeader className="max-sm:!grid-cols-1">
@@ -409,7 +412,7 @@ export default function AdminWebhooksPage() {
             </Button>
           </CardAction>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-2 @[16rem]/hooks:px-4">
           {/* A list read before stays, under "Couldn't refresh" (R4); New endpoint stays off until a
               read succeeds, because the list on screen may be missing one made since. */}
           {loadError && readAt === null ? <ListFailed error={loadError} retrying={loading} onRetry={retry} /> : null}
@@ -473,6 +476,12 @@ function ListFailed({ error, retrying, onRetry }: { error: unknown; retrying: bo
   );
 }
 
+/** "booking.created" with a break opportunity after each dot, so a narrow badge wraps there. */
+function withDotBreaks(token: string): ReactNode {
+  const parts = token.split(".");
+  return parts.map((part, i) => <Fragment key={i}>{part}{i < parts.length - 1 ? <>.<wbr /></> : null}</Fragment>);
+}
+
 /** One endpoint: what it is, where it sends, what it sends — and its deliveries under it. */
 function EndpointRow(props: {
   endpoint: WebhookEndpointDto;
@@ -485,7 +494,7 @@ function EndpointRow(props: {
   const tokens = parseFilter(w.event_filter);
   const name = endpointName(w);
   return (
-    <li className="flex flex-col gap-3 p-4">
+    <li className="flex flex-col gap-3 p-2 @[16rem]/hooks:p-4">
       {/* L6-5: the details have a real basis, so on a phone (or at 200 % text) the buttons wrap
           UNDER them instead of squeezing them to ~50 px beside a 140 px button pair. */}
       <div className="flex flex-wrap items-start gap-3">
@@ -500,7 +509,8 @@ function EndpointRow(props: {
             {tokens.length === 0 || tokens.includes("*") ? (
               <Badge tone="info">any event</Badge>
             ) : (
-              tokens.map((t) => <Badge key={t} tone="info">{t}</Badge>)
+              // A dotted event name may wrap after a dot, never inside a word (R7 L7-11).
+              tokens.map((t) => <Badge key={t} tone="info">{withDotBreaks(t)}</Badge>)
             )}
           </div>
         </div>
