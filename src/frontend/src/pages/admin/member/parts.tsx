@@ -23,7 +23,7 @@ function bookedByLine(row: MemberBookingRow): string {
 
 /**
  * One booking. A date tile, the court and the hours, who booked it, then its status, what it
- * cost and — where the caller offers one — the action. Stacks on a phone; one line on a desk.
+ * cost and — where the caller offers one — the action. Stacks when its text is large for the box; one line on a desk.
  */
 /**
  * R6 E6-10 (BE): `sold_ends_at` is the end a booking was SOLD to — `ends_at` is the sweep's cut
@@ -49,11 +49,14 @@ export function BookingLine({ row, zone, action, people }: {
   // R7 E7-5: a court paid for at the box is the organiser's booking too — its figure is `cost_minutes`.
   const { ends, cost } = soldAndCost(row, partner || row.role === "payer");
   return (
+    // R8 L8-1: wraps by its own TEXT, never by the viewport. `sm:flex-row` beside a `flex-1` (zero
+    // basis) squeezed the hours to a few letters a line at 200 % text on every width; real bases
+    // let the parts drop under each other when the text, not the screen, is large.
     <li
       data-booking-id={row.booking_id}
-      className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-3 sm:flex-row sm:items-center sm:gap-4 sm:p-4"
+      className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-3 sm:p-4"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-[1_1_18rem] flex-wrap items-center gap-3">
         <div
           aria-hidden="true"
           className="flex w-14 shrink-0 flex-col items-center rounded-lg bg-bg-muted py-1.5 leading-tight"
@@ -62,7 +65,7 @@ export function BookingLine({ row, zone, action, people }: {
           <span className="font-display text-xl font-bold tabular-nums text-text-primary">{d.day}</span>
           <span className="text-xs text-text-muted">{d.month}</span>
         </div>
-        <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-[1_1_9rem] flex-col gap-0.5">
           <p className={cn("break-words font-semibold text-text-primary", cancelled && "text-text-secondary line-through")}>
             <span className="sr-only">{`${bookingWhen({ starts_at: row.starts_at, ends_at: ends }, zone)}, `}</span>
             <span aria-hidden="true">{`${clubClock(row.starts_at, zone)}–${clubClock(ends, zone)}`}</span>
@@ -89,14 +92,14 @@ export function BookingLine({ row, zone, action, people }: {
       </div>
       {/* Wraps (R3 V-4 / X-5): at 320 the Cancel ran 16px past the card and "100.00 cr" broke
           over two lines; now the actions drop to their own line and a figure never splits. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
         {partner ? <Badge tone="info">{COPY.partnerBadge}</Badge> : null}
         {row.role === "payer" ? <Badge tone="info">{COPY.payerBadge}</Badge> : null}
         <Badge tone={status.tone}>{status.word}</Badge>
         {/* What this member is out on it (`cost_minutes`). Without it, a partner's row has no
             figure: `charged_minutes` there is the ORGANISER's charge, not what this member paid. */}
         {cost === null ? null : <span className="whitespace-nowrap text-sm tabular-nums text-text-secondary">{COPY.charged(cost)}</span>}
-        {action ? <div className="ml-auto sm:ml-0">{action}</div> : null}
+        {action ? <div className="ml-auto">{action}</div> : null}
       </div>
     </li>
   );
