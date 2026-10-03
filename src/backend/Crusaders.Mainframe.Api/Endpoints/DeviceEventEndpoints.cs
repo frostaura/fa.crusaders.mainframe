@@ -777,6 +777,8 @@ public static class DeviceEventEndpoints
                 relay = evidence.Relay,
                 booking_id = booking.Id,
                 seq = evidence.Seq,
+                // E10-2: whose code the board read.
+                identified_user_id = userId,
             },
             evidence.DeviceId);
     }

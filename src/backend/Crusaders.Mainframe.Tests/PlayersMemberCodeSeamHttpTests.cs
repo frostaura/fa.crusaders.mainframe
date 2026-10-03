@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Endpoints;
@@ -116,6 +117,16 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
         Assert.NotNull(booking.CheckedInAt);
         Assert.Equal(c.Olga, booking.PaidByUserId);   // no payer override: a scan is not a payment
         Assert.Equal(before, (await c.BalanceAsync(app, c.Olga), await c.BalanceAsync(app, c.Pam)));
+
+        // Review round 10, E10-2: Olga's Night names whose code lit her court — Pam's, not hers.
+        var night = await c.Member(app, c.AdminId, "admin")
+            .GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{c.Olga}/trace?day={clock.Now:yyyy-MM-dd}");
+        var lights = Assert.Single(night.GetProperty("events").EnumerateArray(), e => e.GetProperty("kind").GetString() == TraceKinds.LightsOn);
+        Assert.Equal(c.Olga, lights.GetProperty("subject").GetProperty("user_id").GetGuid());
+        Assert.Equal(c.Pam, lights.GetProperty("code_holder").GetProperty("user_id").GetGuid());
+        Assert.Equal("Pam Payer", lights.GetProperty("code_holder").GetProperty("name").GetString());
+        Assert.All(night.GetProperty("events").EnumerateArray().Where(e => e.GetProperty("kind").GetString() != TraceKinds.LightsOn),
+            e => Assert.Equal(JsonValueKind.Null, e.GetProperty("code_holder").ValueKind));
     }
 
     [SkippableFact]

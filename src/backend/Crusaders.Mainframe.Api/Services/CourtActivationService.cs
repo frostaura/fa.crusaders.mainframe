@@ -437,7 +437,8 @@ public class CourtActivationService
         {
             _lights.Audit(
                 CourtLightStateService.LightsOnAction, court.Id, court.CourtNumber, booking.UserId,
-                new { method, payer_user_id = payerUserId, booking_id = booking.Id, occurred_at = occurredAt },
+                // E10-2: whose code lit it — a partner or a pay-for payer on the organiser's booking.
+                new { method, payer_user_id = payerUserId, booking_id = booking.Id, occurred_at = occurredAt, identified_user_id = identifiedUserId },
                 request.DeviceId);
         }
 
@@ -453,7 +454,7 @@ public class CourtActivationService
         // beside the row write is the whole of that ordering.
         if (lightRow is not null) await _lights.PublishAsync(lightRow, court.CourtNumber, ct);
 
-        await _bus.EmitAsync(LightsOnEvent(court, booking, payerUserId, method, now), ct);
+        await _bus.EmitAsync(LightsOnEvent(court, booking, (payerUserId, identifiedUserId), method, now), ct);
 
         return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: false);
     }
@@ -501,7 +502,13 @@ public class CourtActivationService
     /// variable is a config error rather than a retryable failure.
     /// </para>
     /// </summary>
-    private DomainEvent LightsOnEvent(Court court, Booking booking, Guid payerUserId, string method, DateTimeOffset now)
+    /// <para>
+    /// Review round 10, E10-2: the actor is the member whose code lit the court — a partner, or a
+    /// pay-for payer — never assumed to be the booker; <c>user_id</c> stays the booking's owner and
+    /// <c>paid_by_user_id</c> is who actually paid. <c>identified_user_id</c> names the scanner in
+    /// the payload too, because a webhook consumer reads <c>data</c>, not the envelope.
+    /// </para>
+    private DomainEvent LightsOnEvent(Court court, Booking booking, (Guid Payer, Guid Identified) who, string method, DateTimeOffset now)
     {
         // Block body, not an expression body. lizard's C# parser mis-scopes any
         // expression-bodied member containing braces and emits a *global* pseudo-function
@@ -514,7 +521,7 @@ public class CourtActivationService
             TenantId: _tenant.TenantId,
             TenantSlug: _tenant.TenantSlug,
             OccurredAt: now,
-            ActorUserId: booking.UserId,
+            ActorUserId: who.Identified,
             ActorIsAdmin: false,
             SubjectUserId: booking.UserId,
             Data: new()
@@ -524,7 +531,8 @@ public class CourtActivationService
                 ["court_number"] = court.CourtNumber,
                 ["court_name"] = court.Name,
                 ["user_id"] = booking.UserId,
-                ["paid_by_user_id"] = payerUserId,
+                ["paid_by_user_id"] = who.Payer,
+                ["identified_user_id"] = who.Identified,
                 ["starts_at"] = booking.StartsAt,
                 ["ends_at"] = booking.EndsAt,
                 ["identification_method"] = method,

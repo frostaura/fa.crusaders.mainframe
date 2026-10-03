@@ -46,6 +46,16 @@ public sealed record TraceEventRow(
     /// <summary>The board's outage the row's instant fell inside — the club could not hear that board then — or null.</summary>
     public Guid? OutageId { get; init; }
 
+    /// <summary>
+    /// Review round 10, E10-2: the member whose code a board READ to write this row, when the row
+    /// records one — a partner or a pay-for payer lighting the organiser's court — so "with X's
+    /// code" names the scanner, not the booking's owner. Null where the row names no code holder.
+    /// </summary>
+    public Guid? CodeHolderUserId { get; init; }
+
+    /// <summary>The <see cref="CodeHolderUserId"/>'s name, as the club knows it now.</summary>
+    public string? CodeHolderName { get; init; }
+
     /// <summary>The strand, derived from the word rather than carried twice.</summary>
     public string Strand => TraceKinds.StrandOf(Kind);
 
@@ -192,7 +202,7 @@ public static partial class AdminMemberTraceAssembly
             .Select(b => new { b.Id, b.CourtId })
             .ToDictionaryAsync(b => b.Id, b => b.CourtId, ct);
 
-        var people = audit.SelectMany(a => new Guid?[] { a.ActorUserId, a.SubjectUserId })
+        var people = audit.SelectMany(a => new Guid?[] { a.ActorUserId, a.SubjectUserId, CodeHolderOf(a) })
             .Concat(ledger.SelectMany(l => new Guid?[] { l.ActorUserId, l.UserId }));
         var names = await PersonNames.ForAsync(db, people, ct);
         var admins = await AdminsAsync(
@@ -420,8 +430,19 @@ public static partial class AdminMemberTraceAssembly
                 DeviceCode = deviceCode,
                 Approximate = DoorActivityView.TimeUncertain(details, row.CreatedAt),
                 OutageId = OutageAt(s, deviceId, row.ScanAt),
+                CodeHolderUserId = CodeHolderOf(row),
+                CodeHolderName = CodeHolderOf(row) is { } holder ? PersonNames.Of(holder, s.Names) : null,
             };
         }
+    }
+
+    /// <summary>
+    /// E10-2: whose code a lights-on row's board read (<c>identified_user_id</c> in its details), or null.
+    /// </summary>
+    private static Guid? CodeHolderOf(AuditLog row)
+    {
+        if (row.Action != TraceKinds.LightsOnAction) return null;
+        return GuidOf(Inner(DoorActivityView.Details(row.DetailsJson)), "identified_user_id");
     }
 
     /// <summary>

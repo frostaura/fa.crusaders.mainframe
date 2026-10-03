@@ -269,4 +269,73 @@ public sealed class R6MoneyChainHttpTests(PostgresFixture pg) : IClassFixture<Po
         Assert.Equal(TraceActors.Device, lightsOn.GetProperty("actor").GetProperty("kind").GetString());
         Assert.Equal($"box-{c.BoxMac[^6..]}", lightsOn.GetProperty("device_code").GetString());
     }
+    /// <summary>
+    /// Review round 10, E10-2 and E10-1, the pay-for half. Pam pays for Olga's court that nobody
+    /// has lit yet, so her pay-for LIGHTS it: the <c>booking.lights_on</c> webhook's actor is Pam
+    /// (whose code lit it), <c>user_id</c> stays Olga's, <c>paid_by_user_id</c> is Pam who paid;
+    /// Olga's Night names Pam's code; and the two live wallets are told why — Olga's minutes came
+    /// back because somebody paid for her court (<c>pay_for_refund</c>), not "a cancelled booking",
+    /// and Pam paid for another member's court (<c>pay_for_charge</c>).
+    /// </summary>
+    [SkippableFact]
+    public async Task A_pay_for_that_lights_the_court_names_the_payer_as_scanner_and_tells_both_wallets_why()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = pg.SharedHost;
+        var r = await RigAsync(factory, "r10payscan");
+        await using var _ = r.App;
+        var c = r.Club;
+        var booking = await c.BookAsync(r.App, c.Olga, courtIndex: 1, startsInMinutes: -2);
+
+        var realtime = r.App.Services.GetRequiredService<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus>();
+        var olgaTopic = Crusaders.Mainframe.Api.Services.Realtime.RealtimeTopic.Wallet(c.TenantId, c.Olga);
+        var pamTopic = Crusaders.Mainframe.Api.Services.Realtime.RealtimeTopic.Wallet(c.TenantId, c.Pam);
+        var olgaWallet = realtime.Subscribe(olgaTopic);
+        var pamWallet = realtime.Subscribe(pamTopic);
+        try
+        {
+            Assert.True((await PayAsync(r, 2, "60")).GetProperty("paid").GetBoolean());
+            var stored = await c.ReadAsync(r.App, db => db.Bookings.IgnoreQueryFilters().AsNoTracking().SingleAsync(b => b.Id == booking.Id));
+            Assert.NotNull(stored.CheckedInAt);
+
+            var lit = Assert.Single(r.Bus.Emitted, e => e.Type == "booking.lights_on");
+            Assert.Equal(c.Pam, lit.ActorUserId);
+            Assert.Equal(c.Olga, lit.SubjectUserId);
+            Assert.Equal(c.Olga, (Guid?)lit.Data["user_id"]);
+            Assert.Equal(c.Pam, (Guid)lit.Data["paid_by_user_id"]!);
+            Assert.Equal(c.Pam, (Guid)lit.Data["identified_user_id"]!);
+
+            var lights = Assert.Single(await NightAsync(r, c.Olga), e => e.GetProperty("kind").GetString() == TraceKinds.LightsOn);
+            Assert.Equal("Pam Payer", lights.GetProperty("code_holder").GetProperty("name").GetString());
+
+            var olgaFrame = Assert.Single(Frames(olgaWallet), f => f.Event == "balance");
+            using (var doc = JsonDocument.Parse(olgaFrame.JsonPayload))
+            {
+                Assert.Equal("pay_for_refund", doc.RootElement.GetProperty("reason").GetString());
+                Assert.Equal(60, doc.RootElement.GetProperty("delta_minutes").GetInt32());
+                var part = Assert.Single(doc.RootElement.GetProperty("parts").EnumerateArray());
+                Assert.Equal("cancellation_refund", part.GetProperty("reason").GetString());
+                Assert.Equal(60, part.GetProperty("delta_minutes").GetInt32());
+            }
+            var pamFrame = Assert.Single(Frames(pamWallet), f => f.Event == "balance");
+            using (var doc = JsonDocument.Parse(pamFrame.JsonPayload))
+            {
+                Assert.Equal("pay_for_charge", doc.RootElement.GetProperty("reason").GetString());
+                Assert.Equal(-60, doc.RootElement.GetProperty("delta_minutes").GetInt32());
+            }
+        }
+        finally
+        {
+            realtime.Unsubscribe(olgaTopic, olgaWallet);
+            realtime.Unsubscribe(pamTopic, pamWallet);
+        }
+    }
+
+    private static List<Crusaders.Mainframe.Api.Services.Realtime.RealtimeMessage> Frames(
+        Channel<Crusaders.Mainframe.Api.Services.Realtime.RealtimeMessage> channel)
+    {
+        var frames = new List<Crusaders.Mainframe.Api.Services.Realtime.RealtimeMessage>();
+        while (channel.Reader.TryRead(out var frame)) frames.Add(frame);
+        return frames;
+    }
 }

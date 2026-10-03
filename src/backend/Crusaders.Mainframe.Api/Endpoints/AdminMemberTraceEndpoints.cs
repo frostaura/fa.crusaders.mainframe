@@ -343,6 +343,10 @@ public static class AdminMemberTraceEndpoints
             subject = e.SubjectUserId is null
                 ? null
                 : new { user_id = e.SubjectUserId, name = e.SubjectName },
+            // E10-2: whose code the board read, when the row records it; null otherwise.
+            code_holder = e.CodeHolderUserId is null
+                ? null
+                : new { user_id = e.CodeHolderUserId, name = e.CodeHolderName },
             court = e.Court is null
                 ? null
                 : new { id = e.Court.Id, number = e.Court.Number, name = e.Court.Name },
