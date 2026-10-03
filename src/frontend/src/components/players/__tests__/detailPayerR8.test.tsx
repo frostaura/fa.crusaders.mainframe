@@ -49,6 +49,7 @@ describe("E8-2 — paid at the box", () => {
     // The page's header says it too (DETAIL_COPY.payerLine); the money panel's own note must.
     const lines = await screen.findAllByText(/^You paid for this court at the/);
     expect(lines.some((line) => line.closest("[data-money-panel]") !== null)).toBe(true);
+    expect(money()).toHaveTextContent(/You paid for this court at the court box, so \S+ was refunded 30\s+minutes\./);
     expect(money()).not.toHaveTextContent("Ben Payer");
     expect(money()).not.toHaveTextContent(DETAIL_MONEY.notSplit);
   });

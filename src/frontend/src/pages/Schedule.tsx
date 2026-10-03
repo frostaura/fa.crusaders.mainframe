@@ -226,7 +226,7 @@ export default function BookingsPage() {
           />
           <BookingGridHeading />
           {/* R8 X8-2 — a cold start that cannot reach the club, with no day kept: said as offline, once. */}
-          {!shown && !schedule.loading && isConnectionFailure(schedule.error) ? <OfflineNothingKeptRetry line={SCHEDULE_NOTHING_KEPT} onRetry={schedule.refresh} /> : (
+          {!shown && !schedule.loading && isConnectionFailure(schedule.error) ? <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.schedule} onRetry={schedule.refresh} /> : (
             <StateBlock
               loading={!shown && schedule.loading}
               error={shown ? null : schedule.error}
@@ -335,13 +335,6 @@ function SelectToggle({ selection }: { selection: Selection }) {
 /* ─────────────────────────────── the day picker ─────────────────────────────── */
 
 type ScheduleState = ReturnType<typeof useScheduleDay>;
-
-/**
- * R8 X8-2 — Bookings offline with nothing kept. FD2's `OFFLINE_COPY.nothingKept.schedule` once it
- * lands (r8-ask-FD1b-to-FD2); this same sentence until then — drop the fallback when it has.
- */
-const SCHEDULE_NOTHING_KEPT = (OFFLINE_COPY.nothingKept as Partial<Record<string, string>>).schedule
-  ?? "This day hasn't been opened on this phone yet, so there's no schedule or games kept to show. They load by themselves once you're back online.";
 
 /** `BookingForBar`'s own mark — the bar a phone's opening scroll keeps in view (J8-3). */
 const BOOKING_FOR_BAR = "[data-booking-for]";
