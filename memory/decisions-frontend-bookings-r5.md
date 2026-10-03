@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-bookings-r5
 description: "Bookings, review round 5 (lane C): every price is the payer's group price, a hold lift asks why, too-far-ahead and offline cells are drawn as such, closed runs fold, the phone's week sticks."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Live decisions — the Bookings grid and Book sheet (review round 5, lane C)
@@ -31,7 +31,13 @@ Earlier rounds: `decisions-frontend-bookings.md`, `-r4.md`. Tests: `pages/bookin
   `relative z-base` so its sticky court header never paints over the strip.
 - **Desktop**: the selection bar spans the grid frame from 1024px (V5-10, ActionBar `style`); from
   3xl the main column hugs the capped grid (F5-6, `HUG_GRID`); the rail's day summary says
-  "You can book N more slots today" under a cap, today only (§3.1).
+  "You can book N more slots today" under a cap, today only, never for an admin (exempt) (§3.1).
+- **No `?date=`: the club's today, adopted from the first answer** (R6-CI-1, `useScheduleDay`
+  `toClubToday`) — *why:* `lib/clubZone` is memory only, so a cold start guessed the READER's day;
+  New York at 23:50 UTC opened a UTC club's yesterday, every cell past. A day asked for stays.
+- **The phone's first Book cell is ~555px down at 390, not ≤360** (R6, measured): header 81–145,
+  games strip 177–277, picker 297–418, court chips, grid header 495–551. 360 needs a product call
+  (drop/relocate the strip, chips or month row, or scroll to the grid on open).
 - **The desk's "book as" picker is lazy** (`BookAsChoice` via `lazyParts`, lane B's perf lead):
   a member's Schedule chunk no longer pulls the member combobox / cmdk; `lazyParts.test` guards it.
 - **Split late cancel toast** subtracts the penalty from a `net_credits` equal to gross − partners
