@@ -18,6 +18,12 @@ last_verified: 2026-10-03
   emails (`MoneyFormat.Minutes`, §7.2), so prose reads the same in the app and the inbox.
 - **Guard.** `src/frontend/src/lib/spokenMinutes.test.ts` fails if any `lib/*Copy.ts` calls
   `minutesCompact(`/`minutesSigned(`, and asserts the named places carry no `\d (h|min|d)`.
+  R7 J7-3: it also scans every `lib/*Copy.ts` plus `settingsSummaries.ts` (comments stripped)
+  for a number or `${…}` followed by ` min`/` h`/` d`/`-min` — a unit TYPED by hand slipped the
+  R6 guard ("inside ${window} min", `${hours} h` chips, "5 min ago"). The one exemption is by
+  function name (`playCopy.hoursAndMinutes`, a figure drawn beside its twin); add a figure
+  formatter there only if it is never put in a sentence. Relative ages and seconds follow the
+  same rule ("5 minutes ago", "lock released 15 seconds").
   Non-copy callers that build sentences (players detail, splitEditor, adminActs, bookingErrors,
   deskLedger, InviteLink, AccountMenu) were swept by hand; R6 asks went to FD1 (SplitTotals,
   MinutesChip aria-label) and FD2 (TopUpStatus, topUpOpen, the shelf's saving badge/line).
