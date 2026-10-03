@@ -5,7 +5,7 @@ import { useKeptReport } from "../lib/offline/useKeptReport";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
-import { cn, formatMinutes } from "../lib/utils";
+import { cn } from "../lib/utils";
 import { MinutesFigure } from "../components/wallet/MinutesFigure";
 import { useAsyncAction } from "../lib/useAsyncAction";
 import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
@@ -129,12 +129,14 @@ export default function WalletActivityPage() {
 function ActivityBody({ data }: { data: WalletActivity }) {
   const { wallet, days } = data;
   const tiles: Tile[] = [
-    { label: ACTIVITY_COPY.bought, value: <MinutesFigure value={wallet.top_ups_minutes} />, tone: "success" },
-    { label: ACTIVITY_COPY.spent, value: <MinutesFigure value={wallet.spent_minutes} />, tone: "accent" },
-    { label: ACTIVITY_COPY.refunds, value: <MinutesFigure value={wallet.refunds_minutes} />, tone: "neutral" },
+    // R7 E7-7 — signed as the Totals card signs the same figures: the Spent tile read "1 h" above
+    // a Totals row reading "−1 h" for the one amount.
+    { label: ACTIVITY_COPY.bought, value: <MinutesFigure value={wallet.top_ups_minutes} signed />, tone: "success" },
+    { label: ACTIVITY_COPY.spent, value: <MinutesFigure value={-wallet.spent_minutes} signed />, tone: "accent" },
+    { label: ACTIVITY_COPY.refunds, value: <MinutesFigure value={wallet.refunds_minutes} signed />, tone: "neutral" },
     // Attendance, which nothing in the product showed anywhere — `reporting.md` has promised
-    // "Time on court" since it was written.
-    { label: "Time on court", value: formatMinutes(wallet.minutes_on_court), tone: "neutral" },
+    // "Time on court" since it was written. A duration, so unsigned; with its spoken twin (X7-6).
+    { label: "Time on court", value: <MinutesFigure value={wallet.minutes_on_court} />, tone: "neutral" },
   ];
   return (
     <>
@@ -205,7 +207,8 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
       <TotalsCard
         footnote={(
           <>
-            Net movement over this period: <strong className="font-semibold tabular-nums text-text-primary"><MinutesFigure value={wallet.net_movement_minutes} signed /></strong>.
+            Net movement over this period: <strong className="font-semibold tabular-nums text-text-primary"><MinutesFigure value={wallet.net_movement_minutes} signed /></strong>.{" "}
+            {/* R7 J7-8 — the space above is explicit: a sentence starting on the next JSX line collapses to "min.That". */}
             {`That is ${ACTIVITY_COPY.netSum}`}{typeof wallet.share_transfers_minutes === "number" ? " + shares" : ""}, and it is exactly what your balance moved by.
             {typeof wallet.share_transfers_minutes === "number" ? ` ${REPORT_SHARES_COPY.memberFootnote}` : null}
           </>
@@ -225,23 +228,72 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
           <Stat label={REPORT_SHARES_COPY.memberNetCourt} value={<MinutesFigure value={wallet.net_court_spend_minutes} />} />
         ) : null}
         <Stat label="Penalty count" value={String(wallet.penalty_count)} />
-        <Stat label="Bookings played" value={`${wallet.attended_bookings} · ${formatMinutes(wallet.minutes_on_court)}`} />
+        <Stat label="Bookings played" value={<>{wallet.attended_bookings} · <MinutesFigure value={wallet.minutes_on_court} /></>} />
         <Stat label="Movements" value={String(wallet.count)} />
       </TotalsCard>
     </Section>
   );
 }
 
-const DAY_COLUMNS: DataColumn<DailyMePoint>[] = [
-  { key: "date", header: "Date", cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
-  { key: "top_ups_minutes", header: ACTIVITY_COPY.bought, align: "right", cell: (r) => <Cell><MinutesFigure value={r.top_ups_minutes} /></Cell>, sortValue: (r) => r.top_ups_minutes },
-  { key: "spent_minutes", header: ACTIVITY_COPY.spent, align: "right", cell: (r) => <Cell><MinutesFigure value={r.spent_minutes} /></Cell>, sortValue: (r) => r.spent_minutes },
-  { key: "refunds_minutes", header: ACTIVITY_COPY.refunds, align: "right", cell: (r) => <Cell><MinutesFigure value={r.refunds_minutes} signed /></Cell>, sortValue: (r) => r.refunds_minutes },
-  { key: "bookings", header: "Bookings", align: "right", cell: (r) => <Cell>{r.bookings}</Cell>, sortValue: (r) => r.bookings },
-  { key: "balance_minutes", header: "Balance", align: "right", cell: (r) => <Cell><MinutesFigure value={r.balance_minutes} /></Cell>, sortValue: (r) => r.balance_minutes },
+/**
+ * R7 J7-2 — a day's row, with the buckets the API added so a row adds up to what the balance moved:
+ * shares, penalties, adjustments, reversals and the day's net. Optional — an API from before them
+ * sends none. (Widened here until `lib/api.ts`'s `DailyMePoint` carries them.)
+ */
+type DayPoint = DailyMePoint & {
+  penalties_minutes?: number; adjustments_minutes?: number; reversals_minutes?: number;
+  share_transfers_minutes?: number; net_minutes?: number;
+};
+
+/** The daily table's headers beyond the totals' own words. */
+export const DAY_COPY = {
+  penalties: "Penalties (net)",
+  adjustments: "Adjustments",
+  reversals: "Reversals",
+  shares: REPORT_SHARES_COPY.memberShares,
+  net: "Net",
+  bookings: "Bookings",
+  balance: "Balance",
+} as const;
+
+type DayKey = "top_ups_minutes" | "spent_minutes" | "refunds_minutes" | "penalties_minutes" | "adjustments_minutes" | "reversals_minutes" | "share_transfers_minutes" | "net_minutes";
+
+/**
+ * A movement column: every figure SIGNED (in +, out −), so a row reads as the sum it is — the old
+ * table printed Bought and Spent bare beside a signed Refunds and left the rest out, and no row
+ * added up to its balance change. `sign` turns a magnitude the API sends (spent, penalties) into
+ * the movement it was.
+ */
+function movement(key: DayKey, header: string, sign: 1 | -1 = 1): DataColumn<DayPoint> {
+  const value = (r: DayPoint) => sign * (r[key] ?? 0);
+  return { key, header, align: "right", cell: (r) => <Cell><MinutesFigure value={value(r)} signed /></Cell>, sortValue: value };
+}
+
+/** Columns for the buckets that are optional on the wire: drawn only when the period moved by them. */
+const OPTIONAL_DAY_COLUMNS: { key: DayKey; column: DataColumn<DayPoint> }[] = [
+  { key: "penalties_minutes", column: movement("penalties_minutes", DAY_COPY.penalties, -1) },
+  { key: "adjustments_minutes", column: movement("adjustments_minutes", DAY_COPY.adjustments) },
+  { key: "reversals_minutes", column: movement("reversals_minutes", DAY_COPY.reversals) },
+  { key: "share_transfers_minutes", column: movement("share_transfers_minutes", DAY_COPY.shares) },
 ];
 
-function DailyBreakdown({ days }: { days: DailyMePoint[] }) {
+/** The period's columns: the fixed ones, every optional bucket that moved, then Net when the API sends it. */
+function dayColumns(days: DayPoint[]): DataColumn<DayPoint>[] {
+  const moved = (key: DayKey) => days.some((d) => typeof d[key] === "number" && d[key] !== 0);
+  const hasNet = days.some((d) => typeof d.net_minutes === "number");
+  return [
+    { key: "date", header: "Date", cell: (r) => <Cell>{prettyDay(r.date)}</Cell>, sortValue: (r) => r.date, width: 130 },
+    movement("top_ups_minutes", ACTIVITY_COPY.bought),
+    movement("spent_minutes", ACTIVITY_COPY.spent, -1),
+    movement("refunds_minutes", ACTIVITY_COPY.refunds),
+    ...OPTIONAL_DAY_COLUMNS.filter((c) => moved(c.key)).map((c) => c.column),
+    ...(hasNet ? [movement("net_minutes", DAY_COPY.net)] : []),
+    { key: "bookings", header: DAY_COPY.bookings, align: "right", cell: (r) => <Cell>{r.bookings}</Cell>, sortValue: (r) => r.bookings },
+    { key: "balance_minutes", header: DAY_COPY.balance, align: "right", cell: (r) => <Cell><MinutesFigure value={r.balance_minutes} /></Cell>, sortValue: (r) => r.balance_minutes },
+  ];
+}
+
+function DailyBreakdown({ days }: { days: DayPoint[] }) {
   return (
     <Section title="Daily breakdown" description={`${days.length} day${days.length === 1 ? "" : "s"}`}>
       <DataTable
@@ -250,7 +302,7 @@ function DailyBreakdown({ days }: { days: DailyMePoint[] }) {
         defaultSort={{ key: "date", dir: "desc" }}
         emptyTitle="No activity in this window."
         maxHeight="60vh"
-        columns={DAY_COLUMNS}
+        columns={dayColumns(days)}
       />
       <TableNotes>
         <NetNote what="Refunds" />
