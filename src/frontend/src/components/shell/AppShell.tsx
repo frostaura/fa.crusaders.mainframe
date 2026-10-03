@@ -117,10 +117,15 @@ export default function AppShell() {
   const auth = useAuth();
   const location = useLocation();
   const signedIn = auth.status === "authenticated";
-  const isAdmin = signedIn && auth.isAdmin;
   // R4 wave B (P4-4) — the tab bar stays for the member this phone confirmed while the club is
   // out of reach or not yet asked: My Code offline had no way to Bookings or Wallet.
-  const offlineMember = useDataOwner().who !== null;
+  const owner = useDataOwner().who;
+  const offlineMember = owner !== null;
+  // R7 — and an admin keeps the Admin tab there too (the busy 429 screen dropped it): the admin
+  // this device last confirmed, for that member only. The tab is a link; the API still decides.
+  const adminChrome = useRememberedAdmin(signedIn ? { userId: auth.userId, isAdmin: auth.isAdmin } : null, owner);
+  // What READS as an admin is the confirmed session only: a busy club is not asked for more.
+  const isAdmin = signedIn && auth.isAdmin;
   const memberChrome = signedIn || offlineMember;
   // One read each, shared with the admin rail and the Overview (both stores dedupe their requests).
   const attention = useAdminAttention({ enabled: isAdmin });
@@ -182,7 +187,7 @@ export default function AppShell() {
           paddingRight: "env(safe-area-inset-right)",
         }}
       >
-        <BarRow frame={frame} memberChrome={memberChrome} isAdmin={isAdmin} attention={attention} anonymous={auth.status === "anonymous"} />
+        <BarRow frame={frame} memberChrome={memberChrome} isAdmin={adminChrome} attention={attention} anonymous={auth.status === "anonymous"} />
         <RoutePendingBar />
       </header>
       {/*
@@ -229,6 +234,33 @@ export default function AppShell() {
       <CelebrationOverlay />
     </div>
   );
+}
+
+const LAST_ADMIN_KEY = "crusaders.mainframe.last-admin";
+
+/** Never throws — private mode refuses storage. */
+function readLastAdmin(): string | null {
+  try { return window.localStorage?.getItem(LAST_ADMIN_KEY) ?? null; } catch { return null; }
+}
+
+/**
+ * Whether the shell draws the admin's chrome. Signed in, the club's word. Not confirmed right now
+ * (busy, unreachable, still asking) but this device's confirmed member is the admin it last
+ * confirmed — yes. Written whenever the club confirms a session, so a revoked admin loses it on
+ * the next confirmed visit, and keyed by the member, so nobody else on the phone inherits it.
+ */
+function useRememberedAdmin(confirmed: { userId: string; isAdmin: boolean } | null, owner: string | null): boolean {
+  const userId = confirmed?.userId ?? null;
+  const admin = confirmed?.isAdmin ?? false;
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      if (admin) window.localStorage?.setItem(LAST_ADMIN_KEY, userId);
+      else window.localStorage?.removeItem(LAST_ADMIN_KEY);
+    } catch { /* private mode */ }
+  }, [userId, admin]);
+  if (confirmed) return admin;
+  return owner !== null && readLastAdmin() === owner;
 }
 
 /** The bar's one row: crest, the tabs (inline where there is room), the bell and the actions. */
