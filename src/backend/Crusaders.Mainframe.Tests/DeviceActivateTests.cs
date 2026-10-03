@@ -147,6 +147,29 @@ public class DeviceActivateTests
     }
 
     /// <summary>
+    /// The activation greeting is printable ASCII (R11 D11-1) — the box's panel has no glyph
+    /// for "Ë", and the bridge measured its two UTF-8 bytes as two columns.
+    /// </summary>
+    [Fact]
+    public async Task An_activation_greets_an_accented_name_in_plain_letters()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var membership = await f.Db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == f.Host.PlayerUser.Id);
+        membership.FullName = "Ñandú René-Zoë";
+        await f.Db.SaveChangesAsync();
+        var box = await BoxOnAsync(f, 1, 2);
+        var booking = await BookAsync(f, courtIndex: 1, startsInMinutes: 1, minutes: 45);
+
+        var response = await ActivateAsync(f, box, await BookingCodeAsync(f, booking));
+
+        Assert.True(response.Activated);
+        Assert.Equal("NANDU RENE-ZOE", response.MemberDisplay);
+    }
+
+    /// <summary>
     /// A scan inside the grace window after the slot has ended is still attendance — it
     /// stops the sweep — but there is nothing left to light. <c>activated:true</c> with
     /// <c>granted_seconds:0</c> became a one-second relay pulse and a spent scan on the

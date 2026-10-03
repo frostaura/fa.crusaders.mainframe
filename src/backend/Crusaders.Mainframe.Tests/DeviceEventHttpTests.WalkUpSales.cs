@@ -58,6 +58,33 @@ public abstract partial class DeviceEventHttpTests
             Assert.NotNull(booking.CheckedInAt);
         }
 
+        /// <summary>
+        /// The greeting a walk-up hands the box is printable ASCII (R11 D11-1): the HD44780
+        /// prints its ROM glyphs for UTF-8 bytes, so "ZOË" read as "ZO" and two symbols.
+        /// </summary>
+        [SkippableFact]
+        public async Task A_walk_up_greets_an_accented_name_in_plain_letters()
+        {
+            Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+            await using var factory = CreateFactory();
+            var box = await SeedAsync(factory);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+                var membership = await db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == box.MemberId);
+                membership.FullName = "Zoë Nel 🎾";
+                await db.SaveChangesAsync();
+            }
+            var client = factory.CreateClient();
+
+            var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("ZOE NEL", body.GetProperty("member_display").GetString());
+        }
+
         [SkippableFact]
         public async Task A_walk_up_is_truncated_at_the_next_booking_and_charged_pro_rata()
         {

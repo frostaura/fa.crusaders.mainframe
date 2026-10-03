@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Crusaders.Mainframe.Api.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +32,9 @@ public static class MemberDisplay
     /// leaves the member reading a word with no sentence around it.
     /// </summary>
     public const int MaxLength = 16;
+
+    /// <summary>The word shown when a name has nothing printable left in it.</summary>
+    public const string Fallback = "MEMBER";
 
     /// <summary>
     /// The display name for a member, or null when there is nothing worth showing.
@@ -67,7 +72,8 @@ public static class MemberDisplay
     {
         if (string.IsNullOrWhiteSpace(fullName)) return null;
 
-        var name = fullName.Trim().ToUpperInvariant();
+        var name = FoldToAscii(fullName).ToUpperInvariant();
+        if (name.Length == 0) return Fallback;
         if (name.Length <= MaxLength) return name;
 
         var space = name.IndexOf(' ');
@@ -79,4 +85,39 @@ public static class MemberDisplay
 
         return name[..MaxLength];
     }
+
+    /// <summary>
+    /// The name in printable ASCII only (R11 D11-1): decomposed, its accents dropped, the few
+    /// letters that do not decompose spelled out, and anything else — an emoji, a script the
+    /// panel has no glyphs for — removed, with the spaces it leaves collapsed.
+    ///
+    /// <para>
+    /// The panel is an HD44780: every byte past <c>0x7E</c> is a glyph from its own ROM, and the
+    /// bridge counts a two-byte UTF-8 letter as two columns. "ZOË NEL" printed as "ZO", two
+    /// unrelated symbols and " NEL", one column longer than the server measured. "ZOE NEL" is
+    /// the name a club recognises; a symbol in the middle of it is a fault.
+    /// </para>
+    /// </summary>
+    private static string FoldToAscii(string text)
+    {
+        var kept = new StringBuilder(text.Length);
+        foreach (var c in text.Normalize(NormalizationForm.FormD))
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark) continue;
+            if (c is >= ' ' and <= '~') kept.Append(c);
+            else if (Spelled.TryGetValue(c, out var spelled)) kept.Append(spelled);
+            else kept.Append(' ');
+        }
+        return string.Join(' ', kept.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    /// <summary>Letters and marks with no ASCII decomposition, spelled the way the name is said.</summary>
+    private static readonly Dictionary<char, string> Spelled = new()
+    {
+        ['ß'] = "ss", ['Æ'] = "AE", ['æ'] = "ae", ['Œ'] = "OE", ['œ'] = "oe",
+        ['Ø'] = "O", ['ø'] = "o", ['Ł'] = "L", ['ł'] = "l", ['Đ'] = "D", ['đ'] = "d",
+        ['Ð'] = "D", ['ð'] = "d", ['Þ'] = "TH", ['þ'] = "th", ['ı'] = "i",
+        ['\u2018'] = "'", ['\u2019'] = "'", ['\u02BC'] = "'", ['\u201C'] = "\"", ['\u201D'] = "\"",
+        ['\u2010'] = "-", ['\u2011'] = "-", ['\u2013'] = "-", ['\u2014'] = "-",
+    };
 }
