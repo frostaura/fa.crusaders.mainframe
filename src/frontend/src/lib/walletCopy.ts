@@ -369,22 +369,70 @@ export type ShareRowInput = {
   place: SharePlace;
   /** The other person on this movement — the organiser for a partner, a partner for the organiser. */
   other: string | null;
+  /** R11 E11-1 — the live frame's `share_cause`; absent on a ledger row (the row stores none). */
+  cause?: string | null;
+  /** R11 E11-1 — with `no_show`: the partner's part of the penalty that did not come back. */
+  kept?: number | null;
 };
 
 /**
  * One share movement, as a sentence. "25 min moved to Nomsa for your share of Court 1".
  * Nobody owes anybody: a partner's share MOVES, and a returned one COMES BACK.
+ *
+ * <p>
+ * R11 E11-1 — with the live frame's `share_cause` the sentence says WHY, in the inbox's words:
+ * "… came back — the club refunded the session: the court's box was offline", a no-show's return
+ * with the partner's part of the penalty, a late check-in's "taken again — the session was
+ * attended". An unknown cause (a newer server) says today's sentence.
+ * </p>
  */
 export function shareRowSentence(input: ShareRowInput): string {
   const amount = minutesSpoken(Math.abs(input.signed));
   const court = courtOf(input.place);
   const who = input.other ? firstName(input.other) : null;
-  if (input.side === "partner") {
-    if (input.signed < 0) return `${amount} moved to ${who ?? "the organiser"} for your share of ${court}`;
-    return `${amount} of your share of ${court} came back${who ? ` from ${who}` : ""}`;
+  const clause = shareCauseClause(input, who);
+  if (input.cause === "attended" && input.side === "partner" && input.signed < 0) {
+    return `${amount} taken again for your share of ${court}${clause}`;
   }
-  if (input.signed >= 0) return `${who ?? "A partner"} paid you ${amount} for their share of ${court}`;
-  return `${amount} went back to ${who ?? "a partner"} from their share of ${court}`;
+  if (input.side === "partner") {
+    if (input.signed < 0) return `${amount} moved to ${who ?? "the organiser"} for your share of ${court}${clause}`;
+    return `${amount} of your share of ${court} came back${clause || (who ? ` from ${who}` : "")}`;
+  }
+  if (input.signed >= 0) return `${who ?? "A partner"} paid you ${amount} for their share of ${court}${clause}`;
+  return `${amount} went back to ${who ?? "a partner"} from their share of ${court}${clause}`;
+}
+
+/** Why a share moved, as a trailing clause (" — the booking was cancelled"); "" for none or unknown. */
+function shareCauseClause(input: ShareRowInput, who: string | null): string {
+  const partner = input.side === "partner";
+  const kept = input.kept ?? 0;
+  const keptPart = kept > 0
+    ? `, and ${minutesSpoken(kept)} ${kept === 1 ? "is" : "are"} ${partner ? "your" : `${who ?? "the partner"}'s`} part of the no-show penalty`
+    : "";
+  const clauses: Record<string, string> = {
+    outage_refund: "the club refunded the session: the court's box was offline",
+    displaced: "the club refunded the session: the court was already in use by an earlier booking",
+    booking_cancelled: "the booking was cancelled",
+    club_removed: partner ? "the club took you off the game" : "the club took them off the game",
+    club_collected: "the club collected it",
+    attended: "the session was attended",
+    no_show: `nobody checked in${keptPart}`,
+  };
+  const said = input.cause ? clauses[input.cause] : undefined;
+  return said ? ` — ${said}` : "";
+}
+
+/**
+ * R11 E11-1 — the chip's plain share sentence (no booking to name) with the frame's cause:
+ * "A share of a split booking moved 15 minutes into your wallet — the booking was cancelled."
+ */
+export function shareMovementPlain(amount: number, cause: string | undefined, kept: number | undefined): string {
+  const plain = movementSentence(amount, "share_transfer");
+  // A collection (paid, collected, taken again) leaves the PARTNER; a return comes back to them.
+  const collected = cause === "share_paid" || cause === "club_collected" || cause === "attended";
+  const side = (collected ? amount < 0 : amount > 0) ? "partner" : "organiser";
+  const clause = shareCauseClause({ side, signed: amount, place: null, other: null, cause, kept }, null);
+  return clause ? `${plain.replace(/\.$/, "")}${clause}.` : plain;
 }
 
 export const SHARE_LEDGER_COPY = {

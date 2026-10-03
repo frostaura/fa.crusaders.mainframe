@@ -10,7 +10,7 @@ import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn } from "@/lib/utils";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
-import { movementSentence } from "@/lib/walletCopy";
+import { movementSentence, shareMovementPlain } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/useAuth";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { useChipBalance, type ChipFigures, type NoFigure } from "./chipBalance";
@@ -69,10 +69,12 @@ function useClubMovementToast() {
       const charged = (delta.parts ?? []).some((p) => p.delta_minutes < 0);
       const tone = delta.amount > 0 && !charged ? "success" : "info";
       const say = (text: string) => toast.push({ tone, text, durationMs: MONEY_TOAST_MS });
-      const plain = movementSentence(delta.amount, delta.reason, delta.parts);
       if (delta.reason === "share_transfer") {
-        namedShareMovement(delta.amount, me).then((named) => say(named ?? plain), () => say(plain));
+        // R11 E11-1 — said with the frame's cause, named or plain.
+        const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes);
+        namedShareMovement(delta.amount, me, delta).then((named) => say(named ?? plainShare), () => say(plainShare));
       } else {
+        const plain = movementSentence(delta.amount, delta.reason, delta.parts);
         say(plain);
       }
     }

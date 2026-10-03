@@ -71,6 +71,10 @@ export type BalanceDelta = {
   reason?: string;
   /** R10 E10-1 — the ledger rows behind the movement (a refund AND a penalty), where the frame carries them. */
   parts?: BalancePart[];
+  /** R11 E11-1 — why a share moved (`share_cause`), as the server sent it; an unknown value reaches the copy as-is. */
+  shareCause?: string;
+  /** R11 E11-1 — with a `no_show` cause: the partner's part of the penalty that did not come back. */
+  shareKeptMinutes?: number;
 };
 
 /** R10 E10-1 — one row of a live movement: its ledger type's reason and its signed whole minutes. */
@@ -83,6 +87,14 @@ export function balanceParts(raw: unknown): BalancePart[] | undefined {
   return ok && raw.length > 0 ? (raw as BalancePart[]) : undefined;
 }
 
+/** R11 E11-1 — the frame's share cause, kept only when well-shaped (a string; a whole, non-negative minute count). */
+function shareCauseOf(frame: BalanceFrame | undefined): Pick<BalanceDelta, "shareCause" | "shareKeptMinutes"> {
+  const cause = typeof frame?.share_cause === "string" && frame.share_cause ? frame.share_cause : undefined;
+  const kept = frame?.share_kept_minutes;
+  const keptOk = typeof kept === "number" && Number.isInteger(kept) && kept >= 0;
+  return { ...(cause ? { shareCause: cause } : {}), ...(cause && keptOk ? { shareKeptMinutes: kept } : {}) };
+}
+
 /** One frame off the wire. Every field but the balance is optional — an older API sends none. */
 export type BalanceFrame = {
   balance_minutes: number;
@@ -90,6 +102,10 @@ export type BalanceFrame = {
   reason?: string;
   /** R10 E10-1 — each ledger row behind `delta_minutes`; absent from an older API. */
   parts?: unknown;
+  /** R11 E11-1 — non-null exactly when a share_transfer row moved; absent from an older API. */
+  share_cause?: string | null;
+  /** R11 E11-1 — with `share_cause: "no_show"` only: the partner's kept part of the penalty. */
+  share_kept_minutes?: number | null;
   /**
    * D11 (§3a): shares an organiser received, HELD for their partners' possible returns until
    * `held_until` (the earliest share deadline among them). Part of the balance, not spendable.
@@ -400,6 +416,7 @@ export function useLiveBalance({
       source: own ? "self" : "club",
       reason: frame?.reason,
       parts: balanceParts(frame?.parts),
+      ...shareCauseOf(frame),
     });
     expectSelf.current = false;
   }, []);

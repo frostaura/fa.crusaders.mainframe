@@ -15,7 +15,9 @@ import { summariseBooking } from "@/components/wallet/useShareBookings";
  * the caller then says the reason's plain sentence, which is true whoever caused it.
  * </p>
  */
-export async function namedShareMovement(amount: number, me: string | null): Promise<string | null> {
+export async function namedShareMovement(
+  amount: number, me: string | null, cause?: { shareCause?: string; shareKeptMinutes?: number },
+): Promise<string | null> {
   const wallet = await endpoints.wallet(5, 0);
   const row = wallet.entries.find((e) =>
     e.type === "ShareTransfer" && e.relatedBookingId && e.signedAmountMinutes === amount);
@@ -25,5 +27,6 @@ export async function namedShareMovement(amount: number, me: string | null): Pro
   const other = side === "organiser"
     ? booking.partners.find((p) => p.userId === row.actorUserId)?.name ?? null
     : booking.organiserName;
-  return shareRowSentence({ side, signed: row.signedAmountMinutes, place: booking, other });
+  // R11 E11-1 — the frame's cause, said as the inbox says it.
+  return shareRowSentence({ side, signed: row.signedAmountMinutes, place: booking, other, cause: cause?.shareCause, kept: cause?.shareKeptMinutes });
 }
