@@ -55,3 +55,6 @@ Code: `Endpoints/{PackageEndpoints,AdminPackageEndpoints,TopUpEndpoints{,.Abando
   next press). The notice is said ONCE (the Sell button's live region on the check; itself only when a gift became
   paid and the step changed), scrolled into view, and focus lands on Sell — Radix parks it on the dialog container
   when the armed confirm unmounts, which `ConfirmButton`/`focusAfterAction` do not treat as adrift (`saleFocus.ts`).
+- **A desk take-back says when it leaves less than a court (R11 J11-2)**, in the mail's words (`shortOfCourtLine`):
+  balance − amount − held − owed back vs `slice_minutes`, held/owed named; `useTakeBackRoom(userId)` reads them —
+  unknown → no line; below zero the overdraft warning speaks. Callers must pass `TopUpSheet userId` (integrator ask).

@@ -36,3 +36,6 @@ last_verified: 2026-10-03
   reinstated; an unknown negative is "Refund reversed") — *why:* an outage reversal of −15 read "Cancellation
   refund". A desk sale names its `zar_paid` ("…, R96.00 received"); a gift "at no charge". The patterns follow the
   server's stored reasons; a reworded reason there needs `REFUND_REASONS` here.
+- **R11 E11-5:** a `BookingCharge` whose stored reason begins "Paid at court on behalf of another member" (the
+  pay-for's charge leg, stream `pay_for_charge`) reads "Pay-for charge — paid at the court for another member",
+  beside its refund leg's "Pay-for refund — …". Same rule: reworded server reason → `PAY_FOR_CHARGE_REASON` here.
