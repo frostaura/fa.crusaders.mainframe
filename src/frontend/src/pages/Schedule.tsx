@@ -218,7 +218,7 @@ export default function BookingsPage() {
             </>
           )}
         >
-          <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} drawn={ctx !== null} />
+          <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} drawn={ctx !== null} keepInView={bookAsUserId ? BOOKING_FOR_BAR : null} />
           <ScheduleNotices
             notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
             onDismiss={explainer.dismiss} onNextDay={schedule.nextDay}
@@ -332,6 +332,9 @@ function SelectToggle({ selection }: { selection: Selection }) {
 
 type ScheduleState = ReturnType<typeof useScheduleDay>;
 
+/** `BookingForBar`'s own mark — the bar a phone's opening scroll keeps in view (J8-3). */
+const BOOKING_FOR_BAR = "[data-booking-for]";
+
 /** The phone's sticky week: the page's own background, edge to edge, a hairline under it. */
 const STICKY_STRIP = "sticky top-0 z-sticky -mx-4 border-b border-border bg-bg-app px-4 pb-2 pt-1 sm:-mx-6 sm:px-6";
 
@@ -354,12 +357,14 @@ function DayPicker(props: {
   quota: { text: string; atLimit: boolean } | null;
   /** The day's grid is on screen — the moment a phone's page opens at the week (§4.2). */
   drawn: boolean;
+  /** R8 J8-3 — what the opening scroll must not pass: the desk's "Booking for" bar. */
+  keepInView: string | null;
 }) {
-  const { schedule, isAdmin, quota, drawn } = props;
+  const { schedule, isAdmin, quota, drawn, keepInView } = props;
   const { date, setDate, bounds, today } = schedule;
   const strip = useRef<HTMLDivElement>(null);
   const sticks = useStickyDayStrip(strip);
-  useOpenAtWeek(strip, drawn);
+  useOpenAtWeek(strip, drawn, keepInView);
   return (
     // R5 §4.2 — on a phone the week sticks under the app bar while the grid is worked. The whole
     // picker sticks: its parent is the column the grid is in, which is what a sticky box needs.

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 /** Below this viewport width the day strip sticks (the grid's `md:` — a phone). */
 const PHONE_MAX_PX = 767;
@@ -55,17 +55,87 @@ export function useStickyDayStrip(ref: RefObject<HTMLElement | null>): boolean {
  *   <li>Only from the top: a member who already scrolled (or a restored position) is left alone.</li>
  *   <li>Only on a phone (the strip's own width rule); a desktop opens at the top.</li>
  *   <li>Any day — today or a date the member asked for in the address.</li>
+ *   <li>R8 J8-3 — `keepInView` (the desk's "Booking for … · can spend" bar) is never scrolled
+ *   past: the page opens at whichever of it and the week comes first.</li>
+ *   <li>R8 X8-1 — it never fights keyboard focus. Focus the person put inside the page (a Tab, the
+ *   skip link) cancels the scroll; the route announcer's focus on the page's heading — which the
+ *   scroll would leave under the app bar, where the first Tab scrolled the page back to the top —
+ *   is handed to the week the page opened at, for as long as the announcer may still land it.</li>
  * </ul>
  */
-export function useOpenAtWeek(ref: RefObject<HTMLElement | null>, ready: boolean): void {
+export function useOpenAtWeek(ref: RefObject<HTMLElement | null>, ready: boolean, keepInView: string | null = null): void {
   const done = useRef(false);
+  const release = useRef<(() => void) | null>(null);
+  useEffect(() => () => { release.current?.(); }, []);
   useLayoutEffect(() => {
     if (!ready || done.current) return;
     done.current = true;
     const el = ref.current;
     const main = el?.closest("main");
-    if (!el || !main || window.innerWidth > PHONE_MAX_PX || main.scrollTop > 0) return;
-    const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    if (top > 0) main.scrollTop = top;
-  }, [ready, ref]);
+    if (!el || !main || window.innerWidth > PHONE_MAX_PX || main.scrollTop > 0 || focusedByHand(main)) return;
+    const anchor = keepInView ? main.querySelector<HTMLElement>(keepInView) : null;
+    const from = main.getBoundingClientRect().top;
+    const top = Math.min(el.getBoundingClientRect().top, anchor ? anchor.getBoundingClientRect().top : Infinity) - from;
+    if (top <= 0) return;
+    main.scrollTop = top;
+    const unpin = pinWhileSettling(main, anchor ?? el);
+    const unhand = handHeadingFocusToWeek(main, el);
+    release.current = () => { unpin(); unhand(); };
+  }, [ready, ref, keepInView]);
+}
+
+/** How long the page may still grow above the week after it draws (the freshness line, the bar's figures). */
+const SETTLE_MS = 2000;
+/** A person taking the page over: from then on its scroll is theirs. */
+const TAKE_OVER = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+/**
+ * J8-3 — what the page opened at stays in view while the page above it settles: the header's
+ * freshness line and the bar's own figures land after the scroll, and the browser's scroll
+ * anchoring kept a node further down still, so the bar slid 19px under the app bar. Only ever
+ * brings `target` back down to the top edge; stops at the first touch, wheel or key.
+ */
+function pinWhileSettling(main: HTMLElement, target: HTMLElement): () => void {
+  let frame = 0;
+  const until = performance.now() + SETTLE_MS;
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    for (const type of TAKE_OVER) main.removeEventListener(type, stop);
+  };
+  const tick = () => {
+    const gap = target.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    if (gap < -0.5) main.scrollTop += gap;
+    if (performance.now() < until) frame = requestAnimationFrame(tick);
+    else stop();
+  };
+  for (const type of TAKE_OVER) main.addEventListener(type, stop, { passive: true });
+  frame = requestAnimationFrame(tick);
+  return stop;
+}
+
+/** How long the route announcer may still put focus on the heading (its retries run five seconds). */
+const ANNOUNCER_WINDOW_MS = 6000;
+
+/** Focus somewhere inside the page that a person put there — anything but the announcer's heading. */
+function focusedByHand(main: HTMLElement): boolean {
+  const active = document.activeElement;
+  return active instanceof HTMLElement && main.contains(active) && !active.hasAttribute("data-route-heading");
+}
+
+/**
+ * X8-1 — the announcer's heading focus, now or within its retry window, moves to the week's chosen
+ * day while that heading is out of sight above the page. A heading in view keeps it. Returns the stop.
+ */
+function handHeadingFocusToWeek(main: HTMLElement, week: HTMLElement): () => void {
+  const move = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement) || !target.hasAttribute("data-route-heading")) return;
+    if (target.getBoundingClientRect().bottom > main.getBoundingClientRect().top) return;
+    const day = week.querySelector<HTMLElement>('[role="radio"][data-state="on"], [role="radio"][tabindex="0"]');
+    day?.focus({ preventScroll: true });
+  };
+  move(document.activeElement);
+  const onFocusIn = (event: FocusEvent) => move(event.target);
+  main.addEventListener("focusin", onFocusIn);
+  const timer = window.setTimeout(() => main.removeEventListener("focusin", onFocusIn), ANNOUNCER_WINDOW_MS);
+  return () => { window.clearTimeout(timer); main.removeEventListener("focusin", onFocusIn); };
 }
