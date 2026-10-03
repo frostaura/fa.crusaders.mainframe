@@ -55,8 +55,10 @@ export function useOthersOnCourt(
 ): Record<string, OthersState> {
   // A partner row names its organiser in full ("Playing as Sam Naidoo's partner"); that name is
   // on the page too, so another Sam must not be shortened to "Sam" beside it.
-  const named = rows.flatMap((r) => (r.role === "partner" && r.organiser?.name ? [r.organiser.name.trim()] : [])).join("|");
-  const key = rows.map((r) => `${r.booking_id}:${r.role === "partner" ? "p" : ""}`).join(",");
+  // R7 E7-5: a court paid for at the box ("payer") is someone else's booking, like a partner seat.
+  const theirs = (r: { role?: string | null }) => r.role === "partner" || r.role === "payer";
+  const named = rows.flatMap((r) => (theirs(r) && r.organiser?.name ? [r.organiser.name.trim()] : [])).join("|");
+  const key = rows.map((r) => `${r.booking_id}:${theirs(r) ? "p" : ""}`).join(",");
   const [raw, setRaw] = useState<Record<string, Raw>>({});
   useEffect(() => {
     const entries = key ? key.split(",").map((part) => part.split(":")) : [];

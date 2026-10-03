@@ -149,7 +149,8 @@ function BookingPagesView(props: {
 function cancellable(row: MemberBookingRow): boolean {
   // A partner's seat is on somebody else's booking: cancelling it here would cancel THEIR game
   // (C6). The seat is managed from the booking itself.
-  if (row.role === "partner") return false;
+  // R7 E7-5: nor is a court the member paid for at the box — the booking is the organiser's.
+  if (row.role === "partner" || row.role === "payer") return false;
   return row.status === "booked" && !row.checked_in_at && Date.parse(row.ends_at) > Date.now();
 }
 

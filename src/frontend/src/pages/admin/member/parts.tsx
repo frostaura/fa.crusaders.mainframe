@@ -45,7 +45,8 @@ export function BookingLine({ row, zone, action, people }: {
   const court = row.court_name ?? COPY.unknownCourt;
   const cancelled = row.status === "cancelled";
   const partner = row.role === "partner";
-  const { ends, cost } = soldAndCost(row, partner);
+  // R7 E7-5: a court paid for at the box is the organiser's booking too — its figure is `cost_minutes`.
+  const { ends, cost } = soldAndCost(row, partner || row.role === "payer");
   return (
     <li
       data-booking-id={row.booking_id}
