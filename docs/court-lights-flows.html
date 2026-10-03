@@ -240,7 +240,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
   <div class="eyebrow">FrostAura Technologies · Crusaders Mainframe</div>
   <h1>Every path from a booking to a lit court</h1>
   <p class="lead">One box, four courts, no moving parts you have to babysit. Every flow the system runs, drawn lane by lane; what happens when the network is down; and how to put the whole thing in service with the Arduino IDE and one Docker command.</p>
-  <div class="stamp"><i></i> Bridge 2.2.2 · Mega 2.0.0 · one code per member · one API key · box polls, backend answers · wiring unchanged from Carl's schematic</div>
+  <div class="stamp"><i></i> Bridge 2.2.3 · Mega 2.0.0 · one code per member · one API key · box polls, backend answers · wiring unchanged from Carl's schematic</div>
 </div>
 
 <section id="how">
@@ -346,7 +346,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
         <li>Within a few seconds the glass shows <span class="lcd">CONNECTED
 SCAN TO START</span>.</li>
         <li>Within a minute the box is on the <b>Devices</b> page as <code>box-xxxxxx</code>. Rename it; check that court 1 is on relay A and so on; save.</li>
-        <li>Book a court a few minutes ahead on a phone, scan <b>My Code</b> at the box, watch the light. Press OFF. Check the wallet. The Devices page shows the bridge as <b>2.2.2</b>; the Mega is never reflashed and stays 2.0.0.</li>
+        <li>Book a court a few minutes ahead on a phone, scan <b>My Code</b> at the box, watch the light. Press OFF. Check the wallet. The Devices page shows the bridge as <b>2.2.3</b>; the Mega is never reflashed and stays 2.0.0.</li>
       </ol>
     </li>
   </ol>
@@ -425,16 +425,18 @@ SCAN TO START</span></td><td>Idle, WiFi up, backend reachable at the last heartb
       <tr><td><span class="lcd">CRUSADERS COURTS
 SCAN TO START</span></td><td>Not connected: WiFi not joined, or no heartbeat has succeeded yet (wrong URL or key, server down). Bookings in a previously fetched roster still light. Told apart from the landing screen above by its second line — this one is the <i>bridge</i> saying it has no radio.</td><td>Check the router and the server. If the WiFi password, address or key changed, reflash the bridge.</td></tr>
       <tr><td><span class="lcd">NO CONNECTION
-SEE THE DESK</span></td><td>The backend isn't answering and the scanned code isn't in the cached roster.</td><td>Check the server is running. Bookings in the roster still light.</td></tr>
+SEE THE DESK</span></td><td>The backend isn't answering and the box's cached roster is stale: no heartbeat has landed for six hours, so it no longer trusts its bookings (or, for a member code, its clock). A code the box simply doesn't hold reads <span class="lcd">NOT RECOGNISED</span> instead.</td><td>Check the WiFi and that the server is running; the first heartbeat that lands brings the roster back.</td></tr>
       <tr><td><span class="lcd">NO CONNECTION
 SCAN TO START</span></td><td>A walk-up purchase was attempted while the backend is unreachable. Money needs the backend.</td><td>Wait for the connection, or see the desk.</td></tr>
-      <tr><td><span class="lcd">ONE MOMENT</span> then <span class="lcd">COURT B  45 MIN</span></td><td>Online activation succeeded.</td><td>Play.</td></tr>
+      <tr><td><span class="lcd">ONE MOMENT
+Checking code</span> then <span class="lcd">COURT B  45 MIN</span></td><td>Online activation succeeded. (<span class="lcd">ONE MOMENT
+Buying your time</span> is the walk-up's wait, never an activation's.)</td><td>Play.</td></tr>
       <tr><td><span class="lcd">TOO EARLY
 WAIT 7 MIN</span></td><td>Valid booking, but more than 10 minutes before its start.</td><td>Wait for the cue window.</td></tr>
       <tr><td><span class="lcd">NOT RECOGNISED
 SEE THE DESK</span></td><td>The code does not check out: older than about 90 seconds, or (offline) a member this box holds no key for.</td><td>Scan the code on My Code as it is now; it changes every 30 seconds.</td></tr>
       <tr><td><span class="lcd">CODE USED
-WAIT 30 SECONDS</span></td><td>This exact code already lit a court or bought something. A photo of somebody's screen reads the same, so it arms nothing.</td><td>Wait for the next code on My Code. If you lit your own court with it — your booking, or time you just bought or paid for at the buttons — and it is still on, the box shows <span class="lcd">COURT B IS ON</span> instead.</td></tr>
+WAIT 30 SECONDS</span></td><td>This exact code already lit a court or bought something — at this box or another. A photo of somebody's screen reads the same, so it arms nothing and the box forgets the scan: it cannot buy a walk-up or pay for a court on the member whose code it is.</td><td>Wait for the next code on My Code. If you lit your own court with it — your booking, or time you just bought or paid for at the buttons — and it is still on, the box shows <span class="lcd">COURT B IS ON</span> instead.</td></tr>
       <tr><td><span class="lcd">TOO MANY TRIES
 TRY IN A MINUTE</span></td><td>Offline, five wrong codes inside a minute: the box stops checking codes for a while so nobody can guess one.</td><td>Wait a minute; it unlocks on the first good code after that.</td></tr>
       <tr><td><span class="lcd">NO BOOKING
@@ -472,7 +474,7 @@ Please wait</span> then back to the landing screen</td><td>The Mega painted this
 <div class="sig">
   <div class="mark" aria-hidden="true"></div>
   <div><div class="who">FrostAura Technologies</div><div class="line">We build the future of human capability.</div></div>
-  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>BRIDGE 2.2.2 · MEGA 2.0.0 · OCTOBER 2026</div>
+  <div class="meta">CRUSADERS MAINFRAME · COURT LIGHTS<br>BRIDGE 2.2.3 · MEGA 2.0.0 · OCTOBER 2026</div>
 </div>
 
 </div>
@@ -524,9 +526,9 @@ var FLOWS=[
  s:'The box asks the backend and lights the court on the answer. The backend\'s word is final.',
  steps:[
   {l:'mega',t:'Scanner → frame',d:'The scanner reads the QR and the Mega forwards the 19 characters to the ESP as a checksummed frame, exactly as it always forwarded a code.<small>The Mega paints this itself, before any answer exists, so a scan is visibly happening even with the bridge dead. It is an overlay like every other screen: if the ESP never answers, its own deadline returns the glass to the landing screen. No screen on this box can outlive two minutes.</small>',lcd:L('CHECKING YOUR CODE','Please wait')},
-  {l:'box',t:'POST activate',d:'Refuses anything over 20 characters or outside the code alphabet. Otherwise sends <code>{mac, method, token, scan_age_ms}</code>, the code exactly as scanned.<small>A code this box has already acted on is never asked about: it is answered at the box as the used code it is (below).</small>',lcd:L('ONE MOMENT')},
+  {l:'box',t:'POST activate',d:'Refuses anything over 20 characters or outside the code alphabet. Otherwise sends <code>{mac, method, token, scan_age_ms}</code>, the code exactly as scanned.<small>A code this box has already acted on is never asked about: it is answered at the box as the used code it is (below).</small>',lcd:L('ONE MOMENT','Checking code')},
   {l:'api',t:'Check, decide',d:'Checks both halves of the code at the moment it was read, finds the member, and finds their booking on this box — or one they are an accepted partner on. On <code>ok</code> it records the code as used, stamps attendance and settles whatever the settlement model says is owed, then answers granted seconds and the court number.<small>The cue window is 10 minutes before the start. A refusal is never second-guessed against the local roster.</small>',
-   o:[{t:'too_early',d:'More than 10 minutes before the start. Nothing charged, nothing stamped.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'wrong_court',d:'Booking on a court this box doesn\'t switch.',lcd:L('WRONG COURT','SEE THE DESK')},{t:'already_active',d:'Court already lit for this booking: answered with the remaining seconds, so a re-scan simply re-lights.'},{t:'not_recognised',d:'A code that does not check out, or one more than about 90 seconds old.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'code_used',d:'This exact code already lit a court. The member\'s next code, at most 30 seconds away, works.',lcd:L('CODE USED','WAIT 30 SECONDS')},{t:'no_booking',d:'A known member with nothing to light here. The buttons arm: they may buy time, or pay for somebody else\'s court.',lcd:L('NO BOOKING','SEE THE DESK')}]},
+   o:[{t:'too_early',d:'More than 10 minutes before the start. Nothing charged, nothing stamped.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'wrong_court',d:'Booking on a court this box doesn\'t switch.',lcd:L('WRONG COURT','SEE THE DESK')},{t:'already_active',d:'Court already lit for this booking: answered with the remaining seconds, so a re-scan simply re-lights.'},{t:'not_recognised',d:'A code that does not check out, or one more than about 90 seconds old.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'code_used',d:'This exact code already lit a court or bought something, here or at another box. It arms nothing and the scan is forgotten, so a photo of it buys nothing. The member\'s next code, at most 30 seconds away, works.',lcd:L('CODE USED','WAIT 30 SECONDS')},{t:'no_booking',d:'A known member with nothing to light here. The buttons arm: they may buy time, or pay for somebody else\'s court. A code that already lit a court or bought something is code_used instead, never this.',lcd:L('NO BOOKING','SEE THE DESK')}]},
   {l:'box',t:'!ON relay',d:'Maps court number → relay via its court list and sends <code>!ON,&lt;relay&gt;,&lt;seconds&gt;</code>.<small>Grants are capped at 90 minutes on both boards; a longer booking is re-lit with <code>!EXT</code> before the cap runs out.</small>',lcd:L('COURT B  45 MIN')},
   {l:'mega',t:'Relay closes, timer starts',d:'The Mega closes the relay and starts its own independent timer. Even if the ESP dies, the court goes dark on time.',
    o:[{t:'!ON lost',d:'The ESP retries within 1.5 s; if the Mega still never confirms, the promise is withdrawn.',lcd:L('TRY AGAIN','SCAN TO START')}]}
@@ -548,10 +550,10 @@ var FLOWS=[
   {l:'mega',t:'Scan',d:'The Mega paints its own <b>CHECKING YOUR CODE</b> the instant the scan completes, before any answer exists, so the member sees something happen even if the bridge is dead. The bridge\'s answer replaces it within a second when the bridge is alive.'},
   {l:'box',t:'Recognised',d:'Activate → the backend knows the member (no booking to light is still a known member). The box arms the buttons for that member for 30 seconds.<small>Buttons are dead until a recognised scan. What each of the 15 buttons means comes from the button map.</small>',
    o:[{t:'press without scan',d:'Row 3 alone says so, for three seconds, and the rest of the screen is left exactly as it was — a member part-way through reading does not lose the screen they were reading. Repeated presses are counted rather than repainted, so a jammed button cannot strobe the glass.',lcd:L('SCAN YOUR CODE FIRST')}]},
-  {l:'mega',t:'Court',d:'The member presses a court; the glass names it and asks for a time, while row 2 goes on showing which courts are already lit and for how long.',lcd:L('COURT C','CHOOSE TIME')},
+  {l:'mega',t:'Court',d:'The member presses a court; the glass names it and asks how long, and row 3 shows which black button is which duration.',lcd:L('COURT C','HOW LONG?','Press a black button')},
   {l:'mega',t:'Time',d:'They press a duration and the ESP turns the two presses into an intent: court C, 30 minutes. Any press re-arms the screen\'s own clock, so reading it slowly never loses the choice.'},
   {l:'box',t:'POST walkup',d:'Sends <code>{mac, court, minutes, token, nonce, scan_age_ms}</code>. The nonce is reused on a retry so a flaky link can\'t charge twice; <code>scan_age_ms</code> lets the backend check a code that was read a few presses ago.'},
-  {l:'api',t:'Price, charge, grant',d:'Checks the code and the balance, creates a walk-up booking, posts the charge in minutes, answers granted seconds. A replayed nonce returns the original grant; a code that already bought something is refused as used.',
+  {l:'api',t:'Price, charge, grant',d:'Checks the code and the balance, creates a walk-up booking, posts the charge in minutes, answers granted seconds. A replayed nonce returns the original grant; a code that already bought something, or already lit a court, is refused as used.',
    o:[{t:'insufficient_balance',d:'',lcd:L('TOO FEW MINUTES','BUY & RETRY')},{t:'court_in_use',d:'',lcd:L('COURT NOT FREE','SCAN TO START')},{t:'no_time_available',d:'The court is free but a booking starts before the requested time would end.',lcd:L('NO TIME BEFORE','NEXT BOOKING')},{t:'offline',d:'Money needs the backend.',lcd:L('NO CONNECTION','SCAN TO START')}]},
   {l:'mega',t:'Lights',d:'Relay closes; the button window disarms on spend so a second press can\'t buy again on the same scan.',lcd:L('COURT C  30 MIN')}
  ]},

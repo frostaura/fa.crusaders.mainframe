@@ -215,9 +215,20 @@ written **only when the server acts**, never for a refusal or a quote, so a memb
 `too_early` who scans again is not refused as a replay. A second acting use in the same class is
 refused with reason **`code_used`** — on `/activate`, `/gate` and `/pay-for` as a 200 decision,
 on `/walkup` as `409 {"error":"code_used"}` (the court box reads both as `CODE USED / WAIT 30
-SECONDS`, and neither arms its buttons: a used code may be a photo). Idempotent retries are
+SECONDS`, and neither arms its buttons: a used code may be a photo — the box forgets the scan as
+well, so nothing behind its button window can send it as a buyer). Idempotent retries are
 checked **before** the use table: a walk-up or pay-for replaying its own nonce is answered with the
 first result (`replayed: true`), never `code_used`. Rows older than a day are purged.
+
+**Money is refused across the court class too** (review round 8, D8-1). A photo of the code that
+has just lit a court is a code whose `court` use is spent and whose `money` use is not, so per
+class alone it bought a walk-up or paid for somebody's court on the member whose court it lit. A
+walk-up, a pay-for quote and a pay-for confirm are therefore `code_used` when the same `(ref,
+step)` holds a `court` **or** a `money` use; and an activation whose answer would be a booking
+refusal — `no_booking`, `wrong_court` — is `code_used` instead when the code holds either, because
+the box arms its buttons for those two and the photo, shown at a second box, would arrive as a
+known member with nothing booked. The door class is in neither rule: front door then a court
+inside one step is still two things. The member's next code, thirty seconds on, is unaffected.
 
 ---
 
@@ -398,10 +409,12 @@ Tenant setting `member_code_phase` ∈ `legacy` (default) → `v1` → `v1_only`
    `code_step` to `codes:m1` devices. Phones still show legacy codes. Dean can pilot v1 on his own
    phone: v1 tokens are accepted online everywhere, even from un-flashed boards, because a board
    passes scanned bytes through unchanged.
-2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.2 —
+2. **Dean flashes** the ESP8266 bridge (2.1.0 brought member codes; the current bridge is 2.2.3 —
    2.2.0 shows pay-for amounts in minutes, §9.3, 2.2.1 shows the member who rescans the code
-   that just lit their own court its ON screen rather than `CODE USED`, and 2.2.2 does the same
-   on a court the box lit online for them, §6.5) and each ESP32 door (1.1.0) — the physical USB
+   that just lit their own court its ON screen rather than `CODE USED`, 2.2.2 does the same
+   on a court the box lit online for them, §6.5, and 2.2.3 arms nothing for a used code and
+   forgets its scan, §4.4, and waits on `ONE MOMENT / Checking code` while it asks) and each
+   ESP32 door (1.1.0) — the physical USB
    step, below. Each board then reports `codes:m1`.
 3. **Cut-over, automatic**: the first time **every enabled device** of the tenant reports
    `codes:m1` on its latest heartbeat (and at least one does), the phase becomes `v1` and
@@ -426,8 +439,8 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
   **1 ON 2 ON 3 ON 4 ON 5–8 OFF**. (`make flash-bridge` is the PlatformIO equivalent.)
 - **Each door (ESP32)**: Arduino IDE, sketch `src/iot/door-gate/arduino/door_gate/`, board
   `esp32:esp32:esp32` (core 2.0.17), its own `secrets.h`; USB, upload.
-- **Proof it landed**: the Devices page shows firmware **2.2.2** for the box (a box still on
-  2.1.0, 2.2.0 or 2.2.1 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
+- **Proof it landed**: the Devices page shows firmware **2.2.3** for the box (a box still on
+  2.1.0, 2.2.0, 2.2.1 or 2.2.2 also reports `codes:m1`) and **1.1.0** for each door, and — once the backend lane ships —
   `codes:m1`. The Mega stays **2.0.0**: the bridge is the only half of the box that is flashed.
 
 ---
@@ -437,7 +450,11 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
 ### 9.1 The flow
 
 1. The payer **scans** their code. Online, `/activate` answers as today — a member with no booking
-   of their own on this box reads the no-booking refusal, and the button window arms.
+   of their own on this box reads the no-booking refusal, and the button window arms. Only a
+   refusal about a member whose code is unused arms it (`no_booking`, `wrong_court`, `too_early`,
+   `insufficient_balance`, `not_chargeable`, `ended`); `code_used`, `not_recognised` and a reason
+   the box cannot name arm nothing, and the scan is forgotten (§4.4; `membercode/http.json`'s
+   activate vectors pin each).
 2. The payer **presses the court button** of a court somebody holds now — the box's roster has an
    open booking on that relay, or the relay is lit — **and that is not the court their own button
    window is bound to**: a member who lit a court, bought it or rescanned on it and presses its
@@ -535,11 +552,16 @@ instruction cut off. So the same words run down three rows:
 | `PayForPriceChanged` | `PRICE CHANGED` | `Nothing charged` | `Press court again` | court cells | revert |
 | `PayForWorking` | `ONE MOMENT` | `Asking the club` | — | `PLEASE WAIT` | wait (6 s) |
 
+The activation has its own wait, `CheckingCode` — `ONE MOMENT` / `Checking code` / — / `PLEASE
+WAIT`, six seconds (bridge 2.2.3, review round 8 D8-2). `OneMoment`'s row 1 is `Buying your time`,
+the walk-up's sentence, and a booked member read it while their booking activated.
+
 The founder's `SPLIT - PAY IN APP` is 18 columns; it becomes `SPLIT BOOKING` over `PAY IN APP`,
 keeping the instruction verbatim. Other refusals reuse the existing screens:
 `insufficient_balance` → `TOO FEW MINUTES` (the `InsufficientBalance` screen: `TOO FEW MINUTES` /
 `Buy more time` / `Buy in the app`; a walk-up or a scan refused for balance shows `TOO FEW MINUTES` /
-`BUY & RETRY`), `not_recognised`/`code_used` → `CODE NOT KNOWN`,
+`BUY & RETRY`), `not_recognised`/`code_used` → `CODE NOT KNOWN`, and the box forgets the scan and
+closes the window, so the next press cannot try a walk-up on it,
 `ended` → `THAT SLOT ENDED`, anything else → `SEE THE DESK`; no connection on a confirm →
 `NO CONNECTION`. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
 `!LCD` lines ahead of the `!ON`. **Everything reaches the Mega through `!ROW`/`!SHOW`/`!LCD`/`!ON`
@@ -612,6 +634,9 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
 | A code the device already acted on is refused locally, never asked about online | `test_a_code_this_box_acted_on_offline_is_not_asked_about_online`, `test_app_a_code_opened_offline_is_refused_locally_once_the_link_returns` |
 | The guess guard; online uses recorded on the device | `test_guess_guard_locks_after_five_wrong_codes_and_backs_off`, `test_verify_guarded_throttles_guessing_and_a_good_code_resets_it`, `test_an_online_use_is_recorded_so_the_code_cannot_be_used_offline_after`, `test_the_door_throttles_offline_guessing` |
 | `code_used` on activate and walk-up | `http.json` `activate-response-code-used`, `walkup-response-code-used` |
+| Which activate refusals arm the buttons, and that a used code's scan is forgotten | `http.json` `activate-response-{code-used,no-booking,wrong-court,not-recognised,unknown-reason}`, `payfor-*-code-used`; `test_a_used_code_answered_online_arms_nothing_and_cannot_buy` |
+| A code that lit a court buys nothing at the same step, and is `code_used` at a box where it has no booking | `MemberCodePhotoReuseHttpTests` |
+| The activation waits on its own words | `test_an_activation_waits_on_its_own_words_never_buying_your_time` |
 | Every pay-for screen fits the safe subset at its widest | `test_every_screen_holds_the_layout_contract` |
 | Door bodies, the 4096 budget, offline door decisions | `gate.json` → `door-gate/test/test_gate_membercode` |
 | The whole door: sync, offline open, recorded token, replay, capability, a 403 emptying keys and clock | `test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_scanned` |
