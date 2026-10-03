@@ -49,7 +49,7 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `booking.cancelled` | A booking is cancelled (free) |
 | `booking.late_cancellation` | A booking is cancelled inside the penalty window |
 | `booking.no_show` | No-show penalty applied after grace expires |
-| `booking.lights_on` | A court was activated (online activation, roster fallback uploaded later, or a walk-up) |
+| `booking.lights_on` | A court was activated (online activation, roster fallback uploaded later, or a walk-up). The envelope's **actor is the member whose code lit the court** — the organiser, an accepted partner or a pay-for payer — and `data.identified_user_id` names the same member; `data.user_id` stays the booking's owner (the subject) and `data.paid_by_user_id` is who actually paid (the pay-for payer after a pay-for). Additive since review round 10 (E10-2). `Services/CourtActivationService.cs` |
 | `booking.lights_off` | The lights-off cue fires at the end of a slot |
 | `booking.no_show_reversed` | Late attendance evidence from a box reversed a settled no-show |
 | `booking.displaced` | A booking sold into a released tail was cancelled and refunded by a no-show reversal (`ResoldTailRefunded`) |
