@@ -61,6 +61,8 @@ function selectFaults(scope: Locator, maxLines: number): Promise<string[]> {
       const walker = document.createTreeWalker(value, NodeFilter.SHOW_TEXT);
       const lines = new Set<number>();
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        // The accessible-name twin of a glued figure is not painted (R11 FA11 ask).
+        if (node.parentElement?.closest(".sr-only")) continue;
         for (const m of (node.textContent ?? "").matchAll(/\S+/g)) {
           const range = document.createRange();
           range.setStart(node, m.index!);

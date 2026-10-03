@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { FILTER_BAR_INSET, FILTER_TRIGGER_INSET } from "../ui/layout";
+import { keepFiguresWhole } from "../ui/figure-text";
 import { Button } from "../ui/button";
 import { DatePicker } from "../ui/date-picker";
 import { IconButton } from "../ui/icon-button";
@@ -100,8 +101,13 @@ export function FilterSelect({ id, label, value, options, onChange, className }:
         </SelectTrigger>
         <SelectContent>
           {options.map((option) => (
-            <SelectItem key={option.value || ANY} value={option.value === "" ? ANY : option.value}>
-              {option.label}
+            // R11: the figure is glued to its unit in the PAINTED text (Radix copies the item text
+            // into the trigger), so a wrapping value reads "Last / 7 days", never "Last 7 / days".
+            // Radix names an option by its text (aria-labelledby beats aria-label), so the plain
+            // label rides beside the paint as the name; typeahead reads `textValue`.
+            <SelectItem key={option.value || ANY} value={option.value === "" ? ANY : option.value} textValue={option.label}>
+              <span aria-hidden="true">{keepFiguresWhole(option.label)}</span>
+              <span className="sr-only">{option.label}</span>
             </SelectItem>
           ))}
         </SelectContent>

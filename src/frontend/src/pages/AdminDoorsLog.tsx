@@ -12,6 +12,7 @@ import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { RefreshButton } from "../components/ui/refresh-button";
 import { TextLink } from "../components/ui/text-link";
 import { FILTER_BAR_INSET, FILTER_TRIGGER_INSET } from "../components/ui/layout";
+import { keepFiguresWhole } from "../components/ui/figure-text";
 import { cn } from "../lib/utils";
 import { DownloadSimple } from "../components/ui/icons";
 import { useToast } from "../components/toastContext";
@@ -664,7 +665,14 @@ function AdminDoorsLogPageBody() {
                   <Select value={params.get("range") ?? DEFAULT_RANGE} onValueChange={(value) => setFilter("range", value)}>
                     <SelectTrigger className={WRAPPING_TRIGGER}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {RANGES.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                      {/* R11: "Last 24 hours" wraps as "Last / 24 hours", never "24 / hours"; the plain label stays the name. */}
+                      {RANGES.map(({ value, label }) => (
+                        <SelectItem key={value} value={value} textValue={label}>
+                          {/* Radix names an option by its text, so the plain label is the name beside the glued paint. */}
+                          <span aria-hidden="true">{keepFiguresWhole(label)}</span>
+                          <span className="sr-only">{label}</span>
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </Field>
