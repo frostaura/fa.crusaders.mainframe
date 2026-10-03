@@ -1410,11 +1410,13 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
     spendScan();
     gRelight.onGrant(answer.outcome, nowMs);
   }
-  if (answer.decided && !bridgelogic::scanStaysBuyable(answer.outcome) &&
-      !bridgelogic::spendsScan(answer.outcome)) {
+  if (answer.forgetsScan) {
     // A decided refusal of the CODE — `code_used`, `not_recognised`: the scan
-    // buys nothing more, so it is forgotten and the window closed (D8-1). An
-    // UNDECIDED attempt keeps both, with its nonce, for the same purchase.
+    // buys nothing more, so it is forgotten and the window closed (D8-1). Every
+    // other refusal keeps both — TOO LONG / TRY LESS TIME is a sentence the
+    // member answers with a shorter press, which the Mega drops unless the
+    // window is still armed (D9-1). An UNDECIDED attempt keeps both, with its
+    // nonce, for the same purchase.
     forgetScan();
     return;
   }

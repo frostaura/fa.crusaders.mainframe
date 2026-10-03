@@ -729,6 +729,54 @@ void test_walkup_recognised_comes_from_the_body_never_from_the_status() {
                                   kBaseMid) == bridgelogic::AuthCommand::Arm);
 }
 
+void test_walkup_forgets_the_scan_only_for_a_used_or_unknown_code() {
+  // D9-1. Bridge 2.2.3 forgot the scan after every decided refusal that did
+  // not RECOGNISE the member — and `recognised` is false for every refusal
+  // made before the API resolves the token. TOO LONG / TRY LESS TIME told the
+  // member to press a shorter button, the box sent !AUTH,0, the Mega dropped
+  // that press (a ButtonUnauthorised fault) and the member had to rescan. Only
+  // a refusal of the CODE itself — the same two pay-for forgets on — forgets.
+  struct Case {
+    uint16_t status;
+    const char* body;
+    bool forgets;
+  };
+
+  const Case cases[] = {
+      // The member can fix these by choosing again: the scan stays.
+      {400U, "{\"error\":\"minutes_out_of_range\",\"max_minutes\":45}", false},
+      {409U, "{\"error\":\"court_not_on_device\"}", false},
+      {400U, "{\"error\":\"court_not_on_device\"}", false},
+      {402U, "", false},
+      {409U, "", false},
+      {409U, "{}", false},
+      {409U, "{\"error\":\"something_newer\"}", false},
+      {400U, "{\"error\":\"club_closed\",\"opens_at\":\"06:00\"}", false},
+      {402U, "{\"error\":\"insufficient_balance\"}", false},
+      {409U, "{\"error\":\"court_in_use\"}", false},
+      {409U, "{\"error\":\"no_time_available\"}", false},
+      {409U, "{\"error\":\"purchase_ended\"}", false},
+      {409U, "{\"error\":\"activation_refused\"}", false},
+      {404U, "", false},
+      // Undecided: the nonce and the scan stay for the same purchase.
+      {0U, "", false},
+      {429U, "{\"error\":\"code_used\"}", false},
+      {503U, "{\"error\":\"not_recognised\"}", false},
+      // A refusal of the code: it buys nothing more, so it is forgotten.
+      {409U, "{\"error\":\"code_used\"}", true},
+      {409U, "{\"error\":\"not_recognised\"}", true},
+      {400U, "{\"error\":\"not_recognised\"}", true},
+      {402U, "{\"error\":\"not_recognised\"}", true},
+  };
+  for (const Case& c : cases) {
+    const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(c.status, c.body, len(c.body), 1U, 60U);
+    TEST_ASSERT_EQUAL_MESSAGE(c.forgets, r.forgetsScan, c.body[0] != '\0' ? c.body : "(empty body)");
+  }
+  // A grant spends the scan (spendsScan) — it is never "forgotten" as a refusal.
+  const char sold[] = "{\"granted_minutes\":60}";
+  TEST_ASSERT_FALSE(bridgelogic::onWalkUpResponse(200U, sold, len(sold), 1U, 60U).forgetsScan);
+}
+
 // ---------------------------------------------------------------------------
 // StateReconcile — catching up with the Mega when the event was lost
 // ---------------------------------------------------------------------------
@@ -3165,6 +3213,7 @@ int main(int, char**) {
   RUN_TEST(test_walkup_a_closed_club_puts_its_opening_time_on_the_glass);
   RUN_TEST(test_walkup_a_refused_activation_does_not_say_the_court_is_busy);
   RUN_TEST(test_walkup_recognised_comes_from_the_body_never_from_the_status);
+  RUN_TEST(test_walkup_forgets_the_scan_only_for_a_used_or_unknown_code);
 
   RUN_TEST(test_state_mask_parses_decimal_and_refuses_everything_else);
   RUN_TEST(test_reconcile_a_cleared_bit_on_a_held_court_is_the_lost_release);
