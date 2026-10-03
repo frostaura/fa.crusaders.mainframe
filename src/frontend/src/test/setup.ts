@@ -165,3 +165,15 @@ import { resetHeldMarksForTests } from "../components/inbox/heldMarks";
 // The invites read started at a link press (`lib/earlyInvites`) is module scope too: taking it empties it.
 import { takeMyInvites } from "../lib/earlyInvites";
 beforeEach(() => { resetHeldMarksForTests(); takeMyInvites(); });
+
+// R6 CI — Radix FocusScope dispatches its unmount focus event from a zero-delay timer. RTL's
+// automatic cleanup unmounts in afterEach, so after a file's LAST test that timer could fire once
+// the file's jsdom was gone ("dispatchEvent … parameter 1 is not of type 'Event'", an unhandled
+// error that fails the run while every test passes — MemberResetCode, Linux runner only). Let
+// pending timers run while the document still exists.
+import { afterAll, vi } from "vitest";
+
+afterAll(async () => {
+  vi.useRealTimers();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+});
