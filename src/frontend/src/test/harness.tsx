@@ -129,6 +129,11 @@ function answerFor(route: StubRoute, nth: number, request: StubRequest): unknown
   return route.body;
 }
 
+/** A route that cannot answer at all. `sequence` alone is an answer (R10: it was refused). */
+function answerless(route: StubRoute): boolean {
+  return !route.respond && !route.sequence && !("body" in route);
+}
+
 /** The status this route answers this call with — a single one, or the nth with the last repeating. */
 function statusFor(route: StubRoute, nth: number): number {
   if (!Array.isArray(route.status)) return route.status ?? 200;
@@ -198,10 +203,10 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
       // an endpoint nobody meant it to and still pass.
       return Promise.reject(new Error(`No stub for ${method} ${path}`));
     }
-    if (!route.respond && !("body" in route)) {
+    if (answerless(route)) {
       // Same reason, one level in: a route with neither an answer nor a responder would
       // serialise to the string "undefined" and read as a parse failure in the page.
-      return Promise.reject(new Error(`Stub for ${method} ${route.path} has neither body nor respond`));
+      return Promise.reject(new Error(`Stub for ${method} ${route.path} has neither body, sequence nor respond`));
     }
 
     const nth = served.get(route) ?? 0;
