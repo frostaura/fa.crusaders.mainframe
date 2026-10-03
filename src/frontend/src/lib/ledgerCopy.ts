@@ -94,6 +94,8 @@ export function ledgerCategory(row: LedgerRow): string {
   }
   if (row.type === "AdminTopUp") return deskCategory(row as LedgerRowWithActor, label);
   if (row.type === "CancellationRefund") return refundCategory(row, label);
+  // R11 E11-5: the payer's leg of a pay-for at the court, beside its refund leg's own words.
+  if (row.type === "BookingCharge" && PAY_FOR_CHARGE_REASON.test(row.comment?.trim() ?? "")) return LEDGER_CATEGORY.payForCharge;
   return label;
 }
 
@@ -119,12 +121,16 @@ export const LEDGER_CATEGORY = {
   outageRefund: "Outage refund — the court's box was offline",
   outageRefundReversed: "Outage refund reversed — checked in after all",
   payForRefund: "Pay-for refund — another member paid at the court",
+  payForCharge: "Pay-for charge — paid at the court for another member",
   noShowRefund: "No-show refund",
   noShowRefundReversed: "No-show refund reversed — attendance arrived late",
   displacedRefund: "Refund — the court was already in use",
   reinstated: "Refund taken back — booking reinstated",
   refundReversed: "Refund reversed",
 } as const;
+
+/** The stored reason of a pay-for's charge leg (`BookingService`, stream `pay_for_charge`). */
+const PAY_FOR_CHARGE_REASON = /^Paid at court on behalf of another member/;
 
 /**
  * The server's stored reasons, by what they begin with or say: `NoShowWorker.RefundReason`,
