@@ -69,13 +69,27 @@ export type BalanceDelta = {
   source: BalanceDeltaSource;
   /** The server's closed-vocabulary reason, where it sends one. Absent on an older API. */
   reason?: string;
+  /** R10 E10-1 — the ledger rows behind the movement (a refund AND a penalty), where the frame carries them. */
+  parts?: BalancePart[];
 };
+
+/** R10 E10-1 — one row of a live movement: its ledger type's reason and its signed whole minutes. */
+export type BalancePart = { reason: string; delta_minutes: number };
+
+/** The frame's `parts`, kept only where every entry has the documented shape. */
+export function balanceParts(raw: unknown): BalancePart[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const ok = raw.every((p) => p && typeof p.reason === "string" && typeof p.delta_minutes === "number");
+  return ok && raw.length > 0 ? (raw as BalancePart[]) : undefined;
+}
 
 /** One frame off the wire. Every field but the balance is optional — an older API sends none. */
 export type BalanceFrame = {
   balance_minutes: number;
   delta_minutes?: number;
   reason?: string;
+  /** R10 E10-1 — each ledger row behind `delta_minutes`; absent from an older API. */
+  parts?: unknown;
   /**
    * D11 (§3a): shares an organiser received, HELD for their partners' possible returns until
    * `held_until` (the earliest share deadline among them). Part of the balance, not spendable.
@@ -385,6 +399,7 @@ export function useLiveBalance({
       at: Date.now(),
       source: own ? "self" : "club",
       reason: frame?.reason,
+      parts: balanceParts(frame?.parts),
     });
     expectSelf.current = false;
   }, []);

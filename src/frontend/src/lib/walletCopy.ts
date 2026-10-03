@@ -1,5 +1,5 @@
 import type { LedgerEntryType } from "./api";
-import type { WalletTone } from "./balance";
+import { walletTone, type WalletTone } from "./balance";
 import { firstName, playersWhen } from "./playersNames";
 import { minutesSpoken } from "./minutes";
 
@@ -69,6 +69,30 @@ export const TOP_UP_LABEL: Record<BalanceLevel, string> = {
 };
 
 /**
+ * R10 J10-3 — the Wallet card's state: the three tones, plus `short` — something to spend, but
+ * less than the shortest court the club books. The card said "That's enough for a short game"
+ * over 10 minutes in a club of 15-minute slots, and over a WHOLE balance whose spendable part was
+ * −2 (held for partners) while the chip beside it was red. Read off SPENDABLE, like the chip.
+ */
+export type CardLevel = BalanceLevel | "short";
+
+/** The card's state from what the member can spend and the club's shortest booking (null: not known). */
+export function cardLevel(spendable: number | null, smallestSlot: number | null): CardLevel {
+  const tone = walletTone(spendable);
+  if (tone === "zero" || spendable === null || smallestSlot === null) return tone;
+  return Math.trunc(spendable) < smallestSlot ? "short" : tone;
+}
+
+/** The card's sentence: the three fixed ones, or what is short of a court and by how much. */
+export function balanceSentence(level: CardLevel, spendable: number | null, smallestSlot: number | null): string {
+  if (level !== "short" || spendable === null || smallestSlot === null) return BALANCE_SENTENCE[level === "short" ? "low" : level];
+  return `You can't book a court with ${minutesSpoken(Math.trunc(spendable))} — the shortest booking is ${minutesSpoken(smallestSlot)}. Buy minutes to book.`;
+}
+
+/** `short` is drawn as a caution (the chip's amber) and its buy control is the primary one. */
+export const SHORT_TONE = { fill: "bg-warning-soft", ink: "text-warning-strong" } as const;
+
+/**
  * What a member is told when minutes arrive while they are looking at the screen.
  *
  * <p>
@@ -125,21 +149,115 @@ export function minutesLeftSentence(amount: number, entryType: LedgerEntryType |
  * `reason` rather than always blaming "the club". `share_transfer` gets a named sentence from the
  * ledger where it can be read (see the chip); this is the sentence for every other reason, and
  * the fallback for that one.
+ *
+ * <p>
+ * <b>R10 E10-1 — the sign and the cause, never a guess.</b> An outage refund, its reversal (a
+ * MINUS), a pay-for refund and a no-show's refund-and-penalty all arrived as
+ * `cancellation_refund` / `mixed`, and the toast said "A cancelled booking put 15 minutes back"
+ * for a booking nobody cancelled — and "The club added 11 minutes" in green for a no-show that
+ * took a penalty. The server now names the cause (`outage_refund`, `no_show_settled`, …) and
+ * carries each row (`parts`); a frame from an older API is worded by its sign alone.
+ * </p>
  */
-export function movementSentence(amount: number, reason: string | undefined): string {
+export function movementSentence(amount: number, reason: string | undefined, parts?: readonly MovementPart[]): string {
   const minutes = minutesSpoken(Math.abs(amount));
   const up = amount > 0;
-  switch (reason) {
-    case "top_up": return up ? `Your purchase landed: ${minutes} added to your wallet.` : `${minutes} of a purchase were taken back.`;
-    case "admin_top_up": return up ? `Your package from the desk landed: ${minutes} added to your wallet.` : `The club took ${minutes} off your wallet.`;
-    case "booking_charge": return up ? `${minutes} came back from a booking.` : `${minutes} went on a court booking.`;
-    case "cancellation_refund": return `A cancelled booking put ${minutes} back in your wallet.`;
-    case "penalty": return `${minutes} went on a late-cancellation or no-show charge.`;
-    case "lights_purchase": return `${minutes} went on court time at the box.`;
-    case "share_transfer": return up ? `A share of a split booking moved ${minutes} into your wallet.` : `${minutes} went on a share of a split booking.`;
-    case "correction": return up ? `A payment was reversed: ${minutes} back in your wallet.` : `A payment was reversed: ${minutes} left your wallet.`;
-    default: return up ? `The club added ${minutes} to your wallet.` : `The club took ${minutes} off your wallet.`;
-  }
+  const precise = reason ? PRECISE_MOVEMENT[reason] : undefined;
+  if (precise) return precise({ minutes, up, split: splitParts(parts) });
+  // `mixed` without its rows, and anything unknown: true whoever caused it.
+  const [rose, fell] = (reason ? BY_REASON[reason] : undefined) ?? NEUTRAL_MOVEMENT;
+  return (up ? rose : fell)(minutes);
+}
+
+type Say = (minutes: string) => string;
+
+/** Neither a cause nor a guess at one — the sentence for a reason this build does not know. */
+const NEUTRAL_MOVEMENT: readonly [Say, Say] = [(m) => `Your wallet went up by ${m}.`, (m) => `${m} left your wallet.`];
+
+/** The per-type reasons, each worded by its sign: [minutes in, minutes out]. */
+const BY_REASON: Record<string, readonly [Say, Say]> = {
+  top_up: [(m) => `Your purchase landed: ${m} added to your wallet.`, (m) => `${m} of a purchase were taken back.`],
+  admin_top_up: [(m) => `Your package from the desk landed: ${m} added to your wallet.`, (m) => `The club took ${m} off your wallet.`],
+  booking_charge: [(m) => `${m} came back from a booking.`, (m) => `${m} went on a court booking.`],
+  cancellation_refund: [(m) => `A cancelled booking put ${m} back in your wallet.`, (m) => `${m} of a refund were taken back.`],
+  penalty: [(m) => `A charge was returned: ${m} back in your wallet.`, (m) => `${m} went on a late-cancellation or no-show charge.`],
+  lights_purchase: [(m) => `${m} came back from court time at the box.`, (m) => `${m} went on court time at the box.`],
+  share_transfer: [(m) => `A share of a split booking moved ${m} into your wallet.`, (m) => `${m} went on a share of a split booking.`],
+  correction: [(m) => `A payment was reversed: ${m} back in your wallet.`, (m) => `A payment was reversed: ${m} left your wallet.`],
+  admin_adjustment: [(m) => `The club added ${m} to your wallet.`, (m) => `The club took ${m} off your wallet.`],
+};
+
+/** One row of a live movement, as the stream's `parts` carry it (`lib/liveBalance.BalancePart`). */
+export type MovementPart = { reason: string; delta_minutes: number };
+
+/** What came in and what went out across a movement's rows, in words; null without rows. */
+type Split = { back: string; charged: string } | null;
+
+function splitParts(parts: readonly MovementPart[] | undefined): Split {
+  if (!parts || parts.length === 0) return null;
+  const back = parts.filter((p) => p.delta_minutes > 0).reduce((n, p) => n + p.delta_minutes, 0);
+  const charged = -parts.filter((p) => p.delta_minutes < 0).reduce((n, p) => n + p.delta_minutes, 0);
+  if (back <= 0 || charged <= 0) return null;
+  return { back: minutesSpoken(back), charged: minutesSpoken(charged) };
+}
+
+type Said = { minutes: string; up: boolean; split: Split };
+
+/** "so 11 minutes came back" / "so 4 minutes left your wallet" — the net, with its direction in words. */
+function net({ minutes, up }: Said): string {
+  return up ? `so ${minutes} came back to your wallet` : `so ${minutes} left your wallet`;
+}
+
+/** R10 E10-1 — the server's precise causes (BE10 `WalletStreamReasons`). Each says what happened, by sign. */
+const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
+  outage_refund: (s) => s.up
+    ? `The court's box was offline, so your booking was refunded: ${s.minutes} back in your wallet.`
+    : `${s.minutes} of an outage refund left your wallet.`,
+  outage_refund_reversed: (s) => `An outage refund was taken back — you were checked in after all: ${s.minutes} ${s.up ? "came back to" : "left"} your wallet.`,
+  no_show_settled: (s) => s.split
+    ? `A missed booking was settled: ${s.split.back} refunded and ${s.split.charged} charged as a no-show penalty, ${net(s)}.`
+    : s.up ? `A missed booking was refunded: ${s.minutes} back in your wallet.` : `${s.minutes} went on a no-show charge.`,
+  no_show_reversed: (s) => s.split
+    ? `A no-show was reversed — you were checked in after all: the ${s.split.back} penalty came back and the ${s.split.charged} refund was taken back, ${net(s)}.`
+    : `A no-show was reversed — you were checked in after all: ${s.minutes} ${s.up ? "came back to" : "left"} your wallet.`,
+  pay_for_refund: (s) => s.up
+    ? `Another member paid for your booking at the court, so its ${s.minutes} came back to your wallet.`
+    : `${s.minutes} of a pay-at-court refund left your wallet.`,
+  pay_for_charge: (s) => s.up
+    ? `${s.minutes} came back from a court you paid for at the box.`
+    : `${s.minutes} went on another member's court, paid at the box.`,
+  displaced_refund: (s) => s.up
+    ? `A booking was refunded — its court was already in use by an earlier game: ${s.minutes} back in your wallet.`
+    : `${s.minutes} of a refund were taken back.`,
+  // A refund and a charge in one move (a cancellation inside the penalty window, say): both, then the net.
+  mixed: (s) => s.split
+    ? `${s.split.back} came back and ${s.split.charged} went on a charge, ${net(s)}.`
+    : s.up ? `Your wallet went up by ${s.minutes}.` : `${s.minutes} left your wallet.`,
+  displaced_reinstated: (s) => s.up
+    ? `A booking was reinstated: ${s.minutes} back in your wallet.`
+    : `A refunded booking was reinstated: ${s.minutes} went back on it.`,
+};
+
+/**
+ * R10 E10-6 — a stored ledger reason is the CLUB's sentence ("… — the member was checked in after
+ * all"), shown as is on the admin ledger; the member's own wallet says it to them. Only the
+ * reasons written in the third person are mapped; every other comment is left exactly as stored.
+ */
+const MEMBER_VOICE: readonly [RegExp, string][] = [
+  [/^Outage refund reversed — the member was checked in after all/, "Outage refund reversed — you were checked in after all"],
+];
+
+/** The member's wording of a stored ledger comment. */
+export function memberLedgerComment(comment: string): string {
+  for (const [said, mine] of MEMBER_VOICE) if (said.test(comment)) return comment.replace(said, mine);
+  return comment;
+}
+
+/** The wallet's rows with their comments in the member's voice — the same array when nothing changes. */
+export function memberLedgerRows<T extends { comment: string }>(rows: T[]): T[] {
+  return rows.some((r) => memberLedgerComment(r.comment) !== r.comment)
+    ? rows.map((r) => ({ ...r, comment: memberLedgerComment(r.comment) }))
+    : rows;
 }
 
 /** Said once under the ledger, not on every row — the same rule the door history follows. */

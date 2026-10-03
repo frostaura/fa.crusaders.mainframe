@@ -62,8 +62,12 @@ function useClubMovementToast() {
     if (announced.current === delta.at) return;
     announced.current = delta.at;
     if (delta.source === "club") {
-      const say = (text: string) => toast.push({ tone: delta.amount > 0 ? "success" : "info", text, durationMs: MONEY_TOAST_MS });
-      const plain = movementSentence(delta.amount, delta.reason);
+      // R10 E10-1: green only for minutes that simply arrived — a settlement that also took a
+      // penalty is not good news, whatever its net.
+      const charged = (delta.parts ?? []).some((p) => p.delta_minutes < 0);
+      const tone = delta.amount > 0 && !charged ? "success" : "info";
+      const say = (text: string) => toast.push({ tone, text, durationMs: MONEY_TOAST_MS });
+      const plain = movementSentence(delta.amount, delta.reason, delta.parts);
       if (delta.reason === "share_transfer") {
         namedShareMovement(delta.amount, me).then((named) => say(named ?? plain), () => say(plain));
       } else {

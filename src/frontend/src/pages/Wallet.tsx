@@ -16,14 +16,17 @@ import { StaleNotice } from "../components/shell/StaleNotice";
 import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
 import { StillTrying } from "../lib/offline/StillTrying";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
-import { walletTone } from "../lib/balance";
 import { BUY_MINUTES_PATH } from "../lib/minutes";
 import { Minutes } from "../components/Minutes";
 import type { HeldFigures } from "../lib/liveBalance";
 import { WALLET_PAGE_SIZE as PAGE_SIZE } from "../lib/offline/memberReads";
 import { WalletNav } from "../components/wallet/WalletNav";
 import { HeldLine } from "../components/wallet/HeldLine";
-import { BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL, WALLET_LAYOUT, type BalanceLevel } from "../lib/walletCopy";
+import {
+  BALANCE_TONE, LEDGER_CLOCK_NOTE, SHORT_TONE, TOP_UP_LABEL, WALLET_LAYOUT, balanceSentence, cardLevel, memberLedgerRows,
+  type BalanceLevel, type CardLevel,
+} from "../lib/walletCopy";
+import { useSmallestSlot } from "../components/wallet/useSmallestSlot";
 import { ContextBar } from "../components/ui/context-bar";
 import { useMediaQuery } from "../components/ui/use-media-query";
 import { WithAside } from "../components/ui/with-aside";
@@ -48,12 +51,29 @@ import { WalletMiniTotals } from "../components/wallet/WalletMiniTotals";
  * button was primary — one verb, one weight, wherever it is drawn.
  * </p>
  */
-function BalanceCard({ balance, painted, held, topUp = true }: { balance: number | null; painted: number | null; held: HeldFigures | null; topUp?: boolean }) {
-  const level = walletTone(balance);
-  const tone = BALANCE_TONE[level];
+/** The longest slice a club may set (settings: 5–240): above it every spendable figure books something. */
+const LONGEST_SLICE = 240;
+
+type CardState = { level: CardLevel; spendable: number | null; slot: number | null };
+
+/**
+ * R10 J10-3: what the member can SPEND decides the card's state (the chip's figure), and whether
+ * that reaches the club's shortest court; the big figure stays the whole balance. One answer for
+ * the card and the docked Buy button alike.
+ */
+function useCardState(balance: number | null, held: HeldFigures | null): CardState {
+  const spendable = held ? held.spendable : balance;
+  const slot = useSmallestSlot(spendable !== null && spendable >= 1 && spendable < LONGEST_SLICE);
+  return { level: cardLevel(spendable, slot), spendable, slot };
+}
+
+function BalanceCard(props: { state: CardState; painted: number | null; held: HeldFigures | null; topUp?: boolean }) {
+  const { state, painted, held, topUp = true } = props;
+  const { level, spendable, slot } = state;
+  const tone = level === "short" ? SHORT_TONE : BALANCE_TONE[level];
   const edge = level === "zero" ? "border-danger-strong" : "border-warning-strong";
   return (
-    <Card className={cn("px-4 sm:px-6", level !== "fine" && `${tone.fill} border-l-4 ${edge}`)}>
+    <Card data-balance-level={level} className={cn("px-4 sm:px-6", level !== "fine" && `${tone.fill} border-l-4 ${edge}`)}>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
           <p className={typography({ variant: "overline" })}>Current balance</p>
@@ -67,8 +87,8 @@ function BalanceCard({ balance, painted, held, topUp = true }: { balance: number
             {/* Whole minutes in the one compact form ("7 h 30 min"), spoken in full (P13 §7.1). */}
             <Minutes value={painted ?? 0} className={level === "zero" ? tone.ink : undefined} />
           </p>
-          <p className={cn("mt-2 max-w-prose text-sm", level === "fine" ? "text-text-secondary" : tone.ink)}>
-            {BALANCE_SENTENCE[level]}
+          <p data-balance-sentence="" className={cn("mt-2 max-w-prose text-sm", level === "fine" ? "text-text-secondary" : tone.ink)}>
+            {balanceSentence(level, spendable, slot)}
           </p>
           <HeldLine held={held} />
         </div>
@@ -83,10 +103,12 @@ function BalanceCard({ balance, painted, held, topUp = true }: { balance: number
  * (`<Button asChild><Link/></Button>`). Primary when there is nothing to play with; on a phone it is
  * docked in thumb reach (R4 form factor, SPEC 3.4) and primary there whatever the balance.
  */
-function TopUpLink({ level, primary = false, block = false }: { level: BalanceLevel; primary?: boolean; block?: boolean }) {
+function TopUpLink({ level, primary = false, block = false }: { level: CardLevel; primary?: boolean; block?: boolean }) {
+  // `short` cannot book either: its errand is the empty wallet's (R10 J10-3).
+  const errand: BalanceLevel = level === "short" ? "zero" : level;
   return (
-    <Button asChild block={block} variant={primary || level === "zero" ? "primary" : "secondary"} className="shrink-0">
-      <Link to={BUY_MINUTES_PATH}>{TOP_UP_LABEL[level]}</Link>
+    <Button asChild block={block} variant={primary || errand === "zero" ? "primary" : "secondary"} className="shrink-0">
+      <Link to={BUY_MINUTES_PATH}>{TOP_UP_LABEL[errand]}</Link>
     </Button>
   );
 }
@@ -144,7 +166,7 @@ function LedgerSection(props: LedgerProps) {
         // `overflow-clip`, not `-hidden`: a hidden overflow is a scroll container, and the ledger's
         // column heads would stick to the card (which never scrolls) instead of the page (R5 V5-6).
         <Card className="gap-0 overflow-clip py-0 sm:gap-0 sm:py-0">
-          <LedgerTable rows={rows} label="Wallet ledger" groupShares shareBookings={shareBookings} />
+          <LedgerTable rows={memberLedgerRows(rows)} label="Wallet ledger" groupShares shareBookings={shareBookings} />
           {/* Said once under the list rather than on every row: every face on a member surface
               is the CLUB's day, which is right and otherwise invisible. */}
           <p className="border-t border-border px-4 py-3 text-xs text-text-muted sm:px-6">{LEDGER_CLOCK_NOTE}</p>
@@ -176,6 +198,7 @@ export default function WalletPage() {
   const refresh = () => { void load(Math.max(shown, PAGE_SIZE)); };
   // One buy button, in one place: beside the figure from lg, docked in thumb reach below it.
   const wide = useMediaQuery(LG_UP);
+  const card = useCardState(balance, held);
 
   return (
     <PageShell width="wide">
@@ -206,7 +229,7 @@ export default function WalletPage() {
             // The rail carries the last 30 days under the figure (R5 M5-9) where it is a rail.
             <WithAside placement="before" at="64rem" asideLabel={WALLET_LAYOUT.railLabel} aside={
               <>
-                <BalanceCard balance={balance} painted={painted} held={held} topUp={wide} />
+                <BalanceCard state={card} painted={painted} held={held} topUp={wide} />
                 {wide ? <WalletMiniTotals offline={offline} /> : null}
               </>
             }>
@@ -218,7 +241,7 @@ export default function WalletPage() {
       {loaded && !wide ? (
         // One verb, the bar's whole width: the figure it is about is the card just above.
         <ContextBar position="bottom" until="lg" label={WALLET_LAYOUT.actionsLabel}>
-          <TopUpLink level={walletTone(balance)} primary block />
+          <TopUpLink level={card.level} primary block />
         </ContextBar>
       ) : null}
     </PageShell>

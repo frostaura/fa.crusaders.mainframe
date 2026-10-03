@@ -123,3 +123,55 @@ describe("MinutesChip — whose movement it was", () => {
     expect(await screen.findByText("The club added 1 hour 40 minutes to your wallet.")).toBeInTheDocument();
   });
 });
+
+/**
+ * R10 E10-1 — measured end to end: an outage refund, its reversal (−15) and a pay-for refund all
+ * toasted "A cancelled booking put … back" (nothing was cancelled), and a no-show's refund-and-
+ * penalty (`mixed`, +11) toasted a green "The club added 11 minutes", hiding the penalty.
+ */
+describe("MinutesChip — R10 E10-1 a movement is said by its cause and its sign", () => {
+  async function toastFor(frame: Omit<BalanceFrame, "balance_minutes">) {
+    const w = mount();
+    await w.push({ balance_minutes: 200 });
+    await w.push({ balance_minutes: 200 + (frame.delta_minutes ?? 0), ...frame });
+    await settle();
+    return document.body.textContent ?? "";
+  }
+
+  it("says an outage refund was the box being offline, never a cancellation", async () => {
+    const said = await toastFor({ delta_minutes: 15, reason: "outage_refund" });
+    expect(said).toContain("The court's box was offline, so your booking was refunded: 15 minutes back in your wallet.");
+    expect(said).not.toMatch(/cancelled/);
+    expect(document.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("success");
+  });
+
+  it("says an outage refund's reversal took minutes OUT", async () => {
+    const said = await toastFor({ delta_minutes: -15, reason: "outage_refund_reversed" });
+    expect(said).toContain("An outage refund was taken back — you were checked in after all: 15 minutes left your wallet.");
+    expect(said).not.toMatch(/cancelled|back in your wallet/);
+  });
+
+  it("says a pay-for refund came from another member paying at the court", async () => {
+    const said = await toastFor({ delta_minutes: 30, reason: "pay_for_refund" });
+    expect(said).toContain("Another member paid for your booking at the court, so its 30 minutes came back to your wallet.");
+  });
+
+  it("says a no-show settlement's refund AND its penalty, not 'the club added' the net", async () => {
+    const said = await toastFor({
+      delta_minutes: 11, reason: "no_show_settled",
+      parts: [{ reason: "cancellation_refund", delta_minutes: 15 }, { reason: "penalty", delta_minutes: -4 }],
+    });
+    expect(said).toContain("A missed booking was settled: 15 minutes refunded and 4 minutes charged as a no-show penalty, so 11 minutes came back to your wallet.");
+    expect(said).not.toMatch(/The club added/);
+    // Not green: a penalty was taken, whatever the net.
+    expect(document.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("info");
+  });
+
+  it("an older API's frame is worded by its sign: a negative refund is not 'put back', a mixed net is not 'the club'", async () => {
+    expect(await toastFor({ delta_minutes: -15, reason: "cancellation_refund" })).toContain("15 minutes of a refund were taken back.");
+    signOut(); localStorage.clear(); document.body.innerHTML = "";
+    const mixed = await toastFor({ delta_minutes: 11, reason: "mixed" });
+    expect(mixed).toContain("Your wallet went up by 11 minutes.");
+    expect(mixed).not.toMatch(/The club added/);
+  });
+});
