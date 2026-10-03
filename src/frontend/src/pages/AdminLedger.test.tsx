@@ -207,7 +207,8 @@ describe("Admin ledger — the totals are signed by their value, not by their la
    * The four figures above the table, in document order: movements, minutes in, minutes out,
    * net — as the eye reads them (`<Minutes>` pairs the compact form with a spoken one).
    */
-  const shown = (p: Element) => (p.querySelector("[aria-hidden='true']") ?? p).textContent ?? "";
+  // Each number is bound to its unit by a no-break space (R8 L8-7; the wrap is held in e2e/admin-r8-fc).
+  const shown = (p: Element) => ((p.querySelector("[aria-hidden='true']") ?? p).textContent ?? "").replace(/\u00a0/g, " ");
   const totals = () => [...document.querySelectorAll("[data-ledger-total]")].map(shown);
 
   /** The same four, as `{ text, className }` — because the colour is the sign said again. */
@@ -368,7 +369,7 @@ describe("Admin ledger — totals over the whole range, page by page", () => {
     id: `r${n}`, comment: `Charge ${n}`, signedAmountMinutes: -10, amountMinutes: 10,
   });
   const totalsShown = () => Array.from(document.querySelectorAll("[data-ledger-total]"))
-    .map((el) => (el.querySelector("[aria-hidden='true']") ?? el).textContent);
+    .map((el) => (el.querySelector("[aria-hidden='true']") ?? el).textContent?.replace(/\u00a0/g, " "));
 
   it("shows the server's totals for the whole range, and the rows a page at a time", async () => {
     rememberClubZone("Africa/Johannesburg");

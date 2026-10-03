@@ -76,7 +76,8 @@ export function MemberDoors() {
         />
         <Button
           variant="outline"
-          className="sm:ml-auto"
+          // R8 L8-6: wraps rather than push a 320 phone sideways at 200 % text.
+          className="max-w-full whitespace-normal sm:ml-auto"
           onClick={() => void download.run()}
           pending={download.pending}
           icon={<DownloadSimple aria-hidden="true" />}

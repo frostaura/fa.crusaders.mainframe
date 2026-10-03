@@ -8,7 +8,7 @@ import {
 import { clubDayRange, clubToday } from "../lib/clubDay";
 import { clubZoneIsKnown } from "../lib/clubZone";
 import { cn } from "../lib/utils";
-import { Minutes } from "../components/Minutes";
+import { KeptMinutes } from "../components/members/KeptMinutes";
 import { LedgerTable } from "../components/LedgerTable";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { Badge } from "../components/ui/badge";
@@ -252,7 +252,8 @@ function shownTotals(range: Totals | null, filtered: LedgerRow[], query: string,
 
 /** The four totals (R4 carry-over), or why there are none. */
 function LedgerTotals({ totals, loading, searching }: { totals: Totals | null; loading: boolean; searching: boolean }) {
-  // Every signed figure through the signed minutes formatter (`<Minutes signed>`), never a
+  // Every signed figure through the signed minutes formatter (`<KeptMinutes signed>`, units bound
+  // to their numbers — R8 L8-7), never a
   // sign composed around an unsigned one.
   //
   // These two once read "+" + figure and "−" + figure, so the sign was decided by which tile
@@ -278,9 +279,9 @@ function tilesOf(totals: Totals | null): Array<{ label: string; value: ReactNode
   if (!totals) return labels.map((label) => ({ label, value: null }));
   return [
     { label: LEDGER_TOTALS.count, value: String(totals.count) },
-    { label: LEDGER_TOTALS.in, value: <Minutes value={totals.in_minutes} signed />, tone: toneOf(totals.in_minutes) },
-    { label: LEDGER_TOTALS.out, value: <Minutes value={-totals.out_minutes} signed />, tone: toneOf(-totals.out_minutes) },
-    { label: LEDGER_TOTALS.net, value: <Minutes value={totals.net_minutes} signed />, tone: toneOf(totals.net_minutes) },
+    { label: LEDGER_TOTALS.in, value: <KeptMinutes value={totals.in_minutes} signed />, tone: toneOf(totals.in_minutes) },
+    { label: LEDGER_TOTALS.out, value: <KeptMinutes value={-totals.out_minutes} signed />, tone: toneOf(-totals.out_minutes) },
+    { label: LEDGER_TOTALS.net, value: <KeptMinutes value={totals.net_minutes} signed />, tone: toneOf(totals.net_minutes) },
   ];
 }
 
@@ -466,7 +467,8 @@ function ShowMore({ read }: { read: ReturnType<typeof useLedgerRead> }) {
   return (
     <div className="flex flex-col items-center gap-2 border-t border-border p-4">
       {read.more.error ? <p role="alert" className="text-sm text-danger-strong">{describeFailure(read.more.error, { action: "read more movements" })}</p> : null}
-      <Button variant="outline" pending={read.more.pending} onClick={() => void read.loadMore()}>Show more movements</Button>
+      {/* R8 L8-6: a nowrap label ran 31px off a 320 phone at 200 % text; it wraps inside the screen. */}
+      <Button variant="outline" className="max-w-full whitespace-normal" pending={read.more.pending} onClick={() => void read.loadMore()}>Show more movements</Button>
     </div>
   );
 }

@@ -124,7 +124,8 @@ export function GroupCard(props: {
         <Button variant="outline" onClick={props.onMembers} icon={<Users aria-hidden="true" />}>
           {GROUP_ACTIONS.members}{" "}<span className="sr-only">{`of ${group.name}`}</span>
         </Button>
-        <Button variant="outline" onClick={props.onPreview} icon={<CalendarDots aria-hidden="true" />}>
+        {/* R8 L8-6: nowrap, the label pushed a 320 phone sideways at 200 % text. */}
+        <Button variant="outline" className="max-w-full whitespace-normal" onClick={props.onPreview} icon={<CalendarDots aria-hidden="true" />}>
           {GROUP_ACTIONS.preview}{" "}<span className="sr-only">{`for ${group.name}`}</span>
         </Button>
       </CardFooter>

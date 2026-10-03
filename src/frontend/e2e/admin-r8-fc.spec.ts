@@ -147,3 +147,101 @@ test.describe("L8-1 — a member's booking row never squeezes its text to a few 
     });
   }
 });
+
+/* ───────────────────────────── L8-6 / L8-7 nowrap buttons and split totals at 320 / 200 % ───────────────────────────── */
+
+/**
+ * A label painted past its own button. Measured on the label layer, not the button's scrollWidth:
+ * the hidden pending spinner overflows every button by a few px and is never seen (gotchas-frontend-layout).
+ */
+function labelSpills(button: Locator): Promise<boolean> {
+  return button.evaluate((el) => {
+    const label = el.querySelector("[data-slot='button-label']") ?? el;
+    const own = el.getBoundingClientRect();
+    const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement?.closest(".sr-only")) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      if ([...range.getClientRects()].some((r) => r.width > 0 && (r.right > own.right + 1 || r.left < own.left - 1))) return true;
+    }
+    return false;
+  });
+}
+
+const ledgerRow = (id: string, signed: number) => ({
+  id, at: "2026-01-15T10:00:00Z", from: "Club treasury", to: "Paul Partner", amountMinutes: Math.abs(signed),
+  signedAmountMinutes: signed, type: "AdminTopUp", comment: null, subjectUserId: USER, subjectName: "Paul Partner",
+  actorUserId: USER, actorName: "Paul Partner", relatedBookingId: null,
+});
+
+const doorRow = (overrides: Record<string, unknown> = {}) => ({
+  at: "2026-09-22T16:02:00Z", delivered_at: null, time_uncertain: false, action: "gate.released", outcome: "released",
+  reason: null, reason_text: "Opened — a live booking", offline: false, method: "qr", fingerprint: null,
+  door: { id: "d1", name: "Front door", gate_key: "front", removed: false }, ...overrides,
+});
+
+const doorsPage = (items: unknown[]) => ({
+  member: { user_id: USER, name: "Paul Partner" }, items, next_cursor: null, total: items.length,
+  range: { from: "2026-09-16T00:00:00+02:00", to: "2026-09-23T10:00:00+02:00" }, timezone: "Africa/Johannesburg", retention_days: 90,
+});
+
+const groupRow = (id: string, name: string) => ({
+  id, name, description: null, status: "active", sort_order: 0, is_system_default: false,
+  caps: { max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null },
+  windows: [], member_count: 3, system_key: null, package_discount_bps: null, peak_priority: null,
+});
+
+test.describe("L8-6 — a button's label wraps inside the screen at 320 / 200 %", () => {
+  test("Transactions: Show more movements", async ({ page }) => {
+    await open(page, "/admin/ledger?from=2026-01-01&to=2026-01-31", adminRoutes([
+      { path: "/api/v1/admin/ledger/", body: { items: [ledgerRow("1", 60)], next_cursor: "c-2",
+        totals: { count: 2, in_minutes: 120, out_minutes: 0, net_minutes: 120 } } },
+    ]), 320, 700);
+    const more = page.getByRole("button", { name: "Show more movements" });
+    await expect(more).toBeVisible({ timeout: 30_000 });
+    await big(page);
+    expect(await labelSpills(more)).toBe(false);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+
+  test("Groups: Preview week", async ({ page }) => {
+    await open(page, "/admin/groups", adminRoutes([
+      { path: "/api/v1/admin/member-groups", body: { groups: [groupRow("g-1", "Social evenings")] } },
+      { path: "/api/v1/admin/packages", body: { packages: [] } },
+    ]), 320, 700);
+    const preview = page.getByRole("button", { name: /Preview week/ }).first();
+    await expect(preview).toBeVisible({ timeout: 30_000 });
+    await big(page);
+    expect(await labelSpills(preview)).toBe(false);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+
+  test("Door history: Download CSV", async ({ page }) => {
+    await open(page, `/admin/members/${USER}/doors`, adminRoutes([
+      { path: `/api/v1/admin/members/${USER}/doors`, body: doorsPage([doorRow()]) },
+      { path: `/api/v1/admin/members/${USER}`, body: memberDetail() },
+    ]), 320, 700);
+    const csv = page.getByRole("button", { name: /Download CSV/ });
+    await expect(csv).toBeVisible({ timeout: 30_000 });
+    await big(page);
+    expect(await labelSpills(csv)).toBe(false);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("L8-7 — the Transactions totals never split a number from its unit", () => {
+  for (const width of [320, 390]) {
+    test(`at ${width} / 200 %`, async ({ page }) => {
+      const long = 18 * 1440 + 3 * 60 + 2;
+      await open(page, "/admin/ledger?from=2026-01-01&to=2026-01-31", adminRoutes([
+        { path: "/api/v1/admin/ledger/", body: { items: [ledgerRow("1", long)], next_cursor: null,
+          totals: { count: 1, in_minutes: long, out_minutes: long, net_minutes: -long } } },
+      ]), width, 700);
+      const totals = page.locator("[data-ledger-total]");
+      await expect(totals.nth(3)).toBeVisible({ timeout: 30_000 });
+      await big(page);
+      for (let i = 1; i < 4; i++) expect(await splitFigures(totals.nth(i)), `total ${i}`).toEqual([]);
+    });
+  }
+});
