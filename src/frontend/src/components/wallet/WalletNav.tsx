@@ -13,9 +13,11 @@ import { cn } from "@/lib/utils";
  * </p>
  */
 // F4-7: `h-auto min-h-touch whitespace-normal py-2` (the design system's rule for labels that must
-// wrap) and a gutter that gives way — at 200 % text "Overview | Activity" overflowed the screen.
+// wrap) — at 200 % text "Overview | Activity" overflowed the screen. R10 L10-6: a segment no longer
+// SHRINKS below its word and padding (`min-w-0` let "Overview" run into the pill's edge at 320 /
+// 200 %); the bar wraps instead, each segment growing to fill its row.
 const SEGMENT = cn(
-  "no-lift inline-flex min-h-touch min-w-0 items-center justify-center rounded-md border border-transparent px-3 py-2 text-center whitespace-normal sm:px-4",
+  "no-lift inline-flex min-h-touch grow items-center justify-center rounded-md border border-transparent px-3 py-2 text-center whitespace-normal sm:px-4",
   "text-sm font-semibold text-text-secondary transition-colors duration-fast ease-standard motion-reduce:transition-none",
   "hover:text-text-primary focus-visible:-outline-offset-2",
 );
@@ -33,7 +35,7 @@ const VIEWS = [
 
 export function WalletNav() {
   return (
-    <nav aria-label="Wallet views" className="-mb-2 inline-flex w-fit max-w-full items-center gap-1 self-start rounded-lg bg-bg-muted p-1">
+    <nav aria-label="Wallet views" className="-mb-2 inline-flex w-fit max-w-full flex-wrap items-center gap-1 self-start rounded-lg bg-bg-muted p-1">
       {VIEWS.map((view) => (
         <NavLink key={view.to} to={view.to} end={view.end} className={({ isActive }) => cn(SEGMENT, isActive && ACTIVE)}>
           {view.label}

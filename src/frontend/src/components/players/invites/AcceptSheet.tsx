@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useMemo, useRef } from "react";
 import { SendingNote } from "@/components/bookings/SheetParts";
+import { useShortSheet } from "./useShortSheet";
 import { useSendingGuard } from "@/components/bookings/useSendingGuard";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,7 +88,10 @@ function SheetInner(props: InnerProps) {
     asked.current = true;
     flow.decline();
   }, [startWith, flow]);
-  const dismiss = (
+  // R10 L10-6 — on a window short for its text (320×640 at 200 %) Cancel only repeats the ×, and
+  // its row was the difference between reading the share and not: it goes until the answer is in.
+  const short = useShortSheet();
+  const dismiss = short && !flow.outcome ? null : (
     <DialogClose asChild>
       <Button variant="outline">{flow.outcome ? INVITES_COPY.done : INVITES_COPY.cancel}</Button>
     </DialogClose>
