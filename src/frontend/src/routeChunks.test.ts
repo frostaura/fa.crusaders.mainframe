@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  clearNavigationPending, isNavigationPending, markNavigationPending, noteChunk, prefetchNavChunks, preloadAtSessionCheck,
-  preloadRouteChunk, routeChunks,
+  clearNavigationPending, isNavigationPending, markNavigationPending, noteChunk, noteCodeAsked, prefetchNavChunks, preloadAtSessionCheck,
+  preloadRouteChunk, routeChunks, whenCodeAsked,
 } from "./routeChunks";
 
 /** Perf lane (2026-09-30) — a page's code fetched before it is opened, as a hint and nothing more. */
@@ -105,6 +105,43 @@ describe("preloadAtSessionCheck — the opened page, then Bookings once the page
     const q = held();
     expect(preloadAtSessionCheck("/wallet", q.quiet)).toBe(true);
     expect(spies.wallet).toHaveBeenCalledTimes(1);
+    expect(spies.schedule).not.toHaveBeenCalled();
+    await q.release();
+    expect(spies.schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("from My Code, asks for Bookings' code once the code's own read is SENT, not once every read settles (X6-3)", async () => {
+    // Review round 6: tapped as the code showed, a first-session Bookings took 1.6 s on the slow
+    // profile because its ~30 files started only at the tap — My Code's other reads (the chip, the
+    // passkey list) were still out, so the quiet signal came after the member had already moved on.
+    const spies = watch();
+    const q = held();
+    const asked = held();
+    expect(preloadAtSessionCheck("/my-code", q.quiet, "", asked.quiet)).toBe(true);
+    expect(spies.schedule, "never before the code's own read is on its way").not.toHaveBeenCalled();
+    await asked.release();
+    expect(spies.schedule).toHaveBeenCalledTimes(1);
+    await q.release();
+    expect(spies.schedule, "asked for once, whichever signal came first").toHaveBeenCalledTimes(1);
+  });
+
+  it("the code's read going out is said once, a task after it was sent", async () => {
+    let seen = 0;
+    void whenCodeAsked().then(() => { seen += 1; });
+    noteCodeAsked();
+    noteCodeAsked();
+    await Promise.resolve();
+    expect(seen, "not before the request has left").toBe(0);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen).toBe(1);
+  });
+
+  it("anywhere but My Code, still waits for the opened page's reads to settle", async () => {
+    const spies = watch();
+    const q = held();
+    const asked = held();
+    preloadAtSessionCheck("/wallet", q.quiet, "", asked.quiet);
+    await asked.release();
     expect(spies.schedule).not.toHaveBeenCalled();
     await q.release();
     expect(spies.schedule).toHaveBeenCalledTimes(1);

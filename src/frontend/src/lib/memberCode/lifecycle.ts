@@ -3,6 +3,7 @@ import { assertKnownZone, STEP_MS } from "./clubDay";
 import { fromBase64Url, importHmacKey } from "./hotp";
 import { loadMemberCode, saveMemberCode, wipeMemberCode, type MemberCodeRecord } from "./keyStore";
 import { isCanonicalRef } from "./token";
+import { noteCodeAsked } from "../../routeChunks";
 
 /**
  * Enrol, refresh, re-enrol — the phone's half of `docs/specs/member-code.md` §10.
@@ -85,7 +86,10 @@ async function importSecret(secret: string): Promise<CryptoKey> {
 /** `POST /me/code/enrol` → a stored, non-extractable key. */
 export async function enrol(userId: string): Promise<MemberCodeRecord> {
   const sentAt = Date.now();
-  const e = await endpoints.meCodeEnrol();
+  const asked = endpoints.meCodeEnrol();
+  // X6-3 — the door page's one read is on its way: Bookings' code may start behind it now.
+  noteCodeAsked();
+  const e = await asked;
   const receivedAt = Date.now();
   checkEnrolment(e);
   const record: MemberCodeRecord = {

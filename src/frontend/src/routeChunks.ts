@@ -72,8 +72,19 @@ function hint(name: ChunkName) {
  * beside them; Wallet and Profile follow (`prefetchNavChunks`). Returns whether anything was
  * asked for.
  * </p>
+ *
+ * <p>
+ * <b>From My Code, once the code's own read is on its way (R6 X6-3).</b> "Settled" came too late
+ * there: the chip's and the passkey list's reads were still out when the code showed, so a member
+ * tapping Bookings at once fetched its ~30 files only at the tap (first session, slow profile:
+ * p50 1.6 s). The code's read is the one thing the door page waits on, and once it has a socket the
+ * files queue behind it, not in front of it — the code paints no later (A/B in `decisions-frontend-bundle`).
+ * Whichever signal comes first asks, once.
+ * </p>
  */
-export function preloadAtSessionCheck(pathname: string, quiet: () => Promise<void> = whenApiQuiet, search = ""): boolean {
+export function preloadAtSessionCheck(
+  pathname: string, quiet: () => Promise<void> = whenApiQuiet, search = "", codeAsked: () => Promise<void> = whenCodeAsked,
+): boolean {
   if (!worthFetching()) return false;
   // The desk's console is its own chunk; a desk page is not where Bookings is the next tap.
   if (/^\/admin(\/|$)/.test(pathname)) return preloadRouteChunk(pathname);
@@ -86,8 +97,30 @@ export function preloadAtSessionCheck(pathname: string, quiet: () => Promise<voi
   // Not beside the opened page's code and reads, but once they have settled: measured, asking for
   // Bookings' ~30 files beside the session check made a cold My Code — the page a member opens at
   // a locked door — 0.9 s slower (see `whenApiQuiet`).
-  void quiet().then(() => { if (worthFetching()) hint("schedule"); });
+  const ready = MY_CODE.test(pathname) ? Promise.race([quiet(), codeAsked()]) : quiet();
+  void ready.then(() => { if (worthFetching()) hint("schedule"); });
   return true;
+}
+
+const MY_CODE = /^\/my-code\/?$/;
+
+let codeAskedNow: (() => void) | null = null;
+const codeAskedOnce = new Promise<void>((resolve) => { codeAskedNow = resolve; });
+
+/**
+ * X6-3 — the member code's own read has been SENT (`lib/memberCode/lifecycle` calls it as the
+ * enrolment goes out). Released a task later, so the request has left before any file queues
+ * behind it. Only a signal: what it unblocks is a hint, and a later call is a no-op.
+ */
+export function noteCodeAsked(): void {
+  const release = codeAskedNow;
+  codeAskedNow = null;
+  if (release) setTimeout(release, 0);
+}
+
+/** Resolves once {@link noteCodeAsked} has been called in this page's life. */
+export function whenCodeAsked(): Promise<void> {
+  return codeAskedOnce;
 }
 
 /** Start fetching the code of the page at `pathname`, if it is one of these. Returns whether it did. */
