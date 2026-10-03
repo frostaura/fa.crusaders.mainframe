@@ -182,7 +182,7 @@ test.describe("L7-4 — the Book sheet's money figures keep number and unit toge
           const text = fig.textContent ?? "";
           const node = fig.firstChild;
           let at = 0;
-          for (const word of text.split(/[  ]/)) {
+          for (const word of text.split(/[ \u00A0]/)) {
             const r = document.createRange();
             r.setStart(node, at); r.setEnd(node, at + word.length);
             const top = Math.round(r.getBoundingClientRect().top);
