@@ -20,16 +20,17 @@ last_verified: 2026-10-03
   The Overview's quick-link cards overflowed a phone at 200 % text with only `grid gap-3`.
 - **200 % text in e2e is `html { font-size: 32px }`** after navigation; rem floors (`min-w-48`),
   rem bases and fixed two-column grids are what break there — Tailwind's `sm` is still 640 CSS px.
-- **A save-bar "covers the field" test must put the field where the bar grows over it**: a filtered,
-  short settings page cannot scroll there, so shorten the viewport instead (a resize is also what
-  makes the bar re-measure). Seen green on the broken code until it did.
+- **A save-bar "covers the field" test must put the field where the bar grows over it**: shorten the
+  viewport (a filtered page cannot scroll there; a resize also re-measures the bar).
 - **For 200 % text, measure the COMPONENT in rem, not the viewport** (R4, lane F2):
   `[container-type:inline-size]` on a wrapper and `[@container(min-width:17rem)]:…` variants follow
   the text size, where `sm:` (640 CSS px) never does. Inbox rows, Profile stats and badges use it.
   Give each width range ONE rule (`_and_(max-width:…)`): two container variants that set the same
   property compete by stylesheet order. Write every class whole — `${WIDE}:col-span-1` built
   from parts is never seen by Tailwind's scanner and emits nothing. R7: `@[16rem]/x:` (plugin) is emitted BEFORE `sm:`, so it never beats a viewport rule — write base-small + `@[…]:` grow and leave `sm:` alone; gutters that must not grow with text are `min(rem,px)` constants in `ui/layout.ts`.
-- **A rem-sized badge dot on a px glyph hides it at 200 %** (a 24px dot over a 20px icon).
+- **A rem-sized badge dot on a px glyph hides it at 200 %** (a 24px dot over a 20px icon). R8: a
+  `min-h-*` on a flex-COLUMN child replaces `min-height:auto`, so it SHRINKS to that floor (a 2-line
+  dialog title cut to 64px) — give the rows `shrink-0` when the box should scroll instead.
 - **A figure beside a name wraps UNDER it, not squeezes it**: `flex flex-wrap justify-between`
   with `ml-auto` on the figure; a `shrink-0` figure broke names mid-word ("Bon/gani").
 - **A `min-width` beats a `max-width`** (R4, X4-2): `min-w-48` is 384 px at 200 % text and ran
@@ -39,8 +40,7 @@ last_verified: 2026-10-03
   padding (a fixed 44 px box around a 48 px line cut the text). Only a `block` Button wraps; others
   stay `nowrap` (a `shrink-0` + wrap attempt broke callers that opt in with `whitespace-normal`).
   A `Field` is `grid-cols-1` — its implicit column let a password wrapper push the field 36 px out.
-- **Never let a chrome BOX grow with the text** (`app-chrome` B12, +45 px max): padding the bell
-  for its badge grew the top bar 99 px; cap the badge (`min(1.25rem, 28px)`) instead.
+- **Never let a chrome BOX grow with the text** (B12): a padded bell grew the bar 99 px; cap the badge.
 - **A negative margin that grows a target must use `lh`, not rem**: `-my-3` pulled the field
   24 px under "Forgot password?" at 200 %; `min(0px, calc((1lh - 44px) / 2))` is ~0 there.
 - **Measure "clipped label" on the `button-label` layer**, not scrollWidth: the hidden pending

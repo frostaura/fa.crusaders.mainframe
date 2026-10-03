@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-offline-shell
 description: "Worker per build (stamped id, caches named for it, last build pruned), document no-cache, a stalled navigation served the shell at 2 s, endings keep the shell, header kept while whoami is out."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Live decisions — the offline shell across deploys (review round 4, lane F4)
@@ -46,4 +46,8 @@ The worker still caches NO member data (`public/sw.js` header, `offline-shell` a
 - **The header's bell, chip and account menu render for the member this phone confirmed while
   `whoami` is out** (P5-6, `useDataOwner` like the tab bar); the chip draws the kept wallet read
   ("Last known at HH:MM"), never re-asked while the check is out. **Why:** Sign out was unreachable.
+- **R8: a session the club could not confirm right now keeps the chrome even unconfirmed** (status
+  `offline` + a token: busy 429 on a fresh phone kept only the crest); no Admin tab unconfirmed. The
+  chip with nothing kept and the check answered says "unavailable" (+ "You're offline" when
+  unreachable), never "loading" for ever (X8-2, `chipBalance` `none`).
 
