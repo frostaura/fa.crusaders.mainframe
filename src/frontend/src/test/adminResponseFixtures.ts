@@ -360,7 +360,8 @@ export function fingerprintEnrolment(): FingerprintEnrolment {
 
 export function memberBookingRow(): MemberBookingRow {
   return {
-    booking_id: ID, court_id: ID, court_name: "Court 1", starts_at: AT, ends_at: AT, status: "booked", charged_minutes: 8,
+    booking_id: ID, court_id: ID, court_name: "Court 1", starts_at: AT, ends_at: AT, sold_ends_at: AT, status: "booked",
+    charged_minutes: 8, cost_minutes: 8,
     checked_in_at: null, cancelled_at: null, booked_by: memberBookingActor(), role: "organiser", organiser: memberBookingActor(),
   };
 }

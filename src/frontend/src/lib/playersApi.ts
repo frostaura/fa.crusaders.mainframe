@@ -170,7 +170,13 @@ export type BookingDetail = {
      */
     refunded_minutes?: number;
     penalty_minutes?: number;
+    /** R6 E6-2 — whoever took the charge over at the court box (D10); null when the organiser paid. */
+    paid_by?: { user_id: string; name: string | null; photo_url: string | null } | null;
+    /** R6 E6-2 — what they paid; 0 when nobody did. */
+    paid_by_minutes?: number;
   };
+  /** R6 E6-6 — a no-show refunded in full because no box was reachable; not held against the member. */
+  refunded_for_outage?: boolean;
   attendance: { checked_in_at: string | null; players_checked_in: number };
   permissions: {
     can_invite: boolean;

@@ -38,7 +38,8 @@ export type MembershipStatus = "PendingApproval" | "Active" | "Rejected" | "Susp
  */
 export type AdminSource = "config" | "granted";
 
-export type BookingRowStatus = "booked" | "cancelled" | "noshow" | "completed";
+/** R6 E6-6: `refunded_outage` is a no-show refunded in full because no box was reachable — not a no-show. */
+export type BookingRowStatus = "booked" | "cancelled" | "noshow" | "completed" | "refunded_outage";
 
 /** One booking as every member-detail surface prints it (next bookings and each bookings page). */
 export type MemberBookingRow = {
@@ -47,8 +48,12 @@ export type MemberBookingRow = {
   court_name: string | null;
   starts_at: string;
   ends_at: string;
+  /** R6 E6-10: the end it was sold to — `ends_at` is cut short by the no-show sweep. Absent from an older API: read `ends_at`. */
+  sold_ends_at?: string;
   status: BookingRowStatus;
   charged_minutes: number;
+  /** R6 E6-10: what this member is out on it, net of refunds, penalties and shares. Absent: read `charged_minutes`. */
+  cost_minutes?: number;
   checked_in_at: string | null;
   cancelled_at: string | null;
   /**

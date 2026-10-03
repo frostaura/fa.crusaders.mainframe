@@ -160,11 +160,16 @@ public sealed class RepositoryPostureTests
                 var head = starters.Max(s => source.LastIndexOf(s, call.Index, StringComparison.Ordinal));
                 var start = head > 0 ? head : Math.Max(0, call.Index - 1200);
                 var end = Math.Min(source.Length, call.Index + 700);
-                foreach (Match hit in literal.Matches(source[start..end]))
+                // *Events constants count from the emitting method AND every same-file helper it calls
+                // (one level): LedgerService picks the minutes.* name in MirrorTypeOf, outside
+                // MirrorAsync, and the six names it chooses read as never emitted (round 6, E6-11).
+                // Literals only from the method itself: a helper's strings include audit actions.
+                var own = source[start..end];
+                foreach (Match hit in literal.Matches(own))
                 {
                     types.Add(hit.Groups["type"].Value);
                 }
-                foreach (Match hit in constant.Matches(source[start..end]))
+                foreach (Match hit in constant.Matches(own + HelpersCalledIn(source, own, starters)))
                 {
                     var key = $"{hit.Groups["cls"].Value}.{hit.Groups["name"].Value}";
                     Assert.True(named.TryGetValue(key, out var type) || hit.Groups["name"].Value == "All",
@@ -174,6 +179,26 @@ public sealed class RepositoryPostureTests
             }
         }
         return types;
+    }
+
+    /// <summary>
+    /// The bodies of the same-file methods that <paramref name="window"/> calls, so an event name
+    /// chosen in a helper (a switch on the row's type) counts as emitted by the method that emits it.
+    /// </summary>
+    private static string HelpersCalledIn(string source, string window, string[] starters)
+    {
+        var bodies = new System.Text.StringBuilder();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match call in Regex.Matches(window, @"\b(?<m>[A-Z]\w*)\("))
+        {
+            var name = call.Groups["m"].Value;
+            if (!seen.Add(name)) continue;
+            var decl = Regex.Match(source, $@"\n    (?:private|public|internal|protected)[^\n(]*\b{name}\(");
+            if (!decl.Success) continue;
+            var next = starters.Select(s => source.IndexOf(s, decl.Index + 1, StringComparison.Ordinal)).Where(i => i > 0).DefaultIfEmpty(source.Length).Min();
+            bodies.Append(source[decl.Index..next]);
+        }
+        return bodies.ToString();
     }
 
     /// <summary><c>Class.Name</c> → value, for every <c>const string</c> event name in a <c>static class *Events</c>.</summary>
