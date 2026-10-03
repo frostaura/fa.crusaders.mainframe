@@ -1,5 +1,4 @@
 import { GATE_ROSTER_MAX_ENTRIES } from "./gateCopy";
-import { formatCountdown } from "./countdown";
 // O1 — ONE clock formatter for the whole product. This module used to reach for
 // `countdown.formatClock`, which formats in the VIEWER's zone; the admin surfaces used
 // `clubClock`, which formats in the club's. A member abroad and the admin reading the same
@@ -177,6 +176,10 @@ export const MEMBER_DOOR_REASON_LINES: Record<string, string> = {
   // Ruling 15. Deliberately not "not active": there is nothing to reactivate. The club has
   // never recorded a membership for this person, and the fix is somebody adding one.
   no_membership: "The club had no membership on file for you.",
+  // R10 E10-4: the club's "code already used" (the Night, the Doors log) — a code acts once at
+  // a door; the next one on My Code, half a minute on, works. Never the raw token, never only
+  // "Turned away".
+  code_used: "Your code had already been used, and a code opens a door once. The next code on My Code works.",
 };
 
 // --- club contact ------------------------------------------------------------------
@@ -599,6 +602,17 @@ function armNotRecognised(): Arm {
   };
 }
 
+/** R10 E10-4 — the club's "code already used": a code acts once at a door, and the next one works. */
+function armCodeUsed(): Arm {
+  return {
+    tone: "warning",
+    headline: "That code had already been used.",
+    body: "A code opens a door once, so a second scan of the same one — or a photo of it — is turned away."
+      + " The next code below works.",
+    wants: ["refresh_the_code"],
+  };
+}
+
 function armBoardFault(): Arm {
   return {
     tone: "danger",
@@ -650,6 +664,7 @@ const ARMS: Record<string, (ctx: DecisionContext) => Arm> = {
   member_not_active: armNotActive,
   no_membership: armNoMembership,
   not_recognised: armNotRecognised,
+  code_used: armCodeUsed,
   method_not_supported: armBoardFault,
   not_a_gate: armBoardFault,
 };
@@ -1760,10 +1775,10 @@ function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
 
   return [
     ...standing,
-    // Through the shared formatter, not `${seconds}s`: a booking code has a quarter of an
-    // hour on it and "fresh, 900s left" is a number nobody reads as fifteen minutes.
+    // In words, not `${seconds}s` and not the ticking "15m 00s" (R10): this row is read as a
+    // sentence, eye and ear alike, and a quarter of an hour is "15 minutes".
     row("code", input.codeSecondsLeft > 0 ? "passed" : "failed",
-      input.codeSecondsLeft > 0 ? `fresh, ${formatCountdown(input.codeSecondsLeft)} left` : "had run out"),
+      input.codeSecondsLeft > 0 ? `fresh, ${spokenCountdown(input.codeSecondsLeft)} left` : "had run out"),
     connectionRow(input),
   ];
 }
@@ -2087,6 +2102,7 @@ const CHIP_LABELS: Record<string, string> = {
   method_not_supported: "Door misconfigured",
   not_a_gate: "Door misconfigured",
   no_membership: "No membership on file",
+  code_used: "Code already used",
 };
 
 const CHIP_TONES: Record<string, ChipTone> = {
@@ -2097,6 +2113,7 @@ const CHIP_TONES: Record<string, ChipTone> = {
   method_not_supported: "danger",
   not_a_gate: "danger",
   no_membership: "danger",
+  code_used: "warning",
 };
 
 /**
@@ -2140,4 +2157,34 @@ export const CLUB_TIME_NOTE = "Times are the club's own.";
 export function historyRetention(days: number | null): string {
   if (days === null || days <= 0) return "The club hasn't set how long it keeps these.";
   return `The club keeps these for ${days} days, then deletes them.`;
+}
+
+/**
+ * <b>It said "572 minutes" beside a visible "9h 32m", and D-L5 is that gap.</b>
+ *
+ * <p>
+ * The two lines are the SAME sentence — one for the eye, one for the live region — and a
+ * screen-reader user reading over somebody's shoulder, or a member who has both on, was
+ * handed two different answers to "when does the door open for me". Ten hours expressed as
+ * a count of minutes is also not a unit anybody converts standing in a doorway, which is the
+ * argument `formatCountdown` already makes about a quarter of an hour.
+ * </p>
+ *
+ * <p>
+ * So it carries hours where `formatCountdown` carries hours, and it rounds the same way it
+ * does — DOWN, by truncation, because "the door opens in 10 hours" said nine and a half
+ * hours beforehand is a sentence that sends somebody home an hour early. Under a minute it
+ * still says so in words rather than counting.
+ * </p>
+ */
+export function spokenCountdown(seconds: number): string {
+  if (seconds <= 0) return "now";
+  if (seconds < 60) return "less than a minute";
+  const totalMinutes = Math.floor(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const minutePart = minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  if (hours === 0) return minutePart;
+  const hourPart = hours === 1 ? "1 hour" : `${hours} hours`;
+  return minutes === 0 ? hourPart : `${hourPart} ${minutePart}`;
 }

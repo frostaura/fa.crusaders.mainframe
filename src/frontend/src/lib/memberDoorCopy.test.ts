@@ -706,11 +706,16 @@ describe("memberDoorCopy", () => {
     expect(flat(conclusion)).toMatch(/everything else/i);
   });
 
-  /** Through the shared formatter: "fresh, 900s left" is not a number anybody reads. */
-  it("says how long a code has left in minutes and seconds, not in raw seconds", () => {
-    const { rows } = buildDiagnosis({ ...HEALTHY, codeSecondsLeft: 900 });
-    const code = rows.find((r) => r.key === "code")!;
-    expect(code.value).toBe("fresh, 15m 00s left");
+  /**
+   * R10: in words — the row is read as a sentence, eye and ear alike. "fresh, 900s left" and the
+   * ticking "fresh, 15m 00s left" were both a figure where a sentence stands.
+   */
+  it("R10 says how long a code has left in spoken minutes, not raw seconds or a ticking figure", () => {
+    const code = (s: number) => buildDiagnosis({ ...HEALTHY, codeSecondsLeft: s }).rows.find((r) => r.key === "code")!.value;
+    expect(code(900)).toBe("fresh, 15 minutes left");
+    expect(code(14 * 60 + 32)).toBe("fresh, 14 minutes left");
+    expect(code(45)).toBe("fresh, less than a minute left");
+    expect(code(900)).not.toMatch(/\d+\s*(m|s|min)\b/);
   });
 
   it("tells a member whose code had run out that there is a fresh one", () => {
@@ -726,6 +731,19 @@ describe("memberDoorCopy", () => {
   });
 
   // --- the history card -------------------------------------------------------------
+
+  /**
+   * R10 E10-4: the gate's `code_used` reads in the club's "code already used" family — a chip
+   * and a line on the member's own history, never a muted "Turned away" with nothing under it.
+   */
+  it("R10 words a code_used refusal as a code already used, with a line and a way on", () => {
+    const row = { reason: "code_used", released: false, offline: false };
+    expect(historyChip(row)).toEqual({ label: "Code already used", tone: "warning" });
+    expect(historyLine(row)).toMatch(/already been used/);
+    const card = describeDecision(row, DECIDED);
+    expect(card.headline).toMatch(/already been used/);
+    expect(JSON.stringify(card)).not.toContain("code_used");
+  });
 
   it("gives every reason a chip and a tone", () => {
     for (const reason of Object.keys(DOOR_REFUSAL_REASONS)) {
