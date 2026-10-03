@@ -22,6 +22,7 @@ import { ASSIGN_COPY, tariffLine } from "@/lib/groupsCopy";
 import type { AdminRoleResult, MemberDetail } from "@/lib/memberDetailApi";
 import { MEMBER_COPY, MEMBER_TABS, STATUS_WORD, statusTone } from "@/lib/memberDetailCopy";
 import { heldLine, owedBackQuoteLine } from "@/lib/playersCopy";
+import { heldPartsLine } from "@/lib/walletCopy";
 import { typography } from "@/lib/typography";
 import { cn } from "@/lib/utils";
 import { useMembersSplit } from "@/components/members/membersSplit";
@@ -335,9 +336,12 @@ function GroupChips({ groups }: { groups: MemberGroupChip[] }) {
 function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) {
   const held = detail.held_minutes ?? 0;
   const owed = detail.owed_back_minutes ?? 0;
+  // R9 J9-2: with two or more share deadlines the total takes no date and each part its own (the Wallet's rule).
+  const parts = heldPartsLine(detail.held_parts, zoneNow());
   return (
     <>
-      {held > 0 ? <dd data-held-line="" className="basis-full text-xs text-text-secondary">{heldLine(held, detail.held_until ?? null, zoneNow())}</dd> : null}
+      {held > 0 ? <dd data-held-line="" className="basis-full text-xs text-text-secondary">{heldLine(held, parts ? null : detail.held_until ?? null, zoneNow())}</dd> : null}
+      {held > 0 && parts ? <dd data-held-parts="" className="basis-full text-xs text-text-secondary">{parts}</dd> : null}
       {owed > 0 ? <dd data-owed-back-line="" className="max-w-xs basis-full text-xs text-text-secondary">{owedBackQuoteLine(owed, name)}</dd> : null}
     </>
   );

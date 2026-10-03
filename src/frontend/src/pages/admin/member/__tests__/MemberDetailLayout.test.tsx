@@ -56,6 +56,19 @@ describe("member detail — header and tabs", () => {
     expect(screen.getByText(owedBackQuoteLine(5, "Thandi Mokoena"))).toBeInTheDocument();
   });
 
+  /** R9 J9-2: "30 minutes held until Tue 6 Oct" while 15 of it stays until Wed — never one date for parts. */
+  it("J9-2 — held minutes with two deadlines: the total takes no date and each part its own", async () => {
+    serve(baseRoutes(detailFixture({
+      balance_minutes: 170, held_minutes: 30, held_until: "2026-10-06T08:00:00Z",
+      held_parts: [{ minutes: 15, until: "2026-10-06T08:00:00Z" }, { minutes: 15, until: "2026-10-07T08:00:00Z" }],
+    })));
+    renderMember();
+    const line = await screen.findByText(/30 minutes held/);
+    expect(line).toHaveTextContent(/^30 minutes held$/);
+    const parts = document.querySelector("[data-held-parts]");
+    expect(parts).toHaveTextContent(/15 minutes until .*6 Oct.* · 15 minutes until .*7 Oct/);
+  });
+
   it("D9 — names the other players on a next booking", async () => {
     serve(baseRoutes(detailFixture(), [{ path: "/api/v1/bookings/b1", body: {
       booking_id: "b1", organiser: { user_id: MEMBER_ID, name: "Thandi Mokoena", photo_url: null },
