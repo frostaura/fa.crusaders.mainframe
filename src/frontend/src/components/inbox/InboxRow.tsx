@@ -106,7 +106,7 @@ function RowBody(props: BodyProps) {
   return (
     <>
       <span aria-hidden="true" className={ICON}>
-        <KindIcon size={20} />
+        <KindIcon size="1.25rem" />
         {unread ? <span data-unread-dot="" className={DOT} /> : null}
       </span>
       <span className={HEAD}>
@@ -124,7 +124,7 @@ function RowBody(props: BodyProps) {
         </time>
       </span>
       {action ? <span className={ACTION}>{action}</span> : null}
-      {trailing ? <CaretRight size={16} weight="bold" aria-hidden="true" className={CARET} /> : null}
+      {trailing ? <CaretRight size="1rem" weight="bold" aria-hidden="true" className={CARET} /> : null}
     </>
   );
 }
