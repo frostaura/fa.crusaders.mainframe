@@ -8,6 +8,7 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { minutesCompact } from "../lib/minutes";
 import { clubCalendarDate } from "@/lib/clubClock";
 import { ChartFrame, type ChartPalette } from "./ChartFrame";
+import { BUCKET_LABELS, givenMinutes } from "./wallet/walletBuckets";
 
 /**
  * The report charts.
@@ -226,7 +227,7 @@ function stackedExtremes(rows: readonly Record<string, unknown>[], stacks: reado
 
 /** Which series share a stack, per chart — mirroring the `stackId`s on the bars below. */
 const CLUB_FLOW_STACKS = [["top_ups_minutes"], ["booking_charges_minutes", "penalties_minutes"]];
-const MEMBER_FLOW_STACKS = [["top_ups_minutes", "refunds_minutes"], ["spent_minutes"]];
+const MEMBER_FLOW_STACKS = [["top_ups_minutes", "given_minutes", "refunds_minutes"], ["spent_minutes"]];
 /** F4-15 — the axis in the club's format ("1 Sep"), not the reader's locale ("Sep 01"). */
 const fmtDate = (d: string) => clubCalendarDate(d, { weekday: false });
 
@@ -341,15 +342,20 @@ export function drawMyBalance(data: DailyMePoint[], c: ChartPalette) {
  * no-show was reversed a day later sees the refund taken back on the day the evidence landed.
  */
 export function drawMyFlow(data: DailyMePoint[], c: ChartPalette) {
+  // R12 J12-1 — Bought is what was paid for: a package the club gave at no charge is drawn as its
+  // own series, "Given by the club" (the totals' and table's word), and only when there was one.
+  const rows = data.map((d) => ({ ...d, top_ups_minutes: d.top_ups_minutes - givenMinutes(d), given_minutes: givenMinutes(d) }));
+  const anyGiven = rows.some((d) => d.given_minutes > 0);
   return (
-    <BarChart data={data} margin={MARGIN} stackOffset="sign">
+    <BarChart data={rows} margin={MARGIN} stackOffset="sign">
       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
       <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
-      <YAxis {...minuteYAxis(stackedExtremes(data, MEMBER_FLOW_STACKS), c)} />
+      <YAxis {...minuteYAxis(stackedExtremes(rows, MEMBER_FLOW_STACKS), c)} />
       <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
       <Tooltip {...tooltipProps(c)} {...minutesTooltip} />
       <Legend {...legendProps(c)} />
-      <Bar dataKey="top_ups_minutes" name="Bought" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="top_ups_minutes" name={BUCKET_LABELS.bought} stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      {anyGiven ? <Bar dataKey="given_minutes" name={BUCKET_LABELS.given} stackId="a" fill={c.info} radius={[3, 3, 0, 0]} /> : null}
       <Bar dataKey="refunds_minutes" name="Refunds (net)" stackId="a" fill={c.successSoft} radius={[3, 3, 0, 0]} />
       <Bar dataKey="spent_minutes" name="Spent" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
     </BarChart>

@@ -137,6 +137,8 @@ function ActivityBody({ data }: { data: WalletActivity }) {
     // R7 E7-7 — signed as the Totals card signs the same figures: the Spent tile read "1 h" above
     // a Totals row reading "−1 h" for the one amount.
     { label: ACTIVITY_COPY.bought, value: <MinutesFigure value={wallet.top_ups_minutes - givenMinutes(wallet)} signed />, tone: "success" },
+    // R12 J12-1 — a package given at no charge has its own tile, beside Bought, when there was one.
+    ...(givenMinutes(wallet) > 0 ? [{ label: BUCKET_LABELS.given, value: <MinutesFigure value={givenMinutes(wallet)} signed />, tone: "success" as const }] : []),
     { label: ACTIVITY_COPY.spent, value: <MinutesFigure value={-wallet.spent_minutes} signed />, tone: "accent" },
     { label: ACTIVITY_COPY.refunds, value: <MinutesFigure value={wallet.refunds_minutes} signed />, tone: "neutral" },
     // Attendance, which nothing in the product showed anywhere — `reporting.md` has promised
