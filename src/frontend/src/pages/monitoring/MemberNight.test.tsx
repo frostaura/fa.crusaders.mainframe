@@ -169,7 +169,7 @@ describe("a person's night", () => {
 
     // Those words: *nothing was recorded* and *nothing happened* are different claims and
     // this product can only ever make the first.
-    expect(await screen.findByText("1h 04m — nothing recorded")).toBeInTheDocument();
+    expect(await screen.findByText("1 hour 4 minutes — nothing recorded")).toBeInTheDocument();
   });
 
   it("marks an approximate time in the time itself, and explains it once", async () => {
@@ -462,6 +462,23 @@ describe("the admin change record", () => {
     expect(stub.calls.some((c) => c.path.includes("cursor=p2"))).toBe(true);
   });
 
+  /** R9 X9-2: the last page takes "Load more" away; focus goes to the first row it brought. */
+  it("hands focus to the first row a Load more brought, never leaving it on <body>", async () => {
+    const second = { ...change, id: "c2", headline: "Reset a member's password — Sam" };
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/changes", body: { rows: [change], total: 2, cursor: "p2", timezone: "Africa/Johannesburg" } },
+      { path: "/api/v1/admin/changes?period=last_7d&cursor=p2", body: { rows: [second], total: 2, cursor: null, timezone: "Africa/Johannesburg" } },
+    ]);
+    renderPage(<AdminChangeRecordPage />);
+    const more = await screen.findByRole("button", { name: CHANGES_PAGE.loadMore });
+    more.focus();
+    fireEvent.click(more);
+    await screen.findByText("Reset a member's password — Sam");
+    await waitFor(() => expect(document.activeElement).toHaveTextContent("Reset a member's password — Sam"));
+    expect(document.activeElement?.tagName).toBe("LI");
+  });
+
   it("labels a setting with the Settings page's caption, never its stored key", async () => {
     stubFetch(changeRoutes([{
       ...change, area: "setting", action: "settings.updated", headline: "Changed the club's settings",
@@ -537,5 +554,81 @@ describe("a night's money column is the viewed member's only (R7 E7-3)", () => {
     const money = document.querySelectorAll("[data-night-money]");
     expect(money).toHaveLength(1);
     expect(money[0]).toHaveTextContent("minus 15 minutes");
+  });
+});
+
+/**
+ * R9 E9-3: three wallet rows inside a minute were folded into "12:13 · 3 in 1m", which hid each
+ * row's amount, the balance it left and who moved it. Money is never grouped.
+ * R9 X9-4: a burst's summary and a gap are said in words a screen reader reads as words.
+ */
+describe("a night's money is never folded into a burst (R9 E9-3, X9-4)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const wallet = (second: number, headline: string, amount: number, balance: number) => traceEvent({
+    at: `2026-09-22T16:00:${String(second).padStart(2, "0")}.000Z`, strand: "wallet", kind: "minutes.moved", headline,
+    amount_minutes: amount, balance_after_minutes: balance, source: "ledger", source_id: `l-${second}`,
+    actor: { user_id: "a1", name: "Eve Deskadmin", kind: "admin", is_self: false },
+  });
+
+  it("draws every money row with its amount, its balance and who moved it", async () => {
+    stubFetch(nightRoutes(traceView([
+      wallet(1, "Paid 30 minutes for Court 2", -30, 270),
+      wallet(9, "Eve Deskadmin gave them 1 hour at no charge", 60, 330),
+      wallet(20, "A share of a split booking moved", 7, 337),
+    ])));
+    renderNight();
+    await screen.findByText("Eve Deskadmin gave them 1 hour at no charge");
+    expect(screen.queryByText(/ in 1 minute$/)).not.toBeInTheDocument();
+    const money = document.querySelectorAll("[data-night-money]");
+    expect(money).toHaveLength(3);
+    expect(money[2]).toHaveTextContent("plus 7 minutes");
+    expect(money[2]).toHaveTextContent("5 hours 37 minutes");
+    expect(screen.getAllByText("by Eve Deskadmin, an admin")).toHaveLength(3);
+  });
+
+  it("says a burst of door tries in words, never \"in 1m\"", async () => {
+    const door = (second: number) => traceEvent({
+      at: `2026-09-22T16:00:${String(second).padStart(2, "0")}.000Z`, strand: "door", kind: "door.refused",
+      headline: "Refused at the Front door", device_code: "GATE-1", source: "audit", source_id: `d-${second}`,
+    });
+    stubFetch(nightRoutes(traceView([door(1), door(20), door(40), door(59)])));
+    renderNight();
+    expect(await screen.findByText(/· 4 in 1 minute$/)).toBeInTheDocument();
+    expect(screen.queryByText(/\din \d+m\b| in \d+m$/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * R9 E9-5: a row the board wrote about the member's own scan said "at a board, with nobody
+ * signed in" — as if nobody were there. The clause says who the board knew, or that the board
+ * itself reported it; never that nobody was present.
+ */
+describe("a board's row is worded by what the board knew (R9 E9-5)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("a refusal the board wrote about the member's code names the member's code", async () => {
+    stubFetch(nightRoutes(traceView([traceEvent({
+      strand: "court", kind: "court.activation_refused", headline: "Was turned away at Court 2 — code already used",
+      actor: { user_id: null, name: null, kind: "device", is_self: false },
+      subject: { user_id: "u1", name: "Thandi Mokoena" },
+    })])));
+    renderNight();
+    await screen.findByText("Was turned away at Court 2 — code already used");
+    expect(screen.getByText("with Thandi Mokoena's code, at the board")).toBeInTheDocument();
+    expect(screen.queryByText(/nobody signed in/)).not.toBeInTheDocument();
+  });
+
+  it("the lights a board reported carry no claim that nobody was there", async () => {
+    stubFetch(nightRoutes(traceView([traceEvent({
+      strand: "lights", kind: "court.lights_on", headline: "Court 2 lights came on",
+      actor: { user_id: null, name: null, kind: "device", is_self: false }, subject: null,
+    })])));
+    renderNight();
+    await screen.findByText("Court 2 lights came on");
+    expect(screen.getByText("reported by the court's board")).toBeInTheDocument();
+    expect(screen.queryByText(/nobody signed in/)).not.toBeInTheDocument();
   });
 });

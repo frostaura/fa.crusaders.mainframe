@@ -198,6 +198,12 @@ const SRC = join(__dirname, "..");
 
 /** A unit typed beside a number or an interpolation (JS `${n}` or JSX `{n}`): "30 min", `${h} h`. */
 const COMPACT_UNIT_ANYWHERE = /(\d|\$?\{[^}]*\})([ \u00a0]|-)(min|h|d)(?![-=\w])/;
+/**
+ * R9 X9-4: a unit GLUED to its number — `${minutes}m`, `${hours}h`, "1h 04m" — slipped every scan
+ * above, which wanted a space or a hyphen before the unit: the Night's burst said "4 in 1m" and its
+ * gaps "1h 04m — nothing recorded", read aloud as letters.
+ */
+const GLUED_UNIT = /\$\{[^}]*\}(m|h|d|min)(?![\w-])|\b\d+h \d+m\b/;
 /** A compact relative age: "12s ago", `${n}m ago`. */
 const COMPACT_AGO = /(\d|\$?\{[^}]*\})[smhd] ago/;
 /** The narrow and short `Intl.RelativeTimeFormat` styles print "10s ago" / "10 sec. ago". */
@@ -213,6 +219,9 @@ const FIGURE_FORMATTERS = [
   { file: "lib/playCopy.ts", fn: "hoursAndMinutes" },
   { file: "lib/minutes.ts", fn: "compactMagnitude" },
   { file: "lib/utils.ts", fn: "formatMinutes" },
+  // The door's ticking face ("14m 03s"); DecisionCard says the same instant through
+  // `spokenCountdown` in its live region (R9 X9-4 found it once the scan caught glued units).
+  { file: "lib/countdown.ts", fn: "formatCountdown" },
 ];
 
 function sourceFiles(dir: string): string[] {
@@ -243,10 +252,20 @@ describe("R8 J8-4 / X8-6 — spoken units in every module that draws text", () =
       drawnCode(path)
         .split("\n")
         .map((line, i) => ({ line, at: `${relative_(path)}:${i + 1}` }))
-        .filter(({ line }) => COMPACT_UNIT_ANYWHERE.test(line) || COMPACT_AGO.test(line) || ABBREVIATING_FORMAT.test(line))
+        .filter(({ line }) => COMPACT_UNIT_ANYWHERE.test(line) || COMPACT_AGO.test(line) || ABBREVIATING_FORMAT.test(line)
+          || GLUED_UNIT.test(line))
         .map(({ line, at }) => `${at}  ${line.trim()}`),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("catches a unit glued to its number, the way the Night's burst and gap were built (R9 X9-4)", () => {
+    for (const line of ["return `${minutes}m`;", "`${hours}h ${String(rest).padStart(2, \"0\")}m`", "\"1h 04m\"", "`${n}d`"]) {
+      expect(GLUED_UNIT.test(line), line).toBe(true);
+    }
+    for (const line of ["className=\"h-4 w-4\"", "const m = 3;", "`${id}-menu`", "\"md\"", "`${count}ms`", "rgb(var(--x))", "{ value: \"24h\" }", "getContext(\"2d\")"]) {
+      expect(GLUED_UNIT.test(line), line).toBe(false);
+    }
   });
 
   it("the exempt figure formatters still exist, so the exemption cannot outlive them", () => {

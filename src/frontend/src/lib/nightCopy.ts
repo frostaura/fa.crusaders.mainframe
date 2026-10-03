@@ -1,5 +1,6 @@
 import { clubClock, clubDate } from "./clubClock";
-import type { TraceActor, TraceView } from "./adminApi";
+import { minutesSpoken } from "./minutes";
+import type { AdminPerson, TraceActor, TraceView } from "./adminApi";
 
 /**
  * Every sentence on a person's night, and on the club's own change record.
@@ -69,10 +70,12 @@ export function nightWindowHint(range: TraceView["range"], timezone: string | un
  * rather than "by undefined" or, worse, a guess.
  * </p>
  */
-export function actorClause(actor: TraceActor | null | undefined, subjectName: string): string | null {
+export function actorClause(
+  actor: TraceActor | null | undefined, subjectName: string, subject?: AdminPerson | null,
+): string | null {
   if (!actor) return null;
   if (actor.kind === "system") return "by the club's own automatic check";
-  if (actor.kind === "device") return "at a board, with nobody signed in";
+  if (actor.kind === "device") return deviceClause(subject);
   const name = (actor.name ?? "").trim();
   if (actor.is_self === true) {
     // "by Thandi herself" needs a first name and a pronoun this product does not hold. The
@@ -81,6 +84,17 @@ export function actorClause(actor: TraceActor | null | undefined, subjectName: s
   }
   if (name === "") return null;
   return actor.kind === "admin" ? `by ${name}, an admin` : `by ${name}`;
+}
+
+/**
+ * A row a BOARD wrote (R9 E9-5). It used to say "at a board, with nobody signed in" — on the very
+ * row a member's own scan produced, as if nobody had been there. The board knows a code, not a
+ * person: when the row names whose code it read, it says so; when it names nobody (a relay's own
+ * report), it says the board reported it. Neither claims who held the phone, or that nobody did.
+ */
+function deviceClause(subject: AdminPerson | null | undefined): string {
+  const name = (subject?.name ?? "").trim();
+  return name === "" ? "reported by the court's board" : `with ${name}'s code, at the board`;
 }
 
 /** True when this row is somebody acting ON the traced member — the thing worth seeing. */
@@ -94,8 +108,13 @@ export function isOnBehalf(actor: TraceActor | null | undefined): boolean {
 // Gaps and approximate times
 // ---------------------------------------------------------------------------------------
 
+/** A burst's summary — "12:10 · 4 in 1 minute": the clock, how many, over how long, in words (R9 X9-4). */
+export function burstSummary(clock: string, count: number, minutes: number): string {
+  return `${clock} · ${count} in ${minutesSpoken(minutes)}`;
+}
+
 /**
- * "1h 04m — nothing recorded".
+ * "1 hour 4 minutes — nothing recorded".
  *
  * Those words, and not "no activity". *Nothing was recorded* and *nothing happened* are
  * different claims, and a box that was offline, a door row past its ninety days and a scan

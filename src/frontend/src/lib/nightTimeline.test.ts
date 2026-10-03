@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BURST_SECONDS, buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes, readableEvents,
 } from "./nightTimeline";
-import { ACCOUNT_EVENT_WORDS, UNKNOWN_ACCOUNT_EVENT } from "./nightCopy";
+import { ACCOUNT_EVENT_WORDS, UNKNOWN_ACCOUNT_EVENT, burstSummary, gapLine } from "./nightCopy";
 import type { TraceEvent } from "./adminApi";
 
 /**
@@ -150,20 +150,61 @@ describe("gaps — nothing RECORDED, which is not nothing happening", () => {
   });
 });
 
-describe("durations, as a person reads them", () => {
+describe("durations, as a person reads them — and hears them (R9 X9-4)", () => {
+  // The gap and the burst sit inside words a screen reader reads whole: "1h 04m" was heard as
+  // "1 aitch 0 4 em". Spoken long form, the app's one wording (`minutesSpoken`).
   it("writes minutes under the hour", () => {
-    expect(durationInWords(4)).toBe("4m");
-    expect(durationInWords(59)).toBe("59m");
+    expect(durationInWords(1)).toBe("1 minute");
+    expect(durationInWords(4)).toBe("4 minutes");
+    expect(durationInWords(59)).toBe("59 minutes");
   });
 
   it("writes hours and minutes over it", () => {
-    expect(durationInWords(64)).toBe("1h 04m");
-    expect(durationInWords(125)).toBe("2h 05m");
+    expect(durationInWords(64)).toBe("1 hour 4 minutes");
+    expect(durationInWords(125)).toBe("2 hours 5 minutes");
   });
 
-  it("drops the minutes when there are none rather than writing 1h 00m", () => {
-    expect(durationInWords(60)).toBe("1h");
-    expect(durationInWords(120)).toBe("2h");
+  it("drops the minutes when there are none rather than writing 1 hour 0 minutes", () => {
+    expect(durationInWords(60)).toBe("1 hour");
+    expect(durationInWords(120)).toBe("2 hours");
+  });
+
+  it("the gap and the burst summary carry no compact unit", () => {
+    expect(gapLine(durationInWords(64))).toBe("1 hour 4 minutes — nothing recorded");
+    expect(burstSummary("12:10", 4, 1)).toBe("12:10 · 4 in 1 minute");
+    expect(burstSummary("12:10", 3, 64)).not.toMatch(/\d ?(h|m|min)\b/);
+  });
+});
+
+describe("money is never folded into a burst (R9 E9-3)", () => {
+  const money = (at: number, amount: number | null, balance: number | null) => event({
+    at: AT(at), strand: "wallet", kind: "minutes.moved", headline: "A share moved", source: "ledger",
+    source_id: `l-${at}`, device_code: null, amount_minutes: amount, balance_after_minutes: balance,
+  });
+
+  it("three wallet rows in a minute stay three rows, each with its amount and balance", () => {
+    const rows = buildTimeline([money(0, -30, 270), money(10, 7, 277), money(20, 60, 337)]);
+    expect(rows.map((r) => r.kind)).toEqual(["event", "event", "event"]);
+    expect(rows.map((r) => (r.kind === "event" ? r.event.amount_minutes : null))).toEqual([-30, 7, 60]);
+  });
+
+  it("a row about somebody else's money (no amount on this member) is not grouped either", () => {
+    const rows = buildTimeline([money(0, null, null), money(5, null, null), money(9, null, null)]);
+    expect(rows.map((r) => r.kind)).toEqual(["event", "event", "event"]);
+  });
+
+  it("a row carrying an amount on another strand is not grouped", () => {
+    const rows = buildTimeline([
+      event({ at: AT(0), strand: "booking", amount_minutes: -15 }),
+      event({ at: AT(5), strand: "booking", amount_minutes: -15 }),
+      event({ at: AT(9), strand: "booking", amount_minutes: -15 }),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(["event", "event", "event"]);
+  });
+
+  it("a money row beside a door's burst stands on its own row", () => {
+    const rows = buildTimeline([event({ at: AT(0) }), event({ at: AT(10) }), event({ at: AT(20) }), money(25, -30, 270)]);
+    expect(rows.map((r) => r.kind)).toEqual(["burst", "event"]);
   });
 });
 

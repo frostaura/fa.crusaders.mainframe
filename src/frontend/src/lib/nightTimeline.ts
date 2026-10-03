@@ -1,4 +1,5 @@
 import type { TraceEvent } from "./adminApi";
+import { minutesSpoken } from "./minutes";
 import { ACCOUNT_EVENT_WORDS, UNKNOWN_ACCOUNT_EVENT } from "./nightCopy";
 
 /**
@@ -52,8 +53,17 @@ function ms(iso: string): number {
  * </p>
  */
 function burstKey(event: TraceEvent): string {
+  // R9 E9-3: money is never folded. Three wallet rows in a minute became "3 in 1 minute" and hid
+  // each row's amount, the balance it left and who moved it — the three facts a disputed charge
+  // is settled on. A unique key per row puts every one on the rail.
+  if (isMoney(event)) return `money:${event.source ?? ""}:${event.source_id ?? event.at}:${event.headline ?? ""}`;
   const family = (event.kind ?? "").split(".")[0];
   return `${event.strand ?? ""}:${family}:${placeOf(event)}`;
+}
+
+/** A row about minutes: the wallet strand, a ledger row, or any row carrying an amount. */
+function isMoney(event: TraceEvent): boolean {
+  return event.strand === "wallet" || event.source === "ledger" || typeof event.amount_minutes === "number";
 }
 
 /**
@@ -138,16 +148,14 @@ function lastEmittedAt(rows: TimelineRow[]): string | null {
 }
 
 /**
- * "1h 04m" — a duration a person reads, not a number of minutes.
+ * "1 hour 4 minutes" — a duration a person reads, not a number of minutes.
  *
  * Deliberately not "64 minutes": the question a gap answers is "did they leave", and an hour
- * is a different answer from an hour and four minutes only to somebody doing arithmetic.
+ * is a different answer from an hour and four minutes only to somebody doing arithmetic. Said
+ * in words (R9 X9-4): it sits inside a sentence, and "1h 04m" was read aloud as letters.
  */
 export function durationInWords(minutes: number): string {
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `${hours}h` : `${hours}h ${String(rest).padStart(2, "0")}m`;
+  return minutesSpoken(minutes);
 }
 
 /**

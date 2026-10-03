@@ -23,7 +23,7 @@ import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
 import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes, readableEvents } from "../../lib/nightTimeline";
 import {
   APPROXIMATE_EXPLANATION, NIGHT_BALANCE_AFTER, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
-  NIGHT_PRIVACY_NOTICE, actorClause, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
+  NIGHT_PRIVACY_NOTICE, actorClause, burstSummary, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
   retentionCaveat,
 } from "../../lib/nightCopy";
 import { useAsyncAction } from "../../lib/useAsyncAction";
@@ -107,11 +107,9 @@ function NightTimeline({ rows, subjectName, timezone }: {
               {/* A real `<details>`: the disclosure semantics are free, the summary is
                   the accessible name, and it works with no JavaScript at all. */}
               <summary className="min-h-11 cursor-pointer text-sm font-medium">
-                {`${clubClock(row.at, timezone)} · ${row.events.length} in ${
-                  durationInWords(Math.max(1, Math.round(
-                    (Date.parse(row.events.at(-1)!.at) - Date.parse(row.at)) / 60_000,
-                  )))
-                }`}
+                {burstSummary(clubClock(row.at, timezone), row.events.length, Math.max(1, Math.round(
+                  (Date.parse(row.events.at(-1)!.at) - Date.parse(row.at)) / 60_000,
+                )))}
               </summary>
               <p className="mt-1 text-sm text-text-secondary">{burstOutcomes(row.events).join(", ")}</p>
             </details>
@@ -428,7 +426,7 @@ function TraceCard({ event, subjectName, timezone }: {
   subjectName: string;
   timezone: string | undefined;
 }) {
-  const clause = actorClause(event.actor, subjectName);
+  const clause = actorClause(event.actor, subjectName, event.subject);
   const onBehalf = isOnBehalf(event.actor);
   return (
     // R7 L7-15: every card carries the 4px rule — transparent unless somebody acted on the member —
