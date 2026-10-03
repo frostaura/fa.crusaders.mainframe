@@ -555,17 +555,17 @@ public sealed class ShareLedger
         // R9 E9-2: a share collected after the booking's refund was reversed on a late check-in is
         // taken AGAIN because the session was attended — both receipts say so.
         var attended = club is null && move.Delta > 0 && booking.NoShowReversedAt is not null;
-        var refund = club is null && move.Delta < 0 ? ClubRefundOf(booking) : null;
+        var refund = RefundCauseOf(booking, move, club);
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
                 ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason,
                 AfterAttendance: attended, ClubRefund: refund),
-            move.PartnerUserId, $"{key}:partner", RefundHeadline(partnerSide, organiserName, amount, refund) ?? ShareHeadline(partnerSide, organiserName, amount, byClub, attended), settings,
+            move.PartnerUserId, $"{key}:partner", HeadlineFor(partnerSide, organiserName, amount, (byClub, attended, refund)), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
                 HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended,
                 ClubRefund: refund),
-            move.OrganiserUserId, $"{key}:organiser", RefundHeadline(organiserSide, partnerName, amount, refund) ?? ShareHeadline(organiserSide, partnerName, amount, byClub, attended), settings,
+            move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, (byClub, attended, refund)), settings,
             Own(move.OrganiserUserId));
     }
 
@@ -595,6 +595,14 @@ public sealed class ShareLedger
         if (booking.DisplacedByBookingId is not null) return ShareRefundCauses.Displaced;
         return booking.Status == BookingStatus.NoShow ? ShareRefundCauses.NoShow : null;
     }
+
+    /// <summary>E10-7: a club refund's cause, only for a RETURN the club did not make by hand (a collect or removal has its own words).</summary>
+    private static string? RefundCauseOf(Booking booking, ShareMove move, ClubReceipt? club) =>
+        club is null && move.Delta < 0 ? ClubRefundOf(booking) : null;
+
+    /// <summary>The receipt's headline: a club refund's words when there is one (E10-7), else <see cref="ShareHeadline"/>.</summary>
+    private static string HeadlineFor(ShareDirection d, string other, int amount, (bool ByClub, bool Attended, string? Refund) why) =>
+        RefundHeadline(d, other, amount, why.Refund) ?? ShareHeadline(d, other, amount, why.ByClub, why.Attended);
 
     /// <summary>E10-7: the headline for a share the club's refund sent back, or null to use <see cref="ShareHeadline"/>.</summary>
     private static string? RefundHeadline(ShareDirection d, string other, int amount, string? cause)

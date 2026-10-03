@@ -260,7 +260,7 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
     public void A_share_mail_after_a_club_refund_names_the_club_and_the_cause()
     {
         // The text part is wrapped at 72 columns; the sentences are read flat.
-        static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+        static string Flat(string? text) => System.Text.RegularExpressions.Regex.Replace(text ?? "", @"\s+", " ");
         ShareMovement Move(ShareDirection d, string? cause) =>
             new(d, "Olive Organiser", "Court 2", "Sat 3 Oct, 10:00", 16, "https://x.test/b") { ClubRefund = cause };
 

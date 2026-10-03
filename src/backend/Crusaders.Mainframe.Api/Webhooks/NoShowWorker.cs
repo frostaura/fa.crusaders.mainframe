@@ -230,9 +230,8 @@ public sealed class NoShowWorker : BackgroundService
             { StreamReason = SweepStreamReason(courtWasDark) });
         }
 
-        // A penalty is only collectable against money that moved. Charging one for a
-        // booking that was never paid for would drive the balance negative for a slot
-        // the club never received anything for.
+        // A penalty is only collectable against money that moved: charging one for a booking never
+        // paid for would drive the balance negative for a slot the club received nothing for.
         if (penalty > 0)
         {
             postings.Add(new LedgerPosting(
@@ -244,16 +243,14 @@ public sealed class NoShowWorker : BackgroundService
 
         // Status FIRST, then one save carrying it and both movements together.
         //
-        // This used to be the other way round, and it was the difference between a
-        // sweep that is idempotent and one that is not. PostAsync saves per call, so
-        // the refund and penalty were durable while `Status = NoShow` was still only
-        // in memory — persisted, if at all, by a later booking's save or by the
-        // SaveChanges at the end of the tick. Anything failing in that window (the
-        // Users lookup below on an anonymised subject, stoppingToken firing on a
-        // deploy, a transient error) left the money moved and the row still Booked.
-        // The next tick, thirty seconds later, matched it again and refunded it
-        // again, and kept doing so until it succeeded or the row aged past
-        // no_show_lookback_days — roughly twenty thousand attempts.
+        // This used to be the other way round, and it was the difference between a sweep that is
+        // idempotent and one that is not. PostAsync saves per call, so the refund and penalty were
+        // durable while `Status = NoShow` was still only in memory — persisted, if at all, by a
+        // later booking's save or by the SaveChanges at the end of the tick. Anything failing in
+        // that window (the Users lookup below on an anonymised subject, stoppingToken firing on a
+        // deploy, a transient error) left the money moved and the row still Booked. The next tick,
+        // thirty seconds later, matched it again and refunded it again, and kept doing so until it
+        // succeeded or the row aged past no_show_lookback_days — roughly twenty thousand attempts.
         //
         // The single save is also what makes the concurrency token bite. The due list
         // is materialised once per tick and CheckedInAt is never re-read, and there is

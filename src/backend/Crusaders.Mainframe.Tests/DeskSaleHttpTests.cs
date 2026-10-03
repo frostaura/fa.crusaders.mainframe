@@ -199,7 +199,7 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
             new { amountMinutes = -30, reasonCode = "correction", reason = "Double entry" })).StatusCode);
         var shortOf = await mail.WaitFor(m => m.Subject.StartsWith("Minutes taken off", StringComparison.Ordinal));
         Assert.NotNull(shortOf);
-        var flat = System.Text.RegularExpressions.Regex.Replace(shortOf!.PlainBody, @"\s+", " ");
+        var flat = System.Text.RegularExpressions.Regex.Replace(shortOf!.PlainBody ?? "", @"\s+", " ");
         Assert.Contains("That leaves 10 minutes to spend — less than the 15 minutes a court needs.", flat, StringComparison.Ordinal);
     }
 
