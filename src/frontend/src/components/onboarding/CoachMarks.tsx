@@ -101,6 +101,23 @@ function useAnchor(mark: CoachMark | undefined) {
   return { element, virtual };
 }
 
+/**
+ * Where focus lands once the tour has gone (R7 X7-4: closing it dropped a keyboard user on
+ * `<body>`): the control the last mark pointed at when it takes focus, else the page's heading.
+ */
+function focusAfterTour(anchor: HTMLElement | null) {
+  const active = document.activeElement;
+  if (active && active !== document.body && active.isConnected) return;
+  if (anchor && anchor.isConnected && anchor.tabIndex >= 0 && isShown(anchor)) {
+    anchor.focus();
+    return;
+  }
+  const heading = document.querySelector<HTMLElement>("main h1");
+  if (!heading) return;
+  if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+  heading.focus();
+}
+
 export function CoachMarks({ marks, labels, onFinish }: CoachMarksProps) {
   const [index, setIndex] = useState(0);
   const mark = marks[index];
@@ -108,6 +125,11 @@ export function CoachMarks({ marks, labels, onFinish }: CoachMarksProps) {
 
   if (!mark) return null;
   const last = index === marks.length - 1;
+  // R7 X7-4: the mark held focus; when it goes, focus goes to what it pointed at, not <body>.
+  const finish = (how: "done" | "skipped") => {
+    onFinish(how);
+    window.requestAnimationFrame(() => focusAfterTour(element));
+  };
 
   return (
     <Popover open modal={false}>
@@ -119,7 +141,7 @@ export function CoachMarks({ marks, labels, onFinish }: CoachMarksProps) {
         position={{ index, total: marks.length, last, anchored: element !== null }}
         labels={labels}
         onMove={(delta) => setIndex((at) => Math.min(Math.max(at + delta, 0), marks.length - 1))}
-        onFinish={onFinish}
+        onFinish={finish}
       />
     </Popover>
   );
