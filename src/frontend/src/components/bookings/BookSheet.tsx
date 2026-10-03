@@ -116,9 +116,14 @@ function BookFlowView(props: ViewProps) {
   const reasonId = useId();
 
   // A new step is a new screen: take a screen reader to its top rather than leaving it on a
-  // button that has just changed meaning under it.
+  // button that has just changed meaning under it. R8 L8-5 — and the EYE to its top too: the
+  // scroller kept the last step's offset (381px at 320 / 200 %), so Confirm opened with its
+  // summary cut off; focusing it must not scroll it back down either.
   useEffect(() => {
-    if (flow.stepIndex > 0 || flow.run) body.current?.focus();
+    const el = body.current;
+    if (!el || !(flow.stepIndex > 0 || flow.run)) return;
+    el.scrollTop = 0;
+    el.focus({ preventScroll: true });
   }, [flow.stepIndex, flow.run]);
 
   const title = flow.hold ? BOOK_SHEET.holdTitle(flow.count) : BOOK_SHEET.title(flow.count);
