@@ -1,8 +1,9 @@
-import { INBOX_TITLE } from "./bellCopy";
+import { INBOX_TITLE, PENDING_INVITE_NOTE } from "./bellCopy";
 import { ApiError } from "./api";
-import { clubCalendarDate, clubClock, clubShortDate } from "./clubClock";
+import { clubCalendarDate } from "./clubClock";
 import { describeFailure } from "./errors";
 import { minutesSpoken } from "./minutes";
+import { SOMEONE } from "./playersNames";
 import { BUY_MINUTES_ACTION } from "./gridCopy";
 import { unsureSentence, type UnsureWords } from "./lostReply";
 import { LOST_REPLY, unsureWords } from "./lostReplyCopy";
@@ -40,7 +41,7 @@ export const PLAYERS_COPY = {
   teamA: "Team A",
   teamB: "Team B",
   /** A name the server could not give — a member who has left. */
-  someone: "A member",
+  someone: SOMEONE,
 } as const;
 
 /** A seat's state, as a chip says it. Never colour alone — this word is always shown. */
@@ -64,27 +65,9 @@ export const STATUS_WORD: Record<string, string> = {
   not_agreed: "In · share not agreed",
 };
 
-/** "Sam" from "Sam Petersen" — the grid's own rule: first names between members. */
-export function firstName(name: string | null | undefined): string {
-  const trimmed = (name ?? "").trim();
-  if (!trimmed) return PLAYERS_COPY.someone;
-  return trimmed.split(/\s+/)[0] ?? trimmed;
-}
-
-/** "Sam", "Sam and Alex", "Sam, Alex and Jo". */
-export function listNames(names: readonly string[]): string {
-  if (names.length === 0) return "";
-  if (names.length === 1) return names[0];
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
-
-/**
- * "Wed 30 Sep, 18:00" in the club's zone — the one face every players screen writes an instant
- * in: the club's ONE short date (`clubShortDate` — never "01 Oct", never "Sept") and its clock.
- */
-export function playersWhen(iso: string | number | Date, timezone?: string): string {
-  return `${clubShortDate(iso, timezone)}, ${clubClock(iso, timezone)}`;
-}
+// Names and instants live in `playersNames` (first-load split, R7 P5-7); re-exported here.
+export { firstName, listNames, playersWhen } from "./playersNames";
+import { listNames, playersWhen } from "./playersNames";
 
 /** "12 min held until Sat 27 Sep, 20:00" — wherever the balance is explained (§3a). */
 export function heldLine(heldMinutes: number, until: string | null | undefined, timezone?: string): string {
@@ -414,6 +397,8 @@ export const BOOK_CONFIRM = {
 /** The booking's own page, `/bookings/:bookingId` — what every viewer reads. */
 export const DETAIL_COPY = {
   title: "Booking",
+  /** R7 E7-5 — the header line for a member who paid for this court at the box (read-only). */
+  payerLine: "You paid for this court at the box.",
   /** R4 form factor — the docked bar that holds the organiser's one verb on a phone. */
   actionsLabel: "Booking actions",
   /** R5 F5 — the invitee's answer docked above the tab bar on a phone. */
@@ -924,8 +909,8 @@ export const INVITES_COPY = {
   fateGoneBody: "You declined it, pulled out or were taken off it — or its invite lapsed. Your bookings have the latest.",
   /** R1 F2.5 — an invite link opened and not yet answered (a short balance, a sign-in between), resurfaced. */
   pendingFrom: "From a link you opened",
-  pendingNote: "You've been invited to a game. Join the club, and once you're approved and signed in, the invite will be waiting for you.",
-  pendingNoteVerified: "Your invite is waiting — once the club approves you, sign in and we'll take you to it.",
+  pendingNote: PENDING_INVITE_NOTE.join,
+  pendingNoteVerified: PENDING_INVITE_NOTE.verified,
   pendingOpen: "Open your invite",
 } as const;
 

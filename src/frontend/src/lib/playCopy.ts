@@ -490,11 +490,6 @@ export const ADMIN_RESULTS = {
   count: (n: number) => `${n} ${n === 1 ? "result" : "results"}`,
 } as const;
 
-/** The rail badge's sentence and the Admin tab's word for it. */
-export function disputesAttentionLabel(count: number): string {
-  return `${count} disputed match ${count === 1 ? "result" : "results"}`;
-}
-
 export const MEMBER_PLAY_CARD = {
   title: "Play",
   description: "Counts only — the member's partners, opponents and badges are theirs alone.",

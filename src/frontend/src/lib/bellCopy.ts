@@ -18,3 +18,9 @@ export function bellBadge(unread: number | null): string | null {
   if (!unread || unread <= 0) return null;
   return unread > 9 ? "9+" : String(unread);
 }
+
+/** R7 P5-7 — the invite-link note on the way into the club; shell copy, kept out of `playersCopy`. */
+export const PENDING_INVITE_NOTE = {
+  join: "You've been invited to a game. Join the club, and once you're approved and signed in, the invite will be waiting for you.",
+  verified: "Your invite is waiting — once the club approves you, sign in and we'll take you to it.",
+} as const;

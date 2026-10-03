@@ -524,6 +524,8 @@ export const UPCOMING = {
   retry: "Try again",
   organiser: "You booked",
   partner: "You're playing",
+  /** R7 E7-5 — a court the member paid for at the box: someone else's booking. */
+  payerBadge: "Paid for",
   needsAction: "Needs you",
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",

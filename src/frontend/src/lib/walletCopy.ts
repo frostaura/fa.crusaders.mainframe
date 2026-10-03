@@ -1,6 +1,6 @@
 import type { LedgerEntryType } from "./api";
 import type { WalletTone } from "./balance";
-import { firstName, playersWhen } from "./playersCopy";
+import { firstName, playersWhen } from "./playersNames";
 import { minutesSpoken } from "./minutes";
 
 /**
