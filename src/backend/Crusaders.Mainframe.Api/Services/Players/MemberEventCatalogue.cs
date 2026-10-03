@@ -18,7 +18,7 @@ public sealed record InvitePayload(
 public sealed record SharePayload(
     Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, int AmountMinutes,
     string? HeldUntilLocal = null, bool ByClub = false, int? BalanceAfterMinutes = null,
-    bool ClubRemoved = false, string? ClubReason = null);
+    bool ClubRemoved = false, string? ClubReason = null, bool AfterAttendance = false);
 
 /// <summary>The club put a member on a game, or accepted one for them (review round 1, B8).</summary>
 public sealed record ClubSeatPayload(
@@ -165,6 +165,7 @@ public static class MemberEventCatalogue
         {
             ClubRemoved = p.ClubRemoved,
             ClubReason = p.ClubReason,
+            AfterAttendance = p.AfterAttendance,
         });
     }
 

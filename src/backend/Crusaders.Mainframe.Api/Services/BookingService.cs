@@ -1717,9 +1717,7 @@ public sealed class BookingService
                 AmountMinutes: -refundBack,
                 ActorUserId: actorUserId,
                 RelatedBookingId: booking.Id,
-                Reason: takenBack > 0
-                    ? "No-show refund reversed — attendance recorded after the sweep, net of the desk's own adjustment"
-                    : "No-show refund reversed — attendance recorded after the sweep",
+                Reason: RefundReversalReason(booking, takenBack > 0),
                 ExternalReference: NoShowReversalReference(booking.Id, "refund")));
         }
         if (penaltyBack > 0)
@@ -1738,6 +1736,20 @@ public sealed class BookingService
         return new SettledLegs(
             refunded, penalised, refundBack, penaltyBack,
             compensation.Select(c => c.Id).ToList(), givenBack - takenBack, postings);
+    }
+
+    /// <summary>
+    /// The refund leg's wallet line. A sweep that refunded in full because the court's box was
+    /// offline (<see cref="Booking.OutageRefundedAt"/>) never called the booking a no-show, so
+    /// its reversal does not either (review round 9, E9-2): "No-show refund reversed" told a
+    /// member who was never marked absent that they had been.
+    /// </summary>
+    private static string RefundReversalReason(Booking booking, bool netOfDesk)
+    {
+        var line = booking.OutageRefundedAt is not null
+            ? "Outage refund reversed — you were checked in after all"
+            : "No-show refund reversed — attendance recorded after the sweep";
+        return netOfDesk ? line + ", net of the desk's own adjustment" : line;
     }
 
     /// <summary>
@@ -1858,6 +1870,10 @@ public sealed class BookingService
             ActorUserId = scan.UserId,
             SubjectUserId = booking.UserId,
             Action = "court.activated",
+            // R9 E9-4: placed at the SCAN, not the upload — the Night's "Checked in" row read the
+            // instant the queued event reached the server. DoorTrail.ScanAtOf derives an upload
+            // row's scan time for door scans only; a set value is believed (StampAuditScanInstants).
+            ScanAt = attendedAt,
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 booking_id = booking.Id,
@@ -1888,6 +1904,8 @@ public sealed class BookingService
                 penalty_reversed_minutes = legs.PenaltyBack,
                 refund_settled_minutes = legs.Refunded,
                 penalty_settled_minutes = legs.Penalised,
+                // E9-2: the sweep's refund was an outage refund, not a no-show's — the Night says so.
+                peripheral_outage = booking.OutageRefundedAt is not null,
                 payer_user_id = payerUserId,
                 manual_compensation = legs.Compensation.Count > 0 ? legs.Compensation : null,
                 manual_compensation_minutes = legs.CompensatedMinutes,
@@ -2458,8 +2476,10 @@ public sealed class BookingService
         {
             try
             {
-                await _email.SendAsync(EmailTemplates.NoShowReversed(
-                    await _club.GetAsync(ct), user.Email, courtName, refunded, penalised), ct);
+                var club = await _club.GetAsync(ct);
+                await _email.SendAsync(booking.OutageRefundedAt is not null
+                    ? EmailTemplates.OutageRefundReversed(club, user.Email, courtName, refunded)
+                    : EmailTemplates.NoShowReversed(club, user.Email, courtName, refunded, penalised), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show reversal email failed for {BookingId}", booking.Id); }
         }
@@ -2478,6 +2498,7 @@ public sealed class BookingService
                 ["penalty_minutes"] = penalised,
                 ["refund_minutes"] = refunded,
                 ["attended_at"] = attendedAt,
+                ["peripheral_outage"] = booking.OutageRefundedAt is not null,
             }), ct);
     }
 

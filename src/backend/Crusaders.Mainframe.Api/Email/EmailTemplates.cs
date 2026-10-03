@@ -706,6 +706,27 @@ public static partial class EmailTemplates
             ],
             WhyThis: WhyMoney));
 
+    /// <summary>
+    /// A booking refunded in full because its court box was offline, which the box's own late
+    /// check-in then showed was played (review round 9, E9-2). Never a no-show: the sweep did not
+    /// call it one, and there was no penalty to return.
+    /// </summary>
+    public static EmailMessage OutageRefundReversed(ClubIdentity club, string to, string courtName, int refunded) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: $"Outage refund reversed — {courtName}",
+            Preheader: "The court's check-in reached the club late. The booking now stands as played.",
+            Heading: "You were checked in after all",
+            Blocks:
+            [
+                new Paragraph($"Your booking on {courtName} was refunded in full because the court's box was offline and could not tell the club you had arrived. Its check-in has since come through, so the booking stands as played and the refund has been taken back."),
+                new Facts(
+                [
+                    new FactRow("Refund taken back", Min(refunded)),
+                ]),
+                new Footnote("It appears as its own line in your wallet, so you can see exactly what moved and when."),
+            ],
+            WhyThis: WhyMoney));
+
     // ---- money ----
 
     /// <summary>

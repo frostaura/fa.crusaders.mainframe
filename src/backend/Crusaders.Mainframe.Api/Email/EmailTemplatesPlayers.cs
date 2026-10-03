@@ -36,6 +36,13 @@ public sealed record ShareMovement(
 
     /// <summary>The reason the admin recorded for a club collect or removal — the adjust mail always carried one (B-8).</summary>
     public string? ClubReason { get; init; }
+
+    /// <summary>
+    /// The share was taken again because the booking's refund was reversed — the court's late
+    /// check-in showed the session was attended (review round 9, E9-2). A plain "You paid your
+    /// share" told the partner nothing about why minutes left their balance for a refunded game.
+    /// </summary>
+    public bool AfterAttendance { get; init; }
 }
 
 /// <summary>
@@ -288,6 +295,8 @@ public static partial class EmailTemplates
 
     private static string ShareSubject(ShareMovement m)
     {
+        if (m.AfterAttendance && m.Direction == ShareDirection.Paid) return $"Share taken again — {m.CourtName}";
+        if (m.AfterAttendance && m.Direction == ShareDirection.Received) return $"{m.OtherName}'s share came back to you — {m.CourtName}";
         if (m.ByClub && m.Direction == ShareDirection.Paid) return $"The club collected your share — {m.CourtName}";
         if (m.ClubRemoved && m.Direction == ShareDirection.Refunded) return $"The club took you off the game — {m.CourtName}";
         if (m.ClubRemoved) return $"The club took {m.OtherName} off your game — {m.CourtName}";
@@ -302,6 +311,7 @@ public static partial class EmailTemplates
 
     private static string ShareHeading(ShareMovement m)
     {
+        if (m.AfterAttendance && m.Direction == ShareDirection.Paid) return "Your share was taken again";
         if (m.ByClub && m.Direction == ShareDirection.Paid) return "The club collected your share";
         if (m.ClubRemoved) return "Taken off by the club";
         switch (m.Direction)
@@ -316,6 +326,7 @@ public static partial class EmailTemplates
     private static string ShareSentence(ShareMovement m)
     {
         if (m.ByClub) return ClubShareSentence(m);
+        if (m.AfterAttendance) return AttendedSentence(m);
         if (m.ClubRemoved) return ClubRemovedSentence(m);
         switch (m.Direction)
         {
@@ -335,6 +346,14 @@ public static partial class EmailTemplates
         return m.Direction == ShareDirection.Refunded
             ? $"The club took you off the game {m.OtherName} booked, and {Min(m.AmountMinutes)} of your share came back to your balance."
             : $"The club took {m.OtherName} off your game, and {Min(m.AmountMinutes)} of their share went back to them from your balance.";
+    }
+
+    /// <summary>Review round 9, E9-2: the refund was reversed because the session was attended, so the share follows the court again.</summary>
+    private static string AttendedSentence(ShareMovement m)
+    {
+        return m.Direction == ShareDirection.Paid
+            ? $"Your share came back to you when the club refunded the booking, but the court's check-in has since come through — the session was attended, so {Min(m.AmountMinutes)} was taken from your balance again and paid to {m.OtherName}."
+            : $"The court's check-in has since come through and the session was attended, so {m.OtherName}'s share of {Min(m.AmountMinutes)} was taken again and paid to you.";
     }
 
     /// <summary>B8: a share the CLUB collected — "You paid your share…" told the partner they had done something they had not.</summary>

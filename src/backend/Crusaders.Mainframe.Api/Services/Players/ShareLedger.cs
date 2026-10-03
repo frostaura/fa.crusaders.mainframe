@@ -552,14 +552,18 @@ public sealed class ShareLedger
         var byClub = club?.Collected == true;
         var removed = club is { Collected: false };
         var reason = club?.Reason?.Trim() is { Length: > 0 } r ? r : null;
+        // R9 E9-2: a share collected after the booking's refund was reversed on a late check-in is
+        // taken AGAIN because the session was attended — both receipts say so.
+        var attended = club is null && move.Delta > 0 && booking.NoShowReversedAt is not null;
 
         Stage(new SharePayload(booking.Id, partnerSide, organiserName, game.CourtName, game.StartsLocal, amount,
-                ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason),
-            move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub), settings,
+                ByClub: byClub, BalanceAfterMinutes: club?.BalanceAfter, ClubRemoved: removed, ClubReason: reason,
+                AfterAttendance: attended),
+            move.PartnerUserId, $"{key}:partner", ShareHeadline(partnerSide, organiserName, amount, byClub, attended), settings,
             Own(move.PartnerUserId));
         Stage(new SharePayload(booking.Id, organiserSide, partnerName, game.CourtName, game.StartsLocal, amount,
-                HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason),
-            move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub), settings,
+                HeldUntilLocal: heldUntil, ByClub: byClub, ClubRemoved: removed, ClubReason: reason, AfterAttendance: attended),
+            move.OrganiserUserId, $"{key}:organiser", ShareHeadline(organiserSide, partnerName, amount, byClub, attended), settings,
             Own(move.OrganiserUserId));
     }
 
@@ -577,9 +581,11 @@ public sealed class ShareLedger
         }, settings);
     }
 
-    private static string ShareHeadline(ShareDirection d, string other, int amount, bool byClub = false)
+    private static string ShareHeadline(ShareDirection d, string other, int amount, bool byClub = false, bool attended = false)
     {
         var minutes = MoneyFormat.Minutes(amount);
+        if (attended && d == ShareDirection.Paid) return $"{minutes} taken again for your share — the session was attended";
+        if (attended && d == ShareDirection.Received) return $"{other}'s share of {minutes} came back to you — the session was attended";
         if (byClub && d == ShareDirection.Paid) return $"The club collected {minutes} for your share";
         if (byClub && d == ShareDirection.Received) return $"The club collected {other}'s share: {minutes}";
         switch (d)

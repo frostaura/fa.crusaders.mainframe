@@ -116,6 +116,7 @@ internal static class EmailCatalogue
             ("BookingReinstated", EmailTemplates.BookingReinstated(club, to, "Court 3", "Tue 29 Sep, 18:00")),
             ("CancelledBookingLightsCharged", EmailTemplates.CancelledBookingLightsCharged(club, to, "Court 3", 40, 18)),
             ("NoShowReversed", EmailTemplates.NoShowReversed(club, to, "Court 1", 24, 7)),
+            ("OutageRefundReversed", EmailTemplates.OutageRefundReversed(club, to, "Court 1", 24)),
             ("PurchaseConfirmation", EmailTemplates.PurchaseConfirmation(club, to, new PackagePurchaseReceipt(
                 "5 hours", 300, 550m, 1000, "League members", 495m, 1530, "pf-2026-09-22-0041", symbol))),
             ("PurchaseConfirmationNoDiscount", EmailTemplates.PurchaseConfirmation(club, to, new PackagePurchaseReceipt(
@@ -165,6 +166,8 @@ internal static class EmailCatalogue
             ("ShareMovedRefunded", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Refunded, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl))),
             ("ShareMovedReturned", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Returned, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl))),
             ("ShareMovedReceivedHeld", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Received, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl, HeldUntilLocal: "Thu 1 Oct, 19:00"))),
+            ("ShareMovedAfterAttendance", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Paid, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl) { AfterAttendance = true })),
+            ("ShareMovedReceivedAfterAttendance", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Received, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl) { AfterAttendance = true })),
             ("ShareMovedClubCollected", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Paid, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, GameUrl, ByClub: true, BalanceAfterMinutes: -12))),
             ("ClubSeat", EmailTemplates.ClubSeat(club, to, new ClubSeatNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, Accepted: false, GameUrl))),
             ("ClubSeatAccepted", EmailTemplates.ClubSeat(club, to, new ClubSeatNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12, Accepted: true, GameUrl))),

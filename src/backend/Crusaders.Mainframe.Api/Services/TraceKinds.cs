@@ -70,6 +70,8 @@ public readonly record struct TraceFacts
     /// <summary>
     /// The no-show sweep refunded the booking in full because no box on its court could be
     /// reached (§6a) — the club's outage, not the member's absence (review round 7, E7-1/E7-2).
+    /// On a <c>booking.no_show_reversed</c> row: the refund being taken back was that outage
+    /// refund, so the row never calls it a no-show (review round 9, E9-2).
     /// </summary>
     public bool CourtWasDark { get; init; }
 
@@ -542,7 +544,9 @@ public static class TraceKinds
             BookingNoShow => facts.CourtWasDark
                 ? $"The club refunded {court} in full — its box was offline"
                 : "The club's automatic check marked this as a no-show",
-            BookingNoShowReversed => "The club took a no-show back",
+            BookingNoShowReversed => facts.CourtWasDark
+                ? "The club took back an outage refund — the check-in arrived late"
+                : "The club took a no-show back",
             BookingBlockedOver => $"The club blocked out {court}",
             BookingDisplaced => $"The club moved this booking on {court} aside",
             BookingDisplacementReversed => $"The club put this booking on {court} back",
