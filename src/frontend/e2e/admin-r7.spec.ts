@@ -408,3 +408,59 @@ test.describe("L7-11 — a webhook row at 320 / 200 %", () => {
     expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
 });
+
+/* ───────────────────────── L7-15 — the Night timeline's columns ───────────────────────── */
+
+const NIGHT_USER = "00000000-0000-4000-8000-000000000701";
+const nightEvent = (at: string, over: Record<string, unknown> = {}) => ({
+  at, strand: "booking", kind: "booking.made", headline: "Booked Court 2 for 18:00",
+  actor: { user_id: NIGHT_USER, name: "Thandi Mokoena", kind: "member", is_self: true },
+  subject: { user_id: NIGHT_USER, name: "Thandi Mokoena" }, ...over,
+});
+const NIGHT = {
+  member: { user_id: NIGHT_USER, name: "Thandi Mokoena", membership_number: "CR-0184" },
+  club_day: "2026-09-22",
+  range: { from: "2026-09-22T00:00:00+02:00", to: "2026-09-23T00:00:00+02:00" },
+  timezone: "Africa/Johannesburg",
+  retention: { audit_days: 730, door_days: 90, door_horizon: "2026-06-24", door_rows_may_be_incomplete: false },
+  events: [
+    nightEvent("2026-09-22T15:52:09.000Z"),
+    nightEvent("2026-09-22T16:31:00.000Z", {
+      strand: "wallet", kind: "wallet.adjusted_by_admin", headline: "Minutes adjusted by the club", amount_minutes: 30,
+      actor: { user_id: "a1", name: "Review Admin", kind: "admin", is_self: false },
+    }),
+    nightEvent("2026-09-22T17:02:00.000Z", { strand: "lights", kind: "lights.on", headline: "Court 2 lights came on", approximate: true }),
+    nightEvent("2026-09-22T17:48:00.000Z", { strand: "booking", kind: "booking.checked_in", headline: "Checked in on Court 2" }),
+  ],
+  total: 4,
+};
+const memberDetail = {
+  user_id: NIGHT_USER, membership_id: "00000000-0000-4000-8000-000000000711", full_name: "Thandi Mokoena",
+  email: "thandi@r7.review.test", membership_number: "CR-0184", status: "Active", email_verified: true,
+  balance_minutes: 120, created_at: "2026-09-01T08:00:00Z", photo_url: null, is_admin: false, admin_source: null, groups: [],
+  account_status: "Active", last_login_at: null, passkey_count: 0, fingerprints: { count: 0, enrolments: [] },
+  next_bookings: [], counts_30d: { bookings: 0, no_shows: 0, sessions_played: 0 },
+};
+
+test.describe("L7-15 — the Night timeline", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "a desk"); });
+
+  test("at 1280 every card's time and headline start on the same two columns", async ({ page }) => {
+    await open(page, `/admin/members/${NIGHT_USER}/night?day=2026-09-22`, [
+      { path: `/api/v1/admin/members/${NIGHT_USER}/trace`, body: NIGHT },
+      { path: `/api/v1/admin/members/${NIGHT_USER}`, body: memberDetail },
+    ], 1280);
+    await expect(page.getByText("Checked in on Court 2")).toBeVisible(ARRIVES);
+    await fontsReady(page);
+    const cols = await page.evaluate(() => [...document.querySelectorAll("ol li time")].map((t) => {
+      const headline = t.nextElementSibling!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(t);
+      const digits = range.getBoundingClientRect();
+      return { time: t.textContent, timeRight: Math.round(digits.right), headlineLeft: Math.round(headline.left) };
+    }));
+    expect(cols.length, JSON.stringify(cols)).toBe(4);
+    expect(new Set(cols.map((c) => c.headlineLeft)).size, `headlines start ragged: ${JSON.stringify(cols)}`).toBe(1);
+    expect(new Set(cols.map((c) => c.timeRight)).size, `times end ragged: ${JSON.stringify(cols)}`).toBe(1);
+  });
+});

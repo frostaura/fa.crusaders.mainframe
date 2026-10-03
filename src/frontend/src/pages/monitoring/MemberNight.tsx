@@ -27,6 +27,7 @@ import {
 } from "../../lib/nightCopy";
 import { useAsyncAction } from "../../lib/useAsyncAction";
 import { Minutes } from "../../components/Minutes";
+import { cn } from "../../lib/utils";
 import { validClubDay } from "../../lib/scheduleDay";
 import { useRead } from "../../lib/useRead";
 import { useTicker } from "../../lib/useTicker";
@@ -425,11 +426,14 @@ function TraceCard({ event, subjectName, timezone }: {
   const clause = actorClause(event.actor, subjectName);
   const onBehalf = isOnBehalf(event.actor);
   return (
-    <div className={onBehalf ? "border-l-4 border-info-strong pl-3" : "pl-3"}>
+    // R7 L7-15: every card carries the 4px rule — transparent unless somebody acted on the member —
+    // and the time is a right-aligned column wide enough for "≈00:00", so the accented cards are
+    // not indented 4px and the headlines start on one line whatever the time says.
+    <div className={cn("border-l-4 pl-3", onBehalf ? "border-info-strong" : "border-transparent")}>
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
         <time
           dateTime={event.at}
-          className="shrink-0 font-mono text-sm tabular-nums text-text-muted"
+          className="min-w-14 shrink-0 text-right font-mono text-sm tabular-nums text-text-muted"
         >
           {/* The ≈ is part of the time, not a footnote beside it: a reader scanning a column
               of times has to be able to see which ones are estimates without reading prose. */}

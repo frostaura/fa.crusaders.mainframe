@@ -513,3 +513,29 @@ describe("a night read a page at a time", () => {
     expect(paged.path).toContain("day=2026-09-22");
   });
 });
+
+/**
+ * R7 E7-3 (BE commit 47c24f66): a row about ANOTHER member's money — a partner's share, the
+ * automatic return's counterpart — arrives with `amount_minutes: null`, its amount in the
+ * server's words. The money line is the viewed member's own, so a null draws nothing: never 0,
+ * never a dash, never the other member's figure.
+ */
+describe("a night's money column is the viewed member's only (R7 E7-3)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("draws an amount for the member's own movement and none for another member's", async () => {
+    stubFetch(nightRoutes(traceView([
+      traceEvent({ strand: "wallet", kind: "share.paid", headline: "Paid Pam's share of Court 2", amount_minutes: -15, balance_after_minutes: 45 }),
+      traceEvent({
+        at: "2026-09-22T16:00:00.000Z", strand: "wallet", kind: "share.received",
+        headline: "Pam Botha got 15 minutes back from this booking", amount_minutes: null, balance_after_minutes: null,
+        subject: { user_id: "u2", name: "Pam Botha" },
+      }),
+    ])));
+    renderNight();
+    await screen.findByText("Pam Botha got 15 minutes back from this booking");
+    const money = document.querySelectorAll("[data-night-money]");
+    expect(money).toHaveLength(1);
+    expect(money[0]).toHaveTextContent("minus 15 minutes");
+  });
+});
