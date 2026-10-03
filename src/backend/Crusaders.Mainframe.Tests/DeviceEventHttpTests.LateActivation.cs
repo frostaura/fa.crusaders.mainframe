@@ -331,7 +331,7 @@ public abstract partial class DeviceEventHttpTests
         /// <summary>
         /// The sweep released A's tail and B bought part of it; A's late event then reverses
         /// A's no-show. B arrived to a lit court with A on it. B is displaced: cancelled with
-        /// the whole charge back as its own row (reason ResoldTailRefunded), no penalty, an
+        /// the whole charge back as its own row (CancellationReason ResoldTailRefunded), no penalty, an
         /// audit row, an email, a booking.displaced event — and A's end is restored, so the
         /// tail is not sold a second time at the box while A is still lit. A row the sweep had
         /// already settled (C) gets its penalty back instead of a second refund.
@@ -366,7 +366,9 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(BookingService.ResoldTailRefunded, displacedB.CancellationReason);
             var refundB = Assert.Single(await LedgerAsync(factory, b.BookingId), l => l.Type == LedgerEntryType.CancellationRefund);
             Assert.Equal(15, refundB.AmountMinutes);
-            Assert.Contains(BookingService.ResoldTailRefunded, refundB.Reason);
+            // R10 (FB10's ask): the stored line is words, never the CancellationReason token.
+            Assert.Equal("Refunded in full — the court was already in use by an earlier booking whose attendance arrived late", refundB.Reason);
+            Assert.DoesNotContain(BookingService.ResoldTailRefunded, refundB.Reason);
             Assert.Equal(BookingService.DisplacedReference(a.Id, b.BookingId), refundB.ExternalReference);
 
             var displacedC = await BookingAsync(factory, c.BookingId);

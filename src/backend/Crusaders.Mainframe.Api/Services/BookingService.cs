@@ -1998,7 +1998,8 @@ public sealed class BookingService
                 AmountMinutes: penalty,
                 ActorUserId: actorUserId,
                 RelatedBookingId: other.Id,
-                Reason: $"{ResoldTailRefunded} — no-show penalty returned: the court was already in use by an earlier booking whose attendance arrived late",
+                // Words, never the CancellationReason token (R10, FB10's ask): the admin ledger and the wallet show this line.
+                Reason: "No-show penalty returned — the court was already in use by an earlier booking whose attendance arrived late",
                 ExternalReference: reference)
             { StreamReason = WalletStreamReasons.DisplacedRefund };
         }
@@ -2009,7 +2010,7 @@ public sealed class BookingService
             AmountMinutes: DisplacedAmount(other),
             ActorUserId: actorUserId,
             RelatedBookingId: other.Id,
-            Reason: $"{ResoldTailRefunded} — refunded in full: the court was already in use by an earlier booking whose attendance arrived late",
+            Reason: "Refunded in full — the court was already in use by an earlier booking whose attendance arrived late",
             ExternalReference: reference)
         { StreamReason = WalletStreamReasons.DisplacedRefund };
     }
