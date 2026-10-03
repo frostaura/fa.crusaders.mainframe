@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
 import { Switch as SwitchPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
-import { useFieldControl } from "./field";
+import { useFieldControl } from "./field-context";
 
 /**
  * Switch — 44×26 (design-system.md), a 44px-tall hit area from an `after:` box. The track's

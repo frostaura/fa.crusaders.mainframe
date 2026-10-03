@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Avatar, AvatarFallback, AvatarImage } from "../avatar";
-import { Badge, badgeVariants } from "../badge";
+import { Badge } from "../badge";
+import { badgeVariants } from "../badge-variants";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../card";
 import { Progress } from "../progress";
 import { Separator } from "../separator";

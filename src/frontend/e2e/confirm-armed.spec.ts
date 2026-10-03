@@ -8,7 +8,7 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./
  */
 const PAIR_BUTTONS = ":scope > button, :scope > [data-confirm-pair] > button";
 
-/** The design-system button's variants (`components/ui/button.tsx`). */
+/** The design-system button's variants (`components/ui/button-variants.ts`). */
 const BUTTON_VARIANTS = ["primary", "secondary", "outline", "ghost", "danger", "danger-soft"];
 
 /**
@@ -670,7 +670,7 @@ test.describe("under forced colours", () => {
     // Every variant's class string, from the design-system button itself — loaded through the dev
     // server, which resolves the module the way the app does (a string, so the test runner's own
     // transform leaves the dynamic import alone).
-    const variants = await page.evaluate<[string, string][]>(`import("/src/components/ui/button.tsx").then(({ buttonVariants }) =>
+    const variants = await page.evaluate<[string, string][]>(`import("/src/components/ui/button-variants.ts").then(({ buttonVariants }) =>
       ${JSON.stringify(BUTTON_VARIANTS)}.map((variant) => [variant, buttonVariants({ variant })]))`);
     expect(variants.length, "the variant table is empty — nothing was measured").toBeGreaterThan(0);
 

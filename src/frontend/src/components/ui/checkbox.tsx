@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { Check, Minus } from "@/components/ui/icons";
-import { useFieldControl } from "./field";
+import { useFieldControl } from "./field-context";
 
 /**
  * Checkbox (design-system.md: 20px, radius sm 6, 2px control edge). A 44px hit area from an

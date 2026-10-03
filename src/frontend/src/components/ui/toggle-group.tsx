@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useRef, type ComponentProps, type FocusEvent, type KeyboardEvent } from "react";
 import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
-import { toggleVariants, type ToggleVariantProps } from "./toggle";
+import { toggleVariants, type ToggleVariantProps } from "./toggle-variants";
 
 /**
  * ToggleGroup — Radix, roving focus. `type="single"` is the week strip's and every segmented

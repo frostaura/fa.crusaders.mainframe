@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Interactable } from "@/components/ui/interactable";
 import { Wallet } from "@/components/ui/icons";
 import { useBalance } from "@/lib/balance";

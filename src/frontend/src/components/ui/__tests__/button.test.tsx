@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { Button, buttonVariants } from "../button";
+import { Button } from "../button";
+import { buttonVariants } from "../button-variants";
 import { Plus } from "../icons";
 
 const strict = { reactStrictMode: true };

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadingSentence, STATE_BLOCK_VERBS, type StateBlockAction } from "../state-block";
+import { loadingSentence, STATE_BLOCK_VERBS, type StateBlockAction } from "../state-block-action";
 
 /**
  * R1 (F3 follow-up) — StateBlock's `action` is read in TWO sentences: after "Couldn't" on a

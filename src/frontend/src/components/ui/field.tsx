@@ -1,10 +1,8 @@
-import {
-  createContext, useContext, useId, useLayoutEffect, useMemo, useState,
-  type ComponentProps, type Dispatch, type SetStateAction,
-} from "react";
+import { useContext, useId, useLayoutEffect, useMemo, useState, type ComponentProps } from "react";
 import { Label as LabelPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { WarningCircle } from "@/components/ui/icons";
+import { FieldContext, type FieldState } from "./field-context";
 
 /**
  * Field (design-system.md, Components → field / input / textarea).
@@ -14,23 +12,10 @@ import { WarningCircle } from "@/components/ui/icons";
  * wrong control — a settings page here once rendered every `<label>` without `htmlFor` and left
  * every input on it unlabelled. `FieldLabel` points at the control; the control (`Input`,
  * `Textarea`, `SelectTrigger`, `Checkbox`, `Switch`) reads the same context through
- * {@link useFieldControl} and gets its `id`, `aria-describedby` (description, then error — only
+ * `useFieldControl` (`field-context.ts`) and gets its `id`, `aria-describedby` (description, then error — only
  * the parts actually rendered, so no reference dangles) and `aria-invalid`.
  * </p>
  */
-
-type FieldState = {
-  controlId: string;
-  descriptionId: string;
-  errorId: string;
-  invalid: boolean;
-  hasDescription: boolean;
-  hasError: boolean;
-  setHasDescription: Dispatch<SetStateAction<boolean>>;
-  setHasError: Dispatch<SetStateAction<boolean>>;
-};
-
-const FieldContext = createContext<FieldState | null>(null);
 
 type FieldProps = ComponentProps<"div"> & {
   /** Invalid without a rendered `FieldError` (the message lives elsewhere, e.g. a summary). */
@@ -62,32 +47,6 @@ export function Field({ invalid = false, controlId, className, ...props }: Field
       <div data-slot="field" data-invalid={value.invalid || undefined} className={cn("grid grid-cols-1 gap-1.5", className)} {...props} />
     </FieldContext.Provider>
   );
-}
-
-type ControlA11y = {
-  id?: string;
-  "aria-describedby"?: string;
-  "aria-invalid"?: boolean | "true" | "false" | "grammar" | "spelling";
-};
-
-/**
- * The control's half of the wiring. Explicit props win: a control given its own `id` or
- * `aria-describedby` keeps them (the field's parts are appended to a caller's describedby).
- */
-export function useFieldControl<P extends ControlA11y>(props: P): P {
-  const field = useContext(FieldContext);
-  if (!field) return props;
-  const describedBy = [
-    props["aria-describedby"],
-    field.hasDescription ? field.descriptionId : undefined,
-    field.hasError ? field.errorId : undefined,
-  ].filter(Boolean).join(" ");
-  return {
-    ...props,
-    id: props.id ?? field.controlId,
-    "aria-describedby": describedBy || undefined,
-    "aria-invalid": props["aria-invalid"] ?? (field.invalid || undefined),
-  };
 }
 
 export function FieldLabel({ className, htmlFor, ...props }: ComponentProps<typeof LabelPrimitive.Root>) {

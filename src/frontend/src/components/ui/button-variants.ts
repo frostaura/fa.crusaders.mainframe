@@ -1,0 +1,34 @@
+import { cva } from "class-variance-authority";
+
+/** The design-system button's look (see `button.tsx` for the reasoning behind each size and variant). */
+export const buttonVariants = cva(
+  [
+    "relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap text-center",
+    "rounded-lg border border-transparent font-semibold",
+    "transition-colors duration-fast ease-standard motion-reduce:transition-none",
+    "disabled:pointer-events-none disabled:opacity-50 aria-busy:cursor-progress",
+    "[&_svg]:pointer-events-none [&_svg]:shrink-0",
+  ],
+  {
+    variants: {
+      variant: {
+        primary: "bg-primary text-primary-ink shadow-xs hover:bg-primary-hover",
+        secondary: "bg-accent-soft text-accent-strong hover:bg-accent-soft/70",
+        outline: "border-control bg-bg-surface text-text-primary hover:bg-bg-muted",
+        ghost: "bg-transparent text-text-primary hover:bg-bg-muted",
+        danger: "bg-danger-solid text-danger-ink shadow-xs hover:bg-danger-solid/90",
+        "danger-soft": "bg-danger-soft text-danger-strong hover:bg-danger-soft/70",
+      },
+      size: {
+        sm: "min-h-9 px-[min(0.75rem,12px)] py-1 text-sm after:absolute after:inset-x-0 after:-inset-y-[5px] [&_svg]:size-4",
+        md: "min-h-touch px-[min(1rem,16px)] py-2 text-sm [&_svg]:size-4",
+        lg: "min-h-[52px] px-[min(1.5rem,24px)] py-2 text-base [&_svg]:size-5",
+        "icon-sm": "size-9 after:absolute after:-inset-[5px] [&_svg]:size-5",
+        icon: "size-touch [&_svg]:size-5",
+        "icon-lg": "size-[52px] [&_svg]:size-6",
+      },
+      block: { true: "w-full whitespace-normal [overflow-wrap:anywhere]", false: "" },
+    },
+    defaultVariants: { variant: "primary", size: "md", block: false },
+  },
+);

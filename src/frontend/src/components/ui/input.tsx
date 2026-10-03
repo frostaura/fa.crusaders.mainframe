@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
-import { useFieldControl } from "./field";
+import { useFieldControl } from "./field-context";
 
 /**
  * The text-entry surface every input and textarea shares. 16px on phones (iOS zooms the page into

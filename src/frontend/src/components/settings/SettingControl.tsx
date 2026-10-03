@@ -3,7 +3,7 @@ import type { AdminSettings } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { timeOptions } from "@/components/ui/time-select";
+import { timeOptions } from "@/components/ui/time-options";
 import { cn } from "@/lib/utils";
 import { timezoneOptions } from "@/lib/tenantSettings";
 import { minuteLabel, minuteOfLabel, parsePeakHours, unitOf, type SettingDef } from "@/lib/settingsSchema";

@@ -1,7 +1,7 @@
 import { Children, isValidElement, useContext, useEffect, useRef, useState } from "react";
 import { UNSAFE_LocationContext } from "react-router-dom";
 import { cn } from "../lib/utils";
-import { buttonVariants } from "./ui/button";
+import { buttonVariants } from "./ui/button-variants";
 import { Spinner } from "./ui/spinner";
 import { focusAfterAction, pageHeading } from "../lib/focusAfterAction";
 import { useActionFeedback, type ActionIntent } from "./useActionFeedback";

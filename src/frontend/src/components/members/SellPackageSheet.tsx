@@ -7,7 +7,8 @@ import { useSendingGuard, type SendingGuard } from "@/components/bookings/useSen
 import { useToast } from "@/components/Toast";
 import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { AnimatedCheck } from "@/components/ui/feedback-marks";
 import { HourglassMedium } from "@/components/ui/icons";

@@ -5,7 +5,8 @@ import { TZDate } from "react-day-picker";
 import { Calendar } from "../calendar";
 import { DatePicker } from "../date-picker";
 import { formatClubDayLabel } from "../date-picker-day";
-import { TimeSelect, timeOptions } from "../time-select";
+import { TimeSelect } from "../time-select";
+import { timeOptions } from "../time-options";
 import { SM_UP, useMediaQuery } from "../use-media-query";
 // The date picker's calendar is a lazy chunk (P10). Loaded here, once, so opening a picker in a
 // test resolves from the module cache instead of racing a cold transform under a loaded runner.

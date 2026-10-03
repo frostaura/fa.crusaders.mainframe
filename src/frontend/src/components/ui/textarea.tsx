@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
-import { useFieldControl } from "./field";
+import { useFieldControl } from "./field-context";
 import { fieldSurface } from "./input";
 
 export function Textarea({ className, rows = 3, ...props }: ComponentProps<"textarea">) {

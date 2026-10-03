@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { Select as SelectPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { CaretDown, CaretUp, Check } from "@/components/ui/icons";
-import { useFieldControl } from "./field";
+import { useFieldControl } from "./field-context";
 import { fieldSurface } from "./input";
 
 /**
