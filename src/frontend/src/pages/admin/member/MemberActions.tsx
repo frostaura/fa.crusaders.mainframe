@@ -170,7 +170,7 @@ export function MemberActions(props: ActionsProps) {
 
   return (
     // `contents`: the wrapper is only there to find the ⋯ again, for the role dialog's focus return.
-    <span ref={anchor} className="contents">
+    <span ref={anchor} data-member-actions="" className="contents">
       <ActionsMenu label={MEMBER_COPY.moreActions(name)} items={[adjust, resend, role.item, resetCode, ...lifecycle]} />
       {role.attempt ? (
         <AdminRoleDialog

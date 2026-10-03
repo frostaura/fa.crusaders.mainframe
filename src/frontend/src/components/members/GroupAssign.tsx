@@ -26,6 +26,7 @@ import { memberDetailEndpoints } from "@/lib/memberDetailApi";
 import { writeOrReadBack } from "@/lib/lostReply";
 import { LOST_REPLY } from "@/lib/lostReplyCopy";
 import { cn } from "@/lib/utils";
+import { useMenuReturnFocus } from "./useMenuReturnFocus";
 
 /**
  * GroupAssign — one member's groups, chosen as chips and saved WHOLE (D2, R21: "Groups instead
@@ -59,14 +60,17 @@ export type GroupAssignProps = {
   current: readonly Pick<MemberGroupChip, "id" | "name">[] | null;
   onClose: () => void;
   onSaved: (result: MemberGroupsSetResult) => void;
+  /** X6-1: where focus goes when the sheet was opened from a ⋯ menu — that ⋯ (`useMenuReturnFocus`). */
+  returnFocus?: () => HTMLElement | null | undefined;
 };
 
 export function GroupAssign(props: GroupAssignProps) {
   const { name, onClose } = props;
   const state = useAssignState(props);
+  const backToMenu = useMenuReturnFocus(props.returnFocus);
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !state.saving) onClose(); }}>
-      <DialogContent className="sm:max-w-lg" data-dialog="group-assign">
+      <DialogContent className="sm:max-w-lg" data-dialog="group-assign" onCloseAutoFocus={backToMenu}>
         <DialogHeader>
           <DialogTitle>{ASSIGN_COPY.title(name)}</DialogTitle>
           <DialogDescription>{ASSIGN_COPY.description}</DialogDescription>

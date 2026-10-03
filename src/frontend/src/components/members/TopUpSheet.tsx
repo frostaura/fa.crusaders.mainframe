@@ -22,6 +22,7 @@ import {
 } from "@/lib/deskMinutesCopy";
 import { cn } from "@/lib/utils";
 import { Minus, Plus } from "@/components/ui/icons";
+import { useMenuReturnFocus } from "./useMenuReturnFocus";
 
 /**
  * Adjust a member's minutes — goodwill and corrections (P13 §3.7, `/adjust`): add minutes or take
@@ -89,6 +90,8 @@ export type TopUpSheetProps = {
   onClose: () => void;
   /** The "for a booking" field, rendered on the reason step. */
   renderBookingField?: () => ReactNode;
+  /** X6-1: where focus goes when the sheet was opened from a ⋯ menu — that ⋯ (`useMenuReturnFocus`). */
+  returnFocus?: () => HTMLElement | null | undefined;
 };
 
 const QUICK = COPY.quick;
@@ -160,9 +163,10 @@ export function TopUpSheet(props: TopUpSheetProps) {
   const flow = useTopUpFlow();
   const guard = useSendingGuard((open) => { if (!open) onClose(); });
   useFocusFirstInvalid(flow.refused);
+  const backToMenu = useMenuReturnFocus(props.returnFocus);
   return (
     <Sheet open onOpenChange={guard.onOpenChange}>
-      <SheetContent side={wide ? "right" : "bottom"} data-sheet="top-up">
+      <SheetContent side={wide ? "right" : "bottom"} data-sheet="top-up" onCloseAutoFocus={backToMenu}>
         <SheetHeader>
           <SheetTitle>{sheetTitle(flow.direction, name)}</SheetTitle>
           <SheetDescription>

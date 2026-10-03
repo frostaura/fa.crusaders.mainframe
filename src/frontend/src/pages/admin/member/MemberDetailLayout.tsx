@@ -84,6 +84,7 @@ export default function MemberDetailLayout() {
           bookingError={topUp.bookingError}
           onApply={topUp.apply}
           onClose={topUp.close}
+          returnFocus={headerMenu}
           renderBookingField={() => (
             <RelatedBookingField userId={userId} value={topUp.booking} error={null} onChange={topUp.setBooking} />
           )}
@@ -95,11 +96,17 @@ export default function MemberDetailLayout() {
           name={context.name}
           balance={context.detail.balance_minutes}
           onClose={() => setSelling(false)}
+          returnFocus={headerMenu}
           onSold={onApplied}
         />
       ) : null}
     </RecordFrame>
   );
+}
+
+/** The header's ⋯ — where a sheet opened from it gives focus back to (X6-1). */
+function headerMenu(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-member-actions] button");
 }
 
 /**

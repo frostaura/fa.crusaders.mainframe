@@ -28,6 +28,7 @@ import {
 import { formatMoney } from "@/lib/utils";
 import type { AdjustmentKey } from "./adjustmentAttempt";
 import { attemptSale } from "./sellAttempt";
+import { useMenuReturnFocus } from "./useMenuReturnFocus";
 
 /**
  * Sell a member a package at the desk (P13 §3.7) — how the club takes cash, EFT or a card
@@ -56,6 +57,8 @@ export type SellPackageSheetProps = {
   onClose: () => void;
   /** The server's balance after a sale, or null where a lost reply's re-read failed too. */
   onSold: (balanceAfter: number | null) => void;
+  /** X6-1: where focus goes when the sheet was opened from a ⋯ menu — that ⋯ (`useMenuReturnFocus`). */
+  returnFocus?: () => HTMLElement | null | undefined;
 };
 
 type ShelfState = { status: "loading" } | { status: "failed"; error: unknown } | { status: "ready"; shelf: MemberShelf };
@@ -169,9 +172,10 @@ export function SellPackageSheet(props: SellPackageSheetProps) {
   const flow = useSaleFlow(shelf.state);
   const sale = useSalePress(props, flow, shelf.read);
   const guard = useSendingGuard((open) => { if (!open) onClose(); });
+  const backToMenu = useMenuReturnFocus(props.returnFocus);
   return (
     <Sheet open onOpenChange={guard.onOpenChange}>
-      <SheetContent side={wide ? "right" : "bottom"} data-sheet="sell-package">
+      <SheetContent side={wide ? "right" : "bottom"} data-sheet="sell-package" onCloseAutoFocus={backToMenu}>
         <SheetHeader>
           <SheetTitle>{COPY.title(name)}</SheetTitle>
           <SheetDescription>{shelfLine(shelf.state)}</SheetDescription>

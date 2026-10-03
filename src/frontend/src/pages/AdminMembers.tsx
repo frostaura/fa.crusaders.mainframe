@@ -12,7 +12,7 @@ import type { RowActionHandlers } from "../components/members/RowActions";
 import { SellPackageSheet } from "../components/members/SellPackageSheet";
 import { TopUpSheet } from "../components/members/TopUpSheet";
 import {
-  DEFAULT_SORT, listSends, nextSort, patchRow, statusCounts, visibleRows, type MemberRow, type Sort, type SortKey,
+  DEFAULT_SORT, listSends, nextSort, patchRow, rowMenuOf, statusCounts, visibleRows, type MemberRow, type Sort, type SortKey,
 } from "../components/members/membersModel";
 import { useMinutesAdjust } from "../components/members/useMinutesAdjust";
 import { useMemberLifecycle } from "../components/members/useMemberLifecycle";
@@ -214,6 +214,7 @@ function MemberOverlays(props: OverlayProps) {
           // What the row shows, when the row knows; otherwise the dialog reads the member's own.
           current={groupsKnown(groups.state, assigning)}
           onClose={() => setAssigning(null)}
+          returnFocus={() => rowMenuOf(assigning.user_id)}
           onSaved={(result) => {
             list.setMembers((rows) => patchRow(rows, result.user_id, { groups: result.groups }));
             if (groups.state.status !== "inline") void groups.retry();
@@ -230,6 +231,7 @@ function MemberOverlays(props: OverlayProps) {
           bookingError={adjust.bookingError}
           onApply={adjust.apply}
           onClose={adjust.close}
+          returnFocus={() => rowMenuOf(adjust.target!.user_id)}
           renderBookingField={() => (
             <RelatedBookingField userId={adjust.target!.user_id} value={adjust.booking} error={null} onChange={adjust.setBooking} />
           )}
@@ -241,6 +243,7 @@ function MemberOverlays(props: OverlayProps) {
           name={selling.full_name}
           balance={typeof selling.balance_minutes === "number" ? selling.balance_minutes : null}
           onClose={() => setSelling(null)}
+          returnFocus={() => rowMenuOf(selling.user_id)}
           // The row follows the server's answer at once — no refetch that would re-sort the table.
           onSold={(after) => { if (after !== null) list.setMembers((rows) => patchRow(rows, selling.user_id, { balance_minutes: after })); }}
         />
