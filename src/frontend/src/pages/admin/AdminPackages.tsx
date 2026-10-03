@@ -13,7 +13,7 @@ import { HourglassMedium, Plus } from "../../components/ui/icons";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { RefreshButton } from "../../components/ui/refresh-button";
 import {
-  Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from "../../components/ui/sheet";
 import { Skeleton } from "../../components/ui/skeleton";
 import { StateBlock } from "../../components/ui/state-block";
@@ -76,6 +76,7 @@ export default function AdminPackagesPage() {
       groups={groups.status === "ready" ? groups.groups : null}
       onSaved={saved}
       onCancel={() => setEditing(null)}
+      inSheet={!roomy}
     />
   ) : null;
 
@@ -200,7 +201,8 @@ function EditorSheet({ editing, onClose, children }: { editing: AdminPackage | "
             <SheetTitle>{editing === "new" ? COPY.addTitle : COPY.editTitle(editing.name)}</SheetTitle>
             <SheetDescription>{editing === "new" ? COPY.addDescription : COPY.editDescription}</SheetDescription>
           </SheetHeader>
-          <SheetBody className="pb-4">{children}</SheetBody>
+          {/* The editor brings its own body and docked footer (L6-8). */}
+          {children}
         </SheetContent>
       ) : null}
     </Sheet>

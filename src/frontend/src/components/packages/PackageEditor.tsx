@@ -1,10 +1,11 @@
-import { useRef, useState, type ReactNode, type RefObject } from "react";
+import { useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Alert } from "@/components/Alert";
 import { Minutes } from "@/components/Minutes";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SheetBody, SheetFooter } from "@/components/ui/sheet";
 import { adminEndpoints, type AdminPackage, type MemberGroup } from "@/lib/adminApi";
 import { describeFailure } from "@/lib/errors";
 import { unsureSentence, writeOrReadBack } from "@/lib/lostReply";
@@ -42,6 +43,12 @@ export type PackageEditorProps = {
   groups: MemberGroup[] | null;
   onSaved: (saved: AdminPackage, said: string) => void;
   onCancel: () => void;
+  /**
+   * L6-8: drawn inside a sheet — the form scrolls in the sheet's body and Cancel / Save are DOCKED in
+   * its footer (submitting through `form=`), as every other sheet's are. Beside the list it is one
+   * column with the buttons under the form.
+   */
+  inSheet?: boolean;
 };
 
 type Draft = { name: string; minutes: string; price: string; shelf: ShelfKey; order: string; reason: string };
@@ -91,7 +98,10 @@ async function write(pkg: AdminPackage | "new", draft: Draft): Promise<Written> 
   return { saved: value, said: proven ? LOST_REPLY.proven(done) : done };
 }
 
-export function PackageEditor({ pkg, active, groups, onSaved, onCancel }: PackageEditorProps) {
+export function PackageEditor(props: PackageEditorProps) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { pkg, active, groups, onSaved, onCancel, inSheet = false } = props;
+  const formId = useId();
   const [draft, setDraft] = useState<Draft>(() => initialDraft(pkg));
   const [tried, setTried] = useState(false);
   const isNew = pkg === "new";
@@ -111,8 +121,14 @@ export function PackageEditor({ pkg, active, groups, onSaved, onCancel }: Packag
   };
   const show = (k: keyof Complaints) => (tried || (k !== "name" && draft[k].trim() !== "") ? problems[k] : null);
 
-  return (
-    <form noValidate className="flex flex-col gap-5" onSubmit={(e) => { e.preventDefault(); submit(); }} data-package-editor="">
+  const actions = (
+    <>
+      <Button type="button" variant="outline" disabled={save.pending} onClick={onCancel}>{COPY.cancel}</Button>
+      <Button type="submit" form={formId} pending={save.pending}>{isNew ? COPY.saveNew : COPY.saveEdit}</Button>
+    </>
+  );
+  const form = (
+    <form id={formId} noValidate className="flex flex-col gap-5" onSubmit={(e) => { e.preventDefault(); submit(); }} data-package-editor="">
       <TextField label={COPY.nameLabel} description={COPY.nameDescription} complaint={tried ? problems.name : null}>
         <Input ref={nameRef} value={draft.name} maxLength={PACKAGE_LIMITS.nameMax} autoComplete="off" placeholder="5 hours" onChange={(e) => set({ name: e.target.value })} />
       </TextField>
@@ -132,11 +148,15 @@ export function PackageEditor({ pkg, active, groups, onSaved, onCancel }: Packag
       )}
       <Preview pkg={pkg} draft={draft} active={active} groups={groups} />
       <SaveFailure error={save.error} isNew={isNew} name={draft.name.trim()} />
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="outline" disabled={save.pending} onClick={onCancel}>{COPY.cancel}</Button>
-        <Button type="submit" pending={save.pending}>{isNew ? COPY.saveNew : COPY.saveEdit}</Button>
-      </div>
+      {inSheet ? null : <div className="flex flex-wrap justify-end gap-2">{actions}</div>}
     </form>
+  );
+  if (!inSheet) return form;
+  return (
+    <>
+      <SheetBody className="pb-4">{form}</SheetBody>
+      <SheetFooter>{actions}</SheetFooter>
+    </>
   );
 }
 

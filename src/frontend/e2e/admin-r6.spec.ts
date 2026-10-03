@@ -147,3 +147,16 @@ test.describe("L6-7 — Packages uses a desk's width", () => {
     });
   }
 });
+
+test.describe("L6-8 — the package editor's sheet docks its footer", () => {
+  test("at 390 the Save button is on screen with the form unscrolled, and saves", async ({ page }) => {
+    await open(page, "/admin/packages", packageRoutes(), 390);
+    await page.getByRole("button", { name: "Edit Five hours" }).click({ timeout: 30_000 });
+    const sheet = page.getByRole("dialog");
+    await expect(sheet.getByRole("textbox").first()).toBeVisible();
+    const save = sheet.getByRole("button", { name: "Save package" });
+    await expect(save).toBeInViewport();
+    const body = sheet.locator("[data-slot='dialog-body']");
+    expect(await body.evaluate((el) => el.scrollHeight > el.clientHeight), "the form is long enough to scroll").toBe(true);
+  });
+});

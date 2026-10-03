@@ -139,6 +139,22 @@ describe("adding a package", () => {
     expect(preview).toHaveTextContent("Saves R20.00 (8%) against 1 hour (R120.00).");
   });
 
+  /** Review round 6, L6-8: the sheet's Save stays docked under the form, as every other sheet's does. */
+  it("docks Cancel and Add package in the sheet's footer, outside the scrolling form, and still submits", async () => {
+    const stub = stubFetch(routes([{ method: "POST", path: "/api/v1/admin/packages", body: adminPackage({ id: "p2", name: "2 hours", minutes: 120, price_zar: 220 }) }]));
+    renderPage(<AdminPackagesPage />);
+    const dialog = await openAdd();
+    const save = within(dialog).getByRole("button", { name: COPY.saveNew });
+    expect(save.closest("[data-slot='dialog-footer']")).not.toBeNull();
+    expect(save.closest("[data-slot='dialog-body']")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: COPY.cancel }).closest("[data-slot='dialog-footer']")).not.toBeNull();
+    fireEvent.change(within(dialog).getByLabelText(COPY.nameLabel), { target: { value: "2 hours" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: COPY.hoursChip(2) }));
+    fireEvent.change(within(dialog).getByLabelText(COPY.priceLabel), { target: { value: "220" } });
+    fireEvent.click(save);
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path === "/api/v1/admin/packages")).toBe(true));
+  });
+
   it("refuses a fraction of a minute and a price below a cent at the field, and sends nothing", async () => {
     const stub = stubFetch(routes([{ method: "POST", path: "/api/v1/admin/packages", status: 201, body: adminPackage() }]));
     renderPage(<AdminPackagesPage />);
