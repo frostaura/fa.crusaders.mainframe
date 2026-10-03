@@ -1203,3 +1203,11 @@ describe("doorEventsLostNotice", () => {
     expect(doorEventsLostNotice(door({ events_lost: 1 }))).toContain("dropped 1 record ");
   });
 });
+
+describe("R7 E7-4 — one unnamed gate, one name", () => {
+  it("names a live unnamed board in the log exactly as the Doors page does", () => {
+    const door = { id: "d1", name: null, gate_key: null, device_code: "gate-598a9a", removed: false };
+    expect(doorRowIdentity(door).label).toBe(doorDisplayName({ name: null, device_code: "gate-598a9a" }));
+    expect(doorRowIdentity(door).label).not.toBe("An unnamed door");
+  });
+});

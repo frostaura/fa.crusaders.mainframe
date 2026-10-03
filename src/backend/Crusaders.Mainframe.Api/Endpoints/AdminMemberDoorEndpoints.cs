@@ -383,7 +383,7 @@ public static class AdminMemberDoorEndpoints
 
         return await db.Devices.AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Select(d => new DoorRef(d.Id, d.Name, d.GateKey))
+            .Select(d => new DoorRef(d.Id, d.Name, d.GateKey, d.DeviceCode))
             .ToDictionaryAsync(d => d.Id, d => d, ct);
     }
 }

@@ -642,7 +642,7 @@ describe("the doors surface", () => {
        * locale.
        */
       expect(when.getAttribute("title")).toContain("Decided at the door at");
-      expect(within(feed).getByText(/Decided at the door at/)).toHaveTextContent(
+      expect(within(feed).getByText(/^Decided at the door at/)).toHaveTextContent(
         "the door told us at",
       );
       expect(when.getAttribute("title")).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2}/);
@@ -664,7 +664,7 @@ describe("the doors surface", () => {
       });
 
       const feed = await screen.findByRole("region", { name: "Scans at this door" });
-      expect(within(feed).getByText(/Decided at the door at/))
+      expect(within(feed).getByText(/^Decided at the door at/))
         .toHaveTextContent("and the club heard within the minute");
       expect(within(feed).queryByText(/the door told us at/)).toBeNull();
     });
@@ -686,7 +686,7 @@ describe("the doors surface", () => {
       // Both instants, in WIRE-R1 §2's own words. An /events upload IS contact, so
       // `last_seen_at` moving PAST a scan it delivered is not a contradiction — which is
       // exactly why the row has to say which instant is which rather than showing one.
-      expect(within(feed).getByText(/Decided at the door at/))
+      expect(within(feed).getByText(/^Decided at the door at/))
         .toHaveTextContent("Decided at the door at 20:04 \u2014 the door told us at 20:31.");
     });
 

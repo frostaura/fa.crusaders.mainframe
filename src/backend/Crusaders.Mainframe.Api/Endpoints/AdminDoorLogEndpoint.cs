@@ -492,7 +492,7 @@ public static class AdminDoorLogEndpoint
 
         return await db.Devices.AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Select(d => new DoorRef(d.Id, d.Name, d.GateKey))
+            .Select(d => new DoorRef(d.Id, d.Name, d.GateKey, d.DeviceCode))
             .ToDictionaryAsync(d => d.Id, d => d, ct);
     }
 
@@ -502,7 +502,7 @@ public static class AdminDoorLogEndpoint
 /// The three things a log row says about its door. Top-level and bodyless for the lizard reason
 /// recorded in <c>memory/gotchas.md</c>.
 /// </summary>
-public sealed record DoorRef(Guid Id, string Name, string? GateKey);
+public sealed record DoorRef(Guid Id, string Name, string? GateKey, string? DeviceCode = null);
 
 /// <summary>
 /// The zone the export's two readable columns are written in, and its name for the file to

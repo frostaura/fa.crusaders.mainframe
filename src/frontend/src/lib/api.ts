@@ -2911,6 +2911,8 @@ export type DoorLogDoor = {
   /** The display name stored on the row. Null on a row written before names were stored. */
   name?: string | null;
   gate_key?: string | null;
+  /** R7 E7-4 — the live board's own code (`gate-44c103`), so an unnamed one is named as everywhere else. */
+  device_code?: string | null;
   /** True once the board is gone. Absent on an older API, which means "not known to be". */
   removed?: boolean;
 };

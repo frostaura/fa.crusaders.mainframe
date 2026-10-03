@@ -58,6 +58,9 @@ public static class DoorRowDoor
                 id = (Guid?)door.Id,
                 name = DeviceView.Named(door.Name),
                 gate_key = door.GateKey,
+                // R7 E7-4 — so an unnamed board reads "Unnamed scanner (gate-…)" here as it does on
+                // the Doors page and the Night, not a fourth name of its own.
+                device_code = door.DeviceCode,
                 removed = false,
             };
         }

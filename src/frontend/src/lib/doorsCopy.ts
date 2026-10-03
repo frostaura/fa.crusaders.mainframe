@@ -124,7 +124,8 @@ export function doorRowIdentity(door: DoorLogDoor | null | undefined): DoorRowId
   if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return { label: name, removed, id };
   if (key !== "") return { label: key, removed, id };
   if (removed) return { label: REMOVED_DOOR_UNNAMED, removed, id: null };
-  return { label: "An unnamed door", removed, id };
+  // R7 E7-4 — one unnamed board, one name: the Doors page's, the Night's and the history's.
+  return { label: doorDisplayName({ name: null, device_code: door?.device_code ?? null }), removed, id };
 }
 
 /** True of the name {@link doorDisplayName} builds for a door nobody has named. */
