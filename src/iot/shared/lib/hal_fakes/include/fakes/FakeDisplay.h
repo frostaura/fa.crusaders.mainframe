@@ -3,19 +3,20 @@
 // WHY IT MODELS THE GRID INSTEAD OF LOGGING CALLS
 // -----------------------------------------------
 // A call log answers "did you print COURT A?". The questions that actually
-// matter on a 16x2 panel are "what does the glass say now?" and "what fell off
+// matter on the panel are "what does the glass say now?" and "what fell off
 // the right-hand edge?", and a call log cannot answer either.
 //
 // Two real failures this catches that a call log does not:
 //   - Repainting a row with a shorter string leaves the tail of the previous
 //     message behind, so "COURT A 45 MIN" becomes "COURT A 5 MINN". The grid
 //     shows it; the call log shows two innocent-looking print() calls.
-//   - Text that overruns column 16 is silently lost. On the physical 20x4 panel
-//     driven as 16x2 those columns exist but are never repainted, so stale
-//     characters sit there indefinitely.
+//   - Text that overruns the last column is silently lost. The panel is driven
+//     as 20x4 with rows 0-1 kept to the 16-column safe subset, so a row 0-1
+//     message that runs past column 16 would be cut on a 1602 swapped in.
 //
-// Rows read back space-padded to the full width and NUL-terminated, so a test
-// asserts the exact 16 characters with TEST_ASSERT_EQUAL_STRING. Padding is not
+// Rows read back space-padded to the full width (kDisplayCols — 20 under the
+// [lcd] flags, 16 without them) and NUL-terminated, so a test asserts the exact
+// row with TEST_ASSERT_EQUAL_STRING. Padding is not
 // cosmetic: it is what makes the leftover-tail bug visible in the assertion.
 //
 // No Arduino headers, no heap, no String.

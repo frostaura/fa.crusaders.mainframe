@@ -1,12 +1,11 @@
 // Crusaders Mainframe — hal::IDisplayPort on the PCF8574-backed HD44780.
 //
 // The panel fitted is a 2004A (20x4) at I2C 0x27, and this driver initialises
-// it as hal::kDisplayCols x hal::kDisplayRows — 16x2 by decision. 16x2 renders
-// correctly on either panel, so a display swapped at the club degrades to a
-// smaller screen rather than to garbage on a box nobody can service quickly.
-// The columns past 15 exist physically and are simply never written, which is
-// why every caller repaints a full-width, space-padded row: stale characters
-// out there would sit unrefreshed indefinitely.
+// it as hal::kDisplayCols x hal::kDisplayRows — 20x4, from the [lcd] build flags.
+// Rows 0-1 carry the 16-column safe subset, so a 1602 swapped in at the club
+// degrades to a whole, smaller message rather than to garbage on a box nobody
+// can service quickly. Every caller repaints a full-width, space-padded row:
+// stale characters left past the new text would sit unrefreshed indefinitely.
 //
 // WHY NOTHING HERE WRAPS
 // ----------------------

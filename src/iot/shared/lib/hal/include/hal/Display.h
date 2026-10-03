@@ -3,10 +3,11 @@
 // WHY THIS EXISTS
 // ---------------
 // An HD44780-compatible panel behind a PCF8574 I2C backpack at 0x27. The panel
-// fitted is physically 20x4, but the firmware drives it as 16x2 by decision:
-// 16x2 renders correctly on either panel, so a swapped display degrades to a
-// smaller screen instead of to garbage on a court-side box nobody can service
-// quickly.
+// fitted is a 20x4 and the court box drives it as 20x4 (LCD_COLS/LCD_ROWS in
+// court-box/platformio.ini [lcd]). Rows 0-1 hold the 16-column safe subset, so
+// a 1602 swapped in at the club shows a whole, smaller message rather than
+// garbage on a court-side box nobody can service quickly. A build with no LCD
+// flags falls back to 16x2 (below).
 //
 // WHY print() TRUNCATES AND NEVER WRAPS
 // -------------------------------------
