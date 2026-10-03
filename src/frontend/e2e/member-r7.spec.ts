@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { inviteFixture, memberShellRoutes } from "./playersKit";
+import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
 
 /**
  * Review round 7 (lane FD1, member shell and bookings) — what only a browser can measure: where
@@ -88,5 +88,39 @@ test.describe("§4.2 — on a phone Bookings opens with the first bookable row i
   test("a desktop opens at the top of the page", async ({ page }) => {
     await openBookings(page, 1280, 800);
     expect(await mainScrollTop(page)).toBe(0);
+  });
+});
+
+/* ───────────────────────────── L7-12 — the 120rem frame at 3xl ───────────────────────────── */
+
+async function openMember(page: Page, path: string, routes: ApiRoute[], width: number, height: number) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width, height });
+  await signIn(page);
+  await serveApi(page, [...routes, ...memberShellRoutes()]);
+  await page.goto(path);
+}
+
+const shellShare = async (page: Page, width: number) => (await page.locator("[data-page-shell]").first().boundingBox())!.width / width;
+
+test.describe("L7-12 — booking detail and How it works take the 120rem frame from 3xl", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("a booking's page at 1920 uses the window (was 1280px, 62 %)", async ({ page }) => {
+    await openMember(page, `/bookings/${BOOKING}`, [{ path: `/api/v1/bookings/${BOOKING}`, body: detailFixture() }], 1920, 1080);
+    await expect(page.locator("[data-detail-layout]")).toBeVisible({ timeout: 20_000 });
+    expect(await shellShare(page, 1920)).toBeGreaterThanOrEqual(0.9);
+  });
+
+  test("How it works at 1920 uses the window (was 62 %)", async ({ page }) => {
+    await openMember(page, "/how-it-works", [], 1920, 1080);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 20_000 });
+    expect(await shellShare(page, 1920)).toBeGreaterThanOrEqual(0.9);
+  });
+
+  test("at 1280 both keep their xl frame (80rem), not a stretched page", async ({ page }) => {
+    await openMember(page, "/how-it-works", [], 1280, 800);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 20_000 });
+    expect((await page.locator("[data-page-shell]").first().boundingBox())!.width).toBeLessThanOrEqual(1280);
   });
 });

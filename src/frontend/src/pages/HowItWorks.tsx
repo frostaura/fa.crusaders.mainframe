@@ -69,7 +69,8 @@ export default function HowItWorksPage() {
   return (
     // R4 form factor (SPEC P3): `content`, `wide` from xl, the steps as cards in rows (two at
     // lg, three on a wide page) rather than one 36rem column of them.
-    <PageShell width="content" className="xl:max-w-wide">
+    // R7 L7-12 — and the 120rem frame from 3xl, like every member page (62 % of 1920 before).
+    <PageShell width="content" fullFrom3xl className="xl:max-w-wide">
       <PageHeader title={GUIDE_TITLE} description={GUIDE_INTRO} />
       <div className="@container/steps">
       <ol className={STEPS_GRID}>

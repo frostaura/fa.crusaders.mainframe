@@ -60,8 +60,9 @@ export default function BookingDetailPage() {
   // R5 M5-8 — the member's own seat, when the link that opened the page names it.
   const seatId = new URLSearchParams(useLocation().search).get("seat");
   return (
-    // R4 form factor (SPEC 3.3): `content` to xl, `wide` from it, where the money stands in a rail.
-    <PageShell width="content" className="xl:max-w-wide">
+    // R4 form factor (SPEC 3.3): `content` to xl, `wide` from it, where the money stands in a rail;
+    // R7 L7-12 — and the 120rem frame from 3xl, like every member page (it sat at 62 % of 1920).
+    <PageShell width="content" fullFrom3xl className="xl:max-w-wide">
       <PageHeader
         back={{ to: "/bookings", label: DETAIL_COPY.back }}
         title={read.data ? detailTitle(read.data) : DETAIL_COPY.title}
@@ -195,6 +196,8 @@ function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
  *   <li><b>56rem</b> (lg, `content`): Players across; Money beside the court column; Cancel.</li>
  *   <li><b>72rem</b> (xl, `wide`): Players, then the court column's three blocks side by side,
  *   with Money in a 22rem rail that sticks while the players are worked, Cancel at its foot.</li>
+ *   <li><b>100rem</b> (3xl, the 120rem frame, R7 L7-12): the court column's blocks fill the row —
+ *   three across when there are three, two halves when the result card is absent.</li>
  * </ul>
  * DOM order is the phone's in every layout, so Tab order is reading order. Written whole.
  */
@@ -205,7 +208,10 @@ const LAYOUT = [
 ].join(" ");
 const PLAYERS = "@[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-1 @[72rem]/page:row-start-1";
 const MONEY = "min-w-0 @[72rem]/page:sticky @[72rem]/page:top-6 @[72rem]/page:col-start-2 @[72rem]/page:row-span-2 @[72rem]/page:row-start-1";
-const COURT = "flex min-w-0 flex-col gap-8 @[72rem]/page:col-start-1 @[72rem]/page:row-start-2 @[72rem]/page:grid @[72rem]/page:grid-cols-2 @[72rem]/page:items-start";
+const COURT = [
+  "flex min-w-0 flex-col gap-8 @[72rem]/page:col-start-1 @[72rem]/page:row-start-2 @[72rem]/page:grid @[72rem]/page:grid-cols-2 @[72rem]/page:items-start",
+  "@[100rem]/page:grid-cols-[repeat(auto-fit,minmax(20rem,1fr))]",
+].join(" ");
 const CANCEL = "min-w-0 @[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-2 @[72rem]/page:row-start-3";
 const ADMIN = "min-w-0 @[56rem]/page:col-span-2 @[72rem]/page:col-span-1 @[72rem]/page:col-start-1 @[72rem]/page:row-start-3";
 const LG_UP = "(min-width: 1024px)";
