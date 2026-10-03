@@ -29,7 +29,7 @@ import {
   PACKAGES_COPY as COPY, PACKAGE_LIMITS, baselineOf, perHour, savingOf, shelfOrder, type ShelfItem,
 } from "../../lib/packagesCopy";
 import { memberShelfOf } from "../../components/packages/memberShelf";
-import { formatMoney } from "../../lib/utils";
+import { cn, formatMoney } from "../../lib/utils";
 
 /**
  * Admin · Packages (`/admin/packages`, P13 contract §3.5, §4) — what members buy minutes in.
@@ -129,10 +129,17 @@ type PackagesListProps = {
 /** The shelves in their three states — loading, failed, empty — never collapsed into one. */
 function PackagesList({ view, read, groups, wide, onAdd, onEdit }: PackagesListProps) {
   const active = view === "active";
-  const [retiring, setRetiring] = useState<AdminPackage | null>(null);
+  // Which package, and whether its question is open, are separate (R9 X9-1): the dialog stays
+  // mounted while it closes, so Radix's close-time focus runs and Esc or Cancel lands on the ⋯.
+  const [retiring, setRetiring] = useState<{ pkg: AdminPackage; open: boolean } | null>(null);
   return (
     <>
-      <RetireDialog pkg={retiring} onClose={() => setRetiring(null)} onRetired={(p) => { read.settle(p); void read.load(); }} />
+      <RetireDialog
+        pkg={retiring?.pkg ?? null}
+        open={retiring?.open ?? false}
+        onClose={() => setRetiring((now) => (now ? { ...now, open: false } : now))}
+        onRetired={(p) => { read.settle(p); void read.load(); }}
+      />
       <StaleNotice stale={Boolean(read.error) && read.packages !== null} readAt={read.readAt} />
       <StateBlock
         loading={read.loading && read.packages === null}
@@ -148,7 +155,7 @@ function PackagesList({ view, read, groups, wide, onAdd, onEdit }: PackagesListP
         skeleton={<ListSkeleton />}
       >
         {read.packages ? (
-          <Shelves packages={read.packages} groups={groups} wide={wide} onEdit={onEdit} onRetire={setRetiring} />
+          <Shelves packages={read.packages} groups={groups} wide={wide} onEdit={onEdit} onRetire={(pkg) => setRetiring({ pkg, open: true })} />
         ) : null}
       </StateBlock>
     </>
@@ -276,6 +283,13 @@ function savingWords(p: AdminPackage, shelf: Shelf): string {
   return saving ? COPY.saves(saving.zar, saving.pct) : COPY.noSaving;
 }
 
+/**
+ * The figure columns sit closer (R9 L9-5): beside the 20rem editor at 1024 and 1280 the table has
+ * 608px, and at the default cell padding Actions either wrapped ⋯ under Edit or ran 40px past the
+ * box. The outer columns keep the table's edge; "Per hour" wraps between its words like its cells.
+ */
+const FIGURE = "px-2 text-right";
+
 function ShelfTable({ shelf, onEdit, onRetire }: ShelfViewProps) {
   const c = COPY.columns;
   return (
@@ -283,11 +297,11 @@ function ShelfTable({ shelf, onEdit, onRetire }: ShelfViewProps) {
       <TableHeader>
         <TableRow>
           <TableHead>{c.name}</TableHead>
-          <TableHead className="text-right">{c.minutes}</TableHead>
-          <TableHead className="text-right">{c.price}</TableHead>
-          <TableHead className="text-right">{c.perHour}</TableHead>
-          <TableHead className="text-right">{c.saves}</TableHead>
-          <TableHead className="text-right">{c.order}</TableHead>
+          <TableHead className={FIGURE}>{c.minutes}</TableHead>
+          <TableHead className={FIGURE}>{c.price}</TableHead>
+          <TableHead className={cn(FIGURE, "whitespace-normal")}>{c.perHour}</TableHead>
+          <TableHead className={FIGURE}>{c.saves}</TableHead>
+          <TableHead className={FIGURE}>{c.order}</TableHead>
           <TableHead className="text-right">{c.actions}</TableHead>
         </TableRow>
       </TableHeader>
@@ -295,11 +309,11 @@ function ShelfTable({ shelf, onEdit, onRetire }: ShelfViewProps) {
         {shelf.packages.map((p) => (
           <TableRow key={p.id} data-package-row={p.id}>
             <TableCell className="font-semibold text-text-primary">{p.name}</TableCell>
-            <TableCell className="text-right"><Minutes value={p.minutes} /></TableCell>
-            <TableCell className="text-right tabular-nums">{formatMoney(p.price_zar)}</TableCell>
-            <TableCell className="text-right tabular-nums text-text-secondary">{formatHourly(p)}</TableCell>
-            <TableCell className="text-right tabular-nums">{savingWords(p, shelf)}</TableCell>
-            <TableCell className="text-right tabular-nums text-text-secondary">{p.sort_order}</TableCell>
+            <TableCell className={FIGURE}><Minutes value={p.minutes} /></TableCell>
+            <TableCell className={cn(FIGURE, "tabular-nums")}>{formatMoney(p.price_zar)}</TableCell>
+            <TableCell className={cn(FIGURE, "tabular-nums text-text-secondary")}>{formatHourly(p)}</TableCell>
+            <TableCell className={cn(FIGURE, "tabular-nums")}>{savingWords(p, shelf)}</TableCell>
+            <TableCell className={cn(FIGURE, "tabular-nums text-text-secondary")}>{p.sort_order}</TableCell>
             <TableCell className="text-right"><RowActions pkg={p} onEdit={onEdit} onRetire={onRetire} /></TableCell>
           </TableRow>
         ))}
@@ -339,7 +353,8 @@ function ShelfCards({ shelf, onEdit, onRetire }: ShelfViewProps) {
 function RowActions({ pkg, onEdit, onRetire }: { pkg: AdminPackage; onEdit: (p: AdminPackage) => void; onRetire: (p: AdminPackage) => void }) {
   if (pkg.status !== "active") return <Badge tone="neutral">{COPY.retiredOn}</Badge>;
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    // Never wraps (R9 L9-5): beside the 20rem editor at 1024/1280 the cell squeezed ⋯ under Edit.
+    <div className="flex items-center justify-end gap-2">
       <Button size="sm" variant="outline" aria-label={COPY.editLabel(pkg.name)} data-opens-editor={pkg.id} onClick={() => onEdit(pkg)}>{COPY.edit}</Button>
       {/* R8 J8-5: Retire lives behind ⋯, as Boards' Delete does (P3: the rare, destructive act is
           not beside Edit at thumb distance). The inline armed confirm ran its sentence eight lines
@@ -352,18 +367,31 @@ function RowActions({ pkg, onEdit, onRetire }: { pkg: AdminPackage; onEdit: (p: 
   );
 }
 
+/** The ⋯ of a package's row — where a dismissed Retire question hands focus back. */
+const rowMenuOf = (id: string) =>
+  document.querySelector<HTMLElement>(`[data-package-row="${CSS.escape(id)}"] button[aria-haspopup="menu"]`);
+
 /**
  * The retire question, asked by the LIST, not the row (R8 J8-5): the row leaves the shelf when it
  * is retired, and a dialog mounted in it went with it — its close-time focus never ran and focus
  * fell to <body>. Here it survives the row and floors focus on the page heading.
+ *
+ * <p>
+ * R9 X9-1: dismissed (Esc, Cancel, ×), the row is still there, and focus goes back to its ⋯. The
+ * dialog was unmounted the moment it closed, so the return never ran and focus fell to <main>.
+ * </p>
  */
-function RetireDialog({ pkg, onClose, onRetired }: { pkg: AdminPackage | null; onClose: () => void; onRetired: (p: AdminPackage) => void }) {
+function RetireDialog({ pkg, open, onClose, onRetired }: {
+  pkg: AdminPackage | null; open: boolean; onClose: () => void; onRetired: (p: AdminPackage) => void;
+}) {
   const toast = useToast();
   if (!pkg) return null;
   return (
     <ConfirmDialog
-      open
-      onOpenChange={(open) => { if (!open) onClose(); }}
+      key={pkg.id}
+      open={open}
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      returnFocus={() => rowMenuOf(pkg.id)}
       focusAfter={pageHeading}
       title={COPY.retireLabel(pkg.name)}
       description={COPY.retireConfirm(pkg.name)}
