@@ -64,7 +64,9 @@ function OpenRow({ checkout, onHide, onSaid }: { checkout: OpenCheckout; onHide:
   });
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3" data-open-checkout={checkout.id}>
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* R8 L8-2 — a real basis: a zero-basis `flex-1` never wraps to its own line, so at 200 %
+          text it squeezed to a word a line beside Cancel and "Started at" ran into it. */}
+      <div className="flex min-w-0 flex-1 basis-48 flex-col">
         <span className="text-base font-semibold text-text-primary [overflow-wrap:anywhere]">{checkoutWhat(checkout)}</span>
         <span className="text-sm text-text-secondary">{OPEN_CHECKOUTS.line(checkout.created_at)}</span>
         <span className="text-xs text-text-muted">{OPEN_CHECKOUTS.expires(checkout.expires_at)}</span>
