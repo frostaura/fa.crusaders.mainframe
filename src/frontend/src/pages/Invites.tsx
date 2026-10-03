@@ -16,6 +16,7 @@ import { useKeptInvites } from "@/lib/offline/useKeptInvites";
 import { StaleNotice } from "@/components/shell/StaleNotice";
 import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKeptRetry";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
+import { StillTrying } from "@/lib/offline/StillTrying";
 import { usePendingLinkInvite } from "@/components/players/invites/usePendingLinkInvite";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
@@ -56,6 +57,8 @@ export default function InvitesPage() {
       />
       <StaleNotice stale={invites.stale} readAt={invites.readAt} offline={invites.offline} />
       {/* R7 X7-3, R8 — offline with nothing kept on this phone: said as offline, never "couldn't be reached". Offline is the read's own (the club unreachable, a NetworkError), never navigator.onLine, which Wi-Fi without internet leaves true. */}
+      {/* R10 X10-1 — a first read that has not answered says, after a few seconds, it is still trying. */}
+      {firstReadWaiting(invites) ? <StillTrying /> : null}
       {offlineWithNothingKept(invites) ? <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.invites} onRetry={() => void refresh()} /> : (
       <StateBlock
         loading={invites.items === null && invites.loading}
@@ -227,6 +230,11 @@ function useSheet(items: Invite[] | null) {
 }
 
 /** R8 X7-3 — the read failed for want of the club and nothing of it is kept (never `navigator.onLine`). */
+/** R10 X10-1 — nothing on screen yet and the first read still out. */
+function firstReadWaiting(read: { items: unknown; loading: boolean }): boolean {
+  return read.items === null && read.loading;
+}
+
 function offlineWithNothingKept(read: { items: unknown; error: unknown; offline?: boolean }): boolean {
   return read.items === null && read.error != null && read.offline === true;
 }

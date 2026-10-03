@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type ComponentProps, type DragEvent, type ReactNode } from "react";
 import { StaleNotice } from "@/components/shell/StaleNotice";
+import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKeptRetry";
+import { StillTrying } from "@/lib/offline/StillTrying";
+import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { endpoints, NetworkError, type WebAuthnCredentialRow, type MyProfile } from "../lib/api";
 import { useProfile } from "../lib/profile";
 import { useAsyncAction } from "../lib/useAsyncAction";
@@ -69,29 +72,46 @@ function useStalled(missing: boolean): [boolean, () => void] {
   return [stalled && missing, () => setStalled(false)];
 }
 
+/**
+ * R10 X10-1 — where the first read is with no profile on screen: still out ("Still trying" after a
+ * few seconds), or failed for want of a connection — said as offline, never red "couldn't be
+ * reached" — or neither. Out of the page for lizard's CCN gate (the Wallet's `firstRead`).
+ */
+function firstRead(shown: boolean, loading: boolean, unreachable: boolean): "trying" | "offline" | null {
+  if (shown) return null;
+  if (loading) return "trying";
+  return unreachable ? "offline" : null;
+}
+
 export default function ProfilePage() {
   const { profile, loading, failed: readFailed, error: readError, refresh, stale = false, readAt = null, offline = false } = useProfile();
   const [stalled, clearFailed] = useStalled(!profile && !loading);
   // The provider says so when the read failed (D2); the stall is kept for a read never asked.
   const failed = stalled || (readFailed && !profile && !loading);
+  const retry = () => { clearFailed(); void refresh(); };
+  const wait = firstRead(profile !== null, loading, readFailed && offline);
 
   return (
     // R4 form factor (SPEC 3.7): `wide`, in two tabs — My game, and Account in columns.
     <PageShell width="wide">
       <PageHeader title={PROFILE_TITLE} description={PROFILE_DESCRIPTION} />
       <StaleNotice stale={stale} readAt={readAt} offline={offline} />
+      {/* R10 X10-1 — a first read that has not answered says, after a few seconds, it is still trying. */}
+      {wait === "trying" ? <StillTrying /> : null}
+      {wait === "offline" ? <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.profile} onRetry={retry} /> : (
       <StateBlock
         loading={!profile && !failed}
         // The read's own error when there is one (F4-17: a 503 reads "down or restarting", as on
         // every other page); a stall that never got an answer is the club not answering.
         error={!profile && failed ? (readError ?? new NetworkError("timeout")) : null}
         action="load your profile"
-        onRetry={() => { clearFailed(); void refresh(); }}
+        onRetry={retry}
         skeleton={<ProfileSkeleton />}
         className="gap-6"
       >
         {profile ? <ProfileSections profile={profile} /> : null}
       </StateBlock>
+      )}
     </PageShell>
   );
 }

@@ -4,6 +4,7 @@ import { memberReads, type WalletActivity } from "../lib/offline/memberReads";
 import { useKeptReport } from "../lib/offline/useKeptReport";
 import { StaleNotice } from "../components/shell/StaleNotice";
 import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
+import { StillTrying } from "../lib/offline/StillTrying";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { cn } from "../lib/utils";
 import { MinutesFigure } from "../components/wallet/MinutesFigure";
@@ -109,6 +110,8 @@ export default function WalletActivityPage() {
       {/* A refresh that failed keeps the figures it had, and says so — and when — above them. */}
       <StaleNotice stale={report.stale} readAt={report.readAt} offline={report.offline} />
       {/* R6 X6-4 — offline, and this period was never drawn on this phone: said as offline. */}
+      {/* R10 X10-1 — a first read that has not answered says, after a few seconds, it is still trying. */}
+      {data === null && report.loading ? <StillTrying /> : null}
       {data === null && report.error !== null && report.offline ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.activity} /> : (
         <StateBlock
           loading={report.loading && data === null}

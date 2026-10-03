@@ -41,6 +41,8 @@ export const OFFLINE_COPY = {
     schedule: "This day hasn't been opened on this phone yet, so there's no schedule or games kept to show. They load by themselves once you're back online.",
     /** R8 X8-2 — the Wallet on a cold start with no signal. */
     wallet: "Your wallet hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
+    /** R10 X10-1 — Profile on a cold start with no signal (it read red "couldn't be reached"). */
+    profile: "Your profile hasn't been opened on this phone yet, so there's nothing kept to show. It loads by itself once you're back online.",
   },
   /**
    * R9 X9-6 — a first read with nothing kept that has not answered after a few seconds (a stalled

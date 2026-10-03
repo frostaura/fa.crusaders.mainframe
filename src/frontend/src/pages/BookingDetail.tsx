@@ -30,6 +30,7 @@ import { typography } from "@/lib/typography";
 import { cn } from "@/lib/utils";
 import { StaleNotice } from "@/components/shell/StaleNotice";
 import { OfflineNothingKeptRetry } from "@/components/bookings/OfflineNothingKeptRetry";
+import { StillTrying } from "@/lib/offline/StillTrying";
 import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { useAuth } from "@/lib/auth";
 import { memberReads } from "@/lib/offline/memberReads";
@@ -176,6 +177,9 @@ function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
   if (read.data === null && read.error != null && read.offline) return <OfflineNothingKeptRetry line={OFFLINE_COPY.nothingKept.booking} onRetry={read.reload} />;
   if (!read.data) {
     return (
+      <>
+      {/* R10 X10-1 — a first read that has not answered says, after a few seconds, it is still trying. */}
+      {read.loading ? <StillTrying /> : null}
       <StateBlock
         loading={read.loading}
         error={read.error}
@@ -184,6 +188,7 @@ function DetailBody({ read, say, earlyResult, bookingId, seatId }: BodyProps) {
         onRetry={read.reload}
         skeleton={<DetailSkeleton />}
       />
+      </>
     );
   }
   return (

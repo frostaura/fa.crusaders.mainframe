@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { endpoints, phoneIsOffline, type MinutesShelf, type PayFastFormField, type ShelfPackage } from "../lib/api";
 import { isConnectionFailure } from "../lib/offline/useCachedRead";
 import { OfflineNothingKept } from "../lib/offline/OfflineNothingKept";
+import { StillTrying } from "../lib/offline/StillTrying";
 import { OFFLINE_COPY } from "../lib/offline/offlineCopy";
 import { useBalance, walletTone } from "../lib/balance";
 import { BALANCE_SENTENCE } from "../lib/walletCopy";
@@ -66,6 +67,8 @@ export default function BuyMinutesPage() {
       {/* Why they are here, when the answer is "you cannot book anything": a standing condition. */}
       {emptyWallet && <Alert tone="danger" live="polite">{BALANCE_SENTENCE.zero}</Alert>}
       {/* R6 X6-4 — offline there is nothing to show and nothing to buy: said, under the page's own heading. */}
+      {/* R10 X10-1 — a first read that has not answered says, after a few seconds, it is still trying. */}
+      {shelf === null && loadError === null ? <StillTrying /> : null}
       {shelf === null && loadError !== null && (isConnectionFailure(loadError) || phoneIsOffline()) ? (
         <OfflineNothingKept line={OFFLINE_COPY.buyNeedsConnection} />
       ) : (
