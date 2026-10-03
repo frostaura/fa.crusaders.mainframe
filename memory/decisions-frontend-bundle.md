@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-bundle
 description: "What loads first and why: shell, landing, sign-in and My Code in the entry; the admin frame one lazy chunk that never re-suspends; 4 icon weights shipped; first load 557 → 304 (P10) → 255 kB gzip (perf, 2026-09-30)."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Live decisions — the frontend bundle
@@ -43,11 +43,11 @@ entry → 304 kB. Perf lane 2026-09-30: 328 → **255 kB** (entry 166 + React 74
   changing what runs when: 110 → 92 files for +1.2 kB gzip. **Why not higher:** 8 kB merged real
   lazy code into the entry (+12 kB gzip).
 - **Member pages' loaders live in `src/routeChunks.ts`**: the opened page's code starts once
-  `whoami` is SENT; **Bookings' once the page's reads have settled** (`lib/api` `whenApiQuiet`,
-  300 ms idle); the tab bar's prefetch waits for it before EVERY page, Bookings too (R5 P5-4).
-  **Why not beside `whoami`:** measured twice (R4; R5 A/B slow 4G 4x CPU): the member CODE paints
-  1.0 s later (2.69 → 3.70 s) for first Bookings 1.65 → 0.46 s. Still ~1.6 s tapped as My Code shows
-  (~34 files, some desk-only; asked of lane C); `/me/invites` starts at the press (`lib/earlyInvites`).
+  `whoami` is SENT; **Bookings' once the page's reads have settled** (`whenApiQuiet`, 300 ms idle)
+  — **or, on My Code, once the code's enrol read has LEFT** (`noteCodeAsked`, R6 X6-3: A/B gap 0
+  p50 2180 → 1794 ms, code paint unchanged). **Why not beside `whoami`:** the code paints 1.0 s later
+  (R4/R5). The rest is bandwidth: Schedule ~26 files/81 kB gz + Archivo 90 kB + JetBrains 40 kB in
+  the same window (asked of the integrator). Tab-bar prefetch waits for quiet before EVERY page.
   Hints only: failures swallowed, not offline, not under Save-Data.
 - **A member's install set (`precache.json` `first`) leaves out chart chunks and the desk's
   frame** (R4, P4-6: 666 → 514 kB gzip); precached after control, still every chunk on the phone.

@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-topups
 description: "P13: members buy admin-defined minute packages (no cap, no free amount); the purchase lock is all the ITN reads; cancel return and one-hour expiry close abandoned checkouts, reopenable by a late COMPLETE."
 type: decision
-last_verified: 2026-10-02
+last_verified: 2026-10-03
 ---
 
 # Live decisions — buying minutes (packages) and the desk
@@ -40,5 +40,8 @@ Code: `Endpoints/{PackageEndpoints,AdminPackageEndpoints,TopUpEndpoints{,.Abando
 - **The old routes**: `/credit/topup*` are gone except the PayFast ITN `notify_url`
   `/api/v1/credit/topup/callback` (external contract). The SPA's `/wallet/topup[/:id]` redirect to
   `/wallet/buy[/:id]` keeping the query (`?cancelled=1` is PayFast's only cancel signal).
+- **A package free at the member's discount is the desk's (R6 J6-7)**: PayFast takes no R0.00
+  (`package_price_zero`), so the card says "Free at your discount — ask at the desk" and Continue
+  stays disabled — said before the press, not refused after it (`isFreeHere`).
 - **Accepted gap:** a completion racing a cancel return clears the reason by forcing
   `FailureReason` modified; no test can force the interleaving; the cost is a stale `failure_code`.

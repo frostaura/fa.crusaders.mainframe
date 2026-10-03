@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-frontend-offline-data
 description: "Member reads kept per member in IndexedDB (never the worker cache), wiped on any ending or switch; drawn at once, refreshed behind; a failed refresh never blanks; offline writes refused, never queued."
 type: decision
-last_verified: 2026-10-01
+last_verified: 2026-10-03
 ---
 
 # Live decisions — offline & instant member data (R4 wave B, lane D)
@@ -45,8 +45,8 @@ the worker still caches NO member data. Code: `src/frontend/src/lib/offline/`.
   detail, memory only (`adminEarlyReads`). The profile provider waits for the check (`whileChecking: false`).
 - **Kept reads come back key by key** (`loadKept`, first subscriber), never the whole store at boot
   (cost a cold My Code ~110 ms). Stale records are deleted once the app settles (15 s, then idle).
-- **Measured** (390, slow 4G, 4x CPU, A/B, load 15–40): revisit Bookings 625 → 441 ms; first tap
-  Bookings 967 → 786; offline pages 0/4 → 4/4 drawn. Warm My Code +~100 ms — re-measure quietly.
+- **Nothing kept + offline is said as offline (R6 X6-4)**: `OfflineNothingKept` ("You're offline —
+  … loads by itself once you're back online") on Inbox, Wallet activity and /wallet/buy, never red "couldn't be reached".
 
 ## Traps met
 
