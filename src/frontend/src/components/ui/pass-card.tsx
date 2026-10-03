@@ -76,16 +76,32 @@ const BODY_MASK = notchMask("top");
   reader who turns their text up gets bigger words, not a pass whose QR has been pushed below
   the fold by padding that grew with the font (My Code's D7 / D8).
 */
+/*
+  R9 L9-4 — the band is a grid whose AREAS step down when the TEXT is large for the band (a rem
+  query on the band's own box: 14rem is 224px at normal text, 448px at 200 %). Side by side, the
+  crest and avatar flank the overline and both names; stepped down, "MEMBER" and the avatar share
+  the first row and the names take the band's whole width under them. At 320 / 200 % the names
+  truncated to "C…" / "Le…" and the overline ran over the avatar. Names wrap at their spaces,
+  never cut; only a word longer than the whole band may break. Stepped down, the crest (decoration:
+  the app bar carries the club's mark) is not drawn — beside an 80px avatar it left "MEMBER" 88px —
+  and the overline shares the avatar's row rather than taking its own, so the stepped band costs
+  one row, not two: the QR stays inside one screen of `<main>` at 320 × 568 with a 32px root.
+*/
+const BAND_AREAS = [
+  "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3",
+  "[grid-template-areas:'crest_over_avatar'_'crest_club_avatar'_'crest_member_avatar']",
+  "[@container_pass-band_(max-width:14rem)]:[grid-template-areas:'over_over_avatar'_'club_club_club'_'member_member_member']",
+  "[@container_pass-band_(max-width:14rem)]:gap-y-1",
+].join(" ");
+
 function Band({ crest, overline, clubName, memberName, avatar }: Pick<PassCardProps, "crest" | "overline" | "clubName" | "memberName" | "avatar">) {
   return (
-    <div data-pass-band="" className="flex items-center gap-3 bg-brand-strong px-[20px] pb-[24px] pt-[20px] text-brand-ink" style={BAND_MASK}>
-      {crest ? <div className="shrink-0">{crest}</div> : null}
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold uppercase tracking-overline">{overline}</p>
-        <p className="truncate font-display text-lg font-bold [font-stretch:108%]">{clubName}</p>
-        {memberName ? <p className="truncate text-sm font-medium">{memberName}</p> : null}
-      </div>
-      {avatar ? <div className="shrink-0">{avatar}</div> : null}
+    <div data-pass-band="" className={cn(BAND_AREAS, "bg-brand-strong px-[20px] pb-[24px] pt-[20px] text-brand-ink")} style={BAND_MASK}>
+      {crest ? <div className="shrink-0 [grid-area:crest] [@container_pass-band_(max-width:14rem)]:hidden">{crest}</div> : null}
+      <p className="min-w-0 self-end text-xs font-semibold uppercase tracking-overline [grid-area:over] [@container_pass-band_(max-width:14rem)]:self-center">{overline}</p>
+      <p className="min-w-0 break-words font-display text-lg font-bold [font-stretch:108%] [grid-area:club]">{clubName}</p>
+      {memberName ? <p className="min-w-0 self-start break-words text-sm font-medium [grid-area:member]">{memberName}</p> : null}
+      {avatar ? <div className="shrink-0 justify-self-end [grid-area:avatar]">{avatar}</div> : null}
     </div>
   );
 }
@@ -101,7 +117,7 @@ export function PassCard(props: PassCardProps) {
       data-pass-card=""
       className={cn("mx-auto flex w-[min(calc(100vw-32px),360px)] flex-col rounded-2xl shadow-lg", className)}
     >
-      <div className="overflow-hidden rounded-t-2xl">
+      <div className="overflow-hidden rounded-t-2xl [container:pass-band/inline-size]">
         <Band crest={crest} overline={overline} clubName={clubName} memberName={memberName} avatar={avatar} />
       </div>
       <div className="relative overflow-hidden rounded-b-2xl bg-bg-raised" style={BODY_MASK}>
