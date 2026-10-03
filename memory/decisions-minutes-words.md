@@ -50,3 +50,5 @@ last_verified: 2026-10-03
 - **Server half (R9 X9-4):** headlines, mail facts and new ledger lines say durations with
   `MoneyFormat.Minutes` ("after 6 minutes", "Silent for 12 minutes"). `SpokenUnitsTests` sweeps every
   `EmailCatalogue` message and every Api source line for `{…} min|h|d` (exempt: `MoneyFormat.cs`).
+- **R9 X9-4 (FB9):** the guard also catches a unit GLUED to its number (`${n}m`, `${h}h`, "1h 04m"); the
+  Night's burst/gap say `minutesSpoken`. `countdown.formatCountdown` is exempt by name (ticking figure).

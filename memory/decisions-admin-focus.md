@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-admin-focus
-description: "R8 admin console: inline editors and Show-more hand focus on, never to body; Retire asks in a dialog; wide DataTables cue sideways scroll; one caret placement on Reports; rows wrap by their text."
+description: "R8/R9 admin console: editors, Show more and dismissed dialogs hand focus on, never to body; rows and labels step down by rem containers; desk sale states its price; money never grouped on the Night."
 type: decision
 last_verified: 2026-10-03
 ---
@@ -30,3 +30,22 @@ Tests: `e2e/admin-r8-fc.spec.ts` (geometry at 200 % text and focus, both measure
   meet a 320 phone at 200 % carry `max-w-full whitespace-normal` (L8-6, L8-10).
 - **Trap:** lizard ran a helper placed straight after `useMemberNight` to EOF (CCN 45) with no
   generic or literal to blame; moved to the module's end it scored 3. Check `-w` after every move.
+
+## R9 (lane FB9) — `e2e/admin-r9-fb.spec.ts`, unit tests named per item
+- **A list-owned dialog stays mounted while it closes** (X9-1): Retire keeps `{pkg, open}`; unmounting
+  on close skipped Radix's close-time focus (focus fell to `<main>`). Dismiss → the row's ⋯ by
+  `[data-package-row] button[aria-haspopup=menu]`; success still floors on the heading.
+- **Load more / Show more movements** focus the first revealed row (X9-2): `flushSync`, then the
+  change record's `li[data-change-row]` (tabIndex −1) / the ledger row's details button, in drawn order.
+- **Step down by the row's own rem width** (L9-3, L9-6): door log row grid from `@[30rem]`; stat and
+  totals labels keep capitals+tracking only from a `@[7rem]` label box, else sentence case; totals cells
+  `px-2` under a 16rem list. Trap: `typography({variant:"overline"})`'s `tracking-overline` outranks a
+  later `tracking-normal` (twMerge doesn't know the custom name) — spell the classes out.
+- **Packages table beside the editor** (L9-5): Actions never wraps; figure columns `px-2`; "Per hour"
+  header wraps by words — 608/608px at 1024/1280.
+- **The Night never groups money** (E9-3): wallet strand, ledger source or any amount → own row. A
+  device-actor row says "with <subject>'s code, at the board" or "reported by the court's board" (E9-5).
+- **A desk sale states its price** (J9-1): `quotedPriceZar` + `zarReceived` always (0 for a gift);
+  409 `package_price_changed` patches the item, names old/new price in a standing notice, re-confirm.
+  A free package is "Give"/"given" (J9-3). Share legs name whose wallet; a note says shares net to 0 (J9-7).
+
