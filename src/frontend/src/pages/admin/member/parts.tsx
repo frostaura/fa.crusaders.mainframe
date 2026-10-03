@@ -25,15 +25,12 @@ function bookedByLine(row: MemberBookingRow): string {
  * cost and — where the caller offers one — the action. Stacks on a phone; one line on a desk.
  */
 /**
- * R6 E6-10 (BE): the end a booking was SOLD to — `ends_at` is the sweep's cut end on a no-show —
- * and what THIS member is out on it (13 on a swept 45-minute no-show; a partner's share on a
- * partner row). Optional until the API module declares them (ask to the integrator); an older
- * API sends neither and the row reads as it did.
+ * R6 E6-10 (BE): `sold_ends_at` is the end a booking was SOLD to — `ends_at` is the sweep's cut
+ * end on a no-show — and `cost_minutes` what THIS member is out on it (a partner's share on a
+ * partner row). An older API sends neither and the row reads as it did.
  */
-type SoldRow = MemberBookingRow & { sold_ends_at?: string | null; cost_minutes?: number | null };
-
 export function BookingLine({ row, zone, action, people }: {
-  row: SoldRow; zone: string; action?: ReactNode;
+  row: MemberBookingRow; zone: string; action?: ReactNode;
   /** D9 — who else is on the court ("with Sam"), when it has been read. */
   people?: ReactNode;
 }) {
