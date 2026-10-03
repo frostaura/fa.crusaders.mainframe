@@ -89,7 +89,8 @@ describe("Dialog", () => {
     const { dialog, trigger } = open();
     // F4-9 — never a bare "Close"/"Cancel" that a footer button shares.
     const close = within(dialog).getByRole("button", { name: "Close Suspend member" });
-    expect(close.className).toContain("size-touch");
+    // R6 L6-16 — at least 44px, and growing with the text.
+    expect(close.className).toContain("size-[max(44px,2.25rem)]");
     expect(close.className).not.toMatch(/outline-none|focus-visible:ring/);
     fireEvent.click(close);
     expect(screen.queryByRole("dialog")).toBeNull();
