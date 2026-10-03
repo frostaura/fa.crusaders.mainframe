@@ -117,6 +117,16 @@ function chromeFrame(admin: boolean) {
     : { name: "member", header: HEADER_FRAME, crest: "flex shrink-0", banner: BANNER };
 }
 
+/**
+ * R8 — a session the club could not confirm right now (busy, unreachable) is still the member's:
+ * the screen says "You're still signed in", so the bar keeps its tabs, bell and account menu (Sign
+ * out) even on a phone that never confirmed who it is. Nothing in it reads as anyone: with no
+ * confirmed member the chip says it has no figure and the menu has no name.
+ */
+function holdsSession(status: string): boolean {
+  return status === "offline" && Boolean(tokenStore.get());
+}
+
 export default function AppShell() {
   const auth = useAuth();
   const location = useLocation();
@@ -130,12 +140,7 @@ export default function AppShell() {
   const adminChrome = useRememberedAdmin(signedIn ? { userId: auth.userId, isAdmin: auth.isAdmin } : null, owner);
   // What READS as an admin is the confirmed session only: a busy club is not asked for more.
   const isAdmin = signedIn && auth.isAdmin;
-  // R8 — and a session the club could not confirm right now (busy, unreachable) is still the
-  // member's: the screen says "You're still signed in", so the bar keeps its tabs, bell and account
-  // menu (Sign out) even on a phone that never confirmed who it is. Nothing here reads as anyone:
-  // with no confirmed member the chip says it has no figure and the menu has no name.
-  const heldSession = auth.status === "offline" && Boolean(tokenStore.get());
-  const memberChrome = signedIn || offlineMember || heldSession;
+  const memberChrome = signedIn || offlineMember || holdsSession(auth.status);
   // One read each, shared with the admin rail and the Overview (both stores dedupe their requests).
   const attention = useAdminAttention({ enabled: isAdmin });
   const doors = useDoorsChrome(isAdmin, location.pathname);
