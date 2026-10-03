@@ -224,10 +224,12 @@ export function DeviceApiKeyPanel() {
                 ("Regener / ate", "immedia / tely"); break-words breaks only a word wider than the
                 box, which, with the insets folded at large text, none is. */}
             <div className="flex flex-col gap-2 break-words rounded-lg border border-danger-soft p-2 @[16rem]/keycard:p-3 sm:flex-row sm:items-center sm:gap-4">
-              {/* `sm:shrink-0` (R3 V-5): beside the sentence, the anywhere-wrap let the sentence
+              {/* The button's hidden pending layer (spinner + the same words) may break anywhere:
+                  it is never seen, and at 320 / 200 % it was 48px wider than the label it sizes
+                  (R7 L7-9 — the visible label keeps its words). `sm:shrink-0` (R3 V-5): beside the sentence, the anywhere-wrap let the sentence
                   squeeze the button until "Regenerate" broke mid-word at 768 and 1280. */}
               <ConfirmDialog
-                trigger={<Button variant="danger-soft" className="!h-auto max-w-full self-start whitespace-normal py-2 max-sm:w-full sm:shrink-0">Regenerate key</Button>}
+                trigger={<Button variant="danger-soft" className="!h-auto max-w-full self-start whitespace-normal py-2 max-sm:w-full sm:shrink-0 [&_[data-slot=button-pending]]:[overflow-wrap:anywhere]">Regenerate key</Button>}
                 title="Regenerate the club's device key?"
                 description={REGENERATE_CONSEQUENCE}
                 confirmLabel="Reflash every board after this"
