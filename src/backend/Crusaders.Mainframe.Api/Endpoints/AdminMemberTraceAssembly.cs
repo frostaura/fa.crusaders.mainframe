@@ -461,6 +461,8 @@ public static partial class AdminMemberTraceAssembly
                     // and its sentence names whose — it carries no balance for the same reason.
                     OthersMoney = !own,
                     SubjectName = own ? null : PersonNames.Of(row.UserId, s.Names),
+                    // E8-5: a desk top-up the club took no rand for was given, not sold.
+                    NoCharge = row.Type == LedgerEntryType.AdminTopUp && row.ZarPaid == 0m,
                 }),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,

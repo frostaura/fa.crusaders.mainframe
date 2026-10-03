@@ -211,6 +211,21 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         Assert.Contains("no charge", sent!.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("Amount received", sent.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("what you paid", sent.HtmlBody, StringComparison.Ordinal);
+
+        // Review round 8, E8-5: the Night and the club's change record said "sold" about a package
+        // nobody paid for. Both now say it was given at no charge.
+        var night = await JsonOf(await admin.GetAsync($"/api/v1/admin/members/{club.MemberUserId}/trace"));
+        var desk = Assert.Single(night.GetProperty("events").EnumerateArray(),
+            e => e.GetProperty("kind").GetString() == "wallet.topped_up_at_the_desk");
+        var said = desk.GetProperty("headline").GetString()!;
+        Assert.Contains("at no charge", said, StringComparison.Ordinal);
+        Assert.DoesNotContain("sold", said, StringComparison.OrdinalIgnoreCase);
+
+        var changes = await JsonOf(await admin.GetAsync("/api/v1/admin/changes"));
+        var record = Assert.Single(changes.GetProperty("rows").EnumerateArray(),
+            r => r.GetProperty("action").GetString() == "credit.topped_up");
+        var headline = record.GetProperty("headline").GetString()!;
+        Assert.StartsWith("Gave a member a package at no charge", headline, StringComparison.Ordinal);
     }
 
     /// <summary>Every player-affecting event sends an email: a sale says the package, the minutes and the rand; an adjustment says the minutes and the reason.</summary>

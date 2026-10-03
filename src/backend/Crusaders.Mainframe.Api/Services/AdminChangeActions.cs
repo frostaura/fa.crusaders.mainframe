@@ -335,4 +335,36 @@ public static class AdminChangeActions
             _ => $"Did something this club's records have no word for ({action})",
         };
     }
+
+    /// <summary>
+    /// The headline, reading the row's own <c>after</c> where the action alone cannot say it: a
+    /// desk sale the club took no rand for — <c>package_free</c>, or a sale recorded at R0.00 — was
+    /// GIVEN, not sold (review round 8, E8-5). Every other action reads as <see cref="Headline(string, string?)"/>.
+    /// </summary>
+    public static string Headline(string action, string? subjectLabel, string? afterJson)
+    {
+        if (action != PackageSold || !NoChargeSale(afterJson)) return Headline(action, subjectLabel);
+        var name = string.IsNullOrWhiteSpace(subjectLabel) ? null : subjectLabel.Trim();
+        return name is null ? "Gave a member a package at no charge" : $"Gave a member a package at no charge — {name}";
+    }
+
+    /// <summary>Whether a sale's <c>after</c> says nothing was taken. Malformed or older rows read as a sale.</summary>
+    private static bool NoChargeSale(string? afterJson)
+    {
+        if (string.IsNullOrWhiteSpace(afterJson)) return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(afterJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return false;
+            if (root.TryGetProperty("reason_code", out var code) && code.ValueKind == System.Text.Json.JsonValueKind.String
+                && code.GetString() == Endpoints.AdminCreditReasons.PackageFree) return true;
+            return root.TryGetProperty("zar_received", out var zar) && zar.ValueKind == System.Text.Json.JsonValueKind.Number
+                && zar.GetDecimal() == 0m;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
 }

@@ -117,7 +117,7 @@ public static class AdminChangeEndpoints
             actor = new { user_id = row.ActorUserId, name = row.ActorName, email = row.ActorEmail },
             area = row.Area,
             action = row.Action,
-            headline = AdminChangeActions.Headline(row.Action, row.SubjectLabel),
+            headline = AdminChangeActions.Headline(row.Action, row.SubjectLabel, row.AfterJson),
             subject = row.SubjectKind is null && row.SubjectId is null && row.SubjectLabel is null
                 ? null
                 : new { kind = row.SubjectKind, id = row.SubjectId, label = row.SubjectLabel },
@@ -165,7 +165,7 @@ public static class AdminChangeEndpoints
                 row.ActorEmail,
                 row.Area,
                 row.Action,
-                AdminChangeActions.Headline(row.Action, row.SubjectLabel),
+                AdminChangeActions.Headline(row.Action, row.SubjectLabel, row.AfterJson),
                 row.SubjectKind,
                 row.SubjectLabel,
                 row.Reason,

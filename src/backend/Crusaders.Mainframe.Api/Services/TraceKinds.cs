@@ -72,6 +72,12 @@ public readonly record struct TraceFacts
     /// reached (§6a) — the club's outage, not the member's absence (review round 7, E7-1/E7-2).
     /// </summary>
     public bool CourtWasDark { get; init; }
+
+    /// <summary>
+    /// The club took no rand for this desk top-up — a free package (<c>package_free</c>) or a sale
+    /// recorded at R0.00 — so it was given, not sold (review round 8, E8-5).
+    /// </summary>
+    public bool NoCharge { get; init; }
 }
 
 /// <summary>
@@ -261,6 +267,12 @@ public static class TraceKinds
     public const string AccountPasswordChanged = "account.password_changed";
     public const string AccountPasswordReset = "account.temporary_password";
 
+    /// <summary>The club moved them into or out of member groups — their tariff (review round 8, E8-3).</summary>
+    public const string AccountGroupsChanged = "account.groups_changed";
+
+    /// <summary>They put their member code on a phone for the first time (review round 8, E8-3).</summary>
+    public const string AccountCodeSetUp = "account.code_set_up";
+
     /// <summary>
     /// A row this server wrote that this vocabulary has no word for.
     ///
@@ -287,7 +299,7 @@ public static class TraceKinds
         WalletAdjustedByAdmin, WalletReversed, WalletShareMoved,
         AccountApplied, AccountApproved, AccountRejected, AccountSuspended, AccountReactivated,
         AccountMadeAdmin, AccountAdminRemoved, AccountCodeReset, AccountPasskeysRemoved,
-        AccountPasswordChanged, AccountPasswordReset,
+        AccountPasswordChanged, AccountPasswordReset, AccountGroupsChanged, AccountCodeSetUp,
         Unrecognised,
     ];
 
@@ -400,6 +412,8 @@ public static class TraceKinds
             "member.passkeys_revoked" => AccountPasskeysRemoved,
             "user.password_changed" => AccountPasswordChanged,
             "user.password_reset_by_admin" => AccountPasswordReset,
+            Endpoints.MemberGroupAudit.GroupsChanged => AccountGroupsChanged,
+            MemberCodeService.EnrolledAction => AccountCodeSetUp,
             _ => Unrecognised,
         };
     }
@@ -569,7 +583,9 @@ public static class TraceKinds
         return kind switch
         {
             WalletToppedUp => $"{whose} bought {Amount(facts)}",
-            WalletToppedUpAtTheDesk => $"{Who(facts)} sold {whose} {Amount(facts)} at the desk",
+            WalletToppedUpAtTheDesk => facts.NoCharge
+                ? $"{Who(facts)} gave {whose} {Amount(facts)} at no charge"
+                : $"{Who(facts)} sold {whose} {Amount(facts)} at the desk",
             WalletSpent => string.IsNullOrWhiteSpace(facts.CourtName)
                 ? $"{whose} paid {Amount(facts)}"
                 : $"{whose} paid {Amount(facts)} for {facts.CourtName.Trim()}",
@@ -625,6 +641,8 @@ public static class TraceKinds
             AccountPasskeysRemoved => "Their passkeys were removed",
             AccountPasswordChanged => "Changed their password",
             AccountPasswordReset => $"{Who(facts)} gave them a temporary password",
+            AccountGroupsChanged => $"{Who(facts)} changed their member groups",
+            AccountCodeSetUp => "Set up their member code",
             _ => $"Something this club's records have no word for ({facts.RawAction ?? kind})",
         };
     }
@@ -699,10 +717,13 @@ public static class TraceKinds
     /// A package the club sold by hand. It names the actor for the reason
     /// <see cref="AdjustedByAdmin"/> does: the member was not the one who did it, and a night
     /// that says "Bought 5 hours" about a payment somebody else keyed in is a sentence the member
-    /// cannot check.
+    /// cannot check. A top-up the club took no rand for was GIVEN, and says so (review round 8,
+    /// E8-5: a free package read "sold them 1 hour").
     /// </summary>
     private static string ToppedUpAtTheDesk(TraceFacts facts)
-        => $"{Who(facts)} sold them {Amount(facts)} at the desk";
+        => facts.NoCharge
+            ? $"{Who(facts)} gave them {Amount(facts)} at no charge"
+            : $"{Who(facts)} sold them {Amount(facts)} at the desk";
 
     /// <summary>
     /// What they paid for, named when the row knows it. D2 §6.2's own example sentence is

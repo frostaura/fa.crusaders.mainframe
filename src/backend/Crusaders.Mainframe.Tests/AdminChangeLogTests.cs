@@ -105,6 +105,21 @@ public sealed class AdminChangeLogTests
         Assert.DoesNotContain("Approved", headline);
     }
 
+    /// <summary>
+    /// Review round 8, E8-5: a desk sale the club took no rand for is GIVEN — named by its code or
+    /// by the R0.00 it records — and a paid sale, an older row without the fields, or a malformed
+    /// <c>after</c> still reads as a sale.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"reason_code":"package_free","zar_received":0}""", "Gave a member a package at no charge — Thandi")]
+    [InlineData("""{"reason_code":"top_up_cash","zar_received":0.00}""", "Gave a member a package at no charge — Thandi")]
+    [InlineData("""{"reason_code":"top_up_cash","zar_received":150.00}""", "Sold a member a package — Thandi")]
+    [InlineData("""{"balance_minutes":60}""", "Sold a member a package — Thandi")]
+    [InlineData("not json", "Sold a member a package — Thandi")]
+    [InlineData(null, "Sold a member a package — Thandi")]
+    public void A_desk_sale_with_no_rand_taken_reads_as_given(string? after, string expected)
+        => Assert.Equal(expected, AdminChangeActions.Headline(AdminChangeActions.PackageSold, "Thandi", after));
+
     // ------------------------------------------------------------------ the recorder
 
     [Fact]

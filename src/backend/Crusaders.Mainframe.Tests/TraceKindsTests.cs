@@ -129,6 +129,9 @@ public sealed class TraceKindsTests
     [InlineData("user.admin_revoked", TraceKinds.AccountAdminRemoved)]
     [InlineData("member_code.rotated", TraceKinds.AccountCodeReset)]
     [InlineData("member.passkeys_revoked", TraceKinds.AccountPasskeysRemoved)]
+    // Review round 8, E8-3: both read "Something changed on their account" on the Night.
+    [InlineData("member.groups_changed", TraceKinds.AccountGroupsChanged)]
+    [InlineData("member_code.enrolled", TraceKinds.AccountCodeSetUp)]
     public void One_action_reaches_one_word(string action, string expected)
         => Assert.Equal(expected, TraceKinds.OfAudit(action, actorIsSubject: true));
 
@@ -217,6 +220,26 @@ public sealed class TraceKindsTests
             Assert.NotEqual(TraceKinds.Unrecognised, kind);
             Assert.Equal(TraceKinds.WalletStrand, TraceKinds.StrandOf(kind));
         }
+    }
+
+    /// <summary>
+    /// Review round 8, E8-5: a package given at the desk for nothing was "sold" on the Night. A
+    /// desk top-up for which the club took no rand says it was given at no charge, on the
+    /// member's own night and on the admin's who gave it.
+    /// </summary>
+    [Fact]
+    public void A_desk_top_up_with_no_rand_taken_is_given_not_sold()
+    {
+        var own = TraceKinds.Headline(TraceKinds.WalletToppedUpAtTheDesk,
+            new TraceFacts { ActorName = "Eve Desk", ActorKind = TraceActors.Admin, AmountMinutes = 60, NoCharge = true });
+        var others = TraceKinds.Headline(TraceKinds.WalletToppedUpAtTheDesk,
+            new TraceFacts { ActorName = "Eve Desk", ActorKind = TraceActors.Admin, AmountMinutes = 60, NoCharge = true, OthersMoney = true, SubjectName = "Thandi" });
+        var sold = TraceKinds.Headline(TraceKinds.WalletToppedUpAtTheDesk,
+            new TraceFacts { ActorName = "Eve Desk", ActorKind = TraceActors.Admin, AmountMinutes = 60 });
+
+        Assert.Equal("Eve Desk gave them 1 hour at no charge", own);
+        Assert.Equal("Eve Desk gave Thandi 1 hour at no charge", others);
+        Assert.Equal("Eve Desk sold them 1 hour at the desk", sold);
     }
 
     /// <summary>Every word has a strand and a sentence of its own.</summary>
