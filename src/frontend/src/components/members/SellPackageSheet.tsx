@@ -29,6 +29,7 @@ import { formatMoney } from "@/lib/utils";
 import type { AdjustmentKey } from "./adjustmentAttempt";
 import { attemptSale } from "./sellAttempt";
 import { useMenuReturnFocus } from "./useMenuReturnFocus";
+import { shelfSections } from "@/lib/topUpShelf";
 
 /**
  * Sell a member a package at the desk (P13 §3.7) — how the club takes cash, EFT or a card
@@ -239,7 +240,8 @@ function ShelfChoice({ flow, packages, name }: { flow: Flow; packages: ShelfPack
     <Field>
       <FieldLabel>{COPY.shelfLabel(name)}</FieldLabel>
       <RadioGroup value={flow.pkg?.id ?? ""} onValueChange={flow.choose} aria-label={COPY.shelfLabel(name)}>
-        {packages.map((p) => (
+        {/* J6-4: in the member's own order — their groups' packages first, then the club's. */}
+        {shelfSections(packages).flatMap((section) => section.packages).map((p) => (
           <RadioCard key={p.id} value={p.id} title={<PackageTitle pkg={p} />} description={<PackageLine pkg={p} />} />
         ))}
       </RadioGroup>
