@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 import { minutesCompact, minutesSigned, minutesSpoken } from "@/lib/minutes";
 import { movementSentence } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/auth";
-import { useChipBalance, type ChipFigures } from "./chipBalance";
+import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
+import { useChipBalance, type ChipFigures, type NoFigure } from "./chipBalance";
 import { namedShareMovement } from "./shareMovement";
 import { useToast } from "../Toast";
 
@@ -165,6 +166,16 @@ function ChipFigure({ balance, loading, displayed }: { balance: number | null; l
   return <span aria-hidden="true" data-chip-figure="">{balance === null ? "— min" : minutesCompact(displayed)}</span>;
 }
 
+/**
+ * R8 X8-2 — the chip's name and title with no figure and none coming: "Wallet balance unavailable.
+ * You're offline." (the stale notice's own words) when the club could not be reached; the plain
+ * "unavailable" when it answered busy or failing.
+ */
+function noFigureLabel(none: NoFigure): string {
+  const plain = walletLabel(null, false);
+  return none === "offline" ? `${plain}. ${OFFLINE_COPY.staleTitle}.` : `${plain}.`;
+}
+
 /** "Last known at 18:04 — …": a kept figure says it is one. */
 function keptTitle(at: number | null, rest: string): string {
   const time = at === null ? null : new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -172,7 +183,7 @@ function keptTitle(at: number | null, rest: string): string {
 }
 
 export function MinutesChip() {
-  const { live, kept, balance, loading, figures } = useChipBalance();
+  const { live, kept, none, balance, loading, figures } = useChipBalance();
   const { state, delta } = live;
   const location = useLocation();
   const reduceMotion = usePrefersReducedMotion();
@@ -203,8 +214,8 @@ export function MinutesChip() {
         data-minutes-chip=""
         data-zero-entice={entice.breathing || undefined}
         data-live-state={state}
-        aria-label={chipLabel(balance, loading, state, figures)}
-        title={kept ? keptTitle(kept.at, chipTitle(state, loading, balance, figures)) : chipTitle(state, loading, balance, figures)}
+        aria-label={none ? noFigureLabel(none) : chipLabel(balance, loading, state, figures)}
+        title={none ? noFigureLabel(none) : kept ? keptTitle(kept.at, chipTitle(state, loading, balance, figures)) : chipTitle(state, loading, balance, figures)}
         className={cn(
           // A 44px floor in PIXELS at every pointer (it sits beside the 44px account button, and
           // on a phone it is a fingertip target), and no fixed height: at a 32px root the figure

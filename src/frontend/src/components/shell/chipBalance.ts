@@ -2,7 +2,7 @@ import type { WalletResponse } from "@/lib/api";
 import { useBalance } from "@/lib/balance";
 import { heldFrom, type HeldFigures } from "@/lib/liveBalance";
 import { memberReads } from "@/lib/offline/memberReads";
-import { useCachedRead } from "@/lib/offline/useCachedRead";
+import { useCachedRead, useDataOwner } from "@/lib/offline/useCachedRead";
 import { heldPartsLine } from "@/lib/walletCopy";
 import { useAuth } from "@/lib/auth";
 
@@ -29,11 +29,24 @@ function chipFigures(balance: number | null, held: HeldFigures | null): ChipFigu
  */
 type Kept = { balance: number; held: HeldFigures; at: number | null } | null;
 
-function useKeptFigures(waiting: boolean): Kept {
+/**
+ * R8 X8-2 — why there is no figure while the club is not confirming the session: `offline` (it
+ * could not be reached) or `answered` (busy, failing), once the check has come back and nothing of
+ * the wallet is kept on this phone. Null while the check is still out (the skeleton stands then).
+ */
+export type NoFigure = "offline" | "answered" | null;
+
+function useKeptFigures(waiting: boolean): { kept: Kept; none: NoFigure } {
   const kept = useCachedRead<WalletResponse>(waiting ? memberReads.wallet.key : null, memberReads.wallet.load, { whileChecking: false });
+  const owner = useDataOwner();
   const wallet = kept.data;
-  if (!waiting || !wallet || typeof wallet.balance_minutes !== "number") return null;
-  return { balance: wallet.balance_minutes, held: heldFrom(wallet), at: kept.readAt };
+  if (!waiting) return { kept: null, none: null };
+  if (wallet && typeof wallet.balance_minutes === "number") {
+    return { kept: { balance: wallet.balance_minutes, held: heldFrom(wallet), at: kept.readAt }, none: null };
+  }
+  // Settled with nothing: the check answered "can't confirm" and no read is out.
+  const settled = owner.offline && !kept.loading;
+  return { kept: null, none: settled ? (owner.unreachable ? "offline" : "answered") : null };
 }
 
 /**
@@ -44,12 +57,13 @@ function useKeptFigures(waiting: boolean): Kept {
 export function useChipBalance() {
   const live = useBalance();
   const auth = useAuth();
-  const kept = useKeptFigures(auth.status !== "authenticated");
+  const { kept, none } = useKeptFigures(auth.status !== "authenticated");
   const balance = kept ? kept.balance : live.balance;
   const held = kept ? kept.held : live.held;
-  const loading = kept ? false : live.loading;
+  // X8-2: nothing kept and nothing coming is not "loading" — the chip says it has no figure.
+  const loading = kept || none ? false : live.loading;
   // F1.11 (supersedes D11 §3a's "the figure stays the whole balance"): the figure is what can be
   // spent; the name and title say what is held for partners and owed back to them.
-  return { live, kept, balance, held, loading, figures: chipFigures(balance, held) };
+  return { live, kept, none, balance, held, loading, figures: chipFigures(balance, held) };
 }
 
