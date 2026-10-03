@@ -200,7 +200,8 @@ function DuplicateBoxes({ parts }: { parts: NonNullable<ReturnType<typeof duplic
   return (
     <div data-duplicate-boxes="" className="flex flex-col gap-2 rounded-lg border border-warning-strong bg-warning-soft px-[calc(0.75rem*var(--board-scale,1))] py-[calc(0.25rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] text-warning-strong">
       <div className="flex flex-wrap items-center gap-x-2">
-        <Warning size={16} weight="bold" aria-hidden="true" className="shrink-0" />
+        {/* R8 L6-16: the mark and the caret follow the box's text — rem, on the board's scale. */}
+        <Warning size="calc(1rem*var(--board-scale,1))" weight="bold" aria-hidden="true" className="shrink-0" />
         <span className="min-w-0 flex-1 basis-32 font-semibold">{parts.summary}</span>
         <Button
           variant="ghost"
@@ -212,7 +213,9 @@ function DuplicateBoxes({ parts }: { parts: NonNullable<ReturnType<typeof duplic
           className="ml-auto max-w-full whitespace-normal text-warning-strong"
         >
           {open ? DUPLICATE_BOXES_HIDE : DUPLICATE_BOXES_REVIEW}
-          {open ? <CaretUp size={14} weight="bold" aria-hidden="true" /> : <CaretDown size={14} weight="bold" aria-hidden="true" />}
+          {open
+            ? <CaretUp size="calc(0.875rem*var(--board-scale,1))" weight="bold" aria-hidden="true" />
+            : <CaretDown size="calc(0.875rem*var(--board-scale,1))" weight="bold" aria-hidden="true" />}
         </Button>
       </div>
       {/* `hidden` as a class, not the attribute: a utility's `display` beats the attribute's. */}

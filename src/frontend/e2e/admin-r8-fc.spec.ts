@@ -543,3 +543,69 @@ test.describe("L7-15 — every line of a Night card starts on the text's edge", 
     });
   }
 });
+
+/* ───────────────────────────── FD1a ask: icons grow with the words; gutters step down; no orphan dot ───────────────────────────── */
+
+const svgWidth = (el: Locator) => el.evaluate((node) => node.getBoundingClientRect().width);
+
+test.describe("L6-16 rest — admin icons grow with their words at 200 %", () => {
+  test("the change record's \"Show what changed\" chevron", async ({ page }) => {
+    await open(page, "/admin/monitoring/changes", adminRoutes([
+      { path: "/api/v1/admin/changes", body: { rows: [{
+        id: "ch-1", occurred_at: "2026-09-22T16:02:00Z", actor: { name: "Eve Deskadmin" }, area: "settings", action: "updated",
+        headline: "Changed the slot length", subject: { kind: "settings", label: "Club settings" },
+        changes: [{ field: "slice_minutes", label: "Slot length", before: "15 minutes", after: "30 minutes" }],
+      }], total: 1, cursor: null, timezone: "Africa/Johannesburg" } },
+    ]), 390);
+    const summary = page.locator("details summary").filter({ hasText: "Show what changed" }).first();
+    await expect(summary).toBeVisible({ timeout: 30_000 });
+    await big(page);
+    expect(await svgWidth(summary.locator("svg"))).toBeGreaterThanOrEqual(28);
+  });
+
+  test("the control board's duplicate-box warning and its caret", async ({ page }) => {
+    const now = Date.now();
+    await open(page, "/admin/monitoring", adminRoutes([
+      { path: "/api/v1/admin/control-board", body: { generated_at: new Date(now).toISOString(), timezone: "Africa/Johannesburg", courts: [{
+        court_id: "c-1", court_number: 1, name: "Court 1", lights: null, current: null, next: null,
+        device: { device_id: "d-1", device_code: "box-af1737", link: "online", last_seen_at: new Date(now).toISOString(), silent_seconds: 0 },
+        boxes_on_court: 2, other_boxes: [{ device_id: "d-2", device_code: "box-bb2222", name: null, last_seen_at: null }],
+      }] } },
+      { path: "/api/v1/admin/settings", body: { grace_window_minutes: 10 } },
+    ]), 390);
+    const warning = page.locator("[data-duplicate-boxes]");
+    await expect(warning).toBeVisible({ timeout: 30_000 });
+    await big(page);
+    const icons = warning.locator("svg");
+    // The warning mark (1rem of the board's scale) and the caret (0.875rem): 32 and 28px at 200 %.
+    expect(await svgWidth(icons.nth(0))).toBeGreaterThanOrEqual(28);
+    expect(await svgWidth(icons.nth(1))).toBeGreaterThanOrEqual(24);
+  });
+});
+
+test.describe("L8-11 — a group's facts step their icon gutter down at large text", () => {
+  for (const [width, large] of [[320, true], [1280, false]] as const) {
+    test(`at ${width}${large ? " / 200 %" : ""}`, async ({ page }) => {
+      await open(page, "/admin/groups", adminRoutes([
+        { path: "/api/v1/admin/member-groups", body: { groups: [groupRow("g-1", "Social evenings")] } },
+        { path: "/api/v1/admin/packages", body: { packages: [] } },
+      ]), width, 800);
+      const fact = page.locator("[data-group-card] dl > div").nth(1);
+      await expect(fact).toBeVisible({ timeout: 30_000 });
+      if (large) await big(page);
+      const [dt, dd, icon] = await fact.evaluate((el) => [
+        el.querySelector("dt")!.getBoundingClientRect().left,
+        (() => { const r = document.createRange(); r.selectNodeContents(el.querySelector("dd")!); return r.getClientRects()[0].left; })(),
+        el.querySelector("dt svg")!.getBoundingClientRect().width,
+      ]);
+      if (large) {
+        // The gutter goes: the value's lines start on the term's own edge, not 1.5rem in.
+        expect(Math.abs(dd - dt), `dd ${dd} dt ${dt}`).toBeLessThanOrEqual(1);
+        expect(icon).toBeGreaterThanOrEqual(28);
+      } else {
+        // At normal text it still hangs under the term, past the icon.
+        expect(dd - dt).toBeGreaterThan(16);
+      }
+    });
+  }
+});

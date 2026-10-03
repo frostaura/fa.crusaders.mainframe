@@ -238,7 +238,8 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
         <details className="group mt-1">
           <summary className="no-lift inline-flex min-h-touch cursor-pointer list-none items-center gap-1 text-sm font-semibold text-accent-strong [&::-webkit-details-marker]:hidden">
             Show what changed
-            <CaretDown size={16} aria-hidden="true" className="transition-transform duration-fast group-open:rotate-180 motion-reduce:transition-none" />
+            {/* R8 L6-16: 1rem, so it grows with "Show what changed" (it stayed 16px at 200 %). */}
+            <CaretDown size="1rem" aria-hidden="true" className="shrink-0 transition-transform duration-fast group-open:rotate-180 motion-reduce:transition-none" />
           </summary>
           <ChangeDiff row={row} />
         </details>
