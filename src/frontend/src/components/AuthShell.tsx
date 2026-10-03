@@ -94,9 +94,19 @@ export type AuthShellProps = {
   className?: string;
 };
 
+/**
+ * R8 L8-8 — the band's side padding stops growing with the text at its normal-text pixels (20px,
+ * 32px from `sm`), like the card's: at 320 / 200 % a 40px rem gutter a side, inside the page's 32px,
+ * left the club's name 176px and broke it "Crusader / s".
+ */
+const BAND_GUTTER = { paddingInline: "min(var(--band-gutter), var(--band-gutter-px))" } as const;
+
 function Band({ subline }: { subline: string }) {
   return (
-    <div className="relative overflow-hidden bg-brand-strong px-5 py-5 sm:px-8 sm:py-6">
+    <div
+      className="@container/band relative overflow-hidden bg-brand-strong py-5 [--band-gutter-px:20px] [--band-gutter:1.25rem] sm:py-6 sm:[--band-gutter-px:32px] sm:[--band-gutter:2rem]"
+      style={BAND_GUTTER}
+    >
       {/*
         Wholly inside the band, never bled off the edge (bleeding it clipped away the short line
         and the service boxes, the only marks that make a rectangle read as a court). A fixed
@@ -111,7 +121,8 @@ function Band({ subline }: { subline: string }) {
             cross — the mark as it would be embroidered on a navy shirt. */}
         <CrestMark />
         <div className="min-w-0 flex-1 basis-40 break-words">
-          <p className="font-display text-xl font-bold tracking-tight text-brand-ink">Crusaders Squash Club</p>
+          {/* R8 L7-13: a step down when the TEXT is large for the band (a rem query), never a broken word. */}
+          <p className="font-display text-xl font-bold tracking-tight text-brand-ink [@container_band_(max-width:14rem)]:text-lg">Crusaders Squash Club</p>
           <p data-auth-subline="" className="mt-0.5 text-sm text-brand-ink/85">{subline}</p>
         </div>
       </div>
@@ -127,9 +138,15 @@ const CARD_GUTTER = { paddingInline: "min(var(--auth-gutter), var(--auth-gutter-
 
 /**
  * One column (the card, 36rem) below `lg`; from `lg` the brand panel beside the card, the pair at
- * the `wide` frame, stretched to the same height. The gutters are the page shell's own.
+ * the `wide` frame, stretched to the same height. The gutters are the page shell's own — R8 L8-8:
+ * capped at their normal-text pixels, so 200 % text on a 320 phone gives the card the width.
  */
-const SPLIT = "mx-auto grid w-full max-w-narrow grid-cols-1 gap-8 px-4 pb-10 pt-6 sm:px-6 lg:max-w-wide lg:items-stretch lg:gap-12 lg:px-8 lg:py-10 3xl:px-12";
+const SPLIT = [
+  "mx-auto grid w-full max-w-narrow grid-cols-1 gap-8 pb-10 pt-6 lg:max-w-wide lg:items-stretch lg:gap-12 lg:py-10",
+  "[--split-gutter-px:16px] [--split-gutter:1rem] sm:[--split-gutter-px:24px] sm:[--split-gutter:1.5rem]",
+  "lg:[--split-gutter-px:32px] lg:[--split-gutter:2rem] 3xl:[--split-gutter-px:48px] 3xl:[--split-gutter:3rem]",
+].join(" ");
+const SPLIT_GUTTER = { paddingInline: "min(var(--split-gutter), var(--split-gutter-px))" } as const;
 const SPLIT_FORM = "lg:grid-cols-[minmax(0,1fr)_28rem]";
 const SPLIT_WIDE = "lg:grid-cols-[minmax(0,1fr)_28rem] xl:grid-cols-[minmax(0,1fr)_40rem]";
 
@@ -139,7 +156,7 @@ export function AuthShell(props: AuthShellProps) {
   return (
     // `data-full-bleed`: the headerless frame stands down and this owns its width and gutters —
     // the card's 36rem on a phone, the split screen at 80rem from `lg`.
-    <div data-full-bleed="" data-auth-shell="" className={cn(SPLIT, size === "wide" ? SPLIT_WIDE : SPLIT_FORM, className)}>
+    <div data-full-bleed="" data-auth-shell="" className={cn(SPLIT, size === "wide" ? SPLIT_WIDE : SPLIT_FORM, className)} style={SPLIT_GUTTER}>
       <BrandPanel />
       <div className="flex min-w-0 flex-col gap-5 lg:self-center">
         <div className="overflow-hidden rounded-2xl border border-border bg-bg-surface shadow-md">
@@ -157,7 +174,9 @@ export function AuthShell(props: AuthShellProps) {
             style={CARD_GUTTER}
           >
             {mark}
-            {title ? <h1 className={cn(typography({ variant: "h1" }), "text-2xl sm:text-2xl")}>{title}</h1> : null}
+            {/* R8 L8-8: the title steps down when the text is large for the card (a rem query) —
+                "password" ran into the card's edge at 320 / 200 %. */}
+            {title ? <h1 className={cn(typography({ variant: "h1" }), "text-2xl sm:text-2xl [@container_auth_(max-width:14rem)]:text-xl")}>{title}</h1> : null}
             {lead ? <div className="mt-2 text-sm text-text-secondary">{lead}</div> : null}
             {children ? <div className={cn(title || lead ? "mt-6" : undefined)}>{children}</div> : null}
           </div>

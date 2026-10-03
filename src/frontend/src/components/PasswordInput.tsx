@@ -40,7 +40,8 @@ export function PasswordInput({ className, ...props }: Omit<ComponentProps<"inpu
         type="button"
         label={visible ? PASSWORD_TOGGLE.hide : PASSWORD_TOGGLE.show}
         onClick={() => setVisible((v) => !v)}
-        className="absolute inset-y-0 right-0 text-text-secondary hover:bg-transparent hover:text-text-primary"
+        // `my-auto`: centred on the field, which grows with large text (R8 L8-8: it sat at the top).
+        className="absolute inset-y-0 right-0 my-auto text-text-secondary hover:bg-transparent hover:text-text-primary"
       >
         {visible ? <EyeSlash /> : <Eye />}
       </IconButton>

@@ -79,7 +79,9 @@ export default function HowItWorksPage() {
           return (
             <li key={step.id} className={cn("flex", index === steps.length - 1 && lastStepSpan(steps.length))}>
               <Card className="@container/step w-full px-4 sm:px-6">
-                <h2 className={`${typography({ variant: "h3" })} flex items-start gap-3`}>
+                {/* R8 L7-13: the badge stands ABOVE the title when the text is large for the card (a
+                    rem query on the step) — beside it at 320 / 200 % "Buy minutes" broke "minut / es". */}
+                <h2 className={`${typography({ variant: "h3" })} flex flex-col items-start gap-2 @[16rem]/step:flex-row @[16rem]/step:gap-3`}>
                   {/* The step's number, as a badge — aria-hidden because the <ol> already says it. */}
                   <span
                     aria-hidden="true"
@@ -87,7 +89,7 @@ export default function HowItWorksPage() {
                   >
                     {index + 1}
                   </span>
-                  <span className="min-w-0 self-center break-words">{step.title}</span>
+                  <span className="min-w-0 break-words @[16rem]/step:self-center">{step.title}</span>
                 </h2>
                 {/*
                   The drawing sits BESIDE the sentences in a card 28rem wide and above them in a
