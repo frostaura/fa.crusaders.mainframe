@@ -74,7 +74,7 @@ export function useWalletLedger() {
     issued BEFORE that confirmation may be the older of the two and is left alone — the frame
     that overtook it has already asked for a fresh read below.
   */
-  const { apply, lastConfirmedAt, held: liveHeld } = useBalance();
+  const { apply, lastConfirmedAt, held: liveHeld, delta: streamDelta } = useBalance();
   const confirmedAt = useRef(lastConfirmedAt);
   useEffect(() => { confirmedAt.current = lastConfirmedAt; }, [lastConfirmedAt]);
   /** The figure this page last read, so the provider taking it does not trigger a re-read of it. */
@@ -149,7 +149,7 @@ export function useWalletLedger() {
   const delta = useBalanceMovement(balance);
   /** The tweened figure the card paints. Snaps under reduced motion — see `useCountUp`. */
   const countUp = useCountUp(balance);
-  useMoneyAnnouncement(delta, rows, toast);
+  useMoneyAnnouncement(delta, rows, toast, streamDelta?.source === "club");
 
   const held = liveHeld ?? readHeld;
   if (rows === null && kept) {
@@ -170,6 +170,12 @@ export function useWalletLedger() {
  * </p>
  *
  * <p>
+ * <b>Only for what the chip did not say</b> (R11 X11-1). A movement the stream brought unbidden is
+ * the chip's (`MinutesChip.useClubMovementToast`, worded by the frame's reason); this page says the
+ * movements no frame told it of — its own Refresh landing a figure the stream missed.
+ * </p>
+ *
+ * <p>
  * <b>What it says is read off the ledger, never assumed.</b> The delta says how much moved;
  * the newest row that matches it says what it WAS. "The club added 3 h" would be
  * false if a partner had cancelled a court in another tab, and this page cannot tell those
@@ -180,11 +186,17 @@ function useMoneyAnnouncement(
   delta: ReturnType<typeof useBalanceMovement>,
   rows: LedgerRow[] | null,
   toast: ReturnType<typeof useToast>,
+  chipSaysIt: boolean,
 ) {
   const announced = useRef<number>(0);
   useEffect(() => {
     if (!delta || delta.at === announced.current) return;
     announced.current = delta.at;
+    // R11 X11-1: the chip (on every page, this one included) owns a movement the stream brought
+    // unbidden and words it from the frame's reason; saying it here too was two toasts, worded
+    // differently, for one movement. The provider's delta is set in the same batch as the figure
+    // this page paints and cleared a second later, so it is still in hand when this runs.
+    if (chipSaysIt) return;
     const match = matchingRow(rows, delta.amount, delta.direction);
     const rising = delta.direction === "up";
     toast.push({
@@ -196,7 +208,7 @@ function useMoneyAnnouncement(
         : minutesLeftSentence(delta.amount, match?.type ?? null),
       durationMs: MONEY_TOAST_MS,
     });
-  }, [delta, rows, toast]);
+  }, [delta, rows, toast, chipSaysIt]);
 }
 
 /** The page the phone kept, as the figures the card and ledger draw — the live figure still wins. */
