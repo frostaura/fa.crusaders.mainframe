@@ -361,12 +361,12 @@ function DialogContent({ className, ...props }: SurfaceProps) {
 const SHEET_GUTTER = "px-[min(1rem,16px)] sm:px-6";
 
 /**
- * Only the FIRST row of the header clears the close × (R8 L8-5): its right padding is the ×'s
+ * Only the FIRST row of the header clears the close × (R8 L8-5): its right margin is the ×'s
  * target less the header's own gutter, and it is at least as tall as the × reaches, so the next
  * row starts under it. Every row used to carry `pr-14` — 112px of a 320px phone at 200 % text,
  * all the way down a description that never came near the ×.
  */
-const CLEAR_OF_CLOSE = "[&>:first-child]:pr-[calc(0.5rem+max(44px,2rem)-min(1rem,16px)+4px)] [&>:first-child]:min-h-[calc(0.5rem+max(44px,2rem)-min(1rem,16px))]";
+const CLEAR_OF_CLOSE = "[&>:first-child]:mr-[calc(0.5rem+max(44px,2rem)-min(1rem,16px)+4px)] [&>:first-child]:min-h-[calc(0.5rem+max(44px,2rem)-min(1rem,16px))]";
 
 /**
  * The header's cap: a quarter of the screen on a phone, a third from `sm` — but never less than its
