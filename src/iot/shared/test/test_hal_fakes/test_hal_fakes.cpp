@@ -154,8 +154,10 @@ void test_relay_fake_all_off_releases_every_channel(void) {
 // --- display ---------------------------------------------------------------
 
 void test_display_fake_starts_blank_and_pads_rows_to_full_width(void) {
-  // The expectations below are written out at 16x2; if the geometry decision
-  // changes, this is the assertion that says so first.
+  // This shared project builds with no LCD_COLS/LCD_ROWS, so the fake takes the
+  // HAL's DEFAULT geometry, 16x2, and the expectations below are written out at
+  // it. The court box itself is driven as 20x4 (its [lcd] flags); rows 0-1 hold
+  // the 16-column safe subset, which is what this default still models.
   TEST_ASSERT_EQUAL_UINT8(16U, hal::kDisplayCols);
   TEST_ASSERT_EQUAL_UINT8(2U, hal::kDisplayRows);
 
@@ -177,8 +179,9 @@ void test_display_fake_writes_at_an_offset_without_disturbing_neighbours(void) {
   TEST_ASSERT_EQUAL_UINT16(0U, lcd.offGridCalls());
 }
 
-// Column 16 does not exist. On the fitted 20x4 panel driven as 16x2 those
-// columns are never repainted, so anything written there would sit forever.
+// Column 16 does not exist at the default 16x2 geometry. A write past the last
+// column of whatever geometry is built must be dropped, never land where nothing
+// repaints it — on a smaller panel than the build assumes it would sit forever.
 void test_display_fake_truncates_past_the_last_column(void) {
   fakes::FakeDisplay lcd;
   lcd.print(0U, 0U, "ABCDEFGHIJKLMNOPQRS"); // 19 chars into 16 columns
@@ -198,8 +201,9 @@ void test_display_fake_truncates_past_the_last_column(void) {
   TEST_ASSERT_EQUAL_UINT16(6U, lcd.droppedChars());
 }
 
-// Row 2 does not exist on a 16x2. The whole call is dropped rather than
-// clamped onto row 1: a status line rendered on the wrong row reads as current.
+// Row 2 does not exist at the default 16x2 geometry. The whole call is dropped
+// rather than clamped onto row 1: a status line rendered on the wrong row reads
+// as current.
 void test_display_fake_drops_writes_past_the_last_row(void) {
   fakes::FakeDisplay lcd;
   lcd.print(hal::kDisplayRows, 0U, "GHOST");

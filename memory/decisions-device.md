@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-device
 description: "The device contract is hobby-grade by founder decision — one per-tenant API key, auto-registration, no OTA or discovery; the brains are on the ESP8266 because the Mega cannot be flashed over WiFi; the wiring is fixed and untouchable."
 type: decision
-last_verified: 2026-09-19
+last_verified: 2026-10-03
 ---
 
 # Live decisions — the device contract and firmware
@@ -38,8 +38,12 @@ that needs a wire moved is the wrong fix.
   layer with an **independent per-relay auto-off timer** and everything volatile runs on the ESP.
   *Why:* USB-only flashing of the Mega becomes a non-event rather than a trip to the club, and the
   independent timer is the fail-safe — nothing strands a lit court when the network goes away.
-- **The LCD is driven as 16×2** although the fitted panel is a 20×4 (2004A, confirmed from a build
-  photo): safety over screen real estate. The geometry is a compile-time constant.
+- **The LCD is driven as 20×4** — the fitted 2004A (confirmed from a build photo) — with rows 0–1
+  holding the 16-column safe subset, so a 1602 swapped in degrades to a whole message rather than a
+  lying one. The geometry is a compile-time constant (`[lcd]` in `court-box/platformio.ini`); the
+  shared HAL's default, used by builds with no LCD flags, is still 16×2. Somebody must look at the
+  panel before a club box is flashed (go-live checklist). R10 D10-2 corrected the "driven as 16×2"
+  drift here and in two comments.
 - **The legacy single-byte serial dialect is refused on the production Mega** (`LegacyDialect::
   Refuse`; the simulator opts in). The bare `A` closed a relay with no checksum on a UART that
   receives the ESP's 74880-baud boot banner at every reset — a phantom ninety-minute lighting with
