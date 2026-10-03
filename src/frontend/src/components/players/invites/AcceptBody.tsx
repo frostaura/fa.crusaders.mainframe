@@ -15,6 +15,7 @@ import { BUY_MINUTES_PATH } from "@/lib/minutes";
 import { Minutes } from "@/components/Minutes";
 import { inviteCapSentence, inviteRefusal, inviteWhen, organiserName } from "./inviteFacts";
 import type { AcceptFlow } from "./useAcceptFlow";
+import { useDailyCap } from "./useDailyCap";
 
 /**
  * What an invite asks, and what saying yes would do — the accept sheet's body, and the whole of
@@ -152,6 +153,13 @@ function CapEffect({ flow, reasonId }: { flow: AcceptFlow; reasonId: string }) {
     );
   }
   if (invite.status !== "invited") return null;
+  return <CapCounts startsAt={invite.starts_at} timezone={invite.timezone} />;
+}
+
+/** R11 J11-3 — said only to a member who HAS a daily cap on the game's day. */
+function CapCounts({ startsAt, timezone }: { startsAt: string; timezone?: string }) {
+  const capped = useDailyCap(startsAt, timezone);
+  if (capped !== true) return null;
   return <p className="text-sm text-text-secondary" data-cap-counts="">{INVITES_COPY.capCounts}</p>;
 }
 

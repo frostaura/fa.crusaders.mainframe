@@ -172,9 +172,14 @@ describe("Back with the accept sheet open (R1, F1.19's rule)", () => {
   });
 });
 
+/** The game's club day's grid, with this member's caps in its `rules` (R11 J11-3). */
+const dayWithCaps = (rules: Record<string, unknown>): StubRoute => ({
+  path: "/api/v1/schedule", body: { date: "2026-10-04", timezone: "Africa/Johannesburg", sliceMinutes: 15, courts: [], slots: [], rules },
+});
+
 describe("the accept sheet", () => {
   it("shows the game, your share, spendable, balance after, what is held and the deadline", async () => {
-    openInvites();
+    openInvites({ routes: [dayWithCaps({ maxSlotsPerDay: 4, maxMinutesPerDay: 60 })] });
     const sheet = await openSheet();
     expect(sheet).toHaveTextContent("Court 1");
     expect(sheet).toHaveTextContent("Sam");
@@ -185,8 +190,23 @@ describe("the accept sheet", () => {
     expect(sheet).toHaveTextContent("20 minutes held");
     expect(sheet).toHaveTextContent(/held until 48 hours after each game/);
     expect(sheet).toHaveTextContent(/lapses to Sam — no debt either way/);
-    expect(sheet).toHaveTextContent(INVITES_COPY.capCounts);
+    expect(await within(sheet).findByText(INVITES_COPY.capCounts)).toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: /^Close / })).toBeInTheDocument();
+  });
+
+  it("R11 J11-3: says nothing about a daily limit to a member who has none", async () => {
+    const stub = openInvites({ routes: [dayWithCaps({ maxSlotsPerDay: 0, maxMinutesPerDay: 0 })] });
+    const sheet = await openSheet();
+    await waitFor(() => expect(stub.calls.some((c) => c.path.startsWith("/api/v1/schedule"))).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sheet).not.toHaveTextContent(INVITES_COPY.capCounts);
+  });
+
+  it("R11 J11-3: an unknown cap (the day could not be read) is not a limit either", async () => {
+    openInvites({ routes: [{ path: "/api/v1/schedule", status: 503, body: {} }] });
+    const sheet = await openSheet();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(sheet).not.toHaveTextContent(INVITES_COPY.capCounts);
   });
 
   it("accepts with the share it SHOWED, applies the new balance and confirms calmly", async () => {
