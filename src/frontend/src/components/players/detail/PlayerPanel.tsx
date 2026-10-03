@@ -11,7 +11,7 @@ import {
 import { Section } from "@/components/ui/page-shell";
 import { useBalance } from "@/lib/balance";
 import { Minutes } from "@/components/Minutes";
-import { minutesCompact } from "@/lib/minutes";
+import { minutesSpoken } from "@/lib/minutes";
 import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
 import { UnsureOutcome } from "@/lib/lostReply";
 import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_NO_SHOW, DETAIL_PLAYER, PLAYERS_LOST, PLAYERS_UNSURE, playersRefusal, playersWhen } from "@/lib/playersCopy";
@@ -76,7 +76,7 @@ function CancelledShare({ seat }: { seat: DetailPlayer }) {
   return (
     <Section title={DETAIL_PLAYER.title}>
       <p className="text-sm text-text-secondary" data-cancelled-share="">
-        {seat.paid_minutes > 0 ? keepAmounts(DETAIL_CANCELLED.partnerPaid(minutesCompact(seat.paid_minutes))) : DETAIL_CANCELLED.partnerNothing}
+        {seat.paid_minutes > 0 ? keepAmounts(DETAIL_CANCELLED.partnerPaid(minutesSpoken(seat.paid_minutes))) : DETAIL_CANCELLED.partnerNothing}
       </p>
     </Section>
   );
@@ -90,8 +90,8 @@ function NoShowShare({ seat }: { seat: DetailPlayer }) {
   const back = seat.returned_minutes ?? 0;
   const paidIn = seat.paid_minutes + back;
   let words: string = DETAIL_NO_SHOW.partnerNothing;
-  if (back > 0) words = DETAIL_NO_SHOW.partnerBack(minutesCompact(paidIn), minutesCompact(back), minutesCompact(seat.paid_minutes));
-  else if (paidIn > 0) words = DETAIL_NO_SHOW.partnerPaid(minutesCompact(paidIn));
+  if (back > 0) words = DETAIL_NO_SHOW.partnerBack(minutesSpoken(paidIn), minutesSpoken(back), minutesSpoken(seat.paid_minutes));
+  else if (paidIn > 0) words = DETAIL_NO_SHOW.partnerPaid(minutesSpoken(paidIn));
   return (
     <Section title={DETAIL_PLAYER.title}>
       <p className="text-sm text-text-secondary" data-no-show-share="">{keepAmounts(words)}</p>
@@ -107,7 +107,7 @@ function ShareFigures({ seat }: { seat: DetailPlayer }) {
         <Figure term={DETAIL_PLAYER.paid} value={seat.paid_minutes} />
         <Figure term={DETAIL_PLAYER.toPay} value={seat.unpaid_minutes} strong />
       </dl>
-      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(DETAIL_PLAYER.askedAgain(minutesCompact(seat.share_minutes)))}</Alert> : null}
+      {seat.needs_consent ? <Alert tone="warning" live="polite">{keepAmounts(DETAIL_PLAYER.askedAgain(minutesSpoken(seat.share_minutes)))}</Alert> : null}
       {seat.status === "accepted" && seat.unpaid_minutes <= 0 && !seat.needs_consent ? (
         <p className="text-sm text-success-strong">{DETAIL_PLAYER.paidAll}</p>
       ) : null}

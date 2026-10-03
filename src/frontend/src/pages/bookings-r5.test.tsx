@@ -100,7 +100,7 @@ describe("A5-9 — booking for a member, the rail shows THEIR wallet", () => {
     openBookings({ isAdmin: true, balance: 0, at: `/bookings?date=2030-09-09&as=${NALEDI}`, routes: memberRoutes() });
     const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTheirTitle("Naledi") });
     expect(wallet).toHaveTextContent(BOOKINGS_COPY.summaryTheirSpendable("Naledi"));
-    expect(wallet).toHaveTextContent("3 h 20 min");
+    expect(wallet).toHaveTextContent("3 hours 20 minutes");
     expect(within(wallet).queryByRole("link")).toBeNull();
     expect(screen.queryByRole("group", { name: BOOKINGS_COPY.summaryTitle })).toBeNull();
   });
@@ -108,7 +108,7 @@ describe("A5-9 — booking for a member, the rail shows THEIR wallet", () => {
   it("keeps the desk's own wallet when it books for itself", async () => {
     openBookings({ isAdmin: true, balance: 120 });
     const wallet = await screen.findByRole("group", { name: BOOKINGS_COPY.summaryTitle });
-    expect(wallet).toHaveTextContent("2 h");
+    expect(wallet).toHaveTextContent("2 hours");
   });
 });
 
@@ -228,17 +228,17 @@ describe("M5-7 (D1's ask) — a late split cancel says what came back, net of th
 
   it("corrects a net that left the penalty out (gross 50, penalty 15, Thandi's 25 → 10 back)", () => {
     const said = cancellationOutcome(50, 15, null, { net: 25, partners: thandi });
-    expect(said).toContain("10 min back to your balance");
-    expect(said).toContain("25 min to Thandi Third");
-    expect(said).toContain("15 min kept as the late-cancellation penalty");
+    expect(said).toContain("10 minutes back to your balance");
+    expect(said).toContain("25 minutes to Thandi Third");
+    expect(said).toContain("15 minutes kept as the late-cancellation penalty");
   });
 
   it("takes a net that already counts the penalty as it is", () => {
-    expect(cancellationOutcome(50, 15, null, { net: 10, partners: thandi })).toContain("10 min back to your balance");
+    expect(cancellationOutcome(50, 15, null, { net: 10, partners: thandi })).toContain("10 minutes back to your balance");
   });
 
   it("leaves a cancel with no penalty alone", () => {
-    expect(cancellationOutcome(50, 0, null, { net: 25, partners: thandi })).toContain("25 min back to your balance");
+    expect(cancellationOutcome(50, 0, null, { net: 25, partners: thandi })).toContain("25 minutes back to your balance");
   });
 
   it("names the organiser's row \"Back to you\", never \"You keep\"", () => {

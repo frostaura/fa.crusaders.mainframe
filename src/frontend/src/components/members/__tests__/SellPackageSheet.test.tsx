@@ -91,8 +91,8 @@ describe("selling", () => {
 
     // The figures before the press: now, the package, after, and the money.
     const check = document.querySelector("dl")!;
-    expect(within(check).getAllByText("2 h").length).toBeGreaterThan(0);
-    expect(check).toHaveTextContent("7 h");
+    expect(within(check).getAllByText("2 hours").length).toBeGreaterThan(0);
+    expect(check).toHaveTextContent("7 hours");
     expect(check).toHaveTextContent("R495.00");
     await confirm();
 
@@ -102,7 +102,7 @@ describe("selling", () => {
     const body = stub.calls.find((c) => c.method === "POST")!.body as Record<string, unknown>;
     expect(body).not.toHaveProperty("zarReceived");
     expect(typeof body.idempotencyKey).toBe("string");
-    expect(await screen.findByText("Done. Thandi now has 7 h.", { selector: "[role='status']" })).toBeInTheDocument();
+    expect(await screen.findByText("Done. Thandi now has 7 hours.", { selector: "[role='status']" })).toBeInTheDocument();
     expect(screen.getByText(COPY.receipt("Thandi", "5 hours", 300))).toBeInTheDocument();
     expect(onSold).toHaveBeenCalledWith(420);
   });
@@ -159,7 +159,7 @@ describe("a sale whose reply was lost", () => {
     await choosePackage(/5 hours/);
     await pay(PAYMENT_CHOICES[0].label, "Cash 0413");
     await confirm();
-    expect(await screen.findByText("Done. Thandi now has 7 h.", { selector: "[role='status']" })).toBeInTheDocument();
+    expect(await screen.findByText("Done. Thandi now has 7 hours.", { selector: "[role='status']" })).toBeInTheDocument();
     expect(screen.getByText(LOST_REPLY.landed)).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });

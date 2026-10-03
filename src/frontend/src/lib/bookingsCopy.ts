@@ -1,4 +1,4 @@
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { playersWhen } from "./playersCopy";
 
 /**
@@ -130,11 +130,16 @@ export function idleCellLabel(where: string): string {
 }
 
 /**
- * "15 min slots" — a court header's second line. P13 §3.12: the grid carries no price (a booking
+ * "15-minute slots" — a court header's second line. P13 §3.12: the grid carries no price (a booking
  * costs its playing minutes, the same on every court), so the header says how long a slot is.
  */
 export function sliceLengthLine(sliceMinutes: number): string {
-  return `${minutesCompact(sliceMinutes)} slots`;
+  // Words, not "15 min" (R6 X6-2): a screen reader reads the header whole. "15-minute" and
+  // "1-hour" as adjectives; a length that is neither says it the long way.
+  const n = Math.trunc(sliceMinutes);
+  if (n > 0 && n < 60) return `${n}-minute slots`;
+  if (n > 0 && n % 60 === 0 && n < 24 * 60) return `${n / 60}-hour slots`;
+  return `Slots of ${minutesSpoken(n)}`;
 }
 
 /* ─────────────────────────── the selection ─────────────────────────── */
@@ -146,7 +151,7 @@ export function sliceLengthLine(sliceMinutes: number): string {
  */
 export function selectionHeadline(slots: number, totalMinutes: number, bookings = 0): string {
   const parts: string[] = [];
-  if (slots > 0) parts.push(`${slots} ${slots === 1 ? "slot" : "slots"} · ${minutesCompact(totalMinutes)}`);
+  if (slots > 0) parts.push(`${slots} ${slots === 1 ? "slot" : "slots"} · ${minutesSpoken(totalMinutes)}`);
   if (bookings > 0) parts.push(`${bookings} ${bookings === 1 ? "booking" : "bookings"}`);
   return parts.join(" · ");
 }
@@ -229,7 +234,7 @@ export const PENDING_CELL = {
  * minutes formatter's own compact form (P13 §7.1), so a balance is spelt one way everywhere.
  */
 export function signedMinutes(value: number): string {
-  return minutesCompact(value);
+  return minutesSpoken(value);
 }
 
 function countOf(n: number, one: string, many: string): string {
@@ -293,7 +298,7 @@ export const BOOK_SHEET = {
   primary: (count: number, minutes: number, forName: string | null) => {
     const what = count === 1 ? "Book" : `Book ${count} slots`;
     const who = forName ? ` for ${forName}` : "";
-    return `${what}${who} · ${minutesCompact(minutes)}`;
+    return `${what}${who} · ${minutesSpoken(minutes)}`;
   },
   /** While the quote is still being read — the minutes are not known yet, so they are not claimed. */
   primaryPending: (count: number) => (count === 1 ? "Book" : `Book ${count} slots`),
@@ -306,7 +311,7 @@ export const BOOK_SHEET = {
    * −30 min" — a figure their wallet can never reach. The Book button stays, unavailable, and
    * names this as its reason; the way out is a package (P13).
    */
-  needMore: (shortBy: number) => `You need ${minutesCompact(shortBy)} more`,
+  needMore: (shortBy: number) => `You need ${minutesSpoken(shortBy)} more`,
   needMoreBody: "Buy a package, then book — a member's balance can't go below zero.",
   stillNeeded: "Still needed",
   bookedTitle: (booked: number, total: number) => {
@@ -441,7 +446,7 @@ export const CANCEL_SHEET = {
   nothingBack: "Nothing back — the lights had been on",
   finalLine: "Cancelling can't be undone. Booking again is a new booking.",
 
-  waive: (penalty: number) => `Waive the ${minutesCompact(penalty)} penalty`,
+  waive: (penalty: number) => `Waive the ${minutesSpoken(penalty)} penalty`,
   waiveMany: "Waive the late-cancellation penalties",
   waiveHint: "Recorded against your name, with your reason.",
   reasonLabel: "Reason",
@@ -465,16 +470,16 @@ export const CANCEL_SHEET = {
 
 /** F1.13 — a split booking's row: the organiser's net, and what went on to the partners. */
 export function splitRowOutcome(net: number, toPartners: number, penalty: number): string {
-  const line = `${minutesCompact(Math.max(net, 0))} back, ${minutesCompact(toPartners)} to partners`;
-  return penalty > 0 ? `${line}, ${minutesCompact(penalty)} penalty kept` : line;
+  const line = `${minutesSpoken(Math.max(net, 0))} back, ${minutesSpoken(toPartners)} to partners`;
+  return penalty > 0 ? `${line}, ${minutesSpoken(penalty)} penalty kept` : line;
 }
 
 /** What a successful cancellation moved, per row. `refund` is GROSS, as the cancel routes answer it. */
 export function cancelRowOutcome(refund: number, penalty: number): string {
   const back = refund - penalty;
   if (back <= 0 && penalty <= 0) return CANCEL_SHEET.nothingBack;
-  const line = `${minutesCompact(Math.max(back, 0))} back`;
-  return penalty > 0 ? `${line}, ${minutesCompact(penalty)} penalty kept` : line;
+  const line = `${minutesSpoken(Math.max(back, 0))} back`;
+  return penalty > 0 ? `${line}, ${minutesSpoken(penalty)} penalty kept` : line;
 }
 
 /* ═══════════════════════════════ REVIEW ROUND 1 ═══════════════════════════════ */
@@ -484,7 +489,7 @@ export const BOOKING_FOR = {
   label: "Booking for",
   region: (name: string) => `Booking for ${name}`,
   canSpend: (minutes: number) => `can spend ${signedMinutes(minutes)}`,
-  held: (minutes: number) => `${minutesCompact(minutes)} held for or owed to partners`,
+  held: (minutes: number) => `${minutesSpoken(minutes)} held for or owed to partners`,
   gridNote: "The grid shows their group's hours; the sheet charges their minutes.",
   reading: "Reading this member's details…",
   failed: "Couldn't read this member's details. The sheet still books for them and shows their figures.",
@@ -521,11 +526,11 @@ export const UPCOMING = {
   needsAction: "Needs you",
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",
-  share: (minutes: number) => `Your share ${minutesCompact(minutes)}`,
+  share: (minutes: number) => `Your share ${minutesSpoken(minutes)}`,
   /** R3 M-3 — what the game has actually cost the member so far, not the share they would carry. */
-  paid: (minutes: number) => `You've paid ${minutesCompact(minutes)}`,
+  paid: (minutes: number) => `You've paid ${minutesSpoken(minutes)}`,
   /** R3 M-3 — a partner's share not yet paid. */
-  owe: (minutes: number) => `You owe ${minutesCompact(minutes)}`,
+  owe: (minutes: number) => `You owe ${minutesSpoken(minutes)}`,
   /**
    * R3 M-3 — "Dean, Sam · 1 still to answer": the accepted players by first name, then the seats
    * asked but not taken (an invite, an open link), counted and never named as players. The space
@@ -604,7 +609,7 @@ export const SPLIT_CANCEL = {
  * was right only for the first part). "held" leads, so it reads as the held line it replaces.
  */
 export function heldPartsLine(parts: readonly { minutes: number; until: string }[], timezone?: string): string {
-  return `Held: ${parts.map((p) => `${minutesCompact(p.minutes)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
+  return `Held: ${parts.map((p) => `${minutesSpoken(p.minutes)} until ${playersWhen(p.until, timezone)}`).join(" · ")}`;
 }
 
 /**

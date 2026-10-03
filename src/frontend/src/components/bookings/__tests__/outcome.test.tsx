@@ -241,7 +241,7 @@ describe("F1.4 — the desk's quote reads the member's spendable minutes", () =>
     const money = document.querySelector("dl")!;
     expect(money).toHaveTextContent(`${BOOK_SHEET.theirAvailableNow("Naledi Khumalo")}−40 min`);
     expect(money).toHaveTextContent(`${BOOK_SHEET.theirBalanceAfter}−1 h 30 min`);
-    expect(money).not.toHaveTextContent("35 min");
+    expect(money).not.toHaveTextContent("35 minutes");
   });
 });
 
@@ -336,7 +336,7 @@ describe("F1.13 — a split booking's cancel says who gets what back", () => {
     openCancel();
     await screen.findByText(`${SPLIT_CANCEL.youKeep}`);
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
-    expect(await screen.findByText("Booking cancelled. 50 min back to your balance; 50 min to Sam.")).toBeTruthy();
+    expect(await screen.findByText("Booking cancelled. 50 minutes back to your balance; 50 minutes to Sam.")).toBeTruthy();
   });
 
   it("a booking without players is unchanged", async () => {
@@ -367,7 +367,7 @@ describe("F1.13 — the desk cancelling a split booking says the truth even when
     // R4 A4-4: a desk cancel of somebody else's booking always carries a reason.
     fireEvent.change(screen.getByLabelText(CANCEL_SHEET.reasonLabel), { target: { value: "Court closed" } });
     fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
-    expect(await screen.findByText("Booking cancelled. 2 h 5 min back to Adm's balance; 2 h 5 min to Sam.")).toBeTruthy();
-    expect(screen.queryByText(/4 h 10 min back to Adm/)).toBeNull();
+    expect(await screen.findByText("Booking cancelled. 2 hours 5 minutes back to Adm's balance; 2 hours 5 minutes to Sam.")).toBeTruthy();
+    expect(screen.queryByText(/4 hours 10 minutes back to Adm/)).toBeNull();
   });
 });

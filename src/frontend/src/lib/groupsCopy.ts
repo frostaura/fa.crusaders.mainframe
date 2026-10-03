@@ -759,7 +759,8 @@ export const ARCHIVE_COPY = {
   title: (name: string) => `Archive ${name}?`,
   body: (name: string, members: number | null | undefined) => {
     const who = typeof members === "number" && members > 0
-      ? `its ${members === 1 ? "member" : `${members} members`} go back to their other groups' rules and the club's own package prices`
+      ? `${members === 1 ? "its member goes" : `its ${members} members go`} back to their other groups' rules and the club's own `
+        + `package prices, and the group's own packages come off their shelves`
       : "nobody is in it, so nothing changes for anybody today";
     return `${name} stops applying — ${who}. Nothing is deleted, and it can be brought back.`;
   },

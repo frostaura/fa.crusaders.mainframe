@@ -82,19 +82,19 @@ describe("what a member sees when the club tops them up while they watch", () =>
    * can tell them apart.
    */
   it.each([
-    ["AdminAdjustment", "Sipho at the desk added 3 h 20 min to your wallet."],
-    ["AdminTopUp", "Your package from the desk landed: 3 h 20 min added to your wallet."],
-    ["TopUp", "Your purchase landed: 3 h 20 min added to your wallet."],
-    ["CancellationRefund", "A cancelled booking put 3 h 20 min back in your wallet."],
-    ["PaymentReversal", "A payment was reversed: 3 h 20 min back in your wallet."],
+    ["AdminAdjustment", "Sipho at the desk added 3 hours 20 minutes to your wallet."],
+    ["AdminTopUp", "Your package from the desk landed: 3 hours 20 minutes added to your wallet."],
+    ["TopUp", "Your purchase landed: 3 hours 20 minutes added to your wallet."],
+    ["CancellationRefund", "A cancelled booking put 3 hours 20 minutes back in your wallet."],
+    ["PaymentReversal", "A payment was reversed: 3 hours 20 minutes back in your wallet."],
   ] as const)("names a %s for what it was", (type, sentence) => {
     expect(minutesArrivedSentence(200, type, "Sipho at the desk")).toBe(sentence);
   });
 
   /** No row to match, or an actor who is the member themselves: the neutral, true sentence. */
   it("falls back to a sentence that is true whoever caused it", () => {
-    expect(minutesArrivedSentence(200, null, null)).toBe("Your wallet went up by 3 h 20 min.");
-    expect(minutesArrivedSentence(200, "AdminAdjustment", null)).toBe("The club added 3 h 20 min to your wallet.");
+    expect(minutesArrivedSentence(200, null, null)).toBe("Your wallet went up by 3 hours 20 minutes.");
+    expect(minutesArrivedSentence(200, "AdminAdjustment", null)).toBe("The club added 3 hours 20 minutes to your wallet.");
   });
 
   /**
@@ -102,8 +102,8 @@ describe("what a member sees when the club tops them up while they watch", () =>
    * product working, and a red alarm over it is the app telling a member off for using it.
    */
   it("words money going out plainly, and never as a failure", () => {
-    expect(minutesLeftSentence(50, "BookingCharge")).toBe("50 min went on a court booking.");
-    expect(minutesLeftSentence(50, null)).toBe("50 min left your wallet.");
+    expect(minutesLeftSentence(50, "BookingCharge")).toBe("50 minutes went on a court booking.");
+    expect(minutesLeftSentence(50, null)).toBe("50 minutes left your wallet.");
     for (const type of ["BookingCharge", "LightsPurchase", "NoShowPenalty", null] as const) {
       expect(minutesLeftSentence(50, type)).not.toMatch(/fail|error|wrong/i);
     }
@@ -132,10 +132,10 @@ describe("what a member sees when the club tops them up while they watch", () =>
     */
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Refresh" })); });
 
-    await screen.findByText(/added 3 h 20 min to your wallet/);
+    await screen.findByText(/added 3 hours 20 minutes to your wallet/);
     // ONE announcement. The toast carries role="status" per instance and the viewport
     // deliberately carries none.
-    expect(within(document.body).queryAllByText(/added 3 h 20 min/)).toHaveLength(1);
+    expect(within(document.body).queryAllByText(/added 3 hours 20 minutes/)).toHaveLength(1);
     expect(document.querySelectorAll("[role=alert]")).toHaveLength(0);
   });
 
@@ -145,7 +145,7 @@ describe("what a member sees when the club tops them up while they watch", () =>
     renderPage(<WalletPage />);
     await screen.findByText(BALANCE_SENTENCE.fine);
 
-    const figure = screen.getByText("8 h 20 min").closest("p")!;
+    const figure = screen.getByText("8 hours 20 minutes").closest("p")!;
     expect(figure.getAttribute("aria-live")).toBeNull();
     expect(figure.getAttribute("role")).toBeNull();
     // And it is tabular, so a count-up cannot reflow the card on every frame.

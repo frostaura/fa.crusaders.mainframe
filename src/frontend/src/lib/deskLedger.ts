@@ -1,5 +1,5 @@
 import { ApiError, type LedgerEntryType, type LedgerRow } from "./api";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { clubShortDate } from "./clubClock";
 
 /**
@@ -148,7 +148,7 @@ export function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
     seen.add(id);
     // The one short club date, in the club's calendar ("Thu 1 Oct 2026", never "01 Oct").
     const when = clubShortDate(row.at, undefined, { year: true });
-    out.push({ id, label: `${when} · ${ledgerTypeLabel(row.type)} ${minutesCompact(row.amountMinutes)} · ${id.slice(0, 8)}` });
+    out.push({ id, label: `${when} · ${ledgerTypeLabel(row.type)} ${minutesSpoken(row.amountMinutes)} · ${id.slice(0, 8)}` });
   }
   return out;
 }

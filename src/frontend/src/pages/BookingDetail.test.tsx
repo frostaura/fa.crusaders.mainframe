@@ -50,9 +50,9 @@ describe("booking detail — the organiser's view", () => {
     await screen.findByRole("heading", { level: 1 });
     const money = screen.getByRole("region", { name: DETAIL_MONEY.title });
     expect(within(money).getByText(DETAIL_MONEY.deadline("Fri 2 Oct, 20:45"))).toBeInTheDocument();
-    expect(within(money).getByText(DETAIL_MONEY.received).nextSibling).toHaveTextContent("25 min");
-    expect(within(money).getByText(DETAIL_MONEY.net(null)).nextSibling).toHaveTextContent("1 h 15 min");
-    expect(within(money).getByText(DETAIL_MONEY.paidRow("25 min", "25 min"))).toBeInTheDocument();
+    expect(within(money).getByText(DETAIL_MONEY.received).nextSibling).toHaveTextContent("25 minutes");
+    expect(within(money).getByText(DETAIL_MONEY.net(null)).nextSibling).toHaveTextContent("1 hour 15 minutes");
+    expect(within(money).getByText(DETAIL_MONEY.paidRow("25 minutes", "25 minutes"))).toBeInTheDocument();
     expect(within(money).getByText(DETAIL_MONEY.unpaidSentence("Alex", "Fri 2 Oct, 20:45", DETAIL_MONEY.toYou))).toBeInTheDocument();
     expect(money).not.toHaveTextContent(/debt|owe/i);
   });
@@ -62,7 +62,7 @@ describe("booking detail — the organiser's view", () => {
     serve({ detail: detail({ money: { ...detail().money, unpaid_minutes: 50 } }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(within(money).getByText(DETAIL_MONEY.stillToCome).nextSibling).toHaveTextContent("50 min");
+    expect(within(money).getByText(DETAIL_MONEY.stillToCome).nextSibling).toHaveTextContent("50 minutes");
   });
 
   it("marks who has checked in, per seat and in total", async () => {
@@ -119,7 +119,7 @@ describe("booking detail — a player's view", () => {
     serve({ detail: playerView() });
     renderDetail();
     const mine = await screen.findByRole("region", { name: DETAIL_PLAYER.title });
-    expect(within(mine).getByText(DETAIL_PLAYER.toPay).nextSibling).toHaveTextContent("25 min");
+    expect(within(mine).getByText(DETAIL_PLAYER.toPay).nextSibling).toHaveTextContent("25 minutes");
     const review = within(mine).getByRole("link", { name: DETAIL_PLAYER.review });
     expect(review).toHaveAttribute("href", `/invites/${PID.alex}`);
     expect(within(mine).getByRole("button", { name: DETAIL_PLAYER.decline })).toBeInTheDocument();
@@ -134,8 +134,8 @@ describe("booking detail — a player's view", () => {
     serve({ detail: playerView({ players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), SAM_SEAT, ALEX_SEAT, jo] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(within(money).getByText(DETAIL_MONEY.paidRow("25 min", "25 min"))).toBeInTheDocument();
-    expect(within(money).getByText(DETAIL_MONEY.unpaidRow("25 min"))).toBeInTheDocument();
+    expect(within(money).getByText(DETAIL_MONEY.paidRow("25 minutes", "25 minutes"))).toBeInTheDocument();
+    expect(within(money).getByText(DETAIL_MONEY.unpaidRow("25 minutes"))).toBeInTheDocument();
     expect(within(money).getByText(DETAIL_MONEY.unpaidSentence("Jo", "Fri 2 Oct, 20:45", "Sam"))).toBeInTheDocument();
     expect(within(money).getByText(DETAIL_MONEY.organiserPaid("Sam"))).toBeInTheDocument();
     // Their own unpaid share is said to them in their own panel, not in the third person.

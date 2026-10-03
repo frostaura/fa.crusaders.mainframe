@@ -62,8 +62,8 @@ describe("the wallet ledger's share lines", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     shareRows.forEach((tr) => expect(tr).toBeVisible());
     // Newest first, as the ledger sorts: Alex's payment, then Sam's.
-    expect(within(shareRows[0] as HTMLElement).getByText(/^Alex paid you 25 min for their share of Court 1/)).toBeInTheDocument();
-    expect(within(shareRows[1] as HTMLElement).getByText(/^Sam paid you 25 min/)).toBeInTheDocument();
+    expect(within(shareRows[0] as HTMLElement).getByText(/^Alex paid you 25 minutes for their share of Court 1/)).toBeInTheDocument();
+    expect(within(shareRows[1] as HTMLElement).getByText(/^Sam paid you 25 minutes/)).toBeInTheDocument();
 
     const link = screen.getByRole("link", { name: new RegExp(`^${SHARE_LEDGER_COPY.viewBooking}`) });
     expect(link).toHaveAttribute("href", "/bookings/b1");
@@ -85,7 +85,7 @@ describe("the wallet ledger's share lines", () => {
     expect(line.querySelector("td.text-right")).toHaveTextContent("−25 min");
     expect(line.querySelector("[data-stacked-amount]")).toHaveTextContent("−25 min");
     fireEvent.click(toggle);
-    expect(screen.getByText(/^25 min moved to Sam for your share of Court 1/)).toBeInTheDocument();
+    expect(screen.getByText(/^25 minutes moved to Sam for your share of Court 1/)).toBeInTheDocument();
   });
 
   it("still makes sense when the booking cannot be read (a partner who pulled out reads it as a stranger)", async () => {
@@ -118,10 +118,10 @@ describe("R1 F2.14 — a refunded share", () => {
     const toggle = await screen.findByRole("button", { name: /paid and returned/ });
     const line = toggle.closest("tr") as HTMLElement;
     const amount = line.querySelector("td.text-right") as HTMLElement;
-    expect(amount).toHaveTextContent("0 min");
+    expect(amount).toHaveTextContent("0 minutes");
     expect(amount.className).not.toMatch(/text-success/);
     const stacked = line.querySelector("[data-stacked-amount] > span") as HTMLElement;
-    expect(stacked).toHaveTextContent("0 min");
+    expect(stacked).toHaveTextContent("0 minutes");
     expect(stacked.className).not.toMatch(/text-success/);
     // The disclosure is stretched over its line (a phone shows only the words and the amount).
     expect(toggle.className).toMatch(/after:absolute/);
@@ -132,9 +132,9 @@ describe("R1 F2.14 — a refunded share", () => {
 describe("the share sentences", () => {
   const place = { courtName: "Court 1", startsAt: "2026-09-30T16:00:00Z" };
   it("never speaks of debt: shares move, and come back", () => {
-    expect(shareRowSentence({ side: "partner", signed: -25, place, other: "Nomsa Khumalo" })).toBe("25 min moved to Nomsa for your share of Court 1");
-    expect(shareRowSentence({ side: "partner", signed: 25, place, other: "Nomsa Khumalo" })).toBe("25 min of your share of Court 1 came back from Nomsa");
-    expect(shareRowSentence({ side: "organiser", signed: -25, place, other: null })).toBe("25 min went back to a partner from their share of Court 1");
+    expect(shareRowSentence({ side: "partner", signed: -25, place, other: "Nomsa Khumalo" })).toBe("25 minutes moved to Nomsa for your share of Court 1");
+    expect(shareRowSentence({ side: "partner", signed: 25, place, other: "Nomsa Khumalo" })).toBe("25 minutes of your share of Court 1 came back from Nomsa");
+    expect(shareRowSentence({ side: "organiser", signed: -25, place, other: null })).toBe("25 minutes went back to a partner from their share of Court 1");
     for (const s of [shareGroupSentence({ side: "partner", net: -25, place, partners: null })]) expect(s).not.toMatch(/owe|debt/i);
   });
 

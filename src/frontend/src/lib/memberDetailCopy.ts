@@ -1,4 +1,5 @@
-import { minutesCompact } from "./minutes";
+import { FEATURES } from "./features";
+import { minutesSpoken } from "./minutes";
 
 /**
  * Every word the member-detail screen says — its header, its six tabs and the admin-role switch.
@@ -76,7 +77,8 @@ export const MEMBER_TABS = [
   { path: "bookings", label: "Bookings" },
   { path: "doors", label: "Door history" },
   { path: "night", label: "Night" },
-  { path: "access", label: "Sign-in & biometrics" },
+  // R6 L6-12: "biometrics" only while the fingerprint section is drawn (P13 §9).
+  { path: "access", label: FEATURES.fingerprintEnrolment ? "Sign-in & biometrics" : "Sign-in & access" },
 ] as const;
 
 export const TOP_UP_COPY = {
@@ -229,7 +231,7 @@ export const BOOKINGS_TAB_COPY = {
   partnerOf: (name: string | null) => (name ? `Playing as ${name}'s partner` : "Playing as a partner"),
   partnerBadge: "Partner",
   checkedIn: "Checked in",
-  charged: (minutes: number) => minutesCompact(minutes),
+  charged: (minutes: number) => minutesSpoken(minutes),
   unknownCourt: "A court",
 } as const;
 
@@ -238,6 +240,8 @@ export const BOOKING_STATUS: Record<string, { word: string; tone: "success" | "i
   completed: { word: "Played", tone: "success" },
   cancelled: { word: "Cancelled", tone: "neutral" },
   noshow: { word: "No-show", tone: "danger" },
+  /** R6 E6-6 — nobody checked in, but no box was reachable: refunded in full, never counted as a no-show. */
+  refunded_outage: { word: "Refunded — box offline", tone: "neutral" },
 };
 
 /* ═══════════════════════════════ WALLET ═══════════════════════════════ */

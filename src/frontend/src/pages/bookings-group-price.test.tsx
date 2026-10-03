@@ -61,7 +61,7 @@ describe("a booking costs its minutes — the grid carries no price", () => {
     expect(money).toHaveTextContent("15 minutes");
 
     const book = within(dialog).getByRole("button", { name: BOOK_SHEET.primary(1, 15, null) });
-    expect(book).toHaveTextContent("Book · 15 min");
+    expect(book).toHaveTextContent("Book · 15 minutes");
     expect(book).toBeEnabled();
     await act(async () => { fireEvent.click(book); });
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path.startsWith("/api/v1/bookings/"))).toBe(true));
@@ -72,7 +72,7 @@ describe("a booking costs its minutes — the grid carries no price", () => {
     fireEvent.click(await screen.findByRole("button", { name: bookCellLabel("Court 1 at 16:00") }));
     const dialog = await screen.findByRole("dialog");
     await toConfirm(dialog);
-    expect(within(dialog).getByText(BOOK_SHEET.needMore(5))).toHaveTextContent("You need 5 min more");
+    expect(within(dialog).getByText(BOOK_SHEET.needMore(5))).toHaveTextContent("You need 5 minutes more");
     expect(within(dialog).getByRole("link", { name: BOOK_SHEET.buyMinutes })).toHaveAttribute("href", BUY_MINUTES_PATH);
   });
 });
@@ -81,8 +81,8 @@ describe("the empty- and short-wallet banners", () => {
   it("say what a slot takes — the day's slice, in minutes", () => {
     const day = dayFixture() as unknown as ScheduleDay;
     expect(walletNotice(0, day, false)?.title).toBe(emptyWalletSentence(0, 15));
-    expect(walletNotice(0, day, false)?.title).toBe("You have no minutes left, so you can't book yet. A slot here takes 15 min.");
-    expect(walletNotice(10, day, false)?.title).toBe("You have 10 min left and a slot here takes 15 min. Buy a package to book.");
+    expect(walletNotice(0, day, false)?.title).toBe("You have no minutes left, so you can't book yet. A slot here takes 15 minutes.");
+    expect(walletNotice(10, day, false)?.title).toBe("You have 10 minutes left and a slot here takes 15 minutes. Buy a package to book.");
     expect(walletNotice(10, day, false)?.action?.to).toBe(BUY_MINUTES_PATH);
   });
 });

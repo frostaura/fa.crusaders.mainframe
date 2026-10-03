@@ -8,7 +8,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import type { BookingDetail, PlayerSpec } from "@/lib/playersApi";
 import { DETAIL_ACTIONS, SHARE_ASK, firstName } from "@/lib/playersCopy";
-import { minutesCompact } from "@/lib/minutes";
+import { minutesSpoken } from "@/lib/minutes";
 import { askedFigure, defaultAsk, organiserShare } from "./splitEditor";
 
 /**
@@ -43,7 +43,7 @@ export function ShareAskDialog({ detail, pick, onCancel, onAsk }: Props) {
       <DialogContent data-dialog="share-ask">
         <DialogHeader>
           <DialogTitle>{SHARE_ASK.title(who)}</DialogTitle>
-          <DialogDescription>{ratio ? SHARE_ASK.ratioBody : SHARE_ASK.amountBody(minutesCompact(organiserShare(detail)))}</DialogDescription>
+          <DialogDescription>{ratio ? SHARE_ASK.ratioBody : SHARE_ASK.amountBody(minutesSpoken(organiserShare(detail)))}</DialogDescription>
         </DialogHeader>
         <DialogBody className="pb-4">
           <Field invalid={Boolean(error)}>

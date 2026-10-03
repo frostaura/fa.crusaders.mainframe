@@ -39,7 +39,7 @@ describe("collect", () => {
     }] });
     const dialog = await openAct(DETAIL_ADMIN.collect);
     expect(dialog).toHaveTextContent(DETAIL_ADMIN.changeLog);
-    const box = within(dialog).getByRole("checkbox", { name: DETAIL_ADMIN.overdraftCollect("25 min", "Alex Naidoo") });
+    const box = within(dialog).getByRole("checkbox", { name: DETAIL_ADMIN.overdraftCollect("25 minutes", "Alex Naidoo") });
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.collectConfirm }));
     expect(within(dialog).getByText(DETAIL_ADMIN.reasonMissing)).toBeInTheDocument();
     expect(within(dialog).getByText(DETAIL_ADMIN.overdraftMissing)).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe("collect", () => {
     reason(dialog, "Paid late, agreed at the desk");
     fireEvent.click(box);
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.collectConfirm }));
-    await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_ADMIN.collected("Alex", "25 min")));
+    await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_ADMIN.collected("Alex", "25 minutes")));
     expect(posts(stub.calls, `${ADMIN_SEAT}/collect`)[0].body).toEqual({ reason: "Paid late, agreed at the desk", allowNegativeBalance: true });
   });
 
@@ -99,9 +99,9 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
     const dialog = await openAct(DETAIL_ADMIN.settle);
     reason(dialog, "Paid cash");
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.settleConfirm }));
-    const sentence = DETAIL_ADMIN.overdraftReturn("Sam Petersen", { returned: "40 min", covered: "10 min", short: "30 min", partner: "Alex Naidoo" });
+    const sentence = DETAIL_ADMIN.overdraftReturn("Sam Petersen", { returned: "40 minutes", covered: "10 minutes", short: "30 minutes", partner: "Alex Naidoo" });
     expect(sentence).toMatch(/Sam Petersen/);
-    expect(sentence).toMatch(/30 min/);
+    expect(sentence).toMatch(/30 minutes/);
     expect(await within(dialog).findByRole("checkbox", { name: sentence })).toBeInTheDocument();
   });
 
@@ -110,7 +110,7 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
       players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", status: "accepted", consented_minutes: 0, needs_consent: true, unpaid_minutes: 0 })],
     }) });
     renderDetail();
-    expect(await screen.findByText(DETAIL_MONEY.notAgreedRow("25 min"))).toBeInTheDocument();
+    expect(await screen.findByText(DETAIL_MONEY.notAgreedRow("25 minutes"))).toBeInTheDocument();
     expect(screen.getByRole("listitem", { name: `Alex, ${STATUS_WORD.not_agreed}` })).toBeInTheDocument();
     expect(screen.queryByText(/said yes to 0( min|\.00)/)).toBeNull();
   });
@@ -126,14 +126,14 @@ describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", 
   });
 
   it("a collect says the most it can take them below zero", () => {
-    expect(DETAIL_ADMIN.overdraftCollect("25 min", "Alex Naidoo")).toBe("Take 25 min from Alex Naidoo even if it puts them up to 25 min below zero");
+    expect(DETAIL_ADMIN.overdraftCollect("25 minutes", "Alex Naidoo")).toBe("Take 25 minutes from Alex Naidoo even if it puts them up to 25 minutes below zero");
   });
 });
 
 describe("remove and settle — a return that waits on the organiser (P11)", () => {
   it.each([
-    ["remove", DETAIL_ADMIN.remove, DETAIL_ADMIN.removeConfirm, "Removed Alex. Their 16 min is waiting on Sam's balance and goes back as soon as it's covered."],
-    ["settle-outside", DETAIL_ADMIN.settle, DETAIL_ADMIN.settleConfirm, "Alex's share is settled with the club. Their 16 min is waiting on Sam's balance and goes back as soon as it's covered."],
+    ["remove", DETAIL_ADMIN.remove, DETAIL_ADMIN.removeConfirm, "Removed Alex. Their 16 minutes is waiting on Sam's balance and goes back as soon as it's covered."],
+    ["settle-outside", DETAIL_ADMIN.settle, DETAIL_ADMIN.settleConfirm, "Alex's share is settled with the club. Their 16 minutes is waiting on Sam's balance and goes back as soon as it's covered."],
   ])("%s: return_waiting says the money has not moved yet", async (route, label, confirm, done) => {
     serve({ admin: true, detail: adminView(), extra: [{
       method: "POST", path: `${ADMIN_SEAT}/${route}`,

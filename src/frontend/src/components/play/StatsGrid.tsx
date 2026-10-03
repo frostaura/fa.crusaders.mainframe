@@ -1,5 +1,5 @@
 import type { PlayStatsFigures } from "@/lib/playApi";
-import { hoursAndMinutes, scoreLine, STATS_COPY } from "@/lib/playCopy";
+import { hoursAndMinutes, hoursAndMinutesSpoken, scoreLine, STATS_COPY } from "@/lib/playCopy";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,13 +15,16 @@ import { cn } from "@/lib/utils";
  * </p>
  */
 export const STATS_FRAME = "[container-type:inline-size]";
-export const STATS_GRID = "grid grid-cols-1 gap-3 [@container(min-width:14rem)]:grid-cols-2 [@container(min-width:30rem)]:grid-cols-6";
+// R6 L6-18: from 45rem (the wide My game column) the five tiles are one even row, not 3 + 2.
+export const STATS_GRID = "grid grid-cols-1 gap-3 [@container(min-width:14rem)]:grid-cols-2 [@container(min-width:30rem)_and_(max-width:44.99rem)]:grid-cols-6 [@container(min-width:45rem)]:grid-cols-5";
 
 export function statSpan(index: number, count: number): string {
   const firstRow = Math.ceil(count / 2);
   return cn(
     index === count - 1 && count % 2 === 1 && "[@container(min-width:14rem)_and_(max-width:29.99rem)]:col-span-2",
-    index < firstRow ? "[@container(min-width:30rem)]:col-span-2" : "[@container(min-width:30rem)]:col-span-3",
+    index < firstRow
+      ? "[@container(min-width:30rem)_and_(max-width:44.99rem)]:col-span-2"
+      : "[@container(min-width:30rem)_and_(max-width:44.99rem)]:col-span-3",
   );
 }
 
@@ -35,7 +38,9 @@ export function StatsGrid({ stats }: { stats: PlayStatsFigures }) {
     { key: "sessions", label: STATS_COPY.sessions, value: String(stats.sessions_attended), hint: null },
     {
       key: "time", label: STATS_COPY.timeOnCourt, value: hoursAndMinutes(stats.minutes_on_court),
-      hint: STATS_COPY.thisYear(hoursAndMinutes(stats.minutes_this_year)),
+      // R6 X6-2: the compact figure is seen; its words are heard ("6 hours 45 minutes").
+      spoken: hoursAndMinutesSpoken(stats.minutes_on_court),
+      hint: STATS_COPY.thisYear(hoursAndMinutesSpoken(stats.minutes_this_year)),
     },
     { key: "matches", label: STATS_COPY.matches, value: scoreLine(stats.matches_won, stats.matches_lost), hint: null },
     { key: "games", label: STATS_COPY.games, value: scoreLine(stats.games_won, stats.games_lost), hint: null },
@@ -54,7 +59,11 @@ export function StatsGrid({ stats }: { stats: PlayStatsFigures }) {
             className={cn("flex min-w-0 flex-col gap-0.5 break-words rounded-xl border border-border bg-bg-surface p-3", statSpan(index, tiles.length))}
           >
             <dt className="text-xs text-text-secondary">{tile.label}</dt>
-            <dd className="text-xl font-semibold tabular-nums text-text-primary">{tile.value}</dd>
+            <dd className="text-xl font-semibold tabular-nums text-text-primary">
+              {"spoken" in tile && tile.spoken
+                ? <><span aria-hidden="true">{tile.value}</span><span className="sr-only">{tile.spoken}</span></>
+                : tile.value}
+            </dd>
             {tile.hint ? <dd className="text-xs text-text-secondary">{tile.hint}</dd> : null}
           </div>
         ))}

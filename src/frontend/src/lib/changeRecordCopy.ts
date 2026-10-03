@@ -2,7 +2,7 @@ import { settingDef } from "./settingsSchema";
 import { clubCurrencySymbol } from "./currency";
 import { isDeskReasonCode, percentOfBps, reasonLabel } from "./deskMinutesCopy";
 import { formatMoney } from "./utils";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { clubCalendarDate, clubDayAndClock } from "./clubClock";
 
 /**
@@ -245,7 +245,7 @@ function money(field: string, value: string): string | null {
   if (value.trim() === "") return null;
   if (field.endsWith("_minutes")) {
     const minutes = minutesIn(value);
-    return minutes === null ? null : minutesCompact(minutes);
+    return minutes === null ? null : minutesSpoken(minutes);
   }
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -376,9 +376,9 @@ function batchItemOutcome(item: BatchItem): string {
 /** "50 min back", "15 min penalty", or a booked item's price. */
 function batchItemMoney(item: BatchItem): string[] {
   const money: string[] = [];
-  if (item.status === "booked" && item.amount_minutes) money.push(minutesCompact(item.amount_minutes));
-  if (item.refund_minutes) money.push(`${minutesCompact(item.refund_minutes)} back`);
-  if (item.penalty_minutes) money.push(`${minutesCompact(item.penalty_minutes)} penalty`);
+  if (item.status === "booked" && item.amount_minutes) money.push(minutesSpoken(item.amount_minutes));
+  if (item.refund_minutes) money.push(`${minutesSpoken(item.refund_minutes)} back`);
+  if (item.penalty_minutes) money.push(`${minutesSpoken(item.penalty_minutes)} penalty`);
   return money;
 }
 

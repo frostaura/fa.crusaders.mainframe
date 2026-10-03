@@ -1,7 +1,7 @@
 import type { LedgerEntryType } from "./api";
 import type { WalletTone } from "./balance";
 import { firstName, playersWhen } from "./playersCopy";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 
 /**
  * The wallet's own words, and the one distinction the product kept getting wrong.
@@ -85,7 +85,7 @@ export const TOP_UP_LABEL: Record<BalanceLevel, string> = {
  * </p>
  */
 export function minutesArrivedSentence(amount: number, entryType: LedgerEntryType | null, from: string | null): string {
-  const minutes = minutesCompact(amount);
+  const minutes = minutesSpoken(amount);
   switch (entryType) {
     case "AdminAdjustment":
       // Named, because "the club" is a building and a member wants to know who to thank — and
@@ -109,7 +109,7 @@ export function minutesArrivedSentence(amount: number, entryType: LedgerEntryTyp
 
 /** And the other direction, which is deliberately quieter. See the note in `useWalletLive`. */
 export function minutesLeftSentence(amount: number, entryType: LedgerEntryType | null): string {
-  const minutes = minutesCompact(amount);
+  const minutes = minutesSpoken(amount);
   switch (entryType) {
     case "BookingCharge": return `${minutes} went on a court booking.`;
     case "LightsPurchase": return `${minutes} went on court time at the box.`;
@@ -127,7 +127,7 @@ export function minutesLeftSentence(amount: number, entryType: LedgerEntryType |
  * the fallback for that one.
  */
 export function movementSentence(amount: number, reason: string | undefined): string {
-  const minutes = minutesCompact(Math.abs(amount));
+  const minutes = minutesSpoken(Math.abs(amount));
   const up = amount > 0;
   switch (reason) {
     case "top_up": return up ? `Your purchase landed: ${minutes} added to your wallet.` : `${minutes} of a purchase were taken back.`;
@@ -170,8 +170,8 @@ export const WALLET_MINI_COPY = {
 export function spendableLine(spendable: number): string {
   // P11: owing partners more than the balance makes spendable negative. "You can spend −4 min"
   // reads as a debt the member can spend; the honest sentence is nothing, and what clears it.
-  if (spendable < 0) return `You can spend 0 min until ${minutesCompact(-spendable)} more comes in`;
-  return `You can spend ${minutesCompact(spendable)}`;
+  if (spendable < 0) return `You can spend 0 minutes until ${minutesSpoken(-spendable)} more comes in`;
+  return `You can spend ${minutesSpoken(spendable)}`;
 }
 
 /**
@@ -180,14 +180,14 @@ export function spendableLine(spendable: number): string {
  */
 export function heldPartsLine(parts: readonly { minutes: number; until: string }[] | undefined, timezone?: string): string | null {
   if (!parts || parts.length < 2) return null;
-  return parts.map((p) => `${minutesCompact(p.minutes)} until ${playersWhen(p.until, timezone)}`).join(" · ");
+  return parts.map((p) => `${minutesSpoken(p.minutes)} until ${playersWhen(p.until, timezone)}`).join(" · ");
 }
 
 /** The chip's hover title when part of the balance is held or owed back to partners. */
 export function chipHeldTitle(held: number, owedBack = 0): string {
   const parts = [
-    held > 0 ? `${minutesCompact(held)} of it held for partners` : null,
-    owedBack > 0 ? `${minutesCompact(owedBack)} owed back to partners` : null,
+    held > 0 ? `${minutesSpoken(held)} of it held for partners` : null,
+    owedBack > 0 ? `${minutesSpoken(owedBack)} owed back to partners` : null,
   ].filter(Boolean);
   return `Wallet balance — ${parts.join(", ")}. Tap to buy minutes.`;
 }
@@ -258,7 +258,7 @@ export type ShareRowInput = {
  * Nobody owes anybody: a partner's share MOVES, and a returned one COMES BACK.
  */
 export function shareRowSentence(input: ShareRowInput): string {
-  const amount = minutesCompact(Math.abs(input.signed));
+  const amount = minutesSpoken(Math.abs(input.signed));
   const court = courtOf(input.place);
   const who = input.other ? firstName(input.other) : null;
   if (input.side === "partner") {

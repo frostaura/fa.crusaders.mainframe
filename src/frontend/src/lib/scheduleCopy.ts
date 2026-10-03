@@ -1,7 +1,7 @@
 import { WEEKDAYS, type ScheduleConflict, type Weekday } from "./adminApi";
 import { clubCalendarDate, clubClock, clubDayAndClock } from "./clubClock";
 import { epochDay, weekdayOf } from "./scheduleRules";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 
 /**
  * Every sentence the repeating-bookings surface says, as pure functions returning strings.
@@ -261,19 +261,19 @@ export function conflictRefundPhrase(
   const amount = conflict.would_refund_minutes;
   if (amount === undefined || amount === null) return `What would go back${to} isn't known yet.`;
   if (amount === 0) return `Nothing would go back${to}.`;
-  return `${minutesCompact(amount)} would go back${to}.`;
+  return `${minutesSpoken(amount)} would go back${to}.`;
 }
 
 /** The primary button's label, restating the option chosen — including the unknown total. */
 export function clearAllLabel(count: number, totalMinutes: number | null): string {
   const bookings = `${count} booking${count === 1 ? "" : "s"}`;
   if (totalMinutes === null) return `Cancel ${bookings} and refund them in full`;
-  return `Cancel ${bookings} and refund ${minutesCompact(totalMinutes)} in full`;
+  return `Cancel ${bookings} and refund ${minutesSpoken(totalMinutes)} in full`;
 }
 
 /** One conflict's row after a cancel that went through: "1 h went back in full." */
 export function conflictRefundedLine(refundedMinutes: number): string {
-  return `${minutesCompact(refundedMinutes)} went back in full.`;
+  return `${minutesSpoken(refundedMinutes)} went back in full.`;
 }
 
 /** The "cancel them all" confirm's body — with the total when every quote is known, without it when one is not. */
@@ -282,7 +282,7 @@ export function clearAllDescription(count: number, totalMinutes: number | null):
   const tail = "This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.";
   return totalMinutes === null
     ? `${bookings} will be cancelled and refunded in full, and each member emailed. ${tail}`
-    : `${bookings} will be cancelled, ${minutesCompact(totalMinutes)} goes back in full, and each member is emailed. ${tail}`;
+    : `${bookings} will be cancelled, ${minutesSpoken(totalMinutes)} goes back in full, and each member is emailed. ${tail}`;
 }
 
 export const CREATE_LABEL = "Create the hold";
@@ -437,7 +437,7 @@ export function endConsequence({ remaining, days, slots, refundMinutes, dates }:
     ? `${stops}, and the slots it was holding can be booked again.`
     : `${stops} and releases ${slots} held slot${slots === 1 ? "" : "s"}, which members can then book.`;
   const money = refundMinutes > 0
-    ? `${minutesCompact(refundMinutes)} goes back to the members who paid.`
+    ? `${minutesSpoken(refundMinutes)} goes back to the members who paid.`
     : "Nobody is refunded — nobody was charged for a hold.";
   const past = days.length === 1 && !mixedWeekdays(dates)
     ? `${weekdayPlural(days[0])} that have already happened stay exactly as they are.`

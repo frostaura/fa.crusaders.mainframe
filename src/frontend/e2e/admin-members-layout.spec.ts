@@ -336,10 +336,10 @@ test.describe("opening a member from the list", () => {
     await page.getByRole("menuitem", { name: "Adjust minutes" }).click();
     const sheet = page.getByRole("dialog", { name: "Add minutes for Sipho Dlamini" });
     // Reached by keyboard, nothing chosen yet — the reviewer's path.
-    await sheet.getByRole("radio", { name: "+15 min" }).focus();
+    await sheet.getByRole("radio", { name: "+15 minutes" }).focus();
     await page.keyboard.press("ArrowRight");
-    await expect(sheet.getByRole("radio", { name: "+30 min" })).toBeFocused();
-    await expect(sheet.getByRole("radio", { name: "+30 min" })).toHaveAttribute("aria-checked", "true");
+    await expect(sheet.getByRole("radio", { name: "+30 minutes" })).toBeFocused();
+    await expect(sheet.getByRole("radio", { name: "+30 minutes" })).toHaveAttribute("aria-checked", "true");
     await expect(sheet.getByLabel("Another amount, in minutes")).toHaveValue("30");
   });
 

@@ -59,7 +59,7 @@ describe("held parts (C4)", () => {
       return el!;
     });
     expect(line).toHaveTextContent(heldPartsLine([PARTS[1], PARTS[0]], TZ));
-    expect(heldPartsLine([PARTS[1], PARTS[0]], TZ)).toBe("Held: 25 min until Wed 2 Oct, 06:45 · 35 min until Fri 4 Oct, 10:30");
+    expect(heldPartsLine([PARTS[1], PARTS[0]], TZ)).toBe("Held: 25 minutes until Wed 2 Oct, 06:45 · 35 minutes until Fri 4 Oct, 10:30");
     expect(line).not.toHaveTextContent(heldLine(60, PARTS[1].until, TZ));
   });
 });

@@ -119,12 +119,12 @@ describe("the floating action bar", () => {
     openBookings({ day: DAY });
     await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/, /^Book Court 2 at 16:30/]);
     // Three 15-minute slices take 45 minutes — the headline is minutes, never a price (P13 §3.12).
-    expect(within(bar()).getByText("3 slots · 45 min")).toBeInTheDocument();
+    expect(within(bar()).getByText("3 slots · 45 minutes")).toBeInTheDocument();
     // Each court's run to the END of its last slot — never one span over both courts, which
     // read as 45 minutes on each (review round 1, F1.8).
     expect(within(bar()).getByText(/Mon 9 Sep · Court 1 16:00–16:30, Court 2 16:30–16:45/)).toBeInTheDocument();
     // The count is announced politely, beside the toolbar rather than inside it.
-    expect(screen.getAllByRole("status").some((s) => s.textContent === "3 slots · 45 min")).toBe(true);
+    expect(screen.getAllByRole("status").some((s) => s.textContent === "3 slots · 45 minutes")).toBe(true);
 
     await act(async () => { fireEvent.click(within(bar()).getByRole("button", { name: BOOKINGS_COPY.bookSelection })); });
     // Two adjacent slices on Court 1 are one booking of two; Court 2 is its own.
@@ -138,7 +138,7 @@ describe("the floating action bar", () => {
   it("offers an admin Cancel for ticked bookings beside Book for ticked slots", async () => {
     openBookings({ isAdmin: true, day: DAY });
     await select([/^Book Court 1 at 16:00/, /Thandi — cancel on their behalf/]);
-    expect(within(bar()).getByText("1 slot · 15 min · 1 booking")).toBeInTheDocument();
+    expect(within(bar()).getByText("1 slot · 15 minutes · 1 booking")).toBeInTheDocument();
     await act(async () => { fireEvent.click(within(bar()).getByRole("button", { name: "Cancel booking" })); });
     expect(sheets.cancel?.bookings.map((b) => b.bookingId)).toEqual(["bk-1"]);
     expect(sheets.cancel?.bookings[0].memberFirstName).toBe("Thandi");

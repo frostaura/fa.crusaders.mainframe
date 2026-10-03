@@ -6,7 +6,7 @@ import { parseMinutesAmount } from "@/lib/amount";
 import { amountProblemSentence } from "@/lib/amountCopy";
 import type { BookingDetail, DetailPlayer, PlayerSpec, SplitChange, SplitPreviewShare } from "@/lib/playersApi";
 import { CHANGE_SPLIT, PLAYERS_REFUSAL } from "@/lib/playersCopy";
-import { minutesCompact } from "@/lib/minutes";
+import { minutesSpoken } from "@/lib/minutes";
 import { isLive, seatName } from "./detailModel";
 
 /**
@@ -81,18 +81,18 @@ export function splitEffects(d: BookingDetail, shares: readonly SplitPreviewShar
     if (next === undefined) continue;
     const name = seatName(p, d.players);
     if (p.status !== "accepted") {
-      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.askedFor(name, minutesCompact(next)));
+      if (next !== p.share_minutes) lines.push(CHANGE_SPLIT.askedFor(name, minutesSpoken(next)));
     } else if (next > p.paid_minutes) {
       if (next !== p.share_minutes || p.unpaid_minutes > 0) {
-        lines.push(CHANGE_SPLIT.askedMore(name, minutesCompact(next - p.paid_minutes), next > p.consented_minutes));
+        lines.push(CHANGE_SPLIT.askedMore(name, minutesSpoken(next - p.paid_minutes), next > p.consented_minutes));
       }
     } else if (next < p.paid_minutes) {
-      lines.push(CHANGE_SPLIT.goesBack(name, minutesCompact(p.paid_minutes - next)));
+      lines.push(CHANGE_SPLIT.goesBack(name, minutesSpoken(p.paid_minutes - next)));
     }
   }
   if (lines.length === 0) return [CHANGE_SPLIT.noChange];
   const organiser = shares.find((s) => s.seat === 1);
-  if (organiser) lines.push(CHANGE_SPLIT.youCover(minutesCompact(organiser.share_minutes)));
+  if (organiser) lines.push(CHANGE_SPLIT.youCover(minutesSpoken(organiser.share_minutes)));
   return lines;
 }
 

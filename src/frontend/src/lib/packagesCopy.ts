@@ -1,5 +1,5 @@
 import { formatMoney } from "./utils";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { parseAmount, parseMinutesAmount } from "./amount";
 import { amountProblemSentence } from "./amountCopy";
 import { unsureWords } from "./lostReplyCopy";
@@ -23,6 +23,15 @@ export const PACKAGE_LIMITS = {
   /** Active packages per club (`package_limit_reached {max: 50}`). */
   activeMax: 50,
 } as const;
+
+/**
+ * A package's saving, said one way everywhere it is a phrase (R6 L6-11): "Saves R50.00 (8%)" on
+ * the desk's Sell sheet and the console's preview. The console's table cell drops the verb only
+ * because its column is headed "Saves".
+ */
+export function savesWords(zar: string, pct: number | null): string {
+  return pct ? `Saves ${zar} (${pct}%)` : `Saves ${zar}`;
+}
 
 /** The shelf a package is on: null = the club's, else the group's id. */
 export type ShelfKey = string | null;
@@ -77,7 +86,7 @@ export const PACKAGES_COPY = {
   minutesDescription: "Whole minutes. Use the hours below to fill it in.",
   hoursLabel: "Fill in hours",
   hoursChip: (hours: number) => `${hours} h`,
-  minutesEcho: (minutes: number) => `= ${minutesCompact(minutes)}`,
+  minutesEcho: (minutes: number) => `= ${minutesSpoken(minutes)}`,
   priceLabel: "Price (R)",
   priceDescription: "What a member pays, in rand. A group discount comes off a club package's price.",
   shelfLabel: "Who can buy it",
@@ -88,8 +97,7 @@ export const PACKAGES_COPY = {
   reasonLabel: "Why the change (optional)",
   reasonPlaceholder: "e.g. New season's prices",
   preview: "On the shelf",
-  previewSaves: (zar: number, pct: number | null, base: string) =>
-    `Saves ${formatMoney(zar)}${pct ? ` (${pct}%)` : ""} against ${base}.`,
+  previewSaves: (zar: number, pct: number | null, base: string) => `${savesWords(formatMoney(zar), pct)} against ${base}.`,
   previewNoSaving: (base: string) => `No saving against ${base} — members would do as well buying that.`,
   previewIsBaseline: "The smallest package on this shelf: every other package's saving is measured against it.",
   previewAlone: "The only package on this shelf.",

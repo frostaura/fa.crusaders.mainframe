@@ -1,7 +1,7 @@
 import { ApiError } from "./api";
 import { NotSent, UnsureOutcome } from "./bookingOutcome";
 import type { SplitCancel } from "./bookingsApi";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { rateLimitedSentence } from "./errors";
 
 /**
@@ -383,11 +383,11 @@ export function cancellationOutcome(
       : "Booking cancelled. Nothing was refunded — the lights had already been on.";
   }
   // F1.13 — a split booking: what the organiser keeps, and each partner's share, by name.
-  const partners = split ? `; ${split.partners.map((p) => `${minutesCompact(p.minutes)} to ${p.name}`).join(", ")}` : "";
+  const partners = split ? `; ${split.partners.map((p) => `${minutesSpoken(p.minutes)} to ${p.name}`).join(", ")}` : "";
   const back = split ? splitBack(refunded, penalty, split) : refunded - (penalty > 0 ? penalty : 0);
   if (penalty > 0) {
-    return `Booking cancelled. ${minutesCompact(back)} back to ${whose}${partners}, `
-      + `${minutesCompact(penalty)} kept as the late-cancellation penalty.`;
+    return `Booking cancelled. ${minutesSpoken(back)} back to ${whose}${partners}, `
+      + `${minutesSpoken(penalty)} kept as the late-cancellation penalty.`;
   }
-  return `Booking cancelled. ${minutesCompact(split ? split.net : refunded)} back to ${whose}${partners}.`;
+  return `Booking cancelled. ${minutesSpoken(split ? split.net : refunded)} back to ${whose}${partners}.`;
 }

@@ -338,6 +338,6 @@ describe("Settings → Money & packages after P13", () => {
     expect(money).not.toHaveTextContent(/credit|top.?up|\bcr\b|conversion|per R1|over-65|their class/i);
     expect(within(money).getByRole("link", { name: SETTINGS_COPY.packagesLink })).toHaveAttribute("href", "/admin/packages");
     expect(within(money).getByRole("link", { name: SETTINGS_COPY.groupDiscountsLink })).toHaveAttribute("href", "/admin/groups");
-    expect(sectionTrigger("Money & packages")).toHaveAccessibleDescription("Minutes bought in packages, priced in R");
+    expect(sectionTrigger("Money & packages")).toHaveAccessibleDescription("Minutes bought in packages · currency symbol R");
   });
 });

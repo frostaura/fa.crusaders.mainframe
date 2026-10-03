@@ -175,11 +175,11 @@ describe("cancellationOutcome — the message names what actually moved", () => 
     // The API posts refund and penalty as two ledger rows, gross and deduction. What the
     // member wants to read is what landed in their wallet, and what was kept.
     expect(cancellationOutcome(50, 15)).toBe(
-      "Booking cancelled. 35 min back to your balance, 15 min kept as the late-cancellation penalty.");
+      "Booking cancelled. 35 minutes back to your balance, 15 minutes kept as the late-cancellation penalty.");
   });
 
   it("states a free cancellation as a plain figure", () => {
-    expect(cancellationOutcome(50, 0)).toBe("Booking cancelled. 50 min back to your balance.");
+    expect(cancellationOutcome(50, 0)).toBe("Booking cancelled. 50 minutes back to your balance.");
   });
 
   it("says nothing came back when the lights had been on", () => {

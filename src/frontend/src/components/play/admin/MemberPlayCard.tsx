@@ -6,7 +6,7 @@ import { TextLink } from "@/components/ui/text-link";
 import { playEndpoints, type AdminMemberPlay } from "@/lib/playApi";
 import { adminMemberReads, joinEarly } from "@/lib/offline/adminEarlyReads";
 import { useDataOwner } from "@/lib/offline/useCachedRead";
-import { hoursAndMinutes, MEMBER_PLAY_CARD as COPY, PLAY_REFUSAL } from "@/lib/playCopy";
+import { hoursAndMinutes, hoursAndMinutesSpoken, MEMBER_PLAY_CARD as COPY, PLAY_REFUSAL } from "@/lib/playCopy";
 
 /**
  * The Play card on an admin's member Overview (§9.4, §14 Q3): five figures — sessions, this
@@ -55,11 +55,14 @@ export function MemberPlayCard({ userId }: { userId: string }) {
   );
 }
 
-function Tile({ label, value, hint, children }: { label: string; value: string; hint: string; children?: ReactNode }) {
+function Tile({ label, value, spoken, hint, children }: { label: string; value: string; spoken?: string; hint: string; children?: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4">
       <dt className="text-sm font-medium text-text-secondary">{label}</dt>
-      <dd className="font-display text-2xl font-bold tabular-nums text-text-primary">{value}</dd>
+      <dd className="font-display text-2xl font-bold tabular-nums text-text-primary">
+        {/* R6 X6-2: a compact figure is seen; its words are heard. */}
+        {spoken ? <><span aria-hidden="true">{value}</span><span className="sr-only">{spoken}</span></> : value}
+      </dd>
       <dd className="text-xs text-text-muted">{hint}</dd>
       {children ? <dd>{children}</dd> : null}
     </div>
@@ -70,7 +73,12 @@ function Figures({ play }: { play: AdminMemberPlay }) {
   return (
     <dl className="grid gap-3 sm:grid-cols-3">
       <Tile label={COPY.sessions} value={String(play.sessions_attended)} hint={COPY.sessionsHint} />
-      <Tile label={COPY.thisMonth} value={hoursAndMinutes(play.minutes_this_month)} hint={COPY.thisMonthHint(hoursAndMinutes(play.minutes_all_time))} />
+      <Tile
+        label={COPY.thisMonth}
+        value={hoursAndMinutes(play.minutes_this_month)}
+        spoken={hoursAndMinutesSpoken(play.minutes_this_month)}
+        hint={COPY.thisMonthHint(hoursAndMinutesSpoken(play.minutes_all_time))}
+      />
       <Tile label={COPY.streak} value={COPY.streakValue(play.current_streak_weeks)} hint={COPY.streakHint} />
       <Tile label={COPY.record} value={COPY.recordValue(play.matches_won, play.matches_lost)} hint={COPY.recordHint(play.matches_played)} />
       <Tile label={COPY.disputes} value={String(play.open_disputes)} hint={COPY.disputesHint}>

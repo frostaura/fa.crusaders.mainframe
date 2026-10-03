@@ -39,8 +39,8 @@ describe("the wallet card's held line", () => {
     const line = await screen.findByText(heldLine(20, UNTIL));
     expect(line.closest("[data-held-line]")).toHaveTextContent(spendableLine(100));
     expect(screen.getByText(HELD_EXPLAINER)).toBeInTheDocument();
-    expect(heldLine(20, UNTIL)).toBe("20 min held until Fri 2 Oct, 20:45");
-    expect(spendableLine(100)).toBe("You can spend 1 h 40 min");
+    expect(heldLine(20, UNTIL)).toBe("20 minutes held until Fri 2 Oct, 20:45");
+    expect(spendableLine(100)).toBe("You can spend 1 hour 40 minutes");
   });
 
   // F4-18 (C4) — one release date for the whole amount was wrong when two games' shares were held.
@@ -53,7 +53,7 @@ describe("the wallet card's held line", () => {
     renderPage(<WalletPage />);
     const line = await screen.findByText(heldLine(60, null));
     const block = line.closest("[data-held-line]")!;
-    expect(block.querySelector("[data-held-parts]")).toHaveTextContent("25 min until Fri 2 Oct, 06:45 · 35 min until Sun 4 Oct, 10:30");
+    expect(block.querySelector("[data-held-parts]")).toHaveTextContent("25 minutes until Fri 2 Oct, 06:45 · 35 minutes until Sun 4 Oct, 10:30");
     expect(heldPartsLine(parts.slice(0, 1))).toBeNull();
   });
 
@@ -71,7 +71,7 @@ describe("the wallet card's held line", () => {
     const line = await screen.findByText(owedBackLine(16));
     const block = line.closest("[data-held-line]");
     expect(block).toHaveTextContent(spendableLine(-6));
-    expect(spendableLine(-6)).toBe("You can spend 0 min until 6 min more comes in");
+    expect(spendableLine(-6)).toBe("You can spend 0 minutes until 6 minutes more comes in");
     expect(screen.getByText(OWED_BACK_EXPLAINER)).toBeInTheDocument();
     // Nothing is held, so the held sentence and its explainer stay away.
     expect(screen.queryByText(HELD_EXPLAINER)).toBeNull();
@@ -111,9 +111,9 @@ describe("the chip's name mentions what is held", () => {
     stub(wallet({ held_minutes: 0, owed_back_minutes: 16, spendable_minutes: 104, held_until: null }));
     renderPage(<MinutesChip />);
     const chip = await screen.findByRole("link", { name: /2 hours, 16 minutes owed back to partners/ }, { timeout: 5_000 });
-    await waitFor(() => expect(chip).toHaveAttribute("title", "1 h 44 min to spend — 2 h in your wallet, 16 min owed back to partners. Tap to buy minutes."));
-    expect(chipHeldTitle(0, 16)).toBe("Wallet balance — 16 min owed back to partners. Tap to buy minutes.");
-    expect(chipHeldTitle(20)).toBe("Wallet balance — 20 min of it held for partners. Tap to buy minutes.");
+    await waitFor(() => expect(chip).toHaveAttribute("title", "1 hour 44 minutes to spend — 2 hours in your wallet, 16 minutes owed back to partners. Tap to buy minutes."));
+    expect(chipHeldTitle(0, 16)).toBe("Wallet balance — 16 minutes owed back to partners. Tap to buy minutes.");
+    expect(chipHeldTitle(20)).toBe("Wallet balance — 20 minutes of it held for partners. Tap to buy minutes.");
   });
 
   /**
@@ -128,7 +128,7 @@ describe("the chip's name mentions what is held", () => {
     await waitFor(() => expect(chip).toHaveTextContent("1 h 40 min"));
     expect(chip).not.toHaveTextContent("2 h");
     expect(chip).toHaveAccessibleName("Wallet balance 1 hour 40 minutes to spend — 2 hours, 20 minutes held for partners. Tap to buy minutes.");
-    expect(chip).toHaveAttribute("title", "1 h 40 min to spend — 2 h in your wallet, 20 min held for partners. Tap to buy minutes.");
+    expect(chip).toHaveAttribute("title", "1 hour 40 minutes to spend — 2 hours in your wallet, 20 minutes held for partners. Tap to buy minutes.");
   });
 
   it("says a member with nothing to spend cannot book, whatever the whole balance is", async () => {

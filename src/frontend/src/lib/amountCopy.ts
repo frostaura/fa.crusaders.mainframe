@@ -1,5 +1,5 @@
 import type { AmountProblem } from "./amount";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { formatMoney } from "./utils";
 
 /**
@@ -30,7 +30,7 @@ export const AMOUNT_COPY = {
   ambiguousMinutes: "Is that a thousand or one? Write minutes without a separator, like 1000.",
   zero: "Enter an amount greater than zero.",
   tooPrecise: (unit: AmountUnit) => (isRand(unit) ? "Rand go to two decimal places (cents)." : "Minutes are whole numbers — leave off the decimals."),
-  tooLarge: (unit: AmountUnit, max: number) => `The most this can be is ${isRand(unit) ? formatMoney(max) : minutesCompact(max)}.`,
+  tooLarge: (unit: AmountUnit, max: number) => `The most this can be is ${isRand(unit) ? formatMoney(max) : minutesSpoken(max)}.`,
 } as const;
 
 export function amountProblemSentence(problem: AmountProblem, unit: AmountUnit): string {

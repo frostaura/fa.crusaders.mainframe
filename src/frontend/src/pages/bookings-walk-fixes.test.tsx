@@ -37,7 +37,7 @@ describe("the wallet notice follows the actor's role (R19)", () => {
   it("gives an admin below zero a calm note, never the member's refusal", async () => {
     openBookings({ isAdmin: true, balance: -100 });
     const note = await screen.findByText(adminWalletNote(-100));
-    expect(note.textContent).toBe("Your balance is −1 h 40 min. As an admin you can still book — going below zero is recorded.");
+    expect(note.textContent).toBe("Your balance is minus 1 hour 40 minutes. As an admin you can still book — going below zero is recorded.");
     expect(document.body.textContent).not.toMatch(/can't book yet|You owe/);
     // Nothing is blocked, so there is no call to action; the note wears info, not warning.
     const notice = note.closest('[role="status"]')!;
@@ -57,7 +57,7 @@ describe("the wallet notice follows the actor's role (R19)", () => {
     openBookings({ isAdmin: false, balance: -100 });
     // What a slot takes is the day's slice (15 min), never a price (P13 §3.12).
     expect(await screen.findByText(emptyWalletSentence(-100, 15))).toBeTruthy();
-    expect(screen.getByText("You owe 1 h 40 min, so you can't book yet. A slot here takes 15 min.")).toBeTruthy();
+    expect(screen.getByText("You owe 1 hour 40 minutes, so you can't book yet. A slot here takes 15 minutes.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Buy minutes" })).toHaveAttribute("href", "/wallet/buy");
     expect(document.body.textContent).not.toContain("As an admin");
   });
@@ -73,7 +73,7 @@ describe("two courts at the same time", () => {
     expect(chosen().map((c) => c.getAttribute("aria-label"))).toEqual(["Court 1 at 16:45", "Court 2 at 16:45"]);
     const bar = screen.getByRole("toolbar", { name: BOOKINGS_COPY.actionBarLabel });
     // Two 15-minute slices: the bar counts the minutes they take (P13 §3.12).
-    expect(within(bar).getByText("2 slots · 30 min")).toBeTruthy();
+    expect(within(bar).getByText("2 slots · 30 minutes")).toBeTruthy();
     await act(async () => { fireEvent.click(within(bar).getByRole("button", { name: BOOKINGS_COPY.bookSelection })); });
     expect(sheets.book?.slots.map((s) => [s.courtId, s.startsAt])).toEqual([[COURT_A, sast(16, 45)], [COURT_B, sast(16, 45)]]);
   });

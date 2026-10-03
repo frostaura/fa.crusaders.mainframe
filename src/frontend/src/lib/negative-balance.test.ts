@@ -83,11 +83,11 @@ describe("a balance below zero is a debt, not an absence", () => {
 describe("the booking grid's banner can state a debt", () => {
   it("names what is owed instead of claiming there is nothing there", () => {
     const sentence = emptyWalletSentence(-25, 45);
-    expect(sentence).toContain("25 min");
+    expect(sentence).toContain("25 minutes");
     expect(sentence).toMatch(/owe/);
     expect(sentence).not.toMatch(/You have no minutes/);
     // What a slot takes is still named — it is the other half of what the member has to work out.
-    expect(sentence).toContain("A slot here takes 45 min.");
+    expect(sentence).toContain("A slot here takes 45 minutes.");
     // Whole minutes, never a decimal, and never the old unit (P13).
     expect(sentence).not.toMatch(/\d\.\d|credit|\bcr\b/);
   });
@@ -111,9 +111,9 @@ describe("the booking grid's banner can state a debt", () => {
    * from — a sentence re-pointed at the wrong one of the two numbers would still look right
    * with a single fixture.
    */
-  it.each([[-25, 45, "You owe 25 min, so you can't book yet. A slot here takes 45 min."],
-           [-90, 15, "You owe 1 h 30 min, so you can't book yet. A slot here takes 15 min."],
-           [-1500, 60, "You owe 1 d 1 h, so you can't book yet. A slot here takes 1 h."]])(
+  it.each([[-25, 45, "You owe 25 minutes, so you can't book yet. A slot here takes 45 minutes."],
+           [-90, 15, "You owe 1 hour 30 minutes, so you can't book yet. A slot here takes 15 minutes."],
+           [-1500, 60, "You owe 1 day 1 hour, so you can't book yet. A slot here takes 1 hour."]])(
     "keeps the debt and the slot apart at %s against %s",
     (balance, slice, expected) => {
       expect(emptyWalletSentence(balance, slice)).toBe(expected);
@@ -137,7 +137,7 @@ describe("a short wallet — some minutes, but fewer than a slot takes (P13)", (
   it("says so before the member picks, with the way to buy a package", () => {
     const n = walletNotice(10, day(15));
     expect(n?.id).toBe("wallet-short");
-    expect(n?.title).toBe("You have 10 min left and a slot here takes 15 min. Buy a package to book.");
+    expect(n?.title).toBe("You have 10 minutes left and a slot here takes 15 minutes. Buy a package to book.");
     expect(n?.action).toEqual({ label: "Buy minutes", to: "/wallet/buy" });
   });
 

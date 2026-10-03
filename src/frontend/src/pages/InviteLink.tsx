@@ -10,7 +10,7 @@ import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { playersEndpoints } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
-import { minutesCompact } from "@/lib/minutes";
+import { minutesSpoken } from "@/lib/minutes";
 import { clearPendingInvite, pendingInvite, savePendingInvite } from "@/lib/playersPending";
 
 /**
@@ -97,7 +97,7 @@ function notOpenPage(code: string | null, closedGame: ClosedGame, errorBooking: 
   }
   if (closedGame.kind === "cancelled") {
     const sentence = closedGame.back > 0
-      ? INVITES_COPY.linkCancelledBack(minutesCompact(closedGame.back)) : INVITES_COPY.linkCancelledNothing;
+      ? INVITES_COPY.linkCancelledBack(minutesSpoken(closedGame.back)) : INVITES_COPY.linkCancelledNothing;
     return <InviteGone title={INVITES_COPY.fateCancelledTitle} sentence={sentence} bookingId={closedGame.bookingId} />;
   }
   if (!code || !(code in OPEN_REFUSAL)) return null;

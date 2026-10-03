@@ -138,7 +138,7 @@ describe("AdminMembers — adjust minutes", () => {
 
     fireEvent.pointerDown(screen.getByRole("combobox", { name: RELATED_BOOKING.label }), POINTER);
     // One option per booking — the charge row for the same booking does not repeat it.
-    expect(await screen.findByRole("option", { name: /No-show penalty 7 min · aaaaaaaa/ })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /No-show penalty 7 minutes · aaaaaaaa/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Booking charge/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: /No-show penalty/ }));
 
@@ -158,8 +158,8 @@ describe("AdminMembers — adjust minutes", () => {
     });
     // The receipt STAYS on screen — money deserves more than four seconds — and the row's balance
     // follows the API's answer.
-    expect(await screen.findByText("Done. Ada Lovelace now has 2 h 24 min.")).toBeInTheDocument();
-    expect(screen.getByText("2 h 24 min")).toBeInTheDocument();
+    expect(await screen.findByText("Done. Ada Lovelace now has 2 hours 24 minutes.")).toBeInTheDocument();
+    expect(screen.getByText("2 hours 24 minutes")).toBeInTheDocument();
   });
 
   it("sends no relatedBookingId key at all when the adjustment is not for a booking", async () => {
@@ -330,7 +330,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     fireEvent.click(fire);
     fireEvent.click(fire);
 
-    await waitFor(() => expect(screen.getByText("Done. Ada Lovelace now has 2 h 7 min.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Done. Ada Lovelace now has 2 hours 7 minutes.")).toBeInTheDocument());
     const posts = stub.calls.filter((c) => c.method === "POST" && c.path === ADJUST);
     expect(posts).toHaveLength(1);
     const body = posts[0].body as Record<string, unknown>;
@@ -395,7 +395,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
       await fill("7", "lost reply probe");
       fireEvent.click(await armed());
 
-      expect(await screen.findByText("Done. Ada Lovelace now has 2 h 7 min.")).toBeInTheDocument();
+      expect(await screen.findByText("Done. Ada Lovelace now has 2 hours 7 minutes.")).toBeInTheDocument();
       expect(screen.getByText(LOST_REPLY.landed)).toBeInTheDocument();
       expect(screen.queryByText(ADJUST_SHEET.failed)).not.toBeInTheDocument();
       expect(stub.calls.some((c) => c.method === "GET" && c.path.startsWith(`/api/v1/admin/ledger/?`)
@@ -445,7 +445,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     fireEvent.click(await armed());
 
     expect(await screen.findByText(
-      "An earlier press already went through: +7 min (“coaching session”). Nothing more was added — check the ledger before adding anything else.",
+      "An earlier press already went through: +7 minutes (“coaching session”). Nothing more was added — check the ledger before adding anything else.",
     )).toBeInTheDocument();
   });
 
@@ -469,8 +469,8 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     await fill("9", "coaching session");
     fireEvent.click(await armed());
 
-    await screen.findByText(/An earlier press already went through: \+7 min/);
-    expect(await screen.findByText("2 h 16 min")).toBeInTheDocument();
+    await screen.findByText(/An earlier press already went through: \+7 minutes/);
+    expect(await screen.findByText("2 hours 16 minutes")).toBeInTheDocument();
     const live = document.querySelector("[data-confirm-group] > [aria-live='polite']");
     expect(live).toHaveTextContent(LIVE_SAID.reused);
     expect(live).not.toHaveTextContent(/didn't go through/);
@@ -482,7 +482,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
 
     await fill("7", "coaching session");
     fireEvent.click(await armed());
-    await screen.findByText(/the most is 8 min/);
+    await screen.findByText(/the most is 8 minutes/);
     fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
     fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.back }));
     fireEvent.change(await screen.findByLabelText(ADJUST_SHEET.amountLabel), { target: { value: "9" } });
@@ -502,7 +502,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
 
     await fill("7", "coaching session");
     fireEvent.click(await armed());
-    await waitFor(() => expect(screen.getByText("Done. Ada Lovelace now has 2 h 7 min.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Done. Ada Lovelace now has 2 hours 7 minutes.")).toBeInTheDocument());
     // The receipt stays until it is closed — P5 names that button "Done" (every sheet also has
     // its own close ×, named "Close").
     fireEvent.click(screen.getByRole("button", { name: ADJUST_SHEET.done }));

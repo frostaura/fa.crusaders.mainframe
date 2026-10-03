@@ -74,7 +74,7 @@ describe("a cancelled booking (R1 F2.10)", () => {
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
     const sam = within(money).getByText("Sam").closest("li")!;
-    expect(sam).toHaveTextContent(DETAIL_CANCELLED.returnedRow("25 min"));
+    expect(sam).toHaveTextContent(DETAIL_CANCELLED.returnedRow("25 minutes"));
     expect(sam).not.toHaveTextContent(DETAIL_CANCELLED.nothingToPay);
     // Alex never paid: nothing came back, and the row says so.
     expect(within(money).getByText("Alex").closest("li")!).toHaveTextContent(DETAIL_CANCELLED.nothingToPay);
@@ -111,7 +111,7 @@ describe("a cancelled booking (R1 F2.10)", () => {
     }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(within(money).getByText(DETAIL_CANCELLED.paidRow("25 min"))).toBeInTheDocument();
+    expect(within(money).getByText(DETAIL_CANCELLED.paidRow("25 minutes"))).toBeInTheDocument();
     expect(within(money).queryByText(DETAIL_CANCELLED.refunded(null))).toBeNull();
     expect(screen.getByText(DETAIL_ATTENDANCE.checkedInAt("18:02"))).toBeInTheDocument();
   });
@@ -128,7 +128,7 @@ describe("a cancelled booking nobody split (R2 F2-4)", () => {
     }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(within(money).getByText(DETAIL_CANCELLED.refunded(null)).nextSibling).toHaveTextContent("1 h 40 min");
+    expect(within(money).getByText(DETAIL_CANCELLED.refunded(null)).nextSibling).toHaveTextContent("1 hour 40 minutes");
     expect(within(money).queryByText(DETAIL_CANCELLED.splitRefundNote(null))).toBeNull();
   });
 });

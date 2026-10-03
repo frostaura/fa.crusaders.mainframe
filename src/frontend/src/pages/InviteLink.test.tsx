@@ -52,7 +52,7 @@ describe("an open link", () => {
     openLink([{ path: OPEN, body: invite() }]);
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.linkTitle })).toBeInTheDocument();
     expect(screen.getByText(invitedLine("Nomsa", true))).toBeInTheDocument();
-    expect(screen.getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("55 min");
+    expect(screen.getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("55 minutes");
     // An open seat has no one to say no to: the link's decline answers 404 for it.
     expect(screen.queryByRole("button", { name: INVITES_COPY.decline })).toBeNull();
   });
@@ -142,7 +142,7 @@ describe("R2 F2-6 — the claimer's own link after the organiser cancelled", () 
       { path: OPEN, status: 409, body: { error: "invite_closed", booking_id: BOOKING } },
       { path: `/api/v1/bookings/${BOOKING}`, body: claimedDetail() },
     ]);
-    expect(await screen.findByText(INVITES_COPY.linkCancelledBack("10 min"))).toBeInTheDocument();
+    expect(await screen.findByText(INVITES_COPY.linkCancelledBack("10 minutes"))).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: INVITES_COPY.fateCancelledTitle })).toBeInTheDocument();
     expect(screen.queryByText(INVITES_COPY.refusedTitle)).toBeNull();
     expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);

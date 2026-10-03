@@ -69,10 +69,11 @@ function cancellations(settings: AdminSettings): string {
 
 /**
  * P13: the section holds the currency symbol alone — packages and group discounts live on their
- * own pages — so the line says how money works here, in the club's own symbol.
+ * own pages — so the line says how money works here and names the symbol (R6 L6-11: "priced in R" read as
+ * a word).
  */
 function money(_settings: AdminSettings, currency: string): string {
-  return `Minutes bought in packages, priced in ${currency}`;
+  return `Minutes bought in packages · currency symbol ${currency}`;
 }
 
 function schedules(settings: AdminSettings): string {

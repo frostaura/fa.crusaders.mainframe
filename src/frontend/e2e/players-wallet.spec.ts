@@ -90,13 +90,13 @@ test.describe("P11: the wallet, with shares", () => {
 
     await organiser.click();
     await expect(organiser).toHaveAttribute("aria-expanded", "true");
-    await expect(page.getByText(/^Sam paid you 25 min for their share of Court 1/)).toBeVisible();
+    await expect(page.getByText(/^Sam paid you 25 minutes for their share of Court 1/)).toBeVisible();
 
     // The partner's side of another booking reads as their share, not as a debt.
     const partner = page.getByRole("button", { name: /^Your share · Court 2 · / });
     await expect(partner).toBeVisible();
     await partner.click();
-    await expect(page.getByText(/^25 min moved to Jo for your share of Court 2/)).toBeVisible();
+    await expect(page.getByText(/^25 minutes moved to Jo for your share of Court 2/)).toBeVisible();
     await expect(page.locator("body")).not.toContainText(/owe|debt/i);
 
     // Every other movement is its own row.

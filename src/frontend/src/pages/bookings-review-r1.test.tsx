@@ -41,12 +41,12 @@ describe("F1.6 — booking for a member says so before the sheet does", () => {
     expect(bar).toHaveTextContent(`${BOOKING_FOR.label} Naledi Khumalo`);
     expect(bar).toHaveTextContent("Juniors");
     expect(bar).toHaveTextContent(BOOKING_FOR.canSpend(125));
-    expect(bar).toHaveTextContent("can spend 2 h 5 min");
+    expect(bar).toHaveTextContent("can spend 2 hours 5 minutes");
     expect(bar.textContent).not.toMatch(/pays|\bcr\b|credit|\.00/);
     expect(bar).toHaveTextContent(BOOKING_FOR.held(90));
     expect(within(bar).getByRole("link", { name: BOOKING_FOR.stop })).toHaveAttribute("href", "/bookings");
     // The admin's own −100 is not this booking's wallet.
-    expect(document.body.textContent).not.toContain("Your balance is −1 h 40 min");
+    expect(document.body.textContent).not.toMatch(/Your balance is (−|minus )1 (h|hour)/);
     const rules = stub.calls.find((c) => c.path.includes("/booking-rules"));
     expect(rules?.path).toContain("day=2030-09-09");
   });

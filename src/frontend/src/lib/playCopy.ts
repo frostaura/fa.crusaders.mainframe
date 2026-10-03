@@ -38,6 +38,21 @@ export function hoursAndMinutes(minutes: number): string {
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
+/**
+ * The words a screen reader hears for {@link hoursAndMinutes} (R6 X6-2, P13 §7.1 — never "h" or
+ * "min"): "6 hours 45 minutes", "45 minutes", "1 hour". Used inside every sentence, and as the
+ * spoken twin of a tile's compact figure.
+ */
+export function hoursAndMinutesSpoken(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  const hours = `${h} ${h === 1 ? "hour" : "hours"}`;
+  const mins = `${m} ${m === 1 ? "minute" : "minutes"}`;
+  if (h === 0) return mins;
+  return m === 0 ? hours : `${hours} ${mins}`;
+}
+
 /** "Best of 5". */
 export const FORMAT_LABEL: Record<MatchFormat, string> = { best_of_5: "Best of 5", best_of_3: "Best of 3" };
 
@@ -250,8 +265,8 @@ export const RING_COPY = {
   setGoalHint: "A ring you fill by playing — hours on court this month.",
   editGoal: "Change monthly goal",
   centre: (minutes: number) => hoursAndMinutes(minutes),
-  caption: (goalMinutes: number) => `of ${hoursAndMinutes(goalMinutes)} this month`,
-  aria: (attended: number, goal: number) => `${hoursAndMinutes(attended)} on court of a ${hoursAndMinutes(goal)} goal this month`,
+  caption: (goalMinutes: number) => `of ${hoursAndMinutesSpoken(goalMinutes)} this month`,
+  aria: (attended: number, goal: number) => `${hoursAndMinutesSpoken(attended)} on court this month, of a goal of ${hoursAndMinutesSpoken(goal)}`,
   reached: "Goal reached",
   sessions: (n: number) => `${n} ${n === 1 ? "session" : "sessions"}`,
 } as const;
@@ -393,7 +408,7 @@ export const CELEBRATION_COPY = {
   newBadge: "New badge",
   goalReached: "Monthly goal reached",
   goalBody: (goalMinutes: number | null) => (goalMinutes
-    ? `You've played ${hoursAndMinutes(goalMinutes)} this month.`
+    ? `You've played ${hoursAndMinutesSpoken(goalMinutes)} this month.`
     : "You've reached your court time for the month."),
   many: (n: number) => `${n} new badges`,
   manyBody: "You've earned a few since you last looked. They're all on your profile.",

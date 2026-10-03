@@ -1,4 +1,4 @@
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { dateTimeFormat } from "./intlCache";
 
 /**
@@ -255,11 +255,11 @@ export const BUY_MINUTES_ACTION = "Buy minutes";
  * </p>
  */
 export function emptyWalletSentence(balanceMinutes: number | null, sliceMinutes: number | null): string {
-  const cost = sliceMinutes !== null && sliceMinutes > 0 ? ` A slot here takes ${minutesCompact(sliceMinutes)}.` : "";
+  const cost = sliceMinutes !== null && sliceMinutes > 0 ? ` A slot here takes ${minutesSpoken(sliceMinutes)}.` : "";
   // `null` is UNKNOWN and never reaches here — `walletTone` answers "fine" for it — but it is
   // read as "not a debt" rather than trusted not to arrive.
   const shown = balanceMinutes === null ? 0 : Math.trunc(balanceMinutes);
-  if (shown < 0) return `You owe ${minutesCompact(Math.abs(shown))}, so you can't book yet.${cost}`;
+  if (shown < 0) return `You owe ${minutesSpoken(Math.abs(shown))}, so you can't book yet.${cost}`;
   return `You have no minutes left, so you can't book yet.${cost}`;
 }
 
@@ -269,7 +269,7 @@ export function emptyWalletSentence(balanceMinutes: number | null, sliceMinutes:
  * would refuse every slot on the grid.
  */
 export function shortWalletSentence(balanceMinutes: number, sliceMinutes: number): string {
-  return `You have ${minutesCompact(balanceMinutes)} left and a slot here takes ${minutesCompact(sliceMinutes)}. Buy a package to book.`;
+  return `You have ${minutesSpoken(balanceMinutes)} left and a slot here takes ${minutesSpoken(sliceMinutes)}. Buy a package to book.`;
 }
 
 /* ─────────────────────────── The past wall ─────────────────────────── */

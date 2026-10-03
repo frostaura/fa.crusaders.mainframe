@@ -109,7 +109,7 @@ describe("MinutesChip — whose movement it was", () => {
     const expected = shareRowSentence({
       side: "organiser", signed: 20, place: { courtName: "Court 1", startsAt: "2026-09-29T16:00:00Z" }, other: "Sam Petersen",
     });
-    expect(expected).toBe("Sam paid you 20 min for their share of Court 1");
+    expect(expected).toBe("Sam paid you 20 minutes for their share of Court 1");
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(/The club/)).toBeNull();
   });
@@ -120,6 +120,6 @@ describe("MinutesChip — whose movement it was", () => {
     await w.push({ balance_minutes: 250, delta_minutes: 50, reason: "cancellation_refund" });
     expect(await screen.findByText(movementSentence(50, "cancellation_refund"))).toBeInTheDocument();
     await w.push({ balance_minutes: 350, delta_minutes: 100, reason: "admin_adjustment" });
-    expect(await screen.findByText("The club added 1 h 40 min to your wallet.")).toBeInTheDocument();
+    expect(await screen.findByText("The club added 1 hour 40 minutes to your wallet.")).toBeInTheDocument();
   });
 });

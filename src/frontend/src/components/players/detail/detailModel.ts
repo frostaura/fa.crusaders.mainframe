@@ -195,5 +195,8 @@ export function adminActs(p: DetailPlayer): AdminAct[] {
  * by no-break spaces — between a number and its unit, and between one part and the next.
  */
 export function keepAmounts(text: string): string {
-  return text.replace(/(\d) (d|h|min)\b/g, "$1\u00a0$2").replace(/\b(d|h) (?=\d)/g, "$1\u00a0");
+  // R6 X6-2: sentences now say "1 hour 30 minutes" (spoken words), so the long units bind too.
+  return text
+    .replace(/(\d) (d|h|min|days?|hours?|minutes?)\b/g, "$1\u00a0$2")
+    .replace(/\b(d|h|days?|hours?) (?=\d)/g, "$1\u00a0");
 }

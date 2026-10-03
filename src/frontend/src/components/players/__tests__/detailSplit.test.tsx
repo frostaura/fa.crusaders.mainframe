@@ -112,7 +112,7 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
     fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
     const ask = await screen.findByRole("dialog", { name: SHARE_ASK.title("Jo") });
-    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("1 h"));
+    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("1 hour"));
     const field = within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") });
     // Offered the equal share among three payers, in whole minutes: ⌊100 / 3⌋.
     expect(field).toHaveValue("33");
@@ -131,7 +131,7 @@ describe("inviting into an amount or ratio split asks for their share (R1 F2.1)"
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_ACTIONS.invite }));
     fireEvent.click(screen.getByRole("button", { name: "Pick Jo" }));
     const ask = await screen.findByRole("dialog", { name: SHARE_ASK.title("Jo") });
-    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("1 h"));
+    expect(ask).toHaveTextContent(SHARE_ASK.amountBody("1 hour"));
     // ⌊100 / 3⌋, no longer capped at the stale 30.
     expect(within(ask).getByRole("textbox", { name: SHARE_ASK.amountLabel("Jo") })).toHaveValue("33");
   });
@@ -208,11 +208,11 @@ describe("after the booking stands (R2 F2-3)", () => {
     fireEvent.click(within(dialog).getByRole("radio", { name: BOOK_SPLIT.modes.amount }));
     fireEvent.change(within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") }), { target: { value: "37" } });
     const effects = await within(dialog).findByRole("region", { name: CHANGE_SPLIT.effectsTitle });
-    expect(effects).toHaveTextContent(CHANGE_SPLIT.askedMore("Sam", "12 min", true));
-    expect(effects).toHaveTextContent(CHANGE_SPLIT.youCover("13 min"));
+    expect(effects).toHaveTextContent(CHANGE_SPLIT.askedMore("Sam", "12 minutes", true));
+    expect(effects).toHaveTextContent(CHANGE_SPLIT.youCover("13 minutes"));
     fireEvent.change(within(dialog).getByRole("textbox", { name: BOOK_SPLIT.amountLabel("Sam") }), { target: { value: "20" } });
     await waitFor(() => expect(within(dialog).getByRole("region", { name: CHANGE_SPLIT.effectsTitle }))
-      .toHaveTextContent(CHANGE_SPLIT.goesBack("Sam", "5 min")));
+      .toHaveTextContent(CHANGE_SPLIT.goesBack("Sam", "5 minutes")));
   });
 
   it("the change sheet's totals say no 'You pay … now' — the booking is paid for; the effects box says what moves", async () => {
@@ -226,7 +226,7 @@ describe("after the booking stands (R2 F2-3)", () => {
     const totals = within(dialog).getByRole("region", { name: BOOK_SPLIT.totalsLabel });
     await waitFor(() => expect(totals.querySelector("[data-totals]")).not.toBeNull());
     expect(totals).not.toHaveTextContent(/You pay .* now/);
-    expect(totals).toHaveTextContent(BOOK_SPLIT.addsUp("1 h 40 min"));
+    expect(totals).toHaveTextContent(BOOK_SPLIT.addsUp("1 hour 40 minutes"));
   });
 
   it("the money box says a part-paid partner is asked for more — never 'hasn't paid yet'", async () => {
@@ -234,8 +234,8 @@ describe("after the booking stands (R2 F2-3)", () => {
     serve({ detail: detail({ players: [seat(), bob] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(money).toHaveTextContent(DETAIL_MONEY.askedMoreRow("25 min", "12 min"));
-    expect(money).toHaveTextContent(/Sam has paid 25 min and is asked for 12 min more/);
+    expect(money).toHaveTextContent(DETAIL_MONEY.askedMoreRow("25 minutes", "12 minutes"));
+    expect(money).toHaveTextContent(/Sam has paid 25 minutes and is asked for 12 minutes more/);
     expect(money).not.toHaveTextContent(/hasn't paid yet/);
   });
 
@@ -244,6 +244,6 @@ describe("after the booking stands (R2 F2-3)", () => {
     serve({ detail: detail({ players: [seat(), eve] }) });
     renderDetail();
     const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
-    expect(money).toHaveTextContent(DETAIL_MONEY.goingBackRow("25 min", "5 min"));
+    expect(money).toHaveTextContent(DETAIL_MONEY.goingBackRow("25 minutes", "5 minutes"));
   });
 });

@@ -200,7 +200,7 @@ describe("CancelSheet — an admin, for a member", () => {
     expect(String(body.idempotencyKey)).toMatch(/^bc_/);
     const results = screen.getByRole("list", { name: RESULTS_LABEL.cancel });
     expect(results).toHaveTextContent(RESULT_WORD.cancelled);
-    expect(results).toHaveTextContent("35 min back, 15 min penalty kept");
+    expect(results).toHaveTextContent("35 minutes back, 15 minutes penalty kept");
     expect(results).toHaveTextContent(RESULT_WORD.notCancelled);
     expect(screen.getByRole("button", { name: CANCEL_SHEET.done })).toBeTruthy();
   });

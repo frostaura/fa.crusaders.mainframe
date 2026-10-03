@@ -385,11 +385,11 @@ describe("creating one", () => {
 
     expect(await screen.findByText(/2 bookings are in the way\./)).toBeInTheDocument();
     expect(screen.getByText(/Nothing has changed yet\./)).toBeInTheDocument();
-    expect(screen.getByText("36 min would go back to Thandi Mokoena.")).toBeInTheDocument();
-    expect(screen.getByText("24 min would go back to Jason Fourie.")).toBeInTheDocument();
+    expect(screen.getByText("36 minutes would go back to Thandi Mokoena.")).toBeInTheDocument();
+    expect(screen.getByText("24 minutes would go back to Jason Fourie.")).toBeInTheDocument();
     // D2 §11.4: there is no force flag, so there is no control that creates over these.
     expect(screen.queryByRole("button", { name: "Create the hold" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Cancel 2 bookings and refund 1 h in full/ }))
+    expect(screen.getByRole("button", { name: /Cancel 2 bookings and refund 1 hour in full/ }))
       .toBeInTheDocument();
   });
 
@@ -418,7 +418,7 @@ describe("creating one", () => {
 
     expect(await screen.findByText("What would go back to Jason Fourie isn't known yet.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Cancel 2 bookings and refund them in full/ })).toBeInTheDocument();
-    expect(screen.queryByText(/refund 36 min in full/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/refund 36 minutes in full/)).not.toBeInTheDocument();
   });
 
   it("cancels the bookings in the way, in full, and says what happened to each", async () => {
@@ -444,20 +444,20 @@ describe("creating one", () => {
     await screen.findByText(/1 booking is in the way\./);
 
     // The reason is required: it is what the member is told and what the record keeps.
-    const clear = screen.getByRole("button", { name: /Cancel 1 booking and refund 36 min in full/ });
+    const clear = screen.getByRole("button", { name: /Cancel 1 booking and refund 36 minutes in full/ });
     expect(clear).toBeDisabled();
     await userEvent.type(screen.getByLabelText(/Reason/), "Courts held for league");
     await userEvent.click(clear);
     // Confirmed in a dialog (P3): the consequence is its description, read before the press.
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent(/36 min goes back in full/);
+    expect(dialog).toHaveTextContent(/36 minutes goes back in full/);
     // The way out is named for what it KEEPS, never for the destructive verb.
     expect(within(dialog).getByRole("button", { name: "Keep them" })).toBeInTheDocument();
-    await userEvent.click(within(dialog).getByRole("button", { name: /^Cancel 1 booking and refund 36 min in full/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Cancel 1 booking and refund 36 minutes in full/ }));
 
     const results = await screen.findByRole("region", { name: "What was cancelled" });
     expect(within(results).getByRole("status")).toHaveTextContent("1 of 1 done");
-    expect(within(results).getByText(/36 min went back in full\./)).toBeInTheDocument();
+    expect(within(results).getByText(/36 minutes went back in full\./)).toBeInTheDocument();
 
     // The penalty is waived: the club moved, not the member.
     const cancelCall = stub.calls.find((c) => c.path.endsWith("/cancel"));

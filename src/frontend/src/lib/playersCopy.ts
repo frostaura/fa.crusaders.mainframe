@@ -2,7 +2,7 @@ import { INBOX_TITLE } from "./bellCopy";
 import { ApiError } from "./api";
 import { clubCalendarDate, clubClock, clubShortDate } from "./clubClock";
 import { describeFailure } from "./errors";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import { BUY_MINUTES_ACTION } from "./gridCopy";
 import { unsureSentence, type UnsureWords } from "./lostReply";
 import { LOST_REPLY, unsureWords } from "./lostReplyCopy";
@@ -88,7 +88,7 @@ export function playersWhen(iso: string | number | Date, timezone?: string): str
 
 /** "12 min held until Sat 27 Sep, 20:00" — wherever the balance is explained (§3a). */
 export function heldLine(heldMinutes: number, until: string | null | undefined, timezone?: string): string {
-  const amount = minutesCompact(heldMinutes);
+  const amount = minutesSpoken(heldMinutes);
   return until ? `${amount} held until ${playersWhen(until, timezone)}` : `${amount} held`;
 }
 
@@ -101,7 +101,7 @@ export const HELD_EXPLAINER =
  * date: it clears when minutes come in, so the line says that instead of an "until".
  */
 export function owedBackLine(owedBackMinutes: number): string {
-  return `${minutesCompact(owedBackMinutes)} owed back to partners — paid from the next minutes you buy`;
+  return `${minutesSpoken(owedBackMinutes)} owed back to partners — paid from the next minutes you buy`;
 }
 
 /** Why a balance owes partners — the sentence under an owed-back line. */
@@ -112,7 +112,7 @@ export const OWED_BACK_EXPLAINER =
 export function owedBackQuoteLine(owedBackMinutes: number, name: string | null): string {
   const who = name ?? "You";
   const owes = name ? "owes" : "owe";
-  return `${who} ${owes} ${minutesCompact(owedBackMinutes)} back to partners — that comes out of the next minutes first.`;
+  return `${who} ${owes} ${minutesSpoken(owedBackMinutes)} back to partners — that comes out of the next minutes first.`;
 }
 
 /* ═══════════════════════════════════ REFUSALS ═══════════════════════════════════ */
@@ -149,7 +149,7 @@ export const PLAYERS_REFUSAL: Record<string, string> = {
   player_not_accepted: "That player hasn't said yes yet, so there's no share to settle.",
   split_mode_invalid: "Choose Equal, Ratio or Amount.",
   split_weight_invalid: "Each ratio is a whole number from 0 to 100.",
-  split_amount_invalid: "Each amount must be zero or more, to at most two decimal places.",
+  split_amount_invalid: "Each amount is a whole number of minutes, 0 or more.",
   split_exceeds_price: "The amounts you've asked for add up to more than the court costs.",
   split_needs_organiser: "Something went wrong with your own seat. Refresh and try again.",
   split_preview_invalid: "We couldn't work out that split. Check the figures.",
@@ -189,13 +189,13 @@ function withFigures(e: ApiError, timezone?: string): string | null {
       const share = numberDetail(e, "share_minutes");
       return share === null
         ? "Your share has changed since you opened this. Check the new figure and say yes again."
-        : `Your share is now ${minutesCompact(share)}. Check it and say yes again if you're happy.`;
+        : `Your share is now ${minutesSpoken(share)}. Check it and say yes again if you're happy.`;
     }
     case "insufficient_balance": {
       const have = numberDetail(e, "current_minutes");
       const need = numberDetail(e, "required_minutes");
       if (have === null || need === null) return "You don't have enough minutes to spend for this. Buy a package and try again.";
-      return `You need ${minutesCompact(need)} and have ${minutesCompact(have)} to spend — ${minutesCompact(Math.max(0, need - have))} short. Buy a package and try again.`;
+      return `You need ${minutesSpoken(need)} and have ${minutesSpoken(have)} to spend — ${minutesSpoken(Math.max(0, need - have))} short. Buy a package and try again.`;
     }
     case "partner_cap_exceeded": return capSentence(e);
     case "withdraw_window_closed": {
@@ -368,11 +368,11 @@ function askClause(paying: readonly SentenceSeat[]): string {
   if (same) {
     const who = listNames([...members.map((s) => s.name), ...(links.length ? [linkTakers(links.length)] : [])]);
     const plural = members.length + links.length > 1;
-    return `${who} ${plural ? "are" : "is"} asked for ${minutesCompact(paying[0].share)}${plural ? " each" : ""}`;
+    return `${who} ${plural ? "are" : "is"} asked for ${minutesSpoken(paying[0].share)}${plural ? " each" : ""}`;
   }
   const parts = paying.map((s, i) => {
     const who = s.kind === "link" ? linkTakers(1) : s.name;
-    return i === 0 ? `${who} is asked for ${minutesCompact(s.share)}` : `${who} for ${minutesCompact(s.share)}`;
+    return i === 0 ? `${who} is asked for ${minutesSpoken(s.share)}` : `${who} for ${minutesSpoken(s.share)}`;
   });
   return listNames(parts);
 }
@@ -382,7 +382,7 @@ function askClause(paying: readonly SentenceSeat[]): string {
  * each. Jo (guest) plays free." `price` is what the organiser is charged now (the whole court).
  */
 export function confirmPlayersSentence(price: number, seats: readonly SentenceSeat[], eachBooking = false): string {
-  const lead = `${eachBooking ? "On each booking you" : "You"} pay ${minutesCompact(price)} now`;
+  const lead = `${eachBooking ? "On each booking you" : "You"} pay ${minutesSpoken(price)} now`;
   const paying = seats.filter((s) => s.kind !== "guest");
   const guests = seats.filter((s) => s.kind === "guest").map((s) => BOOK_PLAYERS.guestShort(s.name));
   const ask = paying.length ? `; ${askClause(paying)}` : "";
@@ -592,6 +592,10 @@ export const DETAIL_MONEY = {
     `${name} has paid ${paid} and is asked for ${more} more — if it isn't paid by ${when}, that part lapses to ${toWhom}.`,
   goingBackRow: (paid: string, back: string) => `Paid ${paid} · ${back} going back`,
   toYou: "you",
+  /** R6 E6-2 (D10) — somebody else took the charge over at the court box; the booker was refunded. */
+  refundedAtBox: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
+  paidAtBoxNote: (payer: string | null, who: string | null, amount: string) =>
+    `${payer ?? "Another member"} paid for this court at the court box, so ${who ? `${who} was` : "you were"} refunded ${amount}.`,
   notSplit: "This court isn't split — the organiser covers it all.",
 } as const;
 
@@ -658,6 +662,8 @@ export const DETAIL_NO_SHOW = {
     ? "Nobody checked in, so the court was refunded less the no-show penalty — and partners' shares came down with it."
     : "Nobody checked in, so the court was refunded less the no-show penalty.",
   moneyNoteFree: "Nobody checked in. The court was refunded in full, with no penalty.",
+  /** R6 E6-6 — the sweep refunded in full because no box was reachable: not held against anyone. */
+  outageNote: "The court's box couldn't be reached, so this booking was refunded in full. It doesn't count as a no-show.",
   refunded: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
   penalty: "No-show penalty",
   /** A partner's row: everything they paid in, and what came back after the no-show. */
@@ -811,7 +817,6 @@ export const INVITES_COPY = {
   pickTitle: "Pick an invite",
   pickHint: "Its game, your share and when it must be paid open here, with Accept and Decline.",
   actionsLabel: "Invite actions",
-  answer: "Answer this invite",
   pageTitle: "Invite",
   back: "Bookings",
   description: "Games friends have asked you into. Say yes and your share moves to whoever booked the court.",
@@ -909,7 +914,7 @@ export function signedInAsLine(name: string): string {
 
 /** "Accept and pay 22 min" — or plain "Accept" when nothing is collected now. */
 export function acceptLabel(toPay: number): string {
-  return toPay > 0 ? `Accept and pay ${minutesCompact(toPay)}` : "Accept";
+  return toPay > 0 ? `Accept and pay ${minutesSpoken(toPay)}` : "Accept";
 }
 
 /** "2 invites waiting" — the Bookings badge's accessible name. */
@@ -919,12 +924,12 @@ export function invitesWaitingLabel(count: number): string {
 
 /** "Accepted — 5 min still to pay". */
 export function acceptedUnpaidLine(toPay: number): string {
-  return `Accepted — ${minutesCompact(toPay)} still to pay`;
+  return `Accepted — ${minutesSpoken(toPay)} still to pay`;
 }
 
 /** R4 M4-8 — "Sam changed the split: your share is now 30 min. Check it and say yes again." */
 export function askedAgainLine(organiser: string, share: number): string {
-  return `${organiser} changed the split: your share is now ${minutesCompact(share)}. Check it and say yes again.`;
+  return `${organiser} changed the split: your share is now ${minutesSpoken(share)}. Check it and say yes again.`;
 }
 
 /** "Sam invited you to take a seat" (open link) · "Sam invited you to play". */
@@ -944,7 +949,7 @@ export function payByLine(deadline: string, timezone?: string): string {
 
 /** "You need 12 min more to spend to accept this." */
 export function shortByLine(shortBy: number): string {
-  return `You need ${minutesCompact(shortBy)} more to spend to accept this.`;
+  return `You need ${minutesSpoken(shortBy)} more to spend to accept this.`;
 }
 
 /** "4 players" / "2 players". */
@@ -954,7 +959,7 @@ export function playersCount(count: number): string {
 
 /** The calm confirmation's line: "22 min paid to Sam. See you on court." */
 export function acceptedLine(paid: number, organiser: string): string {
-  return paid > 0 ? `${minutesCompact(paid)} paid to ${organiser}. See you on court.` : "See you on court.";
+  return paid > 0 ? `${minutesSpoken(paid)} paid to ${organiser}. See you on court.` : "See you on court.";
 }
 
 /** "Sam's been told." — after a decline. */

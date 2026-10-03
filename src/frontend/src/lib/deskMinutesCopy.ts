@@ -1,10 +1,11 @@
 import { formatMoney } from "./utils";
-import { minutesCompact } from "./minutes";
+import { minutesSpoken } from "./minutes";
 import {
   ADJUSTMENT_REASON_CODES, TOP_UP_REASON_CODES, type AdjustmentReasonCode, type SellReasonCode,
 } from "./adminApi";
 import { parseAmount, parseMinutesAmount } from "./amount";
 import { amountProblemSentence } from "./amountCopy";
+import { savesWords } from "./packagesCopy";
 import { ApiError } from "./api";
 
 /**
@@ -79,13 +80,13 @@ export function isDeskReasonCode(code: string): boolean {
 /** An adjustment never counts as money the club took — said on the check step, every time. */
 export const NOT_REVENUE = "No money changes hands, so this stays out of the club's revenue.";
 
-/** "+1 h 30 min" / "−45 min" — the direction carries the sign, never a typed character. */
+/** "+1 hour 30 minutes" / "−45 minutes" — the direction carries the sign, never a typed character. */
 export function signedAmount(direction: MinutesDirection, amount: number): string {
-  return `${direction === "add" ? "+" : "−"}${minutesCompact(Math.abs(amount))}`;
+  return `${direction === "add" ? "+" : "−"}${minutesSpoken(Math.abs(amount))}`;
 }
 
 /**
- * "Thandi has 6 h 10 min. After +1 h 40 min: 7 h 50 min."
+ * "Thandi has 6 hours 10 minutes. After +1 hour 40 minutes: 7 hours 50 minutes."
  *
  * <p>
  * A balance the console could not read is <b>not</b> zero. The sheet still works, because an
@@ -100,9 +101,9 @@ export function balanceSentence(
     return `Couldn't read ${name}'s balance. You can still ${direction === "add" ? "add minutes" : "take minutes back"}, `
       + "but the figure below is not available — the club's system works out the result.";
   }
-  if (amount === null || amount === 0) return `${name} has ${minutesCompact(balance)}.`;
+  if (amount === null || amount === 0) return `${name} has ${minutesSpoken(balance)}.`;
   const after = balance + (direction === "add" ? amount : -amount);
-  return `${name} has ${minutesCompact(balance)}. After ${signedAmount(direction, amount)}: ${minutesCompact(after)}.`;
+  return `${name} has ${minutesSpoken(balance)}. After ${signedAmount(direction, amount)}: ${minutesSpoken(after)}.`;
 }
 
 /** The one thing a "take minutes back" must say that adding need not: it can go negative. */
@@ -110,7 +111,7 @@ export function overdraftWarning(balance: number | null, amount: number | null):
   if (balance === null || amount === null || amount <= 0) return null;
   const after = balance - amount;
   if (after >= 0) return null;
-  return `That takes them to ${minutesCompact(after)} — they would owe the club ${minutesCompact(Math.abs(after))} `
+  return `That takes them to ${minutesSpoken(after)} — they would owe the club ${minutesSpoken(Math.abs(after))} `
     + "and cannot book until it is made up.";
 }
 
@@ -127,10 +128,14 @@ export function confirmConsequence(
 ): string {
   const after = balance === null ? null : balance + (direction === "add" ? amount : -amount);
   const head = direction === "add"
-    ? `Add ${minutesCompact(amount)} to ${name}?`
-    : `Take ${minutesCompact(amount)} back from ${name}?`;
-  const result = after === null ? "" : ` They end on ${minutesCompact(after)}.`;
-  return `${head}${result} This goes on the ledger and cannot be deleted.`;
+    ? `Add ${minutesSpoken(amount)} to ${name}?`
+    : `Take ${minutesSpoken(amount)} back from ${name}?`;
+  const result = after === null ? "" : ` They end on ${minutesSpoken(after)}.`;
+  // R6 J6-8: the debt is said again where the press is armed, not only on the amount step.
+  const owes = after !== null && after < 0
+    ? ` They would owe the club ${minutesSpoken(-after)} and cannot book until it is made up.`
+    : "";
+  return `${head}${result}${owes} This goes on the ledger and cannot be deleted.`;
 }
 
 /**
@@ -141,13 +146,13 @@ export function receiptHeader(name: string, before: number | null, amount: numbe
   const movement = signedAmount(direction, amount);
   if (before === null) return `${movement} for ${name}.`;
   const after = before + (direction === "add" ? amount : -amount);
-  return `${name} had ${minutesCompact(before)}. ${movement} → ${minutesCompact(after)}.`;
+  return `${name} had ${minutesSpoken(before)}. ${movement} → ${minutesSpoken(after)}.`;
 }
 
 /** Null where the balance could not be re-read after a lost reply — never a made-up figure. */
 export function doneSentence(name: string, balanceAfter: number | null): string {
   if (balanceAfter === null) return `Done. It is on ${name}'s ledger.`;
-  return `Done. ${name} now has ${minutesCompact(balanceAfter)}.`;
+  return `Done. ${name} now has ${minutesSpoken(balanceAfter)}.`;
 }
 
 /**
@@ -178,7 +183,7 @@ function keyReusedSentence(stored: unknown): string {
   const row = (typeof stored === "object" && stored !== null ? stored : {}) as Record<string, unknown>;
   const amount = typeof row.amount_minutes === "number" ? row.amount_minutes : null;
   const what = amount === null ? "An earlier press of this already went through"
-    : `An earlier press already went through: ${amount < 0 ? "−" : "+"}${minutesCompact(Math.abs(amount))}`;
+    : `An earlier press already went through: ${amount < 0 ? "−" : "+"}${minutesSpoken(Math.abs(amount))}`;
   const why = typeof row.reason === "string" && row.reason.trim() ? ` (“${row.reason.trim()}”)` : "";
   return `${what}${why}. Nothing more was added — check the ledger before adding anything else.`;
 }
@@ -219,7 +224,7 @@ const REFUSALS: Record<string, (payload: Record<string, unknown>) => string> = {
   amount_out_of_range: (payload) => {
     const max = typeof payload.max_minutes === "number" ? payload.max_minutes
       : typeof payload.max === "number" ? payload.max : ADJUST_MAX_MINUTES;
-    return `That is more than one movement can be — the most is ${minutesCompact(max)}. Nothing was changed.`;
+    return `That is more than one movement can be — the most is ${minutesSpoken(max)}. Nothing was changed.`;
   },
   amount_zero: () => "Enter an amount greater than zero. Nothing was changed.",
   idempotency_key_reused: (payload) => keyReusedSentence(payload.stored),
@@ -254,7 +259,7 @@ export const ADJUST_SHEET = {
   amountLabel: "Another amount, in minutes",
   amountPlaceholder: "e.g. 45",
   /** The typed minutes said back as the club says an amount — "90" → "= 1 h 30 min". */
-  amountEcho: (minutes: number) => `= ${minutesCompact(minutes)}`,
+  amountEcho: (minutes: number) => `= ${minutesSpoken(minutes)}`,
   reasonLabel: "Reason",
   reasonDescription: "The member sees this on their wallet.",
   reasonPlaceholder: "Choose a reason",
@@ -271,8 +276,8 @@ export const ADJUST_SHEET = {
   serverWorksItOut: "the club's system works it out",
   reasonLine: (label: string, text: string) => `Reason: ${label} — “${text}”`,
   failed: "That didn't go through.",
-  idleAdd: (minutes: number) => `Add ${minutesCompact(minutes)}`,
-  idleTakeBack: (minutes: number) => `Take back ${minutesCompact(minutes)}`,
+  idleAdd: (minutes: number) => `Add ${minutesSpoken(minutes)}`,
+  idleTakeBack: (minutes: number) => `Take back ${minutesSpoken(minutes)}`,
   /** R5 I5-3: said while a movement is on its way — and again on each refused way out. */
   sending: (name: string) => `Waiting for the club to answer about ${name}'s minutes. This stays open until it does.`,
 } as const;
@@ -313,7 +318,7 @@ export const SELL_COPY = {
   shelfEmptyAction: "Open Packages",
   discountLine: (pct: string, group: string) => `${pct} off the club's packages, from ${group}.`,
   listPrice: (price: string) => `was ${price}`,
-  saving: (zar: string, pct: number | null) => (pct ? `Saves ${zar} (${pct}%)` : `Saves ${zar}`),
+  saving: (zar: string, pct: number | null) => savesWords(zar, pct),
   fromGroup: (group: string) => `${group} package`,
   pickPackage: "Choose a package.",
   paymentLabel: "How was it paid?",
@@ -329,9 +334,9 @@ export const SELL_COPY = {
   adds: "Package",
   balanceAfter: "Balance after",
   zarRow: "Money received",
-  idle: (minutes: number) => `Sell ${minutesCompact(minutes)}`,
+  idle: (minutes: number) => `Sell ${minutesSpoken(minutes)}`,
   confirm: (name: string, pkg: string, zar: string) => `Sell ${pkg} to ${name} for ${zar}? This goes on the ledger and cannot be deleted.`,
-  receipt: (name: string, pkg: string, minutes: number) => `${pkg} sold — ${minutesCompact(minutes)} added for ${name}.`,
+  receipt: (name: string, pkg: string, minutes: number) => `${pkg} sold — ${minutesSpoken(minutes)} added for ${name}.`,
   unavailable: "That package isn't on this member's shelf any more — it was changed or retired. Their packages were read again; choose again.",
   sending: (name: string) => `Waiting for the club to answer about ${name}'s package. This stays open until it does.`,
   next: "Next",

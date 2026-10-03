@@ -216,26 +216,26 @@ describe("the Confirm sentence", () => {
   it("names members by first name, groups an equal ask, and lets a guest play free", () => {
     const d = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), ALEX, 3), JO, 4);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 25], [3, 25], [4, 0]))))
-      .toBe("You pay 1 h 40 min now; Sam and Alex are asked for 25 min each. Jo (guest) plays free.");
+      .toBe("You pay 1 hour 40 minutes now; Sam and Alex are asked for 25 minutes each. Jo (guest) plays free.");
   });
 
   it("says who takes an open seat, and a single partner in the singular", () => {
     const d = addPlayer(EMPTY_DRAFT, LINK, 2);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 50]))))
-      .toBe("You pay 1 h 40 min now; whoever takes your link is asked for 50 min.");
+      .toBe("You pay 1 hour 40 minutes now; whoever takes your link is asked for 50 minutes.");
     const two = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), LINK, 3), LINK, 4);
     expect(confirmPlayersSentence(100, sentenceSeats(two, shares([1, 34], [2, 33], [3, 33], [4, 33]))))
-      .toBe("You pay 1 h 40 min now; Sam and the 2 people who take your links are asked for 33 min each.");
+      .toBe("You pay 1 hour 40 minutes now; Sam and the 2 people who take your links are asked for 33 minutes each.");
   });
 
   it("lists different asks one by one, and says 'each booking' for a batch", () => {
     const d = addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), LINK, 3);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 30], [3, 20])), true))
-      .toBe("On each booking you pay 1 h 40 min now; Sam is asked for 30 min and whoever takes your link for 20 min.");
+      .toBe("On each booking you pay 1 hour 40 minutes now; Sam is asked for 30 minutes and whoever takes your link for 20 minutes.");
   });
 
   it("guests only: you pay, they play free", () => {
     const d = addPlayer(addPlayer(EMPTY_DRAFT, JO, 2), { kind: "guest", name: "Lee" }, 3);
-    expect(confirmPlayersSentence(50, sentenceSeats(d, []))).toBe("You pay 50 min now. Jo (guest) and Lee (guest) play free.");
+    expect(confirmPlayersSentence(50, sentenceSeats(d, []))).toBe("You pay 50 minutes now. Jo (guest) and Lee (guest) play free.");
   });
 });

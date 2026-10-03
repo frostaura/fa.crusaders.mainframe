@@ -79,7 +79,7 @@ describe("the list", () => {
     expect(cards[0]).toHaveTextContent("Your share 25 min");
     expect(cards[0]).toHaveTextContent(INVITES_COPY.statusWaiting);
     expect(cards[1]).toHaveTextContent(INVITES_COPY.statusAskedAgain);
-    expect(cards[2]).toHaveTextContent("Accepted — 10 min still to pay");
+    expect(cards[2]).toHaveTextContent("Accepted — 10 minutes still to pay");
     // First names between members — never the surname.
     expect(list).not.toHaveTextContent("Petersen");
   });
@@ -178,11 +178,11 @@ describe("the accept sheet", () => {
     const sheet = await openSheet();
     expect(sheet).toHaveTextContent("Court 1");
     expect(sheet).toHaveTextContent("Sam");
-    expect(within(sheet).getByText(INVITES_COPY.yourShare).nextSibling).toHaveTextContent("25 min");
+    expect(within(sheet).getByText(INVITES_COPY.yourShare).nextSibling).toHaveTextContent("25 minutes");
     // Spendable (100), not the raw balance (120): 100 − 25 = 75.
-    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("1 h 40 min");
-    expect(within(sheet).getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("1 h 15 min");
-    expect(sheet).toHaveTextContent("20 min held");
+    expect(within(sheet).getByText(INVITES_COPY.spendable).nextSibling).toHaveTextContent("1 hour 40 minutes");
+    expect(within(sheet).getByText(INVITES_COPY.balanceAfter).nextSibling).toHaveTextContent("1 hour 15 minutes");
+    expect(sheet).toHaveTextContent("20 minutes held");
     expect(sheet).toHaveTextContent(/held until 48 hours after each game/);
     expect(sheet).toHaveTextContent(/lapses to Sam — no debt either way/);
     expect(sheet).toHaveTextContent(INVITES_COPY.capCounts);
@@ -208,7 +208,7 @@ describe("the accept sheet", () => {
     expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
     expect(acceptCalls(stub)).toHaveLength(1);
     expect(acceptCalls(stub)[0].body).toEqual({ expectedShareMinutes: 25 });
-    expect(sheet).toHaveTextContent("25 min paid to Sam");
+    expect(sheet).toHaveTextContent("25 minutes paid to Sam");
     expect(within(sheet).getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
     await waitFor(() => expect(walletReads()).toBeGreaterThan(before));
     // The list is read again — and the sheet keeps its confirmation although the seat left it.
@@ -305,7 +305,7 @@ describe("the accept sheet", () => {
     expect(within(sheet).getByRole("heading", { name: INVITES_COPY.askedAgainTitle })).toBeInTheDocument();
     expect(within(sheet).queryByRole("heading", { name: INVITES_COPY.sheetTitle })).toBeNull();
     expect(within(sheet).getByText(askedAgainLine("Sam", 30))).toBeInTheDocument();
-    expect(within(sheet).getByText(INVITES_COPY.toPayNow).nextSibling).toHaveTextContent("5 min");
+    expect(within(sheet).getByText(INVITES_COPY.toPayNow).nextSibling).toHaveTextContent("5 minutes");
     expect(within(sheet).getByRole("button", { name: acceptLabel(5) })).toBeInTheDocument();
     // Only an invited seat can be declined.
     expect(within(sheet).queryByRole("button", { name: INVITES_COPY.decline })).toBeNull();
@@ -386,7 +386,7 @@ describe("an accept whose reply was lost (R2 F2-1)", () => {
     const before = walletReads();
     fireEvent.click(within(sheet).getByRole("button", { name: acceptLabel(25) }));
     expect(await within(sheet).findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
-    expect(sheet).toHaveTextContent("25 min paid to Sam");
+    expect(sheet).toHaveTextContent("25 minutes paid to Sam");
     expect(within(sheet).getByText(INVITE_UNSURE.provenNote)).toBeInTheDocument();
     expect(sheet).not.toHaveTextContent(/Couldn't accept/);
     expect(stub.calls.some((c) => c.path === MY_SEAT)).toBe(true);

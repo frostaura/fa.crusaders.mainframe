@@ -184,7 +184,7 @@ test("a mouse drag paints a rectangle, enters selection mode, and selects no tex
   await page.mouse.up();
   await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Stop selecting" })).toBeVisible();
-  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("4 slots · 1 h");
+  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("4 slots · 1 hour");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await page.evaluate(() => (window.getSelection()?.toString() ?? "").trim())).toBe("");
 });

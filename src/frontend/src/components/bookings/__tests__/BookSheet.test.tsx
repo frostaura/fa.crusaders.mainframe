@@ -296,7 +296,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     const { onBooked } = open({ isAdmin: true, members, bookAsUserId: NALEDI });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     expect(await screen.findByText(GOD_MODE.body("Naledi Khumalo", -16))).toBeTruthy();
-    expect(GOD_MODE.body("Naledi Khumalo", -16)).toBe("This takes Naledi Khumalo to −16 min. It's recorded in the change record.");
+    expect(GOD_MODE.body("Naledi Khumalo", -16)).toBe("This takes Naledi Khumalo to minus 16 minutes. It's recorded in the change record.");
     const [q] = gets(stub.calls, "/api/v1/admin/bookings/quote");
     expect(q.path).toContain(`userId=${NALEDI}`);
     expect(q.path).toContain("slices=3");

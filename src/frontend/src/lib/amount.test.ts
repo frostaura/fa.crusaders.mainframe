@@ -69,7 +69,7 @@ describe("parseMinutesAmount", () => {
   it("says minutes in minutes' words: whole numbers, a ceiling as an amount, no '1,00'", () => {
     expect(amountProblemSentence({ kind: "too_precise", decimals: 0 }, "minutes")).toBe(AMOUNT_COPY.tooPrecise("minutes"));
     expect(AMOUNT_COPY.tooPrecise("minutes")).toMatch(/whole numbers/);
-    expect(amountProblemSentence({ kind: "too_large", max: 90 }, "minutes")).toBe("The most this can be is 1 h 30 min.");
+    expect(amountProblemSentence({ kind: "too_large", max: 90 }, "minutes")).toBe("The most this can be is 1 hour 30 minutes.");
     expect(amountProblemSentence({ kind: "ambiguous" }, "minutes")).toBe(AMOUNT_COPY.ambiguousMinutes);
     expect(amountProblemSentence({ kind: "ambiguous" }, "rand")).toBe(AMOUNT_COPY.ambiguous);
     for (const kind of ["empty", "not_a_number"] as const) {

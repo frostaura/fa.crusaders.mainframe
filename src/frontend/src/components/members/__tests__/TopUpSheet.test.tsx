@@ -71,7 +71,7 @@ describe("the amount, in whole minutes through the shared parser", () => {
   it("says typed minutes back as an amount, so 90 is seen to be an hour and a half", () => {
     renderPage(<Harness apply={vi.fn()} />);
     fireEvent.change(screen.getByLabelText(ADJUST_SHEET.amountLabel), { target: { value: "90" } });
-    expect(screen.getByText(ADJUST_SHEET.amountEcho(90))).toHaveTextContent("= 1 h 30 min");
+    expect(screen.getByText(ADJUST_SHEET.amountEcho(90))).toHaveTextContent("= 1 hour 30 minutes");
   });
 });
 
@@ -104,7 +104,7 @@ describe("an adjustment is not money taken (P13 §3.7)", () => {
     typeAmount("45");
     await chooseReason("Refunded outside the system");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(await screen.findByRole("button", { name: /^Take back 45 min/ }), { detail: 1 });
+    fireEvent.click(await screen.findByRole("button", { name: /^Take back 45 minutes/ }), { detail: 1 });
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!, { detail: 1 });
     await waitFor(() => expect(apply).toHaveBeenCalledWith(-45, "refund_outside_system", "Lights failed"));
   });
@@ -119,8 +119,8 @@ describe("the receipt is frozen at the press (F3.5)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await confirm();
 
-    expect(await screen.findByText("Done. Sam now has 3 h 50 min.", { selector: "[role='status']" })).toBeInTheDocument();
-    expect(screen.getByText("Sam had 3 h 20 min. +30 min → 3 h 50 min.")).toBeInTheDocument();
+    expect(await screen.findByText("Done. Sam now has 3 hours 50 minutes.", { selector: "[role='status']" })).toBeInTheDocument();
+    expect(screen.getByText("Sam had 3 hours 20 minutes. +30 minutes → 3 hours 50 minutes.")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\bcr\b|\.00|credit/i);
   });
 });
@@ -129,17 +129,17 @@ describe("the receipt is frozen at the press (F3.5)", () => {
 describe("the quick amounts are radios that choose as the arrows move", () => {
   it("selects the amount the arrow key moves to", async () => {
     renderPage(<Harness apply={vi.fn()} />);
-    const first = screen.getByRole("radio", { name: "+15 min" });
+    const first = screen.getByRole("radio", { name: "+15 minutes" });
     fireEvent.click(first);
     expect(first).toHaveAttribute("aria-checked", "true");
     first.focus();
     fireEvent.keyDown(first, { key: "ArrowRight" });
 
-    const second = screen.getByRole("radio", { name: "+30 min" });
+    const second = screen.getByRole("radio", { name: "+30 minutes" });
     await waitFor(() => expect(second).toHaveAttribute("aria-checked", "true"));
     expect(screen.getByLabelText(ADJUST_SHEET.amountLabel)).toHaveValue("30");
-    expect(screen.getByRole("radio", { name: "+1 h" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "+2 h" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "+1 hour" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "+2 hours" })).toBeInTheDocument();
   });
 
   it("offers taking minutes back as a real button, not a line of text", () => {
@@ -198,7 +198,7 @@ describe("the confirm says what the caller found (R3 I-6)", () => {
     typeAmount("30");
     await chooseReason("Goodwill — something went wrong");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByRole("button", { name: /^Add 30 min/ })).toHaveClass("w-full");
+    expect(await screen.findByRole("button", { name: /^Add 30 minutes/ })).toHaveClass("w-full");
   });
 });
 
@@ -220,7 +220,7 @@ describe("the sheet stays open while the movement is on its way (R5 I5-3)", () =
     expect(onClose).not.toHaveBeenCalled();
     expect(document.querySelector("[data-sheet='top-up']")).toBeInTheDocument();
     land({ balanceAfterMinutes: 230 });
-    expect(await screen.findByText("Done. Sam now has 3 h 50 min.", { selector: "[role='status']" })).toBeInTheDocument();
+    expect(await screen.findByText("Done. Sam now has 3 hours 50 minutes.", { selector: "[role='status']" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(onClose).toHaveBeenCalled();
   });

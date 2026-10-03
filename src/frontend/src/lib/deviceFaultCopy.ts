@@ -305,6 +305,22 @@ export function boardLabel(row: Pick<DeviceErrorRow, "device_code" | "device_nam
   return name || code || "Unnamed board";
 }
 
+/**
+ * R6 L6-15 — the reason a refused scan or walk-up carries is a bare code the server wrote
+ * (`DeviceActivateEndpoint`, `WalkUpRefusalOf`); the card said "out_of_hours". Each in words.
+ */
+const REFUSAL_REASON: Record<string, string> = {
+  out_of_hours: "The club was closed at that time.",
+  insufficient_balance: "The member didn't have enough minutes.",
+  no_time_available: "The court had no time left to sell before the next booking.",
+  court_in_use: "The court was already booked.",
+  walk_up_refused: "The club's rules didn't allow a walk-up then.",
+  no_booking: "The member had no booking on that court then.",
+  too_early: "The member scanned before their booking started.",
+  ended: "The member's booking had already ended.",
+  not_chargeable: "That booking couldn't be charged, so the lights stayed off.",
+};
+
 const ISO_INSTANT = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})\b/g;
 
 /**
@@ -313,6 +329,10 @@ const ISO_INSTANT = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+
  */
 export function faultDetail(detail: string | null | undefined, timezone: string | undefined): string {
   const text = (detail ?? "").trim();
+  const reason = REFUSAL_REASON[text];
+  if (reason) return reason;
+  // An unknown bare code still reads as words rather than as an identifier.
+  if (/^[a-z]+(?:_[a-z]+)+$/.test(text)) return `Reason given: ${text.replace(/_/g, " ")}.`;
   const relays = /^served (\d+) relay\(s\), the box reported (\d+)$/.exec(text);
   if (relays) {
     const served = Number(relays[1]);

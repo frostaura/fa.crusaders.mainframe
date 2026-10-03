@@ -71,8 +71,9 @@ describe("V5-7 — money never wraps mid-value", () => {
     await screen.findByText(DETAIL_PLAYER.toPay);
     for (const dd of document.querySelectorAll("dd")) expect(dd.className).toContain("whitespace-nowrap");
     const [line] = within(money()).getAllByText((_, el) => el?.tagName === "SPAN" && /^Paid 25/.test(el.textContent ?? ""));
-    expect(line.textContent).toBe(`Paid 25${NBSP}min of 25${NBSP}min`);
+    expect(line.textContent).toBe(`Paid 25${NBSP}minutes of 25${NBSP}minutes`);
     expect(keepAmounts("Paid 1 h 30 min of 2 d 3 h")).toBe(`Paid 1${NBSP}h${NBSP}30${NBSP}min of 2${NBSP}d${NBSP}3${NBSP}h`);
+    expect(keepAmounts("Paid 1 hour 30 minutes of 2 days 3 hours")).toBe(`Paid 1${NBSP}hour${NBSP}30${NBSP}minutes of 2${NBSP}days${NBSP}3${NBSP}hours`);
   });
 });
 
@@ -118,8 +119,8 @@ describe("M5-3 — a no-show has its own money view", () => {
     expect(figure(DETAIL_MONEY.received)).toBe(fig(8));
     expect(figure(DETAIL_MONEY.net(null))).toBe(fig(7));
     // 50 − 50 + 15 − 8 = 7: the rows add up to the total, in whole minutes.
-    expect(money()).toHaveTextContent(DETAIL_NO_SHOW.paidBackRow(minutesCompact(16), minutesCompact(12)));
-    expect(money()).not.toHaveTextContent(DETAIL_MONEY.paidRow(minutesCompact(4), minutesCompact(16)));
+    expect(money()).toHaveTextContent(DETAIL_NO_SHOW.paidBackRow(minutesSpoken(16), minutesSpoken(12)));
+    expect(money()).not.toHaveTextContent(DETAIL_MONEY.paidRow(minutesSpoken(4), minutesSpoken(16)));
     expect(money()).not.toHaveTextContent(/Shares close|not paid yet/);
     expect(screen.getByText(DETAIL_NO_SHOW.attendance)).toBeInTheDocument();
     expect(screen.queryByText(DETAIL_ATTENDANCE.notYet)).toBeNull();
@@ -138,7 +139,7 @@ describe("M5-3 — a no-show has its own money view", () => {
     renderDetail();
     await screen.findByText(DETAIL_NO_SHOW.moneyNote(true));
     const own = document.querySelector("[data-no-show-share]");
-    expect(own?.textContent).toBe(keepAmounts(DETAIL_NO_SHOW.partnerBack(minutesCompact(16), minutesCompact(12), minutesCompact(4))));
+    expect(own?.textContent).toBe(keepAmounts(DETAIL_NO_SHOW.partnerBack(minutesSpoken(16), minutesSpoken(12), minutesSpoken(4))));
     expect(screen.queryByText(DETAIL_PLAYER.toPay)).toBeNull();
     expect(screen.queryByText(DETAIL_PLAYER.paidAll)).toBeNull();
     expect(screen.queryByRole("link", { name: DETAIL_PLAYER.review })).toBeNull();
@@ -185,8 +186,8 @@ describe("M5-7 — a late cancellation says its penalty on the page", () => {
     renderDetail();
     await screen.findByText(DETAIL_CANCELLED.banner);
     expect(figure(DETAIL_CANCELLED.penalty)).toBe(fig(-15));
-    expect(money()).toHaveTextContent(DETAIL_CANCELLED.splitRefundPenaltyNote(null, minutesCompact(15)));
-    expect(money()).toHaveTextContent(DETAIL_CANCELLED.returnedRow(minutesCompact(25)));
+    expect(money()).toHaveTextContent(DETAIL_CANCELLED.splitRefundPenaltyNote(null, minutesSpoken(15)));
+    expect(money()).toHaveTextContent(DETAIL_CANCELLED.returnedRow(minutesSpoken(25)));
     expect(figure(DETAIL_MONEY.net(null))).toBe(fig(15));
   });
 

@@ -26,9 +26,9 @@ describe("the change record in words", () => {
         { field: "balance_minutes", label: "Balance minutes", before: "0 minutes", after: "300 minutes" },
       ],
     });
-    expect(changed).toEqual([{ field: "balance_minutes", label: "Balance", before: "0 min", after: "5 h" }]);
+    expect(changed).toEqual([{ field: "balance_minutes", label: "Balance", before: "0 minutes", after: "5 hours" }]);
     expect(facts.map((f) => `${f.label}: ${f.value}`)).toEqual([
-      "Reason: Cash paid at the desk", "Money received: R125.50", "Amount: 5 h",
+      "Reason: Cash paid at the desk", "Money received: R125.50", "Amount: 5 hours",
     ]);
     expect(JSON.stringify({ changed, facts })).not.toMatch(/ce45e706|top_up_cash|125\.5"|Zar|\.00|cr\b/);
   });
@@ -45,9 +45,9 @@ describe("the change record in words", () => {
         { field: "participant_id", label: "Participant id", before: "1efc8f32-2aae-46d5-87a4-808a5818e8de", after: null },
       ],
     });
-    expect(changed).toEqual([{ field: "balance_minutes", label: "Balance", before: "0 min", after: "−1 h 40 min" }]);
+    expect(changed).toEqual([{ field: "balance_minutes", label: "Balance", before: "0 minutes", after: "minus 1 hour 40 minutes" }]);
     expect(facts).toEqual([
-      { field: "collected_minutes", label: "Collected", value: "1 h 40 min" },
+      { field: "collected_minutes", label: "Collected", value: "1 hour 40 minutes" },
       { field: "seat", label: "Seat", value: "2" },
     ]);
   });
@@ -103,7 +103,7 @@ describe("the overdraft row's two figures (R3 A-8)", () => {
         { field: "spendable_minutes", before: "20 minutes", after: "-30 minutes" },
       ],
     });
-    expect(changed).toContainEqual({ field: "spendable_minutes", label: "Can spend", before: "20 min", after: "−30 min" });
+    expect(changed).toContainEqual({ field: "spendable_minutes", label: "Can spend", before: "20 minutes", after: "minus 30 minutes" });
     expect(changed.map((c) => c.label)).toEqual(["Balance", "Can spend"]);
   });
 });
@@ -231,12 +231,12 @@ describe("a batch's bookings, each named once (R5 A5-2)", () => {
     const bookings = facts.find((f) => f.field === "bookings")!;
     expect(bookings.label).toBe("Bookings");
     expect(bookings.value.split("\n")).toEqual([
-      "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50 min back",
+      "Olga Smith — Court 2, Sat 3 Oct, 18:00 — cancelled, 50 minutes back",
       "Coaching (club hold) — Court 3, Sat 3 Oct, 18:00 — hold lifted",
       "Ben Ng — Court 1, Sat 3 Oct, 18:30 — already cancelled",
     ]);
     expect(facts.map((f) => f.value).join(" ")).not.toMatch(/a5604dd3|booking_id|\{/);
-    expect(facts.find((f) => f.field === "total_refunded_minutes")).toEqual({ field: "total_refunded_minutes", label: "Refunded in all", value: "50 min" });
+    expect(facts.find((f) => f.field === "total_refunded_minutes")).toEqual({ field: "total_refunded_minutes", label: "Refunded in all", value: "50 minutes" });
   });
 
   it("says each booking of a bulk book, and a refused one with its reason", () => {
@@ -249,7 +249,7 @@ describe("a batch's bookings, each named once (R5 A5-2)", () => {
       changes: [{ field: "bookings", before: null, after: items.map((i) => JSON.stringify(i)).join(", ") }],
     }, ZONE);
     expect(facts[0].value.split("\n")).toEqual([
-      "Court 2, Sat 3 Oct, 18:00 — booked, 50 min",
+      "Court 2, Sat 3 Oct, 18:00 — booked, 50 minutes",
       "Court 2, Sat 3 Oct, 18:15 — not booked (Slot taken)",
     ]);
   });
@@ -286,7 +286,7 @@ describe("a minutes package's record (P13)", () => {
       ],
     });
     expect(changed).toEqual([
-      { field: "minutes", label: "Minutes", before: "5 h", after: "5 h 30 min" },
+      { field: "minutes", label: "Minutes", before: "5 hours", after: "5 hours 30 minutes" },
       { field: "price_zar", label: "Price", before: "R550.00", after: "R600.00" },
       { field: "sort_order", label: "Place on the shelf", before: "1", after: "2" },
     ]);

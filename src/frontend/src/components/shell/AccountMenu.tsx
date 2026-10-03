@@ -8,7 +8,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ArrowCounterClockwise, Compass, Desktop, Moon, Question, SignOut, Sun, UserCircle, Wallet, type Icon } from "@/components/ui/icons";
 import { walletHref } from "@/lib/balance";
-import { minutesCompact } from "@/lib/minutes";
+import { Minutes } from "@/components/Minutes";
+import { NO_FIGURE_SPOKEN } from "@/lib/minutes";
 import { useChipBalance } from "./chipBalance";
 import { useAuth } from "@/lib/auth";
 import {
@@ -202,9 +203,12 @@ function WalletItem({ onSelect }: { onSelect: () => void }) {
     <DropdownMenuItem asChild onSelect={onSelect}>
       <Link to={walletHref(shown)}>
         <Wallet size={16} aria-hidden="true" className="text-text-muted" />
-        Wallet
+        Wallet{" "}
         <span className="ml-auto whitespace-nowrap font-semibold tabular-nums">
-          {shown === null ? "— min" : minutesCompact(shown)}
+          {/* R6 X6-2: the figure is heard in words — "1 hour 30 minutes", never "1 h 30 min". */}
+          {shown === null
+            ? <><span aria-hidden="true">— min</span><span className="sr-only">{NO_FIGURE_SPOKEN}</span></>
+            : <Minutes value={shown} />}
         </span>
       </Link>
     </DropdownMenuItem>

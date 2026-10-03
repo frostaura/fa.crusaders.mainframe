@@ -141,5 +141,5 @@ test("two courts at one time keep both picks under a real mouse", async ({ page 
   await page.getByRole("button", { name: /^Book Court 1 at 08:45/ }).click();
   await page.getByRole("button", { name: /^Book Court 2 at 08:45/ }).click();
   await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(2);
-  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("2 slots · 30 min");
+  await expect(page.getByRole("toolbar", { name: "Selected slots" })).toContainText("2 slots · 30 minutes");
 });

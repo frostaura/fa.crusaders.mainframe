@@ -63,7 +63,7 @@ describe("the ring", () => {
   it("is hidden without a goal, which is offered instead", async () => {
     await render([{ path: PLAY, body: myPlay({ ring: null, settings: { monthly_goal_minutes: null, celebrations_enabled: true } }) }]);
     expect(await screen.findByRole("button", { name: RING_COPY.setGoal })).toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: /goal this month/ })).toBeNull();
+    expect(screen.queryByRole("img", { name: /of a goal of/ })).toBeNull();
   });
 
   it("sets a goal in hours, sent as minutes", async () => {

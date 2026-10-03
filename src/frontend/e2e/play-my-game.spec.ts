@@ -36,7 +36,7 @@ test.describe("My game", () => {
     const first = await page.locator("[data-my-game], [role=region]").first().getAttribute("id");
     expect(first).toBe("my-game");
 
-    await expect(region.getByRole("img", { name: "6 h 45 min on court of a 10 h goal this month" })).toBeVisible();
+    await expect(region.getByRole("img", { name: "6 hours 45 minutes on court this month, of a goal of 10 hours" })).toBeVisible();
     await expect(region.getByText("6-week streak")).toBeVisible();
     const strip = region.getByRole("list", { name: "The last 12 weeks, oldest first" });
     await expect(strip.getByRole("listitem")).toHaveCount(12);

@@ -232,7 +232,7 @@ describe("the wallet, before the member picks a court — D4 §2.6", () => {
   it("says a zero balance cannot book anything, names what a slot takes, and offers a package", async () => {
     open(dayWith(undefined), 0);
     expect(await screen.findByText(/You have no minutes left, so you can't book yet\./)).toBeInTheDocument();
-    expect(screen.getByText(/A slot here takes 15 min\./)).toBeInTheDocument();
+    expect(screen.getByText(/A slot here takes 15 minutes\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Buy minutes" })).toHaveAttribute("href", "/wallet/buy");
   });
 
@@ -265,7 +265,7 @@ describe("the wallet, before the member picks a court — D4 §2.6", () => {
 
   it("says a short wallet — some minutes, fewer than a slot takes — before the member picks (P13)", async () => {
     open(dayWith(undefined), 10);
-    const sentence = await screen.findByText("You have 10 min left and a slot here takes 15 min. Buy a package to book.");
+    const sentence = await screen.findByText("You have 10 minutes left and a slot here takes 15 minutes. Buy a package to book.");
     const notice = sentence.closest('[role="status"]') as HTMLElement;
     expect(within(notice).getByRole("link", { name: "Buy minutes" })).toHaveAttribute("href", "/wallet/buy");
   });

@@ -399,7 +399,7 @@ describe("the admin change record", () => {
 
     fireEvent.click(await screen.findByText("Show what changed"));
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
-    expect(screen.getByText("6 h 10 min")).toBeInTheDocument();
+    expect(screen.getByText("6 hours 10 minutes")).toBeInTheDocument();
     // Rendered by the SERVER: a volunteer reading their own audit trail cannot be handed
     // minutes past midnight, and the browser is not where the club's clock lives.
     expect(screen.queryByText("1080")).not.toBeInTheDocument();
@@ -421,8 +421,8 @@ describe("the admin change record", () => {
     fireEvent.click(await screen.findByText("Show what changed"));
 
     expect(screen.getByText("Balance")).toBeInTheDocument();
-    expect(screen.getByText("0 min")).toBeInTheDocument();
-    expect(screen.getByText("−1 h 40 min")).toBeInTheDocument();
+    expect(screen.getByText("0 minutes")).toBeInTheDocument();
+    expect(screen.getByText("minus 1 hour 40 minutes")).toBeInTheDocument();
     expect(screen.getByText("Collected")).toBeInTheDocument();
     expect(screen.queryByText(/a5604dd3/)).toBeNull();
     expect(screen.queryByText(/-100/)).toBeNull();
