@@ -17,6 +17,11 @@ export type LedgerRowWithActor = LedgerRow & {
   /** C5 — on a share transfer, the other member of the pair. Null on every other row. */
   counterparty_name?: string | null;
   counterparty_user_id?: string | null;
+  /**
+   * R9 J9-3: the rand the club took for this row, where the server sends it (a desk package's
+   * `ZarPaid`). 0 on a package given at no charge. Absent from older servers.
+   */
+  zar_paid?: number | null;
 };
 
 export const LEDGER_COPY = {
@@ -39,6 +44,12 @@ export const LEDGER_COPY = {
   /** R4 form factor: the movement beside the club's book, not over it. */
   panelLabel: "The movement",
   closePanel: "Close the movement",
+  /**
+   * R9 J9-7: under the totals while shares can be among the rows. A share is two legs — out of the
+   * partner's wallet, into the organiser's — and both are movements, so Minutes in and Minutes out
+   * each carry it while the net does not move (Reports shows shares as the net zero they are).
+   */
+  sharesNote: "Minutes in and out each count a share between members once — out of one wallet, into another — so shares add nothing to the net.",
   panelEmptyTitle: "Pick a movement",
   panelEmptyHint: "Its details open here — who made it, what it was for, and the booking it belongs to. ↑ and ↓ walk the rows.",
 } as const;
@@ -66,7 +77,21 @@ function ownName(row: LedgerRowWithActor): string {
   return row.subjectName?.trim() || LEDGER_COPY.themselves;
 }
 
-/** What kind of movement it was, in the Transactions filter's own words. */
+/**
+ * What kind of movement it was, in the Transactions filter's own words — with the two facts the
+ * label alone hid (review round 9). A share's two legs read alike ("Uma → Piet", +15 and −15), so
+ * each says whose wallet it moved (J9-7); a desk package given at no charge is not "sold" (J9-3).
+ * The Category column is drawn on admin ledgers only.
+ */
 export function ledgerCategory(row: LedgerRow): string {
-  return ledgerTypeLabel(row.type);
+  const label = ledgerTypeLabel(row.type);
+  const owner = row.subjectName?.trim();
+  if (row.type === "ShareTransfer" && owner) {
+    return `${label}, ${row.signedAmountMinutes < 0 ? "out of" : "into"} ${owner}'s wallet`;
+  }
+  if (row.type === "AdminTopUp" && (row as LedgerRowWithActor).zar_paid === 0) return DESK_GIFT;
+  return label;
 }
+
+/** R9 J9-3: an `AdminTopUp` for which the club took no rand (`package_free`, or a R0 sale). */
+const DESK_GIFT = "Package given at the desk, at no charge";

@@ -107,6 +107,7 @@ export default function AdminLedgerPage() {
             phone were narrower than "+68473.00", and the page scrolled sideways. */}
         <AutoGrid min="stat" max={4} gap="md" aria-busy={loading || undefined} className="min-w-0 flex-[2_1_30rem] text-sm">
           <LedgerTotals totals={shownTotals(read.totals, filtered, userQuery, read.next)} loading={loading} searching={userQuery.trim() !== ""} />
+          {type === "" || type === "ShareTransfer" ? <p className="col-span-full text-xs text-text-muted">{LEDGER_COPY.sharesNote}</p> : null}
         </AutoGrid>
       </ContextBar>
 

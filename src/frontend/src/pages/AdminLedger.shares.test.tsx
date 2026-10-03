@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminLedgerPage from "./AdminLedger";
+import { LEDGER_COPY } from "../lib/ledgerCopy";
 import { LEDGER_TYPE_LABEL } from "../lib/deskLedger";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
@@ -82,5 +83,26 @@ describe("Admin ledger — shares of a split booking", () => {
     fireEvent.pointerDown(screen.getByRole("combobox", { name: "Type" }), { button: 0, ctrlKey: false, pointerType: "mouse" });
     fireEvent.click(screen.getByRole("option", { name: LEDGER_TYPE_LABEL.AdminTopUp }));
     await waitFor(() => expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/ledger") && c.path.includes("type=AdminTopUp"))).toBe(true));
+  }, 15_000);
+
+  /** R9 J9-7: Minutes in and out count each share twice (once a leg); the page says so, beside the totals. */
+  it("says the totals carry both legs of a share, which net to zero", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/ledger", body: PAIR },
+    ]);
+    renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30"] });
+    expect(await screen.findByText(LEDGER_COPY.sharesNote)).toBeInTheDocument();
+    expect(screen.getByText("Share of a split booking, out of Ada Lovelace's wallet", { exact: false })).toBeInTheDocument();
+  }, 15_000);
+
+  it("leaves the note off a type that holds no shares", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/ledger", body: [ledgerRowFixture({ id: "c", type: "BookingCharge", signedAmountMinutes: -15, amountMinutes: 15 })] },
+    ]);
+    renderPage(<AdminLedgerPage />, { initialEntries: ["/admin/ledger?from=2026-09-01&to=2026-09-30&type=BookingCharge"] });
+    await screen.findAllByText("Booking charge");
+    expect(screen.queryByText(LEDGER_COPY.sharesNote)).toBeNull();
   }, 15_000);
 });
