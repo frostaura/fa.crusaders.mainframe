@@ -43,6 +43,7 @@ import { firstNameOf, memberGridRules } from "../lib/bookingsApi";
 import { describePlaces, type Place } from "../lib/bookingSpan";
 import { clubClock } from "../lib/clubClock";
 import { useGridExplainer, type ForMember } from "../lib/gridExplain";
+import type { ViewerRules } from "../lib/gridRules";
 import {
   freeCount, gridBookingOf, parseSelectionKey, pendingBookingId, selectionKey, toGridBookings, toSelectedSlots, useGridSelection, type Selection,
 } from "../lib/gridSelection";
@@ -99,12 +100,7 @@ export default function BookingsPage() {
   const forMember = useForMember(bookingFor);
   const gridRules = forMember?.rules ?? rules;
   const explainer = useGridExplainer(day, rules, otherDay, forMember);
-  // R9 J9-4 — the refusal speaks in the pill's figures: booked so far, and the real limit.
-  const quota = rules.bookedSlotsToday !== null && rules.maxSlotsPerDay !== null ? { booked: rules.bookedSlotsToday, max: rules.maxSlotsPerDay } : null;
-  const { booked: quotaBooked = 0, max: quotaMax = 0 } = quota ?? {};
-  const capQuota = useMemo(() => (quotaMax > 0 ? { booked: quotaBooked, max: quotaMax } : null), [quotaBooked, quotaMax]);
-  const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay, capQuota), [otherDay, capQuota]);
-  const capShort = useCallback((cap: number) => selectionCapShort(cap, otherDay, capQuota), [otherDay, capQuota]);
+  const { capSentence, capShort } = useCapWords(rules, otherDay);
   const selection = useGridSelection({
     cap: isAdmin || rules.adminExempt ? null : rules.remainingToday,
     announce: explainer.announce, capSentence, capShort,
@@ -337,6 +333,19 @@ function SelectToggle({ selection }: { selection: Selection }) {
       <CheckSquare weight={on ? "fill" : "regular"} aria-hidden="true" />
     </IconButton>
   );
+}
+
+/**
+ * R9 J9-4 — the cap refusal in the pill's own figures: slots booked so far and the real limit
+ * ("2 of your 4 … so 2 more"), never what is LEFT said as the limit.
+ */
+function useCapWords(rules: ViewerRules, otherDay: string | null) {
+  const booked = rules.bookedSlotsToday ?? 0;
+  const max = rules.maxSlotsPerDay ?? 0;
+  const quota = useMemo(() => (max > 0 ? { booked, max } : null), [booked, max]);
+  const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay, quota), [otherDay, quota]);
+  const capShort = useCallback((cap: number) => selectionCapShort(cap, otherDay, quota), [otherDay, quota]);
+  return { capSentence, capShort };
 }
 
 /* ─────────────────────────────── the day picker ─────────────────────────────── */

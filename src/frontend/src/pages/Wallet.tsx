@@ -159,6 +159,16 @@ function LedgerSection(props: LedgerProps) {
   );
 }
 
+/**
+ * Where the first read is, with nothing on screen yet: still waiting (R9 X9-6's slow line), failed
+ * for want of a connection (R8 X8-2), or neither. Out of `WalletPage` for lizard's CCN gate.
+ */
+function firstRead(loaded: boolean, error: unknown, offline: boolean): "trying" | "offline" | null {
+  if (loaded) return null;
+  if (error === null) return "trying";
+  return offline ? "offline" : null;
+}
+
 export default function WalletPage() {
   const { rows, shareBookings, cardBalance, total, busy, error, readAt, stale, offline, balance, painted, load, held } = useWalletLedger();
   const loaded = rows !== null && cardBalance !== null;
@@ -180,8 +190,8 @@ export default function WalletPage() {
       {/* A failed read is never "no movements yet" — that tells a member their history is gone.
           R8 X8-2 — and with no signal and nothing kept it is said as offline, not as red failure. */}
       {/* R9 X9-6 — a first read that has not answered says, after a few seconds, it is still trying. */}
-      {!loaded && error === null ? <StillTrying /> : null}
-      {!loaded && error !== null && offline ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.wallet} /> : (
+      {firstRead(loaded, error, offline) === "trying" ? <StillTrying /> : null}
+      {firstRead(loaded, error, offline) === "offline" ? <OfflineNothingKept line={OFFLINE_COPY.nothingKept.wallet} /> : (
         <StateBlock
           loading={!loaded}
           error={loaded ? null : error}
