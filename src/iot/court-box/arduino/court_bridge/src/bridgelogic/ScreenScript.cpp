@@ -340,6 +340,17 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
       {"PLEASE WAIT", RowArg::None, ""}},
      kWaitSeconds,
      0U},
+    // The activation's wait (D8-2). Same class and hold as OneMoment — six
+    // seconds in front of a blocking call — with words true for whoever
+    // scanned: nothing is being bought yet. Row 1 is thirteen columns, inside
+    // the safe subset; "Checking your code" would be eighteen and clip.
+    {ScreenId::CheckingCode,
+     {{"ONE MOMENT", RowArg::None, ""},
+      {"Checking code", RowArg::None, ""},
+      kBlank,
+      {"PLEASE WAIT", RowArg::None, ""}},
+     kWaitSeconds,
+     0U},
 };
 
 /// kScreenSpecs is indexed by the ScreenId value, so a row in the wrong place

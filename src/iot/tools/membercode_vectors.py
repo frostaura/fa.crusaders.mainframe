@@ -1030,9 +1030,34 @@ def http_cases():
        "as before", legacy, {"code_step": None, "keys_accepted": None})
 
     rs("activate-response-code-used", "activate", "a single rotating code the server already acted on (§4.4): a "
-       "decision, not an outage — the roster must not get a second opinion — and it arms nothing",
+       "decision, not an outage — the roster must not get a second opinion — and it arms nothing: NOT "
+       "recognised, so no button window and the scan is spent. The code may be a photo of the screen of the "
+       "member whose court it just lit, and an armed window would let it buy a walk-up or a pay-for on their "
+       "minutes (review round 8, D8-1)",
        {"activated": False, "reason": "code_used", "court_number": 2, "granted_seconds": 0},
-       {"fallback": False, "lines": ["CODE USED", "WAIT 30 SECONDS"], "recognised": True})
+       {"fallback": False, "lines": ["CODE USED", "WAIT 30 SECONDS"], "recognised": False})
+    # WHICH REFUSALS ARM THE BUTTONS. A refusal about a member the server identified and whose code it has
+    # not acted on arms the window, unbound — that member may still buy time or pay for a court. Everything
+    # else arms nothing: a used code, a code nobody owns, and a reason this build cannot name (fail closed —
+    # a refusal the box cannot read is not one it can vouch for). The server answers code_used, never these,
+    # for a code it has already acted on for a court or for money, so a photo of a code that lit a court at
+    # another box cannot arrive here as an arming no_booking.
+    rs("activate-response-no-booking", "activate", "a known member with no booking on this box: the walk-up and "
+       "pay-for starting point (§9.1), so it arms the buttons, unbound",
+       {"activated": False, "reason": "no_booking", "granted_seconds": 0},
+       {"fallback": False, "lines": ["NO BOOKING", "SEE THE DESK"], "recognised": True})
+    rs("activate-response-wrong-court", "activate", "a known member whose booking is on a court this box does not "
+       "drive: they may still buy time here, so it arms",
+       {"activated": False, "reason": "wrong_court", "court_number": 7, "granted_seconds": 0},
+       {"fallback": False, "lines": ["WRONG COURT", "SEE THE DESK"], "recognised": True})
+    rs("activate-response-not-recognised", "activate", "a code the server cannot tie to a member of this club "
+       "(another club's, an old generation, a failed ON): nobody to arm the buttons for",
+       {"activated": False, "reason": "not_recognised", "granted_seconds": 0},
+       {"fallback": False, "lines": ["NOT RECOGNISED", "SEE THE DESK"], "recognised": False})
+    rs("activate-response-unknown-reason", "activate", "a reason this build does not know: still a decision (no "
+       "second opinion from the roster), told as SEE THE DESK, and it arms nothing — fail closed",
+       {"activated": False, "reason": "some_future_reason", "granted_seconds": 0},
+       {"fallback": False, "lines": ["SEE THE DESK", ""], "recognised": False})
     rs("walkup-response-code-used", "walkup", "the walk-up's own shape: 409 with error code_used; decided, and not "
        "recognised — a used code may be a photo", {"error": "code_used"},
        {"status": 409, "decided": True, "lines": ["CODE USED", "WAIT 30 SECONDS"], "recognised": False})
@@ -1050,8 +1075,9 @@ def http_cases():
        {"outcome": "quote", "court_number": 9999, "amount_label": "9999", "screen": "PayForQuote",
         "rows": ["CT9999 BOOKED", "PAY 9999 MIN?", "PRESS CT9999 TO PAY", "A   B   C   D"]})
     pq("payfor-quote-split", "a split booking is refused at the box: each player's share is theirs to pay in the "
-       "app", {"payable": False, "reason": "split_booking", "court_number": 2},
-       {"outcome": "refused", "screen": "PayForSplit", "rows": ["SPLIT BOOKING", "PAY IN APP"]})
+       "app; the payer's scan stays theirs", {"payable": False, "reason": "split_booking", "court_number": 2},
+       {"outcome": "refused", "screen": "PayForSplit", "rows": ["SPLIT BOOKING", "PAY IN APP"],
+        "spends_scan": False})
     pq("payfor-quote-not-booked", "the court is free after all: the press is an ordinary walk-up court choice",
        {"payable": False, "reason": "not_booked", "court_number": 2}, {"outcome": "walkup"})
     pq("payfor-quote-own-booking", "their own booking: nothing to pay",
@@ -1063,9 +1089,14 @@ def http_cases():
     pq("payfor-quote-insufficient", "the payer cannot cover it",
        {"payable": False, "reason": "insufficient_balance", "court_number": 2},
        {"outcome": "refused", "screen": "InsufficientBalance"})
-    pq("payfor-quote-not-recognised", "the code is not a member's",
+    pq("payfor-quote-not-recognised", "the code is not a member's: refused, and the scan is forgotten",
        {"payable": False, "reason": "not_recognised", "court_number": 2},
-       {"outcome": "refused", "screen": "NotRecognised"})
+       {"outcome": "refused", "screen": "NotRecognised", "spends_scan": True})
+    pq("payfor-quote-code-used", "a code the server already acted on — for money, or for a court (a photo of the "
+       "code that just lit one): refused, and the scan is forgotten, so the next press cannot try a walk-up on "
+       "it (review round 8, D8-1)",
+       {"payable": False, "reason": "code_used", "court_number": 2},
+       {"outcome": "refused", "screen": "NotRecognised", "spends_scan": True})
     pq("payfor-quote-ended", "the booking is over", {"payable": False, "reason": "ended", "court_number": 2},
        {"outcome": "refused", "screen": "SlotEnded"})
     pq("payfor-quote-unknown-reason", "a reason this build does not know is still a refusal",
@@ -1108,6 +1139,10 @@ def http_cases():
     pc("payfor-confirm-insufficient", "the balance moved since the quote",
        {"paid": False, "reason": "insufficient_balance", "court_number": 2},
        {"outcome": "refused", "screen": "InsufficientBalance"})
+    pc("payfor-confirm-code-used", "the code was acted on since the quote — or before it, for a court: refused, "
+       "nothing charged, and the scan is forgotten",
+       {"paid": False, "reason": "code_used", "court_number": 2},
+       {"outcome": "refused", "screen": "NotRecognised", "spends_scan": True})
     return {"description": "The court box's HTTP bodies for member codes: the capability on the heartbeat, "
             "the code sync in its answer, scan_age_ms on the three paths that carry a scan, and the two-step "
             "D10 pay-for.", "device_mac": MAC, "requests": reqs, "responses": resps}

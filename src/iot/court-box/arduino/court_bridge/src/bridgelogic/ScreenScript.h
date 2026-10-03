@@ -170,7 +170,9 @@ enum class ScreenId : uint8_t {
   ScanFirst,
   /// A court is selected and the box is waiting for a duration.
   ChooseTime,
-  /// A walk-up purchase is in flight.
+  /// A walk-up purchase is in flight. Never painted for an activation: its row
+  /// 1 says "Buying your time", and a booked member reading that while their
+  /// booking activates thinks they are being charged again (CheckingCode).
   OneMoment,
   /// The card, for a member the API named who has a booking.
   CardBooked,
@@ -201,9 +203,19 @@ enum class ScreenId : uint8_t {
   /// A pay-for call is in flight — the quote or the payment. The wait class,
   /// like OneMoment, whose "Buying your time" would be a lie here.
   PayForWorking,
+
+  // --- review round 8 (D8-2). APPENDED, for the same reason as D10's. -------
+
+  /// An activation is in flight: the box is asking the club about the code
+  /// just scanned. Its own words, because the walk-up's "Buying your time" is
+  /// false for a booked member and frightening for one with no booking.
+  CheckingCode,
 };
 
-inline constexpr uint8_t kScreenCount = 30U;
+inline constexpr uint8_t kScreenCount = 31U;
+
+/// What the glass shows while `/activate` is asked about a scan.
+inline constexpr ScreenId kActivateWaitScreen = ScreenId::CheckingCode;
 
 /// The buffer an `amount_label` is read into: six characters, the wire bound.
 /// It sizes storage only; what the box will SHOW is kMaxAmountLabelDigits.

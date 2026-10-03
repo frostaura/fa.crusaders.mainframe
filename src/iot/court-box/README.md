@@ -142,7 +142,13 @@ whole of it for all three. No credential is stored on the box, so nothing can be
 left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of this project's
-`platformio.ini`. The current images are **bridge 2.2.2 and Mega 2.0.0**: 2.2.2
+`platformio.ini`. The current images are **bridge 2.2.3 and Mega 2.0.0**: 2.2.3
+arms nothing for a code the server already acted on (`code_used`), a code
+nobody owns or a refusal it cannot name, and forgets that scan, so a photo of
+the code that just lit somebody's court cannot buy a walk-up or a pay-for on
+their minutes; it also waits on `ONE MOMENT / Checking code` while an
+activation is asked, and remembers whose game a court is only when its `!ON`
+actually left; 2.2.2
 gives the same screen on a court the box lit online for that member (a walk-up,
 a pay-for, or an activation the roster does not name yet); 2.2.1
 shows the member who rescans the code that just lit their own court `COURT B IS

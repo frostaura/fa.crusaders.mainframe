@@ -15,10 +15,13 @@
 // THE RULE
 // --------
 // The window is armed only for a RECOGNISED scan: the API answered with a
-// verdict about a known member (activated, or refused for any reason except
-// not_recognised — a known member with no booking is exactly who buys a
-// walk-up), or the roster matched an entry (allowed, too early, too late or
-// wrong court). An unknown token and a stale roster arm nothing.
+// verdict about a known member whose code it has not acted on (activated, or
+// refused as no_booking, wrong_court, too_early, insufficient_balance,
+// not_chargeable or ended — a known member with no booking is exactly who buys
+// a walk-up), or the roster matched an entry (allowed, too early, too late or
+// wrong court). An unknown token, a stale roster, a `code_used` and a reason
+// this build cannot name arm nothing — a used code may be a photo of the one
+// that just lit somebody's court (ScanFlow.cpp, review round 8 D8-1).
 //
 // A grant does not close the window; it BINDS it. The court that was just lit
 // is remembered, the window stays armed for the same TTL, and an OFF press is

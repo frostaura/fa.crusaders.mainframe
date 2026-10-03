@@ -9,39 +9,45 @@ namespace bridgelogic {
 
 namespace {
 
-/// Every refusal the contract can name, and what a member reads for it. Held
-/// as a table so the strings sit in one place and the host suite can assert
-/// each one; a `reason` this build does not know falls to the last row.
+/// Every refusal the contract can name, what a member reads for it, and
+/// whether it ARMS the buttons. Held as a table so the strings sit in one place
+/// and the host suite can assert each one; a `reason` this build does not know
+/// is SEE THE DESK and arms nothing.
+///
+/// WHICH REFUSALS ARM (review round 8, D8-1). Arming is what lets the scan buy
+/// — a walk-up, a pay-for — so only a refusal about a member the server
+/// identified, whose code it has NOT acted on, arms: that member may still buy
+/// time here. `code_used` does not (the code may be a photo of the one that
+/// just lit somebody's court, and it used to buy on their minutes), nor
+/// `not_recognised`, nor a reason this build cannot read — fail closed. The
+/// corpus's activate vectors pin every row (`membercode/http.json`).
 struct ReasonLines {
   const char* reason;
   const char* line1;
   const char* line2;
+  bool arms;
 };
 
 constexpr ReasonLines kReasons[] = {
-    {"no_booking", "NO BOOKING", "SEE THE DESK"},
-    {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY"},
-    {"wrong_court", "WRONG COURT", "SEE THE DESK"},
-    {"not_recognised", "NOT RECOGNISED", "SEE THE DESK"},
-    {"not_chargeable", "SEE THE DESK", ""},
+    {"no_booking", "NO BOOKING", "SEE THE DESK", true},
+    {"insufficient_balance", "TOO FEW MINUTES", "BUY & RETRY", true},
+    {"wrong_court", "WRONG COURT", "SEE THE DESK", true},
+    {"not_recognised", "NOT RECOGNISED", "SEE THE DESK", false},
+    {"not_chargeable", "SEE THE DESK", "", true},
     // A scan inside the grace window after the slot ended: stamped as
     // attendance, nothing left to light. The same screen granted() paints for
     // an older API's activated:true with zero seconds — one situation, one
     // screen, whichever way the API says it. A decision, never a fallback: the
     // roster still holds the booking and would light the court the API just
     // said was over.
-    {"ended", "SLOT ENDED", "SEE THE DESK"},
+    {"ended", "SLOT ENDED", "SEE THE DESK", true},
     // A single rotating code the server has already acted on — a photo of
     // somebody's screen, or the member's own second scan inside one step. The
     // code on their phone moves on within thirty seconds; the next one works.
-    // The same words the offline path uses for a replay (MemberScan.h).
-    {"code_used", "CODE USED", "WAIT 30 SECONDS"},
+    // The same words the offline path uses for a replay (MemberScan.h), and
+    // the same verdict: it arms nothing.
+    {"code_used", "CODE USED", "WAIT 30 SECONDS", false},
 };
-
-/// The one reason that says the API did NOT identify anybody. Every other
-/// reason is a verdict about a known member — no booking, too few minutes, wrong
-/// court, too early — and a known member may still buy time at the buttons.
-constexpr char kNotRecognised[] = "not_recognised";
 
 court::Outcome refusal(const char* line1, const char* line2, bool recognised) {
   court::Outcome outcome;
@@ -75,12 +81,14 @@ court::Outcome refusedFor(const char* body, size_t len) {
     }
     for (const ReasonLines& row : kReasons) {
       if (strcmp(reason, row.reason) == 0) {
-        return refusal(row.line1, row.line2, strcmp(reason, kNotRecognised) != 0);
+        return refusal(row.line1, row.line2, row.arms);
       }
     }
-    // A reason this build does not know is still a reason ABOUT somebody: the
-    // API only has verdicts for members it identified.
-    return refusal("SEE THE DESK", "", true);
+    // A reason this build does not know is still a DECISION — the roster gets
+    // no second opinion — but not one this box can vouch for: it arms nothing.
+    // It used to arm, on the reading that the API only refuses members it
+    // identified; a refusal of a used or foreign code is also a refusal (D8-1).
+    return refusal("SEE THE DESK", "", false);
   }
   // No reason at all. Nothing says who scanned, so nobody is recognised.
   return refusal("SEE THE DESK", "", false);
@@ -133,6 +141,10 @@ ActivationResult granted(uint32_t grantedSeconds, uint8_t relay) {
 
 bool spendsScan(const court::Outcome& outcome) {
   return outcome.action == court::Action::TurnOn;
+}
+
+bool scanStaysBuyable(const court::Outcome& outcome) {
+  return !spendsScan(outcome) && outcome.recognised;
 }
 
 uint32_t displayMinutes(uint32_t grantedMinutes) {

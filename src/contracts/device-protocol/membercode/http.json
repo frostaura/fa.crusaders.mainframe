@@ -178,7 +178,7 @@
     {
       "id": "activate-response-code-used",
       "kind": "activate",
-      "note": "a single rotating code the server already acted on (§4.4): a decision, not an outage — the roster must not get a second opinion — and it arms nothing",
+      "note": "a single rotating code the server already acted on (§4.4): a decision, not an outage — the roster must not get a second opinion — and it arms nothing: NOT recognised, so no button window and the scan is spent. The code may be a photo of the screen of the member whose court it just lit, and an armed window would let it buy a walk-up or a pay-for on their minutes (review round 8, D8-1)",
       "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a22636f64655f75736564222c22636f7572745f6e756d626572223a322c226772616e7465645f7365636f6e6473223a307d",
       "expect": {
         "fallback": false,
@@ -186,7 +186,63 @@
           "CODE USED",
           "WAIT 30 SECONDS"
         ],
+        "recognised": false
+      }
+    },
+    {
+      "id": "activate-response-no-booking",
+      "kind": "activate",
+      "note": "a known member with no booking on this box: the walk-up and pay-for starting point (§9.1), so it arms the buttons, unbound",
+      "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a226e6f5f626f6f6b696e67222c226772616e7465645f7365636f6e6473223a307d",
+      "expect": {
+        "fallback": false,
+        "lines": [
+          "NO BOOKING",
+          "SEE THE DESK"
+        ],
         "recognised": true
+      }
+    },
+    {
+      "id": "activate-response-wrong-court",
+      "kind": "activate",
+      "note": "a known member whose booking is on a court this box does not drive: they may still buy time here, so it arms",
+      "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a2277726f6e675f636f757274222c22636f7572745f6e756d626572223a372c226772616e7465645f7365636f6e6473223a307d",
+      "expect": {
+        "fallback": false,
+        "lines": [
+          "WRONG COURT",
+          "SEE THE DESK"
+        ],
+        "recognised": true
+      }
+    },
+    {
+      "id": "activate-response-not-recognised",
+      "kind": "activate",
+      "note": "a code the server cannot tie to a member of this club (another club's, an old generation, a failed ON): nobody to arm the buttons for",
+      "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a226e6f745f7265636f676e69736564222c226772616e7465645f7365636f6e6473223a307d",
+      "expect": {
+        "fallback": false,
+        "lines": [
+          "NOT RECOGNISED",
+          "SEE THE DESK"
+        ],
+        "recognised": false
+      }
+    },
+    {
+      "id": "activate-response-unknown-reason",
+      "kind": "activate",
+      "note": "a reason this build does not know: still a decision (no second opinion from the roster), told as SEE THE DESK, and it arms nothing — fail closed",
+      "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a22736f6d655f6675747572655f726561736f6e222c226772616e7465645f7365636f6e6473223a307d",
+      "expect": {
+        "fallback": false,
+        "lines": [
+          "SEE THE DESK",
+          ""
+        ],
+        "recognised": false
       }
     },
     {
@@ -243,7 +299,7 @@
     {
       "id": "payfor-quote-split",
       "kind": "payfor_quote",
-      "note": "a split booking is refused at the box: each player's share is theirs to pay in the app",
+      "note": "a split booking is refused at the box: each player's share is theirs to pay in the app; the payer's scan stays theirs",
       "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a2273706c69745f626f6f6b696e67222c22636f7572745f6e756d626572223a327d",
       "expect": {
         "outcome": "refused",
@@ -251,7 +307,8 @@
         "rows": [
           "SPLIT BOOKING",
           "PAY IN APP"
-        ]
+        ],
+        "spends_scan": false
       }
     },
     {
@@ -304,11 +361,23 @@
     {
       "id": "payfor-quote-not-recognised",
       "kind": "payfor_quote",
-      "note": "the code is not a member's",
+      "note": "the code is not a member's: refused, and the scan is forgotten",
       "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a226e6f745f7265636f676e69736564222c22636f7572745f6e756d626572223a327d",
       "expect": {
         "outcome": "refused",
-        "screen": "NotRecognised"
+        "screen": "NotRecognised",
+        "spends_scan": true
+      }
+    },
+    {
+      "id": "payfor-quote-code-used",
+      "kind": "payfor_quote",
+      "note": "a code the server already acted on — for money, or for a court (a photo of the code that just lit one): refused, and the scan is forgotten, so the next press cannot try a walk-up on it (review round 8, D8-1)",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a22636f64655f75736564222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "NotRecognised",
+        "spends_scan": true
       }
     },
     {
@@ -419,6 +488,17 @@
       "expect": {
         "outcome": "refused",
         "screen": "InsufficientBalance"
+      }
+    },
+    {
+      "id": "payfor-confirm-code-used",
+      "kind": "payfor_confirm",
+      "note": "the code was acted on since the quote — or before it, for a court: refused, nothing charged, and the scan is forgotten",
+      "body_hex": "7b2270616964223a66616c73652c22726561736f6e223a22636f64655f75736564222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "NotRecognised",
+        "spends_scan": true
       }
     }
   ]

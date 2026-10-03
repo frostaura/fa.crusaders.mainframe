@@ -116,6 +116,15 @@ bool relayForCourtNumber(int16_t courtNumber, const int16_t courtNumbers[devlink
 /// time with the buttons.
 bool spendsScan(const court::Outcome& outcome);
 
+/// Whether the scan behind `outcome` may still buy anything at the buttons — a
+/// walk-up, or a pay-for. False for a court it lit (spendsScan) AND for every
+/// scan nobody vouched for: a code the server already acted on (`code_used` —
+/// possibly a photo of the code that just lit somebody's court), a code nobody
+/// owns, a refusal this build cannot name, a stale roster. Such a scan is
+/// forgotten as well as disarmed, so nothing behind the Mega's window can ever
+/// send it as a buyer (review round 8, D8-1).
+bool scanStaysBuyable(const court::Outcome& outcome);
+
 /// True — with `out` filled — when a roster decision would re-light a court
 /// this box already believes is lit, and must not.
 ///
@@ -173,8 +182,12 @@ public:
   ///                            the wire's one-second floor would turn it into
   ///                            a relay pulse and a spent scan.
   ///   200 + activated:false  → Refuse with a line per `reason`; no fallback.
-  ///                            `recognised` is set for every reason except
-  ///                            not_recognised (and a missing reason). `ended`
+  ///                            `recognised` (which arms the buttons) only for
+  ///                            a known member whose code is unused: no_booking,
+  ///                            wrong_court, too_early, insufficient_balance,
+  ///                            not_chargeable, ended. Never for code_used,
+  ///                            not_recognised, an unknown or missing reason
+  ///                            (review round 8, D8-1). `ended`
   ///                            — stamped, nothing left to light — is the same
   ///                            SLOT ENDED as a zero-second grant, and is a
   ///                            decision: the roster would light it.

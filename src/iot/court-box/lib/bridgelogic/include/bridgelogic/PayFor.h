@@ -101,6 +101,12 @@ struct PayForAnswer {
   /// On Paid: seconds to light the court for, 0 when it is already lit or the
   /// server grants nothing.
   uint32_t grantedSeconds = 0U;
+  /// A refusal that says the scanned code is no good for money — `code_used`
+  /// (acted on already: possibly a photo of the code that just lit somebody's
+  /// court) or `not_recognised`. The caller forgets the scan and closes the
+  /// window, so the next press cannot try a walk-up on it (review round 8,
+  /// D8-1). Every other refusal leaves the payer's scan theirs.
+  bool spendsScan = false;
 };
 
 /// A label the glass can show honestly: whole minutes, one to four ASCII digits

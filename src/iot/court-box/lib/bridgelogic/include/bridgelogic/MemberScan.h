@@ -138,6 +138,32 @@ private:
   uint32_t refs_[kStateCourts] = {};
 };
 
+/// An ONLINE decision just tried to light `outcome.court` for whoever scanned
+/// `token`: remember whose game it is so their own rescan of the same code
+/// reads its ON screen (D7-1) — only when THIS attempt's `!ON` left the bridge
+/// (`onSent`). The held state alone was the old test, and it is still true
+/// from the previous game when the new `!ON` fails: a court that never lit for
+/// this member named them (review round 8, D8-3).
+inline void noteOnlineLighting(OnlineGrants& grants, const court::Outcome& outcome,
+                               const HeldState held[kStateCourts], bool onSent, const char* token) {
+  if (onSent && outcome.action == court::Action::TurnOn && outcome.court < kStateCourts &&
+      held[outcome.court].held) {
+    grants.lit(outcome.court, token);
+  }
+}
+
+/// The `!ON` for `court` failed twice (OnRetry): the court is dark in this
+/// half's books, so the next `!STATE` does not synthesise a Release for a
+/// session that never started — and nobody's game is on it, so the online
+/// grant goes with it, as on every other path a court goes dark by (D8-3).
+inline void courtStaysDark(uint8_t court, HeldState held[kStateCourts], OnlineGrants& grants,
+                           uint32_t nowMs) {
+  if (court < kStateCourts) {
+    held[court] = HeldState{nowMs, false};
+    grants.released(court);
+  }
+}
+
 /// The courts this box drives and what it believes about each: the held
 /// state the re-scan guard reads, how many relays the scanner serves, and
 /// which of them this box lit online for whom (null: none remembered).

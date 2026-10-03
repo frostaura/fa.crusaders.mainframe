@@ -218,8 +218,11 @@ public partial class MemberCodeCorpusTests
                     AssertCodeTail(text, id, MemberCodeWire.CourtBoxMaxBytes);
                     break;
                 case "activate":
+                    // Review round 8 (D8-1): the vectors name which refusals arm the box's buttons;
+                    // each is one the server really sends, in the server's own bytes. The unknown
+                    // reason is the one the server never sends — it pins the box failing closed.
                     var act = JsonSerializer.Deserialize<DeviceActivateResponse>(text)!;
-                    Assert.Equal(MemberCodeIdentity.CodeUsed, act.Reason);
+                    if (id != "activate-response-unknown-reason") Assert.Contains(act.Reason, ActivateRefusals);
                     Assert.Equal(text, JsonSerializer.Serialize(act));
                     break;
                 case "walkup":
@@ -241,6 +244,10 @@ public partial class MemberCodeCorpusTests
         }
         Assert.Equal(Declared("http.json", "responses"), responses);
     }
+
+    /// <summary>The activation refusals the member-code corpus pins the box's reading of.</summary>
+    private static readonly string[] ActivateRefusals =
+        [MemberCodeIdentity.CodeUsed, "no_booking", "wrong_court", "not_recognised"];
 
     /// <summary>
     /// A heartbeat vector's member-code keys are the four the server writes, in its order, after

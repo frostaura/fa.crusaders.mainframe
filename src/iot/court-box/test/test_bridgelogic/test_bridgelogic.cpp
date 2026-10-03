@@ -1672,7 +1672,13 @@ void test_scan_flow_recognised_is_every_verdict_about_a_known_member() {
       {"{\"activated\":false,\"reason\":\"wrong_court\"}", true},
       {"{\"activated\":false,\"reason\":\"too_early\",\"starts_in_seconds\":900}", true},
       {"{\"activated\":false,\"reason\":\"not_chargeable\"}", true},
-      {"{\"activated\":false,\"reason\":\"something_newer\"}", true},
+      {"{\"activated\":false,\"reason\":\"ended\"}", true},
+      // Review round 8 (D8-1): a code the server already acted on is not a
+      // member at the panel — it may be a photo of the code that just lit
+      // somebody's court — and a reason this build cannot name is not one it
+      // can vouch for. Neither arms a single button.
+      {"{\"activated\":false,\"reason\":\"code_used\"}", false},
+      {"{\"activated\":false,\"reason\":\"something_newer\"}", false},
       {"{\"activated\":false,\"reason\":\"not_recognised\"}", false},
       {"{\"activated\":false}", false},
   };
@@ -1690,6 +1696,55 @@ void test_scan_flow_a_grant_carries_the_uncapped_booking_remainder() {
       flow.onActivateResponse(200U, body, len(body), kCourts, kCourtCount);
   TEST_ASSERT_EQUAL_UINT32(5400000UL, r.outcome.durationMs);
   TEST_ASSERT_EQUAL_UINT32(7200000UL, r.outcome.bookingRemainingMs);
+}
+
+void test_a_used_code_answered_online_arms_nothing_and_cannot_buy() {
+  // D8-1. A photo of the code that just lit court B, scanned here: the server
+  // answers code_used. It used to be "recognised" — the window armed unbound,
+  // the scan stayed remembered, and the next court press sent it as the buyer
+  // of a walk-up or a pay-for on the victim's minutes.
+  const bridgelogic::ScanFlow flow;
+  const char used[] =
+      "{\"activated\":false,\"reason\":\"code_used\",\"court_number\":2,\"granted_seconds\":0}";
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, used, len(used), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_EQUAL_STRING("CODE USED", r.outcome.line1);
+  bridgelogic::AuthPolicy auth(30000UL);
+  TEST_ASSERT_TRUE(auth.afterScan(r.outcome, 1000U) == bridgelogic::AuthCommand::Disarm);
+  TEST_ASSERT_FALSE(auth.armed(1001U));
+  TEST_ASSERT_FALSE(bridgelogic::scanStaysBuyable(r.outcome));
+
+  // A known member with no booking here is who buys time: armed, and the scan
+  // stays theirs for the buttons.
+  const char none[] = "{\"activated\":false,\"reason\":\"no_booking\",\"granted_seconds\":0}";
+  const bridgelogic::ActivationResult n =
+      flow.onActivateResponse(200U, none, len(none), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(auth.afterScan(n.outcome, 2000U) == bridgelogic::AuthCommand::Arm);
+  TEST_ASSERT_TRUE(bridgelogic::scanStaysBuyable(n.outcome));
+
+  // A grant spends it (H1); an unknown token never had it.
+  const char lit[] = "{\"activated\":true,\"reason\":\"ok\",\"court_number\":7,\"granted_seconds\":600}";
+  TEST_ASSERT_FALSE(bridgelogic::scanStaysBuyable(
+      flow.onActivateResponse(200U, lit, len(lit), kCourts, kCourtCount).outcome));
+  const char nobody[] = "{\"activated\":false,\"reason\":\"not_recognised\"}";
+  TEST_ASSERT_FALSE(bridgelogic::scanStaysBuyable(
+      flow.onActivateResponse(200U, nobody, len(nobody), kCourts, kCourtCount).outcome));
+}
+
+void test_an_activation_waits_on_its_own_words_never_buying_your_time() {
+  // D8-2. Every online activation painted OneMoment, whose row 1 is the
+  // walk-up's "Buying your time" — a booked member read that while their
+  // booking activated. The walk-up keeps it; the activation has its own.
+  bridgelogic::ScreenFacts facts;
+  const bridgelogic::Screen wait = bridgelogic::screenFor(bridgelogic::kActivateWaitScreen, facts);
+  TEST_ASSERT_EQUAL_STRING("ONE MOMENT", wait.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("Checking code", wait.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("PLEASE WAIT", wait.rows[3]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kWaitSeconds, wait.holdSeconds);
+  TEST_ASSERT_TRUE(strstr(wait.rows[1], "Buying") == nullptr);
+  const bridgelogic::Screen walkUp = bridgelogic::screenFor(bridgelogic::ScreenId::OneMoment, facts);
+  TEST_ASSERT_EQUAL_STRING("Buying your time", walkUp.rows[1]);
 }
 
 court::Outcome outcomeOf(court::Action action, uint8_t court, bool recognised) {
@@ -2801,6 +2856,7 @@ const ScreenContract kContract[] = {
     {bridgelogic::ScreenId::PayForNothingToPay, "NOTHING TO PAY", false, false},
     {bridgelogic::ScreenId::PayForPriceChanged, "PRICE", true, false},
     {bridgelogic::ScreenId::PayForWorking, "MOMENT", false, false},
+    {bridgelogic::ScreenId::CheckingCode, "MOMENT", false, false},
 };
 
 constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);
@@ -3141,6 +3197,8 @@ int main(int, char**) {
   RUN_TEST(test_scan_flow_an_open_breaker_is_the_rosters_scan);
   RUN_TEST(test_scan_flow_a_zero_second_grant_is_a_refusal_not_a_pulse);
   RUN_TEST(test_scan_flow_recognised_is_every_verdict_about_a_known_member);
+  RUN_TEST(test_a_used_code_answered_online_arms_nothing_and_cannot_buy);
+  RUN_TEST(test_an_activation_waits_on_its_own_words_never_buying_your_time);
   RUN_TEST(test_scan_flow_a_grant_carries_the_uncapped_booking_remainder);
   RUN_TEST(test_auth_policy_a_refused_scan_cannot_release_any_court);
   RUN_TEST(test_auth_policy_a_recognised_refusal_arms_for_a_walk_up_but_releases_nothing);

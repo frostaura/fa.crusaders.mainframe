@@ -342,6 +342,9 @@ void runPayFor(const char* c, const char* id, bool confirm) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(static_cast<uint32_t>(number(expect, "granted_seconds")),
                                      answer.grantedSeconds, id);
   }
+  if (has(expect, "spends_scan")) {
+    TEST_ASSERT_EQUAL_MESSAGE(flag(expect, "spends_scan"), answer.spendsScan, id);
+  }
   // The glass, from the same facts the composition root builds.
   bridgelogic::ScreenFacts facts;
   facts.courtNumber = static_cast<int16_t>(court);
@@ -750,6 +753,56 @@ void test_offline_v1_replay_on_a_court_this_box_lit_online_for_the_member_is_the
   TEST_ASSERT_FALSE(f.online.courtFor(0U, court));
 }
 
+void test_an_online_grant_is_remembered_only_when_its_on_left(void) {
+  // D8-3. The rule used to read the held state, which is still TRUE from the
+  // previous game when the new `!ON` fails to leave — so a court that never lit
+  // for this member named them, and their photographed code could later read
+  // its ON screen with the OFF bound to somebody else's game.
+  bridgelogic::OnlineGrants online;
+  bridgelogic::HeldState held[bridgelogic::kStateCourts] = {};
+  held[2] = bridgelogic::HeldState{5000U, true};
+  court::Outcome grant;
+  grant.action = court::Action::TurnOn;
+  grant.court = 2U;
+  grant.recognised = true;
+  char token[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 12345678U, 123456U, token, sizeof(token)));
+  uint8_t court = 0U;
+
+  bridgelogic::noteOnlineLighting(online, grant, held, false, token);
+  TEST_ASSERT_FALSE(online.courtFor(0x0A3C9U, court));
+
+  bridgelogic::noteOnlineLighting(online, grant, held, true, token);
+  TEST_ASSERT_TRUE(online.courtFor(0x0A3C9U, court));
+  TEST_ASSERT_EQUAL_UINT8(2U, court);
+
+  // A refusal names nobody, sent or not.
+  online.released(2U);
+  court::Outcome refused = grant;
+  refused.action = court::Action::Refuse;
+  bridgelogic::noteOnlineLighting(online, refused, held, true, token);
+  TEST_ASSERT_FALSE(online.courtFor(0x0A3C9U, court));
+}
+
+void test_a_court_whose_on_failed_twice_forgets_whose_game_it_was(void) {
+  // D8-3. The one-retry path marked the court dark without the release every
+  // other dark court gets, so the grant outlived the lighting.
+  bridgelogic::OnlineGrants online;
+  bridgelogic::HeldState held[bridgelogic::kStateCourts] = {};
+  held[1] = bridgelogic::HeldState{5000U, true};
+  char token[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 12345678U, 123456U, token, sizeof(token)));
+  online.lit(1U, token);
+
+  bridgelogic::courtStaysDark(1U, held, online, 9000U);
+  TEST_ASSERT_FALSE(held[1].held);
+  TEST_ASSERT_EQUAL_UINT32(9000U, held[1].sinceMs);
+  uint8_t court = 0U;
+  TEST_ASSERT_FALSE(online.courtFor(0x0A3C9U, court));
+  // Out of range is nothing at all.
+  bridgelogic::courtStaysDark(bridgelogic::kStateCourts, held, online, 9500U);
+}
+
 void test_offline_v1_code_with_no_clock_reads_as_the_stale_roster(void) {
   Offline f;
   char token[memcode::kTokenLen + 1U] = {};
@@ -907,6 +960,8 @@ int main(int, char**) {
   RUN_TEST(test_offline_v1_rescan_on_a_lit_court_is_the_already_on_screen_and_records_nothing);
   RUN_TEST(test_offline_v1_replay_on_the_members_own_lit_court_is_the_already_on_screen);
   RUN_TEST(test_offline_v1_replay_on_a_court_this_box_lit_online_for_the_member_is_the_already_on_screen);
+  RUN_TEST(test_an_online_grant_is_remembered_only_when_its_on_left);
+  RUN_TEST(test_a_court_whose_on_failed_twice_forgets_whose_game_it_was);
   RUN_TEST(test_offline_v1_code_with_no_clock_reads_as_the_stale_roster);
   RUN_TEST(test_a_wrong_off_is_refused_as_not_recognised_and_arms_nothing);
   RUN_TEST(test_pay_for_quote_answers_that_are_not_decisions_are_the_old_walk_up_choice);

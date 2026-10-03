@@ -48,6 +48,15 @@ ScreenId screenForReason(const char* body, size_t len) {
   return ScreenId::SeeTheDesk;
 }
 
+/// The refusals that say the scanned code is no good for money at all: one the
+/// server already acted on, and one it cannot tie to a member. The caller
+/// forgets the scan (PayForAnswer::spendsScan).
+bool spendsTheScan(const char* body, size_t len) {
+  char reason[32] = {};
+  return devapi::json::topLevelStringField(body, len, "reason", reason, sizeof(reason)) &&
+         (strcmp(reason, "code_used") == 0 || strcmp(reason, "not_recognised") == 0);
+}
+
 bool reasonIs(const char* body, size_t len, const char* expected) {
   char reason[32] = {};
   return devapi::json::topLevelStringField(body, len, "reason", reason, sizeof(reason)) &&
@@ -130,7 +139,9 @@ PayForAnswer onPayForQuote(uint16_t status, const char* body, size_t len, int16_
     if (reasonIs(body, len, kNotBooked)) {
       return answer(PayForKind::WalkUp, ScreenId::ChooseTime);
     }
-    return answer(PayForKind::Refused, screenForReason(body, len));
+    PayForAnswer refused = answer(PayForKind::Refused, screenForReason(body, len));
+    refused.spendsScan = spendsTheScan(body, len);
+    return refused;
   }
 
   uint32_t quotedCourt = 0U;
@@ -164,7 +175,9 @@ PayForAnswer onPayForConfirm(uint16_t status, const char* body, size_t len, cons
     return answer(PayForKind::Undecided, ScreenId::SeeTheDesk);
   }
   if (!paid) {
-    return answer(PayForKind::Refused, screenForReason(body, len));
+    PayForAnswer refused = answer(PayForKind::Refused, screenForReason(body, len));
+    refused.spendsScan = spendsTheScan(body, len);
+    return refused;
   }
 
   PayForAnswer done = answer(PayForKind::Paid, ScreenId::PayForPaid);

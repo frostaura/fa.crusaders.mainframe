@@ -751,10 +751,14 @@ void noteMegaPong(const proto::Frame& frame, uint32_t nowMs) {
 /// "TRY AGAIN" and leaves the court dark in this half's books, so the next
 /// `!STATE` does not synthesise a Release for a session that never started —
 /// bridgelogic::afterOnAttempt is the rule.
-void applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
+///
+/// True when an `!ON` left the bridge on THIS call — what a caller remembering
+/// whose game the court is must ask, never the held state, which a previous
+/// game can leave true (D8-3).
+bool applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   static_cast<void>(sendToMega(proto::Frame::lcd(outcome.line1, outcome.line2)));
   if (outcome.action != court::Action::TurnOn || outcome.court >= bridgelogic::kStateCourts) {
-    return;
+    return false;
   }
   const proto::Court court = static_cast<proto::Court>(outcome.court);
   const proto::Frame on = proto::Frame::on(court, outcome.durationMs / 1000U);
@@ -772,33 +776,38 @@ void applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   // checksum that dies on the wire comes back as `!ERR,BADCRC`, and it is then
   // sent once more (bridgelogic::OnRetry). sendToMega registered it — there is
   // exactly ONE registration point and this is deliberately not a second one.
+  return sent;
 }
 
-/// An ONLINE decision just lit a court for whoever scanned `token`: remember
-/// whose game it is, so their own rescan of the same code reads its ON screen
-/// (D7-1). Only once the `!ON` actually left — a court that stayed dark holds
-/// nobody's game. Must run before spendScan(), which forgets the token.
-void noteOnlineLit(const court::Outcome& outcome, const char* token) {
-  if (outcome.action == court::Action::TurnOn && outcome.court < bridgelogic::kStateCourts &&
-      gHeld[outcome.court].held) {
-    gOnlineGrants.lit(outcome.court, token);
-  }
+/// An ONLINE decision just tried to light a court for whoever scanned `token`:
+/// remember whose game it is, so their own rescan of the same code reads its
+/// ON screen (D7-1) — only when `lit`, the `!ON` of this very attempt, left
+/// (D8-3). Must run before spendScan(), which forgets the token.
+void noteOnlineLit(const court::Outcome& outcome, bool lit, const char* token) {
+  bridgelogic::noteOnlineLighting(gOnlineGrants, outcome, gHeld, lit, token);
 }
 
 /// A scan has been decided, by whichever path: paint it, light it, spend the
 /// scan if it lit, arm or close the button window, and remember a booking
 /// longer than the relay cap for its `!EXT`. ONE function for the online and
-/// roster paths so the two cannot disagree about any of those.
-void settleScan(const court::Outcome& outcome, uint32_t nowMs) {
-  applyOutcome(outcome, nowMs);
-  if (bridgelogic::spendsScan(outcome)) {
+/// roster paths so the two cannot disagree about any of those. True when an
+/// `!ON` left on this call.
+bool settleScan(const court::Outcome& outcome, uint32_t nowMs) {
+  const bool lit = applyOutcome(outcome, nowMs);
+  if (!bridgelogic::scanStaysBuyable(outcome)) {
     // A lit court spends the scan (review H1): the next walk-up must not buy
     // on this member's token. The window is the policy's, below — kept armed
-    // and bound to the court for THIS member's OFF press.
+    // and bound to the court for THIS member's OFF press. A scan nobody
+    // vouched for — `code_used` above all, which may be a photo of the code
+    // that just lit somebody's court — is forgotten too, and the policy closes
+    // the window: it buys nothing (review round 8, D8-1).
     spendScan();
+  }
+  if (bridgelogic::spendsScan(outcome)) {
     gRelight.onGrant(outcome, nowMs);
   }
   applyAuth(gAuth.afterScan(outcome, nowMs));
+  return lit;
 }
 
 /// Forward declarations: the API calls sit together further down, with the
@@ -911,7 +920,7 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
 /// Queues the Release for a court and forgets it. The one place a held court
 /// becomes a released one, whichever messenger — `!EVT` or `!STATE` — said so.
 void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
-  applyOutcome(gSession.onRelease(court, heldMs, nowMs), nowMs);
+  static_cast<void>(applyOutcome(gSession.onRelease(court, heldMs, nowMs), nowMs));
   gHeld[court] = bridgelogic::HeldState{nowMs, false};
   gRelight.onRelease(court);
   gOnlineGrants.released(court);
@@ -990,7 +999,9 @@ void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
   // Twice is a cable. The court is dark in this half's books so the next
   // `!STATE` does not synthesise a Release for a session that never started,
   // and the member is told to try again.
-  gHeld[court] = bridgelogic::HeldState{nowMs, false};
+  // And nobody's game is on it: the online grant goes with it, as it does on
+  // every other path a court goes dark by (D8-3).
+  bridgelogic::courtStaysDark(court, gHeld, gOnlineGrants, nowMs);
   static_cast<void>(
       sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
 }
@@ -1298,7 +1309,9 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
 /// the roster. The interpretation is bridgelogic::ScanFlow's; this owns the
 /// socket and the one side effect it cannot see: the Mega.
 bool activateOnline(const char* token) {
-  showScreen(bridgelogic::ScreenId::OneMoment, gClock.nowMs());
+  // Its own wait screen: OneMoment says "Buying your time", which is the
+  // walk-up's sentence and false here (D8-2).
+  showScreen(bridgelogic::kActivateWaitScreen, gClock.nowMs());
 
   char body[128];
   if (bridgelogic::renderActivateBody(body, sizeof(body), gMacHex, token, scanAgeMs()) == 0U) {
@@ -1327,8 +1340,8 @@ bool activateOnline(const char* token) {
   if (decision.outcome.action == court::Action::TurnOn) {
     noteOnlineUse(token);
   }
-  settleScan(decision.outcome, gClock.nowMs());
-  noteOnlineLit(decision.outcome, token);
+  const bool lit = settleScan(decision.outcome, gClock.nowMs());
+  noteOnlineLit(decision.outcome, lit, token);
   return true;
 }
 
@@ -1390,14 +1403,22 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   if (answer.outcome.action == court::Action::TurnOn) {
     noteOnlineUse(gLastScan);
   }
-  applyOutcome(answer.outcome, nowMs);
-  noteOnlineLit(answer.outcome, gLastScan);
+  const bool lit = applyOutcome(answer.outcome, nowMs);
+  noteOnlineLit(answer.outcome, lit, gLastScan);
   if (bridgelogic::spendsScan(answer.outcome)) {
     // The identity is spent on the purchase: the next member's presses must not
     // buy on this one's token. The window stays, bound to the court just
     // bought, so the buyer can still switch it off.
     spendScan();
     gRelight.onGrant(answer.outcome, nowMs);
+  }
+  if (answer.decided && !bridgelogic::scanStaysBuyable(answer.outcome) &&
+      !bridgelogic::spendsScan(answer.outcome)) {
+    // A decided refusal of the CODE — `code_used`, `not_recognised`: the scan
+    // buys nothing more, so it is forgotten and the window closed (D8-1). An
+    // UNDECIDED attempt keeps both, with its nonce, for the same purchase.
+    forgetScan();
+    return;
   }
   applyAuth(gAuth.afterWalkUp(answer.outcome, nowMs));
 }
@@ -1461,6 +1482,10 @@ void confirmPayFor() {
   }
   if (answer.kind != bridgelogic::PayForKind::Paid) {
     sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
+    if (answer.spendsScan) {
+      // `code_used` / `not_recognised`: the code buys nothing more here (D8-1).
+      forgetScan();
+    }
     return;
   }
 
@@ -1483,8 +1508,8 @@ void confirmPayFor() {
         answer.grantedSeconds > UINT32_MAX / 1000U ? UINT32_MAX : answer.grantedSeconds * 1000U;
     court::detail::setLine(grant.line1, paid.rows[0]);
     court::detail::setLine(grant.line2, paid.rows[1]);
-    applyOutcome(grant, nowMs);
-    noteOnlineLit(grant, gLastScan);
+    const bool lit = applyOutcome(grant, nowMs);
+    noteOnlineLit(grant, lit, gLastScan);
     spendScan();
     gRelight.onGrant(grant, nowMs);
     applyAuth(gAuth.afterWalkUp(grant, nowMs));
@@ -1565,6 +1590,11 @@ bool quotePayFor(uint8_t relay, uint32_t nowMs) {
     gPad.clear();
     sendScreen(
         bridgelogic::screenFor(answer.screen, payForFacts(relay, answer.amountLabel, now), gLcdSettings));
+    if (answer.spendsScan) {
+      // `code_used` / `not_recognised`: the code buys nothing more here — not
+      // this court, and not a walk-up on the next press (D8-1).
+      forgetScan();
+    }
     return true;
   case bridgelogic::PayForKind::WalkUp:
     break;
