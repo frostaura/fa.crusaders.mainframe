@@ -48,7 +48,8 @@ export type SlotLine = {
   courtName: string;
   day: string;
   time: string;
-  duration: string;
+  /** How long the slot is, in whole minutes — a figure with its spoken twin (R7 X7-6). */
+  minutes: number;
   /** What it costs, in whole minutes; null while it is being read (skeleton) or when not shown at all. */
   price: number | null;
   priceLoading?: boolean;
@@ -85,13 +86,15 @@ function SlotItem({ line, refusedWord }: { line: SlotLine; refusedWord: string }
         <Racquet size={20} />
       </span>
       <span className="grid min-w-0 flex-1 gap-0.5">
-        <span className="flex items-baseline justify-between gap-3">
-          <span className="truncate text-sm font-semibold text-text-primary">{line.courtName}</span>
-          <SlotPrice line={line} />
+        {/* R7 L7-4 — the court's name wraps whole (it was cut "Cou…" at 390/200 %), and the figure
+            drops under it, right-aligned, where the two do not fit on one line. */}
+        <span className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <span className="min-w-0 break-words text-sm font-semibold text-text-primary">{line.courtName}</span>
+          <span className="ml-auto whitespace-nowrap"><SlotPrice line={line} /></span>
         </span>
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
           <span>{`${line.day} · ${line.time}`}</span>
-          <Badge tone="neutral">{line.duration}</Badge>
+          <Badge tone="neutral"><Minutes value={line.minutes} /></Badge>
         </span>
         {line.detailLoading ? <Skeleton className="mt-1 h-4 w-40 rounded-sm" /> : null}
         {!line.detailLoading && line.detail ? <span className="text-sm text-text-secondary">{line.detail}</span> : null}

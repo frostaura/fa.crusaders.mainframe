@@ -373,7 +373,7 @@ export function useBookFlow(input: BookFlowInput) {
     const f = slotFace(s, timezone, sliceMinutes);
     const refusedCode = ready?.refused.has(i) ? ready.refused.get(i) ?? null : undefined;
     return {
-      key: slotKey(s), courtName: s.courtName, day: f.day, time: f.time, duration: f.duration,
+      key: slotKey(s), courtName: s.courtName, day: f.day, time: f.time, minutes: f.minutes,
       // A slot costs its playing minutes (P13 §1.1), known before any quote: the desk's quote
       // confirms the same figure, so nothing waits on it.
       price: ready?.prices.get(i) ?? s.priceMinutes,

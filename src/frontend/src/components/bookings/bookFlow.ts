@@ -7,7 +7,6 @@ import {
   type BulkBookResponse,
   type MemberBulkBookResponse,
 } from "@/lib/api";
-import { formatMinutes } from "@/lib/utils";
 import { clubClock, clubShortDate } from "@/lib/clubClock";
 import { refusalReason, RESULT_WORD } from "@/lib/bookingsCopy";
 import { playersEndpoints, type PlayersPayload } from "@/lib/playersApi";
@@ -77,7 +76,7 @@ export function clubDayLabel(at: Date, timezone?: string): string {
   return clubShortDate(at, timezone);
 }
 
-/** "Tue 23 Sep", "18:00–18:45", "45 min" — the club's clock, whatever the reader's locale. */
+/** "Tue 23 Sep", "18:00–18:45" and the slot's length in minutes — the club's clock, whatever the reader's locale. */
 export function slotFace(slot: SelectedSlot, timezone: string, sliceMinutes: number) {
   const start = new Date(slot.startsAt);
   const minutes = slot.sliceCount * sliceMinutes;
@@ -86,7 +85,7 @@ export function slotFace(slot: SelectedSlot, timezone: string, sliceMinutes: num
   return {
     day,
     time: `${clubClock(start, timezone)}–${clubClock(end, timezone)}`,
-    duration: formatMinutes(minutes),
+    minutes,
   };
 }
 

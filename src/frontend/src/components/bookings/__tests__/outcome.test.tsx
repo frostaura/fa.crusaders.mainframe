@@ -305,7 +305,7 @@ describe("F1.10 — Confirm states the cancellation terms before anything is cha
     await toConfirm();
     expect(screen.getByText(cancelTermsLine(30, 15))).toBeTruthy();
     expect(cancelTermsLine(30, 15)).toBe(
-      "Cancel more than 15 min before the start and the full amount comes back; inside 15 min, 30% is kept. Once the lights have been on, nothing comes back.",
+      "Cancel more than 15 minutes before the start and the full amount comes back; inside 15 minutes, 30% is kept. Once the lights have been on, nothing comes back.",
     );
   });
 

@@ -205,7 +205,7 @@ function lineFor(b: GridBooking, detail: string | undefined, loading: boolean): 
   return {
     key: b.bookingId,
     courtName: b.mine || !b.memberFirstName ? b.courtName : `${b.courtName} · ${b.memberFirstName}`,
-    day: f.day, time: f.time, duration: f.duration,
+    day: f.day, time: f.time, minutes: f.minutes,
     price: b.amountChargedMinutes,
     detail,
     detailLoading: loading,

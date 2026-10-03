@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { endpoints, type BulkCancelResponse, type CancellationQuote } from "@/lib/api";
 import { adminEndpoints } from "@/lib/adminApi";
-import { formatMinutes } from "@/lib/utils";
 import { clubClock } from "@/lib/clubClock";
 import { UnsureOutcome, goneFrom, outcomeUnknown, type Reread } from "@/lib/bookingOutcome";
 import { splitCancelOf, type PartnerRefund, type SplitCancel } from "@/lib/bookingsApi";
@@ -90,13 +89,13 @@ export function totalsOf(bookings: readonly GridBooking[], quotes: QuoteMap | nu
   return totals;
 }
 
-/** "Tue 23 Sep", "18:00–18:45", "45 min" for a booking, in the club's clock. */
+/** "Tue 23 Sep", "18:00–18:45" and its length in minutes for a booking, in the club's clock. */
 export function bookingFace(b: GridBooking) {
   const start = new Date(b.startsAt);
   const end = new Date(b.endsAt);
   const minutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000));
   const day = clubDayLabel(start, b.timezone);
-  return { day, time: `${clubClock(start, b.timezone)}–${clubClock(end, b.timezone)}`, duration: formatMinutes(minutes) };
+  return { day, time: `${clubClock(start, b.timezone)}–${clubClock(end, b.timezone)}`, minutes };
 }
 
 /** The per-row money note on a multi-booking sheet. */
