@@ -39,3 +39,14 @@ Tests: `R7ChainHttpTests`, `R7WordsTests`, `DeviceEventHttpTests+R7Night`, `Desk
   package may still be sold under a paid code.
 - **Mail minutes are words** (court time, lights-on duration); a package named by its minutes
   is said once on the PayFast ledger line.
+- **R8 (lane BE):** a no-show reversed by a late scan records the SCAN too — `ReverseNoShowAsync(…, scan:
+  ReversalScan)` stamps the scanner's seat (`SeatArrival`, shared with activation) and writes
+  `court.activated`; the device caller passes it (E8-1). Words for `member.groups_changed`,
+  `member_code.enrolled` (E8-3). A desk top-up with no rand taken (AdminTopUp ZarPaid 0 /
+  `package_free`) is "gave them … at no charge" on the Night and change record (E8-5).
+- **Time on court is ONE rule on member screens** (E8-4): play.md §1 sessions (`AttendanceQuery` —
+  booker or accepted partner, minutes as the row stands) for `/me/play` and `/reports/me/wallet|daily`.
+  *Why:* the reports counted own bookings at sold length; a partner read 0 beside 57 on Profile.
+  The admin Night's `minutes_on_court` stays box-measured, not shown to members.
+- **The grid's daily limit is the POST's** (J8-1): `BookingRules.HeldOnDayAsync` counts accepted
+  partner seats for both.
