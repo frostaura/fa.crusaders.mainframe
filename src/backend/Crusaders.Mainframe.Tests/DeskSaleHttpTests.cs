@@ -338,4 +338,45 @@ public sealed class DeskSaleHttpTests(PostgresFixture pg) : IClassFixture<Postgr
         Assert.True(body.GetProperty("package").GetProperty("price_zar").GetDecimal() > 0m);
         Assert.Empty(await LedgerAsync(f, club, club.MemberUserId));
     }
+
+    /// <summary>
+    /// Review round 9, J9-3: the Transactions page called a package GIVEN at no charge "Package sold
+    /// at the desk" — the admin ledger rows carried neither the rand nor the desk's code. Each row
+    /// now carries <c>zar_paid</c> (rand, null where no rand applies) and <c>reason_code</c> (the
+    /// desk's code on a sale or adjustment, null elsewhere), and only this club's.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_admin_ledger_says_what_the_desk_took_and_under_which_code()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var f = pg.SharedHost;
+        var club = await SeedAsync(f, "dkl");
+        var rival = await SeedAsync(f, "dklr");
+        await SetDiscountAsync(f, club.LeagueGroupId, 10_000);
+        await JoinAsync(f, club, club.MemberUserId, club.LeagueGroupId);
+        var admin = Admin(f, club);
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.MemberUserId),
+            new { packageId = club.OneHour, reasonCode = "package_free", reason = "Welcome", quotedPriceZar = 0m, zarReceived = 0m })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(SellPath(club.OtherUserId),
+            new { packageId = club.FiveHours, reasonCode = "top_up_eft", reason = "EFT", quotedPriceZar = 550m, zarReceived = 549.5m })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/minutes/{club.OtherUserId}/adjust",
+            new { amountMinutes = 5, reasonCode = "goodwill", reason = "Lights" })).StatusCode);
+        // The rival club's desk sells at the same moment, under a different code.
+        Assert.Equal(HttpStatusCode.OK, (await Admin(f, rival).PostAsJsonAsync(SellPath(rival.MemberUserId),
+            new { packageId = rival.FiveHours, reasonCode = "top_up_cash", reason = "Cash", quotedPriceZar = 550m })).StatusCode);
+
+        var rows = (await JsonOf(await admin.GetAsync("/api/v1/admin/ledger"))).EnumerateArray().ToList();
+        Assert.Equal(3, rows.Count);
+        var given = Assert.Single(rows, r => r.GetProperty("subjectUserId").GetGuid() == club.MemberUserId);
+        Assert.Equal("package_free", given.GetProperty("reason_code").GetString());
+        Assert.Equal(0m, given.GetProperty("zar_paid").GetDecimal());
+        var sold = Assert.Single(rows, r => r.GetProperty("type").GetString() == "AdminTopUp" && r.GetProperty("subjectUserId").GetGuid() == club.OtherUserId);
+        Assert.Equal("top_up_eft", sold.GetProperty("reason_code").GetString());
+        Assert.Equal(549.5m, sold.GetProperty("zar_paid").GetDecimal());
+        var adjusted = Assert.Single(rows, r => r.GetProperty("type").GetString() == "AdminAdjustment");
+        Assert.Equal("goodwill", adjusted.GetProperty("reason_code").GetString());
+        Assert.Equal(JsonValueKind.Null, adjusted.GetProperty("zar_paid").ValueKind);
+        Assert.DoesNotContain(rows, r => r.GetProperty("reason_code").GetString() == "top_up_cash");
+    }
 }

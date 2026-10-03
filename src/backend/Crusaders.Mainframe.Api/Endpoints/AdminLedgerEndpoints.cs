@@ -105,7 +105,46 @@ public static class AdminLedgerEndpoints
         var admins = await LedgerRowMapper.AdminsAsync(db, ids, ct);
         var counterparties = await LedgerRowMapper.ShareCounterpartiesAsync(db, entries, ct);
 
-        return entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties)).ToList();
+        var codes = await DeskCodesAsync(db, entries, ct);
+
+        // R9 J9-3: the rand and the desk's code travel with each row, so a package GIVEN at no
+        // charge is not "sold" on the Transactions page.
+        return entries.Select(e => LedgerRowMapper.Build(e, nameFor, admins.Contains, counterparties) with
+        {
+            ZarPaid = e.ZarPaid,
+            ReasonCode = codes.GetValueOrDefault(e.Id),
+        }).ToList();
+    }
+
+    /// <summary>
+    /// The desk's code for each by-hand row on this page (review round 9, J9-3), read off the desk
+    /// audit row that names the entry (<c>credit.adjusted</c>, <c>entry_id</c>, <c>reason_code</c>)
+    /// — the ledger row itself never stored it, and this needs no migration. Tenant-filtered like
+    /// every read; only the page's desk rows are looked for, in the window they were written in.
+    /// </summary>
+    private static async Task<Dictionary<Guid, string>> DeskCodesAsync(MainframeDbContext db, List<LedgerEntry> entries, CancellationToken ct)
+    {
+        var desk = entries.Where(e => e.Type is LedgerEntryType.AdminTopUp or LedgerEntryType.AdminAdjustment).ToList();
+        if (desk.Count == 0) return [];
+        var users = desk.Select(e => e.UserId).Distinct().ToList();
+        var from = desk.Min(e => e.CreatedAt).AddMinutes(-1);
+        var to = desk.Max(e => e.CreatedAt).AddMinutes(1);
+        var audits = await db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == AdminCreditReasons.AuditAction && a.SubjectUserId != null && users.Contains(a.SubjectUserId.Value)
+                        && a.CreatedAt >= from && a.CreatedAt <= to)
+            .Select(a => a.DetailsJson)
+            .ToListAsync(ct);
+
+        var ids = desk.Select(e => e.Id).ToHashSet();
+        var codes = new Dictionary<Guid, string>();
+        foreach (var json in audits)
+        {
+            var details = DoorActivityView.Details(json);
+            if (details is not { } root || root.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+            if (!root.TryGetProperty("entry_id", out var id) || !id.TryGetGuid(out var entryId) || !ids.Contains(entryId)) continue;
+            if (root.TryGetProperty("reason_code", out var code) && code.GetString() is { } c) codes[entryId] = c;
+        }
+        return codes;
     }
 }
 
@@ -280,6 +319,17 @@ public sealed record LedgerRowDto(
     /// </summary>
     [System.Text.Json.Serialization.JsonPropertyName("actor_name")]
     public string? DoneBy { get; init; }
+
+    /// <summary>The rand taken on this row, 2 dp (a desk sale, a PayFast package); null where no rand applies (R9 J9-3).</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("zar_paid")]
+    public decimal? ZarPaid { get; init; }
+
+    /// <summary>
+    /// The desk's code on a by-hand row — <c>top_up_cash</c>, <c>package_free</c>, <c>goodwill</c>, …
+    /// (R9 J9-3); null on every other row, and on the member's own wallet.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; init; }
 
     /// <summary>On a share transfer: the other member of the pair (C5). Null on every other row.</summary>
     [System.Text.Json.Serialization.JsonPropertyName("counterparty_name")]
