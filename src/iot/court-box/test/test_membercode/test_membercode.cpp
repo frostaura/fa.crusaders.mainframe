@@ -632,6 +632,45 @@ void test_offline_v1_rescan_on_a_lit_court_is_the_already_on_screen_and_records_
   TEST_ASSERT_EQUAL_UINT32(before, f.queue.size());
 }
 
+/// Round 6 (D6-3): the member who just lit court B scans the SAME code again
+/// inside its thirty seconds — to switch off, or to check. The code is a replay,
+/// but it is a replay of THEIR lighting on a court this box holds: they read
+/// COURT B IS ON with the OFF bound to it, exactly as a fresh code would give
+/// them, never CODE USED with the buttons disarmed. What a replay still may not
+/// do is buy: the scan is spent, so a walk-up or a pay-for cannot ride a code
+/// that may be a photo of somebody else's screen.
+void test_offline_v1_replay_on_the_members_own_lit_court_is_the_already_on_screen(void) {
+  Offline f;
+  char token[memcode::kTokenLen + 1U] = {};
+  f.token(1000U, token);
+  const bridgelogic::MemberScanResult lit =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 10000U);
+  TEST_ASSERT_EQUAL(court::Action::TurnOn, lit.outcome.action);
+  TEST_ASSERT_FALSE(lit.scanSpent);
+  f.uses.commit(lit.verdict.token.ref, lit.verdict.step);
+  f.held[1] = bridgelogic::HeldState{10000U, true};
+
+  const uint32_t before = f.queue.size();
+  const bridgelogic::MemberScanResult r =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 12000U);
+  TEST_ASSERT_EQUAL(memcode::Status::Replayed, r.verdict.status);
+  TEST_ASSERT_TRUE(r.alreadyOn);
+  TEST_ASSERT_EQUAL_UINT8(1U, r.outcome.court);
+  TEST_ASSERT_EQUAL_STRING("COURT B IS ON", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("ALREADY LIT", r.outcome.line2);
+  TEST_ASSERT_TRUE(r.scanSpent);
+  TEST_ASSERT_EQUAL_UINT32(before, f.queue.size());
+
+  // The same replay with the court gone dark is CODE USED again: there is no
+  // game of theirs here to switch off, and nothing else a used code may do.
+  f.held[1] = bridgelogic::HeldState{12500U, false};
+  const bridgelogic::MemberScanResult dark =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 13000U);
+  TEST_ASSERT_FALSE(dark.alreadyOn);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kCodeUsedLine1, dark.outcome.line1);
+  TEST_ASSERT_FALSE(dark.outcome.recognised);
+}
+
 void test_offline_v1_code_with_no_clock_reads_as_the_stale_roster(void) {
   Offline f;
   char token[memcode::kTokenLen + 1U] = {};
@@ -787,6 +826,7 @@ int main(int, char**) {
   RUN_TEST(test_a_code_this_box_acted_on_offline_is_not_asked_about_online);
   RUN_TEST(test_offline_v1_guessing_is_throttled_and_says_so);
   RUN_TEST(test_offline_v1_rescan_on_a_lit_court_is_the_already_on_screen_and_records_nothing);
+  RUN_TEST(test_offline_v1_replay_on_the_members_own_lit_court_is_the_already_on_screen);
   RUN_TEST(test_offline_v1_code_with_no_clock_reads_as_the_stale_roster);
   RUN_TEST(test_a_wrong_off_is_refused_as_not_recognised_and_arms_nothing);
   RUN_TEST(test_pay_for_quote_answers_that_are_not_decisions_are_the_old_walk_up_choice);

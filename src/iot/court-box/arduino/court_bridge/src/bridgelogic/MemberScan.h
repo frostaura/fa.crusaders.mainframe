@@ -27,7 +27,9 @@
 // ----------------------------------
 // A member who scans again mid-game is told COURT B IS ON, not re-granted: the
 // same bridgelogic::regrantsHeldCourt rule the legacy path uses, asked of the
-// REF path's decision, BEFORE the session records anything.
+// REF path's decision, BEFORE the session records anything. That includes the
+// SAME code scanned again inside its window: a replay whose REF holds a lit
+// court here is that court's ON screen with its OFF bound, and the scan spent.
 //
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
@@ -71,6 +73,10 @@ struct MemberScanResult {
   /// The verified member's court is already lit: paint `outcome`, bind the
   /// button window to its court, record nothing.
   bool alreadyOn = false;
+  /// The scan buys nothing: forget it before any button is pressed. Set for a
+  /// used code shown its own lit court — the OFF is bound, but a walk-up or a
+  /// pay-for must never ride a code that may be a photo of somebody's screen.
+  bool scanSpent = false;
 };
 
 /// A refused v1 scan, recorded as an unknown scan and told in its own words.
@@ -115,10 +121,25 @@ decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeyRingT,
     return result;
   }
   case memcode::Status::Replayed:
-    // Recorded as a refused scan, so the club can see a code presented twice,
-    // and told as what it is. NOT recognised: whoever is holding a used code
-    // may be holding a photo of somebody else's screen, and a recognised scan
-    // arms the buttons — a walk-up or a pay-for on the victim's identity.
+    // OFF matched, so the REF is proven — only the step is spent. The member
+    // who just lit their court and scans the same code again inside its thirty
+    // seconds (to switch off, or to check) reads COURT B IS ON with the OFF
+    // bound to it, as a fresh code gives them — never CODE USED with the
+    // buttons disarmed under their own game (round 6, D6-3). The scan is spent:
+    // a used code may be a photo of somebody else's screen, so it binds that
+    // court's OFF and buys nothing. Nothing is recorded, as for any rescan.
+    if (regrantsHeldCourt(cache.decideMember(result.verdict.token.refText, courts, nowMs), box.held,
+                          result.outcome)) {
+      result.alreadyOn = true;
+      result.scanSpent = true;
+      return result;
+    }
+    // No game of theirs lit here: recorded as a refused scan, so the club can
+    // see a code presented twice, and told as what it is. NOT recognised:
+    // whoever is holding a used code may be holding a photo of somebody else's
+    // screen, and a recognised scan arms the buttons — a walk-up or a pay-for
+    // on the victim's identity.
+    [[fallthrough]];
   case memcode::Status::Throttled: {
     const bool used = result.verdict.status == memcode::Status::Replayed;
     const memcode::Verdict verdict = result.verdict;

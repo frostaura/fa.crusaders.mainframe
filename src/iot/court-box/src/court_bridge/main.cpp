@@ -847,6 +847,11 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
     const bridgelogic::MemberScanResult member =
         bridgelogic::decideOfflineMemberCode(frame.arg(0), codes, gRoster, gSession, box, now);
     if (member.alreadyOn) {
+      if (member.scanSpent) {
+        // The same code again on the member's own lit court: their OFF works,
+        // but a used code buys nothing at the buttons.
+        spendScan();
+      }
       static_cast<void>(sendToMega(proto::Frame::lcd(member.outcome.line1, member.outcome.line2)));
       applyAuth(gAuth.afterHeldCourtRescan(member.outcome.court, now));
       return;
