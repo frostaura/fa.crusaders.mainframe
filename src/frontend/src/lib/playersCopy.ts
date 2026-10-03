@@ -600,6 +600,9 @@ export const DETAIL_MONEY = {
   refundedAtBox: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
   paidAtBoxNote: (payer: string | null, who: string | null, amount: string) =>
     `${payer ?? "Another member"} paid for this court at the court box, so ${who ? `${who} was` : "you were"} refunded ${amount}.`,
+  /** R8 E8-2 — the same note to the member who paid at the box: about themselves, in the second person. */
+  paidAtBoxNoteSelf: (who: string | null, amount: string) =>
+    `You paid for this court at the court box, so ${who ?? "the organiser"} was refunded ${amount}.`,
   notSplit: "This court isn't split — the organiser covers it all.",
 } as const;
 

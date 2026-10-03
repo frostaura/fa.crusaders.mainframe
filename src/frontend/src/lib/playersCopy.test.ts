@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOOK_CONFIRM, DETAIL_ACTIONS, DETAIL_ADMIN } from "./playersCopy";
+import { BOOK_CONFIRM, DETAIL_ACTIONS, DETAIL_ADMIN, DETAIL_MONEY } from "./playersCopy";
 
 const ABBREVIATED = /\d[\s\u00a0]?(h|min|d)\b/;
 
@@ -46,5 +46,13 @@ describe("R7 J7-9 — removing a partner says what goes back, and what it costs 
       "They come off the game. They haven't paid anything, so nothing goes back. Naledi's cost for the court goes up by 30 minutes.",
     );
     expect(body).not.toMatch(ABBREVIATED);
+  });
+});
+
+describe("R8 E8-2 — the member who paid at the box is told about himself", () => {
+  it("in the second person, naming the organiser who was refunded", () => {
+    const line = DETAIL_MONEY.paidAtBoxNoteSelf("Ava", "30 minutes");
+    expect(line).toBe("You paid for this court at the court box, so Ava was refunded 30 minutes.");
+    expect(DETAIL_MONEY.paidAtBoxNoteSelf(null, "30 minutes")).toMatch(/^You paid .* the organiser was refunded/);
   });
 });
