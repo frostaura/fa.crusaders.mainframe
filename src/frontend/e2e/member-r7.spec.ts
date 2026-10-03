@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { bigText, fontsReady, sideways } from "./layoutKit";
 import { BOOKING, detailFixture, inviteFixture, memberShellRoutes } from "./playersKit";
+import { myPlayFixture } from "./playKit";
 
 /**
  * Review round 7 (lane FD1, member shell and bookings) — what only a browser can measure: where
@@ -165,5 +166,62 @@ test.describe("L7-13 — a page title steps down at large text rather than break
     const h1 = page.getByRole("heading", { level: 1 });
     await expect(h1).toBeVisible({ timeout: 20_000 });
     expect(await h1.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBe(24);
+  });
+});
+
+/* ───────────────────────────── L7-5 / L6-16 — the injury pause and small icons at 200 % ───────────────────────────── */
+
+const svgWidth = (page: Page, selector: string) =>
+  page.locator(selector).first().evaluate((el) => el.querySelector("svg")!.getBoundingClientRect().width);
+
+test.describe("L7-5 — the injury pause's sentence takes the card's width at 320 / 200 %", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("the description is not a ~70px column beside the switch; the switch drops under it", async ({ page }) => {
+    await openMember(page, "/profile", [{ path: "/api/v1/me/play", body: myPlayFixture() }], 320, 700);
+    const pause = page.locator("[data-pause]");
+    await expect(pause).toBeVisible({ timeout: 20_000 });
+    await bigText(page);
+    await fontsReady(page);
+    const m = await pause.evaluate((el) => {
+      const desc = el.querySelector("[data-slot=field-description]") ?? el.querySelector("p");
+      return { desc: desc!.getBoundingClientRect().width, card: el.getBoundingClientRect().width };
+    });
+    expect(m.desc, "was ~70px").toBeGreaterThanOrEqual(m.card * 0.9);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
+  });
+
+  test("390 at 100 %: the switch still stands beside the words", async ({ page }) => {
+    await openMember(page, "/profile", [{ path: "/api/v1/me/play", body: myPlayFixture() }], 390, 844);
+    const pause = page.locator("[data-pause]");
+    await expect(pause).toBeVisible({ timeout: 20_000 });
+    const beside = await pause.evaluate((el) => {
+      const sw = el.querySelector('[role="switch"]')!.getBoundingClientRect();
+      const label = el.querySelector("label")!.getBoundingClientRect();
+      return sw.left > label.left + 100 && sw.top < label.bottom + 40;
+    });
+    expect(beside).toBe(true);
+  });
+
+  test("L6-16 — the pause's icon grows with its words", async ({ page }) => {
+    await openMember(page, "/profile", [{ path: "/api/v1/me/play", body: myPlayFixture() }], 390, 844);
+    await expect(page.locator("[data-pause]")).toBeVisible({ timeout: 20_000 });
+    expect(await svgWidth(page, "[data-pause] label")).toBe(16);
+    await bigText(page);
+    expect(await svgWidth(page, "[data-pause] label"), "stayed 16px at a 32px root").toBeGreaterThanOrEqual(28);
+  });
+});
+
+test.describe("L6-16 — the Bookings date controls' icons grow with the text", () => {
+  test.beforeEach(({ browserName }, info) => { void browserName; test.skip(info.project.name !== "desktop", "widths are set per test"); });
+
+  test("390 / 200 %: the calendar and the week arrows are drawn at twice their size", async ({ page }) => {
+    await openBookings(page, 390, 844);
+    const calendar = "[data-day-strip] button[aria-label^='Jump to a date']";
+    expect(await svgWidth(page, calendar)).toBe(16);
+    await bigText(page);
+    expect(await svgWidth(page, calendar), "stayed 16px").toBeGreaterThanOrEqual(28);
+    expect(await svgWidth(page, "button[aria-label='Next week']"), "stayed 20px").toBeGreaterThanOrEqual(36);
+    expect(await sideways(page)).toBeLessThanOrEqual(1);
   });
 });

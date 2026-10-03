@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ToggleGroup } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { CaretLeft, CaretRight } from "./icons";
+import { SCALING_ICON } from "./layout";
 import { dateTimeFormat } from "@/lib/intlCache";
 
 /**
@@ -194,7 +195,8 @@ function WeekNav({ direction, blocked, onGo }: NavProps) {
         "aria-disabled:text-text-muted aria-disabled:hover:bg-transparent",
       )}
     >
-      <Icon size={20} aria-hidden="true" />
+      {/* R7 L6-16 — 20px at 100 % text, growing with it (the target is 44px, and the glyph fits it). */}
+      <Icon size={SCALING_ICON} aria-hidden="true" />
     </button>
   );
 }

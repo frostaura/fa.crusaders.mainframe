@@ -61,7 +61,8 @@ function DateTrigger({ text, placeholder, label, className, ...props }: TriggerP
       )}
       {...props}
     >
-      <CalendarBlank size={16} aria-hidden="true" className="shrink-0 text-text-secondary" />
+      {/* R7 L6-16 — 16px at 100 % text, growing with it. */}
+      <CalendarBlank size="1rem" aria-hidden="true" className="shrink-0 text-text-secondary" />
       <span className={cn(!text && "text-text-muted")}>{text ?? placeholder}</span>
     </button>
   );
