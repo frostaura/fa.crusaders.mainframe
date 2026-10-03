@@ -393,7 +393,8 @@ export function confirmPlayersSentence(price: number, seats: readonly SentenceSe
 /** The Confirm step and the result's players outcome. */
 export const BOOK_CONFIRM = {
   playersLabel: "Players",
-  playersLine: (names: readonly string[]) => `You, ${listNames(names)}`,
+  /** R7 J7-7 — "You and Pam", "You, Sam and Alex": one list, so the last name gets its "and". */
+  playersLine: (names: readonly string[]) => listNames(["You", ...names]),
   /** An open seat, as the players line names it mid-sentence. */
   linkInLine: "an open seat",
   shareLink: "Share the invite link",
@@ -445,6 +446,18 @@ export const DETAIL_COPY = {
   seatNumber: (n: number) => `Seat ${n}`,
 } as const;
 
+/** What a removed seat had paid, and the share the organiser absorbs once it is gone (R7 J7-9). */
+export type RemoveMoney = { paid: number; share: number };
+
+function removeMoneySentence(lead: string, { paid, share }: RemoveMoney, who: { from: string; whose: string }): string {
+  const midWhose = who.whose === "Your" ? "your" : who.whose;
+  if (paid <= 0 && share <= 0) return `${lead}. Nothing was paid and ${midWhose} cost does not change.`;
+  const back = paid > 0
+    ? `${lead} and the ${minutesSpoken(paid)} they paid goes back to them from ${who.from}.`
+    : `${lead}. They haven't paid anything, so nothing goes back.`;
+  return share > 0 ? `${back} ${who.whose} cost for the court goes up by ${minutesSpoken(share)}.` : back;
+}
+
 /** The organiser's hand on the page: invite, remind, share a seat's link, remove. */
 export const DETAIL_ACTIONS = {
   invite: "Invite a player",
@@ -467,6 +480,12 @@ export const DETAIL_ACTIONS = {
   removeFor: (name: string) => `Remove ${name}`,
   removeTitle: (name: string) => `Remove ${name}?`,
   removeBody: (name: string) => `${name} comes off this game. They're refunded anything they paid.`,
+  /**
+   * R7 J7-9 — the confirm says what the remove does to money: what goes back to them, from whose
+   * balance, and that the organiser absorbs their share (a remove never re-splits, players spec).
+   */
+  removeBodyFor: (name: string, money: RemoveMoney) =>
+    removeMoneySentence(`${name} comes off this game`, money, { from: "your balance", whose: "Your" }),
   removeOpenTitle: "Remove this open seat?",
   removeOpenBody: "Its link stops working and the seat is free again.",
   removeConfirm: "Remove",
@@ -764,6 +783,9 @@ export const DETAIL_ADMIN = {
   remove: "Remove",
   removeTitle: (name: string) => `Remove ${name} as the club?`,
   removeBody: "They come off the game and anything they paid goes back to them.",
+  /** R7 J7-9 — the club's confirm, with the money: the refund and the organiser's cost, by name. */
+  removeBodyFor: ({ organiser, ...money }: RemoveMoney & { organiser: string }) =>
+    removeMoneySentence("They come off the game", money, { from: `${organiser}'s balance`, whose: `${organiser}'s` }),
   removeConfirm: "Remove player",
   removed: (name: string) => `${name} is off this game.`,
   accept: "Accept for them",
