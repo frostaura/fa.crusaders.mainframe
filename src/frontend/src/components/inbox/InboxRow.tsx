@@ -75,10 +75,10 @@ export function InboxRow(props: { notice: MemberNotification; now: number; feed:
  * Only the picked row carries a border class: in forced colours `index.css` frames every link whose
  * class names a border, so an always-present `aria-[current=true]:border-…` framed EVERY row.
  */
-const PICKED = "border-l-4 border-accent-strong bg-accent-soft pl-[min(0.75rem,12px)]";
-// R8 L8-11 — the row's gutters are px constants (`min(rem, px)`), so they do not double with the
-// text and take the words' room at 200 % (gotchas-frontend-layout).
-const ROW = "grid min-h-touch w-full items-start gap-x-[min(0.75rem,12px)] gap-y-1 px-[min(1rem,16px)] py-3 text-left";
+const PICKED = "border-l-4 border-accent-strong bg-accent-soft pl-1.5 [@container(min-width:17rem)]:pl-3";
+// R8 L8-11 — the gutters step down on a narrow row (a phone at 200 %): half the padding and gap,
+// so they stay the pixels they are at normal text instead of doubling and taking the words' room.
+const ROW = "grid min-h-touch w-full items-start gap-x-1.5 gap-y-1 px-2 py-3 text-left [@container(min-width:17rem)]:gap-x-3 [@container(min-width:17rem)]:px-4";
 // Whole class names, never built from parts: Tailwind finds classes by reading the source text.
 const ICON = "relative col-start-1 row-start-1 inline-flex shrink-0 items-center justify-center gap-1.5 self-center rounded-full text-text-secondary [@container(min-width:17rem)]:row-span-3 [@container(min-width:17rem)]:size-10 [@container(min-width:17rem)]:self-start [@container(min-width:17rem)]:bg-bg-muted";
 // Beside the bare glyph, not over it: a rem dot on a 20 px glyph hid it at large text.
