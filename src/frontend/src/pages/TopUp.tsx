@@ -4,7 +4,7 @@ import { endpoints, type MinutesShelf, type PayFastFormField, type ShelfPackage 
 import { useBalance, walletTone } from "../lib/balance";
 import { BALANCE_SENTENCE } from "../lib/walletCopy";
 import { formatMoney } from "../lib/utils";
-import { BUY_COPY, BUY_SAID, buyRefusal, withRestated } from "../lib/topUpShelf";
+import { BUY_COPY, BUY_SAID, buyRefusal, isFreeHere, withRestated } from "../lib/topUpShelf";
 import { rememberTopUpReturn, safeReturnTo } from "../lib/topUpReturn";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { StateBlock } from "../components/ui/state-block";
@@ -97,8 +97,8 @@ const LG_UP = "(min-width: 1024px)";
 function summaryDocked(pkg: ShelfPackage | null, buy: Purchase, notice: ReactNode) {
   return (
     <>
-      {notice}
-      <Button block size="lg" pending={buy.pending} disabled={!pkg} onClick={() => { if (pkg) void buy.run(pkg); }}>
+      {pkg && isFreeHere(pkg) ? <Alert tone="warning">{BUY_SAID.priceZero}</Alert> : notice}
+      <Button block size="lg" pending={buy.pending} disabled={!pkg || isFreeHere(pkg)} onClick={() => { if (pkg && !isFreeHere(pkg)) void buy.run(pkg); }}>
         {pkg ? `${BUY_COPY.cta} · ${formatMoney(pkg.price_zar)}` : BUY_COPY.pickOne}
       </Button>
     </>

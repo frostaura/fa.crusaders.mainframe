@@ -3,7 +3,7 @@ import type { MinutesShelf, ShelfPackage } from "../lib/api";
 import { minutesCompact } from "../lib/minutes";
 import { cn, formatMoney } from "../lib/utils";
 import {
-  BUY_COPY, baselineOf, discountPercent, pricePerHour, shelfSections, type ShelfSection,
+  BUY_COPY, BUY_SAID, baselineOf, discountPercent, isFreeHere, pricePerHour, shelfSections, type ShelfSection,
 } from "../lib/topUpShelf";
 import { Minutes } from "../components/Minutes";
 import { Badge } from "../components/ui/badge";
@@ -12,6 +12,7 @@ import { Panel } from "../components/ui/card";
 import { RadioCard, RadioGroup } from "../components/ui/radio-group";
 import { Skeleton } from "../components/ui/skeleton";
 import { Tag, UsersThree } from "../components/ui/icons";
+import { Alert } from "../components/Alert";
 
 /**
  * The shelf itself (P13 §4.2): one radio card per package, the group's own packages under the
@@ -117,6 +118,7 @@ function PackageCard({ pkg, baseline }: { pkg: ShelfPackage; baseline: ShelfPack
           {perHour !== null ? <span className="tabular-nums">{BUY_COPY.perHour(perHour)}</span> : null}
           {saving && baseline ? <span className="text-success-strong">{BUY_COPY.savingLine(pkg.saving_zar!, baseline)}</span> : null}
         </span>
+        {isFreeHere(pkg) ? <Badge tone="warning" className="self-start">{BUY_COPY.freeAtDesk}</Badge> : null}
       </span>
     </RadioCard>
   );
@@ -144,8 +146,10 @@ export function PurchaseSummary(props: SummaryProps) {
     <Panel role="group" aria-label={BUY_COPY.summaryLabel} data-purchase-summary="" className={cn("flex flex-col gap-4", className)}>
       <h2 className="text-base font-semibold text-text-primary">{BUY_COPY.summaryLabel}</h2>
       {pkg ? <SummaryFigures pkg={pkg} discountGroup={discountGroup} /> : <p className="text-sm text-text-secondary">{BUY_COPY.pickOne}</p>}
+      {/* R6 J6-7 — said before the press, not refused after it. */}
+      {pkg && isFreeHere(pkg) ? <Alert tone="warning">{BUY_SAID.priceZero}</Alert> : null}
       {/* No success mark: this ends at PayFast, so "it worked" is the payment page appearing. */}
-      <Button block size="lg" pending={pending} disabled={!pkg} onClick={onBuy}>{BUY_COPY.cta}</Button>
+      <Button block size="lg" pending={pending} disabled={!pkg || isFreeHere(pkg)} onClick={onBuy}>{BUY_COPY.cta}</Button>
       {notice}
       <p className="text-xs text-text-secondary">{BUY_COPY.promise}</p>
     </Panel>

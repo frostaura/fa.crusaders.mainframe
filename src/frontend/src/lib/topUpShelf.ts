@@ -79,6 +79,16 @@ export function withRestated(shelf: MinutesShelf, restated: ShelfPackage): Minut
   return { ...shelf, packages: shelf.packages.map((p) => (p.id === restated.id ? restated : p)) };
 }
 
+/**
+ * R6 J6-7 — a package that costs nothing at this member's discount. PayFast takes no R0.00 payment
+ * (`package_price_zero`), so it is said on the card and never offered to Continue.
+ */
+export function isFreeHere(p: Pick<ShelfPackage, "price_zar">): boolean {
+  return p.price_zar <= 0;
+}
+
+const BUY_COPY_FREE = "Free at your discount — ask at the desk";
+
 export const BUY_COPY = {
   title: "Buy minutes",
   description: "Pick a package and pay in rand with PayFast. The minutes land in your wallet and never expire.",
@@ -107,6 +117,8 @@ export const BUY_COPY = {
   ctaPending: "Starting your payment…",
   promise: "The price is fixed the moment you continue, and can't change while you're at PayFast. If the club changes it while this page is open, we'll show you the new price first.",
   back: "Back",
+  /** R6 J6-7 — a package the member's discount makes free cannot go through PayFast; the desk adds it. */
+  freeAtDesk: BUY_COPY_FREE,
   /** The accessible description of one card — the visible card is a picture of the same facts. */
   spoken: (p: ShelfPackage, baseline: ShelfPackage | null) => {
     const parts = [`${minutesSpoken(p.minutes)} for ${formatMoney(p.price_zar)}`];
@@ -115,6 +127,7 @@ export const BUY_COPY = {
       const pct = p.saving_pct !== null ? ` (${p.saving_pct}%)` : "";
       parts.push(`saves ${formatMoney(p.saving_zar)}${pct} against buying ${minutesSpoken(baseline.minutes)} at a time`);
     }
+    if (isFreeHere(p)) parts.push(BUY_COPY_FREE);
     return `${parts.join(", ")}.`;
   },
   /** The saving's visible sentence under the badge. */

@@ -145,6 +145,30 @@ describe("Buy minutes — the checkout", () => {
     expect(stub.calls.some((c) => c.method === "POST" && c.path === PURCHASE)).toBe(false);
   });
 
+  it("says up front that a package free at the member's discount is the desk's, and never offers Continue for it (R6 J6-7)", async () => {
+    // Review round 6: at a 100 % group discount every card read R0.00 and looked buyable; the
+    // refusal (`package_price_zero`) came only after Continue was pressed.
+    const free = minutesShelf({
+      discount: { bps: 10000, group: { id: "00000000-0000-0000-0000-0000000000c1", name: "Coaches" } },
+      packages: [
+        shelfPackage({ id: PACKAGE_IDS.hour, name: "1 hour", minutes: 60, list_price_zar: 120, discount_bps: 10000, price_zar: 0, saving_zar: null, saving_pct: null }),
+        shelfPackage({ discount_bps: 10000, price_zar: 0, saving_zar: 0, saving_pct: 0 }),
+      ],
+    });
+    const stub = show([{ path: SHELF, body: free }]);
+    const five = await card("5 hours");
+    expect(within(five).getByText(BUY_COPY.freeAtDesk)).toBeInTheDocument();
+    expect(five).toHaveAccessibleDescription(new RegExp(BUY_COPY.freeAtDesk));
+    fireEvent.click(five);
+    expect(screen.getAllByText(BUY_SAID.priceZero).length).toBeGreaterThan(0);
+    const go = screen.getAllByRole("button", { name: new RegExp(BUY_COPY.cta) });
+    for (const button of go) {
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(stub.calls.some((c) => c.method === "POST" && c.path === PURCHASE)).toBe(false);
+  });
+
   it("keeps the way back (an invite) through the PayFast round-trip", async () => {
     show([{ path: SHELF, body: minutesShelf() }, { method: "POST", path: PURCHASE, body: purchaseStart() }], "/wallet/buy?returnTo=%2Fj%2Fabc");
     fireEvent.click(await card("5 hours"));
