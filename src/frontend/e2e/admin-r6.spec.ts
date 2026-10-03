@@ -110,3 +110,40 @@ test.describe("L6-5 — a webhook row at 320 px", () => {
     });
   }
 });
+
+const pkg = (id: string, name: string, minutes: number, price: number, order: number, group: { id: string; name: string } | null = null) => ({
+  id, name, minutes, price_zar: price, group, sort_order: order, status: "active",
+  created_at: "2026-09-01T08:00:00Z", updated_at: "2026-09-01T08:00:00Z",
+});
+const SOCIAL = { id: "g-social", name: "Social evenings", status: "active", system_key: null, package_discount_bps: null, peak_priority: false, member_count: 4 };
+const PACKAGES = [
+  pkg("p-1", "One hour", 60, 120, 0), pkg("p-5", "Five hours", 300, 550, 1), pkg("p-10", "Ten hours", 600, 1000, 2),
+  pkg("p-s", "Social 5 hours", 300, 450, 0, { id: "g-social", name: "Social evenings" }),
+];
+const packageRoutes = () => adminRoutes([
+  { path: "/api/v1/admin/packages", body: { packages: PACKAGES } },
+  { path: "/api/v1/admin/member-groups", body: { groups: [SOCIAL] } },
+]);
+
+test.describe("L6-7 — Packages uses a desk's width", () => {
+  for (const width of [1024, 1280, 1440]) {
+    test(`at ${width}: shelves are tables and the editor stands beside them`, async ({ page }) => {
+      await open(page, "/admin/packages", packageRoutes(), width);
+      await expect(page.getByRole("table").first()).toBeVisible({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Edit Five hours" }).click();
+      // Beside the list, not over it: no modal, and the shelves stay on screen.
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      const rail = page.getByRole("complementary", { name: /package/i });
+      await expect(rail.getByRole("textbox").first()).toBeVisible();
+      await expect(page.getByRole("table").first()).toBeInViewport();
+      expect(await sideways(page)).toBeLessThanOrEqual(1);
+      // Every column on screen beside the editor: the table does not scroll inside its column.
+      const spill = await page.locator("[data-aside-main]").evaluate((col) => {
+        const right = col.getBoundingClientRect().right;
+        return Math.max(...[...col.querySelectorAll("table")].map((t) => t.getBoundingClientRect().right - right));
+      });
+      expect(spill, "a package table runs past its column").toBeLessThanOrEqual(1);
+      if (process.env.FC_SHOTS) await page.screenshot({ path: `${process.env.FC_SHOTS}/packages-${width}.png` });
+    });
+  }
+});

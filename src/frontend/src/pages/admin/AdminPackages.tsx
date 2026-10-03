@@ -23,7 +23,10 @@ import { useIsSmUp } from "../../components/ui/use-media-query";
 import { WithAside } from "../../components/ui/with-aside";
 import { adminEndpoints, type AdminPackage, type MemberGroup, type PackageStatus } from "../../lib/adminApi";
 import { describeFailure } from "../../lib/errors";
-import { PACKAGES_COPY as COPY, PACKAGE_LIMITS, baselineOf, perHour, savingOf, shelfOrder } from "../../lib/packagesCopy";
+import {
+  PACKAGES_COPY as COPY, PACKAGE_LIMITS, baselineOf, perHour, savingOf, shelfOrder, type ShelfItem,
+} from "../../lib/packagesCopy";
+import { memberShelfOf } from "../../components/packages/memberShelf";
 import { formatMoney } from "../../lib/utils";
 
 /**
@@ -37,7 +40,7 @@ import { formatMoney } from "../../lib/utils";
  * </p>
  *
  * <p>
- * <b>Every form factor uses its width.</b> From a 64rem box the list is a table and the editor
+ * <b>Every form factor uses its width.</b> From a 56rem box (a 1024 screen beside the admin rail, L6-7) the list is a table and the editor
  * stands BESIDE it (`WithAside`), so a price is changed with the shelf in view; narrower, the
  * list is cards and the editor is a sheet from the bottom.
  * </p>
@@ -52,7 +55,7 @@ export default function AdminPackagesPage() {
   const read = usePackages(view);
   const groups = useActiveGroups();
   const [editing, setEditing] = useState<AdminPackage | "new" | null>(null);
-  const [boxRef, roomy] = useBoxAtLeast(64);
+  const [boxRef, roomy] = useBoxAtLeast(56);
   const toast = useToast();
   const activeCount = read.active?.length ?? 0;
   const atLimit = activeCount >= PACKAGE_LIMITS.activeMax;
@@ -96,8 +99,8 @@ export default function AdminPackagesPage() {
           aside={<EditorPanel editing={editing}>{roomy ? editor : null}</EditorPanel>}
           asideLabel={COPY.asideLabel}
           placement="sheet"
-          at="64rem"
-          asideWidth="28rem"
+          at="56rem"
+          asideWidth="20rem"
         >
           <PackagesList view={view} read={read} groups={groups} wide={roomy} onAdd={add} onEdit={setEditing} />
         </WithAside>
@@ -204,7 +207,8 @@ function EditorSheet({ editing, onClose, children }: { editing: AdminPackage | "
   );
 }
 
-type Shelf = { key: string; title: string; hint: string; packages: AdminPackage[] };
+/** `member`: the shelf a member of it SEES (club packages too, at the group's discount) — what a saving is measured against (J6-5). */
+type Shelf = { key: string; title: string; hint: string; packages: AdminPackage[]; member: ShelfItem[] };
 
 /** The club's shelf first, then each group's, each in the member's order (§3.5, §4.2). */
 function shelvesOf(packages: AdminPackage[], groups: GroupsRead): Shelf[] {
@@ -215,12 +219,15 @@ function shelvesOf(packages: AdminPackage[], groups: GroupsRead): Shelf[] {
     if (!byKey.has(key)) {
       const name = p.group ? named.get(p.group.id)?.name ?? p.group.name : null;
       byKey.set(key, name === null
-        ? { key, title: COPY.clubShelf, hint: COPY.clubShelfHint, packages: [] }
-        : { key, title: COPY.groupShelf(name), hint: COPY.groupShelfHint(name), packages: [] });
+        ? { key, title: COPY.clubShelf, hint: COPY.clubShelfHint, packages: [], member: [] }
+        : { key, title: COPY.groupShelf(name), hint: COPY.groupShelfHint(name), packages: [], member: [] });
     }
     byKey.get(key)!.packages.push(p);
   }
-  const shelves = [...byKey.values()].map((s) => ({ ...s, packages: [...s.packages].sort(shelfOrder) }));
+  const known = groups.status === "ready" ? groups.groups : null;
+  const shelves = [...byKey.values()].map((s) => ({
+    ...s, packages: [...s.packages].sort(shelfOrder), member: memberShelfOf(packages, s.key === "club" ? null : s.key, known),
+  }));
   return shelves.sort((a, b) => (a.key === "club" ? -1 : b.key === "club" ? 1 : a.title.localeCompare(b.title)));
 }
 
@@ -250,11 +257,11 @@ function Shelves({ packages, groups, wide, onEdit, onRetired }: ShelvesProps) {
 
 type ShelfViewProps = { shelf: Shelf; onEdit: (p: AdminPackage) => void; onRetired: (p: AdminPackage) => void };
 
-/** "Saves R50.00 (8%)", "Smallest", or a dash — against the shelf's own smallest package. */
+/** "Saves R50.00 (8%)", "Smallest", or a dash — against the smallest package on a member's shelf (§4.3). */
 function savingWords(p: AdminPackage, shelf: Shelf): string {
   if (p.status !== "active") return COPY.noSaving;
-  const baseline = baselineOf(shelf.packages.filter((x) => x.status === "active"));
-  if (baseline && baseline.id === p.id && shelf.packages.length > 1) return COPY.baseline;
+  const baseline = baselineOf(shelf.member);
+  if (baseline && baseline.id === p.id && shelf.member.length > 1) return COPY.baseline;
   const saving = savingOf(p, baseline);
   return saving ? COPY.saves(saving.zar, saving.pct) : COPY.noSaving;
 }

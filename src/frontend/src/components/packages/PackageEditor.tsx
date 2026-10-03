@@ -11,8 +11,9 @@ import { unsureSentence, writeOrReadBack } from "@/lib/lostReply";
 import { LOST_REPLY } from "@/lib/lostReplyCopy";
 import {
   PACKAGES_COPY as COPY, PACKAGES_LOST, PACKAGE_LIMITS, baselineOf, minutesComplaint, parsePackageMinutes, parsePrice,
-  perHour, priceComplaint, savingOf, shelfWith, type ShelfKey,
+  perHour, priceComplaint, savingOf, type ShelfKey,
 } from "@/lib/packagesCopy";
+import { memberShelfWith } from "./memberShelf";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { formatMoney } from "@/lib/utils";
 
@@ -129,7 +130,7 @@ export function PackageEditor({ pkg, active, groups, onSaved, onCancel }: Packag
           <Input autoComplete="off" value={draft.reason} placeholder={COPY.reasonPlaceholder} onChange={(e) => set({ reason: e.target.value })} />
         </Field>
       )}
-      <Preview pkg={pkg} draft={draft} active={active} />
+      <Preview pkg={pkg} draft={draft} active={active} groups={groups} />
       <SaveFailure error={save.error} isNew={isNew} name={draft.name.trim()} />
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" disabled={save.pending} onClick={onCancel}>{COPY.cancel}</Button>
@@ -223,13 +224,16 @@ function ShelfField({ isNew, draft, set, groups, pkg }: ShelfFieldProps) {
   );
 }
 
-/** Rand per hour, and the saving against the shelf's smallest package — as the member's shelf will say it. */
-function Preview({ pkg, draft, active }: { pkg: AdminPackage | "new"; draft: Draft; active: AdminPackage[] | null }) {
+/** Rand per hour, and the saving against the smallest package on a member's shelf — as their Buy page will say it. */
+type PreviewProps = { pkg: AdminPackage | "new"; draft: Draft; active: AdminPackage[] | null; groups: MemberGroup[] | null };
+
+function Preview({ pkg, draft, active, groups }: PreviewProps) {
   const minutes = parsePackageMinutes(draft.minutes);
   const price = parsePrice(draft.price);
   if (minutes === null || price === null) return null;
   const item = { id: pkg === "new" ? "draft" : pkg.id, name: draft.name.trim() || COPY.preview, minutes, price_zar: price };
-  const shelf = shelfWith(active ?? [], draft.shelf, item);
+  // J6-5: against the shelf a member of it sees — the club's packages too, at the group's discount.
+  const shelf = memberShelfWith(active ?? [], draft.shelf, groups, item);
   const baseline = baselineOf(shelf);
   const saving = savingOf(item, baseline);
   const hourly = perHour(price, minutes);

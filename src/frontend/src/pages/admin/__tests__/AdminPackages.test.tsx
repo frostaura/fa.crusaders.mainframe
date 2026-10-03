@@ -55,6 +55,31 @@ describe("the shelves", () => {
     expect(document.body.textContent).not.toMatch(/credit|\bcr\b|\d\.\d+ min/i);
   });
 
+  /**
+   * Review round 6, J6-5 — contract §4.3's baseline is the MEMBER's shelf, and a group member's
+   * shelf is the group's packages AND the club's at that group's discount (§4.2, Dean's answer 2).
+   * Measured against the group's packages alone, League night was "the only package on this
+   * shelf" with no saving, where a League member sees it beside 1 hour at R108.00 (10 % off R120).
+   */
+  it("measures a group package's saving against the member's whole shelf, club packages at the group's discount", async () => {
+    stubFetch(routes());
+    renderPage(<AdminPackagesPage />);
+    const league = await screen.findByRole("list", { name: COPY.listLabel("League") });
+    // 108 × 90 ÷ 60 − 150 = R12.00; floor(100 × (1 − 150 × 60 ÷ (90 × 108))) = 7 %.
+    expect(within(league).getAllByRole("listitem")[0]).toHaveTextContent(COPY.saves(12, 7));
+  });
+
+  it("says the same in the editor's preview for a package on a group's shelf", async () => {
+    stubFetch(routes());
+    renderPage(<AdminPackagesPage />);
+    await screen.findByRole("list", { name: COPY.listLabel(COPY.clubShelf) });
+    fireEvent.click(within(await screen.findByRole("list", { name: COPY.listLabel("League") })).getByRole("button", { name: COPY.editLabel("League night") }));
+    const dialog = await screen.findByRole("dialog");
+    const preview = dialog.querySelector("[data-package-preview]")!;
+    expect(preview).not.toHaveTextContent(COPY.previewAlone);
+    expect(preview).toHaveTextContent("Saves R12.00 (7%) against 1 hour (R108.00).");
+  });
+
   it("shows the retired packages in their own view, read-only", async () => {
     stubFetch(routes());
     renderPage(<AdminPackagesPage />);
