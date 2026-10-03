@@ -245,3 +245,56 @@ test.describe("L8-7 — the Transactions totals never split a number from its un
     });
   }
 });
+
+/* ───────────────────────────── X8-4 "Show N more" keeps focus on the page ───────────────────────────── */
+
+const CLUB = Array.from({ length: 82 }, (_, i) => member({
+  user_id: `00000000-0000-4000-8000-${String(100000000000 + i)}`, membership_id: `00000000-0000-4000-9000-${String(100000000000 + i)}`,
+  full_name: `Member ${String(i).padStart(2, "0")}`, membership_number: `MEM-${i}`, email: `m${i}@r8.review.test`,
+}));
+
+test.describe("X8-4 — the members list's last \"Show more\" hands focus to the first row it revealed", () => {
+  for (const width of [390, 1280]) {
+    test(`at ${width}`, async ({ page }) => {
+      await open(page, "/admin/members", adminRoutes([{ path: "/api/v1/admin/members/", body: CLUB }]), width);
+      const more = page.getByRole("button", { name: /^Show 32 more$/ });
+      await more.focus({ timeout: 30_000 });
+      await page.keyboard.press("Enter");
+      await expect(more).toHaveCount(0);
+      await expect.poll(() => focused(page)).not.toBe("<body>");
+      const row = await page.evaluate(() => document.activeElement?.closest("[data-member-row]")?.textContent ?? null);
+      expect(row).toContain("Member 50");
+    });
+  }
+});
+
+const traceEvent = (at: string, headline: string) => ({
+  at, strand: "booking", kind: "booking.made", headline,
+  actor: { user_id: USER, name: "Paul Partner", kind: "member", is_self: true }, subject: { user_id: USER, name: "Paul Partner" },
+});
+const traceView = (events: unknown[], cursor: string | null) => ({
+  member: { user_id: USER, name: "Paul Partner", membership_number: "MEM-801" }, club_day: "2026-09-22",
+  range: { from: "2026-09-22T00:00:00+02:00", to: "2026-09-23T00:00:00+02:00" }, timezone: "Africa/Johannesburg",
+  retention: { audit_days: 730, door_days: 90, door_horizon: "2026-06-24", door_rows_may_be_incomplete: false },
+  events, total: 2, cursor,
+});
+
+test("X8-4 — the Night's last \"Show more\" hands focus to the first event it brought", async ({ page }) => {
+  const first = traceView([traceEvent("2026-09-22T15:52:09.000Z", "Booked Court 2 for 18:00")], "p2");
+  const second = traceView([traceEvent("2026-09-22T19:10:00.000Z", "Booked Court 3 for 21:30")], null);
+  await open(page, `/admin/members/${USER}/night?day=2026-09-22`, adminRoutes([
+    { path: `/api/v1/admin/members/${USER}/trace`, body: first },
+    { path: `/api/v1/admin/members/${USER}`, body: memberDetail() },
+  ]), 1280);
+  // `serveApi` matches paths without their query; the page asked with the cursor is answered here.
+  await page.route(/\/trace\?.*cursor=p2/, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(second) }));
+  const more = page.getByRole("button", { name: "Show more of this night" });
+  await more.focus({ timeout: 30_000 });
+  await page.keyboard.press("Enter");
+  await expect(more).toHaveCount(0);
+  // The first row the page brought: here the gap drawn before the new event (a gap is a row too).
+  await expect.poll(() => page.evaluate(() => {
+    const rows = [...document.querySelectorAll("[data-night-row]")];
+    return rows.indexOf(document.activeElement as Element);
+  })).toBe(1);
+});

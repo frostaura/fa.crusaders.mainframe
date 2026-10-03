@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { useOutlet } from "react-router-dom";
 import { GroupAssign } from "../components/members/GroupAssign";
 import { MemberDialogs, type MemberDialogState } from "../components/members/MemberDialogs";
@@ -175,8 +176,21 @@ export default function AdminMembersPage() {
 function usePaging(key: string) {
   const [state, setState] = useState({ key, shown: MEMBERS_PAGE_SIZE });
   const shown = state.key === key ? state.shown : MEMBERS_PAGE_SIZE;
-  const more = useCallback(() => setState({ key, shown: shown + MEMBERS_PAGE_SIZE }), [key, shown]);
+  const more = useCallback(() => {
+    // R8 X8-4: the last "Show N more" goes with the rows it reveals and focus fell to <body>.
+    // Drawn first, then the first revealed row (its name's link) takes focus — table or picker.
+    flushSync(() => setState({ key, shown: shown + MEMBERS_PAGE_SIZE }));
+    focusFirstRevealed(document.querySelectorAll<HTMLElement>("[data-member-row], [data-picker-row]"), shown);
+  }, [key, shown]);
   return { shown, more };
+}
+
+/** The row at `index` (the first one a "Show more" revealed), or its first link or button, takes focus. */
+function focusFirstRevealed(rows: NodeListOf<HTMLElement>, index: number) {
+  const row = rows[index];
+  if (!row) return;
+  const target = row.matches("a, button") ? row : row.querySelector<HTMLElement>("a[href], button");
+  target?.focus();
 }
 
 type OverlayProps = {

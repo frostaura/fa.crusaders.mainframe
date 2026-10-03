@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert } from "../../components/Alert";
 import { useToast } from "../../components/Toast";
@@ -92,7 +93,9 @@ function NightTimeline({ rows, subjectName, timezone }: {
   return (
     <ol className="relative space-y-3 border-l-2 border-border pl-4">
       {rows.map((row, index) => (
-        <li key={`${row.kind}-${index}`}>
+        // tabIndex -1: focusable by script only, so "Show more" can hand focus to the first row it
+        // brought (R8 X8-4 — the last page took the button away and focus fell to <body>).
+        <li key={`${row.kind}-${index}`} data-night-row="" tabIndex={-1} className="rounded-sm">
           {row.kind === "gap" ? (
             /* Drawn, not closed up. A night with an hour missing from the middle and
                no sign of it reads as a continuous evening, which is a claim. */
@@ -181,12 +184,24 @@ function useMemberNight(userId: string, day: string) {
     setMore({ key, events: mine?.events ?? [], cursor, pending: true, error: null });
     try {
       const page = await adminEndpoints.memberTrace(userId, { day, limit: TRACE_PAGE, cursor });
-      setMore((now) => (now.key === key ? { key, events: [...now.events, ...page.events], cursor: page.cursor ?? null, pending: false, error: null } : now));
+      const before = document.querySelectorAll("[data-night-row]").length;
+      flushSync(() => setMore((now) => (now.key === key ? { key, events: [...now.events, ...page.events], cursor: page.cursor ?? null, pending: false, error: null } : now)));
+      focusFirstNew(before);
     } catch (error) {
       setMore((now) => (now.key === key ? { ...now, pending: false, error } : now));
     }
   };
   return { view, loading: read.loading, error: read.error, retry, loadMore, more: { pending: mine?.pending ?? false, error: mine?.error ?? null } };
+}
+
+/**
+ * The first timeline row a page added takes focus (R8 X8-4): the button may be gone with the last
+ * page, and a reader carries on from where the night continues. A burst that absorbed the new
+ * events is the last row there was — that one, then.
+ */
+function focusFirstNew(before: number) {
+  const rows = document.querySelectorAll<HTMLElement>("[data-night-row]");
+  rows[Math.min(before, rows.length - 1)]?.focus();
 }
 
 /** Events a page holds beyond the first read, for one night (`key`). `cursor` undefined: not paged yet. */
