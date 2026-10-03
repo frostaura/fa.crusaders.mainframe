@@ -121,9 +121,7 @@ export async function attemptSale(input: SellInput, keyRef: { current: Adjustmen
   keyRef.current = saleKey(keyRef.current, input);
   const pressedAt = Date.now();
   try {
-    // `quotedPriceZar` rides on a variable, not a literal: lib/adminApi's body type gains it with
-    // the integrator's R9 change (scratchpad ask), and until then the field is simply not forwarded.
-    const body: Parameters<typeof adminEndpoints.sellPackage>[1] & { quotedPriceZar: number } = {
+    const body = {
       packageId: input.pkg.id,
       reasonCode: input.reasonCode,
       reason: input.reason.trim(),
