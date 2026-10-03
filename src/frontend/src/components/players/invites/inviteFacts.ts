@@ -33,6 +33,15 @@ export function inviteHeading(invite: Invite, invitedTitle: string): { title: st
   return { title: invitedTitle, line: invitedLine(organiser, invite.open_link) };
 }
 
+/**
+ * R12 J12-3 — while "decline for good?" is being asked the heading is the question's own; the line
+ * under it (who invited them) stays. Otherwise `inviteHeading`.
+ */
+export function answerHeading(invite: Invite, invitedTitle: string, askingDecline: boolean): { title: string; line: string } {
+  const heading = inviteHeading(invite, invitedTitle);
+  return askingDecline ? { ...heading, title: INVITES_COPY.declineSheetTitle } : heading;
+}
+
 /** "Wed 30 Sep, 18:00–18:45" in the club's zone. */
 export function inviteWhen(invite: Pick<Invite, "starts_at" | "ends_at">): string {
   return `${playersWhen(invite.starts_at)}–${clubClock(invite.ends_at)}`;

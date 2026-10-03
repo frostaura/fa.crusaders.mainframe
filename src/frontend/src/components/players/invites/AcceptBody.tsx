@@ -34,13 +34,23 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
   headed?: boolean;
 }) {
   if (flow.outcome) return <OutcomeView flow={flow} headed={headed} />;
+  // R12 J12-3 — asking "decline for good?": the game, and that nothing moves. No share, balance,
+  // limit or deadline — they describe a yes. One live region says both sentences, once.
+  if (flow.askingDecline) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Problem flow={flow} />
+        <Alert tone="warning" live="polite" data-decline-final="">
+          {`${INVITES_COPY.declineFinal(organiserName(flow.invite))} ${INVITES_COPY.declineNothingMoves}`}
+        </Alert>
+        <GameFacts flow={flow} />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-4">
       {/* The last answer first: a risen share or a refusal is the reason the sheet changed. */}
       <Problem flow={flow} />
-      {flow.askingDecline ? (
-        <Alert tone="warning" live="polite" data-decline-final="">{INVITES_COPY.declineFinal(organiserName(flow.invite))}</Alert>
-      ) : null}
       {flow.blocked === "rereading" ? <p role="status" id={reasonId} className="text-sm text-text-secondary">{flow.readingAgain}</p> : null}
       <GameFacts flow={flow} />
       <MoneyFacts flow={flow} />

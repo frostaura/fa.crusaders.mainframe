@@ -10,7 +10,7 @@ import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 import { AcceptActions } from "./AcceptActions";
 import { AcceptBody } from "./AcceptBody";
-import { inviteHeading } from "./inviteFacts";
+import { answerHeading } from "./inviteFacts";
 import { seatPort, useAcceptFlow } from "./useAcceptFlow";
 
 /**
@@ -96,7 +96,7 @@ function SheetInner(props: InnerProps) {
       <Button variant="outline">{flow.outcome ? INVITES_COPY.done : INVITES_COPY.cancel}</Button>
     </DialogClose>
   );
-  const heading = inviteHeading(invite, INVITES_COPY.sheetTitle);
+  const heading = answerHeading(invite, INVITES_COPY.sheetTitle, flow.askingDecline);
   return (
     <>
       <DialogHeader>

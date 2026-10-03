@@ -345,12 +345,13 @@ describe("the accept sheet", () => {
     const sheet = await openSheet();
     fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.decline }));
     expect(stub.calls.some((c) => c.path === DECLINE)).toBe(false);
-    expect(within(sheet).getByText(INVITES_COPY.declineFinal("Sam"))).toBeInTheDocument();
+    // R12 J12-3 — one live region: final, and nothing moves.
+    expect(sheet.querySelector("[data-decline-final]")?.textContent).toContain(INVITES_COPY.declineFinal("Sam"));
     // Accept is not offered beside a pending "decline for good" — one question at a time.
     expect(within(sheet).queryByRole("button", { name: acceptLabel(25) })).toBeNull();
     fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.declineKeep }));
     expect(within(sheet).getByRole("button", { name: acceptLabel(25) })).toBeInTheDocument();
-    expect(within(sheet).queryByText(INVITES_COPY.declineFinal("Sam"))).toBeNull();
+    expect(sheet.querySelector("[data-decline-final]")).toBeNull();
     expect(stub.calls.some((c) => c.path === DECLINE)).toBe(false);
   });
 
@@ -587,7 +588,8 @@ describe("R5 §3.5 — the answers on the card at phone width", () => {
     const stub = openInvites();
     const card = await screen.findByRole("group", { name: SPLIT_PANE_COPY.cardActionsLabel("Sam") });
     fireEvent.click(within(card).getByRole("button", { name: SPLIT_PANE_COPY.cardDecline }));
-    const sheet = await screen.findByRole("dialog", { name: INVITES_COPY.sheetTitle });
+    // R12 J12-3 — the question is titled for itself, not "Join this game?".
+    const sheet = await screen.findByRole("dialog", { name: INVITES_COPY.declineSheetTitle });
     const keep = await within(sheet).findByRole("button", { name: INVITES_COPY.declineKeep });
     await waitFor(() => expect(keep).toHaveFocus());
     expect(within(sheet).getByRole("button", { name: INVITES_COPY.declineConfirm })).toBeInTheDocument();

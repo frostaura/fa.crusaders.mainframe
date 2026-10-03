@@ -7,7 +7,7 @@ import { INVITES_COPY } from "@/lib/playersCopy";
 import { typography } from "@/lib/typography";
 import { AcceptActions } from "./AcceptActions";
 import { AcceptBody } from "./AcceptBody";
-import { inviteHeading } from "./inviteFacts";
+import { answerHeading } from "./inviteFacts";
 import { seatPort, useAcceptFlow } from "./useAcceptFlow";
 
 /**
@@ -29,7 +29,7 @@ export function InviteDetail({ invite, onReread }: { invite: Invite; onReread: (
     [bookingId, participantId, openLink, onReread],
   );
   const flow = useAcceptFlow(invite, port);
-  const heading = inviteHeading(invite, INVITES_COPY.sheetTitle);
+  const heading = answerHeading(invite, INVITES_COPY.sheetTitle, flow.askingDecline);
   const dismiss = flow.outcome ? (
     <Button asChild variant="outline"><Link to="/bookings">{INVITES_COPY.toBookings}</Link></Button>
   ) : null;

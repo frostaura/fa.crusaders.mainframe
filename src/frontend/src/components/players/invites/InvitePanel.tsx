@@ -13,7 +13,7 @@ import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY, signedInAsLine } from "@/lib/playersCopy";
 import { AcceptActions } from "./AcceptActions";
 import { AcceptBody } from "./AcceptBody";
-import { inviteHeading } from "./inviteFacts";
+import { answerHeading } from "./inviteFacts";
 import { useAcceptFlow, type AcceptPort } from "./useAcceptFlow";
 
 /**
@@ -28,7 +28,7 @@ export function InvitePanel({ invite, port }: { invite: Invite; port: AcceptPort
       <Link to="/bookings">{INVITES_COPY.toBookings}</Link>
     </Button>
   );
-  const heading = inviteHeading(invite, INVITES_COPY.linkTitle);
+  const heading = answerHeading(invite, INVITES_COPY.linkTitle, flow.askingDecline);
   return (
     <PageShell width="narrow">
       <PageHeader

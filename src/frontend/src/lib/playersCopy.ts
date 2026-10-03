@@ -868,6 +868,10 @@ export const INVITES_COPY = {
   declineKeep: "Keep the invite",
   declineFinal: (organiser: string) =>
     `Declining is final — ${organiser} is told, and can't ask you into this game again.`,
+  /** R12 J12-3 — the decline question's own title: it is not "Join this game?". */
+  declineSheetTitle: "Decline this game?",
+  /** R12 J12-3 — a no takes nothing and holds nothing, so the question shows no figures and says so. */
+  declineNothingMoves: "Nothing moves: no minutes leave your wallet.",
   cancel: "Cancel",
   done: "Done",
   /** P13 — the short-balance way out is a package; the verb is "buy" (§6). */
