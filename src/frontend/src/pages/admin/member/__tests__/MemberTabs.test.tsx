@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ledgerRowFixture, signOut, unreachable } from "@/test/harness";
 import { ACCESS_COPY, BOOKINGS_TAB_COPY, DOORS_TAB_COPY, LEDGER_LIMIT, WALLET_TAB_COPY } from "@/lib/memberDetailCopy";
 import { DETAIL_LINKS } from "@/lib/playersCopy";
-import { doorOptions } from "../MemberDoors";
+import { doorOptions } from "../doorOptions";
 import { BASE, MEMBER_ID, baseRoutes, bookingRow, detailFixture, doorRow, doorsPage, renderMember, serve } from "./memberKit";
 
 const at = (path: string) => `/admin/members/${MEMBER_ID}/${path}`;

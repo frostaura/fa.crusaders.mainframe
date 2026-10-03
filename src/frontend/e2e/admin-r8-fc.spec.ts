@@ -74,7 +74,7 @@ function brokenWords(el: Locator): Promise<string[]> {
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node.textContent ?? "";
       if (node.parentElement?.closest(".sr-only")) continue;
-      for (const m of text.matchAll(/[^\s \-–]+[-–]?/g)) {
+      for (const m of text.matchAll(/[^\s\u00a0\-\u2013]+[-\u2013]?/g)) {
         const range = document.createRange();
         range.setStart(node, m.index!);
         range.setEnd(node, m.index! + m[0].length);
@@ -95,7 +95,7 @@ function splitFigures(el: Locator): Promise<string[]> {
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node.textContent ?? "";
       if (node.parentElement?.closest(".sr-only")) continue;
-      for (const m of text.matchAll(/\d+[\s ]+(?:d|h|min)\b/g)) {
+      for (const m of text.matchAll(/\d+[\s\u00a0]+(?:d|h|min)\b/g)) {
         const range = document.createRange();
         range.setStart(node, m.index!);
         range.setEnd(node, m.index! + m[0].length);
@@ -297,4 +297,91 @@ test("X8-4 — the Night's last \"Show more\" hands focus to the first event it 
     const rows = [...document.querySelectorAll("[data-night-row]")];
     return rows.indexOf(document.activeElement as Element);
   })).toBe(1);
+});
+
+/* ───────────────────────────── X8-3 inline editors take focus and give it back ───────────────────────────── */
+
+const BOX = {
+  id: "11111111-1111-1111-1111-111111111111", device_code: "box-a1b2c3", name: "Cupboard box", kind: "CourtBox", hardware: "Esp8266",
+  court_numbers: [1], gate_key: null, mac_address: "5ccf7f1a2b3c", enabled: true, last_seen_at: new Date().toISOString(),
+  last_ip_address: "192.168.68.151", running_version: "2.0.0", mega_version: "1.4.0", created_at: "2026-09-01T08:00:00Z",
+  auto_registered: false, button_map: null, effective_heartbeat_seconds: 60,
+};
+const SETTINGS = {
+  slice_minutes: 15, advance_booking_days: 14, day_start_minute: 360, day_end_minute: 1320, timezone: "Africa/Johannesburg",
+  button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"], walk_up_max_minutes: 90,
+  heartbeat_seconds: 60,
+};
+const COURTS = [
+  { id: "22222222-2222-2222-2222-222222222221", court_number: 1, name: "Show court", court_type: "Squash", slice_price_credits: 8, is_active: true },
+];
+const boardRoutes = () => adminRoutes([
+  { path: "/api/v1/admin/devices/api-key", body: { api_key: "cmk_test_only", regenerated_at: "2026-09-01T08:30:00Z" } },
+  { path: "/api/v1/admin/devices/", body: [BOX] },
+  { path: "/api/v1/admin/settings/", body: SETTINGS },
+  { path: "/api/v1/admin/courts/", body: COURTS },
+]);
+
+/** Whether focus is inside the element matching `selector` (an editor), by DOM containment. */
+const focusInside = (page: Page, selector: string) => page.evaluate((sel) => {
+  const box = document.querySelector(sel);
+  return Boolean(box && document.activeElement && box.contains(document.activeElement) && document.activeElement !== box);
+}, selector);
+
+test.describe("X8-3 — Boards' inline editors", () => {
+  for (const [opener, width] of [["Edit name and courts", 1280], ["Edit buttons", 1280], ["Edit name and courts", 390]] as const) {
+    test(`${opener} at ${width}: opens with focus in the form, Cancel gives it back`, async ({ page }) => {
+      await open(page, "/admin/devices", boardRoutes(), width);
+      const button = page.getByRole("button", { name: opener, exact: true });
+      await button.focus({ timeout: 30_000 });
+      await page.keyboard.press("Enter");
+      const card = page.locator("[data-board-card]").first();
+      await expect.poll(() => focused(page)).not.toBe(opener);
+      expect(await card.evaluate((el) => el.contains(document.activeElement) && document.activeElement !== document.body)).toBe(true);
+      expect(await page.evaluate(() => ["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(document.activeElement?.tagName ?? ""))).toBe(true);
+      await card.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect.poll(() => focused(page)).toBe(opener);
+    });
+  }
+});
+
+const pkg = (id: string, name: string, minutes: number, price: number, order: number) => ({
+  id, name, minutes, price_zar: price, group: null, sort_order: order, status: "active",
+  created_at: "2026-09-01T08:00:00Z", updated_at: "2026-09-01T08:00:00Z",
+});
+const PACKAGES = [pkg("p-1", "1 hour", 60, 120, 0), pkg("p-5", "5 hours", 300, 550, 1), pkg("p-10", "10 hours", 600, 1000, 2)];
+const packageRoutes = () => adminRoutes([{ path: "/api/v1/admin/packages", body: { packages: PACKAGES } }]);
+
+test.describe("X8-3 — the Packages rail's editor", () => {
+  test("Edit puts focus on the editor's first field; Cancel gives it back to that Edit", async ({ page }) => {
+    await open(page, "/admin/packages", packageRoutes(), 1280);
+    const edit = page.getByRole("button", { name: "Edit 5 hours" });
+    await edit.focus({ timeout: 30_000 });
+    await page.keyboard.press("Enter");
+    await expect.poll(() => focusInside(page, "[data-package-editor]")).toBe(true);
+    await page.locator("[data-package-editor]").getByRole("button", { name: "Cancel" }).click();
+    await expect.poll(() => focused(page)).toBe("Edit 5 hours");
+  });
+
+  test("Add: Cancel gives focus back to Add package", async ({ page }) => {
+    await open(page, "/admin/packages", packageRoutes(), 1280);
+    const add = page.getByRole("button", { name: "Add package" });
+    await add.focus({ timeout: 30_000 });
+    await page.keyboard.press("Enter");
+    await expect.poll(() => focusInside(page, "[data-package-editor]")).toBe(true);
+    await page.locator("[data-package-editor]").getByRole("button", { name: "Cancel" }).click();
+    await expect.poll(() => focused(page)).toBe("Add package");
+  });
+});
+
+test("X8-3 — the Repeating bookings editor's Cancel gives focus back to Create", async ({ page }) => {
+  await open(page, "/admin/schedules", adminRoutes([
+    { path: "/api/v1/admin/schedules", body: { schedules: [], timezone: "Africa/Johannesburg" } },
+    { path: "/api/v1/admin/settings/", body: SETTINGS },
+    { path: "/api/v1/admin/courts/", body: COURTS },
+  ]), 1280);
+  const create = page.getByRole("button", { name: "Create a repeating booking" }).first();
+  await create.click({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect.poll(() => focused(page)).toBe("Create a repeating booking");
 });

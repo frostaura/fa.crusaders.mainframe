@@ -11,6 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { CalendarDots, Plus } from "../components/ui/icons";
 import { CardListSkeleton } from "../components/monitoring/parts";
 import { ScheduleEditor } from "../components/schedules/ScheduleEditor";
+import { useInlineEditorFocus } from "../components/admin/useInlineEditorFocus";
 import { adminEndpoints, type ScheduleRow } from "../lib/adminApi";
 import {
   LIST_EMPTY_ENDED_POINTER, LIST_EMPTY_HINT, LIST_EMPTY_TITLE, LIST_FAILED_CAVEAT, laterRuleLines, nextOccurrenceLine, ruleSentence,
@@ -99,6 +100,10 @@ export function AdminSchedulesPage() {
   const [status, setStatus] = useState<Status>("active");
   const [nonce, setNonce] = useState(0);
   const [creating, setCreating] = useState(false);
+  // R8 X8-3: the editor takes focus on open; Cancel (or a create) hands it back to "Create a
+  // repeating booking" — the editor's own Cancel went with it and focus fell to <body>.
+  const editorRegion = useInlineEditorFocus(creating ? true : null, () =>
+    document.querySelector<HTMLElement>("[data-opens-editor='schedule']"));
   const [created, setCreated] = useState<ScheduleRow | null>(null);
 
   /**
@@ -136,7 +141,7 @@ export function AdminSchedulesPage() {
       title="Repeating bookings"
       actions={creating ? null : (
         // Wraps rather than widening the page at 200% text (R3 X-4).
-        <Button className="!h-auto min-h-touch whitespace-normal py-2" onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
+        <Button className="!h-auto min-h-touch whitespace-normal py-2" data-opens-editor="schedule" onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
           Create a repeating booking
         </Button>
       )}
@@ -152,7 +157,7 @@ export function AdminSchedulesPage() {
         {header}
         {/* A form reads in a column, not across 1,500px (R4 form factor): the editor keeps the
             80rem it was drawn for, its conflicts panel included. */}
-        <div className="w-full max-w-wide">
+        <div ref={editorRegion} className="w-full max-w-wide">
           <ScheduleEditor
             onCancel={() => { setCreating(false); }}
             onCreated={(row) => { setCreating(false); setCreated(row); load(); }}

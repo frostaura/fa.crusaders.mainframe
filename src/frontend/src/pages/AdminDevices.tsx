@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   endpoints, isGate, type AdminCourt, type AdminDevice, type AdminSettings, type DeviceActivityEntry,
 } from "../lib/api";
@@ -44,6 +44,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { TextLink } from "../components/ui/text-link";
 import { CaretDown, Cpu, Door, Trash, WifiHigh, WifiSlash } from "../components/ui/icons";
 import { CardListSkeleton } from "../components/monitoring/parts";
+import { useInlineEditorFocus } from "../components/admin/useInlineEditorFocus";
 
 /**
  * Devices — the club's boxes, under the hobby-grade device contract.
@@ -663,12 +664,15 @@ function DeviceRow({
   const { now } = liveness;
   const online = isOnline(device, liveness.offlineAfter, now);
   const [editing, setEditing] = useState<"details" | "buttons" | null>(null);
+  // R8 X8-3: the editor takes focus when it opens and gives it back to its Edit button on close.
+  const card = useRef<HTMLDivElement>(null);
+  const editorRegion = useInlineEditorFocus(editing, (was) => card.current?.querySelector<HTMLElement>(`[data-opens-editor="${was}"]`));
   // Presence-gated: an API that does not send the field gets no editor for it.
   const hasOwnMapField = device.button_map !== undefined;
   const activity = useDeviceActivity(device);
 
   return (
-    <div data-board-card="" className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
+    <div ref={card} data-board-card="" className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1"><DeviceRowHeader device={device} online={online} now={now} /></div>
         {/* Deleting is not a revocation and locks nothing out — the box still holds the
@@ -693,30 +697,32 @@ function DeviceRow({
         />
       </div>
 
-      {editing === "details" && (
-        <DeviceDetailsEditor device={device} courts={boxEditing.courts} onSave={actions.details} onClose={() => setEditing(null)} />
-      )}
+      <div ref={editorRegion} className="contents">
+        {editing === "details" && (
+          <DeviceDetailsEditor device={device} courts={boxEditing.courts} onSave={actions.details} onClose={() => setEditing(null)} />
+        )}
 
-      {editing === "buttons" && (
-        <DeviceButtonMapPanel
-          device={device}
-          clubMap={boxEditing.clubMap}
-          walkUpMax={boxEditing.walkUpMax}
-          onSave={actions.buttonMap}
-          onClose={() => setEditing(null)}
-        />
-      )}
+        {editing === "buttons" && (
+          <DeviceButtonMapPanel
+            device={device}
+            clubMap={boxEditing.clubMap}
+            walkUpMax={boxEditing.walkUpMax}
+            onSave={actions.buttonMap}
+            onClose={() => setEditing(null)}
+          />
+        )}
+      </div>
 
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
 
       {/* The action strip: 44px targets, sm buttons with the extended hit area. */}
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {editing === null && (
-          <Button variant="outline" size="sm" className={WRAPS} onClick={() => setEditing("details")}>Edit name and courts</Button>
+          <Button variant="outline" size="sm" className={WRAPS} data-opens-editor="details" onClick={() => setEditing("details")}>Edit name and courts</Button>
         )}
 
         {hasOwnMapField && editing === null && (
-          <Button variant="outline" size="sm" className={WRAPS} onClick={() => setEditing("buttons")}>Edit buttons</Button>
+          <Button variant="outline" size="sm" className={WRAPS} data-opens-editor="buttons" onClick={() => setEditing("buttons")}>Edit buttons</Button>
         )}
 
         {/* Out of service — the control the API, the health sweep and the settlement model

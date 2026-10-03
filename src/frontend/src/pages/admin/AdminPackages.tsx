@@ -3,6 +3,7 @@ import { ConfirmButton } from "../../components/ConfirmButton";
 import { Minutes } from "../../components/Minutes";
 import { useToast } from "../../components/Toast";
 import { useBoxAtLeast } from "../../components/admin/useBoxAtLeast";
+import { useInlineEditorFocus } from "../../components/admin/useInlineEditorFocus";
 import { PackageEditor } from "../../components/packages/PackageEditor";
 import { useActiveGroups, usePackages, type GroupsRead } from "../../components/packages/usePackages";
 import { StaleNotice } from "../../components/shell/StaleNotice";
@@ -56,6 +57,10 @@ export default function AdminPackagesPage() {
   const groups = useActiveGroups();
   const [editing, setEditing] = useState<AdminPackage | "new" | null>(null);
   const [boxRef, roomy] = useBoxAtLeast(56);
+  // R8 X8-3: the rail's editor takes focus (Name was six Tabs past every row) and Cancel or Save
+  // gives it back to the Edit / Add button that opened it, not to <body>. A sheet does both itself.
+  const editorRegion = useInlineEditorFocus(roomy ? editing : null, (was) =>
+    document.querySelector<HTMLElement>(`[data-opens-editor="${was === "new" ? "new" : was.id}"]`));
   const toast = useToast();
   const activeCount = read.active?.length ?? 0;
   const atLimit = activeCount >= PACKAGE_LIMITS.activeMax;
@@ -88,7 +93,7 @@ export default function AdminPackagesPage() {
         actions={(
           <>
             <RefreshButton label={COPY.refresh} loading={read.loading} onRefresh={() => void read.load()} />
-            <Button onClick={add} disabled={atLimit} icon={<Plus aria-hidden="true" />}>{COPY.add}</Button>
+            <Button onClick={add} disabled={atLimit} data-opens-editor="new" icon={<Plus aria-hidden="true" />}>{COPY.add}</Button>
           </>
         )}
       />
@@ -97,7 +102,7 @@ export default function AdminPackagesPage() {
       {groups.status === "failed" ? <Alert tone="warning">{COPY.groupsCaveat}</Alert> : null}
       <div ref={boxRef} className="min-w-0">
         <WithAside
-          aside={<EditorPanel editing={editing}>{roomy ? editor : null}</EditorPanel>}
+          aside={<EditorPanel editing={editing}><div ref={editorRegion} className="contents">{roomy ? editor : null}</div></EditorPanel>}
           asideLabel={COPY.asideLabel}
           placement="sheet"
           at="56rem"
@@ -333,7 +338,7 @@ function RowActions({ pkg, onEdit, onRetired }: { pkg: AdminPackage; onEdit: (p:
   if (pkg.status !== "active") return <Badge tone="neutral">{COPY.retiredOn}</Badge>;
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <Button size="sm" variant="outline" aria-label={COPY.editLabel(pkg.name)} onClick={() => onEdit(pkg)}>{COPY.edit}</Button>
+      <Button size="sm" variant="outline" aria-label={COPY.editLabel(pkg.name)} data-opens-editor={pkg.id} onClick={() => onEdit(pkg)}>{COPY.edit}</Button>
       <ConfirmButton
         idleLabel={COPY.retire}
         ariaLabel={COPY.retireLabel(pkg.name)}

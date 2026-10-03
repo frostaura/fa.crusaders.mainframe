@@ -20,6 +20,7 @@ import { useRead } from "@/lib/useRead";
 import { useTicker } from "@/lib/useTicker";
 import { cn } from "@/lib/utils";
 import { doorDisplayName } from "@/lib/doorsCopy";
+import { doorOptions } from "./doorOptions";
 import { useMemberDetail } from "./useMemberDetail";
 
 /**
@@ -230,13 +231,6 @@ function useDoorOptions(): FilterOption[] {
   return doorOptions(read.data?.doors ?? []);
 }
 
-/** The options themselves, each door by the one name every door surface uses (R8, E7-4 rest: not "Door gate"). */
-export function doorOptions(doors: ReadonlyArray<{ device: { id: string; name: string; device_code: string } }>): FilterOption[] {
-  return [
-    { value: "", label: COPY.anyDoor },
-    ...doors.map((d) => ({ value: d.device.id, label: doorDisplayName(d.device) })),
-  ];
-}
 
 function useDownload(userId: string, filters: MemberDoorFilters) {
   const toast = useToast();
