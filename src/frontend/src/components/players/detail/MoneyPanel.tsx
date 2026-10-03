@@ -50,8 +50,13 @@ function PaidAtBoxMoney({ detail, actions }: { detail: BookingDetail; actions?: 
   const { money } = detail;
   const who = organiserName(detail);
   const paid = money.paid_by_minutes ?? 0;
+  // R8 E8-2 — no "isn't split — the organiser covers it all" over an organiser's cost of 0: the
+  // note under the figures says who paid. The payer reads it about themselves, in the second person.
+  const note = detail.viewer.role === "payer"
+    ? paidAtBoxSelf(who, minutesSpoken(paid))
+    : DETAIL_MONEY.paidAtBoxNote(money.paid_by?.name ?? null, who, minutesSpoken(paid));
   return (
-    <Section title={DETAIL_MONEY.title} description={DETAIL_MONEY.notSplit} actions={actions} data-money-panel="">
+    <Section title={DETAIL_MONEY.title} actions={actions} data-money-panel="">
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <Row term={DETAIL_MONEY.price} value={money.price_minutes} />
         <Row term={DETAIL_MONEY.organiserPaid(who)} value={paid} />
@@ -59,10 +64,19 @@ function PaidAtBoxMoney({ detail, actions }: { detail: BookingDetail; actions?: 
         <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_minutes} total />
       </dl>
       <p className="text-sm text-text-secondary">
-        {keepAmounts(DETAIL_MONEY.paidAtBoxNote(money.paid_by?.name ?? null, who, minutesSpoken(paid)))}
+        {keepAmounts(note)}
       </p>
     </Section>
   );
+}
+
+/**
+ * E8-2 — the paid-at-box note for the member who paid. FB's `paidAtBoxNoteSelf` once it lands
+ * (r8-ask-FD1b-to-FB); until then the page header's own second-person line.
+ */
+function paidAtBoxSelf(who: string | null, amount: string): string {
+  const self = (DETAIL_MONEY as { paidAtBoxNoteSelf?: (who: string | null, amount: string) => string }).paidAtBoxNoteSelf;
+  return self ? self(who, amount) : DETAIL_COPY.payerLine;
 }
 
 /**
