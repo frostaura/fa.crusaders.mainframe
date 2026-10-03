@@ -163,7 +163,9 @@ describe("a member's limits — D8", () => {
     await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/, /^Book Court 1 at 16:30/]);
     expect(names()).toEqual(["Court 1 at 16:00", "Court 1 at 16:15"]);
     // The shown day is not the club's today: the sentence names it (review round 1, F1.7).
-    expect(document.body.textContent).toContain(selectionCapSentence(2, "Mon 9 Sep"));
+    expect(document.body.textContent).toContain(selectionCapSentence(2, "Mon 9 Sep", { booked: 2, max: 4 }));
+    // R9 J9-4 — in the pill's figures: 2 of 4 booked, so 2 more.
+    expect(document.body.textContent).toContain("You've booked 2 of your 4 slots on Mon 9 Sep, so 2 more");
   });
 
   it("says a refused pick where the member is looking, and forgets it on the next change (R4 M4-7)", async () => {
@@ -171,10 +173,10 @@ describe("a member's limits — D8", () => {
     await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/, /^Book Court 1 at 16:30/]);
     // Visible in the selection bar, not only to a screen reader — the fifth tap used to do nothing.
     const refusal = bar().querySelector("[data-cap-refusal]");
-    expect(refusal?.textContent).toBe(selectionCapShort(2, "Mon 9 Sep"));
-    expect(refusal?.textContent).toBe("Limit reached: 2 slots on Mon 9 Sep.");
+    expect(refusal?.textContent).toBe(selectionCapShort(2, "Mon 9 Sep", { booked: 2, max: 4 }));
+    expect(refusal?.textContent).toBe("Limit reached: 4 of 4 on Mon 9 Sep.");
     // …and a screen reader hears the whole rule, which no longer invites a fifth pick.
-    expect(selectionCapSentence(2, "Mon 9 Sep")).toMatch(/^That's 2 slots — the most you can book/);
+    expect(selectionCapSentence(2, "Mon 9 Sep", { booked: 2, max: 4 })).toMatch(/so 2 more is the most you can choose/);
     // Unticking one is a change: the bar goes back to naming the selection.
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Court 1 at 16:15/ })); });
     expect(names()).toEqual(["Court 1 at 16:00"]);

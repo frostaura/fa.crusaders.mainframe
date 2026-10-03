@@ -99,8 +99,12 @@ export default function BookingsPage() {
   const forMember = useForMember(bookingFor);
   const gridRules = forMember?.rules ?? rules;
   const explainer = useGridExplainer(day, rules, otherDay, forMember);
-  const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay), [otherDay]);
-  const capShort = useCallback((cap: number) => selectionCapShort(cap, otherDay), [otherDay]);
+  // R9 J9-4 — the refusal speaks in the pill's figures: booked so far, and the real limit.
+  const quota = rules.bookedSlotsToday !== null && rules.maxSlotsPerDay !== null ? { booked: rules.bookedSlotsToday, max: rules.maxSlotsPerDay } : null;
+  const { booked: quotaBooked = 0, max: quotaMax = 0 } = quota ?? {};
+  const capQuota = useMemo(() => (quotaMax > 0 ? { booked: quotaBooked, max: quotaMax } : null), [quotaBooked, quotaMax]);
+  const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay, capQuota), [otherDay, capQuota]);
+  const capShort = useCallback((cap: number) => selectionCapShort(cap, otherDay, capQuota), [otherDay, capQuota]);
   const selection = useGridSelection({
     cap: isAdmin || rules.adminExempt ? null : rules.remainingToday,
     announce: explainer.announce, capSentence, capShort,

@@ -79,7 +79,7 @@ describe("F1.7 — the daily quota names the day it counts", () => {
   });
 
   it("the cap sentence names the day too", () => {
-    expect(selectionCapSentence(1, "Thu 12 Sep")).toBe("That's 1 slot — the most you can book on Thu 12 Sep, the club's daily limit. Untick one to choose a different time.");
+    expect(selectionCapSentence(1, "Thu 12 Sep")).toBe("That's 1 slot — your daily limit on Thu 12 Sep. Untick one to choose a different time.");
     expect(selectionCapSentence(0, "Thu 12 Sep")).toContain("for Thu 12 Sep");
     expect(selectionCapSentence(1)).toContain("today");
   });

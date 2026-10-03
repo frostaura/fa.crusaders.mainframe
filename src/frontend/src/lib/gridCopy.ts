@@ -113,7 +113,21 @@ export function quotaBannerTitle(maxSlots: number, day: string): string {
 }
 
 export function quotaBannerBody(maxSlots: number): string {
-  return `Cancel one of them, or pick another day. The club caps it at ${maxSlots} so everyone gets court time.`;
+  // R9 J9-4 — "your" limit, never "the club caps it": a group may set it, and the club's word was wrong then.
+  return `Cancel one of them, or pick another day. Your daily limit is ${maxSlots} ${maxSlots === 1 ? "slot" : "slots"}, so everyone gets court time.`;
+}
+
+/**
+ * R9 J9-4 — the cap banner's way on. It moves the SHOWN day on by one, so it is "Try tomorrow"
+ * only when the shown day is today; otherwise it names the day it goes to ("Try Mon 5 Oct").
+ */
+export function nextDayAction(shownDay: string, shownIsToday: boolean): { label: string; nextDay: true } {
+  if (shownIsToday) return { label: "Try tomorrow", nextDay: true };
+  const [y, m, d] = shownDay.split("-").map(Number);
+  if (!y || !m || !d) return { label: "Try the next day", nextDay: true };
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const label = dateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(next);
+  return { label: `Try ${label}`, nextDay: true };
 }
 
 /**

@@ -167,21 +167,31 @@ export function cancelSelectionLabel(bookings: number): string {
  * R4 M4-7: said when a pick is REFUSED, so it names what is already chosen — "You can book 4
  * more slots" beside four ticked slots read as an invitation to tick a fifth.
  */
-export function selectionCapSentence(cap: number, dayLabel: string | null = null): string {
+export function selectionCapSentence(cap: number, dayLabel: string | null = null, quota: CapQuota | null = null): string {
   // F1.7 — the cap is the SHOWN day's; "today" is only true when that is today.
   const when = dayLabel ? `on ${dayLabel}` : "today";
   if (cap <= 0) return `You've booked your slots for ${dayLabel ?? "today"}, so there's nothing more to choose.`;
-  const what = cap === 1 ? "That's 1 slot" : `That's ${cap} slots`;
-  return `${what} — the most you can book ${when}, the club's daily limit. Untick one to choose a different time.`;
+  const slots = (n: number) => `${n} ${n === 1 ? "slot" : "slots"}`;
+  // R9 J9-4 — in the pill's own figures: what is LEFT is not the limit ("2 of 4" booked, 2 more).
+  // Not "the club's" limit either: a group may set it.
+  if (quota && quota.booked > 0) {
+    return `You've booked ${quota.booked} of your ${slots(quota.max)} ${when}, so ${cap} more is the most you can choose. Untick one to choose a different time.`;
+  }
+  return `That's ${slots(cap)} — your daily limit ${when}. Untick one to choose a different time.`;
 }
+
+/** R9 J9-4 — the day's cap as the pill says it: slots already booked, and the limit. */
+export type CapQuota = { booked: number; max: number };
 
 /**
  * R4 M4-7 — the same refusal, short enough for the selection bar's two-line detail on a phone
  * (the full sentence is what a screen reader hears).
  */
-export function selectionCapShort(cap: number, dayLabel: string | null = null): string {
+export function selectionCapShort(cap: number, dayLabel: string | null = null, quota: CapQuota | null = null): string {
   const when = dayLabel ? `on ${dayLabel}` : "today";
   if (cap <= 0) return `Limit reached: nothing more ${when}.`;
+  // R9 J9-4 — the pill's "2 of 4", counted with what is chosen: "4 of 4".
+  if (quota && quota.booked > 0) return `Limit reached: ${quota.booked + cap} of ${quota.max} ${when}.`;
   return `Limit reached: ${cap} ${cap === 1 ? "slot" : "slots"} ${when}.`;
 }
 

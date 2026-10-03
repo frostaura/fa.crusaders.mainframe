@@ -91,7 +91,8 @@ describe("item 19 — the daily maximum, on the grid", () => {
     // The why, in one clause. It is what turns a wall into a queue.
     expect(screen.getByText(/so everyone gets court time/)).toBeInTheDocument();
     // And a real way out.
-    expect(screen.getByRole("button", { name: "Try tomorrow" })).toBeInTheDocument();
+    // R9 J9-4 — it moves the SHOWN day on, so it names that day unless the shown day is today.
+    expect(screen.getByRole("button", { name: /^Try (tomorrow|[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2,3})$/ })).toBeInTheDocument();
   });
 
   it("answers when a locked cell is pressed, and says the same thing the banner says", async () => {

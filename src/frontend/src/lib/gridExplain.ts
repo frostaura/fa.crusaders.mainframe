@@ -7,7 +7,7 @@ import { adminWalletNote } from "./bookingsCopy";
 import { BUY_MINUTES_PATH } from "./minutes";
 import {
   BUY_MINUTES_ACTION, closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence,
-  memberEmptyWindowSentence, memberRestrictionSentence, notYetOpenSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
+  memberEmptyWindowSentence, memberRestrictionSentence, nextDayAction, notYetOpenSentence, quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
   shortWalletSentence,
 } from "./gridCopy";
 
@@ -101,8 +101,8 @@ export function useGridExplainer(
 
   const notices = useCallback(
     (balanceMinutes: number | null, current: ScheduleDay | null, isAdmin = false) =>
-      buildNotices(rules, balanceMinutes, current, isAdmin),
-    [rules],
+      buildNotices(rules, balanceMinutes, current, isAdmin, dayLabel === null),
+    [rules, dayLabel],
   );
 
   const pill = useMemo(() => {
@@ -181,14 +181,16 @@ function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null,
  * gets nothing at all.
  * </p>
  */
-function buildNotices(rules: ViewerRules, balanceMinutes: number | null, day: ScheduleDay | null, isAdmin: boolean): Notice[] {
+function buildNotices(
+  rules: ViewerRules, balanceMinutes: number | null, day: ScheduleDay | null, isAdmin: boolean, shownIsToday: boolean,
+): Notice[] {
   const clubDay = rules.clubDay ?? day?.date ?? "";
-  return [ruleNotice(rules, clubDay), walletNotice(balanceMinutes, day, isAdmin)]
+  return [ruleNotice(rules, clubDay, shownIsToday), walletNotice(balanceMinutes, day, isAdmin)]
     .filter((n): n is Notice => n !== null);
 }
 
 /** At most one rule notice: the empty intersection outranks the cap, because it outlasts it. */
-function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
+function ruleNotice(rules: ViewerRules, clubDay: string, shownIsToday: boolean): Notice | null {
   // An exempt viewer has no window and no cap to be told about, whatever else the block carries.
   if (rules.adminExempt) return null;
   if (rules.emptyWindow) {
@@ -200,7 +202,7 @@ function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
     id: "quota", tone: "warning",
     title: quotaBannerTitle(max, clubDay),
     body: quotaBannerBody(max),
-    action: { label: "Try tomorrow", nextDay: true },
+    action: nextDayAction(clubDay, shownIsToday),
   };
 }
 
