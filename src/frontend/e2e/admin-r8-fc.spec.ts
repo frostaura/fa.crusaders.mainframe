@@ -396,7 +396,8 @@ test.describe("J8-5 — the Retire confirmation is not squeezed into the Actions
         { path: "/api/v1/admin/packages", body: { packages: PACKAGES } },
         { method: "POST", path: "/api/v1/admin/packages/p-5/archive", respond: () => { archived.push("p-5"); return { ...PACKAGES[1], status: "archived" }; } },
       ]), width);
-      await page.getByRole("button", { name: "Retire 5 hours" }).click({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Actions for 5 hours" }).click({ timeout: 30_000 });
+      await page.getByRole("menuitem", { name: "Retire" }).click();
       const sentence = page.getByText(/^Retire 5 hours\? It leaves every shelf now\./).filter({ visible: true }).first();
       await expect(sentence).toBeVisible();
       const box = (await sentence.boundingBox())!;

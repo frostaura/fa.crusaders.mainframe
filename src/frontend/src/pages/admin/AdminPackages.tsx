@@ -1,4 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { ActionsMenu } from "../../components/admin/ActionsMenu";
+import { pageHeading } from "../../lib/focusAfterAction";
 import { ConfirmDialog } from "../../components/admin/ConfirmDialog";
 import { Minutes } from "../../components/Minutes";
 import { useToast } from "../../components/Toast";
@@ -10,7 +12,7 @@ import { StaleNotice } from "../../components/shell/StaleNotice";
 import { Alert } from "../../components/Alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { HourglassMedium, Plus } from "../../components/ui/icons";
+import { Archive, HourglassMedium, Plus } from "../../components/ui/icons";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { RefreshButton } from "../../components/ui/refresh-button";
 import {
@@ -127,8 +129,10 @@ type PackagesListProps = {
 /** The shelves in their three states — loading, failed, empty — never collapsed into one. */
 function PackagesList({ view, read, groups, wide, onAdd, onEdit }: PackagesListProps) {
   const active = view === "active";
+  const [retiring, setRetiring] = useState<AdminPackage | null>(null);
   return (
     <>
+      <RetireDialog pkg={retiring} onClose={() => setRetiring(null)} onRetired={(p) => { read.settle(p); void read.load(); }} />
       <StaleNotice stale={Boolean(read.error) && read.packages !== null} readAt={read.readAt} />
       <StateBlock
         loading={read.loading && read.packages === null}
@@ -144,7 +148,7 @@ function PackagesList({ view, read, groups, wide, onAdd, onEdit }: PackagesListP
         skeleton={<ListSkeleton />}
       >
         {read.packages ? (
-          <Shelves packages={read.packages} groups={groups} wide={wide} onEdit={onEdit} onRetired={(p) => { read.settle(p); void read.load(); }} />
+          <Shelves packages={read.packages} groups={groups} wide={wide} onEdit={onEdit} onRetire={setRetiring} />
         ) : null}
       </StateBlock>
     </>
@@ -239,10 +243,10 @@ function shelvesOf(packages: AdminPackage[], groups: GroupsRead): Shelf[] {
 
 type ShelvesProps = {
   packages: AdminPackage[]; groups: GroupsRead; wide: boolean;
-  onEdit: (p: AdminPackage) => void; onRetired: (p: AdminPackage) => void;
+  onEdit: (p: AdminPackage) => void; onRetire: (p: AdminPackage) => void;
 };
 
-function Shelves({ packages, groups, wide, onEdit, onRetired }: ShelvesProps) {
+function Shelves({ packages, groups, wide, onEdit, onRetire }: ShelvesProps) {
   const shelves = useMemo(() => shelvesOf(packages, groups), [packages, groups]);
   return (
     <div className="flex flex-col gap-8">
@@ -253,15 +257,15 @@ function Shelves({ packages, groups, wide, onEdit, onRetired }: ShelvesProps) {
             <p className="text-sm text-text-secondary">{shelf.hint}</p>
           </div>
           {wide
-            ? <ShelfTable shelf={shelf} onEdit={onEdit} onRetired={onRetired} />
-            : <ShelfCards shelf={shelf} onEdit={onEdit} onRetired={onRetired} />}
+            ? <ShelfTable shelf={shelf} onEdit={onEdit} onRetire={onRetire} />
+            : <ShelfCards shelf={shelf} onEdit={onEdit} onRetire={onRetire} />}
         </section>
       ))}
     </div>
   );
 }
 
-type ShelfViewProps = { shelf: Shelf; onEdit: (p: AdminPackage) => void; onRetired: (p: AdminPackage) => void };
+type ShelfViewProps = { shelf: Shelf; onEdit: (p: AdminPackage) => void; onRetire: (p: AdminPackage) => void };
 
 /** "Saves R50.00 (8%)", "Smallest", or a dash — against the smallest package on a member's shelf (§4.3). */
 function savingWords(p: AdminPackage, shelf: Shelf): string {
@@ -272,7 +276,7 @@ function savingWords(p: AdminPackage, shelf: Shelf): string {
   return saving ? COPY.saves(saving.zar, saving.pct) : COPY.noSaving;
 }
 
-function ShelfTable({ shelf, onEdit, onRetired }: ShelfViewProps) {
+function ShelfTable({ shelf, onEdit, onRetire }: ShelfViewProps) {
   const c = COPY.columns;
   return (
     <Table label={COPY.listLabel(shelf.title)}>
@@ -296,7 +300,7 @@ function ShelfTable({ shelf, onEdit, onRetired }: ShelfViewProps) {
             <TableCell className="text-right tabular-nums text-text-secondary">{formatHourly(p)}</TableCell>
             <TableCell className="text-right tabular-nums">{savingWords(p, shelf)}</TableCell>
             <TableCell className="text-right tabular-nums text-text-secondary">{p.sort_order}</TableCell>
-            <TableCell className="text-right"><RowActions pkg={p} onEdit={onEdit} onRetired={onRetired} /></TableCell>
+            <TableCell className="text-right"><RowActions pkg={p} onEdit={onEdit} onRetire={onRetire} /></TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -310,7 +314,7 @@ function formatHourly(p: AdminPackage): string {
 }
 
 /** A phone's shelf: one card per package — name and price over minutes, the rate and the saving. */
-function ShelfCards({ shelf, onEdit, onRetired }: ShelfViewProps) {
+function ShelfCards({ shelf, onEdit, onRetire }: ShelfViewProps) {
   return (
     <ul aria-label={COPY.listLabel(shelf.title)} className="flex flex-col gap-3">
       {shelf.packages.map((p) => (
@@ -325,36 +329,53 @@ function ShelfCards({ shelf, onEdit, onRetired }: ShelfViewProps) {
             <span className="tabular-nums">{formatHourly(p)}</span>
             {savingWords(p, shelf) !== COPY.noSaving ? <Badge tone="success">{savingWords(p, shelf)}</Badge> : null}
           </p>
-          <RowActions pkg={p} onEdit={onEdit} onRetired={onRetired} />
+          <RowActions pkg={p} onEdit={onEdit} onRetire={onRetire} />
         </li>
       ))}
     </ul>
   );
 }
 
-function RowActions({ pkg, onEdit, onRetired }: { pkg: AdminPackage; onEdit: (p: AdminPackage) => void; onRetired: (p: AdminPackage) => void }) {
-  const toast = useToast();
+function RowActions({ pkg, onEdit, onRetire }: { pkg: AdminPackage; onEdit: (p: AdminPackage) => void; onRetire: (p: AdminPackage) => void }) {
   if (pkg.status !== "active") return <Badge tone="neutral">{COPY.retiredOn}</Badge>;
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button size="sm" variant="outline" aria-label={COPY.editLabel(pkg.name)} data-opens-editor={pkg.id} onClick={() => onEdit(pkg)}>{COPY.edit}</Button>
-      {/* R8 J8-5: a dialog, not the inline armed confirm — in the ~100px Actions column at 1280
-          its sentence ran eight lines of two words. The retired row leaves the shelf, so focus
-          goes to the page heading after (ConfirmDialog's floor). */}
-      <ConfirmDialog
-        trigger={<Button size="sm" variant="danger-soft" aria-label={COPY.retireLabel(pkg.name)}>{COPY.retire}</Button>}
-        title={COPY.retireLabel(pkg.name)}
-        description={COPY.retireConfirm(pkg.name)}
-        confirmLabel={COPY.retire}
-        cancelLabel={COPY.cancel}
-        action={COPY.retireAction}
-        codes={COPY.errorCodes}
-        onConfirm={async () => {
-          const retired = await adminEndpoints.packageArchive(pkg.id);
-          onRetired(retired);
-          toast.push({ tone: "success", text: COPY.retired(pkg.name) });
-        }}
-      />
+      {/* R8 J8-5: Retire lives behind ⋯, as Boards' Delete does (P3: the rare, destructive act is
+          not beside Edit at thumb distance). The inline armed confirm ran its sentence eight lines
+          deep in the ~100px Actions column at 1280; a second labelled button under Edit cost the
+          column 88px on a touch screen and ran the shelf table past its column (admin-r6 L6-7). */}
+      <ActionsMenu label={`${COPY.columns.actions} for ${pkg.name}`} items={[{
+        label: COPY.retire, icon: <Archive size={16} aria-hidden="true" />, danger: true, onSelect: () => onRetire(pkg),
+      }]} />
     </div>
+  );
+}
+
+/**
+ * The retire question, asked by the LIST, not the row (R8 J8-5): the row leaves the shelf when it
+ * is retired, and a dialog mounted in it went with it — its close-time focus never ran and focus
+ * fell to <body>. Here it survives the row and floors focus on the page heading.
+ */
+function RetireDialog({ pkg, onClose, onRetired }: { pkg: AdminPackage | null; onClose: () => void; onRetired: (p: AdminPackage) => void }) {
+  const toast = useToast();
+  if (!pkg) return null;
+  return (
+    <ConfirmDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      focusAfter={pageHeading}
+      title={COPY.retireLabel(pkg.name)}
+      description={COPY.retireConfirm(pkg.name)}
+      confirmLabel={COPY.retire}
+      cancelLabel={COPY.cancel}
+      action={COPY.retireAction}
+      codes={COPY.errorCodes}
+      onConfirm={async () => {
+        const retired = await adminEndpoints.packageArchive(pkg.id);
+        onRetired(retired);
+        toast.push({ tone: "success", text: COPY.retired(pkg.name) });
+      }}
+    />
   );
 }
