@@ -1,4 +1,4 @@
-import { ApiError, endpoints, type ShelfPackage } from "@/lib/api";
+import { ApiError, endpoints, type MemberShelf, type ShelfPackage } from "@/lib/api";
 import { adminEndpoints, type SellReasonCode } from "@/lib/adminApi";
 import { errorCodeOf, newIdempotencyKey } from "@/lib/deskLedger";
 import { LIVE_SAID, LOST_REPLY, SELL_COPY, adjustRefusal } from "@/lib/deskMinutesCopy";
@@ -41,9 +41,15 @@ export type SellOutcome =
   | { kind: "sold"; balanceAfterMinutes: number | null; recovered: boolean }
   /** 409 `package_unavailable`: the shelf changed under the desk; the caller re-reads it. */
   | { kind: "unavailable"; message: string }
-  /** 409 `package_price_changed` (R9 J9-1): nothing recorded; the package at its price now, when the body carried it. */
-  | { kind: "repriced"; pkg: ShelfPackage | null }
+  /**
+   * 409 `package_price_changed` (R9 J9-1): nothing recorded; the package at its price now, when the body
+   * carried it, and the member's discount now (R10 J10-1) — `undefined` when the body did not say.
+   */
+  | { kind: "repriced"; pkg: ShelfPackage | null; discount: ShelfDiscount | undefined }
   | { kind: "failed"; message: string; unchanged: boolean; said: string; balanceNow?: number | null };
+
+/** The member's discount as the shelf carries it — null when none applies. */
+export type ShelfDiscount = MemberShelf["discount"];
 
 /** How far before the press a row may be dated and still be this press's — client/server skew. */
 const SKEW_MS = 2 * 60_000;
@@ -93,7 +99,7 @@ async function refused(err: unknown, input: SellInput, keyRef: { current: Adjust
   if (busy) return { kind: "failed", message: busy, unchanged: true, said: busy };
   if (errorCodeOf(err) === "package_price_changed") {
     keyRef.current = null;
-    return { kind: "repriced", pkg: repricedPackage(err) };
+    return { kind: "repriced", pkg: repricedPackage(err), discount: repricedDiscount(err) };
   }
   if (errorCodeOf(err) === "package_unavailable") {
     keyRef.current = null;
@@ -115,6 +121,20 @@ function repricedPackage(err: unknown): ShelfPackage | null {
   if (!pkg || typeof pkg !== "object") return null;
   const item = pkg as Partial<ShelfPackage>;
   return typeof item.id === "string" && typeof item.price_zar === "number" ? (item as ShelfPackage) : null;
+}
+
+/**
+ * R10 J10-1: the discount the same 409 carries — `{ bps, group }`, or null when none applies now.
+ * `undefined` when the body has no `discount` key at all (an older server): the caller re-reads.
+ */
+function repricedDiscount(err: unknown): ShelfDiscount | undefined {
+  const payload = err instanceof ApiError ? err.payload : null;
+  if (!payload || typeof payload !== "object" || !("discount" in payload)) return undefined;
+  const discount = (payload as { discount?: unknown }).discount;
+  if (discount === null) return null;
+  if (typeof discount !== "object") return undefined;
+  const item = discount as Partial<NonNullable<ShelfDiscount>>;
+  return typeof item.bps === "number" && item.group && typeof item.group.name === "string" ? (item as NonNullable<ShelfDiscount>) : undefined;
 }
 
 export async function attemptSale(input: SellInput, keyRef: { current: AdjustmentKey }): Promise<SellOutcome> {
