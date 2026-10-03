@@ -349,6 +349,20 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
       {"PLEASE WAIT", RowArg::None, ""}},
      kWaitSeconds,
      0U},
+
+    // --- review round 9 (D9-2) ----------------------------------------------
+    // A used code reads the same at every button: rows 0-1 are the two lines
+    // the activation, the walk-up and the offline path already paint
+    // (MemberScan.h kCodeUsedLine1/2), so a 1602 shows exactly them. The code
+    // rotates every thirty seconds, so the member's NEXT code works — which is
+    // the whole instruction.
+    {ScreenId::CodeUsed,
+     {{"CODE USED", RowArg::None, ""},
+      {"WAIT 30 SECONDS", RowArg::None, ""},
+      {"Next code will work", RowArg::None, ""},
+      {"SCAN WHEN READY", RowArg::None, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
 };
 
 /// kScreenSpecs is indexed by the ScreenId value, so a row in the wrong place

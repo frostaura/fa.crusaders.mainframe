@@ -2905,6 +2905,7 @@ const ScreenContract kContract[] = {
     {bridgelogic::ScreenId::PayForPriceChanged, "PRICE", true, false},
     {bridgelogic::ScreenId::PayForWorking, "MOMENT", false, false},
     {bridgelogic::ScreenId::CheckingCode, "MOMENT", false, false},
+    {bridgelogic::ScreenId::CodeUsed, "USED", false, false},
 };
 
 constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);

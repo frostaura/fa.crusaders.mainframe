@@ -121,6 +121,8 @@ const char* screenName(bridgelogic::ScreenId id) {
     return "InsufficientBalance";
   case bridgelogic::ScreenId::NotRecognised:
     return "NotRecognised";
+  case bridgelogic::ScreenId::CodeUsed:
+    return "CodeUsed";
   case bridgelogic::ScreenId::SlotEnded:
     return "SlotEnded";
   case bridgelogic::ScreenId::SeeTheDesk:
@@ -389,6 +391,9 @@ void runWalkUp(const char* c, const char* id) {
       bridgelogic::onWalkUpResponse(static_cast<uint16_t>(number(expect, "status")), doc, len, 1U, 60U);
   TEST_ASSERT_EQUAL_MESSAGE(flag(expect, "decided"), r.decided, id);
   TEST_ASSERT_EQUAL_MESSAGE(court::Action::Refuse, r.outcome.action, id);
+  if (has(expect, "forgets_scan")) {
+    TEST_ASSERT_EQUAL_MESSAGE(flag(expect, "forgets_scan"), r.forgetsScan, id);
+  }
   checkLines(expect, r.outcome, id);
 }
 
@@ -866,6 +871,36 @@ void test_pay_for_confirm_that_got_no_decision_keeps_the_nonce(void) {
   TEST_ASSERT_EQUAL_UINT32(0U, a.grantedSeconds);
 }
 
+void test_pay_for_a_used_code_reads_as_it_does_at_every_other_button(void) {
+  // D9-2. The activation, the walk-up and the offline path all paint a used
+  // code as CODE USED / WAIT 30 SECONDS; pay-for painted CODE NOT KNOWN for the
+  // same code — one situation, two screens. A code nobody owns still reads
+  // CODE NOT KNOWN, and both still forget the scan.
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts;
+  facts.courtNumber = 2;
+  facts.buttons = &map;
+  const char quote[] = "{\"payable\":false,\"reason\":\"code_used\",\"court_number\":2}";
+  const char confirm[] = "{\"paid\":false,\"reason\":\"code_used\",\"court_number\":2}";
+  const bridgelogic::PayForAnswer answers[] = {
+      bridgelogic::onPayForQuote(200U, quote, strlen(quote), 2),
+      bridgelogic::onPayForConfirm(200U, confirm, strlen(confirm), "50"),
+  };
+  for (const bridgelogic::PayForAnswer& a : answers) {
+    TEST_ASSERT_EQUAL(bridgelogic::PayForKind::Refused, a.kind);
+    TEST_ASSERT_EQUAL_STRING("CodeUsed", screenName(a.screen));
+    TEST_ASSERT_TRUE(a.spendsScan);
+    const bridgelogic::Screen s = bridgelogic::screenFor(a.screen, facts);
+    TEST_ASSERT_EQUAL_STRING(bridgelogic::kCodeUsedLine1, s.rows[0]);
+    TEST_ASSERT_EQUAL_STRING(bridgelogic::kCodeUsedLine2, s.rows[1]);
+  }
+  const char unknown[] = "{\"payable\":false,\"reason\":\"not_recognised\",\"court_number\":2}";
+  const bridgelogic::PayForAnswer nobody = bridgelogic::onPayForQuote(200U, unknown, strlen(unknown), 2);
+  TEST_ASSERT_EQUAL_STRING("NotRecognised", screenName(nobody.screen));
+  TEST_ASSERT_TRUE(nobody.spendsScan);
+  TEST_ASSERT_EQUAL_STRING("CODE NOT KNOWN", bridgelogic::screenFor(nobody.screen, facts).rows[0]);
+}
+
 void test_pay_for_labels_are_refused_rather_than_cut(void) {
   // Whole minutes, one to four digits (P13 §8): `PAY 9999 MIN?` is the widest question.
   TEST_ASSERT_TRUE(bridgelogic::validAmountLabel("50"));
@@ -966,6 +1001,7 @@ int main(int, char**) {
   RUN_TEST(test_a_wrong_off_is_refused_as_not_recognised_and_arms_nothing);
   RUN_TEST(test_pay_for_quote_answers_that_are_not_decisions_are_the_old_walk_up_choice);
   RUN_TEST(test_pay_for_confirm_that_got_no_decision_keeps_the_nonce);
+  RUN_TEST(test_pay_for_a_used_code_reads_as_it_does_at_every_other_button);
   RUN_TEST(test_pay_for_labels_are_refused_rather_than_cut);
   RUN_TEST(test_pay_for_flow_arms_one_court_lapses_and_keeps_its_nonce_for_the_confirm);
   RUN_TEST(test_the_v1_token_fits_every_buffer_it_passes_through);

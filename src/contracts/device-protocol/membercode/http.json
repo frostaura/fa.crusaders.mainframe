@@ -248,7 +248,7 @@
     {
       "id": "walkup-response-code-used",
       "kind": "walkup",
-      "note": "the walk-up's own shape: 409 with error code_used; decided, and not recognised — a used code may be a photo",
+      "note": "the walk-up's own shape: 409 with error code_used; decided, and not recognised — a used code may be a photo — and the scan is forgotten: of every walk-up refusal only this and not_recognised forget it (review round 9, D9-1)",
       "body_hex": "7b226572726f72223a22636f64655f75736564227d",
       "expect": {
         "status": 409,
@@ -257,7 +257,8 @@
           "CODE USED",
           "WAIT 30 SECONDS"
         ],
-        "recognised": false
+        "recognised": false,
+        "forgets_scan": true
       }
     },
     {
@@ -372,11 +373,15 @@
     {
       "id": "payfor-quote-code-used",
       "kind": "payfor_quote",
-      "note": "a code the server already acted on — for money, or for a court (a photo of the code that just lit one): refused, and the scan is forgotten, so the next press cannot try a walk-up on it (review round 8, D8-1)",
+      "note": "a code the server already acted on — for money, or for a court (a photo of the code that just lit one): refused, and the scan is forgotten, so the next press cannot try a walk-up on it (review round 8, D8-1). The glass reads CODE USED / WAIT 30 SECONDS, as on every other path (D9-2)",
       "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a22636f64655f75736564222c22636f7572745f6e756d626572223a327d",
       "expect": {
         "outcome": "refused",
-        "screen": "NotRecognised",
+        "screen": "CodeUsed",
+        "rows": [
+          "CODE USED",
+          "WAIT 30 SECONDS"
+        ],
         "spends_scan": true
       }
     },
@@ -497,7 +502,11 @@
       "body_hex": "7b2270616964223a66616c73652c22726561736f6e223a22636f64655f75736564222c22636f7572745f6e756d626572223a327d",
       "expect": {
         "outcome": "refused",
-        "screen": "NotRecognised",
+        "screen": "CodeUsed",
+        "rows": [
+          "CODE USED",
+          "WAIT 30 SECONDS"
+        ],
         "spends_scan": true
       }
     }

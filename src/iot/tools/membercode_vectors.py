@@ -1059,8 +1059,10 @@ def http_cases():
        {"activated": False, "reason": "some_future_reason", "granted_seconds": 0},
        {"fallback": False, "lines": ["SEE THE DESK", ""], "recognised": False})
     rs("walkup-response-code-used", "walkup", "the walk-up's own shape: 409 with error code_used; decided, and not "
-       "recognised — a used code may be a photo", {"error": "code_used"},
-       {"status": 409, "decided": True, "lines": ["CODE USED", "WAIT 30 SECONDS"], "recognised": False})
+       "recognised — a used code may be a photo — and the scan is forgotten: of every walk-up refusal only this "
+       "and not_recognised forget it (review round 9, D9-1)", {"error": "code_used"},
+       {"status": 409, "decided": True, "lines": ["CODE USED", "WAIT 30 SECONDS"], "recognised": False,
+        "forgets_scan": True})
 
     def pq(cid, note, body, expect):
         rs(cid, "payfor_quote", note, body, expect)
@@ -1094,9 +1096,10 @@ def http_cases():
        {"outcome": "refused", "screen": "NotRecognised", "spends_scan": True})
     pq("payfor-quote-code-used", "a code the server already acted on — for money, or for a court (a photo of the "
        "code that just lit one): refused, and the scan is forgotten, so the next press cannot try a walk-up on "
-       "it (review round 8, D8-1)",
+       "it (review round 8, D8-1). The glass reads CODE USED / WAIT 30 SECONDS, as on every other path (D9-2)",
        {"payable": False, "reason": "code_used", "court_number": 2},
-       {"outcome": "refused", "screen": "NotRecognised", "spends_scan": True})
+       {"outcome": "refused", "screen": "CodeUsed", "rows": ["CODE USED", "WAIT 30 SECONDS"],
+        "spends_scan": True})
     pq("payfor-quote-ended", "the booking is over", {"payable": False, "reason": "ended", "court_number": 2},
        {"outcome": "refused", "screen": "SlotEnded"})
     pq("payfor-quote-unknown-reason", "a reason this build does not know is still a refusal",
@@ -1142,7 +1145,8 @@ def http_cases():
     pc("payfor-confirm-code-used", "the code was acted on since the quote — or before it, for a court: refused, "
        "nothing charged, and the scan is forgotten",
        {"paid": False, "reason": "code_used", "court_number": 2},
-       {"outcome": "refused", "screen": "NotRecognised", "spends_scan": True})
+       {"outcome": "refused", "screen": "CodeUsed", "rows": ["CODE USED", "WAIT 30 SECONDS"],
+        "spends_scan": True})
     return {"description": "The court box's HTTP bodies for member codes: the capability on the heartbeat, "
             "the code sync in its answer, scan_age_ms on the three paths that carry a scan, and the two-step "
             "D10 pay-for.", "device_mac": MAC, "requests": reqs, "responses": resps}

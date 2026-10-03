@@ -214,9 +214,10 @@ their court inside the same 30-second step is doing two different things, and mu
 written **only when the server acts**, never for a refusal or a quote, so a member told
 `too_early` who scans again is not refused as a replay. A second acting use in the same class is
 refused with reason **`code_used`** — on `/activate`, `/gate` and `/pay-for` as a 200 decision,
-on `/walkup` as `409 {"error":"code_used"}` (the court box reads both as `CODE USED / WAIT 30
-SECONDS`, and neither arms its buttons: a used code may be a photo — the box forgets the scan as
-well, so nothing behind its button window can send it as a buyer). Idempotent retries are
+on `/walkup` as `409 {"error":"code_used"}` (the court box reads every one of them — activation,
+walk-up and pay-for alike, §9.3 — as `CODE USED / WAIT 30 SECONDS`, and none arms its buttons: a
+used code may be a photo — the box forgets the scan as well, so nothing behind its button window
+can send it as a buyer). Idempotent retries are
 checked **before** the use table: a walk-up or pay-for replaying its own nonce is answered with the
 first result (`replayed: true`), never `code_used`. Rows older than a day are purged.
 
@@ -568,7 +569,9 @@ The founder's `SPLIT - PAY IN APP` is 18 columns; it becomes `SPLIT BOOKING` ove
 keeping the instruction verbatim. Other refusals reuse the existing screens:
 `insufficient_balance` → `TOO FEW MINUTES` (the `InsufficientBalance` screen: `TOO FEW MINUTES` /
 `Buy more time` / `Buy in the app`; a walk-up or a scan refused for balance shows `TOO FEW MINUTES` /
-`BUY & RETRY`), `not_recognised`/`code_used` → `CODE NOT KNOWN`, and the box forgets the scan and
+`BUY & RETRY`), `not_recognised` → `CODE NOT KNOWN`, `code_used` → `CODE USED` / `WAIT 30 SECONDS`
+(the `CodeUsed` screen — the same two lines §4.4 gives the activation and the walk-up, one situation
+and one screen, bridge 2.2.4, review round 9 D9-2), and for both the box forgets the scan and
 closes the window, so the next press cannot try a walk-up on it,
 `ended` → `THAT SLOT ENDED`, anything else → `SEE THE DESK`; no connection on a confirm →
 `NO CONNECTION`. When a paid confirm lights the court, rows 0–1 of `PayForPaid` go out as the
