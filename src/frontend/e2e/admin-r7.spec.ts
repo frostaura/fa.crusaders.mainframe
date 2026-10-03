@@ -75,6 +75,11 @@ async function textOutsideBox(page: Page, selector: string, boxSelector: string)
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const el = node.parentElement;
         if (!el || el.closest(".sr-only") || !node.textContent?.trim()) continue;
+        // R8: <DotSeparated> parks each line's leading "·" in a strip its own box clips. That dot
+        // is not painted; only a dot entirely inside the clipped strip is skipped, so a visible one
+        // that runs past the row still counts.
+        const strip = el.closest("[data-dot]") ? el.closest("[data-dot-separated]") : null;
+        if (strip && el.getBoundingClientRect().right <= strip.getBoundingClientRect().left + 1) continue;
         const holder = el.closest(boxSel);
         if (!holder) continue;
         const b = holder.getBoundingClientRect();
