@@ -21,6 +21,23 @@ export function autoGridTemplate(min: Tile, max: number | undefined, gap: GridGa
   return `repeat(auto-${fill}, minmax(${track}, 1fr))`;
 }
 
+/**
+ * A card's side gutter that does not grow with the text (R11 L11-1): `px-4` is 32px a side at
+ * 200 % and left a settings card 190px for "Cancellations" and its caret on a 320 phone.
+ */
+export const CARD_GUTTER_X = "px-[min(1rem,16px)] sm:px-6";
+
+/**
+ * A search field with a leading magnifier and (while there is a query) a trailing clear button —
+ * the insets in pixels, so at 200 % text the room goes to the words: rem insets left "Searc".
+ */
+export const SEARCH_FIELD = {
+  icon: "pointer-events-none absolute left-[min(0.75rem,12px)] top-1/2 -translate-y-1/2 text-text-muted",
+  input: "pl-[min(2.5rem,40px)] pr-[min(0.75rem,12px)]",
+  clearRoom: "pr-[min(3rem,48px)]",
+  clear: "absolute right-1 top-1/2 -translate-y-1/2",
+} as const;
+
 export const DOCK_BOTTOM = "bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px)]";
 
 /** The floating panel a docked bar draws: raised, rounded, centred at 640px on a wide screen. */

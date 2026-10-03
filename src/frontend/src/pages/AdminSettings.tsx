@@ -5,6 +5,8 @@ import { StaleNotice } from "../components/shell/StaleNotice";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { WithAside } from "../components/ui/with-aside";
+import { CARD_GUTTER_X } from "../components/ui/layout";
+import { cn } from "../lib/utils";
 import { Skeleton } from "../components/ui/skeleton";
 import { StateBlock } from "../components/ui/state-block";
 import { TextLink } from "../components/ui/text-link";
@@ -248,7 +250,7 @@ function SettingsEditor({ doc }: { doc: Doc }) {
           type="multiple"
           value={openValue}
           onValueChange={(next) => (search ? sections.setSearchOpen(next) : sections.setOpen(next))}
-          className="rounded-xl border border-border bg-bg-surface px-4 shadow-xs sm:px-6 [&[hidden]]:hidden"
+          className={cn("rounded-xl border border-border bg-bg-surface shadow-xs [&[hidden]]:hidden", CARD_GUTTER_X)}
           hidden={search !== null && search.sections.length === 0}
         >
           {SETTINGS_SECTIONS.map((section) => {

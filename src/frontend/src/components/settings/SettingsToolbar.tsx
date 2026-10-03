@@ -2,6 +2,8 @@ import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
+import { SEARCH_FIELD } from "@/components/ui/layout";
+import { cn } from "@/lib/utils";
 import { MagnifyingGlass, X } from "@/components/ui/icons";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
 
@@ -31,12 +33,14 @@ export function SettingsToolbar(props: SettingsToolbarProps) {
   const searching = query.trim() !== "";
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <div role="search" className="relative min-w-0 flex-1">
+      {/* R11 L11-1: the search has a rem basis, so at 200 % text it takes the whole row and
+          "Open all" drops below it — a zero basis squeezed it to 54px under the button. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="search" className="relative min-w-0 flex-1 basis-40">
           <MagnifyingGlass
             size={20}
             aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+            className={SEARCH_FIELD.icon}
           />
           <Input
             ref={input}
@@ -44,7 +48,7 @@ export function SettingsToolbar(props: SettingsToolbarProps) {
             aria-label={SETTINGS_COPY.searchLabel}
             placeholder={SETTINGS_COPY.searchPlaceholder}
             value={query}
-            className="pl-10 pr-12 [&::-webkit-search-cancel-button]:hidden"
+            className={cn(SEARCH_FIELD.input, query && SEARCH_FIELD.clearRoom, "[&::-webkit-search-cancel-button]:hidden")}
             onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape" && query) {
@@ -57,7 +61,7 @@ export function SettingsToolbar(props: SettingsToolbarProps) {
             <IconButton
               label={SETTINGS_COPY.clearSearch}
               size="icon-sm"
-              className="absolute right-1 top-1/2 -translate-y-1/2"
+              className={SEARCH_FIELD.clear}
               onClick={() => { onQueryChange(""); input.current?.focus(); }}
             >
               <X />

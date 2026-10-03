@@ -59,19 +59,24 @@ function SectionHeader(props: Pick<SettingsSectionProps, "section" | "summary" |
   const dirtyId = `settings-${section.id}-dirty`;
   return (
     <AccordionPrimitive.Header asChild>
-      <h2 className="flex">
+      {/* A query container (R11 L11-1): when the TEXT is large for the card (under 12rem — a
+          320 phone at 200 %), the title steps down a size and the caret's gap closes, so
+          "Cancellations" and "identification" stay whole with the caret inside the card. */}
+      <h2 className="flex @container/sechead">
         <AccordionPrimitive.Trigger
           aria-labelledby={titleId}
           aria-describedby={dirty ? `${summaryId} ${dirtyId}` : summaryId}
           aria-controls={panelId}
           className={cn(
-            "no-lift group/section flex min-h-touch flex-1 items-center gap-3 rounded-lg border border-transparent py-4 text-left",
+            // min-w-0 (R11 L11-1): a flex item's floor is its longest word, and at 200 % text
+            // "Cancellations" plus the caret was wider than the card — the caret was pushed out.
+            "no-lift group/section flex min-h-touch min-w-0 flex-1 items-center gap-2 rounded-lg @[12rem]/sechead:gap-3 border border-transparent py-4 text-left",
             "transition-colors duration-fast ease-standard motion-reduce:transition-none",
           )}
         >
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-2">
-              <span id={titleId} className="text-base font-semibold text-text-primary group-hover/section:text-accent-strong">
+              <span id={titleId} className="min-w-0 break-words text-sm font-semibold text-text-primary group-hover/section:text-accent-strong @[12rem]/sechead:text-base">
                 {section.title}
               </span>
               {badge}
