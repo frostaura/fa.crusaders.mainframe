@@ -224,7 +224,7 @@ const BOOKINGS: SettingDef[] = [
   {
     key: "slice_minutes", section: "bookings", label: "Slice length (minutes)", kind: "number", unit: "min",
     description: "The smallest piece of court time a member can book.",
-    help: "5–240. Each booking is one or more slices, e.g. 30 min, and costs the minutes it covers.",
+    help: "5–240. Each booking is one or more slices, e.g. 30 minutes, and costs the minutes it covers.",
     min: 5, max: 240, step: 5, integer: true, range: true, defaultValue: 15,
   },
   {
@@ -703,6 +703,30 @@ export function resolve<T>(value: Dynamic<T> | undefined, context: SettingContex
 /** A setting's unit in the club's currency. */
 export function unitOf(def: SettingDef, currency: string): string | undefined {
   return def.unit?.replaceAll("{currency}", currency);
+}
+
+/**
+ * The control's edge wears the short unit ("min", "h", "s"); a caption is a sentence and says it
+ * in words (R8 J8-4). The edge tag is aria-hidden on the promise that the caption says it.
+ */
+const SPOKEN_UNITS: Readonly<Record<string, readonly [string, string]>> = {
+  min: ["minute", "minutes"], h: ["hour", "hours"], s: ["second", "seconds"],
+};
+
+function spokenUnit(unit: string, upTo: number): string {
+  const words = SPOKEN_UNITS[unit];
+  if (!words) return unit;
+  return upTo === 1 ? words[0] : words[1];
+}
+
+/** The visible line under a field: what the setting is, then the range it accepts, in words. */
+export function describeSetting(def: SettingDef, currency: string): string {
+  const line = def.description.replaceAll("{currency}", currency);
+  if (def.kind !== "number" || def.min === undefined || typeof def.max !== "number") return line;
+  const unit = unitOf(def, currency);
+  const range = def.minExclusive ? `more than 0, up to ${def.max}` : `${def.min}–${def.max}`;
+  const suffix = unit && !def.unitBefore ? ` ${spokenUnit(unit, def.max)}` : "";
+  return `${line} Allowed: ${range}${suffix}.`;
 }
 
 /** Whether the API serves this key — an optional row for an absent key is not rendered at all. */

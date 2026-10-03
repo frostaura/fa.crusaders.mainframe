@@ -15,6 +15,8 @@ import { sectionSummary } from "./settingsSummaries";
 import type { AdminSettings } from "./api";
 import { keepAmounts } from "../components/players/detail/detailModel";
 import { CELEBRATION_COPY, RING_COPY, hoursAndMinutesSpoken } from "./playCopy";
+import { relative } from "./deviceLiveness";
+import { SETTINGS, describeSetting, resolve } from "./settingsSchema";
 
 /**
  * Review round 6, X6-2: a screen reader never hears "h", "d" or "min" (P13 contract §7.1).
@@ -181,6 +183,100 @@ describe("X6-2 — minutes in words are spoken words", () => {
     expect(keepAmounts("Paid 1 day 6 hours 15 minutes of 2 hours")).toBe(
       "Paid 1 day 6 hours 15 minutes of 2 hours",
     );
+  });
+});
+
+/**
+ * R8 J8-4 / X8-6: the R6/R7 scan read `lib/*Copy.ts` only, and compact units went on reaching
+ * the screen and the screen reader from everywhere else — the settings captions ("Allowed:
+ * 5–240 min."), a help line ("e.g. 30 min"), the header's freshness ("Updated 10s ago", an
+ * `Intl.RelativeTimeFormat` in its narrow style) and every device age ("heard 8h ago", "last seen
+ * 9m ago", read aloud as "eight aitch ago"). The rule is not about which file a line is written
+ * in, so the scan now reads every source module that can draw text.
+ */
+const SRC = join(__dirname, "..");
+
+/** A unit typed beside a number or an interpolation (JS `${n}` or JSX `{n}`): "30 min", `${h} h`. */
+const COMPACT_UNIT_ANYWHERE = /(\d|\$?\{[^}]*\})([ \u00a0]|-)(min|h|d)(?![-=\w])/;
+/** A compact relative age: "12s ago", `${n}m ago`. */
+const COMPACT_AGO = /(\d|\$?\{[^}]*\})[smhd] ago/;
+/** The narrow and short `Intl.RelativeTimeFormat` styles print "10s ago" / "10 sec. ago". */
+const ABBREVIATING_FORMAT = /RelativeTimeFormat\([^)]*(narrow|short)/;
+
+/**
+ * The figure formatters that may write the compact form — each one draws a standalone figure
+ * that sits beside a spoken twin, never a sentence. Exempt by name so the exemption dies with
+ * the function. `pages/dev/` is the primitives gallery, built only in development
+ * (`import.meta.env.DEV` in App.tsx), and is not scanned.
+ */
+const FIGURE_FORMATTERS = [
+  { file: "lib/playCopy.ts", fn: "hoursAndMinutes" },
+  { file: "lib/minutes.ts", fn: "compactMagnitude" },
+  { file: "lib/utils.ts", fn: "formatMinutes" },
+];
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return ["test", "dev", "__tests__"].includes(entry.name) ? [] : sourceFiles(path);
+    return /\.tsx?$/.test(entry.name) && !/\.(test|spec)\.tsx?$/.test(entry.name) ? [path] : [];
+  });
+}
+
+function drawnCode(path: string): string {
+  const file = relative_(path);
+  const blank = (m: string) => m.replace(/[^\n]/g, " ");
+  let code = readFileSync(path, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, (m, lead: string) => lead + blank(m.slice(lead.length)));
+  for (const { file: f, fn } of FIGURE_FORMATTERS) {
+    if (f === file) code = code.replace(new RegExp(`(export )?function ${fn}\\([\\s\\S]*?\\n\\}`), blank);
+  }
+  return code;
+}
+
+const relative_ = (path: string) => path.slice(SRC.length + 1).split("\\").join("/");
+
+describe("R8 J8-4 / X8-6 — spoken units in every module that draws text", () => {
+  it("no source module writes a compact unit, a compact age or an abbreviating relative format", () => {
+    const offenders = sourceFiles(SRC).flatMap((path) =>
+      drawnCode(path)
+        .split("\n")
+        .map((line, i) => ({ line, at: `${relative_(path)}:${i + 1}` }))
+        .filter(({ line }) => COMPACT_UNIT_ANYWHERE.test(line) || COMPACT_AGO.test(line) || ABBREVIATING_FORMAT.test(line))
+        .map(({ line, at }) => `${at}  ${line.trim()}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("the exempt figure formatters still exist, so the exemption cannot outlive them", () => {
+    for (const { file, fn } of FIGURE_FORMATTERS) {
+      expect(readFileSync(join(SRC, file), "utf8"), `${file} ${fn}`).toMatch(new RegExp(`function ${fn}\\(`));
+    }
+  });
+
+  it("a device's age is said in words (X8-6)", () => {
+    const at = Date.parse("2026-10-03T12:00:00Z");
+    const ago = (ms: number) => relative(new Date(at - ms).toISOString(), at);
+    expect(ago(12_000)).toBe("12 seconds ago");
+    expect(ago(1_000)).toBe("1 second ago");
+    expect(ago(9 * 60_000)).toBe("9 minutes ago");
+    expect(ago(60_000)).toBe("1 minute ago");
+    expect(ago(8 * 3_600_000)).toBe("8 hours ago");
+    expect(ago(86_400_000)).toBe("1 day ago");
+    expect(relative(null, at)).toBe("never");
+  });
+
+  it("every settings caption states its range in spoken units (J8-4)", () => {
+    // Every help line is resolved against the defaults, as the page draws it before an edit.
+    const defaults = Object.fromEntries(SETTINGS.map((def) => [def.key, def.defaultValue]));
+    const context = { settings: defaults as unknown as AdminSettings, currency: "R" };
+    for (const def of SETTINGS) {
+      said(describeSetting(def, "R"));
+      said(resolve(def.help, context) ?? "");
+    }
+    const slice = SETTINGS.find((def) => def.key === "slice_minutes")!;
+    expect(describeSetting(slice, "R")).toMatch(/Allowed: 5–240 minutes\.$/);
   });
 });
 

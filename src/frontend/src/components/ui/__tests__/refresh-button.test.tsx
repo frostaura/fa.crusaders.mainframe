@@ -74,7 +74,7 @@ describe("Freshness", () => {
 
   it("says how old the screen is, in a <time>", () => {
     render(<Freshness at={NOW - 12_000} />, strict);
-    const time = screen.getByText("Updated 12s ago");
+    const time = screen.getByText("Updated 12 seconds ago");
     expect(time.tagName).toBe("TIME");
     expect(time).toHaveAttribute("datetime", new Date(NOW - 12_000).toISOString());
     expect(time).not.toHaveAttribute("data-stale");
@@ -89,12 +89,12 @@ describe("Freshness", () => {
   it("re-renders every 10 seconds", () => {
     render(<Freshness at={NOW - 12_000} />);
     act(() => { vi.advanceTimersByTime(10_000); });
-    expect(screen.getByText("Updated 22s ago")).toBeInTheDocument();
+    expect(screen.getByText("Updated 22 seconds ago")).toBeInTheDocument();
   });
 
   it("turns warning — colour AND an icon — once stale", () => {
     render(<Freshness at={NOW - 90_000} />);
-    const time = screen.getByText("Updated 1m ago");
+    const time = screen.getByText("Updated 1 minute ago");
     expect(time).toHaveAttribute("data-stale", "true");
     expect(time.className).toContain("text-warning-strong");
     expect(time.querySelector("svg"), "colour is never the only signal").toHaveAttribute("aria-hidden", "true");
@@ -102,9 +102,9 @@ describe("Freshness", () => {
 
   it("goes stale on the clock, not only on arrival", () => {
     render(<Freshness at={NOW - 55_000} staleAfterMs={60_000} />);
-    expect(screen.getByText("Updated 55s ago")).not.toHaveAttribute("data-stale");
+    expect(screen.getByText("Updated 55 seconds ago")).not.toHaveAttribute("data-stale");
     act(() => { vi.advanceTimersByTime(10_000); });
-    expect(screen.getByText("Updated 1m ago")).toHaveAttribute("data-stale", "true");
+    expect(screen.getByText("Updated 1 minute ago")).toHaveAttribute("data-stale", "true");
   });
 
   it("renders nothing before the first read", () => {

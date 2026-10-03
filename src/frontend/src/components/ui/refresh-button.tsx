@@ -78,9 +78,13 @@ export function RefreshButton({ onRefresh, loading = false, label = "Refresh", c
   );
 }
 
-const RELATIVE = new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" });
+/**
+ * The long style: "10 seconds ago", never the narrow "10s ago" a screen reader says as "ten ess
+ * ago" (R8 J8-4 — a relative age is spoken units, memory/decisions-minutes-words.md).
+ */
+const RELATIVE = new Intl.RelativeTimeFormat("en", { style: "long", numeric: "always" });
 
-/** "Updated 12s ago", "Updated 3m ago", "Updated 2h ago", "Updated 1d ago". */
+/** "Updated 12 seconds ago", "Updated 3 minutes ago", "Updated 2 hours ago", "Updated 1 day ago". */
 function describeAge(ageMs: number): string {
   const seconds = Math.max(0, Math.round(ageMs / 1000));
   if (seconds < 5) return "Updated just now";

@@ -115,7 +115,7 @@ describe("the doors surface", () => {
       openDoors([doorFixture({ last_seen_at: ago(12) })]);
 
       expect(await screen.findByText("Reporting")).toBeInTheDocument();
-      expect(screen.getByText(/Heard from 12s ago/)).toBeInTheDocument();
+      expect(screen.getByText(/Heard from 12 seconds ago/)).toBeInTheDocument();
       // Scoped to the tile rather than the document: `ConfirmButton`'s pending label is the
       // literal "Working…", it is aria-hidden until the button is in flight, and it is a
       // shared primitive's word for a REQUEST — not a claim about a door. The claim this
@@ -1405,7 +1405,7 @@ describe("the doors surface", () => {
 
       const heading = await screen.findByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
       expect(heading).toHaveFocus();
-      expect(screen.getByText(/confirmed — heard from 12s ago/)).toBeInTheDocument();
+      expect(screen.getByText(/confirmed — heard from 12 seconds ago/)).toBeInTheDocument();
       const notConfirmed = screen.getByText(/NOT CONFIRMED — last heard/);
       expect(notConfirmed).toHaveTextContent("It may still admit booked members from its cached list for up to six hours.");
       expect(screen.getByText("With no power this door is: released.")).toBeInTheDocument();

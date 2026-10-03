@@ -222,7 +222,7 @@ describe("the health strip, and how fresh the page itself is", () => {
   it("names the board, its link in words, and how long ago it spoke", () => {
     expect(healthLine(
       { name: "Box 1-4", link: "online", last_seen_at: "2026-09-22T16:00:19Z" }, NOW, "Box",
-    )).toBe("Box 1-4 · online · heard 12s ago");
+    )).toBe("Box 1-4 · online · heard 12 seconds ago");
   });
 
   it("gives the state that has no name today one — quiet, between online and gone", () => {

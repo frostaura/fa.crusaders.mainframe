@@ -23,7 +23,12 @@ last_verified: 2026-10-03
   R6 guard ("inside ${window} min", `${hours} h` chips, "5 min ago"). The one exemption is by
   function name (`playCopy.hoursAndMinutes`, a figure drawn beside its twin); add a figure
   formatter there only if it is never put in a sentence. Relative ages and seconds follow the
-  same rule ("5 minutes ago", "lock released 15 seconds").
+  same rule ("5 minutes ago", "lock released 15 seconds"). R8 J8-4/X8-6: the scan now reads EVERY
+  non-test source module (not only `*Copy.ts`; `pages/dev/` skipped) for a compact unit, a compact
+  age (`${n}m ago`) or a narrow/short `RelativeTimeFormat`; figure formatters exempt by name
+  (`hoursAndMinutes`, `minutes.compactMagnitude`, `utils.formatMinutes`). `deviceLiveness.relative()`
+  and the header freshness say ages in words; settings captions say "Allowed: 5–240 minutes."
+  (`settingsSchema.describeSetting`; the control's edge keeps "min", aria-hidden).
   Non-copy callers that build sentences (players detail, splitEditor, adminActs, bookingErrors,
   deskLedger, InviteLink, AccountMenu) were swept by hand; R6 asks went to FD1 (SplitTotals,
   MinutesChip aria-label) and FD2 (TopUpStatus, topUpOpen, the shelf's saving badge/line).

@@ -314,7 +314,7 @@ describe("AdminDevices", () => {
 
     // A box in a cupboard that stopped talking is the thing an admin most needs to
     // see, and "last seen 10m ago" says it better than a red dot.
-    expect(await screen.findByText(/last seen 10m ago/)).toBeInTheDocument();
+    expect(await screen.findByText(/last seen 10 minutes ago/)).toBeInTheDocument();
   });
 
   /**
@@ -336,7 +336,7 @@ describe("AdminDevices", () => {
     renderPage(<AdminDevicesPage />);
 
     expect(await screen.findByText("online")).toBeInTheDocument();
-    expect(screen.queryByText(/last seen 6m ago/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/last seen 6 minutes ago/)).not.toBeInTheDocument();
   });
 
   it("takes the API's own offline threshold over any arithmetic of its own", async () => {
@@ -378,7 +378,7 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    expect(await screen.findByText(/last seen 16m ago/)).toBeInTheDocument();
+    expect(await screen.findByText(/last seen 16 minutes ago/)).toBeInTheDocument();
   });
 
   /**
@@ -398,7 +398,7 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    expect(await screen.findByText(/last seen 20m ago/)).toBeInTheDocument();
+    expect(await screen.findByText(/last seen 20 minutes ago/)).toBeInTheDocument();
   });
 
   // --- self-registration ------------------------------------------------------------
@@ -843,7 +843,7 @@ describe("AdminDevices", () => {
     }
 
     expect(screen.queryByText("online")).not.toBeInTheDocument();
-    expect(screen.getByText(/not reporting — last seen 3m ago/)).toBeInTheDocument();
+    expect(screen.getByText(/not reporting — last seen 3 minutes ago/)).toBeInTheDocument();
 
     // And it is the poller doing it — one read per tick, all thirteen, still running long
     // after StrictMode's second mount. An exact count rather than "more than before":
@@ -1151,7 +1151,7 @@ describe("AdminDevices", () => {
     renderPage(<AdminDevicesPage />);
 
     // The page already says the sibling is not reporting, in its own header.
-    expect(await screen.findByText(/not reporting — last seen 3h ago/)).toBeInTheDocument();
+    expect(await screen.findByText(/not reporting — last seen 3 hours ago/)).toBeInTheDocument();
 
     // Taking the one reporting box on court 2 out of service is what stops court 2's
     // no-shows being penalised, and the confirm now says so instead of the plain sentence.
@@ -1615,7 +1615,7 @@ describe("AdminDevices", () => {
       // Ten minutes against three beats of the club's 60 s heartbeat. No door-specific
       // arithmetic: one formula, in lib/deviceLiveness, with the 180 s floor.
       expect(await screen.findByText("Not reporting")).toBeInTheDocument();
-      expect(screen.getByText("10m ago")).toBeInTheDocument();
+      expect(screen.getByText("10 minutes ago")).toBeInTheDocument();
     });
 
     /**

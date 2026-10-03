@@ -48,17 +48,17 @@ function gate(overrides: Partial<AdminDevice> = {}): AdminDevice {
 describe("relative", () => {
   it("counts from the instant it is given, not from the wall clock", () => {
     const seen = new Date(AT - 12_000).toISOString();
-    expect(relative(seen, AT)).toBe("12s ago");
+    expect(relative(seen, AT)).toBe("12 seconds ago");
     // The same string, a minute of wall time later, from the same input — which is only
     // possible because the caller owns the clock.
-    expect(relative(new Date(AT + 48_000).toISOString(), AT + 60_000)).toBe("12s ago");
+    expect(relative(new Date(AT + 48_000).toISOString(), AT + 60_000)).toBe("12 seconds ago");
   });
 
   it("steps through seconds, minutes, hours and days", () => {
-    expect(relative(new Date(AT - 59_000).toISOString(), AT)).toBe("59s ago");
-    expect(relative(new Date(AT - 6 * 60_000).toISOString(), AT)).toBe("6m ago");
-    expect(relative(new Date(AT - 3 * 3_600_000).toISOString(), AT)).toBe("3h ago");
-    expect(relative(new Date(AT - 2 * 86_400_000).toISOString(), AT)).toBe("2d ago");
+    expect(relative(new Date(AT - 59_000).toISOString(), AT)).toBe("59 seconds ago");
+    expect(relative(new Date(AT - 6 * 60_000).toISOString(), AT)).toBe("6 minutes ago");
+    expect(relative(new Date(AT - 3 * 3_600_000).toISOString(), AT)).toBe("3 hours ago");
+    expect(relative(new Date(AT - 2 * 86_400_000).toISOString(), AT)).toBe("2 days ago");
   });
 
   /**

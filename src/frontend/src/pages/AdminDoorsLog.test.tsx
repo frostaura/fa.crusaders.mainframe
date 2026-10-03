@@ -893,7 +893,7 @@ describe("the club door log", () => {
 
     const row = (await screen.findAllByRole("listitem"))[0];
     expect(row.textContent).toMatch(/\d{2}:\d{2}/);
-    expect(row).toHaveTextContent("5m ago");
+    expect(row).toHaveTextContent("5 minutes ago");
   });
 
   it("adds the day when the row is not today's", async () => {
@@ -904,7 +904,7 @@ describe("the club door log", () => {
     // "Fri 18 Sep, 11:18" — B20: a weekday always carries its date, because the log ranges
     // over thirty days and four Fridays are in it.
     expect(row.textContent).toMatch(/\w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}/);
-    expect(row).toHaveTextContent("3d ago");
+    expect(row).toHaveTextContent("3 days ago");
   });
 
   // --- C4: the buttons that dropped focus to <body> --------------------------------

@@ -35,12 +35,12 @@ import {
  */
 
 /**
- * "6m ago" spelled out, for an accessible name.
+ * A compact age ("6m ago") spelled out ("6 minutes ago").
  *
  * <p>
- * A screen reader reads "6m ago" as "six em ago". The abbreviation is right on screen, where
- * space is the constraint and the reader can see the pattern, and wrong in a name, where the
- * whole point is that the fact arrives once and completely.
+ * A screen reader reads "6m ago" as "six em ago". Since R8 X8-6 `deviceLiveness.relative()`
+ * already says ages in words on screen as well, so an age from it passes through unchanged;
+ * this stays for any compact age that still reaches an accessible name.
  * </p>
  */
 const AGE_UNITS: Record<string, string> = { s: "second", m: "minute", h: "hour", d: "day" };

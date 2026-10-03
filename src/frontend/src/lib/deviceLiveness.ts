@@ -40,15 +40,27 @@ import { effectiveHeartbeatSeconds, offlineAfterSeconds } from "./tenantSettings
  */
 export const HEARTBEAT_FALLBACK_SECONDS = 60;
 
-/** "12s ago" · "6m ago" · "3h ago" · "2d ago" · "never". */
+/**
+ * "12 seconds ago" · "6 minutes ago" · "1 hour ago" · "2 days ago" · "never".
+ *
+ * <p>
+ * <b>Words, not letters (R8 X8-6).</b> This used to print "6m ago", and every caller put it
+ * inside a sentence — "heard 8h ago", "not reporting — last seen 9m ago" — which a screen
+ * reader says as "eight aitch ago". A relative age follows the minutes rule
+ * (memory/decisions-minutes-words.md): spoken units on screen and in the ear, the same as the
+ * inbox and the member's own pages already say it.
+ * </p>
+ */
 export function relative(iso: string | null, now: number): string {
   if (!iso) return "never";
-  const seconds = Math.round((now - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86400)}d ago`;
+  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return ago(seconds, "second");
+  if (seconds < 3600) return ago(Math.round(seconds / 60), "minute");
+  if (seconds < 86400) return ago(Math.round(seconds / 3600), "hour");
+  return ago(Math.round(seconds / 86400), "day");
 }
+
+const ago = (count: number, unit: string) => `${count} ${count === 1 ? unit : `${unit}s`} ago`;
 
 /**
  * How long this board may be silent before a screen calls it offline, seconds.

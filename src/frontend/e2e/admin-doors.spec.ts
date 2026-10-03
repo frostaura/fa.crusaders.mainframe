@@ -156,7 +156,7 @@ test.describe("The doors overview", () => {
   test("ticks each door's age without going back to the server", async ({ page }) => {
     await openDoors(page, [door({ last_seen_at: ago(12) })]);
 
-    const age = page.getByText(/Heard from \d+s ago/);
+    const age = page.getByText(/Heard from \d+ seconds? ago/);
     await expect(age).toBeVisible();
     const first = await age.textContent();
 
@@ -293,7 +293,7 @@ test.describe("Shutting every door", () => {
     const heading = page.getByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
     await expect(heading).toBeVisible();
     await expect(heading).toBeFocused();
-    await expect(page.getByText(/confirmed — heard from \d+s ago/)).toBeVisible();
+    await expect(page.getByText(/confirmed — heard from \d+ seconds? ago/)).toBeVisible();
     await expect(page.getByText(/NOT CONFIRMED — last heard/))
       .toContainText("It may still admit booked members from its cached list for up to six hours.");
     await expect(page.getByText("With no power this door is: released.")).toBeVisible();

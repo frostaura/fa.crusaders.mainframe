@@ -3,7 +3,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { InfoPopover } from "@/components/ui/info-popover";
 import { cn } from "@/lib/utils";
 import { settingAnchorId } from "@/lib/tenantSettings";
-import { isServed, resolve, settingLabel, unitOf, type SettingDef } from "@/lib/settingsSchema";
+import { describeSetting, isServed, resolve, settingLabel, type SettingDef } from "@/lib/settingsSchema";
 import { HIGHLIGHT_CLASS, afterCaption, takesDescription } from "./draft";
 import { useSettingsForm } from "./form";
 import { Highlight } from "./Highlight";
@@ -92,20 +92,10 @@ const SettingRow = memo(function SettingRow(props: RowProps) {
       <SettingControl {...props} describedBy={wired ? helpId : undefined} invalid={error !== undefined} />
       <FieldError>{error}</FieldError>
       <FieldDescription className="text-text-muted">
-        <Highlight text={describe(def, currency)} query={query} />
+        <Highlight text={describeSetting(def, currency)} query={query} />
       </FieldDescription>
       {wired ? <p id={helpId} className="sr-only">{help}</p> : null}
       <p aria-live="polite" className="sr-only">{left && error ? (afterCaption(label, error) === null ? `${label}: ${error}` : error) : ""}</p>
     </Field>
   );
 });
-
-/** The visible line: what the setting is, then the range it accepts, in its own unit. */
-function describe(def: SettingDef, currency: string): string {
-  const line = def.description.replaceAll("{currency}", currency);
-  if (def.kind !== "number" || def.min === undefined || typeof def.max !== "number") return line;
-  const unit = unitOf(def, currency);
-  const range = def.minExclusive ? `more than 0, up to ${def.max}` : `${def.min}–${def.max}`;
-  const suffix = unit && !def.unitBefore ? ` ${unit}` : "";
-  return `${line} Allowed: ${range}${suffix}.`;
-}

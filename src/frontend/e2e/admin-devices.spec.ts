@@ -243,7 +243,7 @@ test.describe("Online and offline", () => {
     const slow = page.locator("div").filter({ hasText: /^Slow box/ }).first();
     await expect(slow.getByText("online")).toBeVisible();
 
-    await expect(page.getByText("last seen 10m ago")).toBeVisible();
+    await expect(page.getByText("last seen 10 minutes ago")).toBeVisible();
   });
 });
 
