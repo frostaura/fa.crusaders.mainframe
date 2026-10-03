@@ -107,9 +107,21 @@ describe("describeActivityReason", () => {
     // entirely, and the door now refuses with a reason of its own rather than borrowing
     // `member_not_active` — a different fact, and a different fix.
     expect(Object.keys(DOOR_REFUSAL_REASONS).sort()).toEqual([
-      "member_not_active", "method_not_supported", "no_booking", "no_membership",
+      "code_used", "member_not_active", "method_not_supported", "no_booking", "no_membership",
       "not_a_gate", "not_recognised", "ok", "too_early",
     ]);
+  });
+
+  /**
+   * R10 E10-4: a gate's `code_used` (a member code that had already acted, or a photo of it) was
+   * said three ways — the Night "code already used", the Doors log "Code used" (the humanised
+   * token, by accident) under a bare "Refused" chip, the admin member history the raw token.
+   * One family now: the sentence and the chip both say the code had already been used.
+   */
+  it("says a reused code in the Night's words, never the token or a bare Refused", () => {
+    const row = entry({ action: "gate.denied_code_used", reason: "code_used" });
+    expect(describeActivityReason(row)).toBe("The code had already been used");
+    expect(DOOR_OUTCOME_CHIPS.code_used).toBe("Code already used");
   });
 
   /**
@@ -312,10 +324,14 @@ describe("DOOR_OUTCOME_CHIPS", () => {
     }
   });
 
-  /** A chip is a label on a row that is eight characters wide on a phone. */
+  /**
+   * A chip is a label on a row that is eight characters wide on a phone. 17, not 16, since R10
+   * E10-4: "Code already used" is the word the Night, the member's history and the server say,
+   * and one wording family outranks a character (the chip wraps at its space, measured at 320).
+   */
   it("keeps every label short enough to be a chip", () => {
     for (const [reason, chip] of Object.entries(DOOR_OUTCOME_CHIPS)) {
-      expect(chip.length, reason).toBeLessThanOrEqual(16);
+      expect(chip.length, reason).toBeLessThanOrEqual(17);
     }
   });
 });

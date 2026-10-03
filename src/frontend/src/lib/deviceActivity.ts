@@ -69,6 +69,9 @@ export const DOOR_REFUSAL_REASONS: Record<string, string> = {
    * </p>
    */
   no_membership: "No membership on file for that person",
+  /** R10 E10-4: a member code that had already acted (member-code §5, `member_code_uses`) — a
+   *  second scan of one code, or a photo of it. The Night's "code already used", in this voice. */
+  code_used: "The code had already been used",
 };
 
 /**
@@ -102,6 +105,8 @@ export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
   // Ruling 15. "Not active" would be wrong twice over: there is nothing to reactivate, and an
   // admin reading the chip would go looking for a membership row that does not exist.
   no_membership: "No membership",
+  // R10 E10-4: the member's history, the Night and the server's door words say it this way.
+  code_used: "Code already used",
 };
 
 /**
