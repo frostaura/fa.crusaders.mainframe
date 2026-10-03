@@ -66,7 +66,7 @@ export type MemberBookingRow = {
    * record listed only the courts a member booked, so a weekly partner read as never playing.
    * Absent from an older API: read as `organiser`.
    */
-  role?: "organiser" | "partner";
+  role?: "organiser" | "partner" | "payer";
   /** C6: whose booking it is. On an organiser row, the member themselves (`is_self`). */
   organiser?: { user_id: string | null; name: string | null; is_self: boolean } | null;
 };

@@ -808,8 +808,11 @@ export type MemberBookingRules = {
  */
 export const TOP_UP_REASON_CODES = ["top_up_cash", "top_up_eft", "top_up_card_offline"] as const;
 export const ADJUSTMENT_REASON_CODES = ["goodwill", "correction", "refund_outside_system", "other"] as const;
-/** P13 §3.7 — how the desk took the money for a package it sold. */
-export type SellReasonCode = typeof TOP_UP_REASON_CODES[number];
+/**
+ * P13 §3.7 — how the desk took the money for a package it sold; R7 J7-10 `package_free` gives a
+ * package whose shelf price for the member is R0.00 at no charge (never listed as a payment method).
+ */
+export type SellReasonCode = typeof TOP_UP_REASON_CODES[number] | "package_free";
 /** P13 §3.7 — the kinds of hand adjustment `/adjust` still takes. */
 export type AdjustmentReasonCode = typeof ADJUSTMENT_REASON_CODES[number];
 

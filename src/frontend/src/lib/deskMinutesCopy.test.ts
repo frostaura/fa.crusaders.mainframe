@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REASON_MISSING, SELL_COPY } from "./deskMinutesCopy";
+import { REASON_MISSING, SELL_COPY, isDeskReasonCode, reasonLabel } from "./deskMinutesCopy";
 
 describe("R7 J7-6 — the sell sheet's payment step asks the question it shows", () => {
   it("a missing payment method is said as the payment, never as a reason", () => {
@@ -31,5 +31,12 @@ describe("R7 J7-10 — a package sold for nothing is not money the club took", (
   it("has a note to stand where the payment questions would be", () => {
     expect(SELL_COPY.freeNote).toMatch(/nothing to pay/i);
     expect(SELL_COPY.freeNote).not.toMatch(/cash/i);
+  });
+});
+
+describe("R7 J7-10 — a package given at no charge", () => {
+  it("is worded as a gift in the change record, never as cash", () => {
+    expect(reasonLabel("package_free")).toBe("Given at no charge");
+    expect(isDeskReasonCode("package_free")).toBe(true);
   });
 });

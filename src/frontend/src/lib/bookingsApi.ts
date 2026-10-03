@@ -24,8 +24,13 @@ export type UpcomingGame = {
   court_name: string;
   starts_at: string;
   ends_at: string;
-  /** Whether the caller booked it or holds an accepted partner's seat on it. */
-  role: "organiser" | "partner";
+  /**
+   * Whether the caller booked it or holds an accepted partner's seat on it — or (R7 E7-5) paid for
+   * it at the court box, which shows it to them read-only.
+   */
+  role: "organiser" | "partner" | "payer";
+  /** R7 E7-6 — the end it was sold to; `ends_at` is cut short by the no-show sweep. */
+  sold_ends_at?: string;
   status: string;
   players: UpcomingPlayer[];
   /** The caller's share of the price — the whole price for an organiser with nobody else paying. */

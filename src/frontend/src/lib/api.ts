@@ -787,7 +787,7 @@ export type ScheduleSlot = {
    * seat on somebody else's game — theirs to open, never to cancel. Absent on an older API and
    * null on everybody else's.
    */
-  role?: "organiser" | "partner" | null;
+  role?: "organiser" | "partner" | "payer" | null;
 };
 export type ScheduleCourt = {
   id: string; courtNumber: number; name: string;
@@ -1858,7 +1858,13 @@ export type WalletReport = {
  * ledger type nobody bucketed still reaches the total.
  */
 export type DailyAdminPoint = { date: string; top_ups_minutes: number; booking_charges_minutes: number; refunds_minutes: number; penalties_minutes: number; adjustments_minutes: number; reversals_minutes: number; share_transfers_minutes?: number; net_movement_minutes: number; bookings: number; no_shows: number };
-export type DailyMePoint = { date: string; top_ups_minutes: number; spent_minutes: number; refunds_minutes: number; bookings: number; attended: number; minutes_on_court: number; balance_minutes: number };
+export type DailyMePoint = {
+  date: string; top_ups_minutes: number; spent_minutes: number; refunds_minutes: number; bookings: number; attended: number;
+  minutes_on_court: number; balance_minutes: number;
+  /** R7 J7-2 — the rest of a day's movement, so its buckets add up to `net_movement_minutes`. */
+  penalties_minutes?: number; adjustments_minutes?: number; reversals_minutes?: number;
+  share_transfers_minutes?: number; net_movement_minutes?: number;
+};
 /**
  * Club revenue over a window, in BOTH units, because they are not interchangeable.
  *

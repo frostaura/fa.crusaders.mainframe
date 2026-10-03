@@ -136,7 +136,8 @@ export type DetailPlayer = {
   responded_at: string | null;
 };
 
-export type ViewerRole = "organiser" | "player" | "admin";
+/** R7 E7-5 — `payer`: paid for it at the court box; sees it read-only. */
+export type ViewerRole = "organiser" | "player" | "admin" | "payer";
 
 /** `GET /api/v1/bookings/{id}` — the booking as its players see it. */
 export type BookingDetail = {

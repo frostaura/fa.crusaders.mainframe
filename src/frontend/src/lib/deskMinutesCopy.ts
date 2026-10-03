@@ -65,7 +65,11 @@ export const PAYMENT_CHOICES: ReadonlyArray<{ code: SellReasonCode; label: strin
 ];
 
 /** Every desk reason code — an adjustment's or a sale's — in words; the code itself if unknown. */
+/** R7 J7-10 — a package priced R0.00 for the member, given at the desk; never a payment method. */
+export const PACKAGE_FREE_LABEL = "Given at no charge";
+
 export function reasonLabel(code: string): string {
+  if (code === "package_free") return PACKAGE_FREE_LABEL;
   return REASON_CHOICES.find((c) => c.code === code)?.label
     ?? PAYMENT_CHOICES.find((c) => c.code === code)?.label
     ?? code;
@@ -74,7 +78,8 @@ export function reasonLabel(code: string): string {
 /** Whether a stored reason code is one of the desk's (the change record words them, §4.5). */
 export function isDeskReasonCode(code: string): boolean {
   return (TOP_UP_REASON_CODES as readonly string[]).includes(code)
-    || (ADJUSTMENT_REASON_CODES as readonly string[]).includes(code);
+    || (ADJUSTMENT_REASON_CODES as readonly string[]).includes(code)
+    || code === "package_free";
 }
 
 /** An adjustment never counts as money the club took — said on the check step, every time. */
