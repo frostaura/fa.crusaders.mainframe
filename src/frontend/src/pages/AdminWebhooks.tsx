@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { describeFailure } from "../lib/errors";
 import { LOST_CREATE, endpointName } from "../lib/webhooksCopy";
@@ -478,8 +478,7 @@ function ListFailed({ error, retrying, onRetry }: { error: unknown; retrying: bo
 
 /** "booking.created" with a break opportunity after each dot, so a narrow badge wraps there. */
 function withDotBreaks(token: string): ReactNode {
-  const parts = token.split(".");
-  return parts.map((part, i) => <Fragment key={i}>{part}{i < parts.length - 1 ? <>.<wbr /></> : null}</Fragment>);
+  return token.split(".").flatMap((part, i, all) => (i < all.length - 1 ? [`${part}.`, <wbr key={i} />] : [part]));
 }
 
 /** One endpoint: what it is, where it sends, what it sends — and its deliveries under it. */
