@@ -37,7 +37,7 @@ export function givenMinutes(report: { top_ups_minutes: number; given_minutes?: 
 }
 
 export function bucketRows(report: WalletReport): BucketRow[] {
-  const given = givenMinutes(report as WalletReport & { given_minutes?: number });
+  const given = givenMinutes(report);
   const all: BucketRow[] = [
     { key: "bought", label: BUCKET_LABELS.bought, minutes: report.top_ups_minutes - given },
     { key: "given", label: BUCKET_LABELS.given, minutes: given },

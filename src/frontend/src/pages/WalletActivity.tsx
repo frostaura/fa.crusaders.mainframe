@@ -250,8 +250,6 @@ function WalletTotals({ wallet }: { wallet: WalletReport }) {
 type DayPoint = DailyMePoint & {
   penalties_minutes?: number; adjustments_minutes?: number; reversals_minutes?: number;
   share_transfers_minutes?: number; net_movement_minutes?: number;
-  /** R11 J11-4 — the part of `top_ups_minutes` the club gave at no charge. */
-  given_minutes?: number;
 };
 
 /** The daily table's headers beyond the totals' own words. */

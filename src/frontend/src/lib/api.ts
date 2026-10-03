@@ -1829,6 +1829,8 @@ export type PayFastFormField = { name: string; value: string };
 export type WalletReport = {
   from: string; to: string;
   top_ups_minutes: number;
+  /** R11 J11-4 — the part of top_ups_minutes given at no charge (desk give, R 0.00). Absent from an older API. */
+  given_minutes?: number;
   spent_minutes: number;
   refunds_minutes: number;
   /** The penalty TOTAL `reporting.md` asks for, beside the count that was already here. */
@@ -1859,7 +1861,7 @@ export type WalletReport = {
  */
 export type DailyAdminPoint = { date: string; top_ups_minutes: number; booking_charges_minutes: number; refunds_minutes: number; penalties_minutes: number; adjustments_minutes: number; reversals_minutes: number; share_transfers_minutes?: number; net_movement_minutes: number; bookings: number; no_shows: number };
 export type DailyMePoint = {
-  date: string; top_ups_minutes: number; spent_minutes: number; refunds_minutes: number; bookings: number; attended: number;
+  date: string; top_ups_minutes: number; given_minutes?: number; spent_minutes: number; refunds_minutes: number; bookings: number; attended: number;
   minutes_on_court: number; balance_minutes: number;
   /** R7 J7-2 — the rest of a day's movement, so its buckets add up to `net_movement_minutes`. */
   penalties_minutes?: number; adjustments_minutes?: number; reversals_minutes?: number;
