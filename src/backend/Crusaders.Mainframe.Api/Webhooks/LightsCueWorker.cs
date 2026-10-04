@@ -125,6 +125,12 @@ public sealed class LightsCueWorker : BackgroundService
         foreach (var b in attendedAndOver)
         {
             b.Status = BookingStatus.Completed;
+            // R12 E12-3 (decision I12, amended): a reversal that came AFTER the off cue re-emitted
+            // `booking.lights_on` for the late scan, so the court is lit again on every consumer's
+            // mirror; its off is said here, once, at the restored end. A reversal before the cue
+            // emitted nothing to undo. The row's own cue marker records this second cue.
+            var relit = b.NoShowReversedAt is { } reversedAt && b.LightsOffCuedAt is { } cuedAt && reversedAt > cuedAt;
+            if (relit) b.LightsOffCuedAt = now;
             // Saved on its own, like the lights-off rows above and for the same reason: a
             // lost concurrency race means another writer decided this booking, and its
             // decision stands. Only a save that stuck may announce itself — a
@@ -132,6 +138,7 @@ public sealed class LightsCueWorker : BackgroundService
             // utilisation report counting a session that never closed.
             if (await SaveOneAsync(db, b, ct))
             {
+                if (relit) await FireLightsAsync(db, tenant, b, on: false, ct);
                 await FireCompletedAsync(db, tenant, b, ct);
             }
         }

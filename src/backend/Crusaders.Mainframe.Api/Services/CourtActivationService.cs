@@ -514,10 +514,17 @@ public class CourtActivationService
     /// lists. The reversal goes through the booking service, not <see cref="ActivateAsync"/>, so
     /// it emitted nothing and a consumer mirroring lit courts never heard of that session.
     /// </summary>
-    public ValueTask EmitReversedLightsOnAsync(Court court, Booking booking, Guid identifiedUserId, string method, CancellationToken ct)
+    /// <remarks>
+    /// R12 E12-3: timed at the SCAN (<paramref name="scannedAt"/>), not the upload — <c>occurred_at</c>
+    /// is when the lights came on, and <c>duration_seconds</c> runs from then to the restored end (an
+    /// upload after the slot read "duration_seconds": 2 for a 25-minute grant). Its off is
+    /// <c>LightsCueWorker</c>'s attended-and-over pass, at the restored end.
+    /// </remarks>
+    public ValueTask EmitReversedLightsOnAsync(
+        Court court, Booking booking, (Guid Identified, DateTimeOffset ScannedAt) scan, string method, CancellationToken ct)
     {
-        var payer = booking.PaidByUserId ?? booking.UserId ?? identifiedUserId;
-        return _bus.EmitAsync(LightsOnEvent(court, booking, (payer, identifiedUserId), method, DateTimeOffset.UtcNow), ct);
+        var payer = booking.PaidByUserId ?? booking.UserId ?? scan.Identified;
+        return _bus.EmitAsync(LightsOnEvent(court, booking, (payer, scan.Identified), method, scan.ScannedAt), ct);
     }
 
     private DomainEvent LightsOnEvent(Court court, Booking booking, (Guid Payer, Guid Identified) who, string method, DateTimeOffset now)

@@ -691,7 +691,7 @@ public static class DeviceEventEndpoints
                 booking, court, userId, ct);
             // R11 E11-3: the webhooks contract's "roster fallback uploaded later" — the lights came
             // on, named for the scanner, like every other lighting of a booking.
-            await services.Activation.EmitReversedLightsOnAsync(court, booking, userId, e.Method ?? "offline", ct);
+            await services.Activation.EmitReversedLightsOnAsync(court, booking, (userId, occurredAt), e.Method ?? "offline", ct);
         }
         else if (settled.Code == ActivationOutcome.Ok)
         {

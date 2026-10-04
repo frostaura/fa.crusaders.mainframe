@@ -294,6 +294,40 @@ public class LightsCueTests
         Assert.Single(emitted, e => e.Type == "booking.lights_off" && Equals(e.Data["booking_id"], booking.Id));
     }
 
+    /// <summary>
+    /// Review round 12, E12-3 (I12 amended). The late scan's reversal emits <c>booking.lights_on</c>
+    /// (E11-3) after the sweep had already cued the lights off — so the court read lit for ever on a
+    /// consumer's mirror. At the restored end the attended-and-over pass says the lights went off,
+    /// once, with the restored <c>ends_at</c>; a reversal before the cue needs no second off.
+    /// </summary>
+    [Fact]
+    public async Task A_reversal_after_the_off_cue_is_cued_off_again_at_its_restored_end()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var bus = host.Services.GetRequiredService<IEventBus>();
+
+        var relit = await SeedBookingAsync(host, scope, DateTimeOffset.UtcNow.AddMinutes(-40), checkedInAt: DateTimeOffset.UtcNow.AddMinutes(-39));
+        relit.LightsOffCuedAt = DateTimeOffset.UtcNow.AddMinutes(-35);
+        relit.NoShowReversedAt = DateTimeOffset.UtcNow.AddMinutes(-30);
+        var reversedBeforeCue = await SeedBookingAsync(host, scope, DateTimeOffset.UtcNow.AddMinutes(-40), checkedInAt: DateTimeOffset.UtcNow.AddMinutes(-39));
+        reversedBeforeCue.NoShowReversedAt = DateTimeOffset.UtcNow.AddMinutes(-36);
+        reversedBeforeCue.LightsOffCuedAt = DateTimeOffset.UtcNow.AddMinutes(-35);
+        await db.SaveChangesAsync();
+
+        await WorkerFor(host).TickAsync(default);
+        await WorkerFor(host).TickAsync(default);
+
+        var emitted = new List<DomainEvent>();
+        while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
+        var off = Assert.Single(emitted, e => e.Type == "booking.lights_off" && Equals(e.Data["booking_id"], relit.Id));
+        Assert.True(((DateTimeOffset)off.Data["ends_at"]! - relit.EndsAt).Duration() < TimeSpan.FromMilliseconds(1));
+        Assert.DoesNotContain(emitted, e => e.Type == "booking.lights_off" && Equals(e.Data["booking_id"], reversedBeforeCue.Id));
+        Assert.Single(emitted, e => e.Type == "booking.completed" && Equals(e.Data["booking_id"], relit.Id));
+        Assert.Single(emitted, e => e.Type == "booking.completed" && Equals(e.Data["booking_id"], reversedBeforeCue.Id));
+    }
+
     [Fact]
     public async Task Cueing_off_happens_once()
     {

@@ -187,6 +187,11 @@ public abstract partial class DeviceEventHttpTests
 
             var lit = Assert.Single(bus.Kept, e => e.Type == "booking.lights_on");
             Assert.Equal(box.MemberId, lit.ActorUserId);
+            // R12 E12-3: at the SCAN (five minutes before the upload), lit from the scan to the restored end.
+            var scanAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+            Assert.True((lit.OccurredAt - scanAt).Duration() < TimeSpan.FromMinutes(1), $"lights_on at {lit.OccurredAt:O}, scan near {scanAt:O}");
+            var restoredEnd = (await BookingAsync(factory, booked.BookingId)).EndsAt;
+            Assert.InRange((int)lit.Data["duration_seconds"]!, (int)(restoredEnd - lit.OccurredAt).TotalSeconds - 1, (int)(restoredEnd - lit.OccurredAt).TotalSeconds + 1);
             Assert.Equal(booked.BookingId, (Guid)lit.Data["booking_id"]!);
             Assert.Equal(box.MemberId, (Guid)lit.Data["identified_user_id"]!);
 
