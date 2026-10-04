@@ -425,6 +425,13 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(survivor.StartsAt, a.EndsAt);
             Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.displaced"));
             Assert.Contains(d.BookingId.ToString(), Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed")).DetailsJson);
+
+            // R12 E12-4 (C3): the admin's Night names the collision — which booking, and from when.
+            var night = await NightAsync(factory, box);
+            var reversal = Assert.Single(night.GetProperty("events").EnumerateArray(),
+                e => e.GetProperty("kind").GetString() == TraceKinds.BookingNoShowReversed).GetProperty("detail");
+            Assert.Equal(d.BookingId.ToString(), Assert.Single(reversal.GetProperty("collision_booking_ids").EnumerateArray()).GetString());
+            Assert.Equal(survivor.StartsAt, reversal.GetProperty("collision_from").GetDateTimeOffset());
         }
 
         /// <summary>

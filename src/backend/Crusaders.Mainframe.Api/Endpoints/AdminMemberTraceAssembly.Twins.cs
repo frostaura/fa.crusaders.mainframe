@@ -123,6 +123,17 @@ public static partial class AdminMemberTraceAssembly
         return TraceKinds.DoorLabel(name, deviceCode);
     }
 
+    /// <summary>R12 E12-4: the <c>collision_booking_ids</c> a no-show reversal recorded, as strings; empty when none.</summary>
+    private static List<string> CollisionIdsOf(JsonElement? details)
+    {
+        if (details is not { } root || root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("collision_booking_ids", out var ids) || ids.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+        return [.. ids.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.String).Select(i => i.GetString()!)];
+    }
+
     /// <summary>A row an uploaded board event wrote (<c>device.*</c>): its <c>court</c> is a relay index and its instant is the scan's.</summary>
     private static bool IsBoardRow(string action) => action.StartsWith("device.", StringComparison.Ordinal);
 

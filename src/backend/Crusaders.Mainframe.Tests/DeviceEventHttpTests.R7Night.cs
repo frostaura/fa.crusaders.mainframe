@@ -202,25 +202,5 @@ public abstract partial class DeviceEventHttpTests
             Assert.Equal(box.MemberId, on.GetProperty("code_holder").GetProperty("user_id").GetGuid());
         }
 
-        /// <summary>The admin's view of the box member's night, through the real route.</summary>
-        private static async Task<JsonElement> NightAsync(TestWebAppFactory factory, Box box)
-        {
-            var adminId = Guid.NewGuid();
-            using (var scope = factory.Services.CreateScope())
-            {
-                var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-                db.Users.Add(new User
-                {
-                    Id = adminId, TenantId = box.TenantId, Email = $"adm-{box.Slug}@test.local", PasswordHash = "x",
-                    EmailVerified = true, IsAdmin = true,
-                });
-                await db.SaveChangesAsync();
-            }
-
-            var club = new DoorClub(box.TenantId, box.Slug, box.ApiKey, adminId, box.MemberId, box.CourtId);
-            var client = factory.CreateClient();
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", club.TokenFor(adminId, "admin"));
-            return await client.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{box.MemberId}/trace");
-        }
     }
 }

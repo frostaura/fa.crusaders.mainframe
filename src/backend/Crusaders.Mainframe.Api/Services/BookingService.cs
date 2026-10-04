@@ -1930,6 +1930,8 @@ public sealed class BookingService
                 provisional_lit_end = tail.ProvisionalEnd,
                 displaced_booking_ids = tail.Displaced.Select(b => b.Id).ToList(),
                 collision_booking_ids = tail.Survivors.Select(b => b.Id).ToList(),
+                // R12 E12-4 (C3): from when the other booking held the court — both paid for that time.
+                collision_from = tail.Survivors.Count > 0 ? tail.Survivors.Min(b => b.StartsAt) : (DateTimeOffset?)null,
             }),
         };
     }

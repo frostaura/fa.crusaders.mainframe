@@ -609,6 +609,14 @@ public static partial class AdminMemberTraceAssembly
             // R11 E11-4: a court-box refusal's attempt (activate / walkup / pay_for), as stored.
             ("attempt", Text(details, "attempt")));
 
+        // R12 E12-4 (C3): a reversal whose restored session overlapped another member's booking on
+        // that court — which bookings, and from when (the other's start). Absent when there was none.
+        if (CollisionIdsOf(details) is { Count: > 0 } collisions)
+        {
+            detail["collision_booking_ids"] = collisions;
+            detail["collision_from"] = DoorActivityView.Instant(details, "collision_from");
+        }
+
         // Present on every door row and absent everywhere else: "the board decided this alone"
         // is a fact about the row, and false is a different answer from "not a door row".
         if (DoorTrail.IsScan(action)) detail["offline"] = DoorTrail.IsOfflineAction(action);
