@@ -117,7 +117,7 @@ function CheckedIn({ at }: { at: string | null }) {
   if (!at) return <span className="sr-only">{DETAIL_COPY.notCheckedIn}</span>;
   return (
     <span className="inline-flex items-center gap-1 text-xs font-semibold text-success-strong">
-      <CheckCircle size={14} weight="bold" aria-hidden="true" />
+      <CheckCircle size={14} weight="bold" aria-hidden="true" className="shrink-0" />
       {DETAIL_COPY.checkedIn}
     </span>
   );

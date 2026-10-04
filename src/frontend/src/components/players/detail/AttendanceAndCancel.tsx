@@ -21,7 +21,8 @@ export function Attendance({ detail }: { detail: BookingDetail }) {
     <Section title={DETAIL_ATTENDANCE.title}>
       <div className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <p className={at ? "inline-flex items-center gap-2 font-semibold text-success-strong" : "inline-flex items-center gap-2 text-text-secondary"}>
-          {at ? <CheckCircle size={16} weight="bold" aria-hidden="true" /> : <Clock size={16} aria-hidden="true" />}
+          {/* R12 L12-2 — the line wraps at 320 / 200 %: the icon keeps its size. */}
+          {at ? <CheckCircle size={16} weight="bold" aria-hidden="true" className="shrink-0" /> : <Clock size={16} aria-hidden="true" className="shrink-0" />}
           {/* R5 M5-3 — a settled no-show is not waiting for anybody: no "yet". */}
           {at ? DETAIL_ATTENDANCE.checkedInAt(clubClock(at)) : isNoShow(detail) ? DETAIL_NO_SHOW.attendance : DETAIL_ATTENDANCE.notYet}
         </p>

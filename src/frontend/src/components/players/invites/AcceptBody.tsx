@@ -83,20 +83,24 @@ function GameFacts({ flow }: { flow: AcceptFlow }) {
   const { invite } = flow;
   const name = organiserName(invite);
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-3 sm:p-4">
+    // R12 — one column until the card is 16 root ems wide: two at 320 / 200 % broke "Cou / rt 1".
+    <div className="@container">
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-3 @[16rem]:grid-cols-2 sm:p-4">
       <Fact label={INVITES_COPY.court}>{invite.court_name ?? INVITES_COPY.court}</Fact>
       <Fact label={INVITES_COPY.players}>{playersCount(invite.players)}</Fact>
-      <Fact label={INVITES_COPY.when} className="col-span-2">{inviteWhen(invite)}</Fact>
-      <Fact label={INVITES_COPY.organiser} className="col-span-2">
-        <span className="flex items-center gap-3">
+      <Fact label={INVITES_COPY.when} className="@[16rem]:col-span-2">{inviteWhen(invite)}</Fact>
+      <Fact label={INVITES_COPY.organiser} className="@[16rem]:col-span-2">
+        {/* R12 — the name drops under the avatar rather than break mid-word ("No / msa" at 320 / 200 %). */}
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <Avatar size={32}>
             {invite.organiser?.photo_url ? <AvatarImage src={invite.organiser.photo_url} alt="" /> : null}
             <AvatarFallback name={name} />
           </Avatar>
-          <span className="min-w-0">{name}</span>
+          <span className="max-w-full">{name}</span>
         </span>
       </Fact>
     </dl>
+    </div>
   );
 }
 
