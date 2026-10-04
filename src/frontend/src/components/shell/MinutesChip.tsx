@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { walletHref, walletLabel } from "@/lib/walletLabel";
 import { useBalance } from "@/lib/useBalance";
 import { walletTone } from "@/lib/walletTone";
-import type { BalanceDelta, LiveState } from "@/lib/liveBalance";
+import type { BalanceDelta, BalancePart, LiveState } from "@/lib/liveBalance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn } from "@/lib/utils";
@@ -49,6 +49,31 @@ const TONE = {
 const ICON_TONE = { zero: "", low: "", fine: "text-success-strong" } as const;
 
 /**
+ * R12 X12-1 — how long a club cancellation's refund waits for the share frame an older server
+ * sends after it (70 ms apart in the walk), so the two are said as ONE sentence. A server on
+ * contract C1 sends one frame with both rows, which is said at once.
+ */
+const CANCEL_MERGE_MS = 1_000;
+
+type PendingCancel = { delta: BalanceDelta; timer: number };
+
+/** The rows a toast reads: the frame's own, or the refund alone. */
+function partsOf(delta: BalanceDelta): BalancePart[] {
+  return delta.parts ?? [{ reason: delta.reason ?? "cancellation_refund", delta_minutes: delta.amount }];
+}
+
+/** A cancellation refund whose share rows may still be coming (an older server's first frame). */
+function awaitsShares(delta: BalanceDelta): boolean {
+  return delta.reason === "cancellation_refund" && delta.amount > 0
+    && !(delta.parts ?? []).some((p) => p.reason === "share_transfer");
+}
+
+/** Green only for minutes that simply arrived (R10 E10-1) — a penalty or a share out is not good news. */
+function toneOf(amount: number, parts: readonly BalancePart[] | undefined): "success" | "info" {
+  return amount > 0 && !(parts ?? []).some((p) => p.delta_minutes < 0) ? "success" : "info";
+}
+
+/**
  * One toast for a movement this tab did not cause (D4) — worded from the frame's reason, and for
  * a share with the names in it. A movement of the member's own (`source: "self"`) raises none: the
  * page that caused it has already said what happened.
@@ -59,24 +84,45 @@ function useClubMovementToast() {
   const me = auth.status === "authenticated" ? auth.userId : null;
   const toast = useToast();
   const announced = useRef<number | null>(null);
+  const pending = useRef<PendingCancel | null>(null);
+  useEffect(() => () => { if (pending.current) window.clearTimeout(pending.current.timer); }, []);
   useEffect(() => {
     if (!delta) return;
     if (announced.current === delta.at) return;
     announced.current = delta.at;
-    if (delta.source === "club") {
-      // R10 E10-1: green only for minutes that simply arrived — a settlement that also took a
-      // penalty is not good news, whatever its net.
-      const charged = (delta.parts ?? []).some((p) => p.delta_minutes < 0);
-      const tone = delta.amount > 0 && !charged ? "success" : "info";
-      const say = (text: string) => toast.push({ tone, text, durationMs: MONEY_TOAST_MS });
-      if (delta.reason === "share_transfer") {
-        // R11 E11-1 — said with the frame's cause, named or plain.
-        const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes);
-        namedShareMovement(delta.amount, me, delta).then((named) => say(named ?? plainShare), () => say(plainShare));
-      } else {
-        const plain = movementSentence(delta.amount, delta.reason, delta.parts);
-        say(plain);
-      }
+    if (delta.source !== "club") return;
+    const sayAs = (amount: number, parts: BalancePart[] | undefined) => (text: string) =>
+      toast.push({ tone: toneOf(amount, parts), text, durationMs: MONEY_TOAST_MS });
+    const who = { cancelledBy: delta.cancelledBy, checkedInBy: delta.checkedInBy };
+    const held = pending.current;
+    if (held && delta.reason === "share_transfer") {
+      // R12 X12-1 — the refund's share rows, an older server's second frame: one sentence, the net.
+      window.clearTimeout(held.timer);
+      pending.current = null;
+      const parts = [...partsOf(held.delta), { reason: "share_transfer", delta_minutes: delta.amount }];
+      const amount = held.delta.amount + delta.amount;
+      const heldWho = { cancelledBy: held.delta.cancelledBy, checkedInBy: held.delta.checkedInBy };
+      sayAs(amount, parts)(movementSentence(amount, "cancellation_refund", parts, heldWho));
+      return;
+    }
+    if (held) {
+      window.clearTimeout(held.timer);
+      pending.current = null;
+      sayAs(held.delta.amount, held.delta.parts)(movementSentence(held.delta.amount, held.delta.reason, held.delta.parts, held.delta));
+    }
+    const say = sayAs(delta.amount, delta.parts);
+    if (delta.reason === "share_transfer") {
+      // R11 E11-1 — said with the frame's cause, named or plain.
+      const plainShare = shareMovementPlain(delta.amount, delta.shareCause, delta.shareKeptMinutes, delta.checkedInBy);
+      namedShareMovement(delta.amount, me, delta).then((named) => say(named ?? plainShare), () => say(plainShare));
+    } else if (awaitsShares(delta)) {
+      const timer = window.setTimeout(() => {
+        pending.current = null;
+        say(movementSentence(delta.amount, delta.reason, delta.parts, who));
+      }, CANCEL_MERGE_MS);
+      pending.current = { delta, timer };
+    } else {
+      say(movementSentence(delta.amount, delta.reason, delta.parts, who));
     }
   }, [delta, toast, me]);
 

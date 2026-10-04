@@ -16,7 +16,7 @@ import { summariseBooking } from "@/components/wallet/useShareBookings";
  * </p>
  */
 export async function namedShareMovement(
-  amount: number, me: string | null, cause?: { shareCause?: string; shareKeptMinutes?: number },
+  amount: number, me: string | null, cause?: { shareCause?: string; shareKeptMinutes?: number; checkedInBy?: string },
 ): Promise<string | null> {
   const wallet = await endpoints.wallet(5, 0);
   const row = wallet.entries.find((e) =>
@@ -24,9 +24,14 @@ export async function namedShareMovement(
   if (!row?.relatedBookingId) return null;
   const booking = summariseBooking(await playersEndpoints.detail(row.relatedBookingId));
   const side = booking.organiserId === me ? "organiser" : "partner";
+  // R12 X12-3 — a partner who withdrew is no longer on the booking: the ledger row still names
+  // them (the side the minutes went to, or came from), so the toast keeps their name.
+  const fromRow = row.signedAmountMinutes < 0 ? row.to : row.from;
   const other = side === "organiser"
-    ? booking.partners.find((p) => p.userId === row.actorUserId)?.name ?? null
+    ? booking.partners.find((p) => p.userId === row.actorUserId)?.name ?? (fromRow?.trim() || null)
     : booking.organiserName;
   // R11 E11-1 — the frame's cause, said as the inbox says it.
-  return shareRowSentence({ side, signed: row.signedAmountMinutes, place: booking, other, cause: cause?.shareCause, kept: cause?.shareKeptMinutes });
+  return shareRowSentence({
+    side, signed: row.signedAmountMinutes, place: booking, other, cause: cause?.shareCause, kept: cause?.shareKeptMinutes, by: cause?.checkedInBy,
+  });
 }

@@ -159,11 +159,15 @@ export function minutesLeftSentence(amount: number, entryType: LedgerEntryType |
  * carries each row (`parts`); a frame from an older API is worded by its sign alone.
  * </p>
  */
-export function movementSentence(amount: number, reason: string | undefined, parts?: readonly MovementPart[]): string {
+export function movementSentence(amount: number, reason: string | undefined, parts?: readonly MovementPart[], who: MovementWho = {}): string {
   const minutes = minutesSpoken(Math.abs(amount));
   const up = amount > 0;
+  const said: Said = { minutes, up, split: splitParts(parts), by: who.checkedInBy };
+  if (reason === "cancellation_refund" && (who.cancelledBy === "club" || (parts?.length ?? 0) > 1)) {
+    return cancelSentence(said, parts, who.cancelledBy === "club");
+  }
   const precise = reason ? PRECISE_MOVEMENT[reason] : undefined;
-  if (precise) return precise({ minutes, up, split: splitParts(parts) });
+  if (precise) return precise(said);
   // `mixed` without its rows, and anything unknown: true whoever caused it.
   const [rose, fell] = (reason ? BY_REASON[reason] : undefined) ?? NEUTRAL_MOVEMENT;
   return (up ? rose : fell)(minutes);
@@ -187,6 +191,30 @@ const BY_REASON: Record<string, readonly [Say, Say]> = {
   admin_adjustment: [(m) => `The club added ${m} to your wallet.`, (m) => `The club took ${m} off your wallet.`],
 };
 
+/** R12 contracts C1 / C2 — who cancelled, and who checked in (absent: this member, or not said). */
+export type MovementWho = { cancelledBy?: "club" | "member"; checkedInBy?: string };
+
+/**
+ * R12 X12-1 — a cancellation said once, whoever's rows it moved: the refund, the partners' shares
+ * that went back to them, any charge kept — then the net. "The club cancelled your booking: 30
+ * minutes came back, 15 minutes went back to your partners for their shares, so 15 minutes came
+ * back to your wallet." Worded by the club when `cancelled_by` says so.
+ */
+function cancelSentence(s: Said, parts: readonly MovementPart[] | undefined, club: boolean): string {
+  const lead = club ? "The club cancelled your booking" : "Your booking was cancelled";
+  const rows = parts ?? [];
+  const back = rows.filter((p) => p.delta_minutes > 0).reduce((n, p) => n + p.delta_minutes, 0);
+  const shares = -rows.filter((p) => p.delta_minutes < 0 && p.reason === "share_transfer").reduce((n, p) => n + p.delta_minutes, 0);
+  const charged = -rows.filter((p) => p.delta_minutes < 0 && p.reason !== "share_transfer").reduce((n, p) => n + p.delta_minutes, 0);
+  if (back <= 0 || shares + charged <= 0) return `${lead}: ${s.minutes} ${s.up ? "back in your wallet" : "left your wallet"}.`;
+  const clauses = [
+    `${minutesSpoken(back)} came back`,
+    ...(shares > 0 ? [`${minutesSpoken(shares)} went back to your partners for their shares`] : []),
+    ...(charged > 0 ? [`${minutesSpoken(charged)} went on a late-cancellation charge`] : []),
+  ];
+  return `${lead}: ${clauses.join(", ")}, ${net(s)}.`;
+}
+
 /** One row of a live movement, as the stream's `parts` carry it (`lib/liveBalance.BalancePart`). */
 export type MovementPart = { reason: string; delta_minutes: number };
 
@@ -201,7 +229,13 @@ function splitParts(parts: readonly MovementPart[] | undefined): Split {
   return { back: minutesSpoken(back), charged: minutesSpoken(charged) };
 }
 
-type Said = { minutes: string; up: boolean; split: Split };
+/** `by` (R12 E12-2, contract C2): the member whose scan reversed a no-show or an outage refund. */
+type Said = { minutes: string; up: boolean; split: Split; by?: string };
+
+/** "Dan Splitter checked in, so …" or this member's own "… — you were checked in after all". */
+function reversedLead(s: Said, what: string, own: string): string {
+  return s.by ? `${s.by} checked in, so ${what}` : own;
+}
 
 /** "so 11 minutes came back" / "so 4 minutes left your wallet" — the net, with its direction in words. */
 function net({ minutes, up }: Said): string {
@@ -213,13 +247,16 @@ const PRECISE_MOVEMENT: Record<string, (s: Said) => string> = {
   outage_refund: (s) => s.up
     ? `The court's box was offline, so your booking was refunded: ${s.minutes} back in your wallet.`
     : `${s.minutes} of an outage refund left your wallet.`,
-  outage_refund_reversed: (s) => `An outage refund was taken back — you were checked in after all: ${s.minutes} ${s.up ? "came back to" : "left"} your wallet.`,
+  outage_refund_reversed: (s) => `${reversedLead(s, "the outage refund was taken back", "An outage refund was taken back — you were checked in after all")}: ${s.minutes} ${s.up ? "came back to" : "left"} your wallet.`,
   no_show_settled: (s) => s.split
     ? `A missed booking was settled: ${s.split.back} refunded and ${s.split.charged} charged as a no-show penalty, ${net(s)}.`
     : s.up ? `A missed booking was refunded: ${s.minutes} back in your wallet.` : `${s.minutes} went on a no-show charge.`,
-  no_show_reversed: (s) => s.split
-    ? `A no-show was reversed — you were checked in after all: the ${s.split.back} penalty came back and the ${s.split.charged} refund was taken back, ${net(s)}.`
-    : `A no-show was reversed — you were checked in after all: ${s.minutes} ${s.up ? "came back to" : "left"} your wallet.`,
+  no_show_reversed: (s) => {
+    const lead = reversedLead(s, "the no-show was reversed", "A no-show was reversed — you were checked in after all");
+    return s.split
+      ? `${lead}: the ${s.split.back} penalty came back and the ${s.split.charged} refund was taken back, ${net(s)}.`
+      : `${lead}: ${s.minutes} ${s.up ? "came back to" : "left"} your wallet.`;
+  },
   pay_for_refund: (s) => s.up
     ? `Another member paid for your booking at the court, so its ${s.minutes} came back to your wallet.`
     : `${s.minutes} of a pay-at-court refund left your wallet.`,
@@ -373,6 +410,8 @@ export type ShareRowInput = {
   cause?: string | null;
   /** R11 E11-1 — with `no_show`: the partner's part of the penalty that did not come back. */
   kept?: number | null;
+  /** R12 E12-2 (contract C2) — with `attended`: who checked in, when it was not this member. */
+  by?: string | null;
 };
 
 /**
@@ -415,7 +454,9 @@ function shareCauseClause(input: ShareRowInput, who: string | null): string {
     booking_cancelled: "the booking was cancelled",
     club_removed: partner ? "the club took you off the game" : "the club took them off the game",
     club_collected: "the club collected it",
-    attended: "the session was attended",
+    attended: input.by ? `${input.by} checked in, so the session was attended` : "the session was attended",
+    // R12 X12-3 — a partner withdrew, and their share went back to them.
+    share_returned: partner ? "you withdrew from the game" : `${who ? "they" : "the partner"} withdrew from the game`,
     no_show: `nobody checked in${keptPart}`,
   };
   const said = input.cause ? clauses[input.cause] : undefined;
@@ -426,12 +467,14 @@ function shareCauseClause(input: ShareRowInput, who: string | null): string {
  * R11 E11-1 — the chip's plain share sentence (no booking to name) with the frame's cause:
  * "A share of a split booking moved 15 minutes into your wallet — the booking was cancelled."
  */
-export function shareMovementPlain(amount: number, cause: string | undefined, kept: number | undefined): string {
+export function shareMovementPlain(amount: number, cause: string | undefined, kept: number | undefined, by?: string): string {
+  // R12 X12-3 — a withdrawal said plainly, with nobody to name: the share went back to them.
+  if (cause === "share_returned" && amount < 0) return `${minutesSpoken(-amount)} went back to a partner who withdrew from the game.`;
   const plain = movementSentence(amount, "share_transfer");
   // A collection (paid, collected, taken again) leaves the PARTNER; a return comes back to them.
   const collected = cause === "share_paid" || cause === "club_collected" || cause === "attended";
   const side = (collected ? amount < 0 : amount > 0) ? "partner" : "organiser";
-  const clause = shareCauseClause({ side, signed: amount, place: null, other: null, cause, kept }, null);
+  const clause = shareCauseClause({ side, signed: amount, place: null, other: null, cause, kept, by }, null);
   return clause ? `${plain.replace(/\.$/, "")}${clause}.` : plain;
 }
 
