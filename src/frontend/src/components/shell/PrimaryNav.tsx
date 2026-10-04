@@ -38,12 +38,17 @@ export function PrimaryNav({ isAdmin, attention }: { isAdmin: boolean; attention
       aria-label="Main"
       data-primary-nav=""
       className={cn(
-        "fixed inset-x-0 bottom-0 z-chrome border-t border-border bg-bg-surface shadow-md",
-        "@[44rem]/appbar:static @[44rem]/appbar:z-auto @[44rem]/appbar:min-w-0 @[44rem]/appbar:border-0 @[44rem]/appbar:bg-transparent @[44rem]/appbar:shadow-none",
+        // `@container/tabbar` (L12-1): on the phone the bar is a size container, so a tab's width
+        // is `100cqw / --tab-count` and the Admin count can be kept inside its own tab. Inline the
+        // nav is sized by its tabs, which inline-size containment would collapse — so not there.
+        // (Written as a raw @container variant: the plugin's `@[44rem]/appbar:` emits nothing for
+        // a `[container-type:…]` arbitrary property.)
+        "@container/tabbar fixed inset-x-0 bottom-0 z-chrome border-t border-border bg-bg-surface shadow-md",
+        "[@container_appbar_(min-width:44rem)]:![container-type:normal] @[44rem]/appbar:static @[44rem]/appbar:z-auto @[44rem]/appbar:min-w-0 @[44rem]/appbar:border-0 @[44rem]/appbar:bg-transparent @[44rem]/appbar:shadow-none",
       )}
       style={{ paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" }}
     >
-      <ul className="grid auto-cols-fr grid-flow-col @[44rem]/appbar:flex @[44rem]/appbar:items-center @[44rem]/appbar:gap-1">
+      <ul style={{ "--tab-count": items.length } as React.CSSProperties} className="grid auto-cols-fr grid-flow-col @[44rem]/appbar:flex @[44rem]/appbar:items-center @[44rem]/appbar:gap-1">
         {items.map((item) => (
           <li key={item.to} className="min-w-0">
             <PrimaryLink item={item} badge={item.adminOnly ? attention : null} />
@@ -81,7 +86,23 @@ const LINK = [
  * pill, and at 200 % text the clamp won — the "46" sat on half the shield. The badge now overhangs
  * the pill into its tab's own margin instead, which the smaller badge below leaves room for.
  */
-const BADGE_BOX = { left: "calc(50% + 8px)", minWidth: 20, minHeight: 20, padding: "2px 6px" } as const;
+/**
+ * L12-1 (round 12): ...but never past its own tab. At 320 px and 200 % text the Admin tab is the
+ * last of four 80 px columns, and a "51" starting 8 px right of the icon's centre ended at 325 px —
+ * off the screen. The left edge is now the SMALLER of that and "the tab's right edge minus the
+ * badge's width": the tab is `100cqw / --tab-count` wide (the bar is a size container on the
+ * phone), the pill is centred in it, and the badge is its characters in `ch` (tabular digits are
+ * one `ch` each) plus its padding and its 2 px ring. On the inline bar the badge is static and
+ * `left` does nothing.
+ */
+function badgeBox(text: string): React.CSSProperties {
+  const width = `(${text.length}ch + 12px)`;
+  return {
+    left: `min(calc(50% + 8px), calc((100cqw / var(--tab-count, 1) + 100%) / 2 - ${width}))`,
+    // 1 px above and below (was 2): at 200 % text the box's top reached past the bar's top edge.
+    minWidth: 18, minHeight: 18, padding: "1px 4px",
+  };
+}
 
 const PILL_BOX = { height: 32, maxWidth: 56 } as const;
 
@@ -141,6 +162,7 @@ function PrimaryLink({ item, badge }: { item: PrimaryDestination; badge: Pick<Ad
  */
 function CountBadge({ attention }: { attention: Pick<AdminAttention, "total" | "label"> }) {
   if (attention.total <= 0) return null;
+  const text = attention.total > 99 ? "99+" : String(attention.total);
   return (
     <span
       data-attention-badge=""
@@ -151,17 +173,20 @@ function CountBadge({ attention }: { attention: Pick<AdminAttention, "total" | "
         // the shield it counts for. Its left edge is just right of the icon's centre, but never so
         // far right that it leaves the tab (the 320 px phone at the largest text), and its foot
         // stops at 60 % of the pill's height, so at most the icon's upper corner is covered.
-        // X-10: the digits grow with the text to 20 px and no further, and the box (BADGE_BOX) is
+        // X-10: the digits grow with the text to 20 px and no further, and the box (badgeBox) is
         // pixel-padded around them — a count whose number is also the link's accessible name, not
         // body text. At 200 % a rem box (40 px) was wider than the room right of the icon.
         // shrink-0 (V5-3): inline it is a flex item of the link, and squeezed its "96" out of the circle.
         "absolute bottom-1/2 inline-flex shrink-0 items-center justify-center rounded-full",
-        "bg-danger-solid text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
+        // L12-1: 16 px on the phone bar (14 px for "99+"), so a count kept inside a 320 px
+        // screen's last tab still leaves three quarters of the shield showing; inline, 20 px.
+        text.length > 2 ? "text-[min(0.75rem,14px)]" : "text-[min(0.75rem,16px)]",
+        "bg-danger-solid @[44rem]/appbar:text-[min(0.75rem,20px)] font-semibold leading-none tabular-nums text-danger-ink ring-2 ring-bg-surface",
         "@[44rem]/appbar:static @[44rem]/appbar:order-last @[44rem]/appbar:ml-0 @[44rem]/appbar:ring-0",
       )}
-      style={BADGE_BOX}
+      style={badgeBox(text)}
     >
-      {attention.total > 99 ? "99+" : attention.total}
+      {text}
     </span>
   );
 }
