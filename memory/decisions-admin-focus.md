@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-admin-focus
-description: "R8/R9 admin console: editors, Show more and dismissed dialogs hand focus on, never to body; rows and labels step down by rem containers; desk sale states its price; money never grouped on the Night."
+description: "R8-R12 admin console: editors, Show more (one usePagedFocus hook) and dismissed dialogs hand focus on, never to body; rows step down by rem containers; desk sale states its price."
 type: decision
 last_verified: 2026-10-03
 ---
@@ -49,3 +49,12 @@ Tests: `e2e/admin-r8-fc.spec.ts` (geometry at 200 % text and focus, both measure
   409 `package_price_changed` patches the item, names old/new price in a standing notice, re-confirm.
   A free package is "Give"/"given" (J9-3). Share legs name whose wallet; a note says shares net to 0 (J9-7).
 
+## R12 (lane FD12) — one paged-list rule; the Night names a reversal's collision
+- **Every "Show more"/"Load more" uses `lib/usePagedFocus(rowSelector, run)`** (X12-2): count rows at
+  the press, focus row `before` after the page's update commits (a settle tick queued after it); a
+  page that added nothing and took the button → last row. Row target: itself if focusable, else its
+  direct-child link (inbox), else tabindex −1. Inbox, member Bookings/Doors, Match results, Night,
+  Change record. *Why:* fixed list by list in R8/R9 and four lists still dropped to `<body>`.
+- **A reversal that collided says so** (E12-4, contract C3): `detail.collision_booking_ids` +
+  `collision_from` → "This session overlapped another member's booking on the same court from 18:30,
+  so both paid for that time." with a link to `/bookings/<id>`, never the other member's name.
