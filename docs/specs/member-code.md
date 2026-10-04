@@ -414,7 +414,7 @@ use is claimed and no forgery alert is raised, because the device opened nothing
 
 `member_display`, on every device answer that greets a member (activate, walk-up), is printable
 ASCII 0x20–0x7E, at most 16 characters: accents are folded (Zoë → ZOE), anything else is dropped,
-and a name with nothing printable left reads `MEMBER` (review round 11, D11-1). The court box's
+and a name with nothing printable left reads `MEMBER` (review round 11, D11-1). A double quote of either shape becomes `'`, and `\` and `~` separate words (the A00 character ROM prints them as ¥ and →); the surname initial is the first letter of the last word, never punctuation (review round 12, D12-1). The court box's
 HD44780 has no glyphs beyond ASCII, so the server, not the firmware, owns the fold.
 
 ---

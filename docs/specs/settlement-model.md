@@ -607,6 +607,13 @@ lights off at the truncated end, and clearing the marker made the cue worker fir
 `Completed` does not depend on the marker — `LightsCueWorker`'s attended-and-over pass
 promotes a reversed booking whether or not the cue already fired.
 
+A reversal that lands **after** the off cue re-emits `booking.lights_on` for the late scan
+(review round 11, E11-3). So the attended-and-over pass that completes that booking emits **one**
+more `booking.lights_off`, at the restored end (`ends_at` = the restored end), and restamps
+`LightsOffCuedAt`. A reversal before the cue emits nothing extra. **Why:** a consumer mirroring
+lit courts otherwise saw a `lights_on` with no `lights_off` after it (review round 12, E12-3;
+`LightsCueWorker.CompleteAttendedAsync`).
+
 ---
 
 ## 4. The lit window, in order
