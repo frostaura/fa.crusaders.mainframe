@@ -135,8 +135,30 @@ function phosphorWeights(keep: readonly string[]): Plugin {
   };
 }
 
+/**
+ * Round 12 — a chunk past Rollup's size warning FAILS the build. Vite only prints "(!) Some chunks
+ * are larger than 500 kB", and that line sat in every CI log for weeks (the entry reached 534 kB)
+ * because nothing reads a build's output. A warning is a failure in this repo, so the budget is
+ * enforced here, by the same rule Vite warns on (minified bytes / 1000 > the limit). Fix a breach by
+ * splitting what is genuinely separate (see `manualChunks`), never by raising the limit.
+ */
+function chunkBudget(limitKb = 500): Plugin {
+  return {
+    name: "crusaders-chunk-budget",
+    apply: "build",
+    enforce: "post",
+    // writeBundle, not generateBundle: it sees the final code Vite's own size report measures.
+    writeBundle(_options, bundle) {
+      const over = Object.values(bundle)
+        .filter((c) => c.type === "chunk" && c.code.length / 1000 > limitKb)
+        .map((c) => `${c.fileName} ${(c.type === "chunk" ? c.code.length / 1000 : 0).toFixed(1)} kB`);
+      if (over.length > 0) this.error(`chunk budget ${limitKb} kB exceeded: ${over.join(", ")}`);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), precacheManifest(), phosphorWeights(SHIPPED_ICON_WEIGHTS)],
+  plugins: [react(), precacheManifest(), phosphorWeights(SHIPPED_ICON_WEIGHTS), chunkBudget()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },
@@ -205,8 +227,15 @@ export default defineConfig({
         // the rest of the shell (an offline /my-code needs every byte of its first render). Nothing
         // else is grouped by hand — a hand-made group pulls modules that only lazy routes use into
         // the first load.
+        // The class merger and the positioning engine get the same treatment, for the same reason and
+        // one more: the entry crossed Rollup's 500 kB warning (534 kB), and a warning is a failure
+        // here. Both are wholly static imports of the shell (`cn()` in every primitive; the tooltip
+        // and menu poppers in the app bar), so no lazy-only module rides along and the first load
+        // carries exactly the same bytes in one more file. A package with modules only lazy routes
+        // use (Phosphor's per-icon files, the Radix widgets) must NOT be grouped here.
         manualChunks(id) {
           if (/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom)\//.test(id)) return "react";
+          if (/node_modules\/(tailwind-merge|@floating-ui\/[^/]+)\//.test(id)) return "ui-vendor";
           return undefined;
         },
         // Perf lane (2026-09-30): a chunk under ~2.5 kB is merged into a chunk that is always
