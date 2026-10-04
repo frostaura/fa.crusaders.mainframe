@@ -108,6 +108,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus,
                               Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
         services.AddScoped<Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox>();
+        services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.WalletFrameHolds>();
         services.AddScoped<CourtLightStateService>();
         services.AddScoped<DeviceErrorService>();
         services.AddScoped<DeviceFaultSink>();

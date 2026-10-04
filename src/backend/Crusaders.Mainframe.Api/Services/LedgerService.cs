@@ -178,46 +178,84 @@ public sealed class LedgerService
         Guid userId, int deltaMinutes, string reason, CancellationToken ct, bool moneyIn = false, IReadOnlyList<LedgerPosting>? rows = null)
     {
         // E10-1: each row's {reason, minutes}; R11 E11-1: why a share among them moved.
-        var parts = rows is null ? [] : PartsOf(rows);
-        var share = rows?.Select(p => p.Share).FirstOrDefault(w => w is not null);
-        var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);
-        var topic = RealtimeTopic.Wallet(tenantId, userId);
-        // Optional only for the unit suites' hand-built containers; the app always registers it.
-        var retry = moneyIn ? _shares : null;
+        var frame = new WalletFrame(
+            deltaMinutes, reason, rows is null ? [] : PartsOf(rows), rows?.Select(p => p.Share).FirstOrDefault(w => w is not null), moneyIn)
+        {
+            // R12 C1 / C2: who cancelled, and whose scan reversed a settlement — unstored, per posting.
+            CancelledBy = rows?.Select(p => p.CancelledBy).FirstOrDefault(c => c is not null),
+            CheckedInBy = rows?.Select(p => p.CheckedInBy ?? p.Share?.CheckedInBy).FirstOrDefault(c => c is not null),
+        };
+        var tenantId = _tenant.TenantId;
+        var booking = BookingOf(rows);
 
         return _outbox.EnqueueAsync(async token =>
         {
-            var balance = await GetBalanceAsync(userId, token);
-            var held = await GetHeldAsync(userId, token);
-
-            _realtime.Publish(topic, new RealtimeMessage(
-                string.Empty, JsonSerializer.Serialize(new { balance_minutes = balance })));
-
-            // D11: the held part rides on the named frame, so the badge can say "12 min held until
-            // Tue 18:00" beside the total. The legacy unnamed frame above stays verbatim.
-            _realtime.Publish(topic, new RealtimeMessage(BalanceEvent, JsonSerializer.Serialize(new
-            {
-                balance_minutes = balance,
-                delta_minutes = deltaMinutes,
-                reason,
-                at = DateTimeOffset.UtcNow,
-                held_minutes = held.Held,
-                owed_back_minutes = held.OwedBack,
-                spendable_minutes = balance - held.Reserved,
-                held_until = held.ReleasesAt,
-                // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
-                held_parts = held.WireParts(),
-                // E10-1: the rows behind delta_minutes, each {reason (by type), delta_minutes}; [] when only what is set aside moved.
-                parts = parts.Select(p => new { reason = p.Reason, delta_minutes = p.DeltaMinutes }).ToList(),
-                // R11 E11-1: WHY a share moved (WalletShareCauses), null unless a share row moved; and on a
-                // no-show return the partner's part of the penalty that stayed behind.
-                share_cause = share?.Cause,
-                share_kept_minutes = share?.KeptMinutes,
-            })));
-
-            // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
-            if (retry is not null) await retry.AfterMinutesArriveAsync(tenantId, slug, [userId], token);
+            // R12 X12-1: an action holding this booking's frames merges this one into the member's single frame.
+            if (_outbox.Holds?.TryHold(tenantId, booking, userId, frame) == true) return;
+            await SendAsync(userId, frame, token);
         }, ct);
+    }
+
+    /// <summary>
+    /// Sends a frame a <see cref="WalletFrameScope"/> held — after every commit behind it, so the
+    /// balance it reads is the one the member now has.
+    /// </summary>
+    public Task PublishFrameAsync(Guid userId, WalletFrame frame, CancellationToken ct) =>
+        _outbox.EnqueueAsync(token => SendAsync(userId, frame, token), ct);
+
+    /// <summary>The booking every row of a movement names, or null when they name none or several.</summary>
+    private static Guid? BookingOf(IReadOnlyList<LedgerPosting>? rows)
+    {
+        if (rows is null || rows.Count == 0) return null;
+        var first = rows[0].RelatedBookingId;
+        return rows.All(r => r.RelatedBookingId == first) ? first : null;
+    }
+
+    private async Task SendAsync(Guid userId, WalletFrame frame, CancellationToken token)
+    {
+        var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);
+        var topic = RealtimeTopic.Wallet(tenantId, userId);
+        // Optional only for the unit suites' hand-built containers; the app always registers it.
+        var retry = frame.MoneyIn ? _shares : null;
+
+        var balance = await GetBalanceAsync(userId, token);
+        var held = await GetHeldAsync(userId, token);
+        // R12 E12-2 (C2): the scanner is named only when it was somebody else.
+        var checkedInBy = frame.CheckedInBy is { } scanner && scanner != userId
+            ? await _db.Memberships.AsNoTracking().Where(m => m.UserId == scanner).Select(m => m.FullName).FirstOrDefaultAsync(token)
+            : null;
+
+        _realtime.Publish(topic, new RealtimeMessage(
+            string.Empty, JsonSerializer.Serialize(new { balance_minutes = balance })));
+
+        // D11: the held part rides on the named frame, so the badge can say "12 min held until
+        // Tue 18:00" beside the total. The legacy unnamed frame above stays verbatim.
+        _realtime.Publish(topic, new RealtimeMessage(BalanceEvent, JsonSerializer.Serialize(new
+        {
+            balance_minutes = balance,
+            delta_minutes = frame.DeltaMinutes,
+            reason = frame.Reason,
+            at = DateTimeOffset.UtcNow,
+            held_minutes = held.Held,
+            owed_back_minutes = held.OwedBack,
+            spendable_minutes = balance - held.Reserved,
+            held_until = held.ReleasesAt,
+            // C4: one part per share deadline, soonest first, summing to held_minutes; held_until is the first.
+            held_parts = held.WireParts(),
+            // E10-1: the rows behind delta_minutes, each {reason (by type), delta_minutes}; [] when only what is set aside moved.
+            parts = frame.Parts.Select(p => new { reason = p.Reason, delta_minutes = p.DeltaMinutes }).ToList(),
+            // R11 E11-1: WHY a share moved (WalletShareCauses), null unless a share row moved; and on a
+            // no-show return the partner's part of the penalty that stayed behind.
+            share_cause = frame.Share?.Cause,
+            share_kept_minutes = frame.Share?.KeptMinutes,
+            // R12 C1: on a cancellation's frame, "club" or "member"; null on anything else.
+            cancelled_by = frame.CancelledBy,
+            // R12 C2: on a reversal by a late check-in (and its share), the scanner when not this member.
+            checked_in_by_name = string.IsNullOrWhiteSpace(checkedInBy) ? null : checkedInBy.Trim(),
+        })));
+
+        // Money arrived: a return waiting on this member may be covered now (see MoneyIn).
+        if (retry is not null) await retry.AfterMinutesArriveAsync(tenantId, slug, [userId], token);
     }
 
     /// <summary>The named SSE event the wallet stream carries alongside its legacy unnamed frame.</summary>
@@ -454,10 +492,19 @@ public sealed record LedgerPosting(
     /// refund told the partner the organiser had returned it. Null elsewhere. Never stored.
     /// </summary>
     public ShareWhy? Share { get; init; }
+
+    /// <summary>Review round 12, C1: on a cancellation's refund and penalty, who cancelled (<see cref="WalletCancelledBy"/>). Never stored.</summary>
+    public string? CancelledBy { get; init; }
+
+    /// <summary>Review round 12, C2: on a reversal by a late check-in, the member whose scan it was. Never stored.</summary>
+    public Guid? CheckedInBy { get; init; }
 }
 
-/// <summary>Why a share moved (one of <see cref="WalletShareCauses"/>), and on a no-show return the minutes kept as the partner's part of the penalty.</summary>
-public sealed record ShareWhy(string Cause, int? KeptMinutes = null);
+/// <summary>
+/// Why a share moved (one of <see cref="WalletShareCauses"/>), and on a no-show return the minutes kept as the partner's part of the penalty.
+/// R12 C2: on a share taken again after a late check-in, the member whose scan it was.
+/// </summary>
+public sealed record ShareWhy(string Cause, int? KeptMinutes = null, Guid? CheckedInBy = null);
 
 /// <summary>
 /// The closed set the live wallet frame's <c>share_cause</c> carries (review round 11, E11-1). The

@@ -404,6 +404,8 @@ builder.Services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtim
 // SCOPED, not singleton: it holds one request's unpublished frames until that request's
 // transaction commits. See RealtimeOutbox for what publishing before the commit cost.
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox>();
+// R12 X12-1: one action's wallet frames across scopes, merged into one per member — process-wide.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.WalletFrameHolds>();
 // The one writer for the IoT error log. Scoped: it takes the request's DbContext and tenant,
 // and its background variant opens a scope of its own.
 builder.Services.AddScoped<DeviceErrorService>();

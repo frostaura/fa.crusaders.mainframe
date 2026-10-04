@@ -90,14 +90,24 @@ public static class AdminBulkBookingEndpoints
         var split = ctx.RequestServices.GetRequiredService<SplitCancelView>();
         var paidBefore = new Dictionary<Guid, Dictionary<Guid, int>>();
         foreach (var item in items) paidBefore[item.BookingId] = await split.PaidByPartnerAsync(item.BookingId, ct);
-        var outcome = await bulk.CancelAsync(
-            items.Select(i => new BulkCancelItem(i.BookingId, i.WaivePenalty)).ToList(),
-            req.IdempotencyKey!.Trim(), reason, req.WaivePenalty, actorId, ct);
+        // R12 X12-1: each booking's refund and the shares that follow it reach a wallet as ONE frame.
+        var holds = items.Select(i => BookingEndpoints.OneWalletFrame(ctx, i.BookingId)).ToList();
+        BulkCancelOutcome outcome;
+        try
+        {
+            outcome = await bulk.CancelAsync(
+                items.Select(i => new BulkCancelItem(i.BookingId, i.WaivePenalty)).ToList(),
+                req.IdempotencyKey!.Trim(), reason, req.WaivePenalty, actorId, ct);
+
+            // D11: each cancelled booking's partners are refunded their shares.
+            await ctx.AfterSettlementAsync(outcome.Results.Where(r => r.Succeeded).Select(r => (Guid?)r.BookingId), ct);
+        }
+        finally
+        {
+            foreach (var hold in holds) await hold.DisposeAsync();
+        }
 
         var succeeded = outcome.Results.Count(r => r.Succeeded);
-
-        // D11: each cancelled booking's partners are refunded their shares.
-        await ctx.AfterSettlementAsync(outcome.Results.Where(r => r.Succeeded).Select(r => (Guid?)r.BookingId), ct);
         var refunds = new Dictionary<Guid, List<PartnerRefund>>();
         foreach (var r in outcome.Results.Where(r => r.Succeeded))
         {

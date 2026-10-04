@@ -33,6 +33,12 @@ namespace Crusaders.Mainframe.Api.Services.Realtime;
 public sealed class RealtimeOutbox
 {
     private readonly List<Func<CancellationToken, Task>> _pending = [];
+
+    /// <summary>R12 X12-1: the process's open wallet-frame holds, null in a container without them.</summary>
+    public WalletFrameHolds? Holds { get; }
+
+    public RealtimeOutbox(WalletFrameHolds? holds = null) => Holds = holds;
+
     private int _depth;
     private bool _poisoned;
 

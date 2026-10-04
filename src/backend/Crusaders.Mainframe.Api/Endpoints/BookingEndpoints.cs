@@ -230,14 +230,18 @@ public static class BookingEndpoints
         // Review round 1 (lane F1): the desk sees the same truthful split refund the member does.
         var split = ctx.RequestServices.GetRequiredService<SplitCancelView>();
         var paidBefore = await split.PaidByPartnerAsync(bookingId, ct);
-        var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: waive, ct, reason);
-        if (result is not CancellationResult.Ok ok)
+        // R12 X12-1: the refund and the shares that follow it reach each wallet as ONE frame.
+        await using (OneWalletFrame(ctx, bookingId))
         {
-            AdminCancelRecord.Withdraw(ctx, record);
-            return ToHttpResult(result, ctx);
+            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: waive, ct, reason);
+            if (result is not CancellationResult.Ok ok)
+            {
+                AdminCancelRecord.Withdraw(ctx, record);
+                return ToHttpResult(result, ctx);
+            }
+            await ctx.AfterSettlementAsync([bookingId], ct);
+            return CancelledAnswer(ok, await split.AfterAsync(bookingId, paidBefore, ct));
         }
-        await ctx.AfterSettlementAsync([bookingId], ct);
-        return CancelledAnswer(ok, await split.AfterAsync(bookingId, paidBefore, ct));
     }
 
     /// <summary>A settled cancellation's answer: the refund, the penalty, each partner's refund and the organiser's net (B3).</summary>
@@ -491,12 +495,21 @@ public static class BookingEndpoints
     {
         var actorId = ctx.User.Id() ?? Guid.Empty;
         var paidBefore = await split.PaidByPartnerAsync(bookingId, ct);
-        var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: false, waivePenalty: false, ct);
-        if (result is not CancellationResult.Ok ok) return ToHttpResult(result, ctx);
+        // R12 X12-1: one frame per wallet — the organiser's other device hears one movement, not two.
+        await using (OneWalletFrame(ctx, bookingId))
+        {
+            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: false, waivePenalty: false, ct);
+            if (result is not CancellationResult.Ok ok) return ToHttpResult(result, ctx);
 
-        await ctx.AfterSettlementAsync([bookingId], ct);
-        return CancelledAnswer(ok, await split.AfterAsync(bookingId, paidBefore, ct));
+            await ctx.AfterSettlementAsync([bookingId], ct);
+            return CancelledAnswer(ok, await split.AfterAsync(bookingId, paidBefore, ct));
+        }
     }
+
+    /// <summary>R12 X12-1 (contract C1): holds a booking's wallet frames until the action and its share follow-up are done.</summary>
+    internal static Services.Realtime.WalletFrameScope OneWalletFrame(HttpContext ctx, Guid bookingId) =>
+        Services.Realtime.WalletFrameScope.Open(
+            ctx.RequestServices, ctx.RequestServices.GetRequiredService<Multitenancy.ITenantContext>().TenantId, bookingId);
 
     /// <summary>
     /// The arm that should never run. It answers 500 as before — but it LOGS, naming the

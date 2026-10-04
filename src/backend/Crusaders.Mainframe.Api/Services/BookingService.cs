@@ -5,6 +5,8 @@ using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.EntityFrameworkCore;
 
+using Crusaders.Mainframe.Api.Services.Realtime;
+
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>
@@ -1378,6 +1380,9 @@ public sealed class BookingService
         // penalty did I pay?". Posting them together is what keeps that from costing
         // atomicity: PostManyAsync stages both and saves once, carrying the status change
         // with them, so the concurrency token decides the whole cancellation at once.
+        // R12 C1: the live wallet frame says who cancelled — the club (an admin acting on somebody
+        // else's court) or the member — the same rule the mail's `byClub` uses below.
+        var cancelledBy = actorIsAdmin && actorId != booking.UserId ? WalletCancelledBy.Club : WalletCancelledBy.Member;
         var postings = new List<LedgerPosting>(2);
         if (refundAmount > 0)
         {
@@ -1388,7 +1393,8 @@ public sealed class BookingService
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
                 Reason: "Cancellation refund",
-                ExternalReference: externalReferencePrefix is null ? null : $"{externalReferencePrefix}:refund"));
+                ExternalReference: externalReferencePrefix is null ? null : $"{externalReferencePrefix}:refund")
+            { CancelledBy = cancelledBy });
         }
         if (penaltyAmount > 0)
         {
@@ -1399,7 +1405,8 @@ public sealed class BookingService
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
                 Reason: $"Late-cancellation penalty {MoneyFormat.Number(settings.PenaltyPct)}%",
-                ExternalReference: externalReferencePrefix is null ? null : $"{externalReferencePrefix}:penalty"));
+                ExternalReference: externalReferencePrefix is null ? null : $"{externalReferencePrefix}:penalty")
+            { CancelledBy = cancelledBy });
         }
 
         try
