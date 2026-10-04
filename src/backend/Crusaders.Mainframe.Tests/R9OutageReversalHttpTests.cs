@@ -308,7 +308,7 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         Assert.Equal(sam, again.GetProperty("checked_in_by_name").GetString());
 
         var mail = Assert.Single(r.Mail.Sent, m => m.Subject.Contains("reversed", StringComparison.Ordinal));
-        Assert.Contains($"{sam} checked in", mail.PlainBody, StringComparison.Ordinal);
+        Assert.Contains($"{sam} checked in", mail.PlainBody ?? "", StringComparison.Ordinal);
         Assert.DoesNotContain("You were", mail.HtmlBody + mail.PlainBody, StringComparison.Ordinal);
     }
 
@@ -325,7 +325,7 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
 
         Assert.All(r.BalanceFrames(), f => Assert.Equal(JsonValueKind.Null, f.GetProperty("checked_in_by_name").ValueKind));
         Assert.Contains(r.Mail.Sent, m => m.Subject.StartsWith("Outage refund reversed", StringComparison.Ordinal)
-                                           && m.PlainBody.Contains("You were checked in after all", StringComparison.Ordinal));
+                                           && (m.PlainBody ?? "").Contains("You were checked in after all", StringComparison.Ordinal));
     }
 
     // ---- Review round 11: the share's cause on the live wallet, and the no-show's kept part ----

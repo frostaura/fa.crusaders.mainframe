@@ -123,6 +123,26 @@ public static partial class AdminMemberTraceAssembly
         return TraceKinds.DoorLabel(name, deviceCode);
     }
 
+    /// <summary>Where an audit row happened and, on a refused upload, the server's verdict (R12 E12-1 / D12-2).</summary>
+    private sealed record RowPlace(TraceCourtRef? Court, string? CourtName, string? BoxName, string? Verdict, int? BoardCourt);
+
+    /// <summary>
+    /// R12 D12-2 / E12-1: a board row's court is the court its relay maps to — its stored
+    /// <c>court</c> is the RELAY INDEX, never a court's name — and at no court the box is named; a
+    /// verdict row carries the server's reason. Any other row as before.
+    /// </summary>
+    private static RowPlace PlaceOf(string action, JsonElement? details, Guid? deviceId, Strands s)
+    {
+        if (!IsBoardRow(action))
+        {
+            var named = CourtOf(details, s.Courts);
+            return new RowPlace(named, named?.Name ?? Text(details, "court"), null, null, null);
+        }
+        var court = CourtOfBoard(details, deviceId, s);
+        var verdict = action.StartsWith(VerdictPrefix, StringComparison.Ordinal) ? Text(details, "outcome") : null;
+        return new RowPlace(court, court?.Name, court is null ? BoxLabelOf(deviceId, s) : null, verdict, court?.Number);
+    }
+
     /// <summary>R12 E12-4: the <c>collision_booking_ids</c> a no-show reversal recorded, as strings; empty when none.</summary>
     private static List<string> CollisionIdsOf(JsonElement? details)
     {

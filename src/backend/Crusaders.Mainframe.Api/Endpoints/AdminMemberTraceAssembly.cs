@@ -404,8 +404,8 @@ public static partial class AdminMemberTraceAssembly
             if (IsReceiptTwin(row.Action, details, s)) continue;
 
             var deviceId = DoorTrail.DeviceIdOf(details);
-            var boardRow = IsBoardRow(row.Action);
-            var court = boardRow ? CourtOfBoard(details, deviceId, s) : CourtOf(details, s.Courts);
+            var place = PlaceOf(row.Action, details, deviceId, s);
+            var court = place.Court;
             var at = AtOf(row, details);
             var actorKind = ActorKindOf(row.ActorUserId, deviceId is not null, s.Admins);
             var actorName = PersonNames.Of(row.ActorUserId, s.Names);
@@ -420,11 +420,9 @@ public static partial class AdminMemberTraceAssembly
                 Headline: TraceKinds.Headline(kind, new TraceFacts
                 {
                     DoorName = doorName,
-                    // R12 D12-2: a board row's `court` is its RELAY INDEX, never a court's name.
-                    CourtName = court?.Name ?? (boardRow ? null : Text(details, "court")),
-                    BoxName = boardRow && court is null ? BoxLabelOf(deviceId, s) : null,
-                    // R12 E12-1: the server's verdict on an uploaded activation it did not accept.
-                    Verdict = row.Action.StartsWith(VerdictPrefix, StringComparison.Ordinal) ? Text(details, "outcome") : null,
+                    CourtName = place.CourtName,
+                    BoxName = place.BoxName,
+                    Verdict = place.Verdict,
                     ActorName = actorName,
                     ActorKind = actorKind,
                     RawAction = row.Action,
@@ -442,7 +440,7 @@ public static partial class AdminMemberTraceAssembly
                 Court: court,
                 AmountMinutes: null,
                 BalanceAfterMinutes: null,
-                Detail: AuditDetail(row.Action, details, doorName, boardRow ? court?.Number : null))
+                Detail: AuditDetail(row.Action, details, doorName, place.BoardCourt))
             {
                 // A removed board keeps the code its rows were written with.
                 DeviceCode = deviceCode,

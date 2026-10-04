@@ -707,7 +707,7 @@ public static partial class EmailTemplates
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"No-show reversed — {courtName}",
             Preheader: "The court's check-in reached the club late. The booking now stands as played.",
-            Heading: Named(checkedInBy) is { } who ? $"{who} checked in after all" : "You were there after all",
+            Heading: ReversedHeading(checkedInBy, "You were there after all"),
             Blocks:
             [
                 new Paragraph($"Your booking on {courtName} was marked as a no-show, but the court's check-in reached the club afterwards{ScannerClause(checkedInBy)}. The booking now stands as attended."),
@@ -730,7 +730,7 @@ public static partial class EmailTemplates
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Outage refund reversed — {courtName}",
             Preheader: "The court's check-in reached the club late. The booking now stands as played.",
-            Heading: Named(checkedInBy) is { } who ? $"{who} checked in after all" : "You were checked in after all",
+            Heading: ReversedHeading(checkedInBy, "You were checked in after all"),
             Blocks:
             [
                 new Paragraph($"Your booking on {courtName} was refunded in full because the court's box was offline and could not tell the club anybody had arrived. Its check-in has since come through{ScannerClause(checkedInBy)}, so the booking stands as played and the refund has been taken back."),
@@ -742,11 +742,17 @@ public static partial class EmailTemplates
             ],
             WhyThis: WhyMoney));
 
-    private static string? Named(string? name) => string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+    /// <summary>R12 E12-2: "Dan Splitter checked in after all" — or the recipient's own heading. Block body for the lizard reason.</summary>
+    private static string ReversedHeading(string? checkedInBy, string own)
+    {
+        return string.IsNullOrWhiteSpace(checkedInBy) ? own : $"{checkedInBy.Trim()} checked in after all";
+    }
 
     /// <summary>R12 E12-2: ": Dan Splitter checked in, so the session counts as attended" — empty when it was the recipient.</summary>
-    private static string ScannerClause(string? checkedInBy) =>
-        Named(checkedInBy) is { } who ? $": {who} checked in, so the session counts as attended" : "";
+    private static string ScannerClause(string? checkedInBy)
+    {
+        return string.IsNullOrWhiteSpace(checkedInBy) ? "" : $": {checkedInBy.Trim()} checked in, so the session counts as attended";
+    }
 
     // ---- money ----
 

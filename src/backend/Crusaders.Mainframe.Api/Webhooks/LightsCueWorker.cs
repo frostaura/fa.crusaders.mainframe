@@ -116,6 +116,16 @@ public sealed class LightsCueWorker : BackgroundService
         // predicate above never sees it again, and it sat as Booked for ever — never
         // Completed, never anonymised by retention. Attended and over is Completed,
         // whether or not the lights-off was already cued.
+        await CompleteAttendedAsync(db, tenant, now, ct);
+    }
+
+    /// <summary>
+    /// The attended-and-over pass: a reversed no-show the off sweep can no longer see is promoted to
+    /// Completed (and, R12 E12-3, cued off again when its reversal re-lit it). Lifted out of
+    /// <see cref="TickAsync"/> for the complexity gate.
+    /// </summary>
+    private async Task CompleteAttendedAsync(MainframeDbContext db, ITenantContext tenant, DateTimeOffset now, CancellationToken ct)
+    {
         var attendedAndOver = await db.Bookings.IgnoreQueryFilters()
             .Where(b => b.Status == BookingStatus.Booked
                 && b.CheckedInAt != null
