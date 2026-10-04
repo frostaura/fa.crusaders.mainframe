@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-frontend-rendering
 description: "Rendering traps the unit suite cannot see: forced-colours backplates, unscrolled sticky focus, unread fixture fields, inheriting <body> changes, px glyphs and mx-auto at 200 % text."
 type: gotcha
-last_verified: 2026-10-03
+last_verified: 2026-10-04
 ---
 
 # Gotchas — what only a real browser shows (review round 3, lane F4)
@@ -43,3 +43,11 @@ last_verified: 2026-10-03
   narrower rem-guttered column hangs off its right side (the pass card, L10-3) — centre it with
   `ml-[calc((100%-W)/2)]`, which may go negative. A row's no-shrink figure + avatar at 200 % squeezed
   combobox names to nothing AND pushed the page sideways: query the row (avatar under 12rem), wrap.
+- **The container-queries plugin's `@[44rem]/appbar:` emits NOTHING for some arbitrary properties**
+  (R12 L12-1: `[container-type:normal]`, `[--x:1]`) while `[container-type:inline-size]` works —
+  grep the served CSS. The raw variant `[@container_appbar_(min-width:44rem)]:![…]` is emitted.
+  The phone tab bar is `@container/tabbar` so the Admin count clamps into its own tab with
+  `100cqw / --tab-count` and a width in `ch` (tabular digits are one `ch` each).
+- **A scrolling tab list's fade can have nothing to cut** (R12 L12-3): at 320 / 200 % the gap
+  between two tabs fell exactly on the edge. `ui/tabs` TabsList masks the edge with more AND puts a
+  caret there, the fade ending where the caret begins; jsdom drops `mask-image`, so it is e2e-checked.
