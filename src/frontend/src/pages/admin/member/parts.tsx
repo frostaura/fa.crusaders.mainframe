@@ -54,6 +54,8 @@ export function BookingLine({ row, zone, action, people }: {
     // let the parts drop under each other when the text, not the screen, is large.
     <li
       data-booking-id={row.booking_id}
+      // Where the Bookings tab's "Load more" hands focus once its last page takes the button (X12-2).
+      tabIndex={-1}
       className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-3 sm:p-4"
     >
       <div className="flex min-w-0 flex-[1_1_18rem] flex-wrap items-center gap-3">

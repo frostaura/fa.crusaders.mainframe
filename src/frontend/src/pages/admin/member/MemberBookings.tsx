@@ -15,6 +15,7 @@ import { memberDetailEndpoints, type BookingsWhen, type MemberBookingRow, type M
 import { BOOKINGS_TAB_COPY as COPY, MEMBER_COPY } from "@/lib/memberDetailCopy";
 import { DETAIL_LINKS } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { usePagedFocus } from "@/lib/usePagedFocus";
 import { useRead } from "@/lib/useRead";
 import { adminMemberReads, joinEarly } from "@/lib/offline/adminEarlyReads";
 import { useDataOwner } from "@/lib/offline/useCachedRead";
@@ -88,6 +89,8 @@ function BookingPagesView(props: {
   const { pages, when, canBook, userId, onCancel } = props;
   const zone = zoneNow();
   const upcoming = when === "upcoming";
+  // R12 X12-2 — the last page takes "Load more" away; the first booking it brought takes focus.
+  const loadMore = usePagedFocus("[data-member-bookings] > li", pages.more.run);
   return (
     <StateBlock
       loading={pages.loading}
@@ -104,7 +107,7 @@ function BookingPagesView(props: {
       ) : null}
       skeleton={<BookingListSkeleton />}
     >
-      <ul className="flex flex-col gap-3" aria-busy={pages.more.pending || undefined}>
+      <ul data-member-bookings="" className="flex flex-col gap-3" aria-busy={pages.more.pending || undefined}>
         {pages.items.map((row) => (
           <BookingLine
             key={row.booking_id}
@@ -138,7 +141,7 @@ function BookingPagesView(props: {
       {pages.more.error ? <Alert tone="danger">{COPY.loadMoreFailed}</Alert> : null}
       {pages.cursor ? (
         <div className="flex justify-center">
-          <Button variant="outline" pending={pages.more.pending} onClick={() => void pages.more.run()}>{COPY.loadMore}</Button>
+          <Button variant="outline" pending={pages.more.pending} onClick={loadMore}>{COPY.loadMore}</Button>
         </div>
       ) : null}
     </StateBlock>

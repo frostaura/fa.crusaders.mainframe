@@ -242,3 +242,20 @@ export const UNKNOWN_ACCOUNT_EVENT = "Something changed on their account";
 
 /** Before the balance a money card left the member on: "+1 h · balance 2 h 15 min" (P13). */
 export const NIGHT_BALANCE_AFTER = "balance";
+
+/**
+ * R12 E12-4 (contract C3) — a no-show reversed by a late scan AFTER the released tail was booked
+ * and played by somebody else: both members paid for the overlap, and only the reversal's detail
+ * knew (`collision_booking_ids`, `collision_from`). Said under the server's headline, because it
+ * is a fact about money the headline does not carry; the other booking is linked, never named —
+ * whose it was is that booking's own page to say.
+ */
+export const NIGHT_COLLISION = {
+  line(count: number, fromClock: string | null): string {
+    const what = count === 1 ? "another member's booking" : `${count} other bookings`;
+    const from = fromClock ? ` from ${fromClock}` : "";
+    return `This session overlapped ${what} on the same court${from}, so both paid for that time.`;
+  },
+  openOne: "Open the other booking",
+  openNth: (n: number) => `Open other booking ${n}`,
+} as const;

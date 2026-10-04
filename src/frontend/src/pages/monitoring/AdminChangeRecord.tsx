@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { flushSync } from "react-dom";
 import { Alert } from "../../components/Alert";
 import { Button } from "../../components/ui/button";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
@@ -10,6 +9,7 @@ import {
   CardListSkeleton, DownloadCsvLink, FilterBar, FilterSelect, type FilterOption,
 } from "../../components/monitoring/parts";
 import { useAsyncAction } from "../../lib/useAsyncAction";
+import { usePagedFocus } from "../../lib/usePagedFocus";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
   ADMIN_CHANGE_AREAS, adminEndpoints, type AdminChangePage, type AdminChangeRow,
@@ -111,18 +111,15 @@ export function AdminChangeRecordPage() {
     if (!cursor) return;
     try {
       const next = await adminEndpoints.adminChanges({ ...(area ? { area } : {}), period, cursor });
-      const before = document.querySelectorAll("[data-change-row]").length;
-      // R9 X9-2: the last page takes "Load more" away and focus fell to <body>; the reader carries
-      // on from the first row this page brought, as the Night and Members' Show more do (X8-4).
-      flushSync(() => {
-        setPage((prev) => ({ ...next, rows: [...(prev?.rows ?? []), ...next.rows] }));
-        setMoreError(null);
-      });
-      if (next.rows.length > 0) document.querySelectorAll<HTMLElement>("[data-change-row]")[before]?.focus();
+      setPage((prev) => ({ ...next, rows: [...(prev?.rows ?? []), ...next.rows] }));
+      setMoreError(null);
     } catch (err) {
       setMoreError(err);
     }
   });
+  // R9 X9-2 / R12 X12-2: the last page takes "Load more" away and focus fell to <body>; the reader
+  // carries on from the first row this page brought — the one paged-list rule (usePagedFocus).
+  const loadMore = usePagedFocus("[data-change-row]", more.run);
 
   return (
     <PageShell width="full">
@@ -193,7 +190,7 @@ export function AdminChangeRecordPage() {
             </Alert>
           ) : null}
           {page?.cursor ? (
-            <Button variant="outline" onClick={() => void more.run()} pending={more.pending}>{CHANGES_PAGE.loadMore}</Button>
+            <Button variant="outline" onClick={loadMore} pending={more.pending}>{CHANGES_PAGE.loadMore}</Button>
           ) : null}
         </div>
       </StateBlock>

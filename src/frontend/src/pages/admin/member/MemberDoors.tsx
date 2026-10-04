@@ -16,6 +16,7 @@ import {
 } from "@/lib/memberDetailApi";
 import { DEFAULT_DOOR_PERIOD, DOOR_PERIODS, DOORS_TAB_COPY as COPY, doorMethod } from "@/lib/memberDetailCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { usePagedFocus } from "@/lib/usePagedFocus";
 import { useRead } from "@/lib/useRead";
 import { useTicker } from "@/lib/useTicker";
 import { cn } from "@/lib/utils";
@@ -99,6 +100,8 @@ function DoorPagesView({ pages }: { pages: Pages }) {
   const { first } = pages;
   // Which rows are "today" moves with the clock; a minute is finer than anybody reads it.
   const now = useTicker(true, 60_000);
+  // R12 X12-2 — the last page takes "Load older" away; the first scan it brought takes focus.
+  const loadOlder = usePagedFocus("[data-member-doors] > li", pages.more.run);
   return (
     <StateBlock
       loading={pages.loading}
@@ -119,7 +122,7 @@ function DoorPagesView({ pages }: { pages: Pages }) {
           {[clubRangeInWords(first.range, first.timezone), COPY.total(pages.items.length, first.total)].filter(Boolean).join(" ")}
         </p>
       ) : null}
-      <ol className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface">
+      <ol data-member-doors="" className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-bg-surface">
         {pages.items.map((row, i) => (
           <DoorLine key={`${row.at}-${i}`} row={row} now={now} timezone={first?.timezone} />
         ))}
@@ -127,7 +130,7 @@ function DoorPagesView({ pages }: { pages: Pages }) {
       {pages.more.error ? <Alert tone="danger">{COPY.loadOlderFailed}</Alert> : null}
       {pages.cursor ? (
         <div className="flex justify-center">
-          <Button variant="outline" pending={pages.more.pending} onClick={() => void pages.more.run()}>{COPY.loadOlder}</Button>
+          <Button variant="outline" pending={pages.more.pending} onClick={loadOlder}>{COPY.loadOlder}</Button>
         </div>
       ) : null}
       {first ? <p className="text-xs text-text-muted">{COPY.retention(first.retention_days)}</p> : null}
@@ -156,7 +159,8 @@ function DoorLine({ row, now, timezone }: { row: MemberDoorRow; now: number; tim
   const released = row.outcome === "released";
   const method = doorMethod(row.method);
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 px-4 py-3 sm:grid-cols-[11rem_minmax(0,1fr)_auto]">
+    // tabIndex −1: where "Load older" hands focus when its last page takes the button away (X12-2).
+    <li tabIndex={-1} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 px-4 py-3 sm:grid-cols-[11rem_minmax(0,1fr)_auto]">
       <time
         dateTime={row.at}
         title={row.time_uncertain ? COPY.approximate : undefined}

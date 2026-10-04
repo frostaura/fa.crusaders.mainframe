@@ -12,6 +12,7 @@ import { refreshAttentionCounts } from "@/lib/adminAttention";
 import { playEndpoints, type AdminResult } from "@/lib/playApi";
 import { ADMIN_RESULTS, PLAY_REFUSAL, playRefusal } from "@/lib/playCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { usePagedFocus } from "@/lib/usePagedFocus";
 
 /**
  * `/admin/results` — Match results (§9.4): the disputes waiting for the club (the default tab,
@@ -100,6 +101,8 @@ type TabBodyProps = { tab: Tab; read: ReturnType<typeof useResultsTab>; onDecide
 
 function TabBody({ tab, read, onDecided }: TabBodyProps) {
   const rows = read.rows;
+  // R12 X12-2 — the last page takes "Show more" away; the first result it brought takes focus.
+  const showMore = usePagedFocus(`[data-admin-results="${tab}"] > li`, read.more.run);
   return (
     <StateBlock
       loading={rows === null && read.loading}
@@ -118,7 +121,7 @@ function TabBody({ tab, read, onDecided }: TabBodyProps) {
       </ul>
       {read.more.error ? <Alert tone="danger" live="assertive">{playRefusal(read.more.error, ADMIN_RESULTS.readAction)}</Alert> : null}
       {read.next ? (
-        <div><Button variant="outline" pending={read.more.pending} onClick={() => void read.more.run()}>{ADMIN_RESULTS.more}</Button></div>
+        <div><Button variant="outline" pending={read.more.pending} onClick={showMore}>{ADMIN_RESULTS.more}</Button></div>
       ) : null}
     </StateBlock>
   );

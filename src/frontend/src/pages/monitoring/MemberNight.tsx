@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { flushSync } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert } from "../../components/Alert";
 import { useToast } from "../../components/toastContext";
@@ -11,22 +10,24 @@ import { DownloadSimple } from "../../components/ui/icons";
 import { MemberCombobox } from "../../components/ui/member-combobox";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
+import { TextLink } from "../../components/ui/text-link";
 import { StateBlock } from "../../components/ui/state-block";
 import { CardListSkeleton } from "../../components/monitoring/parts";
 import { clubClock, clubDate } from "../../lib/clubClock";
 import { endpoints, type AdminMember } from "../../lib/api";
-import { adminEndpoints, type TraceView } from "../../lib/adminApi";
+import { adminEndpoints, type TraceEvent, type TraceView } from "../../lib/adminApi";
 import { describeFailure } from "../../lib/errors";
 import { clubDayOf, shiftClubDay } from "../../lib/gridClock";
 import { memberDetailEndpoints, saveFile } from "../../lib/memberDetailApi";
 import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
 import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes, readableEvents } from "../../lib/nightTimeline";
 import {
-  APPROXIMATE_EXPLANATION, NIGHT_BALANCE_AFTER, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
+  APPROXIMATE_EXPLANATION, NIGHT_BALANCE_AFTER, NIGHT_COLLISION, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
   NIGHT_PRIVACY_NOTICE, actorClause, burstSummary, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
   retentionCaveat,
 } from "../../lib/nightCopy";
 import { useAsyncAction } from "../../lib/useAsyncAction";
+import { usePagedFocus } from "../../lib/usePagedFocus";
 import { Minutes } from "../../components/Minutes";
 import { cn } from "../../lib/utils";
 import { validClubDay } from "../../lib/scheduleDay";
@@ -182,9 +183,7 @@ function useMemberNight(userId: string, day: string) {
     setMore({ key, events: mine?.events ?? [], cursor, pending: true, error: null });
     try {
       const page = await adminEndpoints.memberTrace(userId, { day, limit: TRACE_PAGE, cursor });
-      const before = document.querySelectorAll("[data-night-row]").length;
-      flushSync(() => setMore((now) => (now.key === key ? { key, events: [...now.events, ...page.events], cursor: page.cursor ?? null, pending: false, error: null } : now)));
-      focusFirstNew(before);
+      setMore((now) => (now.key === key ? { key, events: [...now.events, ...page.events], cursor: page.cursor ?? null, pending: false, error: null } : now));
     } catch (error) {
       setMore((now) => (now.key === key ? { ...now, pending: false, error } : now));
     }
@@ -262,6 +261,9 @@ export function MemberNight({ userId, name }: { userId: string; name: string | n
     }, { replace: true });
   };
   const night = useMemberNight(userId, day);
+  // R8 X8-4 / R12 X12-2: the last page takes "Show more" away; the first row it added takes focus
+  // (a burst that absorbed the new events is the last row there was — that one, then).
+  const showMore = usePagedFocus("[data-night-row]", night.loadMore);
   const { view, loading, error, retry } = night;
   const { timezone, events, rows, subjectName, caveat, retentionKey, rangeHint } = nightView(view, name);
 
@@ -284,7 +286,7 @@ export function MemberNight({ userId, name }: { userId: string; name: string | n
         timezone={timezone}
         onRetry={retry}
       />
-      <NightMoreButton view={view} onMore={() => void night.loadMore()} pending={night.more.pending} error={night.more.error} />
+      <NightMoreButton view={view} onMore={showMore} pending={night.more.pending} error={night.more.error} />
     </div>
   );
 }
@@ -474,6 +476,7 @@ function TraceCard({ event, subjectName, timezone }: {
             </p>
           )}
           {event.court?.name && <p className="text-sm text-text-muted">{event.court.name}</p>}
+          <CollisionNote detail={event.detail} timezone={timezone} />
         </div>
       </div>
     </div>
@@ -481,12 +484,23 @@ function TraceCard({ event, subjectName, timezone }: {
 }
 
 /**
- * The first timeline row a page added takes focus (R8 X8-4): the button may be gone with the last
- * page, and a reader carries on from where the night continues. A burst that absorbed the new
- * events is the last row there was — that one, then.
+ * R12 E12-4 (contract C3): a reversal whose session overlapped a booking somebody else played on
+ * the released tail — both paid for that time. The other booking is linked, never named here.
  */
-function focusFirstNew(before: number) {
-  const rows = document.querySelectorAll("[data-night-row]");
-  const row = rows[Math.min(before, rows.length - 1)];
-  if (row instanceof HTMLElement) row.focus();
+function CollisionNote({ detail, timezone }: { detail: TraceEvent["detail"]; timezone: string | undefined }) {
+  const raw = detail?.collision_booking_ids;
+  const ids = Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string" && id !== "") : [];
+  if (ids.length === 0) return null;
+  const from = typeof detail?.collision_from === "string" ? clubClock(detail.collision_from, timezone) : null;
+  return (
+    <p data-night-collision="" className="break-words text-sm text-text-secondary">
+      {NIGHT_COLLISION.line(ids.length, from)}{" "}
+      {ids.map((id, i) => (
+        <span key={id}>
+          {i > 0 ? " · " : null}
+          <TextLink to={`/bookings/${encodeURIComponent(id)}`}>{ids.length === 1 ? NIGHT_COLLISION.openOne : NIGHT_COLLISION.openNth(i + 1)}</TextLink>
+        </span>
+      ))}
+    </p>
+  );
 }

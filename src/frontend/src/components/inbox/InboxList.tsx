@@ -9,6 +9,7 @@ import { OFFLINE_COPY } from "@/lib/offline/offlineCopy";
 import { ApiError } from "@/lib/api";
 import { INBOX_COPY as COPY } from "@/lib/playersCopy";
 import type { MemberNotification } from "@/lib/playersApi";
+import { usePagedFocus } from "@/lib/usePagedFocus";
 import { useTicker } from "@/lib/useTicker";
 import { StillTrying } from "@/lib/offline/StillTrying";
 import { InboxRow } from "./InboxRow";
@@ -33,6 +34,8 @@ export type InboxPick = { id: string | null; onPick: (notice: MemberNotification
 export function InboxList({ feed, listRef, pick }: { feed: InboxFeed; listRef?: Ref<HTMLOListElement>; pick?: InboxPick }) {
   // The "Today, 18:05" face turns into a date at midnight; a minute is fine enough.
   const now = useTicker(true, 60_000);
+  // R12 X12-2 — the last page takes "Show more" away; the first notice it brought takes focus.
+  const showMore = usePagedFocus("[data-inbox-list] > li", feed.more.run);
   // R6 X6-4 — offline with no list kept on this phone: said as offline, not as a failure.
   if (feed.error !== null && feed.offline) return <OfflineNothingKept line={OFFLINE_COPY.nothingKept.inbox} />;
   return (
@@ -65,7 +68,7 @@ export function InboxList({ feed, listRef, pick }: { feed: InboxFeed; listRef?: 
         ) : null}
         {feed.cursor ? (
           <div className="flex justify-center">
-            <Button variant="outline" pending={feed.more.pending} onClick={() => void feed.more.run()}>{COPY.showMore}</Button>
+            <Button variant="outline" pending={feed.more.pending} onClick={showMore}>{COPY.showMore}</Button>
           </div>
         ) : null}
       </StateBlock>
