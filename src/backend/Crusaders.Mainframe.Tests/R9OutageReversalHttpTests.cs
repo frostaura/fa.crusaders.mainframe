@@ -84,7 +84,9 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
     }
 
     /// <summary>The box's queued scan arrives: Olive checked in two minutes into the slot.</summary>
-    private static async Task<DateTimeOffset> ReverseAsync(Rig r)
+    private static Task<DateTimeOffset> ReverseAsync(Rig r) => ReverseAsync(r, r.Club.Organiser);
+
+    private static async Task<DateTimeOffset> ReverseAsync(Rig r, Guid scanner)
     {
         var scannedAt = r.Start.AddMinutes(2).Storable();
         r.Mail.Sent.Clear();
@@ -92,7 +94,7 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         {
             var row = await sp.GetRequiredService<MainframeDbContext>().Bookings.FirstAsync(b => b.Id == r.BookingId);
             return await sp.GetRequiredService<BookingService>().ReverseNoShowAsync(
-                row, scannedAt, Guid.Empty, default, scan: new ReversalScan(r.Club.Organiser, "member_code"));
+                row, scannedAt, Guid.Empty, default, scan: new ReversalScan(scanner, "member_code"));
         });
         Assert.IsType<NoShowReversalResult.Ok>(result);
         await r.App.Services.GetRequiredService<ShareHook>().AfterSettlementAsync(r.Club.TenantId, r.Club.Slug, [r.BookingId], default);
@@ -276,6 +278,54 @@ public sealed class R9OutageReversalHttpTests(PostgresFixture pg) : IClassFixtur
         // An ordinary return is unchanged.
         var plain = EmailTemplates.ShareMoved(EmailCatalogue.Riverside, "s@x.test", Move(ShareDirection.Refunded, null));
         Assert.Contains("16 minutes of your share came back from Olive Organiser.", Flat(plain.PlainBody), StringComparison.Ordinal);
+    }
+
+    // ---- Review round 12, E12-2 (contract C2): the scan was the partner's, not the organiser's ----
+
+    /// <summary>
+    /// The partner's late check-in reversed Olive's outage refund. Olive's wallet frames (the
+    /// reversal and the share taken again) and her mail name Sam; "you were checked in after all"
+    /// is never said to the organiser who did not scan.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_partners_late_check_in_is_named_to_the_organiser_on_the_frame_and_the_mail(bool dark)
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await SweptAsync(dark ? "r12scanout" : "r12scanns", dark);
+        await using var owned = r.App;
+        r.BalanceFrames();
+        var sam = await PlayersClub.ReadAsync(r.App, db => db.Memberships.IgnoreQueryFilters().Where(m => m.UserId == r.Club.Sam).Select(m => m.FullName).FirstAsync());
+
+        await ReverseAsync(r, r.Club.Sam);
+
+        var frames = r.BalanceFrames();
+        var reversal = Assert.Single(frames, f => f.GetProperty("reason").GetString() is WalletStreamReasons.OutageRefundReversed or WalletStreamReasons.NoShowReversed);
+        Assert.Equal(sam, reversal.GetProperty("checked_in_by_name").GetString());
+        var again = ShareFrame(frames);
+        Assert.Equal(WalletShareCauses.Attended, again.GetProperty("share_cause").GetString());
+        Assert.Equal(sam, again.GetProperty("checked_in_by_name").GetString());
+
+        var mail = Assert.Single(r.Mail.Sent, m => m.Subject.Contains("reversed", StringComparison.Ordinal));
+        Assert.Contains($"{sam} checked in", mail.PlainBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("You were", mail.HtmlBody + mail.PlainBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>C2: the organiser's own scan names nobody — the frame's field is null and the mail says "you".</summary>
+    [SkippableFact]
+    public async Task The_organisers_own_late_check_in_names_nobody()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        var r = await SweptAsync("r12scanown", dark: true);
+        await using var owned = r.App;
+        r.BalanceFrames();
+
+        await ReverseAsync(r);
+
+        Assert.All(r.BalanceFrames(), f => Assert.Equal(JsonValueKind.Null, f.GetProperty("checked_in_by_name").ValueKind));
+        Assert.Contains(r.Mail.Sent, m => m.Subject.StartsWith("Outage refund reversed", StringComparison.Ordinal)
+                                           && m.PlainBody.Contains("You were checked in after all", StringComparison.Ordinal));
     }
 
     // ---- Review round 11: the share's cause on the live wallet, and the no-show's kept part ----

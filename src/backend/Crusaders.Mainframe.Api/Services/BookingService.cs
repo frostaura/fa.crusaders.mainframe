@@ -1582,7 +1582,8 @@ public sealed class BookingService
 
         var legs = await SettledLegsAsync(booking, payerUserId, actorUserId, ct);
         var tail = await DisplacementAsync(booking, actorUserId, now, provisionalLitEnd, ct);
-        var postings = legs.Postings.Concat(tail.Postings).ToList();
+        // R12 C2: the reversal's own legs name whose scan reversed it (the frame's checked_in_by_name).
+        var postings = legs.Postings.Select(p => p with { CheckedInBy = scan?.UserId }).Concat(tail.Postings).ToList();
 
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
         BookingParticipant? stamped = null;
@@ -2500,9 +2501,13 @@ public sealed class BookingService
             try
             {
                 var club = await _club.GetAsync(ct);
+                // R12 E12-2: a partner's scan is named — never "you were there" to an organiser who did not scan.
+                var scanner = scan is { } s && s.UserId != booking.UserId
+                    ? await _db.Memberships.AsNoTracking().Where(m => m.UserId == s.UserId).Select(m => m.FullName).FirstOrDefaultAsync(ct)
+                    : null;
                 await _email.SendAsync(booking.OutageRefundedAt is not null
-                    ? EmailTemplates.OutageRefundReversed(club, user.Email, courtName, refunded)
-                    : EmailTemplates.NoShowReversed(club, user.Email, courtName, refunded, penalised), ct);
+                    ? EmailTemplates.OutageRefundReversed(club, user.Email, courtName, refunded, scanner)
+                    : EmailTemplates.NoShowReversed(club, user.Email, courtName, refunded, penalised, scanner), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show reversal email failed for {BookingId}", booking.Id); }
         }

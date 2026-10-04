@@ -697,16 +697,20 @@ public static partial class EmailTemplates
             ],
             WhyThis: WhyBooking));
 
-    /// <summary>A no-show the box's own record overturned.</summary>
+    /// <summary>
+    /// A no-show the box's own record overturned. R12 E12-2: when somebody else's scan did it —
+    /// a partner checking in — the mail names them; "You were there after all" is said only to
+    /// the member whose own check-in it was.
+    /// </summary>
     public static EmailMessage NoShowReversed(
-        ClubIdentity club, string to, string courtName, int refunded, int penalised) =>
+        ClubIdentity club, string to, string courtName, int refunded, int penalised, string? checkedInBy = null) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"No-show reversed — {courtName}",
             Preheader: "The court's check-in reached the club late. The booking now stands as played.",
-            Heading: "You were there after all",
+            Heading: Named(checkedInBy) is { } who ? $"{who} checked in after all" : "You were there after all",
             Blocks:
             [
-                new Paragraph($"Your booking on {courtName} was marked as a no-show, but the court's check-in reached the club afterwards. The booking now stands as attended."),
+                new Paragraph($"Your booking on {courtName} was marked as a no-show, but the court's check-in reached the club afterwards{ScannerClause(checkedInBy)}. The booking now stands as attended."),
                 new Facts(
                 [
                     new FactRow("No-show refund reversed", Min(refunded)),
@@ -719,16 +723,17 @@ public static partial class EmailTemplates
     /// <summary>
     /// A booking refunded in full because its court box was offline, which the box's own late
     /// check-in then showed was played (review round 9, E9-2). Never a no-show: the sweep did not
-    /// call it one, and there was no penalty to return.
+    /// call it one, and there was no penalty to return. R12 E12-2: names the scanner when it was
+    /// somebody else.
     /// </summary>
-    public static EmailMessage OutageRefundReversed(ClubIdentity club, string to, string courtName, int refunded) =>
+    public static EmailMessage OutageRefundReversed(ClubIdentity club, string to, string courtName, int refunded, string? checkedInBy = null) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: $"Outage refund reversed — {courtName}",
             Preheader: "The court's check-in reached the club late. The booking now stands as played.",
-            Heading: "You were checked in after all",
+            Heading: Named(checkedInBy) is { } who ? $"{who} checked in after all" : "You were checked in after all",
             Blocks:
             [
-                new Paragraph($"Your booking on {courtName} was refunded in full because the court's box was offline and could not tell the club you had arrived. Its check-in has since come through, so the booking stands as played and the refund has been taken back."),
+                new Paragraph($"Your booking on {courtName} was refunded in full because the court's box was offline and could not tell the club anybody had arrived. Its check-in has since come through{ScannerClause(checkedInBy)}, so the booking stands as played and the refund has been taken back."),
                 new Facts(
                 [
                     new FactRow("Refund taken back", Min(refunded)),
@@ -736,6 +741,12 @@ public static partial class EmailTemplates
                 new Footnote("It appears as its own line in your wallet, so you can see exactly what moved and when."),
             ],
             WhyThis: WhyMoney));
+
+    private static string? Named(string? name) => string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+
+    /// <summary>R12 E12-2: ": Dan Splitter checked in, so the session counts as attended" — empty when it was the recipient.</summary>
+    private static string ScannerClause(string? checkedInBy) =>
+        Named(checkedInBy) is { } who ? $": {who} checked in, so the session counts as attended" : "";
 
     // ---- money ----
 

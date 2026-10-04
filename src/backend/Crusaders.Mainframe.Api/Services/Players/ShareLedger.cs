@@ -571,7 +571,23 @@ public sealed class ShareLedger
                 ClubRefund: refund, KeptMinutes: kept),
             move.OrganiserUserId, $"{key}:organiser", HeadlineFor(organiserSide, partnerName, amount, new HeadlineWhy(byClub, attended, refund, kept)), settings,
             Own(move.OrganiserUserId));
-        return new ShareWhy(CauseOf(booking, move, club, attended, refund), kept);
+        return new ShareWhy(CauseOf(booking, move, club, attended, refund), kept, attended ? await ScannerOfAsync(booking, ct) : null);
+    }
+
+    /// <summary>
+    /// R12 E12-2 (C2): whose scan made a reversed session attended — the seat stamped at the
+    /// booking's check-in (the reversal stamps the scanner's own seat), else the booker, whose
+    /// check-in stamps no seat when they hold none.
+    /// </summary>
+    private async Task<Guid?> ScannerOfAsync(Booking booking, CancellationToken ct)
+    {
+        if (booking.CheckedInAt is not { } at) return null;
+        var seat = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.BookingId == booking.Id && p.CheckedInAt == at && p.UserId != null)
+            .OrderBy(p => p.Seat)
+            .Select(p => p.UserId)
+            .FirstOrDefaultAsync(ct);
+        return seat ?? booking.UserId;
     }
 
     /// <summary>
