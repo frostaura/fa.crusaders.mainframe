@@ -51,8 +51,33 @@ public class MemberDisplayTests
     [Fact]
     public void A_long_accented_name_is_folded_before_it_is_initialled()
     {
-        // Folding first: "É" is one column, so the initial is "E", never a lone combining mark.
-        Assert.Equal("PRIYA E", MemberDisplay.Shorten("Priya Éloïse-Naidoo van der Berg"));
+        // Folding first: "Ø" is one column, so the initial is "O", never a lone combining mark.
+        // R12 D12-1: the initial is the LAST word's — the surname, "Berg" of "van der Berg".
+        Assert.Equal("PRIYA B", MemberDisplay.Shorten("Priya Éloïse-Naidoo van der Berg"));
+        Assert.Equal("THANDIWE O", MemberDisplay.Shorten("Thandiwe Nomvula Ørsted"));
+    }
+
+    /// <summary>
+    /// Review round 12, D12-1. On the panel's A00 ROM <c>\</c> is a yen sign and <c>~</c> an arrow,
+    /// and the bridge stored <c>"</c> as an escape the LCD printed — <c>THABO \"</c>,
+    /// <c>KIM LEE\\PARK</c>. A double quote of either shape is an apostrophe; a backslash or a
+    /// tilde separates words; and the initial is a LETTER, never the punctuation a nickname opens with.
+    /// </summary>
+    [Theory]
+    [InlineData("Thabo \u201CTJ\u201D Mokoena", "THABO M")]
+    [InlineData("Thabo \"TJ\" Ng", "THABO 'TJ' NG")]
+    [InlineData("Kim Lee\\Park", "KIM LEE PARK")]
+    [InlineData("Ana~Maria Vos", "ANA MARIA VOS")]
+    [InlineData("Thabo (TJ) Mokoena", "THABO M")]
+    [InlineData("Nomvuzo Thandeka 'Mokoena'", "NOMVUZO M")]
+    public void Quotes_backslashes_and_tildes_never_reach_the_panel_and_the_initial_is_a_letter(string full, string expected)
+    {
+        var shown = MemberDisplay.Shorten(full);
+
+        Assert.Equal(expected, shown);
+        Assert.DoesNotContain('"', shown!);
+        Assert.DoesNotContain('\\', shown!);
+        Assert.DoesNotContain('~', shown!);
     }
 
     [Theory]

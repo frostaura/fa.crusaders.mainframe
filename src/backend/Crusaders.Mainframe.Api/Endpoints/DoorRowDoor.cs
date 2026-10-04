@@ -117,11 +117,14 @@ public static class DoorRowDoor
     /// </summary>
     public static (string Key, string Name) Columns(JsonElement? details, IReadOnlyDictionary<Guid, DoorRef> live)
     {
+        // R12 D12-3: the console's own name for a door (TraceKinds.DoorLabel) — an unnamed gate is
+        // "Unnamed scanner (gate-…)" in the file as on the Doors page and the Night, never "Door gate".
         if (DoorTrail.DeviceIdOf(details) is { } id && live.TryGetValue(id, out var door))
         {
-            return (door.GateKey ?? "", door.Name);
+            return (door.GateKey ?? "", TraceKinds.DoorLabel(door.Name, door.DeviceCode ?? StoredCode(details)) ?? "");
         }
 
-        return (StoredKey(details) ?? "", StoredName(details) ?? "");
+        var stored = details is { } root ? DoorActivityView.Text(root, "door_name") : null;
+        return (StoredKey(details) ?? "", TraceKinds.DoorLabel(stored, StoredCode(details)) ?? "");
     }
 }

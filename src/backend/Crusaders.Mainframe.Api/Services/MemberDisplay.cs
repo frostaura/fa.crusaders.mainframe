@@ -76,10 +76,10 @@ public static class MemberDisplay
         if (name.Length == 0) return Fallback;
         if (name.Length <= MaxLength) return name;
 
-        var space = name.IndexOf(' ');
-        if (space > 0)
+        var words = name.Split(' ');
+        if (words.Length > 1 && SurnameInitial(words) is { } initial)
         {
-            var initialled = $"{name[..space]} {name[space + 1]}";
+            var initialled = $"{words[0]} {initial}";
             if (initialled.Length <= MaxLength) return initialled;
         }
 
@@ -87,9 +87,26 @@ public static class MemberDisplay
     }
 
     /// <summary>
+    /// The surname's initial: the first LETTER of the last word that has one (review round 12,
+    /// D12-1). "THABO (TJ) MOKOENA" read "THABO (" — the second word's first character, a bracket.
+    /// </summary>
+    private static char? SurnameInitial(string[] words)
+    {
+        for (var i = words.Length - 1; i > 0; i--)
+        {
+            foreach (var c in words[i])
+            {
+                if (char.IsAsciiLetter(c)) return c;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// The name in printable ASCII only (R11 D11-1): decomposed, its accents dropped, the few
     /// letters that do not decompose spelled out, and anything else — an emoji, a script the
-    /// panel has no glyphs for — removed, with the spaces it leaves collapsed.
+    /// panel has no glyphs for — removed, with the spaces it leaves collapsed. R12 D12-1: a double
+    /// quote of either shape is an apostrophe, and a backslash or a tilde separates words.
     ///
     /// <para>
     /// The panel is an HD44780: every byte past <c>0x7E</c> is a glyph from its own ROM, and the
@@ -104,7 +121,11 @@ public static class MemberDisplay
         foreach (var c in text.Normalize(NormalizationForm.FormD))
         {
             if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark) continue;
-            if (c is >= ' ' and <= '~') kept.Append(c);
+            // R12 D12-1: the A00 ROM prints a yen sign for `\` and an arrow for `~`, and the bridge
+            // stored `"` as an escape the panel printed — so neither reaches it as itself.
+            if (c is '"') kept.Append('\'');
+            else if (c is '\\' or '~') kept.Append(' ');
+            else if (c is >= ' ' and <= '}') kept.Append(c);
             else if (Spelled.TryGetValue(c, out var spelled)) kept.Append(spelled);
             else kept.Append(' ');
         }
@@ -133,8 +154,8 @@ public static class MemberDisplay
         ['\u2018'] = "'",
         ['\u2019'] = "'",
         ['\u02BC'] = "'",
-        ['\u201C'] = "\"",
-        ['\u201D'] = "\"",
+        ['\u201C'] = "'",
+        ['\u201D'] = "'",
         ['\u2010'] = "-",
         ['\u2011'] = "-",
         ['\u2013'] = "-",
