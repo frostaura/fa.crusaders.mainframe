@@ -15,7 +15,7 @@ import { CaretRight } from "./icons";
  *   <li><b>inline</b> — in running text: underlined, accent, medium weight. The underline is the
  *   non-colour cue (colour is never the only signal).</li>
  *   <li><b>standalone</b> — on its own line ("See all bookings"): semibold, accent, trailing caret,
- *   and a 44px-tall hit area.</li>
+ *   a 44px-tall hit area, and the buttons' text size (`text-sm`), so it matches a button beside it.</li>
  * </ul>
  * <p>
  * A link that must look like a button is a navigation CTA only, and is written
@@ -36,7 +36,9 @@ export type TextLinkProps = TextLinkRouteProps | TextLinkAnchorProps;
 
 const VARIANT: Record<TextLinkVariant, string> = {
   inline: "no-lift font-medium text-accent-strong underline decoration-1 underline-offset-2 hover:decoration-2",
-  standalone: "no-lift inline-flex min-h-touch items-center gap-1 font-semibold text-accent-strong underline-offset-2 hover:underline",
+  // text-sm (L12-4, round 12): the button scale's size. A standalone link sits beside buttons
+  // ("Buy minutes" · "Open wallet") and inherited the body's 16px against their 14px.
+  standalone: "no-lift inline-flex min-h-touch items-center gap-1 text-sm font-semibold text-accent-strong underline-offset-2 hover:underline",
 };
 
 function Content({ variant, label }: { variant: TextLinkVariant; label: ReactNode }) {

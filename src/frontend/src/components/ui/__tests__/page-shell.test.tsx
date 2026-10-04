@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
 import { PageHeader, PageShell, Section } from "../page-shell";
 import { TextLink } from "../text-link";
+import { buttonVariants } from "../button-variants";
 
 const strict = { reactStrictMode: true };
 const routed = (ui: ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>, strict);
@@ -112,6 +113,16 @@ describe("TextLink", () => {
     const caret = link.querySelector("svg")!;
     expect(caret).toHaveAttribute("aria-hidden", "true");
     expect(link.lastElementChild).toBe(caret);
+  });
+
+  // L12-4 (round 12): "Open wallet" was 16px beside the 14px "Buy minutes" button on My Code.
+  it("standalone: the text size of the sm/md button it sits beside", () => {
+    routed(<TextLink variant="standalone" to="/wallet">Open wallet</TextLink>);
+    const link = screen.getByRole("link", { name: "Open wallet" });
+    const size = (classes: string) => classes.split(/\s+/).filter((c) => /^text-(xs|sm|base|lg|xl)$/.test(c));
+    expect(size(link.className)).toEqual(["text-sm"]);
+    expect(size(buttonVariants({ size: "sm" }))).toEqual(size(link.className));
+    expect(size(buttonVariants({ size: "md" }))).toEqual(size(link.className));
   });
 
   it("renders a plain anchor for an href", () => {
