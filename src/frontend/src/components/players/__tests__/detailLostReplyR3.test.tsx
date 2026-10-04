@@ -198,7 +198,7 @@ describe("a partner leaving", () => {
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_PLAYER.withdraw }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: DETAIL_PLAYER.withdrawConfirm }));
     expect(await screen.findByText("The bookings grid")).toBeInTheDocument();
-    expect(await screen.findByText(PLAYERS_LOST(DETAIL_PLAYER.withdrawn))).toBeInTheDocument();
+    expect(await screen.findByText(PLAYERS_LOST(DETAIL_PLAYER.withdrawn(25)))).toBeInTheDocument();
   });
 
   it("a pull-out that did not land says you're still on the game", async () => {

@@ -728,10 +728,13 @@ export const DETAIL_PLAYER = {
   withdrawUntil: (when: string) => `You can pull out until ${when}.`,
   withdrawClosed: (when: string) => `Pulling out closed at ${when}. Talk to the organiser.`,
   withdrawTitle: "Pull out of this game?",
-  withdrawBody: "You come off the booking and anything you paid comes back to you.",
+  /** R12 X12-4 — the figure that comes back, not "anything you paid". */
+  withdrawBody: (paid: number) => (paid > 0
+    ? `You come off the booking and the ${minutesSpoken(paid)} you paid come back to you.`
+    : "You come off the booking. You haven't paid anything, so nothing moves."),
   withdrawConfirm: "Pull out",
   withdrawKeep: "Stay in",
-  withdrawn: "You've pulled out. Anything you paid is back on your balance.",
+  withdrawn: (paid: number) => (paid > 0 ? `You've pulled out. ${minutesSpoken(paid)} came back to you.` : "You've pulled out."),
   withdrawAction: "pull out",
   decline: "Decline",
   declineTitle: "Say no to this game?",

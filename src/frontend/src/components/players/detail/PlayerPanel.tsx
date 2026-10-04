@@ -140,24 +140,27 @@ function WithdrawLine({ detail, seat }: { detail: BookingDetail; seat: DetailPla
   );
 }
 
-const LEAVE = {
-  withdraw: {
-    title: DETAIL_PLAYER.withdrawTitle, body: DETAIL_PLAYER.withdrawBody, confirm: DETAIL_PLAYER.withdrawConfirm,
-    keep: DETAIL_PLAYER.withdrawKeep, done: DETAIL_PLAYER.withdrawn, action: DETAIL_PLAYER.withdrawAction,
-    unsure: PLAYERS_UNSURE.withdraw,
-  },
-  decline: {
+/** R12 X12-4 — the pull-out's words carry the figure the seat paid; a decline moves nothing. */
+function leaveCopy(kind: Leave, paid: number) {
+  if (kind === "withdraw") {
+    return {
+      title: DETAIL_PLAYER.withdrawTitle, body: keepAmounts(DETAIL_PLAYER.withdrawBody(paid)), confirm: DETAIL_PLAYER.withdrawConfirm,
+      keep: DETAIL_PLAYER.withdrawKeep, done: DETAIL_PLAYER.withdrawn(paid), action: DETAIL_PLAYER.withdrawAction,
+      unsure: PLAYERS_UNSURE.withdraw,
+    };
+  }
+  return {
     title: DETAIL_PLAYER.declineTitle, body: DETAIL_PLAYER.declineBody, confirm: DETAIL_PLAYER.declineConfirm,
     keep: DETAIL_PLAYER.declineKeep, done: DETAIL_PLAYER.declined, action: DETAIL_PLAYER.declineAction,
     unsure: PLAYERS_UNSURE.decline,
-  },
-} as const;
+  };
+}
 
 type LeaveProps = Props & { kind: Leave; seat: DetailPlayer; onClose: () => void };
 
 function LeaveDialog(props: LeaveProps) {
   const { kind, detail, seat, onClose, reload } = props;
-  const copy = LEAVE[kind];
+  const copy = leaveCopy(kind, seat.paid_minutes);
   const { refresh } = useBalance();
   const toast = useToast();
   const navigate = useNavigate();

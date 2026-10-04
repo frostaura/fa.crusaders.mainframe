@@ -36,10 +36,11 @@ describe("pull out", () => {
     renderDetail();
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_PLAYER.withdraw }));
     const dialog = screen.getByRole("dialog", { name: DETAIL_PLAYER.withdrawTitle });
-    expect(dialog).toHaveTextContent(DETAIL_PLAYER.withdrawBody);
+    // R12 X12-4 — the figure, not "anything you paid".
+    expect(dialog).toHaveTextContent("the 25 minutes you paid come back to you");
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_PLAYER.withdrawConfirm }));
     expect(await screen.findByText("The bookings grid")).toBeInTheDocument();
-    expect(await screen.findByText(DETAIL_PLAYER.withdrawn)).toBeInTheDocument();
+    expect(await screen.findByText("You've pulled out. 25 minutes came back to you.")).toBeInTheDocument();
     expect(screen.queryByText(DETAIL_COPY.notFoundTitle)).toBeNull();
     expect(stub.calls.some((c) => c.method === "POST" && c.path === `${SEAT}/withdraw`)).toBe(true);
   });
