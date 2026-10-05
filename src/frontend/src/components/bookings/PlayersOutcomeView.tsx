@@ -82,7 +82,12 @@ function ShareButton({ path, label, text }: { path: string; label: string; text:
   );
 }
 
-function BookingBlock({ booking, face, titled }: { booking: BookingPlayers; face: Face; titled: boolean }) {
+/** R16 J16-11 — a players_error said for what it is, where the code says more than "not added". */
+function playersErrorSentence(error: string, members: readonly string[]): string {
+  return error === "at_daily_limit" ? BOOK_CONFIRM.playersAtLimit(members) : BOOK_CONFIRM.playersError;
+}
+
+function BookingBlock({ booking, face, titled, members }: { booking: BookingPlayers; face: Face; titled: boolean; members: readonly string[] }) {
   const when = booking.slot ? face(booking.slot) : "";
   const text = booking.slot ? BOOK_CONFIRM.shareText(when, booking.slot.courtName) : BOOK_CONFIRM.shareTitle;
   return (
@@ -90,7 +95,7 @@ function BookingBlock({ booking, face, titled }: { booking: BookingPlayers; face
       {titled && booking.slot ? (
         <p className="text-sm font-semibold text-text-primary">{`${booking.slot.courtName} · ${when}`}</p>
       ) : null}
-      {booking.error ? <Alert tone="warning" live="polite">{BOOK_CONFIRM.playersError}</Alert> : null}
+      {booking.error ? <Alert tone="warning" live="polite">{playersErrorSentence(booking.error, members)}</Alert> : null}
       {booking.links.map((link) => (
         <ShareButton
           key={link.seat} path={link.invitePath} text={text}
@@ -104,14 +109,15 @@ function BookingBlock({ booking, face, titled }: { booking: BookingPlayers; face
   );
 }
 
-export function ResultPlayers({ outcome, face }: { outcome: PlayersOutcome; face: Face }) {
+/** `members`: the first names of the members asked to join (the done step's own draft). */
+export function ResultPlayers({ outcome, face, members = [] }: { outcome: PlayersOutcome; face: Face; members?: readonly string[] }) {
   if (outcome.bookings.length === 0) return null;
   const anyLinks = outcome.bookings.some((b) => b.links.length > 0);
   return (
     <section aria-label={BOOK_CONFIRM.playersLabel} data-result-players="" className="grid gap-4 rounded-xl border border-border bg-bg-surface p-4">
       {anyLinks ? <p className="text-sm text-text-secondary">{BOOK_CONFIRM.linksNote}</p> : null}
       {outcome.bookings.map((b) => (
-        <BookingBlock key={b.bookingId} booking={b} face={face} titled={outcome.bookings.length > 1} />
+        <BookingBlock key={b.bookingId} booking={b} face={face} titled={outcome.bookings.length > 1} members={members} />
       ))}
     </section>
   );

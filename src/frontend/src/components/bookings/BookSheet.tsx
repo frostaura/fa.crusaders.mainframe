@@ -22,6 +22,7 @@ import { isAdminRun, slotCount } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
 import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
 import { ConfirmPlayers, ResultPlayers } from "./PlayersOutcomeView";
+import { seatName } from "./playersDraft";
 import { LazyBookAsChoice, LazySplitStep, loadSplitStep, usePrefetchWhen } from "./lazyParts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { refusalSentence, useBookFlow, type BookFlow, type BookFlowInput } from "./useBookFlow";
@@ -328,7 +329,12 @@ function ResultView({ flow }: { flow: BookFlow }) {
         </Alert>
       ) : null}
       <BulkResults rows={run.rows} label={RESULTS_LABEL.book} />
-      {run.players ? <ResultPlayers outcome={run.players} face={flow.face} /> : null}
+      {run.players ? (
+        <ResultPlayers
+          outcome={run.players} face={flow.face}
+          members={flow.players.draft.seats.flatMap((s) => (s.player.kind === "member" ? [seatName(s.player)] : []))}
+        />
+      ) : null}
     </>
   );
 }

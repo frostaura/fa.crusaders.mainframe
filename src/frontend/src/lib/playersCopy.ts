@@ -432,6 +432,17 @@ export const BOOK_CONFIRM = {
   copyFailed: (url: string) => `Couldn't share it from here. Copy this link: ${url}`,
   seeBooking: "See the booking",
   playersError: "Your court is booked, but the players weren't added — add them from the booking's page.",
+  /**
+   * R16 J16-11 — `players_error: "at_daily_limit"`: a member asked to join is already at their daily
+   * limit, so no players were added. The answer does not say which, so with two or more it says either.
+   */
+  playersAtLimit: (members: readonly string[]) => {
+    if (members.length === 1) {
+      return `Your court is booked, but ${members[0]} wasn't added — they've already used their court time for that day. Invite someone else from the booking's page.`;
+    }
+    const who = members.length === 0 ? "one of them" : `${members.slice(0, -1).join(", ")} or ${members[members.length - 1]}`;
+    return `Your court is booked, but no players were added — ${who} has already used their court time for that day. Add players from the booking's page.`;
+  },
   linksNote: "Each open seat has its own link. Share it now — it's shown only once, and you can make a new one from the booking's page.",
 } as const;
 
