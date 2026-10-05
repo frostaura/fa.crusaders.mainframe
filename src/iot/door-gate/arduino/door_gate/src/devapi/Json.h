@@ -231,8 +231,16 @@ inline constexpr size_t kMaxEscapeExpansion = 6U;
 /// `"` and `\` take their two-character forms; every byte below 0x20 takes a
 /// short form where JSON defines one and `\u00XX` otherwise, because a raw
 /// control byte inside a string is not legal JSON and a server that rejects the
-/// body drops the record behind it. Bytes at 0x20 and above pass through, which
-/// keeps UTF-8 intact.
+/// body drops the record behind it. Printable ASCII (0x20–0x7E) passes through.
+///
+/// <b>Every byte from 0x7F up is `\u00XX` too</b> — its Latin-1 code point —
+/// so the output is pure ASCII and every body is valid JSON AND valid UTF-8
+/// whatever went in (R15 D15-1). The Mega passes scanner bytes above 0x7F
+/// straight through, and a lone 0xE9 written raw was a body the server could
+/// not decode: it answered 500, the event drain kept the head event for ever
+/// and the breaker read it as an outage. The cost is that a scan which WAS
+/// valid UTF-8 arrives as one code point per byte; nothing scanned here is
+/// meant to be anything but ASCII, so that is the honest rendering.
 ///
 /// False, with `out` emptied, when it would not fit — REFUSED rather than
 /// truncated, on the same rule as every other renderer here: half an escape

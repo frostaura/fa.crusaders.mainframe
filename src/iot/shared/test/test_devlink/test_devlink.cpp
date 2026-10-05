@@ -415,6 +415,32 @@ void test_breaker_any_answer_closes_it_and_resets_the_window() {
   }
 }
 
+/// R15 D15-1. The server answers a body it cannot parse with 400
+/// `malformed_body` (it answered 500, which the breaker counted). A 400 is the
+/// API THERE and saying no: it must never count toward a trip, and it must
+/// reset the run of failures before it, so a box whose drain keeps meeting one
+/// unparseable event between two blips is not judged down.
+void test_breaker_a_400_malformed_body_is_not_a_transport_failure() {
+  TEST_ASSERT_FALSE(devlink::isTransportFailure(400U));
+  TEST_ASSERT_FALSE(devlink::isTransportFailure(413U));
+  TEST_ASSERT_FALSE(devlink::isTransportFailure(422U));
+
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    devlink::ApiBreaker breaker;
+    for (uint32_t pass = 0U; pass < 10U; ++pass) {
+      breaker.onResult(400U, base + pass);
+      TEST_ASSERT_FALSE(breaker.open(base + pass));
+      TEST_ASSERT_EQUAL_UINT8(0U, breaker.consecutiveFailures());
+    }
+    breaker.onResult(500U, base + 20U);
+    breaker.onResult(400U, base + 21U);
+    breaker.onResult(500U, base + 22U);
+    TEST_ASSERT_FALSE(breaker.open(base + 23U));
+    TEST_ASSERT_EQUAL_UINT16(0U, breaker.trips());
+  }
+}
+
 // -------------------------------------------------------------------------
 // Cadence — the interval the tenant asks for
 // -------------------------------------------------------------------------
@@ -572,7 +598,9 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
 /// the court box's serial link as much as the gate's scanner. Fuzzed over the
 /// metacharacters, against the one structural fact a forged field has to break.
 void test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it() {
-  static const char kAlphabet[] = "\"\\:,{}[]abAB01-_ \t\n\r\x01\x1f";
+  // And the bytes the Mega passes through from the scanner above 0x7f (R15
+  // D15-1): a lone 0xE9 is invalid UTF-8, and the server refused the body.
+  static const char kAlphabet[] = "\"\\:,{}[]abAB01-_ \t\n\r\x01\x1f\x7f\x80\xc3\xa9\xe9\xff";
   const size_t alphabetLen = sizeof(kAlphabet) - 1U;
 
   uint32_t state = 0x2468ACE1U;
@@ -618,10 +646,12 @@ void test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it() {
     TEST_ASSERT_EQUAL_size_t_MESSAGE(28U, quotes, body);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"seq\":11,"), body);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"kind\":\"unknown_scan\""), body);
-    // AND NO RAW CONTROL BYTE, which is not legal JSON at all: a body the
-    // server refuses is a record this drain then drops.
+    // AND NO RAW CONTROL BYTE, which is not legal JSON at all, and NO BYTE
+    // ABOVE 0x7F, which is not valid UTF-8 on its own: a body the server
+    // cannot parse is one it answered 500, which pinned the queue (D15-1).
     for (size_t i = 0U; body[i] != '\0'; ++i) {
       TEST_ASSERT_TRUE_MESSAGE(static_cast<unsigned char>(body[i]) >= 0x20U, body);
+      TEST_ASSERT_TRUE_MESSAGE(static_cast<unsigned char>(body[i]) < 0x80U, body);
     }
   }
 }
@@ -1496,6 +1526,7 @@ int main(int, char**) {
 
   RUN_TEST(test_breaker_opens_after_two_transport_failures_and_backs_off_doubling);
   RUN_TEST(test_breaker_any_answer_closes_it_and_resets_the_window);
+  RUN_TEST(test_breaker_a_400_malformed_body_is_not_a_transport_failure);
 
   RUN_TEST(test_heartbeat_interval_is_adopted_and_bounded);
   RUN_TEST(test_a_tenant_slug_that_names_a_key_hides_nothing);

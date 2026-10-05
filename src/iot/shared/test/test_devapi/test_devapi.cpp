@@ -42,6 +42,7 @@
 #include <string.h>
 #include <unity.h>
 
+#include "devapi/DeviceClient.h"
 #include "devapi/Json.h"
 
 namespace {
@@ -484,6 +485,91 @@ void test_is_complete_object_reads_only_the_length_it_is_given() {
   TEST_ASSERT_FALSE(devapi::json::isCompleteObject(body, len(body)));
 }
 
+// ---------------------------------------------------------------------------
+// escapeInto — the writer half (R15 D15-1)
+// ---------------------------------------------------------------------------
+//
+// The Mega passes every byte >= 0x80 straight through from the scanner, and a
+// body carrying one raw is invalid UTF-8: the server could not parse it, the
+// event drain kept the head event, and one scanned byte pinned a court box's
+// whole queue. So EVERY output byte is printable ASCII, whatever went in.
+
+/// True when every byte of `s` is printable ASCII — 0x20..0x7e.
+bool printableAscii(const char* s) {
+  for (size_t i = 0U; s[i] != '\0'; ++i) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c < 0x20U || c > 0x7eU) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// D15-1's scan, byte for byte: a quote, a backslash, and two bytes the Mega
+/// let through from the scanner above 0x7f.
+void test_escape_into_writes_bytes_above_0x7f_as_unicode_escapes() {
+  const char in[] = {'Q', '"', '\\', 'X', static_cast<char>(0xE9), static_cast<char>(0xFF)};
+  char out[64] = {};
+  TEST_ASSERT_TRUE(devapi::json::escapeInto(in, sizeof(in), out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("Q\\\"\\\\X\\u00e9\\u00ff", out);
+  TEST_ASSERT_TRUE(printableAscii(out));
+}
+
+/// Valid UTF-8 is no exception: the escaper does not know what the scanner
+/// meant, and the only output that is valid whatever the bytes were is one
+/// that never puts a byte >= 0x80 on the wire. C3 A9 is two code points.
+void test_escape_into_escapes_a_utf8_sequence_byte_by_byte() {
+  const char in[] = {'A', static_cast<char>(0xC3), static_cast<char>(0xA9), 'B', static_cast<char>(0x80)};
+  char out[64] = {};
+  TEST_ASSERT_TRUE(devapi::json::escapeInto(in, sizeof(in), out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("A\\u00c3\\u00a9B\\u0080", out);
+}
+
+/// Every one of the 256 byte values, alone: printable ASCII out, and never
+/// more than kMaxEscapeExpansion bytes for one byte in — the bound every
+/// caller sizes its buffer by.
+void test_escape_into_keeps_every_byte_value_inside_the_expansion_bound() {
+  for (unsigned value = 0U; value < 256U; ++value) {
+    const char in[1] = {static_cast<char>(value)};
+    char out[devapi::json::kMaxEscapeExpansion + 1U] = {};
+    TEST_ASSERT_TRUE_MESSAGE(devapi::json::escapeInto(in, 1U, out, sizeof(out)), "fits the bound");
+    TEST_ASSERT_TRUE_MESSAGE(printableAscii(out), "printable ASCII only");
+    TEST_ASSERT_TRUE(strlen(out) >= 1U && strlen(out) <= devapi::json::kMaxEscapeExpansion);
+  }
+}
+
+/// Refused rather than cut, on a high byte too: half of `é` is a body the
+/// server cannot parse.
+void test_escape_into_refuses_a_high_byte_that_does_not_fit() {
+  const char in[] = {'A', static_cast<char>(0xE9)};
+  char out[7] = {}; // "A" + 6 needs 8 with the terminator
+  out[0] = 'x';
+  TEST_ASSERT_FALSE(devapi::json::escapeInto(in, sizeof(in), out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("", out);
+  char fits[8] = {};
+  TEST_ASSERT_TRUE(devapi::json::escapeInto(in, sizeof(in), fits, sizeof(fits)));
+  TEST_ASSERT_EQUAL_STRING("A\\u00e9", fits);
+}
+
+/// R15 D15-1, the drain's half. A body the server cannot parse is answered 400
+/// `malformed_body`; both event drains (the bridge's and the gate's) switch on
+/// react(), and `Rejected` RELEASES the head event so the next one gets a turn.
+/// Were it `Retry`, one unparseable event would pin every later one behind it
+/// until the 64-slot ring overflowed — which is what the 500 it used to get did.
+void test_react_drops_an_event_the_server_calls_malformed() {
+  TEST_ASSERT_TRUE(devapi::react(400U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(413U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(422U) == devapi::Reaction::Rejected);
+  // The statuses a malformed body must never be answered with, because each
+  // keeps the event: transient, rate-limited, wrong key, or server-side.
+  TEST_ASSERT_TRUE(devapi::react(0U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(401U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(403U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(408U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(429U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(500U) == devapi::Reaction::Retry);
+}
+
 } // namespace
 
 /// G4 / B2. The top-level family reads ONE object's own members and nothing
@@ -605,6 +691,12 @@ int main(int, char**) {
   RUN_TEST(test_is_complete_object_refuses_nesting_it_cannot_track);
   RUN_TEST(test_is_complete_object_reads_only_the_length_it_is_given);
   RUN_TEST(test_top_level_readers_see_only_the_outermost_objects_members);
+
+  RUN_TEST(test_escape_into_writes_bytes_above_0x7f_as_unicode_escapes);
+  RUN_TEST(test_escape_into_escapes_a_utf8_sequence_byte_by_byte);
+  RUN_TEST(test_escape_into_keeps_every_byte_value_inside_the_expansion_bound);
+  RUN_TEST(test_escape_into_refuses_a_high_byte_that_does_not_fit);
+  RUN_TEST(test_react_drops_an_event_the_server_calls_malformed);
 
   return UNITY_END();
 }

@@ -406,9 +406,8 @@ size_t writeEscaped(char byte, char* out, size_t outCap, size_t at) {
   }
 
   const unsigned char value = static_cast<unsigned char>(byte);
-  if (value >= 0x20U) {
-    // Everything printable, and every UTF-8 continuation byte, straight
-    // through: escaping those would change what the server stores.
+  if (value >= 0x20U && value < 0x7FU) {
+    // Printable ASCII, straight through.
     if (at + 1U >= outCap) {
       return kNotFound;
     }
@@ -416,8 +415,15 @@ size_t writeEscaped(char byte, char* out, size_t outCap, size_t at) {
     return at + 1U;
   }
 
-  // A control byte with no short form. Raw, it is not legal JSON at all, and a
-  // body the server refuses is a record the drain then drops.
+  // A control byte with no short form, DEL, or any byte above 0x7F (R15
+  // D15-1). A raw control byte is not legal JSON; a raw high byte is legal
+  // JSON only inside valid UTF-8, and nothing here knows what the scanner
+  // meant — the Mega passes every byte >= 0x80 straight through, so a lone
+  // 0xE9 reached the server, failed to decode, and was answered 500. The
+  // drain retried it forever and the breaker read it as an outage. Written
+  // as `\u00XX` the byte is its Latin-1 code point: every body is ASCII,
+  // valid JSON and valid UTF-8 whatever was scanned. A member code is ASCII,
+  // so no real code changes on the wire.
   static const char kHex[] = "0123456789abcdef";
   if (at + 6U >= outCap) {
     return kNotFound;
